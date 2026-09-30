@@ -32,28 +32,34 @@ namespace internal {
 // ---------------------------------------------------------------------------
 
 namespace internal {
-    // Compile-time default. On Apple the true root differs by bundle layout
-    // and is chosen at runtime (see resolveDataPathRootOnce): macOS keeps data
-    // in bin/data/ reached via ../../../ from Contents/MacOS/, while iOS uses a
-    // FLAT bundle with data/ right next to the executable. Existence, not a
-    // preprocessor macro, is the source of truth (TARGET_OS_* proved unreliable
-    // in the iOS build, and the runtime probe also runs too early in _setup_cb
-    // to see a valid executable path — so it happens lazily on first use).
-    #ifdef __APPLE__
-    inline fs::path dataPathRoot = "../../../data";
-    #else
-    inline fs::path dataPathRoot = "data";
-    #endif
-    inline bool dataPathRootUserSet = false;  // user called setDataPathRoot()
-    inline bool dataPathRootProbed = false;   // lazy Apple probe done
+    // The data path root, one per process. Defined in tcGlobal.cpp, not
+    // inline here: app code sets it (setDataPathRoot) and host code resolves
+    // paths with it (e.g. tc_start_recording), so both must reach one copy,
+    // also from a Windows hot reload guest DLL.
+    //
+    // Its compile-time default is "data", or "../../../data" on Apple. On Apple
+    // the true root differs by bundle layout and is chosen at runtime (see
+    // resolveDataPathRootOnce): macOS keeps data in bin/data/ reached via
+    // ../../../ from Contents/MacOS/, while iOS uses a FLAT bundle with data/
+    // right next to the executable. Existence, not a preprocessor macro, is the
+    // source of truth (TARGET_OS_* proved unreliable in the iOS build, and the
+    // runtime probe also runs too early in _setup_cb to see a valid executable
+    // path — so it happens lazily on first use).
+    struct DataPathState {
+        fs::path root;
+        bool userSet = false;  // user called setDataPathRoot()
+        bool probed = false;   // lazy Apple probe done
+    };
+    DataPathState& dataPathState();
 }
 
 // Set the data path root
 // If relative, resolved relative to executable directory
 // If absolute, used as-is (fs::path::is_absolute — handles "C:/..." on Windows too)
 inline void setDataPathRoot(const fs::path& path) {
-    internal::dataPathRoot = path;
-    internal::dataPathRootUserSet = true;  // explicit choice wins over the probe
+    auto& state = internal::dataPathState();
+    state.root = path;
+    state.userSet = true;  // explicit choice wins over the probe
 }
 
 namespace internal {
@@ -61,20 +67,21 @@ namespace internal {
 // the executable. Skipped if the user set the root explicitly. No-op elsewhere.
 inline void resolveDataPathRootOnce() {
 #ifdef __APPLE__
-    if (dataPathRootProbed || dataPathRootUserSet) return;
+    auto& state = dataPathState();
+    if (state.probed || state.userSet) return;
     fs::path exe = getExecutableDir();
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
     if (exe.empty() || exe == fs::path("/")) return;
-    dataPathRootProbed = true;
+    state.probed = true;
     std::error_code ec;
     // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
     // next to the executable). macOS dev has no Contents/MacOS/data, so it
     // correctly falls through to the ../../../data (bin/data) layout.
     if (std::filesystem::exists(exe / "data", ec)) {
-        dataPathRoot = "data";            // iOS flat bundle / distributed
+        state.root = "data";            // iOS flat bundle / distributed
     } else if (std::filesystem::exists(exe / "../../../data", ec)) {
-        dataPathRoot = "../../../data";   // macOS dev / bin layout
+        state.root = "../../../data";   // macOS dev / bin layout
     }
     // else: keep the compile-time default
 #endif
@@ -84,7 +91,7 @@ inline void resolveDataPathRootOnce() {
 // Get the data path root
 inline fs::path getDataPathRoot() {
     internal::resolveDataPathRootOnce();
-    return internal::dataPathRoot;
+    return internal::dataPathState().root;
 }
 
 // Get data path for a filename
@@ -96,11 +103,12 @@ inline fs::path getDataPath(const fs::path& filename) {
         return filename;
     }
 
-    if (internal::dataPathRoot.is_absolute()) {
-        return internal::dataPathRoot / filename;
+    const fs::path& root = internal::dataPathState().root;
+    if (root.is_absolute()) {
+        return root / filename;
     } else {
         // Relative root: resolve relative to executable directory
-        return getExecutableDir() / internal::dataPathRoot / filename;
+        return getExecutableDir() / root / filename;
     }
 }
 
@@ -778,10 +786,9 @@ struct BeepManager {
     }
 };
 
-inline BeepManager& getManager() {
-    static BeepManager manager;
-    return manager;
-}
+// Defined in tcGlobal.cpp: one beep cache / volume / debounce per process, so a
+// hot reload guest's setBeepVolume() survives reloads on Windows too (#249).
+BeepManager& getManager();
 
 } // namespace internal
 

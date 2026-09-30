@@ -42,6 +42,32 @@
 
 namespace trussc {
 
+namespace internal {
+
+// Shared baking resources (pipelines, quad buffer), lazily created on the
+// first bake (Environment::ensureBakeResources).
+struct IblBakeResources {
+    sg_shader eqShader{};
+    sg_shader irrShader{};
+    sg_shader preShader{};
+    sg_shader lutShader{};
+    sg_pipeline eqPipe{};      // target: RGBA16F
+    sg_pipeline irrPipe{};     // target: RGBA16F
+    sg_pipeline prePipe{};     // target: RGBA16F
+    sg_pipeline lutPipe{};     // target: RG16F
+    sg_buffer quadVbuf{};      // 6 verts, 2 triangles
+    sg_sampler linearSampler{};
+    bool initialized = false;
+};
+
+// One set per process, defined in tcGlobal.cpp. Nothing destroys these
+// shaders and pipelines. Header-inline, each hot reload guest generation that
+// baked made 4 more shaders in the host's pool (32 by default), which ran out
+// after a few reloads (#249).
+IblBakeResources& iblBakeResources();
+
+} // namespace internal
+
 class Environment {
 public:
     Environment() = default;
@@ -180,7 +206,7 @@ private:
     // render targets). iPad reports as Mac, so also check touch points. Cached.
     static bool isIosWeb() {
 #ifdef __EMSCRIPTEN__
-        static int cached = -1;
+        static int cached = -1;  // cached probe: a per-module copy is harmless
         if (cached < 0) {
             cached = emscripten_run_script_int(
                 "((/iPhone|iPad|iPod/.test(navigator.userAgent)||"
@@ -193,30 +219,13 @@ private:
     }
 
     // -------------------------------------------------------------------------
-    // Shared baking resources (pipelines, quad buffer). Lazy-initialized on
-    // the first bake call.
+    // Shared baking resources (pipelines, quad buffer): internal::IblBakeResources,
+    // one per process. Lazy-initialized on the first bake call.
     // -------------------------------------------------------------------------
-    struct BakeResources {
-        sg_shader eqShader{};
-        sg_shader irrShader{};
-        sg_shader preShader{};
-        sg_shader lutShader{};
-        sg_pipeline eqPipe{};      // target: RGBA16F
-        sg_pipeline irrPipe{};     // target: RGBA16F
-        sg_pipeline prePipe{};     // target: RGBA16F
-        sg_pipeline lutPipe{};     // target: RG16F
-        sg_buffer quadVbuf{};      // 6 verts, 2 triangles
-        sg_sampler linearSampler{};
-        bool initialized = false;
-    };
-
-    static BakeResources& bake() {
-        static BakeResources r;
-        return r;
-    }
+    using BakeResources = internal::IblBakeResources;
 
     static void ensureBakeResources() {
-        BakeResources& r = bake();
+        BakeResources& r = internal::iblBakeResources();
         if (r.initialized) return;
 
         r.eqShader  = sg_make_shader(tc_ibl_equirect_to_cube_shader_desc(sg_query_backend()));
@@ -314,7 +323,7 @@ private:
         // IBL is opt-in via setEnvironment(), so this only affects apps that use
         // it; they degrade gracefully on iOS instead of breaking.
         if (isIosWeb()) {
-            static bool warned = false;
+            static bool warned = false;  // warn-once flag: a per-module copy is harmless
             if (!warned) {
                 warned = true;
                 logWarning("Environment")
@@ -326,7 +335,7 @@ private:
         }
 #endif
         ensureBakeResources();
-        BakeResources& r = bake();
+        BakeResources& r = internal::iblBakeResources();
 
         // IBL bakes run outside any user-facing pass. If a swapchain pass is
         // somehow active, suspend it so we can start fresh offscreen passes.

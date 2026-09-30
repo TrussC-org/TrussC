@@ -42,13 +42,11 @@ namespace internal { inline void drainMainThreadQueue() {} }
 #else
 
 namespace internal {
-    // FIFO of pending main-thread work. A function-local static so the queue is
-    // constructed on first use and shared process-wide; ThreadChannel is itself
-    // thread-safe (mutex + condition_variable).
-    inline ThreadChannel<std::function<void()>>& mainThreadQueue() {
-        static ThreadChannel<std::function<void()>> q;
-        return q;
-    }
+    // FIFO of pending main-thread work, one per process; ThreadChannel is
+    // itself thread-safe (mutex + condition_variable). Defined in tcGlobal.cpp:
+    // header-inline, a hot reload guest on Windows queued into its own copy,
+    // which the host's frame loop never drained (#249).
+    ThreadChannel<std::function<void()>>& mainThreadQueue();
 }
 
 // Run `fn` on the main thread. Immediately if already on it; otherwise queued

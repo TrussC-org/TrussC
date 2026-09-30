@@ -74,7 +74,7 @@ struct GuestLibrary {
         //               back the OLD code.
         //   - macOS:    dyld usually picks up the replacement, but copying to
         //               a unique path makes behavior identical across OSes.
-        static int loadCounter = 0;
+        static int loadCounter = 0;  // host-only: only the host loads guests
 #ifdef _WIN32
         const char* ext = ".tmp.dll";
 #else
@@ -129,7 +129,7 @@ struct GuestLibrary {
             // is deleted — no stale tool from an old build lingers in
             // tools/list pointing at a freed App (#227). The tag is only an
             // identity, never dereferenced.
-            static uintptr_t generation = 0;
+            static uintptr_t generation = 0;  // host-only: only the host creates guests
             mcpOwner = reinterpret_cast<const void*>(++generation);
             mcp::detail::setRegistrationOwner(mcpOwner);
             App* raw = createApp();
@@ -497,7 +497,7 @@ struct Host {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / dpiScale);
+            float scale = internal::pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
             newApp->handleWindowResized(static_cast<int>(w * scale),
                                         static_cast<int>(h * scale));
         }
@@ -537,7 +537,8 @@ struct Host {
 };
 
 // ---------------------------------------------------------------------------
-// Global host instance
+// Global host instance. Host-only: only the host's runHotReloadApp uses it; a
+// guest's copy (TrussC.h includes this header there too) is never used.
 // ---------------------------------------------------------------------------
 inline Host g_host;
 
@@ -633,7 +634,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     };
 
     // Build the sokol descriptor (without template — we handle App* manually)
-    internal::pixelPerfectMode = settings.pixelPerfect;
+    internal::pixelPerfectMode() = settings.pixelPerfect;
 
     sapp_desc desc = {};
     if (settings.pixelPerfect) {

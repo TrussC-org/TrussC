@@ -10,7 +10,8 @@
 namespace trussc {
 namespace headless {
 
-// Headless mode active flag (true when running in headless mode)
+// Headless mode active flag (true when running in headless mode). Hot reload
+// is windowed, so it is false in every module's copy there.
 inline std::atomic<bool> active{false};
 
 // Check if currently running in headless mode

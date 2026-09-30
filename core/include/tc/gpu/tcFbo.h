@@ -19,13 +19,44 @@ class Fbo;
 // Static helper function for calling FBO's clearColor
 namespace internal { inline void _fboClearColorHelper(float r, float g, float b, float a); }
 
+namespace internal {
+
+// Rendering resources shared by every Fbo of the same (sampleCount, format):
+// one sokol_gl context and its role->pipeline cache (see Fbo::ensureShared).
+struct FboSharedResources {
+    sgl_context context = {};
+    RenderTarget target;  // role->pipeline cache for this FBO context
+    bool initialized = false;
+};
+
+// Mip-downsample resources shared per color format (see Fbo::ensureSharedMip).
+struct FboSharedMipResources {
+    sg_shader shader = {};
+    sg_pipeline pipeline = {};
+    sg_shader blitShader = {};
+    sg_pipeline blitPipeline = {};
+    sg_buffer vbuf = {};
+    sg_sampler sampler = {};
+    bool initialized = false;
+};
+
+// Both caches are one per process, defined in tcGlobal.cpp. Nothing ever
+// destroys the contexts, shaders and pipelines they hold, and sokol_gl has 4
+// context slots, the default context included. Header-inline, each hot reload
+// guest generation that drew into an Fbo made a new set in the host's pools,
+// and a few reloads later FBO drawing silently stopped (#249).
+std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap();
+std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap();
+
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Fbo Class - inherits from HasTexture
 // ---------------------------------------------------------------------------
 class Fbo : public HasTexture {
 public:
-    Fbo() { internal::fboCount++; }
-    ~Fbo() { clear(); internal::fboCount--; }
+    Fbo() { internal::fboCount()++; }
+    ~Fbo() { clear(); internal::fboCount()--; }
 
     // Non-copyable
     Fbo(const Fbo&) = delete;
@@ -594,24 +625,16 @@ private:
     // Nested FBO begin/end is NOT supported (sokol doesn't support nested passes).
     // =========================================================================
 
-    struct SharedResources {
-        sgl_context context = {};
-        internal::RenderTarget target;  // role->pipeline cache for this FBO context
-        bool initialized = false;
-    };
+    // The cache itself is internal::fboSharedMap(), one per process.
+    using SharedResources = internal::FboSharedResources;
 
     // Pack (sampleCount, format) into a uint64_t key
     static uint64_t sharedKey(int sampleCount, TextureFormat format) {
         return ((uint64_t)sampleCount << 32) | (uint64_t)format;
     }
 
-    static std::unordered_map<uint64_t, SharedResources>& sharedMap() {
-        static std::unordered_map<uint64_t, SharedResources> map;
-        return map;
-    }
-
     static SharedResources& getShared(int sampleCount, TextureFormat format) {
-        return sharedMap()[sharedKey(sampleCount, format)];
+        return internal::fboSharedMap()[sharedKey(sampleCount, format)];
     }
 
     static void ensureShared(int sampleCount, TextureFormat format) {
@@ -622,8 +645,8 @@ private:
 
         // Create sgl context (match main context buffer sizes)
         sgl_context_desc_t ctx_desc = {};
-        ctx_desc.max_vertices = internal::sglMaxVertices;
-        ctx_desc.max_commands = internal::sglMaxCommands;
+        ctx_desc.max_vertices = internal::sglBudget().maxVertices;
+        ctx_desc.max_commands = internal::sglBudget().maxCommands;
         ctx_desc.color_format = sgFormat;
         ctx_desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         ctx_desc.sample_count = sampleCount;
@@ -643,25 +666,13 @@ private:
     // Shared mip-downsample resources (keyed by color format).
     // Independent of the sgl_context / sampleCount of SharedResources because
     // mip generation always runs on the resolved (non-MSAA) color texture
-    // with a tiny custom pipeline, not through sokol_gl.
+    // with a tiny custom pipeline, not through sokol_gl. The cache is
+    // internal::fboSharedMipMap(), one per process.
     // -------------------------------------------------------------------------
-    struct SharedMipResources {
-        sg_shader shader = {};
-        sg_pipeline pipeline = {};
-        sg_shader blitShader = {};
-        sg_pipeline blitPipeline = {};
-        sg_buffer vbuf = {};
-        sg_sampler sampler = {};
-        bool initialized = false;
-    };
-
-    static std::unordered_map<uint64_t, SharedMipResources>& sharedMipMap() {
-        static std::unordered_map<uint64_t, SharedMipResources> map;
-        return map;
-    }
+    using SharedMipResources = internal::FboSharedMipResources;
 
     static SharedMipResources& getSharedMip(TextureFormat format) {
-        return sharedMipMap()[(uint64_t)format];
+        return internal::fboSharedMipMap()[(uint64_t)format];
     }
 
     static void ensureSharedMip(TextureFormat format) {
@@ -674,7 +685,7 @@ private:
         // bilinear sample of the previous mip is enough to produce a 2x2
         // box-filtered destination level. textureLod() in the shader pins
         // the source level, so a single pipeline handles every level.
-        static const float quadVerts[] = {
+        static const float quadVerts[] = {  // immutable
             // x,     y,    u,    v
             -1.0f, -1.0f, 0.0f, 0.0f,
              1.0f, -1.0f, 1.0f, 0.0f,
@@ -869,7 +880,7 @@ private:
         // Setup screen projection using defaultScreenFov (like main screen).
         // pickable=false: geometry drawn into an offscreen target must not be
         // pickable from main-screen clicks (see tcCameraContext.h).
-        internal::setupScreenFovWithSize(internal::defaultScreenFov, (float)width_, (float)height_, 0.0f, 0.0f, false);
+        internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)width_, (float)height_, 0.0f, 0.0f, false);
 
         active_ = true;
         internal::currentWindowContext().inFboPass = true;

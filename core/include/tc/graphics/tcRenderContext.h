@@ -54,15 +54,10 @@ enum class PointStyle {
     Pixel    // true 1px point (sokol_gl immediate; ignores pointSize)
 };
 
-// Forward declarations
-namespace internal {
-    extern sg_view fontView;
-    extern sg_sampler fontSampler;
-    extern bool fontInitialized;
-    extern bool pixelPerfectMode;
-    // Screen setup / view-projection tracking state lives in WindowContext
-    // (tc/app/tcWindowContext.h, included before this header from TrussC.h).
-}
+// The bitmap-font state (internal::bitmapFontAtlas()) and pixelPerfectMode()
+// are declared in TrussC.h before this header is included. Screen setup /
+// view-projection tracking state lives in WindowContext
+// (tc/app/tcWindowContext.h, also included before this header from TrussC.h).
 
 // ---------------------------------------------------------------------------
 // RenderContext class

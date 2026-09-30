@@ -820,6 +820,16 @@ While the app is running, saving any source file in `src/` triggers an automatic
 
 All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This macro automatically selects between normal and hot reload mode — no changes to `main.cpp` needed.
 
+### Adding a `static` or `inline` variable to a TrussC core header?
+
+This is for changes to TrussC itself (`core/include`), not app code. On Windows, a hot-reload app gets its own copy of every such variable, so the app and TrussC would see different values. CI (`tools/check_header_state.py`) flags them. Decide in this order:
+
+1. **A constant?** Make it `constexpr` (or a `const` at namespace scope). Not flagged; done.
+2. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
+3. **Only a warn-once flag or a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
+
+Details: docs/ARCHITECTURE.md, "One instance per process".
+
 ## AI Automation (MCP)
 
 Every TrussC app can run as an MCP server: launch with `TRUSSC_MCP=1` and the app
