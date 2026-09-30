@@ -821,6 +821,25 @@ namespace internal {
     // anything opens an audio context: the engine keeps the context it
     // opened first. State lives in tcAudio_impl.cpp.
     void setNullAudioBackendForTests(bool on);
+
+    // Test hook, not a user setting: AudioRecorder's audio-thread capture
+    // calls `hook` with the frame count of every buffer it takes, after
+    // copying it into the ring and before handing it to the writer, so a
+    // headless test can hold a capture in flight
+    // (core/tests/audioListenerTeardown). nullptr, the default, turns it off.
+    // State lives in tcAudio_impl.cpp.
+    void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+    void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+
+    // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
+    // without its one-second limit. internal::detachAppAudio() waits here
+    // before the framework destroys an App (exit, runHeadlessApp, hot reload,
+    // closing a secondary window). A listener that never returns is an app
+    // bug; the teardown keeps waiting for it (the app hangs where it can be
+    // seen) rather than destroy what the listener may still use. After one
+    // second it logs an error, once, and goes on waiting. Returns at once on
+    // the audio thread inside a listener. tcAudio_impl.cpp.
+    void waitForCallbackIdleNoTimeout();
 }
 
 // ---------------------------------------------------------------------------
@@ -898,6 +917,39 @@ public:
     Event<AudioOutBuffer> audioOut;
     Event<AudioInBuffer>  audioIn;
 
+    // Teardown barrier for audioOut / audioIn listeners (#256). Returns once
+    // every audioOut / audioIn notify that was running when it was called has
+    // finished. Event does not wait: when disconnect() returns, the callback
+    // may still be running on the audio thread. So an object whose listener
+    // touches its members disconnects, then waits here, then lets the members
+    // go:
+    //
+    //   ~Synth() { listener_.disconnect();
+    //              AudioEngine::getInstance().waitForCallbackIdle(); }
+    //
+    // Do it in the most-derived class (or in cleanup()), not in a base-class
+    // destructor, which runs after the derived members are already gone. The
+    // App's own audioOut() / audioIn() hooks are handled by the framework:
+    // they are detached after cleanup(), and before the App is destroyed
+    // (exit, hot reload, closing a secondary window) the framework waits the
+    // same way, but without the one-second limit below
+    // (internal::waitForCallbackIdleNoTimeout()).
+    //
+    //   - Returns at once when no callback is running: the device is stopped
+    //     or was never started, or the audio thread is between two buffers.
+    //   - Returns at once when called from inside an audioOut / audioIn
+    //     listener (the audio thread): waiting there would wait for itself.
+    //   - Otherwise waits only for callbacks already running (at most two
+    //     back-to-back buffers), not for later ones. Gives up after one
+    //     second, logs a warning and returns false: a listener that blocks
+    //     that long is stuck (e.g. on a lock the caller holds), and waiting
+    //     forever would hang the caller. Returns true otherwise. (The
+    //     framework's App teardown does wait forever, see above: there a hang
+    //     is better than destroying the App under a running listener.)
+    // It waits for every listener running at that moment, not only the
+    // caller's: call it without holding a lock that a listener takes.
+    bool waitForCallbackIdle();
+
     // Fired on every successful init() — both the initial startup and any
     // subsequent live re-init. The args carry the new device's real name
     // (never empty), whether it's the system default, and the current
@@ -968,12 +1020,25 @@ private:
     void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
     friend void internal::flushAudioDiagnostics();
+    friend void internal::waitForCallbackIdleNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
 
     // Zero the output meters, the load window and every voice's level. Only
     // while no device is running (init(), shutdown()), so the audio thread
     // cannot race it.
     void resetMeters();
+
+    // Mark an audioOut / audioIn notify in flight for waitForCallbackIdle()
+    // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
+    // add each, no lock. beginCallback() returns the slot to pass to
+    // endCallback(). audioIn has no engine-side source yet: whatever fires it
+    // from the engine must enclose that notify the same way.
+    int  beginCallback();
+    void endCallback(int slot);
+
+    // Both barriers (tcAudio_impl.cpp): waitForCallbackIdle() gives up after
+    // one second (giveUp), internal::waitForCallbackIdleNoTimeout() does not.
+    bool waitForCallbacks(bool giveUp);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -1155,7 +1220,11 @@ private:
             ob.channels      = num_channels;
             ob.sampleRate    = sampleRate_;
             ob.framePosition = framePosition_;
+            // In flight for waitForCallbackIdle(). Must enclose the notify:
+            // it is what loads the listener snapshot.
+            const int slot = beginCallback();
             audioOut.notify(ob);
+            endCallback(slot);
         }
         framePosition_ += (uint64_t)num_frames;
 
@@ -1216,6 +1285,19 @@ private:
     // Drop counters, output meters, audio-thread load and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
     std::unique_ptr<internal::AudioDiagnostics> diag_;
+
+    // Callbacks in flight (beginCallback / endCallback), counted in one of two
+    // slots picked by the epoch's low bit. waitForCallbackIdle() advances the
+    // epoch so new callbacks count in the other slot, then waits for the old
+    // slot to drain, twice (once per slot): it waits only for callbacks that
+    // were already running, and a callback that read the epoch just before an
+    // advance is still caught. The mutex serializes barriers (the epoch
+    // advances of two barriers must not interleave); the audio thread never
+    // takes it. Timed, so waitForCallbackIdle() keeps its one-second limit
+    // while a framework teardown holds it waiting for a stuck listener.
+    std::atomic<uint32_t> callbackEpoch_{0};
+    std::atomic<int>      callbacksInFlight_[2]{};
+    std::timed_mutex      callbackBarrierMutex_;
 };
 
 // ---------------------------------------------------------------------------

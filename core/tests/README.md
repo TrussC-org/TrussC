@@ -85,6 +85,34 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+- `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
+  (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
+  one disconnects or destroys is not called in that pass, `clear()` stops the
+  rest of the pass, a listener that removes itself does not stop the later
+  ones, and a listener added during a pass starts from the next one. Includes
+  the `Tween` shape: objects in a vector listen with `[this]` and re-listen in
+  their move constructor; growing the vector inside the pass sends no call to
+  a moved-from object.
+- `audioListenerTeardown/` — nothing on the audio thread reaches an object
+  after its owner let it go (#256), on the real `AudioEngine` over miniaudio's
+  null backend: `AudioEngine::waitForCallbackIdle()` waits for an `audioOut`
+  pass in flight, returns at once with no audio running and from inside a
+  listener, and gives up (warning, `false`) on a listener stuck for a second;
+  an App torn down by `runHeadlessApp` while its `audioOut()` runs keeps the
+  hook through `cleanup()`, then its destructor neither starts during
+  `audioOut()` nor sees it called afterwards (the windowed exit, hot reload
+  and closing a secondary window use the same `internal::detachAppAudio()`);
+  that teardown waits for a stuck `audioOut()` past one second without
+  destroying the App (one error logged; the public barrier still gives up
+  after a second meanwhile) and goes on once it returns; an App runs once:
+  `Window::setApp()` refuses an App whose window closed (one error, the
+  window keeps its App, no hook comes back, no second `setup()`) and any App
+  on a window that is not open;
+  `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
+  flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
+  while another thread calls `stop()` still ends up in the WAV and in
+  `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
+  a FAIL.
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×

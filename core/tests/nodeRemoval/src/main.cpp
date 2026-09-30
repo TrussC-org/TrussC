@@ -256,17 +256,22 @@ private:
 };
 
 // A secondary window's context: its Window drives the tree like the
-// platform glue does.
+// platform glue does. A Window made in a headless test has no native side,
+// and setApp() only takes an open window (#256): native_ points at a
+// stand-in that nothing here dereferences, cleared before ~Window() would
+// close() it.
 class WindowDriver : public Driver {
 public:
     WindowDriver() {
         prev_ = internal::currentWindowCtx();
         internal::currentWindowCtx() = &win_.context();
+        win_.native_ = &nativeStandIn_;
         app_ = make_shared<App>();
         win_.setApp(app_);
     }
     ~WindowDriver() override {
         win_.setApp(nullptr);
+        win_.native_ = nullptr;
         app_.reset();
         internal::currentWindowCtx() = prev_;
     }
@@ -283,6 +288,7 @@ protected:
     }
 
 private:
+    int nativeStandIn_ = 0;
     Window win_;
     internal::WindowContext* prev_ = nullptr;
 };

@@ -2357,6 +2357,10 @@ namespace mcp {
 inline void shutdownAudio();
 // tcAudio_impl.cpp: logs the dropped plays that were only counted (see tcSound.h).
 namespace internal { void pumpAudioDiagnostics(); }
+// Defined in tcBaseApp.h (included later in this header); declared here so
+// the launcher's cleanup below can detach the App's audio hooks (#256).
+class App;
+namespace internal { inline void detachAppAudio(App& app); }
 
 namespace internal {
 
@@ -3001,6 +3005,10 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
             events().exit.notify();
             app->exit();
             app->cleanup();
+            // The audio device is still running (it stops in _cleanup_cb, so
+            // exit() can use audio): detach the App's audio hooks and wait
+            // for a callback in flight before the App goes (#256).
+            internal::detachAppAudio(*app);
             app.reset();
         }
     };

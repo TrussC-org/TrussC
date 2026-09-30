@@ -296,6 +296,9 @@ void Window::close() {
     if (app_) {
         app_->exit();
         app_->cleanup();
+        // Audio keeps running for the other windows: detach this App's audio
+        // hooks and wait for a callback in flight before the App goes (#256).
+        internal::detachAppAudio(*app_);
         internal::attachedApps().erase(app_.get());
         app_.reset();
         ctx_.rootNode.reset();

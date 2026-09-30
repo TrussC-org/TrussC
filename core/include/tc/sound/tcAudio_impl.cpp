@@ -55,6 +55,9 @@ ma_result maDecoderInitPathA(const fs::path& path,
 // Set by internal::setNullAudioBackendForTests(): the engine, device
 // enumeration and MicInput open miniaudio's null backend only.
 std::atomic<bool> g_nullBackendForTests{false};
+
+// Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
+std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
 const ma_backend kNullBackend = ma_backend_null;
 
 // ma_context_init with miniaudio's default backend order for the platform,
@@ -70,6 +73,15 @@ ma_result initContext(ma_context* ctx) {
 namespace internal {
 void setNullAudioBackendForTests(bool on) {
     g_nullBackendForTests.store(on, std::memory_order_relaxed);
+}
+
+void setAudioRecorderCaptureHookForTests(void (*hook)(int frames)) {
+    g_recorderCaptureHook.store(hook, std::memory_order_release);
+}
+
+void runAudioRecorderCaptureHookForTests(int frames) {
+    // Audio thread, once per captured buffer: one load when unset.
+    if (auto hook = g_recorderCaptureHook.load(std::memory_order_acquire)) hook(frames);
 }
 } // namespace internal
 
@@ -1274,6 +1286,96 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
         d.loadAudio = 0.0;
         d.loadWinMax = 0.0f;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Callbacks in flight and the teardown barrier (#256)
+// ---------------------------------------------------------------------------
+namespace {
+// audioOut / audioIn notifies running on this thread (nested when one device
+// callback fires both). Non-zero only on the audio thread inside a listener,
+// where waitForCallbackIdle() must not wait for itself.
+thread_local int t_callbackDepth = 0;
+
+// How long waitForCallbackIdle() waits. A buffer lasts ~1-100 ms, so a
+// callback still running after this is stuck, not slow.
+constexpr std::chrono::seconds kCallbackIdleTimeout{1};
+} // namespace
+
+int AudioEngine::beginCallback() {
+    ++t_callbackDepth;
+    // seq_cst, like the barrier's epoch advance and slot load, and ordered
+    // before the notify's load of the listener list: for a listener removed
+    // before a barrier, either the barrier counts this callback and waits
+    // for it, or this callback's notify no longer sees the listener.
+    const int slot = (int)(callbackEpoch_.load() & 1u);
+    callbacksInFlight_[slot].fetch_add(1);
+    return slot;
+}
+
+void AudioEngine::endCallback(int slot) {
+    // Release: what the listeners did happens-before the barrier returns.
+    callbacksInFlight_[slot].fetch_sub(1, std::memory_order_release);
+    --t_callbackDepth;
+}
+
+bool AudioEngine::waitForCallbackIdle() {
+    return waitForCallbacks(true);
+}
+
+namespace internal {
+void waitForCallbackIdleNoTimeout() {
+    AudioEngine::getInstance().waitForCallbacks(false);
+}
+} // namespace internal
+
+bool AudioEngine::waitForCallbacks(bool giveUp) {
+    if (t_callbackDepth > 0) return true;   // audio thread, inside a listener
+
+    auto warnGaveUp = [] {
+        logWarning("AudioEngine") << "waitForCallbackIdle: an audioOut / audioIn "
+            "listener has been running for over "
+            << kCallbackIdleTimeout.count() << " s; continuing without "
+            "waiting for it. Is it waiting on this thread (a lock held here, "
+            "or work queued to it)?";
+    };
+    std::unique_lock<std::timed_mutex> lock(callbackBarrierMutex_, std::defer_lock);
+    auto deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    if (giveUp) {
+        // A framework teardown may hold the mutex while it waits for a stuck
+        // listener: the one-second limit covers this wait too.
+        if (!lock.try_lock_until(deadline)) { warnGaveUp(); return false; }
+    } else {
+        lock.lock();
+        deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    }
+    bool reported = false;
+    // Advance the epoch so new callbacks count in the other slot, then wait
+    // for the old slot to drain. Twice, so both slots are drained after the
+    // caller's disconnect: a callback that read the epoch just before an
+    // advance still counts in the slot it read.
+    for (int pass = 0; pass < 2; ++pass) {
+        const int slot = (int)(callbackEpoch_.fetch_add(1) & 1u);
+        while (callbacksInFlight_[slot].load() != 0) {
+            if (std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::yield();
+                continue;
+            }
+            if (giveUp) { warnGaveUp(); return false; }
+            // Framework teardown: keep waiting (a use-after-free would be
+            // worse than a hang), and say why the app is stuck, once.
+            if (!reported) {
+                reported = true;
+                logError("AudioEngine") << "an audioOut / audioIn listener has not "
+                    "returned for " << kCallbackIdleTimeout.count() << " s; the "
+                    "teardown keeps waiting for it before it destroys anything the "
+                    "listener may use. The listener is most likely waiting on the "
+                    "main thread or on a lock.";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

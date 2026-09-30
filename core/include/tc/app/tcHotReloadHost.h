@@ -150,6 +150,10 @@ struct GuestLibrary {
             mcp::detail::setRegistrationOwner(nullptr);
             mcpOwner = nullptr;
         }
+        // Audio keeps running across a reload: detach the guest App's audio
+        // hooks and wait for a callback in flight before the App is
+        // destroyed (#256). On exit, appCleanupFunc has run cleanup() first.
+        if (app) internal::detachAppAudio(*app);
         app.reset();
     }
 
