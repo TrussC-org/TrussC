@@ -172,9 +172,9 @@ std::string describePolygonError(PolygonError err) {
     return "";
 }
 
-std::string describeCollapsedHull(const std::string& caller) {
+std::string describeCollapsedHull(const std::string& caller, bool mayHave) {
     return "fewer than 3 distinct, non-collinear points (" + caller
-           + " drops duplicate and collinear points)";
+           + (mayHave ? " may have dropped" : " drops") + " duplicate and collinear points)";
 }
 
 std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points, size_t maxPoints) {
