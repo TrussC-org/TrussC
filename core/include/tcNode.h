@@ -1695,7 +1695,10 @@ inline void setSelectedNode(Node* n) {
 
 // The running App as the root of the node tree (set by the framework while the
 // app is alive, null otherwise). Lets tools — e.g. the MCP node tools — walk
-// the whole tree without the app passing itself around.
+// the whole tree without the app passing itself around. Held weakly, so the
+// framework registers the App once it is made (runApp(), runHeadlessApp(),
+// the hot reload host): inside the App's own constructor this is not the App
+// yet. Use it from setup() on.
 inline Node* getRootNode() { return internal::currentWindowContext().rootNode.lock().get(); }
 
 } // namespace trussc

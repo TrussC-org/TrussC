@@ -293,6 +293,16 @@ inline Window* App::getWindow() const {
 // resized THAT window instead. Width/height get the same framebuffer ->
 // logical conversion as setWindowSize(), with the target window's own scale.
 inline void App::setSize(float w, float h) {
+    // Not owned by a shared_ptr yet, i.e. called from the App's constructor:
+    // no window runs this App yet (it becomes getRootNode() / a window's App
+    // only once it is made), so there is no window to resize. Only the App's
+    // own size is set, with a warning.
+    if (weak_from_this().expired()) {
+        logWarning("App") << "setSize() in the App's constructor does not resize "
+            "the window (the App isn't running yet). Call it in setup().";
+        RectNode::setSize(w, h);
+        return;
+    }
     int width = static_cast<int>(w), height = static_cast<int>(h);
     if (Window* win = getWindow()) {
         if (internal::pixelPerfectMode()) {

@@ -137,7 +137,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   reference, so the App can't register itself from its constructor, and the
   code that creates it through a `shared_ptr` does. `runApp()`'s setup
   callback (called here without `sapp_run()`) registers the App, and the
-  root is gone once the cleanup callback freed it; `runHeadlessApp()` owns
+  root is gone once the cleanup callback freed it. Inside the App's
+  constructor `getRootNode()` is not the App yet and `App::setSize()` warns
+  and resizes no window; from `setup()` it goes to the main window without
+  a warning. `runHeadlessApp()` owns
   the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
   `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
   run ends.

@@ -119,9 +119,9 @@ related = ["App::isExitRequested"]
 ["App::setSize"]
 category = "events"
 keywords = ["resize", "window", "dimensions"]
-description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size"
-description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる"
-description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜"
+description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. In the App's constructor it resizes no window and logs a warning: call it in setup()"
+description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。Appのコンストラクタ内ではウィンドウは変わらず警告が出る。setup()で呼ぶ"
+description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. App의 생성자 안에서는 윈도우가 바뀌지 않고 경고가 나옴. setup()에서 호출"
 related = ["getWindowSize", "setWindowSize", "App::getWindow"]
 
 ["App::touchMoved"]
@@ -14081,9 +14081,9 @@ related = ["getFileName", "joinPath"]
 ["getRootNode"]
 category = "scene_graph"
 keywords = ["tree", "app", "top", "hierarchy"]
-description.en = "Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around."
-description.ja = "実行中のAppをノードツリーのルートとして取得(アプリ生存中はフレームワークが設定、それ以外はnull)。アプリが自身を渡し回さずともツールがツリー全体を辿れる"
-description.ko = "실행 중인 App을 노드 트리의 루트로 얻음(앱이 살아있는 동안 프레임워크가 설정, 그 외에는 null). 앱이 자신을 넘기지 않아도 도구가 트리 전체를 순회 가능"
+description.en = "Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around. Not yet the App inside its own constructor: use it from setup() on."
+description.ja = "実行中のAppをノードツリーのルートとして取得(アプリ生存中はフレームワークが設定、それ以外はnull)。アプリが自身を渡し回さずともツールがツリー全体を辿れる。App自身のコンストラクタ内ではまだそのAppを返さない。setup()以降で使う"
+description.ko = "실행 중인 App을 노드 트리의 루트로 얻음(앱이 살아있는 동안 프레임워크가 설정, 그 외에는 null). 앱이 자신을 넘기지 않아도 도구가 트리 전체를 순회 가능. App 자신의 생성자 안에서는 아직 그 App을 반환하지 않음. setup()부터 사용"
 related = ["getSelectedNode", "Node"]
 
 ["getScale"]
