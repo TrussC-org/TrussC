@@ -9248,9 +9248,9 @@ value_desc.Critical.en = "Thermal throttling active, risk of shutdown"
 
 ["Thread"]
 keywords = ["background", "worker", "async", "concurrent", "ofthread"]
-description.en = "Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data."
-description.ja = "バックグラウンドスレッドの基底クラス（ofThread 互換）。サブクラス化して protected の純粋仮想 threadedFunction() を while (isThreadRunning()) { ... } ループでオーバーライドし、startThread()/stopThread()/waitForThread() で制御する。データ共有用に protected の mutex dataMutex_ が利用できる"
-description.ko = "백그라운드 스레드의 기반 클래스(ofThread 호환). 서브클래싱하여 protected 순수 가상 threadedFunction()을 while (isThreadRunning()) { ... } 루프로 오버라이드한 뒤 startThread()/stopThread()/waitForThread()로 제어. 데이터 공유용 protected mutex dataMutex_가 제공됨"
+description.en = "Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in \"pure virtual method called\"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread)."
+description.ja = "バックグラウンドスレッドの基底クラス（ofThread 互換）。サブクラス化して protected の純粋仮想 threadedFunction() を while (isThreadRunning()) { ... } ループでオーバーライドし、startThread()/stopThread()/waitForThread() で制御する。データ共有用に protected の mutex dataMutex_ が利用できる。サブクラスは自分のデストラクタで必ず waitForThread() を呼ぶこと: 基底のデストラクタも停止して join するが、それはサブクラスのメンバが破棄された後になる。threadedFunction() がまだ動いていれば警告をログに出す。待機しないサブクラスは、ワーカーが threadedFunction() を呼ぶ前に破棄されうる（例: startThread() の直後）。その場合はワーカーがその呼び出しに達するタイミング次第になる: サブクラスのデストラクタ実行中なら本物の threadedFunction() が走り、破棄済みのメンバを使いうる（未定義動作で、たいてい異常終了もしない）。~Thread() の開始とほぼ同時なら \"pure virtual method called\" で強制終了しうる。それより後なら threadedFunction() はスキップされ、基底のデストラクタが警告を出して join する。3つすべてを防げるのは、サブクラスのデストラクタで待つ（waitForThread()）ことだけ。サブクラスは unique_ptr / shared_ptr で保持する（Thread のムーブは非推奨: 実行中のスレッドは移らない）"
+description.ko = "백그라운드 스레드의 기반 클래스(ofThread 호환). 서브클래싱하여 protected 순수 가상 threadedFunction()을 while (isThreadRunning()) { ... } 루프로 오버라이드한 뒤 startThread()/stopThread()/waitForThread()로 제어. 데이터 공유용 protected mutex dataMutex_가 제공됨. 서브클래스는 자신의 소멸자에서 반드시 waitForThread()를 호출해야 함: 기반 소멸자도 정지 후 join하지만 서브클래스 멤버가 파괴된 뒤에 실행됨. threadedFunction()이 아직 실행 중이면 경고를 로그로 남김. 대기하지 않는 서브클래스는 워커가 threadedFunction()을 호출하기 전에 파괴될 수 있음(예: startThread() 직후). 그 경우 워커가 그 호출에 도달하는 시점에 따라 달라짐: 서브클래스 소멸자 실행 중이면 실제 threadedFunction()이 실행되어 이미 파괴된 멤버를 사용할 수 있음(정의되지 않은 동작이며, 대개 비정상 종료도 없음). ~Thread() 시작과 거의 같은 순간이면 \"pure virtual method called\"로 강제 종료될 수 있음. 그 이후라면 threadedFunction()은 건너뛰고 기반 소멸자가 경고를 남긴 뒤 join함. 세 경우를 모두 막는 방법은 서브클래스 소멸자에서 대기(waitForThread())하는 것뿐임. 서브클래스는 unique_ptr / shared_ptr로 보유(Thread 이동은 deprecated: 실행 중인 스레드는 옮겨지지 않음)"
 related = ["ThreadChannel<T>", "isMainThread"]
 
 ["Thread::getMainThreadId"]
@@ -9294,9 +9294,9 @@ description.ja = "スレッド上で実行する処理でこれをオーバー�
 description.ko = "스레드에서 실행할 작업으로 이를 오버라이드. 권장 패턴은 while (isThreadRunning()) { ... }. (protected, pure virtual)"
 
 ["Thread::waitForThread"]
-description.en = "Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first."
-description.ja = "スレッドの終了を待つ（join）。callStopThread が true（デフォルト）なら先に stopThread() を呼ぶ"
-description.ko = "스레드 종료를 대기(join). callStopThread가 true(기본값)이면 먼저 stopThread()를 호출"
+description.en = "Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first. A subclass must call it in its own destructor. Never call it on the thread itself (e.g. from a destructor that runs inside threadedFunction()): joining itself throws std::system_error."
+description.ja = "スレッドの終了を待つ（join）。callStopThread が true（デフォルト）なら先に stopThread() を呼ぶ。サブクラスは自分のデストラクタで必ずこれを呼ぶ。そのスレッド自身からは呼ばないこと（例: threadedFunction() の中で走るデストラクタ）: 自分自身の join は std::system_error を投げる"
+description.ko = "스레드 종료를 대기(join). callStopThread가 true(기본값)이면 먼저 stopThread()를 호출. 서브클래스는 자신의 소멸자에서 반드시 이를 호출해야 함. 해당 스레드 자신에서는 호출하지 말 것(예: threadedFunction() 안에서 실행되는 소멸자): 자기 자신을 join하면 std::system_error를 던짐"
 
 ["Thread::yield"]
 description.en = "Yield execution to other threads."
@@ -14836,6 +14836,14 @@ description.ja = "XML 文字列を Xml オブジェクトにパース"
 description.ko = "XML 문자열을 Xml 객체로 파싱"
 related = ["Xml", "loadXml"]
 
+["pathToUtf8"]
+category = "file"
+keywords = ["utf-8", "encoding", "unicode", "string", "japanese", "windows", "code page"]
+description.en = "Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw."
+description.ja = "パスを UTF-8 の std::string に変換する（全プラットフォームで同じ）。path.string() の代わりに使う。path.string() は Windows ではプロセスのコードページに変換し、そこにない文字で例外を投げることがある。Windows では、不正な UTF-16 の名前（対になっていないサロゲート）でこの関数も例外を投げうる。ログに出すなら log << path を使う（こちらは投げない）"
+description.ko = "경로를 UTF-8 std::string으로 변환 (모든 플랫폼에서 동일). path.string() 대신 사용한다. path.string()은 Windows에서 프로세스 코드 페이지로 변환하며, 거기에 없는 문자에서 예외를 던질 수 있다. Windows에서는 올바르지 않은 UTF-16 이름(짝이 없는 서로게이트)에서 이 함수도 예외를 던질 수 있다. 로그에 경로를 출력할 때는 log << path를 사용한다 (이쪽은 예외를 던지지 않는다)"
+related = ["utf8ToPath", "getFileName", "joinPath"]
+
 ["popMatrix"]
 category = "transform"
 keywords = ["restore", "transform", "stack", "ofpopmatrix"]
@@ -16182,6 +16190,14 @@ description.en = "Unbind a custom cursor image, restoring the system default"
 description.ja = "カスタムカーソル画像を解除し、システムデフォルトに戻す"
 description.ko = "커스텀 커서 이미지를 해제하고 시스템 기본값으로 복원"
 related = ["Cursor", "bindCursorImage", "setCursor"]
+
+["utf8ToPath"]
+category = "file"
+keywords = ["utf-8", "encoding", "unicode", "string", "japanese", "windows", "code page"]
+description.en = "Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later)."
+description.ja = "UTF-8 文字列を fs::path に変換する（全プラットフォームで UTF-8 として解釈）。Windows の fs::path(std::string) はプロセスのコードページで解釈し、それが UTF-8 になるのは TrussC の Windows マニフェスト入りでビルドしたアプリ（Windows 10 1903 以降）だけ"
+description.ko = "UTF-8 문자열을 fs::path로 변환 (모든 플랫폼에서 UTF-8로 해석). Windows의 fs::path(std::string)는 프로세스 코드 페이지로 해석하며, 그것이 UTF-8인 것은 TrussC의 Windows 매니페스트로 빌드한 앱(Windows 10 1903 이상)뿐이다"
+related = ["pathToUtf8", "getDataPath"]
 
 ["vertex"]
 category = "graphics_shapes"

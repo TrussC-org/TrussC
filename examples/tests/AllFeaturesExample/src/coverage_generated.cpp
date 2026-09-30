@@ -31,6 +31,8 @@ static void cover_audioengine() {
 }
 
 static void cover_file() {
+    (void)pathToUtf8(af::val<const fs::path>());
+    (void)utf8ToPath(af::val<std::string_view>());
     (void)getExecutablePath();
     (void)getExecutableDir();
     (void)loadErrorName(af::val<LoadError>());

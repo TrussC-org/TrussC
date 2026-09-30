@@ -38,6 +38,16 @@ ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 # Helper Functions
 # =============================================================================
 
+def configure_output():
+    # Write our stdout/stderr as UTF-8 and replace what cannot be encoded,
+    # instead of raising. Test output is echoed through print() and carries
+    # non-ASCII text (filePath logs Japanese file names). On Windows a pipe
+    # defaults to the ANSI code page (cp1252 on the CI runners), where print()
+    # raised UnicodeEncodeError and ended the whole run.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
 def get_platform_info():
     system = platform.system()
     if system == "Windows":
@@ -356,6 +366,7 @@ def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_
 # =============================================================================
 
 def main():
+    configure_output()
     parser = argparse.ArgumentParser(description="TrussC Batch Build Script")
     parser.add_argument('--clean', action='store_true', help="Clean build directories before building")
     parser.add_argument('--web', action='store_true', help="Also build for WebAssembly")

@@ -16,20 +16,23 @@ namespace trussc {
 // =============================================================================
 // File Path Utilities
 // =============================================================================
+// The strings returned here are UTF-8 on every platform (pathToUtf8).
+// path::string() would return active-code-page bytes on Windows, and throw
+// for characters the code page cannot represent.
 
 // Get filename from path: "dir/test.txt" -> "test.txt"
 inline std::string getFileName(const fs::path& path) {
-    return path.filename().string();
+    return pathToUtf8(path.filename());
 }
 
 // Get filename without extension: "dir/test.txt" -> "test"
 inline std::string getBaseName(const fs::path& path) {
-    return path.stem().string();
+    return pathToUtf8(path.stem());
 }
 
 // Get file extension without dot: "dir/test.txt" -> "txt"
 inline std::string getFileExtension(const fs::path& path) {
-    std::string ext = path.extension().string();
+    std::string ext = pathToUtf8(path.extension());
     if (!ext.empty() && ext[0] == '.') {
         ext = ext.substr(1);
     }
@@ -38,17 +41,17 @@ inline std::string getFileExtension(const fs::path& path) {
 
 // Get parent directory: "dir/test.txt" -> "dir"
 inline std::string getParentDirectory(const fs::path& path) {
-    return path.parent_path().string();
+    return pathToUtf8(path.parent_path());
 }
 
 // Join paths: ("dir", "file.txt") -> "dir/file.txt"
 inline std::string joinPath(const fs::path& dir, const fs::path& file) {
-    return (dir / file).string();
+    return pathToUtf8(dir / file);
 }
 
 // Get absolute path
 inline std::string getAbsolutePath(const fs::path& path) {
-    return std::filesystem::absolute(path).string();
+    return pathToUtf8(std::filesystem::absolute(path));
 }
 
 // =============================================================================
@@ -92,12 +95,20 @@ inline std::vector<std::string> listDirectory(const fs::path& path) {
         return result;
     }
 
-    try {
-        for (const auto& entry : std::filesystem::directory_iterator(fullPath)) {
-            result.push_back(entry.path().filename().string());
+    // Error codes instead of exceptions, and one conversion per entry: an
+    // entry that fails is logged and skipped, the listing goes on.
+    std::error_code ec;
+    std::filesystem::directory_iterator it(fullPath, ec);
+    std::filesystem::directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        try {
+            result.push_back(pathToUtf8(it->path().filename()));
+        } catch (const std::exception& e) {
+            logWarning() << "listDirectory: skipped an entry in " << path << " - " << e.what();
         }
-    } catch (const std::exception& e) {
-        logError() << "Failed to list directory: " << path << " - " << e.what();
+    }
+    if (ec) {
+        logError() << "Failed to list directory: " << path << " - " << ec.message();
     }
 
     return result;

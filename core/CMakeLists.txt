@@ -647,6 +647,26 @@ function(_trussc_convert_png_to_ico PNG_FILE OUTPUT_ICO OUT_SUCCESS)
 endfunction()
 
 # =============================================================================
+# trussc_setup_manifest(<target>)
+# Windows: add TrussC's application manifest (resources/windows/app.manifest)
+# to an executable. CMake hands .manifest sources to the manifest tool, which
+# merges them with the linker's default manifest and embeds the result.
+#   - activeCodePage UTF-8: the process ANSI code page becomes UTF-8
+#     (Windows 10 1903+), so narrow strings are UTF-8 for fs::path(string),
+#     path::string(), fopen, getenv and the -A Win32 APIs, in TrussC, addons
+#     and third-party libraries alike. Older Windows ignores the setting.
+#   - longPathAware: paths beyond MAX_PATH work where the system allows it
+#     (LongPathsEnabled).
+# No-op on other platforms.
+# =============================================================================
+function(trussc_setup_manifest TARGET_NAME)
+    if(WIN32)
+        target_sources(${TARGET_NAME} PRIVATE
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/resources/windows/app.manifest")
+    endif()
+endfunction()
+
+# =============================================================================
 # Automatically include the addon macros (makes use_addon available)
 # =============================================================================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
