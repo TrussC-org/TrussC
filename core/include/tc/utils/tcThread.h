@@ -40,14 +40,19 @@ namespace trussc {
 //   finds the thread still running. Calling only stopThread() (the ofThread
 //   exit() habit) does not wait either.
 //
-//   A subclass that does not wait may be destroyed before its worker has
-//   called threadedFunction(), e.g. right after startThread() (with or
-//   without stopThread()). The subclass part is then already gone, so the
-//   worker skips threadedFunction() and the base destructor joins it. Only a
-//   destruction at the very moment the worker makes that call can still
-//   reach the pure virtual threadedFunction() ("pure virtual method called").
-//   Waiting in the subclass destructor rules that out, and threadedFunction()
-//   then always runs.
+//   A subclass that does not wait may also be destroyed before its worker
+//   has called threadedFunction(), e.g. right after startThread() (with or
+//   without stopThread()). What happens then depends on when the worker
+//   makes that call:
+//   - while the subclass destructor is running: the real threadedFunction()
+//     runs and may use members that are already destroyed. This is undefined
+//     behaviour, and usually nothing aborts to point at it.
+//   - at about the moment ~Thread() starts: the call can still reach the
+//     pure virtual threadedFunction() ("pure virtual method called").
+//   - after ~Thread() has started: the worker skips threadedFunction(), and
+//     the base destructor logs the warning and joins it.
+//   Only waiting in the subclass destructor (waitForThread()) rules out all
+//   three, and threadedFunction() then always runs.
 //
 //   A subclass that waits must not be destroyed from its own
 //   threadedFunction() (delete this, or dropping the last shared_ptr on the
