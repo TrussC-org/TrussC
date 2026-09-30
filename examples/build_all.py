@@ -98,6 +98,29 @@ def find_project_generator(root_dir, platform_info):
         print(f" - {p}")
     sys.exit(1)
 
+
+_target_flags_cache = {}
+
+def update_target_flags(pg_bin, web):
+    # `trusscli update` keeps the targets saved in a project's (gitignored)
+    # CMakePresets.json, so a native sweep after an earlier --web run would
+    # reconfigure build-web every time (and fail without emsdk). Name the
+    # exact target set instead: --web or --no-web, never android / ios.
+    # A trusscli older than --no-web does not keep targets and rejects the
+    # flag, so it gets --web only.
+    key = str(pg_bin)
+    if key not in _target_flags_cache:
+        try:
+            r = subprocess.run([key, "update", "--help"], stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, timeout=60)
+            _target_flags_cache[key] = "--no-web" in r.stdout
+        except (OSError, subprocess.SubprocessError):
+            _target_flags_cache[key] = False
+    supported = _target_flags_cache[key]
+    if web:
+        return ["--web", "--no-android", "--no-ios"] if supported else ["--web"]
+    return ["--no-web", "--no-android", "--no-ios"] if supported else []
+
 def find_examples(root_dir):
     examples_dir = os.path.join(root_dir, "examples")
     addons_dir = os.path.join(root_dir, "addons")
@@ -238,6 +261,7 @@ def build_and_run_test(test_dir, pg_bin, platform_info, args):
     # Build a native console test project, then RUN it (non-zero exit = failure).
     # Returns (ok, stage) where stage names what failed for the summary.
     pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+    pg_cmd += update_target_flags(pg_bin, web=False)
     if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
         return False, "update"
 
@@ -307,7 +331,8 @@ def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
         Colors.print("  node not found (source emsdk_env or put node on PATH)", Colors.RED)
         return False, "node-missing"
 
-    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake", "--web"]
+    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+    pg_cmd += update_target_flags(pg_bin, web=True)
     if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
         return False, "update"
 
@@ -494,8 +519,7 @@ def main():
 
         # Regenerate build files for each example before building
         pg_cmd = [str(pg_bin), "update", "-p", example_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
-        if args.web:
-            pg_cmd.append("--web")
+        pg_cmd += update_target_flags(pg_bin, web=args.web)
         
         if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
             Colors.print(f"  Project update failed!", Colors.RED)

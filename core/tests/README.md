@@ -193,6 +193,21 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   fill the settings and explicit flags win (`--ide`, `--no-web` /
   `--no-android` / `--no-ios`, `--web` with `--no-web` is an error); without a
   `CMakePresets.json` the old defaults stay (vscode, native only, WebGPU).
+  Saved settings that cannot be used are reported as warnings: a file that
+  does not parse or cannot be read, wrongly typed entries, an unknown IDE id,
+  and an IDE this OS cannot generate (xcode off macOS, vs off Windows).
+  `TC_WEB_BACKEND` is read the way CMake builds it, as a string or as
+  `{"type": ..., "value": ...}`: `"WGPU"` (or unset / null) is WebGPU, every
+  other value GLES3, with a warning unless it is `"GLES3"`.
+  `prepareRegeneration()`, the settings setup that `update`, `addon add` and
+  `addon remove` all call, is checked directly (presets kept, flags win,
+  defaults without a file, warnings and summary line). The toolchainFile of a
+  kept web / android preset survives a regeneration from a shell without
+  emsdk / the NDK when the saved file still exists (the test sets `EMSDK`,
+  `PATH`, `ANDROID_NDK_HOME` / `ANDROID_HOME` per case), and a kept target
+  whose configure fails (a toolchain that fails on purpose; needs `cmake` in
+  `PATH`) is a warning naming `trusscli update --no-android`, while the same
+  target passed as a flag fails the update.
   For `trusscli build` / `clean` (#357): one preset-to-build-folder mapping
   (`ios` -> `xcode-ios`) that the written presets, `build` and `clean` follow;
   a build folder without a CMake cache, or with only the cache of a failed
@@ -202,6 +217,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Windows through the real writer), only a native Windows build refreshes the
   presets, and the refresh replaces only the `windows` preset's pins (the
   no-VS fallback entry pins nothing).
-  Not covered: the commands in `tools/src/main.cpp` that call these, the
-  IDE files and CMake configure that `update` runs, and Visual Studio
+  Not covered: the argument parsing and output of the commands in
+  `tools/src/main.cpp` (including the ones that call the build / clean
+  helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
