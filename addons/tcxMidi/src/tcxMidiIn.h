@@ -14,7 +14,10 @@
 //        MidiMessage m;
 //        while (midiIn.getNextMessage(m)) { ... }
 //      The internal queue is enabled on the first hasNewMessage()/
-//      getNextMessage() call.
+//      getNextMessage() call. It holds up to getBufferSize() messages
+//      (default 1024); when full, the oldest is dropped, counted in
+//      getDroppedMessages() and logged as a warning from those two calls
+//      (at most once every 2 s).
 // =============================================================================
 
 #include "tcxMidiMessage.h"
@@ -27,6 +30,8 @@
 #include "tcxMidiApi.h"
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -144,6 +149,7 @@ public:
     // Enables the internal queue on first call. Returns true if unread.
     bool hasNewMessage() {
         bufferEnabled_ = true;
+        reportDrops();
         std::lock_guard<std::mutex> lock(queueMutex_);
         return !queue_.empty();
     }
@@ -151,6 +157,7 @@ public:
     // Pop the next queued message. Returns false when the queue is empty.
     bool getNextMessage(MidiMessage& msg) {
         bufferEnabled_ = true;
+        reportDrops();
         std::lock_guard<std::mutex> lock(queueMutex_);
         if (queue_.empty()) return false;
         msg = std::move(queue_.front());
@@ -158,12 +165,20 @@ public:
         return true;
     }
 
+    // Queue limit (default 1024). Past it, the oldest message is dropped.
+    // Shrinking the limit discards the oldest queued messages now.
     void setBufferSize(size_t size) {
         std::lock_guard<std::mutex> lock(queueMutex_);
         bufferMax_ = size;
         while (queue_.size() > bufferMax_) queue_.pop();
     }
     size_t getBufferSize() const { return bufferMax_; }
+
+    // Messages dropped from the full polling queue since this MidiIn was
+    // created (a running total, never reset). Cheap to call from any thread.
+    uint64_t getDroppedMessages() const {
+        return droppedMessages_.load(std::memory_order_relaxed);
+    }
 
 private:
     libremidi::input_configuration makeConfig() {
@@ -202,11 +217,48 @@ private:
         msg.portNum = portNumber_;
 
         if (bufferEnabled_) {
-            std::lock_guard<std::mutex> lock(queueMutex_);
-            queue_.push(msg);
-            while (queue_.size() > bufferMax_) queue_.pop();
+            // Drops are only counted here (input thread); the polling calls
+            // log them (reportDrops()).
+            uint64_t dropped = 0;
+            {
+                std::lock_guard<std::mutex> lock(queueMutex_);
+                queue_.push(msg);
+                while (queue_.size() > bufferMax_) {
+                    queue_.pop();
+                    ++dropped;
+                }
+            }
+            if (dropped > 0) {
+                droppedMessages_.fetch_add(dropped, std::memory_order_relaxed);
+                unreportedDrops_.fetch_add(dropped, std::memory_order_relaxed);
+            }
         }
         onMessage.notify(msg);
+    }
+
+    // Polling side: log the drops counted since the last report, at most
+    // once every kDropReportInterval. Drops in between are summed into the
+    // next line, so a queue that overflows every frame cannot flood the log.
+    void reportDrops() {
+        if (unreportedDrops_.load(std::memory_order_relaxed) == 0) return;
+        const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        int64_t last = lastDropReportNs_.load(std::memory_order_relaxed);
+        if (last != kNeverReported &&
+            now - last < std::chrono::nanoseconds(kDropReportInterval).count()) return;
+        // Only one polling thread reports a given interval
+        if (!lastDropReportNs_.compare_exchange_strong(last, now, std::memory_order_relaxed)) return;
+        const uint64_t n = unreportedDrops_.exchange(0, std::memory_order_relaxed);
+        if (n == 0) return;
+        size_t limit;
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            limit = bufferMax_;
+        }
+        trussc::logWarning("tcxMidiIn") << "MidiIn \"" << name_ << "\": " << n
+                                        << (n == 1 ? " message" : " messages")
+                                        << " dropped since the last report (queue full at "
+                                        << limit << ", oldest dropped first); raise setBufferSize()";
     }
 
     std::unique_ptr<libremidi::midi_in> midiIn_;
@@ -221,7 +273,15 @@ private:
     std::queue<MidiMessage> queue_;
     std::mutex queueMutex_;
     std::atomic<bool> bufferEnabled_{false};
-    size_t bufferMax_ = 256;
+    size_t bufferMax_ = 1024;
+
+    // Drop accounting: the input thread only adds to the counters; the
+    // polling calls read and log them.
+    static constexpr std::chrono::seconds kDropReportInterval{2};
+    static constexpr int64_t kNeverReported = INT64_MIN;
+    std::atomic<uint64_t> droppedMessages_{0};   // running total
+    std::atomic<uint64_t> unreportedDrops_{0};   // counted, not logged yet
+    std::atomic<int64_t> lastDropReportNs_{kNeverReported};  // steady_clock
 };
 
 }  // namespace tcx::midi
