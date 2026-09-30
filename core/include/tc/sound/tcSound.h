@@ -868,8 +868,12 @@ public:
 
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //
-    // init() with no arguments uses the defaults (DEFAULT_SAMPLE_RATE etc.).
-    // init(settings) writes the runtime config from `settings`. On a running
+    // init(settings) stores sampleRate, channels, bufferSize and maxPolyphony
+    // from `settings` (0 or less picks DEFAULT_*) before it opens the device,
+    // so they are kept even when the open fails. init() with no arguments
+    // reuses the settings of the last init(settings) call, failed or not
+    // (the DEFAULT_* values if there was none), but always opens the system
+    // default device: deviceName is not kept. On a running
     // engine it re-initializes live: the device is reopened with the new
     // settings and playing voices move over, keeping their position.
     //
@@ -883,7 +887,10 @@ public:
     // started, or other settings). Each failed try opens the device again
     // and logs again, so retry on a timer (about once a second) or on a
     // user action, not every frame. Sound::load*() also calls init() while
-    // the engine is not initialized; play() does not.
+    // the engine is not initialized; play() does not. After a failed
+    // init(settings), that implicit init() opens the system default device
+    // with those settings, so call init(settings) again before loading
+    // sounds if you want the requested device.
     bool init();
     bool init(const AudioSettings& settings);
     void shutdown();

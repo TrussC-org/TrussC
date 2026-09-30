@@ -10,8 +10,9 @@
 // device-less clock that still drives the mixer callback.
 //
 // Guards the invariants:
-//   - Every header reserves a 36-byte JUNK chunk right after "WAVE": the data
-//     chunk starts at byte 80 (S16) or 92 (F32).
+//   - Every header reserves a 36-byte JUNK chunk right after "WAVE": the
+//     samples start at byte 80 (S16) or 92 (F32); the data chunk header is
+//     at 72 / 84.
 //   - The size fields are computed in 64 bits. A take stays plain RIFF with
 //     exact 32-bit fields up to the last frame whose RIFF size (file size - 8)
 //     fits 32 bits, and becomes RF64 from the next frame on. That includes
@@ -278,7 +279,7 @@ static void recordTake(AudioRecordSettings::SampleFormat format, int sampleRate)
           tagAt(b, 0) == "RIFF" && tagAt(b, 8) == "WAVE"
           && tagAt(b, 12) == "JUNK" && u32At(b, 16) == 28 && tagAt(b, 48) == "fmt ",
           tagAt(b, 0) + " " + tagAt(b, 12));
-    check(name + " take: data chunk at byte " + to_string(dataStart) + ", sizes match the frames",
+    check(name + " take: samples at byte " + to_string(dataStart) + ", sizes match the frames",
           frames > 0 && tagAt(b, dataTag) == "data" && u32At(b, dataTag + 4) == dataBytes
           && (uint64_t)b.size() == dataStart + dataBytes && u32At(b, 4) == b.size() - 8
           && (!isF32 || u32At(b, 80) == frames),

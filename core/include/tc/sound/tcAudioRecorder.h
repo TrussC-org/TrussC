@@ -17,11 +17,12 @@
 //
 // The engine keeps playing as usual; recording is a pure observer.
 //
-// Every file carries a 36-byte JUNK chunk right after "WAVE" (the data chunk
-// starts at byte 80 for S16, 92 for F32). A take whose RIFF size passes
-// 32 bits (about 4 GiB of samples) is finalized as RF64 (EBU Tech 3306): the
-// JUNK chunk becomes the ds64 chunk that holds the 64-bit sizes. Shorter
-// takes stay plain RIFF; readers skip the JUNK chunk.
+// Every file carries a 36-byte JUNK chunk right after "WAVE" (the samples
+// start at byte 80 for S16, 92 for F32; the data chunk header is at 72 / 84).
+// A take whose RIFF size passes 32 bits (about 4 GiB of samples) is
+// finalized as RF64 (EBU Tech 3306): the JUNK chunk becomes the ds64 chunk
+// that holds the 64-bit sizes. Shorter takes stay plain RIFF; readers skip
+// the JUNK chunk.
 // =============================================================================
 
 #include <algorithm>
