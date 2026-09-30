@@ -1,0 +1,377 @@
+// =============================================================================
+// tcxGltf tests - headless behavioral test (no window).
+//
+// Built and run by CI on every push/PR across macOS / Windows / Linux via
+// examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
+//
+// Each case writes a small .gltf (buffer embedded as a base64 data URI) to a
+// temp directory and loads it with GltfModel. No textures, so nothing needs a
+// graphics context.
+//
+// It checks that GltfModel validates model data before reading it:
+//   - valid models (indexed, non-indexed, node hierarchy, sparse) load as before
+//   - an accessor or buffer view that runs past its buffer view / buffer, or a
+//     reference to an accessor / buffer view that does not exist, fails to load
+//   - counts large enough to wrap the size arithmetic fail to load
+//   - attribute counts that differ within a primitive fail to load
+//   - an index past the primitive's vertices fails to load
+//   - a file with no scene fails to load
+// Every failed load logs a warning and leaves the model empty.
+// =============================================================================
+
+#include <tcxGltf.h>
+
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
+
+using namespace std;
+using namespace tc;
+using tcx::gltf::GltfModel;
+
+static int g_pass = 0, g_fail = 0;
+static void check(const string& name, bool ok) {
+    printf("%-60s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
+    fflush(stdout);  // flush each line so CI logs survive a later crash
+    ok ? ++g_pass : ++g_fail;
+}
+
+// Counts warnings (and worse) logged while it is alive.
+struct WarningCounter {
+    int count = 0;
+    EventListener listener;
+    WarningCounter() {
+        listener = getLogger().onLog.listen([this](LogEventArgs& e) {
+            if (e.level >= LogLevel::Warning) count++;
+        });
+    }
+};
+
+static string base64(const vector<uint8_t>& in) {
+    static const char* T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    string out;
+    size_t i = 0;
+    for (; i + 2 < in.size(); i += 3) {
+        uint32_t v = (in[i] << 16) | (in[i + 1] << 8) | in[i + 2];
+        out += T[(v >> 18) & 63]; out += T[(v >> 12) & 63];
+        out += T[(v >> 6) & 63];  out += T[v & 63];
+    }
+    if (i + 1 == in.size()) {
+        uint32_t v = in[i] << 16;
+        out += T[(v >> 18) & 63]; out += T[(v >> 12) & 63]; out += "==";
+    } else if (i + 2 == in.size()) {
+        uint32_t v = (in[i] << 16) | (in[i + 1] << 8);
+        out += T[(v >> 18) & 63]; out += T[(v >> 12) & 63];
+        out += T[(v >> 6) & 63];  out += "=";
+    }
+    return out;
+}
+
+// Builds one glTF document: a single buffer, its buffer views, accessors, and
+// one mesh drawn by the scene's nodes.
+struct GltfBuilder {
+    vector<uint8_t> bin;
+    vector<string> views;
+    vector<string> accessors;
+    string primitive;                    // JSON of the one primitive
+    string nodes = R"([{"mesh":0}])";
+    string scenes = R"([{"nodes":[0]}])";  // empty string = no "scenes" key
+    long long bufferLength = -1;         // -1 = bin.size()
+
+    // Append raw bytes (padded to 4) and a buffer view over them.
+    int addView(const void* data, size_t size, int byteStride = 0) {
+        size_t offset = bin.size();
+        const uint8_t* p = static_cast<const uint8_t*>(data);
+        bin.insert(bin.end(), p, p + size);
+        while (bin.size() % 4) bin.push_back(0);
+        return addViewJson(offset, size, byteStride);
+    }
+    int addViewJson(size_t offset, size_t size, int byteStride = 0) {
+        string v = "{\"buffer\":0,\"byteOffset\":" + to_string(offset) +
+                   ",\"byteLength\":" + to_string(size);
+        if (byteStride) v += ",\"byteStride\":" + to_string(byteStride);
+        views.push_back(v + "}");
+        return (int)views.size() - 1;
+    }
+    int addAccessor(const string& json) {
+        accessors.push_back(json);
+        return (int)accessors.size() - 1;
+    }
+
+    string json() const {
+        auto join = [](const vector<string>& v) {
+            string s;
+            for (size_t i = 0; i < v.size(); i++) s += (i ? "," : "") + v[i];
+            return s;
+        };
+        long long len = bufferLength >= 0 ? bufferLength : (long long)bin.size();
+        string j = "{\"asset\":{\"version\":\"2.0\"},";
+        if (!scenes.empty()) j += "\"scenes\":" + scenes + ",";
+        j += "\"nodes\":" + nodes + ",";
+        j += "\"meshes\":[{\"primitives\":[" + primitive + "]}],";
+        j += "\"accessors\":[" + join(accessors) + "],";
+        j += "\"bufferViews\":[" + join(views) + "],";
+        j += "\"buffers\":[{\"byteLength\":" + to_string(len) +
+             ",\"uri\":\"data:application/octet-stream;base64," + base64(bin) + "\"}]}";
+        return j;
+    }
+};
+
+static string accessorJson(int view, int componentType, const string& count,
+                           const char* type, const string& extra = "") {
+    string a = "{";
+    if (view >= 0) a += "\"bufferView\":" + to_string(view) + ",";
+    a += "\"componentType\":" + to_string(componentType) + ",\"count\":" + count +
+         ",\"type\":\"" + type + "\"" + extra + "}";
+    return a;
+}
+
+static const int FLOAT = 5126, USHORT = 5123, UINT = 5125;
+
+// The three vertices of the test triangle, its indices, and one normal each.
+static const float POSITIONS[9] = { 0, 0, 0,  1, 0, 0,  0, 1, 0 };
+static const uint16_t INDICES[3] = { 0, 1, 2 };
+static const float NORMALS[9] = { 0, 0, 1,  0, 0, 1,  0, 0, 1 };
+
+// A builder holding the triangle: accessor 0 = POSITION (view 0), 1 = indices
+// (view 1), 2 = NORMAL (view 2). The primitive uses all three.
+static GltfBuilder triangle() {
+    GltfBuilder b;
+    int pv = b.addView(POSITIONS, sizeof(POSITIONS));
+    int iv = b.addView(INDICES, sizeof(INDICES));
+    int nv = b.addView(NORMALS, sizeof(NORMALS));
+    b.addAccessor(accessorJson(pv, FLOAT, "3", "VEC3"));
+    b.addAccessor(accessorJson(iv, USHORT, "3", "SCALAR"));
+    b.addAccessor(accessorJson(nv, FLOAT, "3", "VEC3"));
+    b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
+    return b;
+}
+
+static fs::path g_dir;
+static int g_fileNo = 0;
+
+static fs::path writeGltf(const GltfBuilder& b) {
+    fs::path p = g_dir / ("model" + to_string(g_fileNo++) + ".gltf");
+    ofstream(p, ios::binary) << b.json();
+    return p;
+}
+
+// Load `b` and check the result. When the load should fail, also check that
+// it logged a warning and left the model empty.
+static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, GltfModel& model) {
+    fs::path p = writeGltf(b);
+    WarningCounter warnings;
+    bool ok = model.load(p.string());
+    if (expectOk) {
+        check(name + ": loads", ok && model.isLoaded());
+    } else {
+        check(name + ": rejected", !ok && !model.isLoaded() && model.getNodeCount() == 0);
+        check(name + ": warning logged", warnings.count > 0);
+    }
+    return ok;
+}
+
+static bool vecNear(const Vec3& v, float x, float y, float z) {
+    return fabs(v.x - x) < 1e-5f && fabs(v.y - y) < 1e-5f && fabs(v.z - z) < 1e-5f;
+}
+
+int main() {
+    g_dir = fs::temp_directory_path() /
+            ("tcxGltf-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(g_dir);
+
+    // A count whose size arithmetic wraps to a small number on 64-bit:
+    // 12 * (2^62) and 4 * (2^62) are multiples of 2^64.
+    const string WRAP_COUNT = "4611686018427387905";  // 2^62 + 1
+    const bool is64 = sizeof(size_t) == 8;
+
+    // ----- valid models load as before ---------------------------------------
+    {
+        GltfModel m;
+        if (loadCase("valid indexed triangle", triangle(), true, m)) {
+            const auto& mesh = m.getNode(0).mesh;
+            check("valid indexed triangle: one node", m.getNodeCount() == 1);
+            check("valid indexed triangle: 3 vertices, 3 indices",
+                  mesh.getNumVertices() == 3 && mesh.getNumIndices() == 3);
+            check("valid indexed triangle: vertex data",
+                  vecNear(mesh.getVertices()[1], 1, 0, 0) && vecNear(mesh.getVertices()[2], 0, 1, 0) &&
+                  vecNear(mesh.getNormals()[0], 0, 0, 1));
+            check("valid indexed triangle: index data",
+                  mesh.getIndices()[0] == 0 && mesh.getIndices()[1] == 1 && mesh.getIndices()[2] == 2);
+        }
+    }
+    {
+        GltfBuilder b = triangle();
+        b.primitive = R"({"attributes":{"POSITION":0}})";
+        GltfModel m;
+        if (loadCase("valid non-indexed triangle", b, true, m)) {
+            check("valid non-indexed triangle: 3 vertices, no indices",
+                  m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3 &&
+                  m.getNode(0).mesh.getNumIndices() == 0);
+        }
+    }
+    {
+        // Default scene named explicitly, and a child node with a translation
+        GltfBuilder b = triangle();
+        b.nodes = R"([{"children":[1]},{"mesh":0,"translation":[0,0,2]}])";
+        b.scenes = R"([{"nodes":[0]}],"scene":0)";
+        GltfModel m;
+        if (loadCase("valid node hierarchy", b, true, m)) {
+            check("valid node hierarchy: child transform baked",
+                  m.getNodeCount() == 1 && vecNear(m.getNode(0).mesh.getVertices()[1], 1, 0, 2));
+        }
+    }
+    {
+        // Sparse accessor: base positions with vertex 1 replaced
+        GltfBuilder b = triangle();
+        const uint16_t sparseIdx[1] = { 1 };
+        const float sparseVal[3] = { 5, 5, 5 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        int svv = b.addView(sparseVal, sizeof(sparseVal));
+        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+            ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3},"indices":1})";
+        GltfModel m;
+        if (loadCase("valid sparse accessor", b, true, m)) {
+            const auto& v = m.getNode(0).mesh.getVertices();
+            check("valid sparse accessor: sparse value applied",
+                  v.size() == 3 && vecNear(v[0], 0, 0, 0) && vecNear(v[1], 5, 5, 5) && vecNear(v[2], 0, 1, 0));
+        }
+    }
+
+    // ----- ranges and references ----------------------------------------------
+    {
+        GltfBuilder b = triangle();
+        b.accessors[0] = accessorJson(0, FLOAT, "4", "VEC3");
+        b.accessors[2] = accessorJson(2, FLOAT, "4", "VEC3");
+        GltfModel m;
+        loadCase("accessor count past its buffer view", b, false, m);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.accessors[0] = accessorJson(0, FLOAT, "3", "VEC3", ",\"byteOffset\":4");
+        GltfModel m;
+        loadCase("accessor offset past its buffer view", b, false, m);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.addViewJson(b.bin.size() - 8, 16);  // runs 8 bytes past the buffer
+        GltfModel m;
+        loadCase("buffer view past its buffer", b, false, m);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.accessors[1] = accessorJson(7, USHORT, "3", "SCALAR");
+        GltfModel m;
+        loadCase("reference to a missing buffer view", b, false, m);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.primitive = R"({"attributes":{"POSITION":9},"indices":1})";
+        GltfModel m;
+        loadCase("reference to a missing accessor", b, false, m);
+    }
+    if (is64) {
+        // POSITION count that wraps: its float array cannot be allocated
+        GltfBuilder b = triangle();
+        b.accessors[0] = accessorJson(0, FLOAT, WRAP_COUNT, "VEC3");
+        b.primitive = R"({"attributes":{"POSITION":0}})";
+        GltfModel m;
+        loadCase("position count that wraps the size arithmetic", b, false, m);
+    }
+    if (is64) {
+        // Index count that wraps: every index would be read
+        GltfBuilder b = triangle();
+        const uint32_t idx32[1] = { 0 };
+        int v = b.addView(idx32, sizeof(idx32));
+        b.addAccessor(accessorJson(v, UINT, WRAP_COUNT, "SCALAR"));
+        b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
+        GltfModel m;
+        loadCase("index count that wraps the size arithmetic", b, false, m);
+    }
+    if (is64) {
+        // Sparse count that wraps
+        GltfBuilder b = triangle();
+        const uint32_t sparseIdx[1] = { 0 };
+        const float sparseVal[3] = { 5, 5, 5 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        int svv = b.addView(sparseVal, sizeof(sparseVal));
+        b.addAccessor(accessorJson(-1, FLOAT, "3", "VEC3",
+            ",\"sparse\":{\"count\":" + WRAP_COUNT + ",\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5125},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3}})";
+        GltfModel m;
+        loadCase("sparse count that wraps the size arithmetic", b, false, m);
+    }
+    {
+        // Sparse values are read with the base view's stride (16 here), so two
+        // of them need 28 bytes; the values view at the end of the buffer
+        // holds 24.
+        GltfBuilder b = triangle();
+        const float strided[8] = { 0, 0, 0, 0,  1, 0, 0, 0 };
+        int basev = b.addView(strided, sizeof(strided), 16);
+        const uint16_t sparseIdx[2] = { 0, 1 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        const float sparseVal[6] = { 5, 5, 5,  6, 6, 6 };
+        int svv = b.addView(sparseVal, sizeof(sparseVal));
+        b.addAccessor(accessorJson(basev, FLOAT, "2", "VEC3",
+            ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3}})";
+        GltfModel m;
+        loadCase("sparse values past their buffer view at the base stride", b, false, m);
+    }
+
+    // ----- mesh consistency ---------------------------------------------------
+    {
+        GltfBuilder b = triangle();
+        b.accessors[2] = accessorJson(2, FLOAT, "2", "VEC3");  // 2 normals, 3 positions
+        GltfModel m;
+        loadCase("attribute counts differ", b, false, m);
+    }
+    {
+        GltfBuilder b = triangle();
+        const uint16_t idx[3] = { 0, 1, 5 };
+        int v = b.addView(idx, sizeof(idx));
+        b.addAccessor(accessorJson(v, USHORT, "3", "SCALAR"));
+        b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
+        GltfModel m;
+        loadCase("index past the vertex count", b, false, m);
+    }
+    {
+        // Indices but no POSITION: every index points past the (zero) vertices
+        GltfBuilder b = triangle();
+        b.primitive = R"({"attributes":{"NORMAL":2},"indices":1})";
+        GltfModel m;
+        loadCase("indices without positions", b, false, m);
+    }
+    {
+        GltfBuilder b = triangle();
+        b.scenes = "";
+        GltfModel m;
+        loadCase("no scene", b, false, m);
+    }
+
+    // ----- a failed load after a good one leaves the model empty ---------------
+    {
+        GltfModel m;
+        bool first = m.load(writeGltf(triangle()).string());
+        GltfBuilder bad = triangle();
+        bad.accessors[0] = accessorJson(0, FLOAT, "4", "VEC3");
+        bool second = m.load(writeGltf(bad).string());
+        check("reload: good then rejected leaves the model empty",
+              first && !second && !m.isLoaded() && m.getNodeCount() == 0);
+    }
+
+    error_code ec;
+    fs::remove_all(g_dir, ec);
+
+    printf("\n%d passed, %d failed\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
+}

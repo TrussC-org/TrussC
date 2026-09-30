@@ -15,6 +15,55 @@ namespace tcx::gltf {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// True when `count` elements of `elemSize` bytes, `stride` bytes apart and
+// starting at `offset`, lie inside `size` bytes. Written so that no step can
+// wrap around, whatever values the file holds.
+static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
+                      cgltf_size elemSize, cgltf_size count) {
+    if (count == 0) return true;
+    if (offset > size || elemSize > size - offset) return false;
+    // The last element starts at offset + stride * (count - 1).
+    cgltf_size room = size - offset - elemSize;
+    return stride == 0 || count - 1 <= room / stride;
+}
+
+// Check that every buffer view lies inside its buffer and every accessor
+// (including sparse parts) lies inside its buffer view. cgltf_validate()
+// checks the same ranges, but its sums can wrap around for very large
+// values, and it reads index data itself, so this runs first.
+static bool checkDataRanges(const cgltf_data* data) {
+    for (cgltf_size i = 0; i < data->buffer_views_count; i++) {
+        const cgltf_buffer_view& view = data->buffer_views[i];
+        if (view.buffer && !rangeFits(view.buffer->size, view.offset, 0, view.size, 1)) {
+            return false;
+        }
+    }
+    for (cgltf_size i = 0; i < data->accessors_count; i++) {
+        const cgltf_accessor& acc = data->accessors[i];
+        cgltf_size elemSize = cgltf_calc_size(acc.type, acc.component_type);
+        if (elemSize == 0) return false;
+        if (acc.buffer_view &&
+            !rangeFits(acc.buffer_view->size, acc.offset, acc.stride, elemSize, acc.count)) {
+            return false;
+        }
+        if (acc.is_sparse) {
+            const cgltf_accessor_sparse& sp = acc.sparse;
+            cgltf_size indexSize = cgltf_component_size(sp.indices_component_type);
+            if (indexSize == 0) return false;
+            if (!rangeFits(sp.indices_buffer_view->size, sp.indices_byte_offset,
+                           indexSize, indexSize, sp.count)) {
+                return false;
+            }
+            // Sparse values are read acc.stride bytes apart
+            if (!rangeFits(sp.values_buffer_view->size, sp.values_byte_offset,
+                           acc.stride, elemSize, sp.count)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 // Read accessor data as float array (handles all component types)
 static vector<float> readAccessorFloats(const cgltf_accessor* acc) {
     vector<float> out(acc->count * cgltf_num_components(acc->type));
@@ -147,8 +196,8 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 // Mesh loading
 // ---------------------------------------------------------------------------
 
-static Mesh loadGltfPrimitive(const cgltf_primitive* prim) {
-    Mesh mesh;
+// Returns false when an index points past the primitive's vertices.
+static bool loadGltfPrimitive(const cgltf_primitive* prim, Mesh& mesh) {
     mesh.setMode(PrimitiveMode::Triangles);
 
     // Attributes
@@ -192,11 +241,12 @@ static Mesh loadGltfPrimitive(const cgltf_primitive* prim) {
     if (prim->indices) {
         auto indices = readAccessorIndices(prim->indices);
         for (auto idx : indices) {
+            if (idx >= vertCount) return false;
             mesh.addIndex(idx);
         }
     }
 
-    return mesh;
+    return true;
 }
 
 // Bake a world transform into mesh vertices and normals in-place.
@@ -245,11 +295,32 @@ bool GltfModel::load(const string& path) {
         return false;
     }
 
+    // Validate the model data before reading any of it
+    if (!checkDataRanges(data)) {
+        logWarning() << "[GltfModel] model data refers past the end of a buffer: " << resolved;
+        cgltf_free(data);
+        return false;
+    }
+    result = cgltf_validate(data);
+    if (result != cgltf_result_success) {
+        logWarning() << "[GltfModel] model data failed validation (cgltf result "
+                     << (int)result << "): " << resolved;
+        cgltf_free(data);
+        return false;
+    }
+    if (data->scenes_count == 0) {
+        logWarning() << "[GltfModel] no scene to load: " << resolved;
+        cgltf_free(data);
+        return false;
+    }
+
     // Base directory for relative texture paths
     string baseDir = filesystem::path(resolved).parent_path().string();
 
     // Iterate the default scene (or scene 0)
     const cgltf_scene* scene = data->scene ? data->scene : &data->scenes[0];
+
+    bool primitivesOk = true;
 
     // Recursive node visitor
     function<void(const cgltf_node*)> visitNode = [&](const cgltf_node* node) {
@@ -261,7 +332,10 @@ bool GltfModel::load(const string& path) {
                 if (prim->type != cgltf_primitive_type_triangles) continue;
 
                 Node entry;
-                entry.mesh = loadGltfPrimitive(prim);
+                if (!loadGltfPrimitive(prim, entry.mesh)) {
+                    primitivesOk = false;
+                    return;
+                }
                 entry.material = loadGltfMaterial(prim->material, textures_,
                                                   baseDir, data);
                 entry.transform = worldXform;
@@ -275,16 +349,22 @@ bool GltfModel::load(const string& path) {
             }
         }
 
-        for (cgltf_size c = 0; c < node->children_count; c++) {
+        for (cgltf_size c = 0; c < node->children_count && primitivesOk; c++) {
             visitNode(node->children[c]);
         }
     };
 
-    for (cgltf_size n = 0; n < scene->nodes_count; n++) {
+    for (cgltf_size n = 0; n < scene->nodes_count && primitivesOk; n++) {
         visitNode(scene->nodes[n]);
     }
 
     cgltf_free(data);
+    if (!primitivesOk) {
+        logWarning() << "[GltfModel] a mesh index points past its vertices: " << resolved;
+        nodes_.clear();
+        textures_.clear();
+        return false;
+    }
     loaded_ = true;
     logNotice() << "[GltfModel] loaded " << nodes_.size() << " nodes, "
                 << textures_.size() << " textures from " << path;
