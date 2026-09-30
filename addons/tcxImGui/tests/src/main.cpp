@@ -225,24 +225,24 @@ static void testClippedCheckbox() {
     ImGuiHarness h;
     tcx::imgui::resetTouched();
 
-    bool pushDown = false, far = false, near = false;
+    bool pushDown = false, farBox = false, nearBox = false;
     h.setUi([&] {
         ImGui::SetNextWindowPos(ImVec2(10, 30));
         ImGui::SetNextWindowSize(ImVec2(300, 200));
         ImGui::Begin("Scroll");
-        ImGui::Checkbox("near", &near);
+        ImGui::Checkbox("near", &nearBox);
         if (pushDown) ImGui::Dummy(ImVec2(10, 1000));
-        ImGui::Checkbox("far", &far);
+        ImGui::Checkbox("far", &farBox);
         ImGui::End();
     });
     h.frames(3);
     h.click("far");
-    check("clipped checkbox: toggled on by hand", far && isValue(touchedJson("far"), "checkbox", true));
+    check("clipped checkbox: toggled on by hand", farBox && isValue(touchedJson("far"), "checkbox", true));
     h.click("near");   // move the nav focus off "far": ImGui never clips the focused item
 
     pushDown = true;   // now below the window's bottom edge: clipped
     h.frames(2);
-    far = false;       // changed from code while clipped
+    farBox = false;       // changed from code while clipped
     h.frames(2);
     const tcx::imgui::WidgetInfo* w = h.find("far");
     check("clipped checkbox: listed with its value",
