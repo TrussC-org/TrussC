@@ -17,6 +17,10 @@ public:
     // Timetag representing immediate execution
     static constexpr uint64_t TIMETAG_IMMEDIATELY = 1;
 
+    // Deepest bundle nesting fromBytes() accepts, counting the outermost
+    // bundle as level 1. Data nested deeper fails to parse as a whole.
+    static constexpr int MAX_NESTING_DEPTH = 16;
+
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
     explicit OscBundle(uint64_t timetag) : timetag_(timetag) {}
 
@@ -74,6 +78,8 @@ public:
     // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
+    // ok is false when nesting exceeds MAX_NESTING_DEPTH or any nested
+    // bundle fails to parse: the whole bundle is rejected, not a part of it.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
 
     // -------------------------------------------------------------------------
@@ -95,6 +101,9 @@ public:
     }
 
 private:
+    // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
+    static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok, int depth);
+
     uint64_t timetag_;
     std::vector<Element> elements_;
 };
