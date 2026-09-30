@@ -184,3 +184,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `trusscliPresets/` — trusscli's project files (#350): `update`, `addon add`
+  and `addon remove` keep the project's IDE, web / android / ios targets and
+  web backend. Its `local.cmake` compiles trusscli's own sources
+  (`tools/src`, without trusscli's `main.cpp` and GUI) into the test. The IDE
+  written by `ProjectGenerator` as `"vendor": {"trussc": {"ide": ...}}` reads
+  back for every IDE, and so do the targets and the web backend; the presets
+  fill the settings and explicit flags win (`--ide`, `--no-web` /
+  `--no-android` / `--no-ios`, `--web` with `--no-web` is an error); without a
+  `CMakePresets.json` the old defaults stay (vscode, native only, WebGPU).
+  Not covered: the commands in `tools/src/main.cpp` that call these, and the
+  IDE files and CMake configure that `update` runs.
