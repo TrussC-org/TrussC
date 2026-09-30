@@ -36,8 +36,23 @@
 #include <cstdlib>
 #include <cstring>
 #define TC_STBTT_ALLOC_PADDING 64
+
+#ifdef TC_STBTT_TEST_LIMITS
+// Test builds only (core/tests/fontSfntCheck/local.cmake defines this): the
+// vertex limit of stb_truetype's CFF counting pass and a cap on STBTT_malloc
+// sizes are variables the test sets, so both limits are reached with small
+// fonts.
+int tcStbttTestMaxVertices = 1 << 20;
+size_t tcStbttTestMallocMax = SIZE_MAX;
+#define STBTT_MAX_VERTICES tcStbttTestMaxVertices
+#endif
+
+// Returns nullptr when the size cannot be allocated; stb checks for that.
 static void* tcStbttMalloc(size_t size) {
     if (size > SIZE_MAX - TC_STBTT_ALLOC_PADDING) return nullptr;
+#ifdef TC_STBTT_TEST_LIMITS
+    if (size > tcStbttTestMallocMax) return nullptr;
+#endif
     void* p = std::malloc(size + TC_STBTT_ALLOC_PADDING);
     if (p) std::memset(static_cast<char*>(p) + size, 0, TC_STBTT_ALLOC_PADDING);
     return p;

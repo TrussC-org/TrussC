@@ -10,7 +10,7 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 | `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 2 |
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
-| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 1 |
+| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 2 |
 | `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | none |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
@@ -76,12 +76,30 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      (upstream has a `@TODO` for it). Every later CFF read (INDEX, DICT,
      Subrs, FDSelect, CharStrings) is bounds-checked by stb against that
      buffer, so it stays inside the table.
+  2. CFF glyph outlines (`stbtt__csctx`, `stbtt__csctx_v`,
+     `stbtt__run_charstring`, `stbtt__GetGlyphShapeT2`): vertex counting
+     stops within the range stb handles, and the allocation result is
+     checked. stb runs a CFF charstring twice, once to count vertices (into
+     an int) and once to write them into an array of that size. The counting
+     pass now stops at `STBTT_MAX_VERTICES`, `min(INT_MAX, SIZE_MAX /
+     sizeof(stbtt_vertex))` (the count is an int, and the array size is
+     computed in `size_t`, 32 bits on wasm32): `stbtt__csctx_v` sets a new
+     `stopped` field instead of counting further, and `stbtt__run_charstring`
+     returns 0 at the top of its loop (subroutine calls run in that loop) and
+     at `endchar` once it is set. `STBTT__CSCTX_INIT` gained the matching
+     initializer. The glyph then has no outline. `stbtt__GetGlyphShapeT2`
+     returns 0 vertices when `STBTT_malloc` returns NULL, without running
+     the second pass. `STBTT_MAX_VERTICES` may be predefined.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_malloc` allocates 64 zeroed bytes past each requested size.
   `stbtt_GetGlyphShape` sizes the TrueType vertex array as
   `n + 2*numberOfContours` and reads one element past it when the last
   point of a glyph starts a contour off-curve (a last contour that is a
   single off-curve point); the padding keeps that read inside the block.
+  It returns NULL when the size cannot be allocated. With
+  `TC_STBTT_TEST_LIMITS` (set only by `core/tests/fontSfntCheck/local.cmake`)
+  `STBTT_MAX_VERTICES` and a cap on `STBTT_malloc` sizes become variables the
+  test sets.
 - **Not covered by stb, checked by TrussC**: stb_truetype takes no buffer
   length. `FontAtlasManager` (`core/include/tc/graphics/tcFont.h`) checks the
   sfnt skeleton (collection header, table directory, table bounds, required

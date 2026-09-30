@@ -1917,9 +1917,20 @@ typedef struct
 
    stbtt_vertex *pvertices;
    int num_vertices;
+   int stopped; // TrussC patch: counting pass reached STBTT_MAX_VERTICES
 } stbtt__csctx;
 
-#define STBTT__CSCTX_INIT(bounds) {bounds,0, 0,0, 0,0, 0,0,0,0, NULL, 0}
+#define STBTT__CSCTX_INIT(bounds) {bounds,0, 0,0, 0,0, 0,0,0,0, NULL, 0, 0}
+
+// TrussC patch: the counting pass of a CFF glyph stops once the vertex count
+// reaches the range stb handles: the count is an int, and the vertex array
+// size (count * sizeof(stbtt_vertex)) is computed in size_t, which is 32 bits
+// on some targets. May be predefined (lower) for tests.
+#ifndef STBTT_MAX_VERTICES
+#define STBTT_MAX_VERTICES \
+   ((size_t)(~0u >> 1) < (size_t)-1 / sizeof(stbtt_vertex) \
+      ? (int)(~0u >> 1) : (int)((size_t)-1 / sizeof(stbtt_vertex)))
+#endif
 
 static void stbtt__track_vertex(stbtt__csctx *c, stbtt_int32 x, stbtt_int32 y)
 {
@@ -1932,6 +1943,11 @@ static void stbtt__track_vertex(stbtt__csctx *c, stbtt_int32 x, stbtt_int32 y)
 
 static void stbtt__csctx_v(stbtt__csctx *c, stbtt_uint8 type, stbtt_int32 x, stbtt_int32 y, stbtt_int32 cx, stbtt_int32 cy, stbtt_int32 cx1, stbtt_int32 cy1)
 {
+   // TrussC patch: stop counting at STBTT_MAX_VERTICES (see there).
+   if (c->bounds && c->num_vertices >= STBTT_MAX_VERTICES) {
+      c->stopped = 1;
+      return;
+   }
    if (c->bounds) {
       stbtt__track_vertex(c, x, y);
       if (type == STBTT_vcubic) {
@@ -2033,6 +2049,9 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
    // this currently ignores the initial width value, which isn't needed if we have hmtx
    b = stbtt__cff_index_get(info->charstrings, glyph_index);
    while (b.cursor < b.size) {
+      // TrussC patch: a counting pass that reached STBTT_MAX_VERTICES ends
+      // here (subroutine calls run in this loop too).
+      if (c->stopped) return STBTT__CSERR("vertex count");
       i = 0;
       clear_stack = 1;
       b0 = stbtt__buf_get8(&b);
@@ -2172,6 +2191,9 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
 
       case 0x0E: // endchar
          stbtt__csctx_close_shape(c);
+         // TrussC patch: the closing vertex may be the one that reached
+         // STBTT_MAX_VERTICES.
+         if (c->stopped) return STBTT__CSERR("vertex count");
          return 1;
 
       case 0x0C: { // two-byte escape
@@ -2286,6 +2308,8 @@ static int stbtt__GetGlyphShapeT2(const stbtt_fontinfo *info, int glyph_index, s
    stbtt__csctx output_ctx = STBTT__CSCTX_INIT(0);
    if (stbtt__run_charstring(info, glyph_index, &count_ctx)) {
       *pvertices = (stbtt_vertex*)STBTT_malloc(count_ctx.num_vertices*sizeof(stbtt_vertex), info->userdata);
+      // TrussC patch: check the allocation result.
+      if (*pvertices == NULL) return 0;
       output_ctx.pvertices = *pvertices;
       if (stbtt__run_charstring(info, glyph_index, &output_ctx)) {
          STBTT_assert(output_ctx.num_vertices == count_ctx.num_vertices);
