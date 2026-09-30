@@ -209,7 +209,12 @@ public:
             return false;
         }
 
-        size_t fileSize = file.tellg();
+        const std::streamoff end = file.tellg();
+        if (end < 0) {
+            logError() << "FontAtlasManager: cannot get the size of " << fontPath;
+            return false;
+        }
+        const size_t fileSize = (size_t)end;
         file.seekg(0, std::ios::beg);
         fontData_.resize(fileSize);
         if (!file.read(reinterpret_cast<char*>(fontData_.data()), fileSize)) {
@@ -286,6 +291,21 @@ private:
             return false;
         }
 
+        // Glyph indices run up to maxp numGlyphs. A CFF font's outlines come
+        // from the CharStrings INDEX, which stb indexes without comparing
+        // against its count, so there the limit is the smaller of the two.
+        glyphLimit_ = fontInfo_.numGlyphs;
+        if (!fontInfo_.glyf) {
+            const int count = cffCharStringsCount(fontInfo_.charstrings);
+            if (count < 1) {
+                logWarning() << "FontAtlasManager: not a usable font "
+                                "(CFF CharStrings INDEX cannot be read)";
+                fontData_.clear();
+                return false;
+            }
+            glyphLimit_ = std::min(glyphLimit_, count);
+        }
+
         fontSize_ = fontSize;
         scale_ = stbtt_ScaleForPixelHeight(&fontInfo_, (float)fontSize);
 
@@ -322,11 +342,26 @@ private:
 
     // stbtt_FindGlyphIndex returns whatever the cmap says, and stb indexes
     // hmtx and the CFF charstrings with it unchecked. An index past numGlyphs
-    // is treated as a missing glyph (.notdef).
+    // (for CFF, past the CharStrings count too) is treated as a missing glyph
+    // (.notdef). stb takes the codepoint as int, so anything above the Unicode
+    // range is answered here as missing instead of being passed on.
     int findGlyphIndex(uint32_t codepoint) const {
+        if (codepoint > 0x10FFFF) return 0;
         const int glyph = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
-        if (glyph < 0 || glyph >= fontInfo_.numGlyphs) return 0;
+        if (glyph < 0 || glyph >= glyphLimit_) return 0;
         return glyph;
+    }
+
+    // Number of entries in a CFF INDEX (stb's view of the CharStrings INDEX,
+    // which lies within the CFF table), or 0 when the count and its offset
+    // array do not fit in the buffer.
+    static int cffCharStringsCount(const stbtt__buf& index) {
+        if (!index.data || index.size < 3) return 0;
+        const uint64_t count = ((uint64_t)index.data[0] << 8) | index.data[1];
+        const uint64_t offSize = index.data[2];
+        if (count == 0 || offSize < 1 || offSize > 4) return 0;
+        if (3 + (count + 1) * offSize > (uint64_t)index.size) return 0;
+        return (int)count;
     }
 
     // -------------------------------------------------------------------------
@@ -369,7 +404,8 @@ private:
         }
         // stb keeps offsets and sizes in int, and caps a CFF buffer at 1 GiB.
         if (n >= 0x40000000u) {
-            reason = "data is larger than 1 GiB";
+            reason = "the bundled font engine (stb_truetype) cannot handle fonts "
+                     "larger than 1 GiB";
             return false;
         }
 
@@ -491,7 +527,8 @@ private:
             return false;
         }
 
-        // loca: numGlyphs + 1 entries, each within glyf.
+        // loca: numGlyphs + 1 entries, in non-decreasing order, each within
+        // glyf (a glyph's data runs from its entry to the next one).
         if (trueType) {
             const uint64_t locaFormat = u16(head.offset + 50);
             if (locaFormat > 1) {
@@ -503,6 +540,7 @@ private:
                 reason = "loca table is too short";
                 return false;
             }
+            uint64_t previous = 0;
             for (uint64_t i = 0; i <= numGlyphs; i++) {
                 const uint64_t at = loca.offset + i * entrySize;
                 const uint64_t glyphOffset = (locaFormat == 0) ? u16(at) * 2 : u32(at);
@@ -510,6 +548,11 @@ private:
                     reason = "loca entry points past the end of glyf";
                     return false;
                 }
+                if (glyphOffset < previous) {
+                    reason = "loca entries are not in increasing order";
+                    return false;
+                }
+                previous = glyphOffset;
             }
         }
         return true;
@@ -539,6 +582,7 @@ public:
         atlases_.clear();
         glyphs_.clear();
         fontData_.clear();
+        glyphLimit_ = 0;
         loaded_ = false;
     }
 
@@ -737,6 +781,7 @@ private:
     // Font data
     std::vector<uint8_t> fontData_;
     stbtt_fontinfo fontInfo_ = {};
+    int glyphLimit_ = 0;         // glyph indices below this are usable
     int fontSize_ = 0;
     float scale_ = 0;
     float ascent_ = 0;
