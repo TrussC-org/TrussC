@@ -2895,8 +2895,9 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // a GUI-subsystem Release build has none, and the call does nothing.
     // sokol restores the previous code page when sapp_run() returns, and
     // internal::ConsoleOutputCPCtrlGuard when Ctrl+C, Ctrl+Break or closing
-    // the console ends the process. std::exit(), abort() and a crash leave the
-    // console in UTF-8. Ignored on other platforms.
+    // the console ends the process. std::exit(), abort(), an uncaught
+    // exception and a crash leave the console in UTF-8. Ignored on other
+    // platforms.
     desc.win32.console_utf8 = true;
 
     return desc;
