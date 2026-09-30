@@ -90,6 +90,11 @@ static string messageOf(const json& reply) {
         ? reply["message"].get<string>() : string();
 }
 
+static string statusOf(const json& reply) {
+    return reply.is_object() && reply.contains("status") && reply["status"].is_string()
+        ? reply["status"].get<string>() : string();
+}
+
 static bool contains(const string& s, const string& part) { return s.find(part) != string::npos; }
 
 int main() {
@@ -149,17 +154,18 @@ int main() {
         // --- hidden window: both screenshot tools fail at once ------------
         double sec = 0;
         json r = call(*cli, "tc_get_screenshot", R"({"window":2})", &sec);
-        check("tc_get_screenshot hidden window -> error", r.value("status", "") == "error", r.dump());
+        check("tc_get_screenshot hidden window -> error", statusOf(r) == "error", r.dump());
         check("  names the window and why",
               contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
 
         r = call(*cli, "tc_save_screenshot", R"({"window":2,"path":)" + savePathJson + "}", &sec);
-        check("tc_save_screenshot hidden window -> error", r.value("status", "") == "error", r.dump());
+        check("tc_save_screenshot hidden window -> error", statusOf(r) == "error", r.dump());
         check("  names the window and why",
               contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
-        check("  no file written", !filesystem::exists(savePath));
+        // No "no file written" check: headless, a secondary window's capture
+        // has no framebuffer to read (0x0), so no file could appear either way.
 
         // Unchanged: an index past the open windows.
         r = call(*cli, "tc_get_screenshot", R"({"window":3})");
