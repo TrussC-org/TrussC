@@ -3065,7 +3065,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
     desc.event_cb = internal::_event_cb;
-    desc.logger.func = slog_func;
+    desc.logger.func = internal::sokolLog;
 
     // Enable drag and drop
     desc.enable_dragndrop = true;

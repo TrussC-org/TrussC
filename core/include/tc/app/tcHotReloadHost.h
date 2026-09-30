@@ -654,7 +654,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
     desc.event_cb = internal::_event_cb;
-    desc.logger.func = slog_func;
+    desc.logger.func = internal::sokolLog;
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 16;
     desc.max_dropped_file_path_length = 2048;

@@ -257,6 +257,27 @@ private:
 Logger& getLogger();
 
 // ---------------------------------------------------------------------------
+// sokol -> Logger bridge
+// ---------------------------------------------------------------------------
+namespace internal {
+// The logger.func TrussC passes to the sokol modules it sets up (sapp, sg,
+// sgl, simgui), in place of sokol's slog_func: their messages go through the
+// Logger (console, log file, onLog listeners). The tag is the module name.
+// panic -> Fatal, written without waiting for the Logger's lock and then
+// handed on to slog_func, which aborts as before; error -> Error;
+// warning -> Warning; info -> Verbose (hidden by default). In tcGlobal.cpp.
+void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
+              const char* message, uint32_t lineNr, const char* filename,
+              void* userData);
+
+// The level mapping and the message sokolLog() logs: "[tag] message", or
+// "[tag] id:<item> line:<line>" when sokol passes no message (release builds).
+LogLevel sokolLogLevel(uint32_t logLevel);
+std::string sokolLogMessage(const char* tag, uint32_t logItem,
+                            const char* message, uint32_t lineNr);
+} // namespace internal
+
+// ---------------------------------------------------------------------------
 // Convenience functions
 // ---------------------------------------------------------------------------
 inline void setConsoleLogLevel(LogLevel level) {
