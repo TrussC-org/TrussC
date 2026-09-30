@@ -201,8 +201,9 @@ struct FileWatcher {
         if (!fs::exists(srcDir)) return;
         for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
             if (entry.is_regular_file()) {
-                auto ext = entry.path().extension().string();
-                if (ext == ".cpp" || ext == ".h" || ext == ".hpp" || ext == ".mm") {
+                // Case-insensitive extension match (.CPP, .H)
+                auto ext = toLower(getFileExtension(entry.path()));
+                if (ext == "cpp" || ext == "h" || ext == "hpp" || ext == "mm") {
                     watchPaths.push_back(entry.path());
                 }
             }

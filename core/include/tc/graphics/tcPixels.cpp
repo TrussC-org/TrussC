@@ -15,16 +15,18 @@ bool Pixels::save(const fs::path& path) const {
         savePath = getDataPath(path);
     }
 
-    auto ext = savePath.extension().string();
+    // The encoder follows the extension, whatever its case (.PNG, .Jpg);
+    // the file is written under the path as given.
+    auto ext = toLower(getFileExtension(savePath));
     // UTF-8 for stb (STBIW_WINDOWS_UTF8 makes stb wide-open it on Windows)
     auto pathStr = internal::pathToUtf8(savePath);
     int result = 0;
 
-    if (ext == ".png" || ext == ".PNG") {
+    if (ext == "png") {
         result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
-    } else if (ext == ".jpg" || ext == ".jpeg" || ext == ".JPG" || ext == ".JPEG") {
+    } else if (ext == "jpg" || ext == "jpeg") {
         result = stbi_write_jpg(pathStr.c_str(), width_, height_, channels_, data_, 90);
-    } else if (ext == ".bmp" || ext == ".BMP") {
+    } else if (ext == "bmp") {
         result = stbi_write_bmp(pathStr.c_str(), width_, height_, channels_, data_);
     } else {
         // Default is PNG

@@ -59,8 +59,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                 fileType = AVFileTypeQuickTimeMovie; useBitrate = false; break;
         }
         if (fileType == AVFileTypeQuickTimeMovie &&
-            fullPath.size() >= 4 &&
-            fullPath.compare(fullPath.size() - 4, 4, ".mov") != 0) {
+            toLower(getFileExtension(fullPath)) != "mov") {
             logWarning("VideoWriter")
                 << "ProRes is written as QuickTime; prefer a .mov path ("
                 << fullPath << ")";

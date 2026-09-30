@@ -374,23 +374,19 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     unsigned char* data = pixels.getData();
 
     // 拡張子から形式を判定
-    std::string ext = path.extension().string();
-
-    // 小文字に変換
-    for (char& c : ext) {
-        c = (char)std::tolower((unsigned char)c);
-    }
+    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    std::string ext = toLower(getFileExtension(path));
 
     int result = 0;
     std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
-    if (ext == ".png") {
+    if (ext == "png") {
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == ".jpg" || ext == ".jpeg") {
+    } else if (ext == "jpg" || ext == "jpeg") {
         result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == ".bmp") {
+    } else if (ext == "bmp") {
         result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
-    } else if (ext == ".tga") {
+    } else if (ext == "tga") {
         result = stbi_write_tga(pathStr.c_str(), width, height, 4, data);
     } else {
         // デフォルトは PNG
