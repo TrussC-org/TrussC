@@ -85,9 +85,11 @@ struct Shape2D {
     // to its enclosing one), any number of points. It is triangulated like
     // Path::drawFill() and each triangle becomes one fixture of the one body
     // (a single convex ring of at most 8 points stays one polygon fixture).
-    // Slivers Box2D can't use are skipped with one warning; if nothing is
-    // left, a warning and no body. Collision events come once per touching
-    // body pair, however many fixtures touch.
+    // Slivers Box2D can't use (collinear or nearly coincident corners, almost
+    // no area) are skipped with one warning; if nothing is left, or the whole
+    // body is tiny next to its distance from the origin, a warning and no
+    // body. Collision events come once per touching body pair, however many
+    // fixtures touch.
     static Shape2D compound(const tc::Path& outline) {
         Shape2D s; s.kind = Compound; s.path = outline; return s;
     }
@@ -295,14 +297,22 @@ protected:
         } else if (shape_.kind == Shape2D::Compound) {
             detail::CompoundShapes shapes;
             if (!detail::makeCompoundShapes(shape_.path, shapes)) {
-                tc::logWarning() << "tcxBox2d: RigidBody2D compound has " << shape_.path.size()
-                                 << " points with no area Box2D can use (" << shapes.triangles
-                                 << " triangles, none usable). Body not created.";
+                if (shapes.error == detail::PolygonError::TooSmallForOffset) {
+                    tc::logWarning() << "tcxBox2d: RigidBody2D compound has " << shape_.path.size()
+                                     << " points: " << detail::describePolygonError(shapes.error)
+                                     << ". Body not created.";
+                } else {
+                    tc::logWarning() << "tcxBox2d: RigidBody2D compound has " << shape_.path.size()
+                                     << " points with no area Box2D can use (" << shapes.triangles
+                                     << " triangles, none usable). Body not created.";
+                }
                 return;
             }
             if (shapes.skipped > 0) {
                 tc::logWarning() << "tcxBox2d: RigidBody2D compound skipped " << shapes.skipped
-                                 << " of " << shapes.triangles << " triangles too thin for Box2D.";
+                                 << " of " << shapes.triangles
+                                 << " triangles that are slivers Box2D can't use (collinear or nearly"
+                                 << " coincident corners, almost no area).";
             }
             polys = std::move(shapes.shapes);
         }
@@ -437,10 +447,19 @@ private:
             }
             case Shape2D::Polygon:
             case Shape2D::Compound: {
+                // Added at density 0, then given the density at once:
+                // CreateFixture() resets the mass data after every fixture
+                // that has a density, and a compound body's first few
+                // triangles alone can be too small for their offset (an
+                // m_I > 0 assert in Debug) even though the whole body passed
+                // the check.
+                fd.density = 0.0f;
                 for (const auto& poly : polys) {
                     fd.shape = &poly;
                     body_->CreateFixture(&fd);
                 }
+                forFixtures([this](b2Fixture* f) { f->SetDensity(density_); });
+                body_->ResetMassData();
                 break;
             }
         }

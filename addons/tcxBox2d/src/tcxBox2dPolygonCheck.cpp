@@ -46,11 +46,42 @@ bool keepsHullOrder(const std::vector<b2Vec2>& input, const b2PolygonShape& shap
     return forward || backward;
 }
 
+// A dynamic body's b2Body::ResetMassData() sums the fixtures' mass, mass *
+// centroid and inertia about the body origin, then subtracts mass *
+// |centroid|^2. For a body that is tiny next to its distance from the origin
+// the two nearly cancel in float, and the result can be <= 0: an assert
+// (Debug) or NaN motion (Release). Mirror that step at density 1 (`shapes`
+// in fixture-list order, which is the reverse of creation order) and demand a
+// margin of 16 float epsilons of the subtracted term for one polygon, so the
+// result stays positive at any density (fuzzed at densities 0.001 to 1000).
+// Each further fixture adds one epsilon: Box2D sums the fixtures one by one
+// in float, and at another density that sum rounds differently, by up to
+// about 0.8 epsilon per fixture near the limit (measured on 6 to 3793
+// triangles at densities 0.001 to 1000), so a fixed margin is not enough for
+// a compound body.
+bool inertiaSurvives(const b2PolygonShape* const* shapes, size_t count) {
+    float mass = 0.0f, inertia = 0.0f;
+    b2Vec2 center = b2Vec2_zero;
+    for (size_t i = 0; i < count; ++i) {
+        b2MassData md;
+        shapes[i]->ComputeMass(&md, 1.0f);
+        mass += md.mass;
+        center += md.mass * md.center;
+        inertia += md.I;
+    }
+    center *= 1.0f / mass;
+    const float shift = mass * b2Dot(center, center);
+    const float centered = inertia - shift;
+    const float margin = 16.0f + static_cast<float>(count - 1);
+    return centered > margin * FLT_EPSILON * shift;
+}
+
 } // namespace
 
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
-                              std::vector<tc::Vec2>& hull) {
+                              std::vector<tc::Vec2>& hull,
+                              OffsetCheck offset) {
     const size_t count = points.size();
     if (count < 3) return PolygonError::TooFewPoints;
     if (count > b2_maxPolygonVertices) return PolygonError::TooManyPoints;
@@ -127,21 +158,10 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
     b2PolygonShape built;
     built.Set(input.data(), static_cast<int32>(count));
 
-    // A dynamic body's b2Body::ResetMassData() takes the polygon's inertia
-    // about the body origin and subtracts mass * |centroid|^2. For a polygon
-    // that is tiny next to its distance from the origin the two nearly cancel
-    // in float, and the result can be <= 0: an assert (Debug) or NaN motion
-    // (Release). Mirror that step at density 1 and demand a margin of
-    // 16 float epsilons of the subtracted term, so the result stays positive
-    // at any density (fuzzed at densities 0.001 to 1000).
-    b2MassData md;
-    built.ComputeMass(&md, 1.0f);
-    b2Vec2 center = b2Vec2_zero;
-    center += md.mass * md.center;
-    center *= 1.0f / md.mass;
-    const float shift = md.mass * b2Dot(center, center);
-    const float centered = md.I - shift;
-    if (!(centered > 16.0f * FLT_EPSILON * shift)) return PolygonError::TooSmallForOffset;
+    // The polygon as a body of its own: its inertia about its centroid must
+    // survive float rounding (see inertiaSurvives()).
+    const b2PolygonShape* one = &built;
+    if (offset == OffsetCheck::Apply && !inertiaSurvives(&one, 1)) return PolygonError::TooSmallForOffset;
 
     shape = built;
     hull.clear();
@@ -155,6 +175,15 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
         for (int32 i = 0; i < shape.m_count; ++i) hull.push_back(World::toPixels(shape.m_vertices[i]));
     }
     return PolygonError::None;
+}
+
+bool keepsInertia(const std::vector<b2PolygonShape>& shapes) {
+    if (shapes.empty()) return false;
+    // Box2D walks the fixture list, newest fixture first.
+    std::vector<const b2PolygonShape*> order;
+    order.reserve(shapes.size());
+    for (size_t i = shapes.size(); i > 0; --i) order.push_back(&shapes[i - 1]);
+    return inertiaSurvives(order.data(), order.size());
 }
 
 std::string describePolygonError(PolygonError err) {
@@ -334,10 +363,18 @@ bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
     if (convexRing(path, ring)) {
         b2PolygonShape shape;
         std::vector<tc::Vec2> hull;
-        if (makePolygonShape(ring, shape, hull) == PolygonError::None) {
+        const PolygonError err = makePolygonShape(ring, shape, hull);
+        if (err == PolygonError::None) {
             out.shapes.push_back(shape);
             return true;
         }
+        if (err == PolygonError::TooSmallForOffset) {
+            // A usable polygon, only too small for its offset: its triangles
+            // would fail the combined check the same way.
+            out.error = err;
+            return false;
+        }
+        // Collinear or merged corners: triangulate, and keep what has area.
     }
 
     const std::vector<std::array<float, 2>> tris = path.buildFillTriangles();
@@ -347,13 +384,26 @@ bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
         for (size_t k = 0; k < 3; ++k) tri[k] = tc::Vec2(tris[t * 3 + k][0], tris[t * 3 + k][1]);
         b2PolygonShape shape;
         std::vector<tc::Vec2> hull;
-        if (makePolygonShape(tri, shape, hull) == PolygonError::None) {
+        // Box2D checks the inertia only for the whole body (PolyShape and
+        // RigidBody2D add the fixtures at density 0 and reset the mass data
+        // once): a tiny ear triangle of an ordinary outline is fine on its
+        // own (checked below, together).
+        if (makePolygonShape(tri, shape, hull, OffsetCheck::Skip) == PolygonError::None) {
             out.shapes.push_back(shape);
         } else {
             ++out.skipped;
         }
     }
-    return !out.shapes.empty();
+    if (out.shapes.empty()) {
+        out.error = PolygonError::Degenerate;
+        return false;
+    }
+    if (!keepsInertia(out.shapes)) {
+        out.shapes.clear();
+        out.error = PolygonError::TooSmallForOffset;
+        return false;
+    }
+    return true;
 }
 
 } // namespace tcx::box2d::detail

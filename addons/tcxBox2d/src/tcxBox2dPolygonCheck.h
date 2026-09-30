@@ -38,9 +38,24 @@ enum class PolygonError {
 // otherwise (concave input, collinear middle points, merged points, or hull
 // points in a crossing order) it is Box2D's hull in Box2D's order, starting at
 // the rightmost point. On failure neither is touched.
+// OffsetCheck::Skip leaves out the inertia check (never TooSmallForOffset):
+// for the fixtures of one compound body, which Box2D only checks as a whole
+// (see keepsInertia()).
+enum class OffsetCheck { Apply, Skip };
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
-                              std::vector<tc::Vec2>& hull);
+                              std::vector<tc::Vec2>& hull,
+                              OffsetCheck offset = OffsetCheck::Apply);
+
+// The inertia check of makePolygonShape() for one body made of every shape in
+// `shapes` (one fixture each, same density): true when the body's combined
+// inertia about its centroid stays positive at any density, false when it
+// would be lost to float rounding (TooSmallForOffset). The margin grows by
+// one float epsilon per fixture after the first, for the rounding of Box2D's
+// sum over the fixtures. It holds for the whole body only: add the fixtures
+// at density 0 and set the density afterwards, since CreateFixture() resets
+// the mass data (and asserts) after every fixture that has a density.
+bool keepsInertia(const std::vector<b2PolygonShape>& shapes);
 
 // Short English reason for a warning ("" for None).
 std::string describePolygonError(PolygonError err);
@@ -75,13 +90,22 @@ struct CompoundShapes {
     std::vector<b2PolygonShape> shapes;  // one fixture each
     size_t triangles = 0;                // from the triangulation (0: one convex polygon)
     size_t skipped = 0;                  // of those, slivers makePolygonShape() refused
+    // Why no body can be made (None while `shapes` is usable): Degenerate
+    // (no usable area at all) or TooSmallForOffset (the whole body is too
+    // small for its distance from the origin).
+    PolygonError error = PolygonError::None;
 };
 
-// A path that convexRing() accepts, and makePolygonShape() too, gives one
-// polygon. Anything else is triangulated with Path::buildFillTriangles()
-// (non-zero winding, holes, self-intersections split), and every triangle
-// that passes makePolygonShape() becomes one shape; the others are counted in
-// `skipped`. Returns false when no shape could be made.
+// A path that convexRing() accepts gives one polygon when makePolygonShape()
+// accepts it, and is refused when it fails only the inertia check
+// (TooSmallForOffset). Anything else is triangulated with
+// Path::buildFillTriangles() (non-zero winding, holes, self-intersections
+// split), and every triangle that passes makePolygonShape() without the
+// inertia check becomes one shape; the others (slivers: collinear or merged
+// corners, almost no area) are counted in `skipped`. The inertia check then
+// runs once on all the shapes together, as Box2D's b2Body::ResetMassData()
+// does. Returns false, with `error` set and no shapes, when no body can be
+// made.
 bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out);
 
 // Outline every subpath of `path` as a closed loop (a compound body's outline;
