@@ -31,7 +31,8 @@ and other bundles.
   rather than crashing. Bundles nest up to `OscBundle::MAX_NESTING_DEPTH` (16)
   levels; a packet nested deeper, or one whose nested bundle fails to parse, is
   rejected as a whole. So is a bundle with an element whose size runs past the end
-  of the data, and a message with a blob that does.
+  of the data, and a top-level message with a blob that does. A message inside a
+  bundle that fails to parse is still skipped (see #399).
 
 ## Install
 
