@@ -38,8 +38,15 @@ Each is marked `// TrussC patch:` in the file.
    result is the same whenever the index fits, since the position array
    always holds whole xyz triples.
 
-**Covered by**: `tests/` (quad split, ear clipping of a concave pentagon,
-indices past the end of their lists). The 32-bit case of patch 2 cannot be
+**Covered by**: `tests/`: a valid quad and a valid concave pentagon (the
+result is unchanged), and a quad and a pentagon with a vertex index one
+past the end of the positions, which reach the patched checks (a triangle
+is passed through without them). If the quad check lets that index
+through, the test fails in any build, since tinyobjloader then no longer
+warns about the face. The pentagon's vertex order reaches all three ear
+clipping checks; there a check that lets the index through reads past the
+position array, which only an AddressSanitizer build reports (the test
+harness does not otherwise see it). The 32-bit case of patch 2 cannot be
 reproduced on a 64-bit build: a face index is an `int`, so `3 * vi + 2`
 never wraps a 64-bit `size_t`.
 

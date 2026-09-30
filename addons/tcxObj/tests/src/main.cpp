@@ -15,6 +15,10 @@
 //     fails the load (tinyobjloader rejects the line) with an error logged
 //   - a face whose vertex, normal or texcoord index is past the end of its
 //     list is skipped with a warning; the other faces still load
+//   - a quad or pentagon with a vertex index one past the end: tinyobjloader
+//     drops the quad; ear clipping of the pentagon does not read the missing
+//     vertex, and ObjLoader skips the triangles that use it. Under
+//     AddressSanitizer a read of that vertex is reported
 //   - a normal index in a file with no normals is ignored, as before
 // =============================================================================
 
@@ -37,17 +41,20 @@ static void check(const string& name, bool ok) {
     ok ? ++g_pass : ++g_fail;
 }
 
-// Counts warnings (and worse) logged while it is alive, and how many of them
-// are ObjLoader's own note about skipped faces.
+// Counts warnings (and worse) logged while it is alive, how many of them
+// are ObjLoader's own note about skipped faces, and how many carry
+// tinyobjloader's note about a face it dropped while triangulating.
 struct WarningCounter {
     int count = 0;
     int skipped = 0;
+    int invalidFace = 0;
     EventListener listener;
     WarningCounter() {
         listener = getLogger().onLog.listen([this](LogEventArgs& e) {
             if (e.level < LogLevel::Warning) return;
             count++;
             if (e.message.find("ObjLoader: skipped") != string::npos) skipped++;
+            if (e.message.find("Face with invalid vertex index") != string::npos) invalidFace++;
         });
     }
 };
@@ -65,6 +72,7 @@ struct ObjLoadResult {
     bool ok = false;
     int warnings = 0;
     int skippedWarnings = 0;
+    int invalidFaceWarnings = 0;
     int groups = 0;
     Mesh mesh;   // merged
 };
@@ -76,6 +84,7 @@ static ObjLoadResult loadObjText(const string& text) {
     r.ok = loader.load(writeObj(text));
     r.warnings = warnings.count;
     r.skippedWarnings = warnings.skipped;
+    r.invalidFaceWarnings = warnings.invalidFace;
     r.groups = loader.getNumGroups();
     r.mesh = loader.getMesh();
     return r;
@@ -90,6 +99,29 @@ static const string TRI_V =
     "v 0 0 0\n"
     "v 1 0 0\n"
     "v 0 1 0\n";
+
+// Five vertices in the z = 0 plane. tinyobjloader stores the positions in a
+// vector filled by push_back, so 15 floats sit in a 16-float allocation: a
+// read of vertex 6 (floats 15..17) runs past the allocation, which
+// AddressSanitizer reports. With three vertices (9 floats in 16) the same
+// read would stay inside the allocation and go unreported.
+static const string PENTA_V =
+    "v 0 0 0\n"
+    "v 2 0 0\n"
+    "v 2 2 0\n"
+    "v 1 1 0\n"
+    "v 0 2 0\n";
+
+// True when every vertex of `mesh` is one of the PENTA_V positions.
+static bool onlyPentaVertices(const Mesh& mesh) {
+    for (const auto& p : mesh.getVertices()) {
+        if (!vecNear(p, 0, 0, 0) && !vecNear(p, 2, 0, 0) && !vecNear(p, 2, 2, 0) &&
+            !vecNear(p, 1, 1, 0) && !vecNear(p, 0, 2, 0)) {
+            return false;
+        }
+    }
+    return true;
+}
 
 int main() {
     g_dir = fs::temp_directory_path() /
@@ -183,6 +215,35 @@ int main() {
               r.ok && r.mesh.getNumIndices() == 3 && r.mesh.getTexCoords().size() == 3);
         check("texcoord index past the end: skipped face logged", r.skippedWarnings == 1);
     }
+
+    // ----- faces tinyobjloader splits, with a vertex index one past the end ----
+    // These reach tinyobjloader's own index checks in triangulation (a
+    // triangle is passed through without them).
+    {
+        // A quad is split directly; tinyobjloader drops it with a warning
+        // before reading any position, so ObjLoader never sees it
+        auto r = loadObjText(PENTA_V + "f 1 2 3\nf 1 2 3 6\n");
+        check("quad with a vertex index one past the end: loads", r.ok);
+        check("quad with a vertex index one past the end: only the good face",
+              r.mesh.getNumIndices() == 3 && onlyPentaVertices(r.mesh));
+        check("quad with a vertex index one past the end: dropped by tinyobjloader",
+              r.invalidFaceWarnings == 1 && r.skippedWarnings == 0);
+    }
+    {
+        // A pentagon goes through ear clipping, which skips the missing
+        // vertex when it picks the projection axes, when it tests an ear
+        // and when it tests other vertices against an ear (this vertex order
+        // reaches all three). The triangles that use the missing vertex are
+        // then skipped by ObjLoader
+        auto r = loadObjText(PENTA_V + "f 6 1 2 3 4\n");
+        check("pentagon with a vertex index one past the end: loads", r.ok);
+        check("pentagon with a vertex index one past the end: only good faces",
+              r.mesh.getNumIndices() % 3 == 0 && r.mesh.getNumIndices() < 9 &&
+              onlyPentaVertices(r.mesh));
+        check("pentagon with a vertex index one past the end: skipped faces logged",
+              r.skippedWarnings == 1);
+    }
+
     {
         // With no vn lines at all the normal index was never read; the face
         // still loads (normals are computed instead).

@@ -11,6 +11,11 @@ validated before they are read:
   the load (tinyobjloader rejects the line) and logs an error;
 - a face whose vertex, normal or texcoord index is past the end of its list is
   skipped with one warning; the other faces still load;
+- a quad or pentagon with a vertex index one past the end reaches
+  tinyobjloader's own checks in triangulation: the quad is dropped with
+  tinyobjloader's warning, and ear clipping of the pentagon never reads the
+  missing vertex (a read past the positions shows up under
+  AddressSanitizer); ObjLoader then skips the triangles that use it;
 - a normal index in a file with no normals is ignored, as before.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
