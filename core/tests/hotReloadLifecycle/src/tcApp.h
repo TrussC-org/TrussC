@@ -109,6 +109,9 @@ public:
     virtual void queueFromWorker(std::atomic<int>* ran);
     // window.setApp(app) as app code calls it; true if the window took it.
     virtual bool attachApp(Window& window, std::shared_ptr<App> app);
+    // Whether guest code sees `app` in the secondary windows' double-attach
+    // guard (internal::attachedApps()).
+    virtual bool seesAttached(const App* app);
 
 private:
     EventListener updateListener_;

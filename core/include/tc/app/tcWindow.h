@@ -64,10 +64,13 @@ public:
     // (position, decoration). To control this window from elsewhere, use this
     // Window handle (from inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
-    // (standard Node lifecycle), i.e. on the window's first tick. Closing the
-    // window runs exit() and cleanup() and detaches the App's audioOut() /
-    // audioIn(); attaching that App to a window again subscribes them again
-    // and runs setup() again, on that window's first tick.
+    // (standard Node lifecycle), i.e. on the window's first tick. An App runs
+    // once: setup() when first attached, exit() / cleanup() when its window
+    // closes (or, with #318, when it is swapped out); closing the window also
+    // detaches its audioOut() / audioIn() for good. To show it again, create
+    // a new App. setApp() refuses an App whose cleanup() already ran, and any
+    // App on a window that is not open (both log an error and leave the
+    // window as it is); setApp(nullptr) always releases.
     void setApp(std::shared_ptr<App> app);
     std::shared_ptr<App> getApp() const { return app_; }
 
@@ -263,6 +266,12 @@ std::unordered_set<const App*>& attachedApps();
 inline void Window::setApp(std::shared_ptr<App> app) {
     auto& attached = internal::attachedApps();
     if (app) {
+        // A closed window never runs close() again (~Window() returns early),
+        // so nothing would end an App attached to it (#256).
+        if (!isOpen()) {
+            logError("Window") << "setApp(): this window is closed; create a new window";
+            return;
+        }
         if (app.get() == internal::mainWindowContext().rootNode) {
             logError("Window") << "setApp(): this App is the running main App";
             return;
@@ -271,15 +280,17 @@ inline void Window::setApp(std::shared_ptr<App> app) {
             logError("Window") << "setApp(): this App already drives another window";
             return;
         }
+        // An App runs once (#256): its window's close() ran its cleanup() and
+        // detached its audio hooks for good.
+        if (internal::appRanCleanup(*app)) {
+            logError("Window") << "setApp(): this App already ran cleanup(); create a new App";
+            return;
+        }
     }
     if (app_) attached.erase(app_.get());
     if (app) attached.insert(app.get());
     app_ = std::move(app);
     ctx_.rootNode = app_.get();
-    // The App's audio hooks follow the window (#256): close() detaches them,
-    // attaching subscribes them again, and an App whose window was closed
-    // runs setup() again on this window's first tick.
-    if (app_) internal::attachAppAudio(*app_);
 }
 
 // Looked up in the open-window registry rather than cached on the App: every

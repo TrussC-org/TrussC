@@ -30,11 +30,11 @@
 //     limit: past one second the App is still not destroyed, one error is
 //     logged, and the teardown goes on once audioOut() returns. Meanwhile the
 //     public waitForCallbackIdle() still gives up after about a second.
-//   - A secondary window's App whose window was closed (exit(), cleanup(),
-//     audio detached) and that is attached again with Window::setApp() gets
-//     its audioOut() back through one hook, and setup() runs again on the new
-//     window's first tick; moving an App between windows without a close
-//     restarts nothing.
+//   - An App runs once: Window::setApp() refuses an App whose window closed
+//     (exit(), cleanup(), audio detached) with one error, keeps the window's
+//     App, subscribes no hook and runs no second setup(); and it refuses any
+//     App on a window that is not open (one error each, the window stays
+//     empty), which leaves that App free to go to an open window.
 //   - AudioRecorder::stop() waits for the audioOut pass in flight, and a
 //     capture still in flight when stop() is called (held by a test hook
 //     after its checks, before it hands the buffer to the writer) ends up in
@@ -180,14 +180,23 @@ struct StuckApp : App {
     }
 };
 
-// --- A secondary window's App, closed and attached again ----------------------
+// --- A secondary window's App, and setApp()'s refusals -------------------------
 
-static atomic<int> g_reSetups{0};
-static atomic<int> g_reAudioCalls{0};
+struct WindowApp : App {
+    atomic<int> setups{0};
+    atomic<int> audioCalls{0};
+    void setup() override { ++setups; }
+    void audioOut(AudioOutBuffer&) override { ++audioCalls; }
+};
 
-struct ReattachApp : App {
-    void setup() override { ++g_reSetups; }
-    void audioOut(AudioOutBuffer&) override { ++g_reAudioCalls; }
+// A Window made in a headless test has no native side: it is a closed window
+// (isOpen() is false). OpenWindow stands in for an open one: its native_
+// points at a dummy that nothing here dereferences (setApp() and tickTree()
+// don't), and is cleared before ~Window() would close() it.
+static int g_nativeStandIn = 0;
+struct OpenWindow : Window {
+    OpenWindow() { native_ = &g_nativeStandIn; }
+    ~OpenWindow() { native_ = nullptr; }
 };
 
 // One tick of a secondary window, in its own context (as the platform glue
@@ -383,53 +392,75 @@ int main() {
               !publicResult && publicTook >= 0.9 && publicTook < 1.5, ms(publicTook));
     }
 
-    // --- a closed window's App attached again: audio and setup() come back ---------------
-    // Window::close() needs a native window; here the test runs its App part
-    // (exit(), cleanup(), internal::detachAppAudio(), release) itself, then
-    // attaches the App to another window with the real Window::setApp().
+    // --- setApp() refuses a cleaned-up App and a closed window ---------------------------
+    // An App runs once. Window::close() needs a native window; here the test
+    // runs its steps itself (exit(), cleanup(), internal::detachAppAudio(),
+    // release, clear the native state) and then calls the real
+    // Window::setApp().
     {
         auto mainApp = make_shared<App>();   // the main context's root, as runApp's App would be
-        auto sub = make_shared<ReattachApp>();
-        const size_t hooksBefore = engine.audioOut.listenerCount();   // mainApp's and sub's
-        Window first, second;
+        auto sub = make_shared<WindowApp>();
+        auto keeper = make_shared<WindowApp>();
+        auto stray = make_shared<WindowApp>();
+        const size_t hooks = engine.audioOut.listenerCount();   // one per App above
+        OpenWindow first, second;
+        Window closedWin;
+
         first.setApp(sub);
         tickWindow(first);
-        const bool firstAudio = waitFor([] { return g_reAudioCalls.load() > 0; }, 2000);
-        check("a new App attached to a window: setup() once, audioOut() called, no second hook",
-              g_reSetups.load() == 1 && firstAudio && engine.audioOut.listenerCount() == hooksBefore,
+        const bool firstAudio = waitFor([&] { return sub->audioCalls.load() > 0; }, 2000);
+        check("a new App attached to an open window: setup() once, audioOut() called, no extra hook",
+              first.getApp() == sub && sub->setups.load() == 1 && firstAudio &&
+              engine.audioOut.listenerCount() == hooks,
               to_string(engine.audioOut.listenerCount()) + " hooks");
 
-        // What the platform Window::close() does with its App.
+        // What the platform Window::close() does, its App part included.
         sub->exit();
         sub->cleanup();
         internal::detachAppAudio(*sub);
         first.setApp(nullptr);
-        const int callsAtClose = g_reAudioCalls.load();
+        first.native_ = nullptr;
+        const int callsAtClose = sub->audioCalls.load();
         this_thread::sleep_for(chrono::milliseconds(50));
         check("after the close, its audioOut() is no longer called",
-              g_reAudioCalls.load() == callsAtClose &&
-              engine.audioOut.listenerCount() == hooksBefore - 1);
+              sub->audioCalls.load() == callsAtClose && engine.audioOut.listenerCount() == hooks - 1);
 
+        // The cleaned-up App on another open window, which already shows an App.
+        second.setApp(keeper);
+        tickWindow(second);
+        const size_t cleanupErrors = countErrors("already ran cleanup()");
         second.setApp(sub);
-        const bool audioBack = waitFor([&] { return g_reAudioCalls.load() > callsAtClose; }, 2000);
         tickWindow(second);
-        check("attached again: its audioOut() is called again", audioBack);
-        check("... through one hook, not two", engine.audioOut.listenerCount() == hooksBefore,
+        this_thread::sleep_for(chrono::milliseconds(50));
+        check("setApp() refuses an App whose cleanup() ran: one error",
+              countErrors("already ran cleanup()") == cleanupErrors + 1);
+        check("... the window keeps its App", second.getApp() == keeper && keeper->setups.load() == 1);
+        check("... no hook comes back, audioOut() is not called",
+              engine.audioOut.listenerCount() == hooks - 1 && sub->audioCalls.load() == callsAtClose,
               to_string(engine.audioOut.listenerCount()) + " hooks");
-        check("... and setup() runs again on the new window's first tick", g_reSetups.load() == 2,
-              to_string(g_reSetups.load()) + " setups");
-        tickWindow(second);
-        check("... once", g_reSetups.load() == 2);
+        check("... and its setup() does not run again", sub->setups.load() == 1);
 
-        // Attached elsewhere without a close in between: nothing restarts.
+        // A window that is not open: a closed one never runs close() again.
+        const size_t closedErrors = countErrors("this window is closed");
+        closedWin.setApp(stray);
+        check("setApp() on a window that is not open is refused: one error",
+              countErrors("this window is closed") == closedErrors + 1);
+        check("... the window stays empty", closedWin.getApp() == nullptr);
+        first.setApp(stray);   // closed above
+        check("... also one that was open before", first.getApp() == nullptr &&
+              countErrors("this window is closed") == closedErrors + 2);
         second.setApp(nullptr);
-        first.setApp(sub);
-        tickWindow(first);
-        check("moved to another window without a close: no new setup(), no second hook",
-              g_reSetups.load() == 2 && engine.audioOut.listenerCount() == hooksBefore);
-        first.setApp(nullptr);
-        sub->cleanup();
-        internal::detachAppAudio(*sub);
+        second.setApp(stray);   // the refusals left it free to attach
+        check("the refused App can still go to an open window",
+              second.getApp() == stray && engine.audioOut.listenerCount() == hooks - 1);
+        second.setApp(nullptr);
+
+        // Every App here still has its constructor's hook but sub: detach and
+        // wait before they go, so the audio thread (still running) cannot be
+        // inside one meanwhile.
+        internal::detachAppAudio(*keeper);
+        internal::detachAppAudio(*stray);
+        internal::detachAppAudio(*mainApp);
     }
 
     // --- AudioRecorder::stop() waits for the pass in flight ------------------------------

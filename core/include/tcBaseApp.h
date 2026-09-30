@@ -30,8 +30,9 @@ namespace internal {
 // reload, closing a secondary window; #256): after app.cleanup(), before the
 // App is destroyed. Defined below the App class.
 inline void detachAppAudio(App& app);
-// The other half: Window::setApp() attaching an App (#256). Defined below.
-inline void attachAppAudio(App& app);
+// True once the framework has run the App's cleanup() (#256): Window::setApp()
+// refuses such an App. Defined below the App class.
+inline bool appRanCleanup(const App& app);
 }
 
 // =============================================================================
@@ -50,7 +51,10 @@ public:
         // callback already running on the audio thread before the App is
         // destroyed (internal::detachAppAudio()); ~App() would be too late,
         // the derived members that audioOut() uses are gone by then.
-        connectAudioHooks();
+        audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
+            [this](AudioOutBuffer& b) { audioOut(b); });
+        audioInListener_  = AudioEngine::getInstance().audioIn.listen(
+            [this](AudioInBuffer& b) { audioIn(b); });
 
         // The FIRST App becomes the scene-graph root of the active window
         // (normally the main App created by runApp) — exposed via
@@ -202,8 +206,9 @@ public:
     // goes. It waits for a call already running, as long as it takes, so
     // don't wait on the main thread or on a lock the main thread may hold in
     // here: the teardown would hang (with an error in the log after one
-    // second). Attaching a closed App to a window again (Window::setApp())
-    // subscribes them again and runs setup() again.
+    // second). An App runs once: setup() when first attached, exit() /
+    // cleanup() when its window closes (or, with #318, when it is swapped
+    // out). To show it again, create a new App.
     virtual void audioOut(AudioOutBuffer& buf) { (void)buf; }
     virtual void audioIn(const AudioInBuffer& buf) { (void)buf; }
 
@@ -211,32 +216,14 @@ private:
     EventListener audioOutListener_;
     EventListener audioInListener_;
 
-    // Subscribe the hooks that are not subscribed yet (the constructor, and
-    // internal::attachAppAudio() for an App whose window was closed).
-    void connectAudioHooks() {
-        if (!audioOutListener_.isConnected()) {
-            audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
-                [this](AudioOutBuffer& b) { audioOut(b); });
-        }
-        if (!audioInListener_.isConnected()) {
-            audioInListener_ = AudioEngine::getInstance().audioIn.listen(
-                [this](AudioInBuffer& b) { audioIn(b); });
-        }
-    }
-
     // Framework lifecycle, next to Node's setupCalled_: true once the
     // framework has run cleanup() and let the App go
-    // (internal::detachAppAudio()). Attaching it to a window again starts it
-    // over (internal::attachAppAudio()): setup() runs again on the window's
-    // next tick, so setup() starts what cleanup() ended.
+    // (internal::detachAppAudio()). An App runs once, so Window::setApp()
+    // refuses it from then on (internal::appRanCleanup()).
     bool cleanupCalled_ = false;
-    void restartAfterCleanup() {
-        cleanupCalled_ = false;
-        setupCalled_ = false;   // Node: setup() runs on the next updateTree()
-    }
 
     friend void internal::detachAppAudio(App& app);
-    friend void internal::attachAppAudio(App& app);
+    friend bool internal::appRanCleanup(const App& app);
 public:
 
     // -------------------------------------------------------------------------
@@ -312,7 +299,8 @@ namespace internal {
 //
 // Every framework path calls it right after cleanup() (a hot reload, which
 // runs no cleanup(), destroys the App right after), so it also records that
-// the App's lifecycle ended: attachAppAudio() starts it again.
+// the App's lifecycle ended: Window::setApp() refuses it from then on, and
+// its hooks are never subscribed again.
 inline void detachAppAudio(App& app) {
     app.audioOutListener_.disconnect();
     app.audioInListener_.disconnect();
@@ -320,14 +308,8 @@ inline void detachAppAudio(App& app) {
     waitForCallbackIdleNoTimeout();
 }
 
-// Window::setApp(): the App gets its audio hooks while a window drives it.
-// A new App already has them (its constructor subscribes them), so this adds
-// no second subscription. An App whose window was closed (cleanup() ran, hooks
-// detached) gets them back and runs setup() again on its new window's first
-// tick. Main thread.
-inline void attachAppAudio(App& app) {
-    app.connectAudioHooks();
-    if (app.cleanupCalled_) app.restartAfterCleanup();
+inline bool appRanCleanup(const App& app) {
+    return app.cleanupCalled_;
 }
 }
 
