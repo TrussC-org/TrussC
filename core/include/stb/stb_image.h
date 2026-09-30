@@ -6693,15 +6693,12 @@ static int stbi__gif_info_raw(stbi__context *s, int *x, int *y, int *comp)
    return 1;
 }
 
-static void stbi__out_gif_code(stbi__gif *g, stbi__uint16 code)
+// TrussC patch: stbi__out_gif_code walks the prefix chain with a loop instead of
+// recursing once per link; this helper writes one pixel of the decoded string.
+static void stbi__out_gif_pixel(stbi__gif *g, stbi_uc suffix)
 {
    stbi_uc *p, *c;
    int idx;
-
-   // recurse to decode the prefixes, since the linked-list is backwards,
-   // and working backwards through an interleaved image would be nasty
-   if (g->codes[code].prefix >= 0)
-      stbi__out_gif_code(g, g->codes[code].prefix);
 
    if (g->cur_y >= g->max_y) return;
 
@@ -6709,7 +6706,7 @@ static void stbi__out_gif_code(stbi__gif *g, stbi__uint16 code)
    p = &g->out[idx];
    g->history[idx / 4] = 1;
 
-   c = &g->color_table[g->codes[code].suffix * 4];
+   c = &g->color_table[suffix * 4];
    if (c[3] > 128) { // don't render transparent pixels;
       p[0] = c[2];
       p[1] = c[1];
@@ -6728,6 +6725,23 @@ static void stbi__out_gif_code(stbi__gif *g, stbi__uint16 code)
          --g->parse;
       }
    }
+}
+
+static void stbi__out_gif_code(stbi__gif *g, stbi__uint16 code)
+{
+   // TrussC patch: the linked list is backwards, so collect the suffixes of the
+   // prefix chain first, then write them out in order. A prefix always has a
+   // lower index than the code that uses it and codes stay below 4096, so the
+   // chain never holds more than 4096 entries.
+   stbi_uc suffixes[4096];
+   int n = 0;
+   int cur = code;
+   while (cur >= 0 && n < 4096) {
+      suffixes[n++] = g->codes[cur].suffix;
+      cur = g->codes[cur].prefix;
+   }
+   while (n > 0)
+      stbi__out_gif_pixel(g, suffixes[--n]);
 }
 
 static stbi_uc *stbi__process_gif_raster(stbi__context *s, stbi__gif *g)
