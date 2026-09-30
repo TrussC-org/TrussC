@@ -30,8 +30,9 @@
 // isConnected() and getDevicePath() never wait for close(), even from a
 // thread close() is waiting for (section 13). setup() and close() log only
 // once they have released the lock, so a Logger listener may call back into
-// the same Serial (section 14). A slow write is played by slowWrite.cpp
-// (Linux only).
+// the same Serial (section 14). The Android backend's guard against joining
+// its worker from the worker itself is checked on its own (section 15). A
+// slow write is played by slowWrite.cpp (Linux only).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -849,6 +850,29 @@ int main() {
         }
         t.join();
         check("14. ... and it ran for the connect and the disconnect line", ok && callbacks >= 2);
+    }
+
+    // --- 15. the self-join guard of the Android backend ---------------------
+    // The Android backend asks internal::isThisThread(worker) before it joins
+    // its USB worker: on the worker itself (a Logger listener running there
+    // calls close() or destroys the Serial) join() would throw, so it refuses
+    // or hands the connection over instead. The backend needs Android, but the
+    // guard is plain C++.
+    {
+        thread none;
+        check("15. an empty thread object is not this thread", !internal::isThisThread(none));
+        atomic<bool> go{false};
+        bool fromInside = false;
+        thread worker;
+        worker = thread([&] {
+            while (!go) this_thread::yield();
+            fromInside = internal::isThisThread(worker);
+        });
+        check("15. seen from another thread, the worker is not this thread", !internal::isThisThread(worker));
+        go = true;
+        worker.join();
+        check("15. seen from inside, the worker is this thread", fromInside);
+        check("15. once joined, it is nobody's thread", !internal::isThisThread(worker));
     }
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

@@ -118,8 +118,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   next one. `isConnected()` / `getDevicePath()` answer even from a thread that
   `close()` is waiting for, and a Logger listener may call back into the
   `Serial` whose `setup()` / `close()` logged (both would deadlock otherwise;
-  a watchdog turns that into a failure). `src/slowWrite.cpp` plays the slow
-  write by defining `write()` (Linux only). A pseudo-terminal plays the device, and closing its master
+  a watchdog turns that into a failure). The Android backend's guard against
+  joining its USB worker from the worker itself (`internal::isThisThread()`)
+  is checked on its own; the backend itself needs Android. `src/slowWrite.cpp`
+  plays the slow write by defining `write()` (Linux only). A pseudo-terminal plays the device, and closing its master
   stands in for the USB unplug. POSIX only (SKIP on Windows).
 - `serialBaudRate/` — `Serial::setup()` does not report success after opening
   at a speed other than the one asked for (#260): rates without a termios
