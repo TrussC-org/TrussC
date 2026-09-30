@@ -84,8 +84,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
   `writeBytes()` each notice it on their own, close the port, log one warning,
   and `isConnected()` turns false so `setup()` can reconnect; a quiet but
-  present device is not a loss. A pseudo-terminal plays the device, and closing
-  its master stands in for the USB unplug. POSIX only (SKIP on Windows).
+  present device is not a loss. `onDisconnect` fires once per open connection:
+  for the loss (`wasClean` false, the port, the rate and the warning's text as
+  `reason`) and for `close()` of an open port, but not from the destructor or
+  a move assignment. A listener may call `setup()` from inside the
+  notification, and the call that found the loss must leave that new
+  connection alone. A pseudo-terminal plays the device, and closing its master
+  stands in for the USB unplug. POSIX only (SKIP on Windows).
 - `serialBaudRate/` — `Serial::setup()` does not report success after opening
   at a speed other than the one asked for (#260): rates without a termios
   B-constant used to open at 9600 and report success. Linux must apply any rate

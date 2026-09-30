@@ -13,6 +13,13 @@
 //
 // Before the fix, isInitialized() stayed true forever after an unplug.
 //
+// Serial::onDisconnect fires once per open connection: on a detected loss
+// (wasClean = false, reason = the warning's text) and on close() of an open
+// port (wasClean = true), never from the destructor or a move assignment.
+// The port is closed before listeners run, so a listener may call setup()
+// to reconnect, and the call that found the loss must leave the new
+// connection alone (sections 6 - 8).
+//
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
 // hangs the slave up the way the kernel does when the USB device is removed.
@@ -41,6 +48,7 @@ int main() {
 #include <cstdlib>
 #include <cstring>
 #include <chrono>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -51,8 +59,12 @@ static void check(const char* name, bool ok) {
     if (!ok) ++g_fail;
 }
 
-// "Serial: lost connection to ..." warnings seen so far
+// "Serial: lost connection to ..." warnings seen so far, and the last one
 static int g_lostWarnings = 0;
+static string g_lastLostWarning;
+
+// "Serial: setup() closes the port an onDisconnect listener opened" warnings
+static int g_overruledWarnings = 0;
 
 // Poll cond every 5 ms until it holds or ms elapse.
 template <typename F>
@@ -121,10 +133,51 @@ static bool connect(Pty& pty, Serial& serial, const char* what) {
     return ok;
 }
 
+// Records the onDisconnect notifications of one Serial
+struct Recorder {
+    int count = 0;
+    SerialDisconnectEventArgs first;  // args of the first notification
+    SerialDisconnectEventArgs last;   // args of the latest one
+    bool sawOpenPort = false;         // a listener ran while isConnected()
+    EventListener sub;
+
+    void attach(Serial& serial) {
+        sub = serial.onDisconnect.listen([this, &serial](SerialDisconnectEventArgs& e) {
+            if (++count == 1) first = e;
+            last = e;
+            if (serial.isConnected()) sawOpenPort = true;
+        });
+    }
+};
+
+// A loss notification: wasClean false, the port and rate it was opened with,
+// and the reason the warning gave ("Serial: lost connection to P (reason)")
+static bool isLossOf(const SerialDisconnectEventArgs& e, const Pty& pty) {
+    const string tail = " (" + e.reason + ")";
+    const string& w = g_lastLostWarning;
+    return !e.wasClean && e.portName == pty.slavePath && e.baudRate == 115200 &&
+           !e.reason.empty() && w.size() >= tail.size() &&
+           w.compare(w.size() - tail.size(), tail.size(), tail) == 0;
+}
+
+// Open file descriptors in this process (to spot a leaked port)
+static int countOpenFds() {
+    int n = 0;
+    for (int fd = 0; fd < 1024; ++fd) {
+        if (fcntl(fd, F_GETFD) != -1) ++n;
+    }
+    return n;
+}
+
 int main() {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
-        if (e.level == LogLevel::Warning && e.message.find("lost connection") != string::npos) {
+        if (e.level != LogLevel::Warning) return;
+        if (e.message.find("lost connection") != string::npos) {
             ++g_lostWarnings;
+            g_lastLostWarning = e.message;
+        }
+        if (e.message.find("onDisconnect listener opened") != string::npos) {
+            ++g_overruledWarnings;
         }
     });
 
@@ -134,6 +187,8 @@ int main() {
     {
         Pty pty;
         Serial serial;
+        Recorder rec;
+        rec.attach(serial);
         if (!connect(pty, serial, "1. setup() on a pty slave connects")) return 1;
         check("1. isInitialized() agrees with isConnected()", serial.isInitialized());
 
@@ -158,6 +213,7 @@ int main() {
         }
         check("1. 200 ms of silence: no data, still connected", quietOk && serial.isConnected());
         check("1. no loss warning while quiet", g_lostWarnings == 0);
+        check("1. no onDisconnect while quiet", rec.count == 0);
 
         // Through a const reference: available() must stay const and still
         // close the port
@@ -166,15 +222,21 @@ int main() {
         check("1. const available() notices the unplug within 1 s",
               waitFor(1000, [&] { cs.available(); return !cs.isConnected(); }));
         check("1. isInitialized() is false too", !serial.isInitialized());
+        check("1. onDisconnect fired once", rec.count == 1);
+        check("1. ... as a loss of this port at 115200, reason as logged", isLossOf(rec.first, pty));
+        check("1. ... after the port was closed", !rec.sawOpenPort);
         check("1. available() == 0 after the loss", serial.available() == 0);
         check("1. readBytes() == -1 after the loss", serial.readBytes(buf, sizeof(buf)) == -1);
         check("1. readByte() == -2 after the loss", serial.readByte() == -2);
         check("1. writeBytes() == -1 after the loss", serial.writeBytes(string("x")) == -1);
+        serial.close();
         check("1. exactly one loss warning", g_lostWarnings == 1);
+        check("1. no second onDisconnect (later calls, close())", rec.count == 1);
 
         // Reconnect on the same object, as the example's retry loop does
         Pty again;
         connect(again, serial, "1. setup() again after the loss connects");
+        check("1. setup() on a closed port does not fire", rec.count == 1);
         check("1. the new port carries data", again.send("z") &&
               waitFor(1000, [&] { return serial.readByte() == 'z'; }));
     }
@@ -183,12 +245,18 @@ int main() {
     {
         Pty pty;
         Serial serial;
+        Recorder rec;
+        rec.attach(serial);
         if (connect(pty, serial, "2. setup() connects")) {
             pty.unplug();
             int r = 0;
             bool lost = waitFor(1000, [&] { r = serial.readBytes(buf, sizeof(buf)); return r != 0; });
             check("2. readBytes() alone returns -1 on unplug", lost && r == -1);
             check("2. ... and the port is closed", !serial.isConnected());
+            check("2. onDisconnect fired once, as a loss", rec.count == 1 && isLossOf(rec.first, pty));
+            check("2. ... after the port was closed", !rec.sawOpenPort);
+            serial.close();
+            check("2. close() after the loss does not fire again", rec.count == 1);
         }
     }
 
@@ -196,12 +264,15 @@ int main() {
     {
         Pty pty;
         Serial serial;
+        Recorder rec;
+        rec.attach(serial);
         if (connect(pty, serial, "3. setup() connects")) {
             pty.unplug();
             int r = -1;
             bool lost = waitFor(1000, [&] { r = serial.readByte(); return r != -1; });
             check("3. readByte() alone returns -2 on unplug", lost && r == -2);
             check("3. ... and the port is closed", !serial.isConnected());
+            check("3. onDisconnect fired once, as a loss", rec.count == 1 && isLossOf(rec.first, pty));
         }
     }
 
@@ -209,12 +280,15 @@ int main() {
     {
         Pty pty;
         Serial serial;
+        Recorder rec;
+        rec.attach(serial);
         if (connect(pty, serial, "4. setup() connects")) {
             pty.unplug();
             int r = 0;
             bool lost = waitFor(1000, [&] { r = serial.writeBytes(string("x")); return r < 0; });
             check("4. writeBytes() alone returns -1 on unplug", lost && r == -1);
             check("4. ... and the port is closed", !serial.isConnected());
+            check("4. onDisconnect fired once, as a loss", rec.count == 1 && isLossOf(rec.first, pty));
         }
     }
 
@@ -225,11 +299,147 @@ int main() {
     {
         Pty pty;
         Serial serial;
+        Recorder rec;
+        rec.attach(serial);
+        serial.close();
+        check("5. close() on a port never opened does not fire", rec.count == 0);
         if (connect(pty, serial, "5. setup() connects")) {
             int before = g_lostWarnings;
             serial.close();
             check("5. close() disconnects", !serial.isConnected());
             check("5. close() logs no loss warning", g_lostWarnings == before);
+            check("5. close() fires onDisconnect once", rec.count == 1);
+            check("5. ... wasClean, \"closed by close()\"",
+                  rec.first.wasClean && rec.first.reason == "closed by close()");
+            check("5. ... with this port at 115200",
+                  rec.first.portName == pty.slavePath && rec.first.baudRate == 115200);
+            check("5. ... after the port was closed", !rec.sawOpenPort);
+            serial.close();
+            check("5. a second close() does not fire", rec.count == 1);
+        }
+
+        // setup() on an open port closes it first, which is a close()
+        Pty next, after;
+        if (connect(next, serial, "5. setup() connects again") &&
+            connect(after, serial, "5. setup() on the open port moves to another pty")) {
+            check("5. that setup() fired once more, wasClean, for the previous port",
+                  rec.count == 2 && rec.last.wasClean && rec.last.portName == next.slavePath &&
+                  serial.getDevicePath() == after.slavePath);
+        }
+    }
+
+    // --- 6. destruction and move assignment do not fire ---------------------
+    {
+        Pty pty;
+        Recorder rec;
+        auto serial = make_unique<Serial>();
+        rec.attach(*serial);
+        if (connect(pty, *serial, "6. setup() connects")) {
+            serial.reset();
+            check("6. destroying an open Serial does not fire onDisconnect", rec.count == 0);
+        }
+
+        Pty ptyA, ptyB;
+        Serial a, b;
+        Recorder recA, recB;
+        recA.attach(a);
+        recB.attach(b);
+        if (connect(ptyA, a, "6. setup() connects a") && connect(ptyB, b, "6. setup() connects b")) {
+            a = std::move(b);
+            check("6. a move assignment over an open Serial does not fire",
+                  recA.count == 0 && recB.count == 0);
+            check("6. ... and a now holds b's port",
+                  a.isConnected() && a.getDevicePath() == ptyB.slavePath);
+            a.close();
+            check("6. a's own listener reports the port it holds now",
+                  recA.count == 1 && recA.first.portName == ptyB.slavePath && recB.count == 0);
+        }
+    }
+
+    // --- 7. a listener reconnects from inside the notification --------------
+    // The loss is found by readBytes(), by available() through a const
+    // Serial&, and by writeBytes(). Each time the listener opens a fresh pty,
+    // which already has data waiting (or must get none, for writeBytes()),
+    // and the call that found the loss must return its usual error value
+    // without touching the new connection.
+    for (int via = 0; via < 3; ++via) {
+        const char* name = via == 0 ? "7. readBytes()" : via == 1 ? "7. const available()" : "7. writeBytes()";
+        auto label = [&](const char* what) { return string(name) + ": " + what; };
+
+        Pty lostPty, newPty;
+        Serial serial;
+        const Serial& cs = serial;
+        int events = 0;
+        bool sawOpenPort = false;
+        bool reconnected = false;
+        bool sentFromListener = false;
+        SerialDisconnectEventArgs firstArgs;
+        EventListener sub = serial.onDisconnect.listen([&](SerialDisconnectEventArgs& e) {
+            if (++events == 1) firstArgs = e;
+            if (serial.isConnected()) sawOpenPort = true;
+            if (e.wasClean) return;
+            reconnected = serial.setup(newPty.slavePath, e.baudRate);
+            if (via != 2) sentFromListener = newPty.send("new");
+        });
+        if (!connect(lostPty, serial, label("setup() connects").c_str())) continue;
+        check(label("a second pty opens").c_str(), newPty.open());
+
+        // Call until the notification comes; r is what that call returned
+        lostPty.unplug();
+        int r = 0;
+        bool found = waitFor(1000, [&] {
+            if (via == 0) r = serial.readBytes(buf, sizeof(buf));
+            else if (via == 1) r = cs.available();
+            else r = serial.writeBytes(string("x"));
+            return events > 0;
+        });
+        check(label("finds the loss and returns its error value").c_str(),
+              found && r == (via == 1 ? 0 : -1));
+        check(label("one notification, a loss of the first pty").c_str(),
+              events == 1 && isLossOf(firstArgs, lostPty));
+        check(label("the listener saw the port closed").c_str(), !sawOpenPort);
+        check(label("setup() inside the listener succeeds").c_str(), reconnected);
+        check(label("still connected, to the new pty, after the call").c_str(),
+              serial.isConnected() && serial.getDevicePath() == newPty.slavePath);
+        if (via != 2) {
+            bool intact = sentFromListener &&
+                          waitFor(1000, [&] { return serial.available() == 3; }) &&
+                          serial.readBytes(buf, sizeof(buf)) == 3 && memcmp(buf, "new", 3) == 0;
+            check(label("the new pty's waiting data is intact").c_str(), intact);
+        } else {
+            check(label("the failed write did not reach the new pty").c_str(),
+                  newPty.receive(100).empty());
+        }
+        check(label("the new connection writes").c_str(),
+              serial.writeBytes(string("ok")) == 2 && newPty.receive(1000) == "ok");
+        check(label("no second notification").c_str(), events == 1);
+    }
+
+    // --- 8. setup() overrules a listener that reopens on a clean close ------
+    {
+        Pty first, second, reopened;
+        Serial serial;
+        int events = 0;
+        bool reopenedOk = false;
+        EventListener sub = serial.onDisconnect.listen([&](SerialDisconnectEventArgs&) {
+            ++events;
+            // Wrong on purpose: reconnects on a clean close too
+            reopenedOk = serial.setup(reopened.slavePath, 115200);
+        });
+        if (connect(first, serial, "8. setup() connects") &&
+            second.open() && reopened.open()) {
+            int fdsBefore = countOpenFds();
+            int warnedBefore = g_overruledWarnings;
+            bool ok = serial.setup(second.slavePath, 115200);
+            check("8. setup() fires once for the previous port", events == 1);
+            check("8. the listener's setup() succeeded inside", reopenedOk);
+            check("8. the outer setup() wins", ok && serial.isConnected() &&
+                  serial.getDevicePath() == second.slavePath);
+            check("8. ... and warns that it closed the listener's port",
+                  g_overruledWarnings == warnedBefore + 1);
+            check("8. no port is left open behind it", countOpenFds() == fdsBefore);
+            check("8. the outer port carries data", second.send("s") &&
+                  waitFor(1000, [&] { return serial.readByte() == 's'; }));
         }
     }
 
