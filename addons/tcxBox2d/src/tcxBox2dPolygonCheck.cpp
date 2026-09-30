@@ -334,9 +334,14 @@ bool convexRing(const tc::Path& path, std::vector<tc::Vec2>& ring) {
         double e1x = double(b.x) - a.x, e1y = double(b.y) - a.y;
         double e2x = double(c.x) - b.x, e2y = double(c.y) - b.y;
         double cr = e1x * e2y - e1y * e2x;
+        double dot = e1x * e2x + e1y * e2y;
+        // An edge that runs straight back is no convex corner, and its turn
+        // (atan2 of +-0 gives a half turn, TAU / 2, signed by the zero) could
+        // make the total look like one turn around.
+        if (cr == 0.0 && dot < 0.0) return false;
         if (cr > 0.0) left = true;
         if (cr < 0.0) right = true;
-        turning += std::atan2(cr, e1x * e2x + e1y * e2y);
+        turning += std::atan2(cr, dot);
     }
     if ((left && right) || (!left && !right)) return false;
     if (std::abs(turning) > 1.5 * tc::TAU) return false;

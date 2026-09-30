@@ -23,7 +23,8 @@
 // outline exactly, one fixture per triangle of Path::buildFillTriangles():
 //   - a 20-point circle gives many fixtures and the 20-gon's mass; a convex
 //     outline of at most 8 points gives exactly one fixture; a pentagram's
-//     doubly covered center weighs twice; the fill kept for drawing is
+//     doubly covered center weighs twice; an L whose edge runs straight back
+//     is triangulated, not made its hull; the fill kept for drawing is
 //     Path::buildFillTriangles()' own;
 //   - concave notches and holes stay empty: a ball in the hole falls to the
 //     hole's floor, a ball above the solid part lands on it;
@@ -705,6 +706,18 @@ static void testCompoundShapes(box2d::World& world) {
               abs(poly.getMass() / areaMass(polygonArea(notched)) - 1.0f) < 0.01f);
     }
 
+    // An L whose first edge runs out and straight back (a 180-degree turn with
+    // a zero cross product) turns once around in total like a convex ring,
+    // but is not convex: it is triangulated, not made its hull.
+    {
+        const vector<Vec2> ell = {{0, 0}, {10, 0}, {5, 0}, {5, 5}, {10, 5}, {10, -5}, {0, -5}};
+        box2d::PolyShape poly;
+        poly.setupCompound(world, ell, 400, 300);
+        check("setupCompound L with a reversing edge: created", poly.isCreated());
+        check("setupCompound L with a reversing edge: mass = area (75) x density, not the hull's",
+              abs(poly.getMass() / areaMass(75) - 1.0f) < 0.01f);
+    }
+
     // A ring: the hole is empty.
     {
         box2d::PolyShape poly;
@@ -776,6 +789,14 @@ static void testCompoundShapes(box2d::World& world) {
             }
         }
         check("RigidBody2D compound ring: the hole is empty", rb->getBody() && holeEmpty && ringSolid);
+    }
+    {
+        const vector<Vec2> ell = {{0, 0}, {10, 0}, {5, 0}, {5, 5}, {10, 5}, {10, -5}, {0, -5}};
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(ell));
+        float mass = rb->getBody() ? rb->getBody()->GetMass() : 0.0f;
+        check("RigidBody2D compound L with a reversing edge: mass = area (75) x density, not the hull's",
+              abs(mass / areaMass(75) - 1.0f) < 0.01f);
     }
     {
         vector<Vec2> line;
