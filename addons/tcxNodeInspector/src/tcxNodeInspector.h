@@ -95,13 +95,17 @@ struct ImGuiReflector : ::trussc::Reflector {
 
 protected:
     // Run a widget; suppress inside a collapsed group, grey out when read-only.
-    // A change is recorded in `edited` under the member's path.
+    // A change is recorded in `edited` under the member's path. A value the
+    // MCP tools wrote (tcx_imgui_input) also makes the widget return true, so
+    // the change is applied, but it is not an edit by hand: not recorded.
     template <class F>
     bool edit(const char* name, F&& widget) {
         if (suppressDepth_ > 0) return false;
         if (!isReadOnly()) {
+            const unsigned int injectedBefore = tcx::imgui::detail::injectedValueCount();
             bool changed = widget();
-            if (changed && name) {
+            const bool injected = tcx::imgui::detail::injectedValueCount() != injectedBefore;
+            if (changed && name && !injected) {
                 std::string path;
                 for (auto& g : groupNames_) { path += g; path += '.'; }
                 edited.push_back(path + name);
