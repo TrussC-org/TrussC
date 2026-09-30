@@ -280,6 +280,37 @@ private:
 } // namespace tcx::myaddon
 ```
 
+### Events, Threads and Teardown
+
+Addons often fire an `Event<T>` from a thread they own (a receive thread, a device callback), or listen to one that fires off the main thread (`AudioEngine::audioOut`). `Event` guarantees the first point below; the component that owns the thread takes care of the rest:
+
+1. **Same thread:** a listener removed during `notify()` on the notifying thread is not called again, also not later in the same pass. A listener added during a pass starts from the next `notify()`.
+2. **Across threads, `Event` does not wait.** `disconnect()` (or destroying the `EventListener`) returns while the callback may still be running on the other thread. Two safe patterns:
+   - The receiver listens with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
+   - For latency-critical sources such as audio, **the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier and calls it during teardown**: `AudioEngine::waitForCallbackIdle()` for `audioOut` / `audioIn`, the async timer scheduler for `callAfterAsync` / `callEveryAsync` (`cancelAllAsyncTimers()`, also run from `~Node`), and `TcpClient::disconnect()`, which joins the receive thread. If your addon owns a thread that fires events, give it such a stop-and-wait, and let it return at once when it is called from that thread itself.
+3. **Order:** the barrier runs before the state the callback touches is destroyed. Call it from the most-derived class's destructor (or from an explicit `close()` / `stop()`), not from a base-class destructor: by the time a base-class destructor runs, the derived members are already gone.
+
+An addon class that listens on the audio thread:
+
+```cpp
+class Scope {
+public:
+    Scope() {
+        listener_ = tc::AudioEngine::getInstance().audioOut.listen(
+            [this](tc::AudioOutBuffer& b) { push(b); },        // audio thread
+            tc::audio::priority::Monitor);
+    }
+    ~Scope() {
+        listener_.disconnect();                                // no new calls
+        tc::AudioEngine::getInstance().waitForCallbackIdle();  // none still running
+    }                                                          // members go after this
+private:
+    void push(const tc::AudioOutBuffer& b);
+    std::vector<float> ring_;
+    tc::EventListener listener_;
+};
+```
+
 ---
 
 ## Naming Conventions
