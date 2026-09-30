@@ -110,9 +110,11 @@ public:
     //
     // A listener that reconnects with connect() from inside connect()'s own
     // disconnect anyway is overruled: connect() closes that connection again,
-    // without another notification, and connects where it was asked to. A
-    // reconnect with connectAsync() is not covered: connect() does not wait
-    // for its connect thread (#261).
+    // without another notification, and connects where it was asked to.
+    // With threads, do not call connectAsync() from such a listener: the
+    // connect thread it starts runs connect() at the same time as the outer
+    // connect(), which can end in std::terminate (#261). Without threads
+    // connectAsync() is connect(), and is overruled the same way.
     //
     // RECONNECTING ON THE RECEIVE THREAD: when an event fires on the receive
     // thread (onDisconnect for a remote close or an error, onReceive; for
@@ -120,12 +122,14 @@ public:
     // (inline) listener that calls connect() runs it on that old receive
     // thread, which connect() detaches from the client first. A listener
     // that calls disconnect() there detaches it the same way. Nothing waits
-    // for the thread then: neither disconnect() nor the destructor. Until
-    // that call has returned, do not destroy the client, and do not call
-    // disconnect() on it from another thread. Either can end in a
-    // use-after-free, or in a connection that completes after disconnect()
-    // has returned. Reconnecting from the main thread, as above, avoids this.
-    // (A connect() that can be cancelled is #261; see also #262.)
+    // for a detached thread, neither disconnect() nor the destructor, and it
+    // goes on using the client after that call returns (the rest of the
+    // listener and of its receive loop). So until #261 / #262 land, do not
+    // destroy a client whose receive-thread listener called connect() or
+    // disconnect(): keep it for the life of the app. And do not call
+    // disconnect() on it from another thread until that call has returned,
+    // or the connection may complete after disconnect() has returned.
+    // Reconnecting from the main thread, as above, avoids all of this.
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive
@@ -253,13 +257,15 @@ private:
     // Not covered: the reconnect itself. connect() on the receive thread
     // detaches that thread and then, on it, creates the socket, resolves the
     // host, connects (blocking), fires onConnect and starts the new receive
-    // thread. No one owns the detached thread meanwhile: disconnect() and
-    // the destructor do not wait for it, and socket_ is not atomic. A
-    // disconnect() or destruction from another thread in that window races
-    // it (a use-after-free, or a connection that completes after disconnect()
-    // returned), hence the rule in the Events comment above. disconnect()
-    // called on the receive thread detaches it the same way. The fix belongs
-    // to #261 (a cancellable connect) and #262.
+    // thread. disconnect() called on the receive thread detaches it the same
+    // way. No one owns the detached thread: disconnect() and the destructor
+    // do not wait for it, socket_ is not atomic, and the thread goes on
+    // reading the client after that call returns (the rest of the listener,
+    // of the notification and of its receive loop). A disconnect() from
+    // another thread before that call has returned races it; destruction
+    // races it for as long as the thread runs, which the app cannot see.
+    // Hence the rules in the Events comment above. The fix belongs to #261
+    // (a cancellable connect) and #262.
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
