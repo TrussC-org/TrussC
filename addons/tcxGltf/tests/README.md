@@ -10,12 +10,24 @@ embedded as a base64 data URI) to a temp directory and loads it with
   byteStride;
 - an accessor or buffer view that runs past its buffer view or buffer, or a
   reference to an accessor or buffer view that does not exist, fails to load;
-- counts large enough to wrap the size arithmetic fail to load;
+- counts large enough to wrap the size arithmetic fail to load, also on an
+  accessor without a buffer view;
 - a primitive whose attribute counts differ, or whose indices point past its
-  vertices, fails to load; a primitive without POSITION is skipped and the
-  rest of the model loads;
+  vertices (checked by cgltf_validate() against the accessor count, and by the
+  loader against the vertices actually read), fails to load;
+- a primitive without POSITION, or whose POSITION accessor has no buffer view,
+  is skipped with one warning per load (with the count) and the rest of the
+  model loads;
+- a count too large to allocate fails to load (the allocation failure is
+  caught inside `load()`);
+- an image in a buffer without data (no uri) is skipped; the mesh loads;
 - a component type glTF 2.0 does not allow fails validation;
-- a file with no scene fails to load.
+- a file with no scene loads from its root nodes; a file with no scene and no
+  nodes fails to load;
+- a node chain 100000 deep loads (the hierarchy is walked without recursion,
+  each world transform computed once from its parent's); a node cycle is
+  refused by cgltf_validate(), and a scene that lists a node twice by the
+  loader.
 
 Every failed load logs a warning and leaves the model empty.
 

@@ -5,20 +5,27 @@
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 //
 // Each case writes a small .gltf (buffer embedded as a base64 data URI) to a
-// temp directory and loads it with GltfModel. No textures, so nothing needs a
-// graphics context.
+// temp directory and loads it with GltfModel. No texture is ever created, so
+// nothing needs a graphics context.
 //
 // It checks that GltfModel validates model data before reading it:
 //   - valid models (indexed, non-indexed, node hierarchy, sparse) load as before;
 //     sparse values are read tightly packed, also on a strided view
 //   - an accessor or buffer view that runs past its buffer view / buffer, or a
 //     reference to an accessor / buffer view that does not exist, fails to load
-//   - counts large enough to wrap the size arithmetic fail to load
+//   - counts large enough to wrap the size arithmetic fail to load, also on
+//     an accessor without a buffer view
 //   - attribute counts that differ within a primitive fail to load
-//   - an index past the primitive's vertices fails to load; a primitive
-//     without POSITION is skipped
+//   - an index past the primitive's vertices fails to load (caught by
+//     cgltf_validate() or, for vertices the loader cannot read, by the loader)
+//   - a primitive without POSITION, or with a POSITION accessor without a
+//     buffer view, is skipped with one warning per load
+//   - a count too large to allocate fails to load
+//   - an image in a buffer without data is skipped
 //   - a component type glTF 2.0 does not allow fails validation
-//   - a file with no scene fails to load
+//   - a file with no scene loads from its root nodes; with no nodes it fails
+//   - a 100000-deep node chain loads; node cycles and repeated scene nodes
+//     fail to load
 // Every failed load logs a warning and leaves the model empty.
 // =============================================================================
 
@@ -86,9 +93,11 @@ struct GltfBuilder {
     vector<string> views;
     vector<string> accessors;
     string primitive;                    // JSON of the one primitive
-    string nodes = R"([{"mesh":0}])";
+    string nodes = R"([{"mesh":0}])";   // empty string = no "nodes" key
     string scenes = R"([{"nodes":[0]}])";  // empty string = no "scenes" key
     long long bufferLength = -1;         // -1 = bin.size()
+    vector<string> extraBuffers;         // JSON of buffers 1, 2, ...
+    string extra;                        // more top-level members, each ending in ","
 
     // Append raw bytes (padded to 4) and a buffer view over them.
     int addView(const void* data, size_t size, int byteStride = 0) {
@@ -119,12 +128,15 @@ struct GltfBuilder {
         long long len = bufferLength >= 0 ? bufferLength : (long long)bin.size();
         string j = "{\"asset\":{\"version\":\"2.0\"},";
         if (!scenes.empty()) j += "\"scenes\":" + scenes + ",";
-        j += "\"nodes\":" + nodes + ",";
+        if (!nodes.empty()) j += "\"nodes\":" + nodes + ",";
+        j += extra;
         j += "\"meshes\":[{\"primitives\":[" + primitive + "]}],";
         j += "\"accessors\":[" + join(accessors) + "],";
         j += "\"bufferViews\":[" + join(views) + "],";
         j += "\"buffers\":[{\"byteLength\":" + to_string(len) +
-             ",\"uri\":\"data:application/octet-stream;base64," + base64(bin) + "\"}]}";
+             ",\"uri\":\"data:application/octet-stream;base64," + base64(bin) + "\"}";
+        for (const auto& eb : extraBuffers) j += "," + eb;
+        j += "]}";
         return j;
     }
 };
@@ -320,6 +332,25 @@ int main() {
         GltfModel m;
         loadCase("sparse count that wraps the size arithmetic", b, false, m);
     }
+    if (is64) {
+        // Sparse accessor without a buffer view whose own count wraps:
+        // 3 * 6148914691236517206 = 2^64 + 2. No buffer view bounds the
+        // count, and cgltf_validate() only checks sparse indices against it.
+        GltfBuilder b = triangle();
+        const uint16_t sparseIdx[1] = { 0 };
+        const float sparseVal[3] = { 5, 5, 5 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        int svv = b.addView(sparseVal, sizeof(sparseVal));
+        b.addAccessor(accessorJson(-1, FLOAT, "6148914691236517206", "VEC3",
+            ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3}})";
+        GltfModel m;
+        string warning;
+        loadCase("accessor without a buffer view whose count wraps", b, false, m, &warning);
+        check("accessor without a buffer view whose count wraps: reported as too large",
+              warning.find("too large to address") != string::npos);
+    }
     {
         // Sparse accessor on a view with byteStride 16: glTF packs the sparse
         // values tightly (12 bytes apart), not at the base stride. A view
@@ -403,22 +434,166 @@ int main() {
         loadCase("index past the vertex count", b, false, m);
     }
     {
+        // POSITION declared VEC2: cgltf_validate() bounds the indices by the
+        // accessor count (3), but only 2 whole vertices come out of 6 floats,
+        // so index 2 is caught by the loader
+        GltfBuilder b = triangle();
+        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC2"));
+        b.primitive = R"({"attributes":{"POSITION":3},"indices":1})";
+        GltfModel m;
+        string warning;
+        loadCase("index past the vertices read", b, false, m, &warning);
+        check("index past the vertices read: reported by the loader",
+              warning.find("points past its vertices") != string::npos);
+    }
+    {
         // A primitive without POSITION is skipped; the rest of the mesh loads
         GltfBuilder b = triangle();
         b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1},)"
                       R"({"attributes":{"NORMAL":2},"indices":1})";
         GltfModel m;
-        if (loadCase("primitive without positions", b, true, m)) {
+        string warning;
+        if (loadCase("primitive without positions", b, true, m, &warning)) {
             check("primitive without positions: skipped, the other one loaded",
                   m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3 &&
                   m.getNode(0).mesh.getNumIndices() == 3);
+            check("primitive without positions: one warning",
+                  warning.find("skipped 1 primitive") != string::npos);
+        }
+    }
+    {
+        // Two primitives without POSITION: still one warning, with the count
+        GltfBuilder b = triangle();
+        b.primitive = R"({"attributes":{"NORMAL":2}},)"
+                      R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1},)"
+                      R"({"attributes":{"NORMAL":2},"indices":1})";
+        GltfModel m;
+        WarningCounter warnings;
+        bool ok = m.load(writeGltf(b).string());
+        check("two primitives without positions: loads, one node",
+              ok && m.isLoaded() && m.getNodeCount() == 1);
+        check("two primitives without positions: one warning with the count",
+              warnings.count == 1 && warnings.last.find("skipped 2 primitive") != string::npos);
+    }
+    {
+        // POSITION accessor without a buffer view has no vertex data of its
+        // own: the primitive is skipped like one without POSITION
+        GltfBuilder b = triangle();
+        b.addAccessor(accessorJson(-1, FLOAT, "3", "VEC3"));
+        b.primitive = R"({"attributes":{"POSITION":3}},)"
+                      R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
+        GltfModel m;
+        string warning;
+        if (loadCase("position accessor without a buffer view", b, true, m, &warning)) {
+            check("position accessor without a buffer view: skipped, the other one loaded",
+                  m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3);
+            check("position accessor without a buffer view: warning logged",
+                  warning.find("skipped 1 primitive") != string::npos);
+        }
+    }
+    if (is64) {
+        // An index accessor without a buffer view whose count does not wrap
+        // the size arithmetic but is larger than a vector can hold: the
+        // vector refuses it before allocating (std::length_error; libc++ asks
+        // the allocator, which throws std::bad_alloc). load() catches either.
+        GltfBuilder b = triangle();
+        b.addAccessor(accessorJson(-1, UINT, "4611686018427387903", "SCALAR"));  // 2^62 - 1
+        b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
+        GltfModel m;
+        string warning;
+        loadCase("count too large to allocate", b, false, m, &warning);
+        check("count too large to allocate: reported as out of memory",
+              warning.find("not enough memory") != string::npos);
+    }
+
+    // ----- textures -------------------------------------------------------------
+    {
+        // The image lives in a buffer without a uri, so the buffer has no
+        // data. The texture is skipped; the mesh loads.
+        GltfBuilder b = triangle();
+        b.extraBuffers.push_back(R"({"byteLength":16})");
+        b.views.push_back(R"({"buffer":1,"byteOffset":0,"byteLength":16})");
+        int imgView = (int)b.views.size() - 1;
+        b.extra = "\"images\":[{\"bufferView\":" + to_string(imgView) +
+                  ",\"mimeType\":\"image/png\"}],"
+                  "\"textures\":[{\"source\":0}],"
+                  "\"materials\":[{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}],";
+        b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1,"material":0})";
+        GltfModel m;
+        if (loadCase("image in a buffer without data", b, true, m)) {
+            check("image in a buffer without data: texture skipped",
+                  m.getNodeCount() == 1 && !m.getNode(0).material.hasBaseColorTexture());
+        }
+    }
+
+    // ----- scenes and node hierarchy ---------------------------------------------
+    {
+        // No scenes: every node without a parent is a root. Node 1 is a
+        // child of node 0, so it is visited once, through node 0.
+        GltfBuilder b = triangle();
+        b.scenes = "";
+        b.nodes = R"([{"children":[1]},{"mesh":0,"translation":[0,0,2]}])";
+        GltfModel m;
+        if (loadCase("no scene", b, true, m)) {
+            check("no scene: loaded from the root node",
+                  m.getNodeCount() == 1 && vecNear(m.getNode(0).mesh.getVertices()[1], 1, 0, 2));
         }
     }
     {
         GltfBuilder b = triangle();
         b.scenes = "";
+        b.nodes = "";
         GltfModel m;
-        loadCase("no scene", b, false, m);
+        loadCase("no scene and no nodes", b, false, m);
+    }
+    {
+        // A chain 100000 nodes deep, each moved 1 along z: loads without
+        // exhausting the call stack, with the transforms accumulated
+        const int DEPTH = 100000;
+        GltfBuilder b = triangle();
+        string nodes = "[";
+        for (int i = 0; i < DEPTH - 1; i++) {
+            nodes += "{\"children\":[" + to_string(i + 1) + "],\"translation\":[0,0,1]},";
+        }
+        nodes += R"({"mesh":0,"translation":[0,0,1]}])";
+        b.nodes = nodes;
+        GltfModel m;
+        if (loadCase("deep node hierarchy", b, true, m)) {
+            check("deep node hierarchy: transforms accumulated",
+                  m.getNodeCount() == 1 &&
+                  vecNear(m.getNode(0).mesh.getVertices()[1], 1, 0, (float)DEPTH));
+        }
+    }
+    {
+        // Two nodes that are each other's child. No node is a root; the
+        // cycle is refused by cgltf_validate()
+        GltfBuilder b = triangle();
+        b.scenes = "";
+        b.nodes = R"([{"children":[1]},{"children":[0],"mesh":0}])";
+        GltfModel m;
+        string warning;
+        loadCase("node cycle", b, false, m, &warning);
+        check("node cycle: reported by validation",
+              warning.find("failed validation") != string::npos);
+    }
+    {
+        // A node that is its own child
+        GltfBuilder b = triangle();
+        b.scenes = "";
+        b.nodes = R"([{"children":[0],"mesh":0}])";
+        GltfModel m;
+        loadCase("node that is its own child", b, false, m);
+    }
+    {
+        // A scene that lists the same node twice (glTF requires unique
+        // entries) is refused by the loader's walk
+        GltfBuilder b = triangle();
+        b.scenes = R"([{"nodes":[0,0]}])";
+        GltfModel m;
+        string warning;
+        loadCase("scene lists a node twice", b, false, m, &warning);
+        check("scene lists a node twice: reported by the loader",
+              warning.find("more than once") != string::npos);
     }
 
     // ----- a failed load after a good one leaves the model empty ---------------
