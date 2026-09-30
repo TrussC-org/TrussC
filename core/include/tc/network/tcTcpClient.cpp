@@ -32,7 +32,7 @@ TcpClient::TcpClient(TcpClient&& other) noexcept
     , remotePort_(other.remotePort_)
     , running_(other.running_.load())
     , connected_(other.connected_.load())
-    , receiveBufferSize_(other.receiveBufferSize_)
+    , receiveBufferSize_(other.receiveBufferSize_.load())
 {
     // recvBuf_ is not taken from `other`: it is scratch space that
     // processNetwork() sizes on the next receive, and a receive thread of
@@ -54,7 +54,7 @@ TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
         remotePort_ = other.remotePort_;
         running_ = other.running_.load();
         connected_ = other.connected_.load();
-        receiveBufferSize_ = other.receiveBufferSize_;
+        receiveBufferSize_ = other.receiveBufferSize_.load();
         // recvBuf_ stays this object's own (see the move constructor).
 
 #ifdef _WIN32

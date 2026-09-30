@@ -216,7 +216,9 @@ protected:
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
 
-    size_t receiveBufferSize_ = 65536;
+    // Atomic: setReceiveBufferSize() may run on any thread (a listener on the
+    // receive thread, say) while a receive thread reads it
+    std::atomic<size_t> receiveBufferSize_{65536};
     std::mutex sendMutex_;
 
 #ifdef __EMSCRIPTEN__
