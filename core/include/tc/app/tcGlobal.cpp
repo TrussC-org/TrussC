@@ -39,7 +39,7 @@ void setup() {
     // Initialize sokol_gfx (with memory tracking allocator)
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
-    sgdesc.logger.func = slog_func;
+    sgdesc.logger.func = internal::sokolLog;
     sgdesc.pipeline_pool_size = 256;  // default 64 is too small when FBOs are used
     sgdesc.buffer_pool_size = 10000;  // default 128 too small with many meshes (only CPU slot table, not GPU memory)
     sgdesc.image_pool_size = 10000;
@@ -68,7 +68,7 @@ void setup() {
 
     // Initialize sokol_gl (with memory tracking allocator)
     sgl_desc_t sgldesc = {};
-    sgldesc.logger.func = slog_func;
+    sgldesc.logger.func = internal::sokolLog;
     sgldesc.pipeline_pool_size = 256;
     sgldesc.max_vertices = internal::sglBudget().maxVertices;
     sgldesc.max_commands = internal::sglBudget().maxCommands;
@@ -179,7 +179,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     budget.maxCommands = newMaxCommands;
 
     sgl_desc_t sgldesc = {};
-    sgldesc.logger.func = slog_func;
+    sgldesc.logger.func = internal::sokolLog;
     sgldesc.pipeline_pool_size = 256;
     sgldesc.max_vertices = newMaxVertices;
     sgldesc.max_commands = newMaxCommands;
@@ -476,6 +476,10 @@ void registerWindow(Window* w) {
 void unregisterWindow(Window* w) {
     auto& list = windowRegistryStorage();
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
+}
+WindowOccludedHook& windowOccludedHookForTests() {
+    static WindowOccludedHook hook = nullptr;
+    return hook;
 }
 std::vector<Window*> openWindows() {
     std::vector<Window*> out;
@@ -825,6 +829,54 @@ Logger& getLogger() {
     return logger;
 }
 
+// Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
+// (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
+bool Logger::setLogFile(const fs::path& path) {
+    // Relative paths resolve against the data folder, like every other writer.
+    // An absolute path skips getDataPath(), so it never reads the data path
+    // state (unlocked, and written by the first call on Apple).
+    const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
+    const std::string pathUtf8 = internal::pathToUtf8(resolved);
+
+    // "" or "logs/": fail before creating any folder (the current log stays
+    // open, as with the failures below).
+    if (resolved.filename().empty()) {
+        log(LogLevel::Error, "Failed to open log file: " + pathUtf8 + " (no file name in path)");
+        return false;
+    }
+
+    // Create a missing parent folder, like saveScreenshot().
+    std::error_code ec;
+    const fs::path parent = resolved.parent_path();
+    if (!parent.empty()) {
+        fs::create_directories(parent, ec);
+        if (ec) {
+            log(LogLevel::Error, "Failed to open log file: " + pathUtf8
+                + " (cannot create its folder: " + ec.message() + ")");
+            return false;
+        }
+    }
+
+    // Open into a local stream first: a failed call leaves the current log
+    // open, so the error line below still lands in it.
+    std::ofstream stream(resolved, std::ios::app);
+    if (!stream.is_open()) {
+        log(LogLevel::Error, "Failed to open log file: " + pathUtf8);
+        return false;
+    }
+
+    {
+        // Swap under the lock: every line goes whole to the old file or to
+        // the new one. Errors above are logged outside it (log() runs the
+        // onLog listeners).
+        TC_LOCK_GUARD(mutex_);
+        closeFileLocked();
+        fileStream_ = std::move(stream);
+        filePath_ = pathUtf8;
+    }
+    return true;
+}
+
 namespace internal {
 // Declared in tcThread.h, which is included before tcLog.h and cannot log.
 void logThreadNotWaited() {
@@ -836,6 +888,77 @@ void logThreadNotWaited() {
                             "Thread destructor joins only after the subclass members "
                             "are destroyed";
 }
+} // namespace internal
+
+// ---------------------------------------------------------------------------
+// sokol -> Logger bridge (declared in tcLog.h)
+// ---------------------------------------------------------------------------
+namespace {
+// Set while this thread logs a sokol panic (see internal::isLogNonBlocking).
+thread_local bool logNonBlocking = false;
+} // namespace
+
+namespace internal {
+
+bool isLogNonBlocking() {
+    return logNonBlocking;
+}
+
+LogLevel sokolLogLevel(uint32_t logLevel) {
+    switch (logLevel) {
+        case 0:  return LogLevel::Fatal;     // panic
+        case 1:  return LogLevel::Error;
+        case 2:  return LogLevel::Warning;
+        default: return LogLevel::Verbose;   // info: hidden by default
+    }
+}
+
+std::string sokolLogMessage(const char* tag, uint32_t logItem,
+                            const char* message, uint32_t lineNr) {
+    std::string text = "[";
+    text += tag ? tag : "sokol";
+    text += "] ";
+    if (message) {
+        text += message;
+    } else {
+        // Release builds (no SOKOL_DEBUG) pass no message: the log item id
+        // (SAPP_LOGITEM_*, SG_LOGITEM_*, ...) and sokol's source line.
+        text += "id:" + std::to_string(logItem) + " line:" + std::to_string(lineNr);
+    }
+    return text;
+}
+
+void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
+              const char* message, uint32_t lineNr, const char* filename,
+              void* userData) {
+    // Called from sokol's C code: nothing may throw out of here, and a panic
+    // must reach slog_func (the abort) whatever happens before it.
+    const bool noLogger = loggerDestroyed.load();
+    if (!noLogger) {
+        try {
+            if (logLevel == 0) {
+                // A panic: the process ends right after, so the sinks do not
+                // wait for the lock (a thread holding it may never let go).
+                struct NonBlocking {
+                    NonBlocking() { logNonBlocking = true; }
+                    ~NonBlocking() { logNonBlocking = false; }
+                } nonBlocking;
+                getLogger().log(LogLevel::Fatal,
+                                sokolLogMessage(tag, logItem, message, lineNr));
+            } else {
+                getLogger().log(sokolLogLevel(logLevel),
+                                sokolLogMessage(tag, logItem, message, lineNr));
+            }
+        } catch (...) {
+        }
+    }
+    if (logLevel == 0 || noLogger) {
+        // Panic: slog_func prints it too and aborts, as before the bridge.
+        // After the Logger is gone (static destruction), slog_func alone.
+        slog_func(tag, logLevel, logItem, message, lineNr, filename, userData);
+    }
+}
+
 } // namespace internal
 
 // ---------------------------------------------------------------------------

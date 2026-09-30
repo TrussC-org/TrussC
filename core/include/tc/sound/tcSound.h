@@ -73,6 +73,22 @@ protected:
 };
 
 
+namespace internal {
+
+// Interleaved sample count of `frames` frames of `channels` channels, for
+// sizing SoundBuffer::samples. False when channels < 1 or when the count
+// exceeds maxCount (pass samples.max_size()). The product is checked before
+// it is formed, so it cannot wrap where size_t is 32-bit (wasm32).
+inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCount,
+                                   size_t& outCount) {
+    if (channels < 1) return false;
+    if (frames > maxCount / (size_t)channels) return false;
+    outCount = (size_t)frames * (size_t)channels;
+    return true;
+}
+
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Sound Buffer (decoded data)
 // ---------------------------------------------------------------------------
@@ -158,7 +174,10 @@ public:
     std::string deferredAacPath_;  // Path for deferred AAC loading (Web only)
 #endif
 
-    // Load raw PCM data (16-bit signed, little-endian)
+    // Load raw interleaved PCM: 16-bit signed integer or 32-bit float,
+    // little-endian unless bigEndian is set. dataSize must be a whole number
+    // of frames (bitsPerSample / 8 * numChannels bytes each); anything else
+    // fails without touching the buffer.
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
@@ -167,15 +186,38 @@ public:
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "unsupported bits per sample: " + std::to_string(bitsPerSample));
         }
+        if (numChannels < 1) {
+            logError("SoundBuffer") << "invalid PCM channel count: " << numChannels;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "invalid PCM channel count: " + std::to_string(numChannels));
+        }
+        // Frame size in 64 bits: bytes * channels can exceed a 32-bit size_t.
+        const size_t bytesPerSample = (size_t)bitsPerSample / 8;
+        const uint64_t frameBytes = (uint64_t)bytesPerSample * (uint64_t)numChannels;
+        if ((uint64_t)dataSize % frameBytes != 0) {
+            logError("SoundBuffer") << "PCM data size " << dataSize
+                                    << " is not a whole number of " << frameBytes << "-byte frames";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data size " + std::to_string(dataSize) +
+                                    " is not a whole number of " + std::to_string(frameBytes) +
+                                    "-byte frames");
+        }
+        const uint64_t frameCount = (uint64_t)dataSize / frameBytes;
+        size_t sampleCount = 0;
+        if (!internal::interleavedSampleCount(frameCount, numChannels, samples.max_size(),
+                                              sampleCount)) {
+            logError("SoundBuffer") << "PCM data too large: " << dataSize << " bytes";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data too large: " + std::to_string(dataSize) + " bytes");
+        }
 
         path_.clear();
         channels = numChannels;
         sampleRate = rate;
+        numSamples = (size_t)frameCount;
 
         if (bitsPerSample == 16) {
             // 16-bit signed integer -> float
-            size_t sampleCount = dataSize / 2;
-            numSamples = sampleCount / channels;
             samples.resize(sampleCount);
 
             const int16_t* src = static_cast<const int16_t*>(data);
@@ -188,13 +230,20 @@ public:
                 samples[i] = s / 32768.0f;
             }
         } else {
-            // 32-bit float
-            size_t sampleCount = dataSize / 4;
-            numSamples = sampleCount / channels;
+            // 32-bit float: dataSize == sampleCount * sizeof(float) here
             samples.resize(sampleCount);
-
-            const float* src = static_cast<const float*>(data);
-            std::memcpy(samples.data(), src, dataSize);
+            const size_t copyBytes = sampleCount * sizeof(float);
+            std::memcpy(samples.data(), data, copyBytes);
+            if (bigEndian) {
+                // Reverse the bytes of each sample
+                for (size_t i = 0; i < sampleCount; i++) {
+                    uint32_t u;
+                    std::memcpy(&u, &samples[i], sizeof(u));
+                    u = (u >> 24) | ((u >> 8) & 0x0000FF00u) |
+                        ((u << 8) & 0x00FF0000u) | (u << 24);
+                    std::memcpy(&samples[i], &u, sizeof(u));
+                }
+            }
         }
 
         logVerbose("SoundBuffer") << "loaded PCM from memory (" << channels << " ch, "
@@ -615,9 +664,9 @@ struct PlayingSound {
 // call to override the engine defaults (sample rate, channel count,
 // device, polyphony).
 //
-// Once init() succeeds, the engine is locked in — calling init() again
-// with different settings is currently a no-op + warning (avoiding the
-// disruption of tearing down a running device while sounds are playing).
+// Calling init(settings) again on a running engine re-initializes it live:
+// the device is reopened with the new settings and playing voices carry on
+// from their position (expect a short audible gap while the device is down).
 //
 // Empty `deviceName` selects the system default playback device.
 // Use AudioEngine::listDevices() to enumerate available device names.
@@ -772,6 +821,25 @@ namespace internal {
     // anything opens an audio context: the engine keeps the context it
     // opened first. State lives in tcAudio_impl.cpp.
     void setNullAudioBackendForTests(bool on);
+
+    // Test hook, not a user setting: AudioRecorder's audio-thread capture
+    // calls `hook` with the frame count of every buffer it takes, after
+    // copying it into the ring and before handing it to the writer, so a
+    // headless test can hold a capture in flight
+    // (core/tests/audioListenerTeardown). nullptr, the default, turns it off.
+    // State lives in tcAudio_impl.cpp.
+    void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+    void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+
+    // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
+    // without its one-second limit. internal::detachAppAudio() waits here
+    // before the framework destroys an App (exit, runHeadlessApp, hot reload,
+    // closing a secondary window). A listener that never returns is an app
+    // bug; the teardown keeps waiting for it (the app hangs where it can be
+    // seen) rather than destroy what the listener may still use. After one
+    // second it logs an error, once, and goes on waiting. Returns at once on
+    // the audio thread inside a listener. tcAudio_impl.cpp.
+    void waitForCallbackIdleNoTimeout();
 }
 
 // ---------------------------------------------------------------------------
@@ -782,12 +850,13 @@ public:
     // FFT analysis buffer is internal-only and unaffected by AudioSettings.
     static constexpr int ANALYSIS_BUFFER_SIZE = 4096;
 
-    // Default values used when init() is called without an explicit
-    // AudioSettings, and as initial values for the runtime fields. 48 kHz
-    // is the de-facto pro/video/web standard (DAWs, Web Audio, modern OS
-    // mixers, game engines all default to 48k), and avoids extra resampling
-    // on the way out of the engine. Use init({.sampleRate = 96000}) to opt
-    // into a higher rate when needed.
+    // Initial values of the runtime fields: init() with no arguments uses
+    // them only until init(settings) is first called (after that it reuses
+    // the last settings), and init(settings) picks them for a field given
+    // as 0 or less. 48 kHz is the de-facto pro/video/web standard (DAWs,
+    // Web Audio, modern OS mixers, game engines all default to 48k), and
+    // avoids extra resampling on the way out of the engine. Use
+    // init({.sampleRate = 96000}) to opt into a higher rate when needed.
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;
     static constexpr int DEFAULT_CHANNELS = 2;
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
@@ -800,10 +869,31 @@ public:
 
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //
-    // init() with no arguments uses the defaults (DEFAULT_SAMPLE_RATE etc.).
-    // init(settings) writes the runtime config from `settings`. If the
-    // engine is already running, init returns true immediately with a
-    // warning (silent re-init would tear down playing voices).
+    // init(settings) stores sampleRate, channels, bufferSize and maxPolyphony
+    // from `settings` (0 or less picks DEFAULT_*) before it opens the device,
+    // so they are kept even when the open fails. init() with no arguments
+    // reuses the settings of the last init(settings) call, failed or not
+    // (the DEFAULT_* values if there was none), but always opens the system
+    // default device: deviceName is not kept. On a running
+    // engine it re-initializes live: the device is reopened with the new
+    // settings and playing voices move over, keeping their position.
+    //
+    // With no usable audio backend, miniaudio falls back to its Null
+    // backend: init() succeeds on a silent device and logs a warning.
+    // Returns false when no output device can be opened (none present, or
+    // the requested one refused); the failure is logged
+    // through logError("AudioEngine"), naming the requested device, and the
+    // engine is left uninitialized. That holds for a re-init too: the
+    // running device is closed before the new one is tried, so a failed
+    // switch leaves the engine stopped, not on the previous device. init()
+    // may be called again later (a device switched on after the app
+    // started, or other settings). Each failed try opens the device again
+    // and logs again, so retry on a timer (about once a second) or on a
+    // user action, not every frame. Sound::load*() also calls init() while
+    // the engine is not initialized; play() does not. After a failed
+    // init(settings), that implicit init() opens the system default device
+    // with those settings, so call init(settings) again before loading
+    // sounds if you want the requested device.
     bool init();
     bool init(const AudioSettings& settings);
     void shutdown();
@@ -814,10 +904,11 @@ public:
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values
-    // passed to init(AudioSettings) — or the defaults if init() was called
-    // without an argument. They return the default even before init() is
-    // called, so video / audio code that needs the rate up front can rely
-    // on the value being sensible.
+    // stored by the last init(AudioSettings) call, whether it succeeded or
+    // failed (a zero-arg init() reuses them), or the DEFAULT_* values if
+    // init(settings) was never called. They are valid even before init(),
+    // so video / audio code that needs the rate up front can rely on the
+    // value being sensible.
     int getSampleRate()   const { return sampleRate_; }
     int getChannels()     const { return channels_; }
     int getMaxPolyphony() const { return (int)playingSounds_.size(); }
@@ -848,6 +939,39 @@ public:
     //   });
     Event<AudioOutBuffer> audioOut;
     Event<AudioInBuffer>  audioIn;
+
+    // Teardown barrier for audioOut / audioIn listeners (#256). Returns once
+    // every audioOut / audioIn notify that was running when it was called has
+    // finished. Event does not wait: when disconnect() returns, the callback
+    // may still be running on the audio thread. So an object whose listener
+    // touches its members disconnects, then waits here, then lets the members
+    // go:
+    //
+    //   ~Synth() { listener_.disconnect();
+    //              AudioEngine::getInstance().waitForCallbackIdle(); }
+    //
+    // Do it in the most-derived class (or in cleanup()), not in a base-class
+    // destructor, which runs after the derived members are already gone. The
+    // App's own audioOut() / audioIn() hooks are handled by the framework:
+    // they are detached after cleanup(), and before the App is destroyed
+    // (exit, hot reload, closing a secondary window) the framework waits the
+    // same way, but without the one-second limit below
+    // (internal::waitForCallbackIdleNoTimeout()).
+    //
+    //   - Returns at once when no callback is running: the device is stopped
+    //     or was never started, or the audio thread is between two buffers.
+    //   - Returns at once when called from inside an audioOut / audioIn
+    //     listener (the audio thread): waiting there would wait for itself.
+    //   - Otherwise waits only for callbacks already running (at most two
+    //     back-to-back buffers), not for later ones. Gives up after one
+    //     second, logs a warning and returns false: a listener that blocks
+    //     that long is stuck (e.g. on a lock the caller holds), and waiting
+    //     forever would hang the caller. Returns true otherwise. (The
+    //     framework's App teardown does wait forever, see above: there a hang
+    //     is better than destroying the App under a running listener.)
+    // It waits for every listener running at that moment, not only the
+    // caller's: call it without holding a lock that a listener takes.
+    bool waitForCallbackIdle();
 
     // Fired on every successful init() — both the initial startup and any
     // subsequent live re-init. The args carry the new device's real name
@@ -919,12 +1043,25 @@ private:
     void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
     friend void internal::flushAudioDiagnostics();
+    friend void internal::waitForCallbackIdleNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
 
     // Zero the output meters, the load window and every voice's level. Only
     // while no device is running (init(), shutdown()), so the audio thread
     // cannot race it.
     void resetMeters();
+
+    // Mark an audioOut / audioIn notify in flight for waitForCallbackIdle()
+    // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
+    // add each, no lock. beginCallback() returns the slot to pass to
+    // endCallback(). audioIn has no engine-side source yet: whatever fires it
+    // from the engine must enclose that notify the same way.
+    int  beginCallback();
+    void endCallback(int slot);
+
+    // Both barriers (tcAudio_impl.cpp): waitForCallbackIdle() gives up after
+    // one second (giveUp), internal::waitForCallbackIdleNoTimeout() does not.
+    bool waitForCallbacks(bool giveUp);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -1106,7 +1243,11 @@ private:
             ob.channels      = num_channels;
             ob.sampleRate    = sampleRate_;
             ob.framePosition = framePosition_;
+            // In flight for waitForCallbackIdle(). Must enclose the notify:
+            // it is what loads the listener snapshot.
+            const int slot = beginCallback();
             audioOut.notify(ob);
+            endCallback(slot);
         }
         framePosition_ += (uint64_t)num_frames;
 
@@ -1144,8 +1285,9 @@ private:
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;
 
-    // Runtime engine configuration. Initialized to defaults; replaced when
-    // init(AudioSettings) succeeds. Reading these before init() returns the
+    // Runtime engine configuration. Initialized to defaults; overwritten by
+    // every init(AudioSettings) call, success or failure, and reused by a
+    // zero-arg init(). Reading these before init() returns the
     // defaults (intentional — code that needs the rate up front, e.g. video
     // resampler setup in tcVideoPlayer_*, can pull the value without first
     // forcing engine startup).
@@ -1167,6 +1309,19 @@ private:
     // Drop counters, output meters, audio-thread load and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
     std::unique_ptr<internal::AudioDiagnostics> diag_;
+
+    // Callbacks in flight (beginCallback / endCallback), counted in one of two
+    // slots picked by the epoch's low bit. waitForCallbackIdle() advances the
+    // epoch so new callbacks count in the other slot, then waits for the old
+    // slot to drain, twice (once per slot): it waits only for callbacks that
+    // were already running, and a callback that read the epoch just before an
+    // advance is still caught. The mutex serializes barriers (the epoch
+    // advances of two barriers must not interleave); the audio thread never
+    // takes it. Timed, so waitForCallbackIdle() keeps its one-second limit
+    // while a framework teardown holds it waiting for a stuck listener.
+    std::atomic<uint32_t> callbackEpoch_{0};
+    std::atomic<int>      callbacksInFlight_[2]{};
+    std::timed_mutex      callbackBarrierMutex_;
 };
 
 // ---------------------------------------------------------------------------
@@ -1205,29 +1360,11 @@ public:
         if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 
         // Decode into a SoundBuffer, then store as the polymorphic source.
+        // SoundBuffer::load() picks the decoder from the extension, ignoring
+        // its case (the path itself is used as given), records the file for
+        // getPath() and logs a failure with the file name.
         auto buf = std::make_shared<SoundBuffer>();
-
-        // Determine format by extension
-        std::string ext = path.extension().string();
-        if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-        LoadResult result = LoadResult::fail(LoadError::UnsupportedFormat,
-                                             "unsupported extension '." + ext + "'");
-
-        if (ext == "ogg" || ext == "OGG") {
-            result = buf->loadOgg(path);
-        } else if (ext == "wav" || ext == "WAV") {
-            result = buf->loadWav(path);
-        } else if (ext == "mp3" || ext == "MP3") {
-            result = buf->loadMp3(path);
-        } else if (ext == "flac" || ext == "FLAC") {
-            result = buf->loadFlac(path);
-        } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
-            // Through SoundBuffer::load(): the per-platform loadAac() does
-            // not record the file for getPath(), load() does.
-            result = buf->load(path);
-        } else {
-            logError("Sound") << "unsupported format: " << ext;
-        }
+        LoadResult result = buf->load(path);
 
         if (!result) {
             buffer_.reset();

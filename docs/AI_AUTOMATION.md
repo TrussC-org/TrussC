@@ -30,10 +30,26 @@ When enabled:
 
 ### Related: `TRUSSC_LOG_FILE`
 
-Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes the app
-call `setLogFile()` before `setup()` runs, so every log line — including
-setup-time output — is appended to that file with zero app code. This is how a
-supervisor process (e.g. `anchorbolt start`) captures logs from an unmodified app.
+Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes a
+native app call `setLogFile()` before the window and graphics start
+(`runApp()`, before `sapp_run()`), so every log line — including setup-time
+output — is appended to that file with zero app code. (Web builds don't read
+`TRUSSC_LOG_FILE`.) A relative value resolves against the data folder
+(`getDataPath()` with the root in effect when `runApp()` starts — normally
+the default; it is read before `setup()`, so a `setDataPathRoot()` in `setup()`
+does not apply, while one in `main()` before `runApp()` does), and a
+missing parent folder is created. If the file still cannot be opened, the app
+runs on and logs a warning. sokol's own errors, warnings and panics go through the
+logger too, and lines logged from worker threads land whole. A window or GPU
+setup failure reaches the file where sokol reports it as text: on Linux (no X
+display; GLX setup, framebuffer config, GL context or window creation; EGL
+setup in GLES3 builds) and on iOS (Metal swapchain textures). On the web,
+WebGPU instance, adapter and device request failures reach the logger (the
+browser console and `onLog`), not a file. On Android sokol's app messages
+(lifecycle, the app thread's startup) reach the logger too, but an EGL setup
+failure is not logged; on Windows and macOS a window or GPU setup failure is
+not logged yet. This is how a supervisor process (e.g. `anchorbolt start`)
+captures logs from an unmodified app.
 
 The audio engine reports through the logger too, so the file also receives
 the plays it had to drop (`Sound::play()` returned false: every voice busy, a
@@ -65,9 +81,9 @@ your own tools:
 ### Inspection Tools (always available in MCP mode)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236) |
-| `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main) |
-| `tc_list_windows` | (none) | List open windows: index 0 = main, then secondary windows (title, size). Use the index as the `window` arg above |
+| `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236). A secondary window is captured inside its own frame, so it must be visible: see [Hidden secondary windows](#hidden-secondary-windows) |
+| `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main). A secondary window must be visible, as for `tc_get_screenshot` |
+| `tc_list_windows` | (none) | List open windows: `{windows: [{index, main, title, width, height, occluded}]}`. Index 0 = main (no `title`, no `occluded`), then the secondary windows. `occluded` is `true` while the OS reports that window hidden (`Window::isOccluded()`). Use the index as the `window` arg above |
 | `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `voices` `[{slot, file (normalized path), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the voice's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, voiceLimit, streamLimit, decoderError, notRunning}` (plays refused since startup); `thread` `{load, loadMax}` (audio-thread time / audio time over ~0.5 s of audio); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getVoices()` |
 | `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
@@ -75,6 +91,31 @@ your own tools:
 | `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
 | `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
+
+#### Hidden secondary windows
+
+A secondary window renders only while it is visible, and the screenshot tools
+capture it inside its own frame. So:
+
+- While the OS reports the window hidden, `tc_list_windows` shows
+  `"occluded": true` for it, and `tc_get_screenshot` / `tc_save_screenshot`
+  fail at once with `window N is not visible (the OS reports it hidden: ...),
+  so it renders no frames: make it visible and retry`. The flag is the OS
+  signal that pauses the window, not a diagnosis, so raising the window does
+  not always help: macOS: minimized, fully covered or on another Space
+  (NSWindow occlusionState); Windows: minimized, or DXGI reports the window
+  occluded (while the session is locked or the display is off; under DWM a
+  window that is merely covered keeps rendering and is not flagged); Linux
+  (X11): minimized, or fully obscured (only reported without a compositing
+  manager; under a compositing WM such as GNOME's a covered window keeps
+  rendering and is not flagged).
+- Otherwise the request waits for the window's next frame. If none comes
+  within 5 s (the window became hidden after the check, the platform has no
+  signal for how it is hidden, or `Window::setFps()` throttles it very low),
+  it fails with `the window rendered no frame within 5 s (minimized, hidden
+  or closed?)`.
+- The main window (index 0) keeps running while hidden, so none of this
+  applies to it.
 
 ### Recording Tools (always available in MCP mode)
 
@@ -365,8 +406,10 @@ Configure your MCP client with the HTTP URL:
 
 By default the MCP server binds to **localhost only** and sends no CORS headers,
 so it is reachable only by native MCP clients on the same machine (a wildcard
-CORS origin would otherwise let any web page in your browser drive it). For
-remote access, SSH tunnelling is the simplest safe option.
+CORS origin would otherwise let any web page in your browser drive it). The
+server is for native MCP clients: a web page cannot call it, neither directly
+nor through a dev-server proxy that forwards the page's `Origin`. For remote
+access, SSH tunnelling is the simplest safe option.
 
 A web page can still *send* requests to a loopback server without CORS, so
 every request is also checked before anything runs (as the MCP HTTP transport
@@ -375,18 +418,8 @@ spec requires):
 | Check | Refused with |
 |-------|--------------|
 | When bound to loopback, `Host` must be `localhost`, `127.0.0.1` or `[::1]` (any port) — a DNS-rebinding page arrives under its own name | 403 |
-| An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) or one added with `mcp::allowOrigin(...)`. Native MCP clients send none | 403 |
+| An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) — a browser page on any other origin, including another localhost port, is refused. Native MCP clients send none | 403 |
 | `POST /mcp` must be `Content-Type: application/json` (parameters such as `; charset=utf-8` are fine) | 415 |
-
-To call the server from your own web page (a debug UI served by a dev server,
-for example), allow its origin in code:
-
-```cpp
-mcp::allowOrigin("http://localhost:5173");
-```
-
-There is deliberately no environment variable for this: environment variables
-can narrow what the MCP server exposes, never widen it.
 
 To expose it directly instead, set both:
 

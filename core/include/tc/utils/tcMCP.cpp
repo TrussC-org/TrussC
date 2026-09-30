@@ -103,16 +103,6 @@ std::atomic<bool>& mcpLoopbackOnly() {
     return loopback;
 }
 
-std::vector<AllowedOrigin>& allowedOrigins() {
-    static std::vector<AllowedOrigin> origins;
-    return origins;
-}
-
-std::mutex& allowedOriginsMutex() {
-    static std::mutex m;
-    return m;
-}
-
 #endif // __EMSCRIPTEN__
 
 } // namespace detail

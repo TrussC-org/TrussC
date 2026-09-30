@@ -30,7 +30,7 @@ public:
         // Every manager owns a full sokol_imgui instance (own ImGui context,
         // font atlas, buffers). The classic single-window app just has one.
         simgui_desc_t desc = {};
-        desc.logger.func = slog_func;
+        desc.logger.func = tc::internal::sokolLog;
         // Secondary windows have their own swapchain formats (BGRA8/RGBA8,
         // not the main window's RGB10A2) -- the imgui pipeline must match
         // the pass it renders into or sg validation fails.

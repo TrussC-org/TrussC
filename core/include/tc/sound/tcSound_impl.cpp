@@ -37,6 +37,7 @@ extern "C" {
 #include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
+#include "tc/utils/tcFile.h"
 
 namespace trussc {
 
@@ -170,11 +171,19 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     }
 
     stb_vorbis_info info = stb_vorbis_get_info(vorbis);
+    const unsigned int frames = stb_vorbis_stream_length_in_samples(vorbis);
+    size_t sampleCount = 0;
+    if (!internal::interleavedSampleCount(frames, info.channels, samples.max_size(), sampleCount)) {
+        stb_vorbis_close(vorbis);
+        logError("SoundBuffer") << "OGG stream too large to load: " << pathStr << " ("
+                                << info.channels << " ch, " << frames << " samples)";
+        return LoadResult::fail(LoadError::DecodeFailed, "OGG stream too large to load: " + pathStr);
+    }
     channels = info.channels;
     sampleRate = info.sample_rate;
-    numSamples = stb_vorbis_stream_length_in_samples(vorbis);
+    numSamples = frames;
 
-    samples.resize(numSamples * channels);
+    samples.resize(sampleCount);
 
     int decoded = stb_vorbis_get_samples_float_interleaved(
         vorbis, channels, samples.data(), static_cast<int>(samples.size()));
@@ -276,11 +285,19 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
     }
 
     stb_vorbis_info info = stb_vorbis_get_info(vorbis);
+    const unsigned int frames = stb_vorbis_stream_length_in_samples(vorbis);
+    size_t sampleCount = 0;
+    if (!internal::interleavedSampleCount(frames, info.channels, samples.max_size(), sampleCount)) {
+        stb_vorbis_close(vorbis);
+        logError("SoundBuffer") << "OGG stream in memory too large to load (" << info.channels
+                                << " ch, " << frames << " samples)";
+        return LoadResult::fail(LoadError::DecodeFailed, "OGG stream in memory too large to load");
+    }
     channels = info.channels;
     sampleRate = info.sample_rate;
-    numSamples = stb_vorbis_stream_length_in_samples(vorbis);
+    numSamples = frames;
 
-    samples.resize(numSamples * channels);
+    samples.resize(sampleCount);
     int decoded = stb_vorbis_get_samples_float_interleaved(
         vorbis, channels, samples.data(), static_cast<int>(samples.size()));
 
@@ -295,16 +312,14 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
 }
 
 // -----------------------------------------------------------------------------
-// Auto-detect by extension. Mirrors the dispatch in Sound::load() so callers
-// that already have a SoundBuffer (e.g., for sharing across multiple Sounds)
-// can use it directly.
+// Auto-detect by extension. Sound::load() delegates here; callers that
+// already have a SoundBuffer (e.g., for sharing across multiple Sounds) can
+// use it directly.
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::load(const fs::path& path) {
     // Lowercase the extension once
-    std::string ext = path.extension().string();
-    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    std::string ext = toLower(getFileExtension(path));
 
     if (ext == "wav")  return loadWav(path);
     if (ext == "mp3")  return loadMp3(path);

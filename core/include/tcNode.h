@@ -105,6 +105,12 @@ namespace internal {
     // give one node two timers with the same id, and cancelTimer(id) removes
     // every timer with that id.
     uint64_t nextNodeTimerId();
+
+    // Runs the node's setup() once and then the framework's post-setup hook,
+    // as the node's first updateTree() / drawTree() does (Node::setupOnce()).
+    // For a runner that drives an App without the tree walk
+    // (runHeadlessApp()). Defined below the Node class.
+    inline void setupNodeOnce(Node& node);
 }
 
 // True when an overlay currently has the pointer over it (e.g. cursor is over a
@@ -129,6 +135,7 @@ class Node : public std::enable_shared_from_this<Node> {
     friend class App;     // Allow App to call dispatch methods
     friend class Window;  // Secondary windows drive their own tree (tcWindow.h)
     friend class Mod;  // Allow Mod to access owner_
+    friend void internal::setupNodeOnce(Node& node);
 
 public:
     using Ptr = std::shared_ptr<Node>;
@@ -812,6 +819,21 @@ private:
     // Recursive update/draw (called by App via friend access)
     // -------------------------------------------------------------------------
 
+    // The node's first updateTree() / drawTree() runs setup() here, once,
+    // and then onSetupDone() (both paths share this, so they can't drift).
+    void setupOnce() {
+        if (setupCalled_) return;
+        setupCalled_ = true;
+        setup();
+        onSetupDone();
+    }
+
+    // Framework hook, not an app callback (apps override setup()): runs once,
+    // right after the node's first setup() has returned. App attaches its
+    // audioOut() / audioIn() here (#426), so the audio thread never runs them
+    // before or during setup().
+    virtual void onSetupDone() {}
+
     // Recursively update self and child nodes
     void updateTree() {
         if (!isActive_) return;
@@ -820,10 +842,7 @@ private:
         sweepDeadChildren();
 
         // Call setup() once on first update/draw
-        if (!setupCalled_) {
-            setupCalled_ = true;
-            setup();
-        }
+        setupOnce();
 
         // Mod early update (before Node::update). forEachMod snapshots types
         // and defers self-removal, so a mod may add/remove mods safely here.
@@ -905,10 +924,7 @@ private:
         if (!isActive_) return;
 
         // Call setup() once on first update/draw
-        if (!setupCalled_) {
-            setupCalled_ = true;
-            setup();
-        }
+        setupOnce();
 
         // Stamp the camera scope this node is being drawn under (pointer
         // compare first — steady state is one assignment skip per frame).
@@ -1674,6 +1690,12 @@ protected:
         }
     }
 };
+
+namespace internal {
+inline void setupNodeOnce(Node& node) {
+    node.setupOnce();
+}
+}
 
 // Mod::removeSelf — defined here now that Node is complete. Uses the mod's
 // dynamic type so it removes the right entry without the mod naming its type.

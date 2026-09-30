@@ -34,6 +34,14 @@ void registerWindow(Window* w);
 void unregisterWindow(Window* w);
 std::vector<Window*> openWindows();   // only windows whose native side is alive
 
+// Test hook, not a user setting: a headless test has no native window the OS
+// could cover or minimize. While a hook is set, Window::isOccluded() returns
+// hook(window) instead of the native flag (core/tests/mcpOccludedWindow).
+// nullptr, the default, turns it off. Defined in tcGlobal.cpp (one per
+// process), next to the window registry.
+using WindowOccludedHook = bool (*)(const Window&);
+WindowOccludedHook& windowOccludedHookForTests();
+
 // RAII registrar: a Window member, so every ~Window() unregisters no matter
 // which platform adapter defines the destructor.
 struct WindowRegistryEntry {
@@ -64,7 +72,15 @@ public:
     // (position, decoration). To control this window from elsewhere, use this
     // Window handle (from inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
-    // (standard Node lifecycle), i.e. on the window's first tick.
+    // (standard Node lifecycle), i.e. on the window's first tick; its
+    // audioOut() / audioIn() are subscribed right after that setup() returns,
+    // not at setApp(). An App runs
+    // once: setup() when first attached, exit() / cleanup() when its window
+    // closes (or, with #318, when it is swapped out); closing the window also
+    // detaches its audioOut() / audioIn() for good. To show it again, create
+    // a new App. setApp() refuses an App whose cleanup() already ran, and any
+    // App on a window that is not open (both log an error and leave the
+    // window as it is); setApp(nullptr) always releases.
     void setApp(std::shared_ptr<App> app);
     std::shared_ptr<App> getApp() const { return app_; }
 
@@ -80,6 +96,16 @@ public:
     const std::string& getTitle() const { return title_; }
     int getWidth() const;    // logical size (matches the window's coordinates)
     int getHeight() const;
+
+    // True while the OS reports this window as not visible, so it renders no
+    // frames (its update/draw are paused until it is visible again). The
+    // signals are the ones that pause the window's tick: macOS: minimized,
+    // fully covered or on another Space (NSWindow occlusionState); Windows:
+    // minimized, or DXGI reports the window occluded; Linux (X11): minimized,
+    // or fully obscured (without a compositing manager). False for a closed
+    // window. A window can turn hidden or visible at any time, so this is a
+    // snapshot. The MCP screenshot tools use it to fail fast (#347).
+    bool isOccluded() const;
 
     // Resize this window's content area to the given LOGICAL size (points),
     // matching getWidth()/getHeight() units. Implemented natively per platform
@@ -254,7 +280,10 @@ namespace internal {
 // defined in tcGlobal.cpp: setApp() below adds to it from app code, and the
 // platform close() (TrussC.lib) removes from it, so under hot reload the guest
 // adds and the host removes. With a copy per module a Windows guest never saw
-// the removal, and re-attaching an App after its window closed was refused.
+// the removal: the released App stayed "attached" in the guest's view, so a
+// new App that got a released App's address was refused. (A closed App is
+// never attached again: setApp() refuses an App whose cleanup() ran; attach
+// a new App instead.)
 // Main thread only. (runApp unification — "runApp = create main window +
 // setApp" — is a future refactor; the main App is guarded via rootNode.)
 std::unordered_set<const App*>& attachedApps();
@@ -263,12 +292,24 @@ std::unordered_set<const App*>& attachedApps();
 inline void Window::setApp(std::shared_ptr<App> app) {
     auto& attached = internal::attachedApps();
     if (app) {
+        // A closed window never runs close() again (~Window() returns early),
+        // so nothing would end an App attached to it (#256).
+        if (!isOpen()) {
+            logError("Window") << "setApp(): this window is closed; create a new window";
+            return;
+        }
         if (app == internal::mainWindowContext().rootNode.lock()) {
             logError("Window") << "setApp(): this App is the running main App";
             return;
         }
         if (attached.count(app.get())) {
             logError("Window") << "setApp(): this App already drives another window";
+            return;
+        }
+        // An App runs once (#256): its window's close() ran its cleanup() and
+        // detached its audio hooks for good.
+        if (internal::appRanCleanup(*app)) {
+            logError("Window") << "setApp(): this App already ran cleanup(); create a new App";
             return;
         }
     }
@@ -344,6 +385,10 @@ inline void Window::close() {}
 inline void Window::setTitle(const std::string&) {}
 inline int Window::getWidth() const { return 0; }
 inline int Window::getHeight() const { return 0; }
+inline bool Window::isOccluded() const {
+    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
+    return false;
+}
 inline void Window::setSize(int, int) {}
 inline void Window::setFullscreen(bool) {}
 inline bool Window::isFullscreen() const { return false; }

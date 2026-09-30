@@ -292,6 +292,9 @@ void Window::close() {
     if (app_) {
         app_->exit();
         app_->cleanup();
+        // Audio keeps running for the other windows: detach this App's audio
+        // hooks and wait for a callback in flight before the App goes (#256).
+        internal::detachAppAudio(*app_);
         internal::attachedApps().erase(app_.get());
         app_.reset();
         ctx_.rootNode.reset();
@@ -362,6 +365,12 @@ int Window::getWidth() const {
 int Window::getHeight() const {
     auto* st = static_cast<AdapterState*>(native_);
     return st ? sapp_window_height(st->win) : 0;
+}
+
+bool Window::isOccluded() const {
+    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
+    auto* st = static_cast<AdapterState*>(native_);
+    return st ? sapp_window_occluded(st->win) : false;
 }
 
 std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
