@@ -288,9 +288,9 @@ related = ["AudioVoiceInfo", "AudioEngine::getStats"]
 ["AudioEngine::init"]
 category = "audioengine"
 keywords = ["initialize", "start", "open", "device", "setup"]
-description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. It may be called again later (for example from update() until isInitialized() is true)."
-description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。後からもう一度呼んでよい (例: isInitialized() が true になるまで update() から呼ぶ)"
-description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 나중에 다시 호출해도 된다 (예: isInitialized() 가 true 가 될 때까지 update() 에서 호출)"
+description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame."
+description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること"
+description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것"
 related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]

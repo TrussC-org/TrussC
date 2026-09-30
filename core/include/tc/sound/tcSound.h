@@ -876,10 +876,14 @@ public:
     // Returns false when no output device can be opened (none present, the
     // requested one refused, or no audio backend); the failure is logged
     // through logError("AudioEngine"), naming the requested device, and the
-    // engine stays uninitialized. It may be called again later, for example
-    // from update() until isInitialized() is true (a device switched on
-    // after the app started). Sound::load*() also calls init() while the
-    // engine is not initialized; play() does not.
+    // engine is left uninitialized. That holds for a re-init too: the
+    // running device is closed before the new one is tried, so a failed
+    // switch leaves the engine stopped, not on the previous device. init()
+    // may be called again later (a device switched on after the app
+    // started, or other settings). Each failed try opens the device again
+    // and logs again, so retry on a timer (about once a second) or on a
+    // user action, not every frame. Sound::load*() also calls init() while
+    // the engine is not initialized; play() does not.
     bool init();
     bool init(const AudioSettings& settings);
     void shutdown();
