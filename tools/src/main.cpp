@@ -433,7 +433,7 @@ static CheckResult checkGit() {
 // One check for both `trusscli doctor` and `trusscli build` (#357).
 static CheckResult checkWindowsPresetToolchain(const string& projectPath,
                                                ToolchainCheck* out = nullptr) {
-    CheckResult r{"VS toolchain in presets", CheckStatus::Skipped, "", "", false};
+    CheckResult r{"Pinned VS paths", CheckStatus::Skipped, "", "", false};
     fs::path presetsPath = fs::path(projectPath) / "CMakePresets.json";
     error_code ec;
     if (projectPath.empty() || !fs::is_regular_file(presetsPath, ec)) {
@@ -3036,9 +3036,9 @@ static int cmdDoctor(const vector<string>& args) {
 
         cout << "  " << statusIcon(r.status)
              << " " << r.name;
-        // Pad to align detail
-        int pad = 20 - (int)r.name.size();
-        if (pad > 0) cout << string(pad, ' ');
+        // Pad to align detail; a long name still gets one space before it
+        int pad = max(1, 20 - (int)r.name.size());
+        cout << string(pad, ' ');
         if (!r.detail.empty()) cout << r.detail;
         cout << "\n";
         if (!r.hint.empty() && (r.status != CheckStatus::OK || verbose)) {
@@ -3272,9 +3272,10 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
     });
     if (fresh.stale()) {
         cerr << "Error: " << changed << ", and the paths of the detected "
-             << vs.displayName << " are missing too (" << fresh.missing[0] << ").\n"
-             << "Repair Visual Studio or build from a Visual Studio developer prompt. "
-                "CMakePresets.json was left as it is.\n";
+             << vs.displayName << " are missing too: " << fresh.missing[0] << "\n"
+             << "That Windows SDK / MSVC folder is incomplete: remove the leftover folder or "
+                "repair the SDK / Visual Studio install (or drop the \"environment\" block "
+                "from the \"windows\" preset). CMakePresets.json was left as it is.\n";
         return 1;
     }
 
