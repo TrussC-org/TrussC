@@ -41,12 +41,18 @@
 // worker thread logs too (permission timeout, connected, lost connection,
 // RX overflow, open errors). A listener running inline on that thread must
 // not call an I/O call, setup() or close() on the Serial, nor destroy it:
-// - setup(), close(), the destructor and a move stop the worker and wait for
-//   it, which the worker cannot do for itself. setup() / close() there are
-//   refused with an error log and do nothing; destroying the Serial there
-//   leaves the connection to the worker, which releases it when it stops.
-// - An I/O call may deadlock with a close() / setup() on another thread,
-//   which holds the lock while it waits for the worker.
+// - setup() and close() stop a USB worker and wait for it, which a worker
+//   must not do. On any Serial's USB worker thread they are refused at once,
+//   before they take the lock, with one error log per thread, and do
+//   nothing.
+// - The destructor and a move cannot refuse. Destroying the Serial on its
+//   own worker leaves the connection to that worker, which releases it when
+//   it stops. Destroying or moving a Serial on a worker is only safe while
+//   no other thread uses that Serial: they take its lock first, and a
+//   close() / setup() on another thread holds it while it waits for the
+//   worker.
+// - An I/O call may deadlock the same way with a close() / setup() on
+//   another thread.
 // isConnected() and getDevicePath() are safe there. Listen with
 // Deliver::Main to run on the main thread instead.
 // =============================================================================
@@ -127,6 +133,44 @@ namespace internal {
         return t.joinable() && t.get_id() == std::this_thread::get_id();
     }
 
+    // Whether this thread is a USB worker thread of the Android backend (the
+    // only backend that has one), of any Serial. Serial::setup() and close()
+    // refuse to run there, before they take the Serial's lock: they would
+    // stop a USB worker and wait for it (this one, which cannot wait for
+    // itself, or another Serial's, which might be waiting for this one), and
+    // a close() / setup() on another thread may hold that lock while it
+    // waits for this thread. Here, not in the backend, so that the tests can
+    // check the refusal on every platform. thread_local, one per module: only
+    // the Android worker sets it, and hot reload never runs on Android.
+    struct SerialWorkerThread {
+        bool marked = false;         // set for the worker's whole run
+        bool refusalLogged = false;  // a refusal has been logged on this thread
+    };
+    inline SerialWorkerThread& serialWorkerThread() {
+        static thread_local SerialWorkerThread state;  // no-hot-reload: see above
+        return state;
+    }
+    inline bool onSerialWorkerThread() {
+        return serialWorkerThread().marked;
+    }
+    // True for the first refusal on this thread only: a Logger listener that
+    // calls close() on every line would otherwise loop on the refusal's line
+    inline bool firstSerialWorkerRefusal() {
+        SerialWorkerThread& state = serialWorkerThread();
+        if (state.refusalLogged) return false;
+        state.refusalLogged = true;
+        return true;
+    }
+    // Marks the thread it lives on as a USB worker (the Android worker holds
+    // one for its whole run)
+    class SerialWorkerThreadMark {
+    public:
+        SerialWorkerThreadMark() { serialWorkerThread() = {true, false}; }
+        ~SerialWorkerThreadMark() { serialWorkerThread() = {}; }
+        SerialWorkerThreadMark(const SerialWorkerThreadMark&) = delete;
+        SerialWorkerThreadMark& operator=(const SerialWorkerThreadMark&) = delete;
+    };
+
     // Log lines Serial makes while it holds its port lock, sent once it has
     // released it: a Logger listener that runs inline may call the same
     // Serial, and no thread may take that lock twice. Declare it before the
@@ -202,14 +246,19 @@ namespace internal {
 //   the Impl alive), so it may run at the same time as setup(), close() or
 //   the release of a connection. It must read the atomic state only.
 // The worker shares only the receive buffer and those flags with them.
-// setup(), close() and destroy() made on the worker thread itself (from a
-// Logger listener running inline there) cannot wait for it: see Refused.
+// The worker marks its thread (internal::SerialWorkerThreadMark). Serial
+// refuses setup() and close() there before it calls in; setup() and close()
+// made on any USB worker thread anyway (close() from an I/O call that found
+// a loss there) are refused too: see Refused. destroy() on the Serial's own
+// worker hands the connection to that worker; on another Serial's worker it
+// waits for this Serial's worker, which is fine unless that one is waiting
+// for the other in turn.
 // ---------------------------------------------------------------------------
 namespace androidserial {
     struct Impl;
     // How close() found the connection, for Serial::onDisconnect. Refused:
-    // called on the backend's own worker thread, which cannot wait for
-    // itself; nothing was closed.
+    // called on a USB worker thread, which must not wait for a worker;
+    // nothing was closed.
     enum class CloseResult { NotOpen, Closed, Lost, Refused };
     Impl* create();
     void destroy(Impl* impl);
@@ -571,6 +620,7 @@ public:
     // Connect by specifying device path. An open port is closed first, which
     // fires onDisconnect (wasClean = true).
     bool setup(const std::string& portName, int baudRate) {
+        if (refusedOnWorkerThread("setup()")) return false;
 #if defined(__ANDROID__)
         // End the previous connection first, so that onDisconnect reports it
         // with its own port and rate, and with the lock released. Not a
@@ -872,6 +922,7 @@ public:
     // wasClean = true and reason "closed by close()" (see Events above for
     // a loss nobody had reported yet).
     void close() {
+        if (refusedOnWorkerThread("close()")) return;
         PendingDisconnect closed;
         {
             internal::SerialHeldLog held;  // sent after the lock is released
@@ -1409,7 +1460,7 @@ private:
 #if defined(__ANDROID__)
             {
                 androidserial::HoldLogs hold(held);
-                // Refused on the USB worker thread itself: the loss stays
+                // Refused on a USB worker thread: the loss stays
                 // recorded, for the next call made elsewhere
                 if (androidserial::close(aimpl_, loss.reason) == androidserial::CloseResult::Refused) return;
             }
@@ -1435,6 +1486,21 @@ private:
         notifyDisconnect(lost);
     }
 
+    // setup() / close() on a USB worker thread of the Android backend (from a
+    // Logger listener running inline there): refused on entry, before the
+    // lock, since another thread's close() / setup() may hold it while it
+    // waits for this thread (see internal::onSerialWorkerThread()). Logged
+    // once per thread; the lock is not held, so the line goes out at once.
+    static bool refusedOnWorkerThread(const char* call) {
+        if (!internal::onSerialWorkerThread()) return false;
+        if (internal::firstSerialWorkerRefusal()) {
+            logError() << "Serial: " << call << " cannot run on a USB worker thread, which must not wait"
+                       << " for a worker (called from a Logger listener running there?), so it does"
+                       << " nothing. Listen with Deliver::Main";
+        }
+        return true;
+    }
+
     // close() with the lock held exclusive: closes the port and sets `closed`
     // to the notification to fire once the lock is released. Its log lines
     // go to held.
@@ -1444,7 +1510,8 @@ private:
         std::string lostReason;
         androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
                                                   : androidserial::CloseResult::NotOpen;
-        // Refused on the USB worker thread itself: the connection stays
+        // Refused on a USB worker thread (close() and setup() refuse there
+        // before they get here): the connection stays
         if (ended == androidserial::CloseResult::Refused) return;
         initialized_ = false;
         closed = closeArgs(ended, lostReason, devicePath_, baudRate_);

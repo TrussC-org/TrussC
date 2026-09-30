@@ -260,9 +260,6 @@ struct Impl {
     // listener destroyed the Serial): the worker then releases the
     // connection and deletes this Impl when it stops (see workerMain()).
     std::atomic<bool> orphaned{false};
-    // A call refused on the worker thread has been logged (once per Impl, so
-    // a listener that calls close() on every log line does not loop)
-    std::atomic<bool> refusalLogged{false};
 };
 
 namespace {
@@ -561,22 +558,24 @@ bool onWorker(const Impl* impl) {
     return internal::isThisThread(impl->worker);
 }
 
-void logRefusal(Impl* impl, const char* what) {
-    if (impl->refusalLogged.exchange(true)) return;
-    blog(LogLevel::Error) << "Serial: " << what << " cannot run on the USB worker thread, which it would"
-                          << " have to wait for (called from a Logger listener running there?), so it"
-                          << " does nothing. Listen with Deliver::Main";
+// setup() / close() on a USB worker thread (any Serial's; a Logger listener
+// running inline there called in) must not wait for a worker. Serial refuses
+// them before it calls in, logging once per thread; this shares that once.
+bool refusedOnWorkerThread(const char* what) {
+    if (!internal::onSerialWorkerThread()) return false;
+    if (internal::firstSerialWorkerRefusal()) {
+        blog(LogLevel::Error) << "Serial: " << what << " cannot run on a USB worker thread, which must not"
+                              << " wait for a worker (called from a Logger listener running there?), so it"
+                              << " does nothing. Listen with Deliver::Main";
+    }
+    return true;
 }
 
 // Stop the worker and release the USB connection. Returns how the connection
-// had ended; lostReason is filled for Lost. On the worker thread itself it
-// refuses (Refused) and touches nothing: joining would throw, and the worker
-// goes on using the connection once the listener that called this returns.
+// had ended; lostReason is filled for Lost. Never on impl's own worker
+// thread, where joining would throw: close() and setup() refuse on any worker
+// thread first, and destroy() hands impl to its own worker instead.
 CloseResult closeImpl(Impl* impl, std::string& lostReason) {
-    if (onWorker(impl)) {
-        logRefusal(impl, "close() / setup()");
-        return CloseResult::Refused;
-    }
     impl->stop = true;
     if (impl->worker.joinable()) impl->worker.join();
     impl->stop = false;
@@ -600,6 +599,8 @@ CloseResult closeImpl(Impl* impl, std::string& lostReason) {
 // destroyed the Serial), it stopped and detached the thread and left impl to
 // it: release the connection and delete impl once the loop has ended.
 void workerMain(Impl* impl) {
+    // Serial::setup() / close() and the backend's refuse on this thread
+    internal::SerialWorkerThreadMark mark;
     workerRun(impl);
     if (impl->orphaned.load()) {
         releaseConnection(impl);
@@ -714,11 +715,8 @@ std::vector<SerialDeviceInfo> listDevices() {
 bool setup(Impl* impl, const std::string& devicePath, int baudRate,
            CloseResult& ended, std::string& lostReason) {
     ended = CloseResult::NotOpen;
-    // It would have to stop and replace the worker it runs on
-    if (onWorker(impl)) {
-        logRefusal(impl, "close() / setup()");
-        return false;
-    }
+    // It would have to stop and replace a worker (Serial refuses first)
+    if (refusedOnWorkerThread("setup()")) return false;
     // Reconnect-loop guard: while the permission dialog for this device is
     // still pending, repeated setup() calls must not re-trigger it.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {
@@ -775,6 +773,9 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
 }
 
 CloseResult close(Impl* impl, std::string& lostReason) {
+    // Serial refuses close() here first; an I/O call that found a loss on a
+    // worker thread still gets here (its closeLost())
+    if (refusedOnWorkerThread("close()")) return CloseResult::Refused;
     return closeImpl(impl, lostReason);
 }
 
