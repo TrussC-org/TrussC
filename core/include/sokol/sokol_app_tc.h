@@ -2469,9 +2469,34 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdio.h>
+#include <stdarg.h>
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
+
+/* The fork's own diagnostics -- the _SAPP_* log macros of the iOS, GLES3
+   Linux and web backends, the X11 / GLX init failures and the
+   sapp_create_window() "not supported" stubs -- go through sapp_desc.logger,
+   the way upstream sokol_app.h reports everything, so the host's logger (and
+   its log file) sees them too. Every backend stores the desc at the very
+   start of sapp_run(), before any of them can fire. Without a logger they
+   print to stderr as before: "sokol_app_tc.h: <kind><message>".
+   level: 0=panic, 1=error, 2=warning, 3=info. A panic site still calls
+   abort() itself once this returns. */
+static inline void _sapp_tc_log(const sapp_logger* logger, uint32_t level, uint32_t item,
+                                uint32_t line_nr, const char* kind, const char* fmt, ...) {
+    char msg[512];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, args);
+    va_end(args);
+    if (logger && logger->func) {
+        logger->func("sapp", level, item, msg, line_nr, 0, logger->user_data);
+    } else {
+        fprintf(stderr, "sokol_app_tc.h: %s%s\n", kind, msg);
+    }
+}
 
 #if defined(__APPLE__) && TARGET_OS_OSX
 /*== macOS ==================================================================*/
@@ -4078,12 +4103,13 @@ sapp_swapchain sapp_get_swapchain(void) {
 #define _SAPP_OBJC_RELEASE(obj) { [obj release]; obj = nil; }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -5912,7 +5938,8 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    a second window is not representable */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on iOS (single-window platform)\n");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on iOS (single-window platform)");
     sapp_window w = {0};
     return w;
 }
@@ -10098,16 +10125,19 @@ static _sapp_tc_glx_voidfn_t _sapp_tc_glx_getprocaddr(const char* name) {
 static bool _sapp_tc_glx_init(void) {
     int error_base = 0, event_base = 0;
     if (!glXQueryExtension(_sapp_tc.display, &error_base, &event_base)) {
-        fprintf(stderr, "sokol_app_tc.h: GLX extension not present on the X server\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_EXTENSION_NOT_FOUND, __LINE__,
+                     "", "GLX extension not present on the X server");
         return false;
     }
     int major = 0, minor = 0;
     if (!glXQueryVersion(_sapp_tc.display, &major, &minor)) {
-        fprintf(stderr, "sokol_app_tc.h: glXQueryVersion() failed\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_QUERY_VERSION_FAILED, __LINE__,
+                     "", "glXQueryVersion() failed");
         return false;
     }
     if ((major < 1) || ((major == 1) && (minor < 3))) {
-        fprintf(stderr, "sokol_app_tc.h: GLX version 1.3 or higher required\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_VERSION_TOO_LOW, __LINE__,
+                     "", "GLX version 1.3 or higher required");
         return false;
     }
     const char* exts = glXQueryExtensionsString(_sapp_tc.display, _sapp_tc.screen);
@@ -10126,7 +10156,8 @@ static bool _sapp_tc_glx_init(void) {
             _sapp_tc_glx_getprocaddr("glXCreateContextAttribsARB");
     }
     if (!_sapp_tc.CreateContextAttribsARB) {
-        fprintf(stderr, "sokol_app_tc.h: GLX_ARB_create_context(_profile) required\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_REQUIRED_EXTENSIONS_MISSING, __LINE__,
+                     "", "GLX_ARB_create_context(_profile) required");
         return false;
     }
     return true;
@@ -10179,7 +10210,8 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
         _sapp_tc.app.desc.sample_count = (got_samples > 1) ? got_samples : 1;
         ok = true;
     } else {
-        fprintf(stderr, "sokol_app_tc.h: no suitable GLXFBConfig found\n");
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_NO_SUITABLE_GLXFBCONFIG, __LINE__,
+                     "", "no suitable GLXFBConfig found");
     }
     XFree(configs);
     return ok;
@@ -10204,7 +10236,8 @@ static bool _sapp_tc_glx_create_context(void) {
                                                     NULL, True, attribs);
     _sapp_tc_x11_release_error_handler();
     if (!_sapp_tc.ctx) {
-        fprintf(stderr, "sokol_app_tc.h: failed to create GL %d.%d core context\n", gl_major, gl_minor);
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_CREATE_CONTEXT_FAILED, __LINE__,
+                     "", "failed to create GL %d.%d core context", gl_major, gl_minor);
         return false;
     }
     return true;
@@ -10849,7 +10882,9 @@ void sapp_run(const sapp_desc* desc) {
     XrmInitialize();
     _sapp_tc.display = XOpenDisplay(NULL);
     if (!_sapp_tc.display) {
-        fprintf(stderr, "sokol_app_tc.h: XOpenDisplay() failed (no X server / DISPLAY not set)\n");
+        /* the desc (and its logger) is already stored above */
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 0, (uint32_t)SAPP_LOGITEM_LINUX_X11_OPEN_DISPLAY_FAILED, __LINE__,
+                     "", "XOpenDisplay() failed (no X server / DISPLAY not set)");
         abort();
     }
     _sapp_tc.screen = DefaultScreen(_sapp_tc.display);
@@ -11263,14 +11298,15 @@ sapp_swapchain sapp_get_swapchain(void) {
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
-#define _SAPP_INFO(code) fprintf(stderr, "sokol_app_tc.h: info: " #code "\n")
-#define _SAPP_WARN(code) fprintf(stderr, "sokol_app_tc.h: warn: " #code "\n")
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
+#define _SAPP_INFO(code) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s", #code)
+#define _SAPP_WARN(code) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s", #code)
 typedef struct {
     #if defined(_SAPP_APPLE)
         struct {
@@ -15521,7 +15557,8 @@ const void* sapp_d3d11_get_device_context(void) { return 0; }
    the GLCORE branch */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on GLES3 Linux (single-window platform)\n");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on GLES3 Linux (single-window platform)");
     sapp_window w = {0};
     return w;
 }
@@ -17721,12 +17758,13 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_CLEAR_ARC_STRUCT(type, item) { _sapp_tc_clear(&item, sizeof(item)); }
 #endif
 
-/* controlled failure instead of sokol_app.h's log-item machinery */
-#define _SAPP_PANIC(code) do { fprintf(stderr, "sokol_app_tc.h: panic: " #code "\n"); abort(); } while (0)
-#define _SAPP_ERROR(code) fprintf(stderr, "sokol_app_tc.h: error: " #code "\n")
-#define _SAPP_ERROR_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: error: " #code ": %s\n", msg)
-#define _SAPP_WARN_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: warn: " #code ": %s\n", msg)
-#define _SAPP_INFO_MSG(code, msg) fprintf(stderr, "sokol_app_tc.h: info: " #code ": %s\n", msg)
+/* controlled failure instead of sokol_app.h's log-item machinery, reported
+   through sapp_desc.logger (_sapp_tc_log) */
+#define _SAPP_PANIC(code) do { _sapp_tc_log(&_sapp_tc.desc.logger, 0, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "panic: ", "%s", #code); abort(); } while (0)
+#define _SAPP_ERROR(code) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s", #code)
+#define _SAPP_ERROR_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "error: ", "%s: %s", #code, msg)
+#define _SAPP_WARN_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 2, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "warn: ", "%s: %s", #code, msg)
+#define _SAPP_INFO_MSG(code, msg) _sapp_tc_log(&_sapp_tc.desc.logger, 3, (uint32_t)SAPP_LOGITEM_##code, __LINE__, "info: ", "%s: %s", #code, msg)
 
 /* the internal monotonic clock is deliberately unused on web: all timing
    comes from the timestamp the browser hands to the frame callback */
@@ -20514,7 +20552,8 @@ SOKOL_API_IMPL void sapp_skip_present(void) {
    a second window is not representable in a browser tab */
 sapp_window sapp_create_window(const sapp_window_desc* desc) {
     _SOKOL_UNUSED(desc);
-    fprintf(stderr, "sokol_app_tc.h: sapp_create_window() is not supported on the web (single-canvas platform)\n");
+    _sapp_tc_log(&_sapp_tc.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "", "sapp_create_window() is not supported on the web (single-canvas platform)");
     sapp_window w = {0};
     return w;
 }
