@@ -9,7 +9,8 @@
 //
 // It checks that ObjLoader validates face indices before reading:
 //   - valid faces load as before: positive and relative (negative) indices,
-//     normals and texcoords, quads split into two triangles
+//     normals and texcoords, quads split into two triangles, a concave
+//     pentagon split into three by ear clipping
 //   - a face vertex index of 0, or a negative index before the first vertex,
 //     fails the load (tinyobjloader rejects the line) with an error logged
 //   - a face whose vertex, normal or texcoord index is past the end of its
@@ -136,6 +137,13 @@ int main() {
         auto r = loadObjText(TRI_V + "v 1 1 0\nf 1 2 4 3\n");
         check("valid quad: two triangles",
               r.ok && r.mesh.getNumVertices() == 4 && r.mesh.getNumIndices() == 6);
+    }
+    {
+        // A concave pentagon goes through tinyobjloader's ear clipping
+        auto r = loadObjText("v 0 0 0\nv 2 0 0\nv 2 2 0\nv 1 1 0\nv 0 2 0\nf 1 2 3 4 5\n");
+        check("valid concave pentagon: three triangles",
+              r.ok && r.warnings == 0 && r.mesh.getNumVertices() == 5 &&
+              r.mesh.getNumIndices() == 9);
     }
 
     // ----- indices tinyobjloader rejects ----------------------------------------

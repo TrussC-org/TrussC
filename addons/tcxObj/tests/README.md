@@ -5,7 +5,8 @@ directory and loads it with `ObjLoader`, checking that face indices are
 validated before they are read:
 
 - valid faces load as before: positive and relative (negative) indices,
-  normals and texcoords, quads split into two triangles;
+  normals and texcoords, quads split into two triangles, a concave pentagon
+  split into three by tinyobjloader's ear clipping;
 - a face vertex index of 0, or a negative index before the first vertex, fails
   the load (tinyobjloader rejects the line) and logs an error;
 - a face whose vertex, normal or texcoord index is past the end of its list is
