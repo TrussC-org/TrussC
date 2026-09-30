@@ -3854,7 +3854,7 @@ SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+
 void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
 void TcpServer::setSendAsyncBufferSize(size_t bytes)  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
 void TcpServer::setSendTimeout(float seconds)  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 10)  // Start listening on a port
+bool TcpServer::start(int port, int maxClients = 0)  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)
 void TcpServer::stop()  // Stop the server
 ```
 

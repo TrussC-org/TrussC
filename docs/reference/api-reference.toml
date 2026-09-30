@@ -8881,9 +8881,11 @@ description.ja = "受信バッファサイズを設定"
 description.ko = "수신 버퍼 크기를 설정"
 
 ["TcpServer::start"]
-description.en = "Start listening on a port"
-description.ja = "ポートで待ち受けを開始"
-description.ko = "포트에서 수신 대기를 시작"
+description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)"
+description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）"
+description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값)"
+keywords = ["listen", "port", "max clients", "connection limit"]
+details = "With maxClients above 0, a connection that arrives while that many clients are connected is closed right away and a warning is logged, at most once every few seconds however many arrive; a slot frees up as soon as a client disconnects. The default of 0 accepts any number of clients. The listen backlog is a fixed value and does not depend on maxClients. Receive threads of clients that leave are joined while the server runs, and a failing accept() is retried with a short back-off rather than in a tight loop."
 
 ["TcpServer::stop"]
 description.en = "Stop the server"
