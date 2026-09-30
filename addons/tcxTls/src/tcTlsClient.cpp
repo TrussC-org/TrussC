@@ -366,13 +366,10 @@ bool TlsClient::connect(const std::string& host, int port) {
     std::string portStr = std::to_string(port);
     int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
     if (ret != 0) {
+        // Clean up before notifying: an onError listener that reconnects
+        // must not have its new socket closed after it returns
+        closeSocket();
         notifyError("Failed to resolve host: " + host, ret);
-        CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-        socket_ = INVALID_SOCKET;
-#else
-        socket_ = -1;
-#endif
         return false;
     }
 
@@ -395,13 +392,9 @@ bool TlsClient::connect(const std::string& host, int port) {
             connectPending_ = true;
             running_ = true;
         } else {
+            // Clean up before notifying (see above)
+            closeSocket();
             notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
-            CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-            socket_ = INVALID_SOCKET;
-#else
-            socket_ = -1;
-#endif
             return false;
         }
     } else {

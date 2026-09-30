@@ -24,6 +24,8 @@
 //   - A reconnect the peer refuses (its device still rebooting) returns false
 //     and still releases the old socket (checked on Linux), and the next
 //     connect() succeeds.
+//   - An onError listener that reconnects after a refused connect() keeps
+//     its connection: connect() closes the failed socket before notifying.
 //   - connect() to another peer while connected, with a listener that
 //     reconnects on every onDisconnect: the listener's reconnect (to the old
 //     peer, from inside connect()'s own disconnect) is closed again without
@@ -444,6 +446,32 @@ static void scenario() {
     check("refused reconnect: data reaches the peer afterwards", clientToPeer(client, peer, "back"));
     check("refused reconnect: the client receives the peer's data",
           peerToClient(peer, "welcome back"));
+    if (g_fail) bail();
+
+    // --- a refused connect(), then a reconnect from onError ------------------
+    // connect() notified onError and only then closed the failed socket. An
+    // onError listener that reconnects has replaced socket_ by then: the
+    // close after it returned shut the listener's new connection.
+    atomic<bool> refusedArmed{true};
+    atomic<int> refusedListenerResult{-1};   // -1 not run, 0 connect() failed, 1 ok
+    EventListener refusedErrSub = client.onError.listen([&](TcpErrorEventArgs&) {
+        if (refusedArmed.exchange(false)) {
+            refusedListenerResult = client.connect("127.0.0.1", port) ? 1 : 0;
+        }
+    });
+    check("onError reconnect: the refused connect() returns false",
+          !client.connect("127.0.0.1", refusedPort));
+    refusedErrSub.disconnect();
+    check("onError reconnect: the listener's connect() returned true",
+          refusedListenerResult == 1);
+    TC_CLOSE(peer);   // the client closed it when connect() disconnected
+    peer = acceptWithin(listener, 2000);
+    check("onError reconnect: peer accepted the listener's connection", peer != kNoSocket);
+    check("onError reconnect: client is connected", client.isConnected());
+    if (g_fail) bail();
+    check("onError reconnect: data reaches the peer", clientToPeer(client, peer, "rescued"));
+    check("onError reconnect: the client receives the peer's data",
+          peerToClient(peer, "glad you made it"));
     if (g_fail) bail();
 
     // --- connect() elsewhere while connected, with a listener that reconnects -

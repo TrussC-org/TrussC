@@ -124,13 +124,15 @@ bool TcpClient::connect(const std::string& host, int port) {
     std::string portStr = std::to_string(port);
     int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
     if (ret != 0) {
-        notifyError("Failed to resolve host: " + host, ret);
+        // Clean up before notifying: an onError listener that reconnects
+        // must not have its new socket closed after it returns
         CLOSE_SOCKET(socket_);
 #ifdef _WIN32
         socket_ = INVALID_SOCKET;
 #else
         socket_ = -1;
 #endif
+        notifyError("Failed to resolve host: " + host, ret);
         return false;
     }
 
@@ -152,13 +154,14 @@ bool TcpClient::connect(const std::string& host, int port) {
             connectPending_ = true;
             running_ = true;
         } else {
-            notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
+            // Clean up before notifying (see above)
             CLOSE_SOCKET(socket_);
 #ifdef _WIN32
             socket_ = INVALID_SOCKET;
 #else
             socket_ = -1;
 #endif
+            notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
             return false;
         }
     } else {
@@ -341,8 +344,10 @@ void TcpClient::processNetwork() {
                 int err = 0;
                 int len = sizeof(err);
                 getsockopt(socket_, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
-                notifyError("Connection failed", err);
+                // Tear down before notifying: a listener that reconnects must
+                // not have its new connection torn down after it returns
                 disconnect();
+                notifyError("Connection failed", err);
                 TcpConnectEventArgs args;
                 args.success = false;
                 args.message = "Connection failed";
@@ -377,8 +382,9 @@ void TcpClient::processNetwork() {
                 args.message = "Connected";
                 onConnect.notify(args);
             } else {
-                notifyError("Connection failed", err);
+                // Tear down before notifying (see the Windows branch)
                 disconnect();
+                notifyError("Connection failed", err);
                 TcpConnectEventArgs args;
                 args.success = false;
                 args.message = "Connection failed";
