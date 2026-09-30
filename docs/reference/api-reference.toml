@@ -14373,9 +14373,9 @@ description.ko = "in-place 역 FFT. 데이터 크기는 2의 거듭제곱이어�
 ["initAudio"]
 category = "audioengine"
 keywords = ["initialize", "start", "engine", "setup", "open"]
-description.en = "Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
-description.ja = "グローバルなAudioEngineを初期化。Sound::load() / play()から自動的に呼ばれるため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
-description.ko = "전역 AudioEngine을 초기화. Sound::load() / play()에서 자동 호출되므로, 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
+description.en = "Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
+description.ja = "グローバルなAudioEngineを初期化。エンジンが未初期化なら Sound::load() / loadStream() / loadTestTone() / loadFromBuffer() が自動的に初期化する (play() はしない) ため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
+description.ko = "전역 AudioEngine을 초기화. 엔진이 초기화되지 않았으면 Sound::load() / loadStream() / loadTestTone() / loadFromBuffer() 가 자동으로 초기화하므로 (play() 는 하지 않음), 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
 related = ["AudioEngine::getInstance", "shutdownAudio"]
 
 ["intersectRect"]

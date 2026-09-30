@@ -2162,7 +2162,7 @@ void setBeepVolume(float vol)  // Set the output volume for beep() (0.0-1.0).
 size_t getAudioAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer for FFT / visualization. numSamples is capped at the analysis buffer size (4096). Returns the number of samples written.
 size_t getMicAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest microphone input samples into outBuffer. Convenience wrapper over getMicInput().getBuffer(). numSamples is capped at the mic buffer size (4096). Returns the number of samples written.
 MicInput & getMicInput()  // Get the global MicInput singleton (microphone capture). Call start() on it to open the device.
-void initAudio()  // Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
+void initAudio()  // Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
 void shutdownAudio()  // Shut down the global AudioEngine and close the audio device. Usually unnecessary (runs at program exit).
 ```
 
