@@ -25,7 +25,8 @@
 //     addon remove share (tools/src/main.cpp calls it for all three).
 //   - The toolchainFile of a kept web / android preset survives a
 //     regeneration from a shell without emsdk / the NDK (chooseToolchainFile,
-//     and through the real writer with EMSDK / PATH / ANDROID_* set per case).
+//     and through the real writer with EMSDK / PATH / ANDROID_* set per case);
+//     an ANDROID_NDK_HOME without the toolchain file does not beat it.
 //   - A kept target whose configure fails is a warning, a target asked for
 //     by a flag an error (ProjectGenerator::update with a toolchain that
 //     fails on purpose; needs cmake in PATH).
@@ -646,6 +647,27 @@ static void testToolchainFiles() {
               writeAndroid(saved) == saved);
         check("android preset: $env{ANDROID_NDK_HOME} form when nothing is saved",
               writeAndroid("") == kNdkEnvToolchain);
+
+        // A stale ANDROID_NDK_HOME (no toolchain file there) is not a detected
+        // NDK: the saved toolchain that still exists wins, else $env{}
+        fs::path staleNdk = dir / "stale-ndk";
+        fs::create_directories(staleNdk);
+        {
+            EnvOverride stale("ANDROID_NDK_HOME", staleNdk.string().c_str());
+            check("android preset: stale ANDROID_NDK_HOME loses to the saved toolchain",
+                  writeAndroid(saved) == saved);
+            check("android preset: stale ANDROID_NDK_HOME, nothing saved: $env{} form",
+                  writeAndroid("") == kNdkEnvToolchain);
+        }
+        // ...while one that has the toolchain file wins over the saved one
+        fs::path ndkFile = dir / "real-ndk" / "build/cmake/android.toolchain.cmake";
+        fs::create_directories(ndkFile.parent_path());
+        writeFile(ndkFile, "# ndk\n");
+        {
+            EnvOverride real("ANDROID_NDK_HOME", (dir / "real-ndk").string().c_str());
+            check("android preset: the NDK of this shell wins over the saved one",
+                  fs::path(writeAndroid(saved)) == fs::path(ndkFile));
+        }
     }
     {
         // The saved path is read back from the presets and reaches the settings

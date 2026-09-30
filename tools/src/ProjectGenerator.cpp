@@ -185,7 +185,9 @@ static string detectEmscriptenToolchain() {
     return "";
 }
 
-// Helper to find the Android NDK toolchain. Empty when this shell has none.
+// Helper to find the Android NDK toolchain. Empty when this shell has none,
+// or when its NDK has no toolchain file (a stale ANDROID_NDK_HOME), so that a
+// saved toolchain that still exists wins over it.
 static string detectAndroidToolchain() {
     string ndkHome;
     if (getenv("ANDROID_NDK_HOME")) {
@@ -205,7 +207,10 @@ static string detectAndroidToolchain() {
         }
     }
     if (ndkHome.empty()) return "";
-    return ndkHome + "/build/cmake/android.toolchain.cmake";
+    string toolchain = ndkHome + "/build/cmake/android.toolchain.cmake";
+    error_code ec;
+    if (!fs::is_regular_file(toolchain, ec)) return "";
+    return toolchain;
 }
 
 ProjectGenerator::ProjectGenerator(const ProjectSettings& settings)
