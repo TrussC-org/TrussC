@@ -54,11 +54,12 @@ bool keepsHullOrder(const std::vector<b2Vec2>& input, const b2PolygonShape& shap
 // in fixture-list order, which is the reverse of creation order) and demand a
 // margin of 16 float epsilons of the subtracted term for one polygon, so the
 // result stays positive at any density (fuzzed at densities 0.001 to 1000).
-// Each further fixture adds one epsilon: Box2D sums the fixtures one by one
-// in float, and at another density that sum rounds differently, by up to
-// about 0.8 epsilon per fixture near the limit (measured on 6 to 3793
-// triangles at densities 0.001 to 1000), so a fixed margin is not enough for
-// a compound body.
+// A compound body needs 16 + (fixtures - 1) epsilons: Box2D sums the
+// per-fixture values in float, in order, so the rounding differs from one
+// density to another (by up to about 0.8 epsilon per fixture near the limit).
+// Measured: with a fixed 16-epsilon margin, bodies accepted at density 1 had
+// m_I <= 0 at some density in 0.001 to 1000 (133 cases for a 128-gon, 8642
+// for a 2048-gon); with one more epsilon per fixture, 0 cases.
 bool inertiaSurvives(const b2PolygonShape* const* shapes, size_t count) {
     float mass = 0.0f, inertia = 0.0f;
     b2Vec2 center = b2Vec2_zero;
