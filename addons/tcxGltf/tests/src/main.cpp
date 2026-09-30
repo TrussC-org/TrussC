@@ -23,6 +23,10 @@
 //     skipped with one warning per load; no array is allocated from its count
 //   - a sparse accessor with more values than elements fails to load
 //   - an image in a buffer without data is skipped
+//   - an external image that cannot be loaded, or whose uri is not valid
+//     UTF-8, is skipped with a warning; the mesh loads
+//   - an exception while the model is read (injected through the texture
+//     load test hook) fails the load and leaves the model empty
 //   - a component type glTF 2.0 does not allow fails validation
 //   - a file with no scene loads from its root nodes; with no nodes it fails
 //   - a 20000-deep node chain loads; node cycles and repeated scene nodes
@@ -38,12 +42,14 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 using namespace std;
 using namespace tc;
 using tcx::gltf::GltfModel;
+namespace gltf_internal = tcx::gltf::internal;
 
 static int g_pass = 0, g_fail = 0;
 static void check(const string& name, bool ok) {
@@ -199,6 +205,20 @@ static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, Gl
     if (lastWarning) *lastWarning = warnings.last;
     return ok;
 }
+
+// A triangle with a material whose base color texture is `imageJson` (the
+// JSON of image 0).
+static GltfBuilder texturedTriangle(const string& imageJson) {
+    GltfBuilder b = triangle();
+    b.extra = "\"images\":[" + imageJson + "],"
+              "\"textures\":[{\"source\":0}],"
+              "\"materials\":[{\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}],";
+    b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1,"material":0})";
+    return b;
+}
+
+static void throwRuntimeError() { throw runtime_error("injected failure"); }
+static void throwInt() { throw 42; }
 
 static bool vecNear(const Vec3& v, float x, float y, float z) {
     return fabs(v.x - x) < 1e-5f && fabs(v.y - y) < 1e-5f && fabs(v.z - z) < 1e-5f;
@@ -568,6 +588,85 @@ int main() {
             check("image in a buffer without data: texture skipped",
                   m.getNodeCount() == 1 && !m.getNode(0).material.hasBaseColorTexture());
         }
+    }
+
+    {
+        // An external image that does not exist: skipped with a warning
+        GltfModel m;
+        string warning;
+        if (loadCase("missing image file", texturedTriangle(R"({"uri":"missing.png"})"), true, m,
+                     &warning)) {
+            check("missing image file: texture skipped",
+                  m.getNodeCount() == 1 && !m.getNode(0).material.hasBaseColorTexture());
+            check("missing image file: warning logged",
+                  warning.find("could not be loaded") != string::npos);
+        }
+    }
+    {
+        // An image uri with a byte that is not valid UTF-8. The loader builds
+        // the path with utf8ToPath(): on Windows that throws for such bytes,
+        // and the loader skips the image with a warning. On POSIX the bytes
+        // are a valid file name and the conversion does not throw, so here
+        // the image is skipped because no such file exists (the same
+        // outcome, through the missing-file warning). Either way load()
+        // succeeds, without that texture, and nothing escapes.
+        GltfModel m;
+        string warning;
+        bool threw = false;
+        bool ok = false;
+        try {
+            ok = loadCase("image uri not valid UTF-8",
+                          texturedTriangle("{\"uri\":\"bad\xff" "name.png\"}"), true, m, &warning);
+        } catch (...) {
+            threw = true;
+        }
+        check("image uri not valid UTF-8: no exception", !threw);
+        if (ok) {
+            check("image uri not valid UTF-8: texture skipped",
+                  m.getNodeCount() == 1 && !m.getNode(0).material.hasBaseColorTexture());
+            check("image uri not valid UTF-8: warning logged",
+                  warning.find("skipped an image") != string::npos);
+        }
+    }
+
+    // ----- an exception while reading the model -----------------------------------
+    {
+        // The test hook throws when the texture of the second primitive is
+        // about to be read. The first primitive (no material) has been added
+        // by then; the failed load must not keep it.
+        GltfBuilder b = texturedTriangle(R"({"uri":"missing.png"})");
+        b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1},)"
+                      R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1,"material":0})";
+        GltfModel m;
+        gltf_internal::setTextureLoadHookForTests(&throwRuntimeError);
+        string warning;
+        bool threw = false;
+        try {
+            loadCase("exception while reading", b, false, m, &warning);
+        } catch (...) {
+            threw = true;
+        }
+        gltf_internal::setTextureLoadHookForTests(nullptr);
+        check("exception while reading: does not escape load()", !threw);
+        check("exception while reading: primitive read before it not kept",
+              m.getNodeCount() == 0 && !m.isLoaded());
+        check("exception while reading: warning names the error",
+              warning.find("injected failure") != string::npos);
+
+        // An exception that is not a std::exception
+        gltf_internal::setTextureLoadHookForTests(&throwInt);
+        threw = false;
+        try {
+            loadCase("non-standard exception while reading", b, false, m);
+        } catch (...) {
+            threw = true;
+        }
+        gltf_internal::setTextureLoadHookForTests(nullptr);
+        check("non-standard exception while reading: does not escape load()", !threw);
+
+        // With the hook off, the same file loads (the texture is skipped)
+        loadCase("same file without the hook", b, true, m);
+        check("same file without the hook: both primitives", m.getNodeCount() == 2);
     }
 
     // ----- scenes and node hierarchy ---------------------------------------------

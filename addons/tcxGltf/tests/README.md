@@ -22,6 +22,16 @@ embedded as a base64 data URI) to a temp directory and loads it with
   nothing loaded bounds (the case uses a count of 2^62 - 1 on 64-bit);
 - a sparse accessor with more values than elements fails to load;
 - an image in a buffer without data (no uri) is skipped; the mesh loads;
+- an external image that cannot be loaded, or whose uri holds a byte that is
+  not valid UTF-8, is skipped with a warning; the mesh loads. The image path
+  is built with `utf8ToPath()`, which throws for such a uri on Windows (the
+  loader catches it and skips that image). On POSIX the bytes are a valid
+  file name, so there the image is skipped because the file does not exist;
+- an exception while the model is read (injected through
+  `internal::setTextureLoadHookForTests()`, a `std::exception` and one that
+  is not) fails the load, logs a warning (with `what()` when there is one)
+  and leaves the model empty, also of the primitive read before it. Under
+  ASan this also checks that the parsed data is freed on that path;
 - a component type glTF 2.0 does not allow fails validation;
 - a file with no scene loads from its root nodes; a file with no scene and no
   nodes fails to load;
@@ -36,8 +46,9 @@ Every failed load logs a warning and leaves the model empty.
 
 `load()` also catches an allocation failure (`std::bad_alloc`,
 `std::length_error`) and fails the same way. No case here reaches it, since
-every array the loader allocates is bounded by data in memory. It applies
-where exceptions are caught: native builds. TrussC's web (Emscripten) builds
+every array the loader allocates is bounded by data in memory. Like the
+injected exceptions above, it applies where exceptions are caught: native
+builds. TrussC's web (Emscripten) builds
 do not enable exception catching, so there an allocation failure aborts.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
