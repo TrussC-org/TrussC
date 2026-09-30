@@ -41,6 +41,12 @@
     using rawsocket_t = int;
 #endif
 
+#if (defined(__linux__) || defined(__APPLE__)) && !defined(__ANDROID__)
+    #define TC_TEST_CRASH_REPORT 1
+    #include <csignal>
+    #include <execinfo.h>
+#endif
+
 // The test's own raw sends must not die on SIGPIPE if a client goes away
 #if defined(MSG_NOSIGNAL)
     #define TEST_SEND_FLAGS MSG_NOSIGNAL
@@ -54,22 +60,49 @@ using namespace tc;
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
 static atomic<int> g_fail{0};
+
+// What the test is doing, for the fatal-signal report below
+static const char* volatile g_phase = "starting";
+
+#ifdef TC_TEST_CRASH_REPORT
+// A crash prints what the test was doing and a backtrace, then dies of the
+// same signal (as in tcpClientReconnect)
+static void onFatalSignal(int sig) {
+    char line[160];
+    const int n = snprintf(line, sizeof(line), "\nFATAL: signal %d during %s\n",
+                           sig, g_phase);
+    if (n > 0) (void)!write(2, line, static_cast<size_t>(n));
+    void* frames[64];
+    backtrace_symbols_fd(frames, backtrace(frames, 64), 2);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
+
 static void check(const char* name, bool ok) {
     printf("%-60s %s\n", name, ok ? "PASS" : "FAIL");
     fflush(stdout);
     if (!ok) ++g_fail;
 }
 
+// Run fn on a worker and report failure if it does not finish in time. A
+// worker that finished is joined, so it is not still exiting when main()
+// returns and the process tears down its statics; one that hangs is
+// detached, and the caller then bails out with _Exit.
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread([done, fn = move(fn)]() mutable { fn(); done->store(true); }).detach();
+    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
-    while (chrono::steady_clock::now() < deadline) {
-        if (done->load()) return true;
+    while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
     }
-    return done->load();
+    if (done->load()) {
+        worker.join();
+        return true;
+    }
+    worker.detach();
+    return false;
 }
 
 [[noreturn]] static void bail() {
@@ -197,10 +230,18 @@ static void scenario() {
 }
 
 int main() {
+#ifdef TC_TEST_CRASH_REPORT
+    signal(SIGSEGV, onFatalSignal);
+    signal(SIGBUS, onFatalSignal);
+    signal(SIGABRT, onFatalSignal);
+#endif
+    g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
         bail();
     }
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
+    fflush(stdout);   // a crash in static destruction then still shows this
+    g_phase = "exit (static destruction)";
     return g_fail ? 1 : 0;
 }
