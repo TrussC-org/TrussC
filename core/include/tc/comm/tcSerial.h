@@ -12,8 +12,9 @@
 //   See platform/android/tcSerial_android.cpp for details and caveats.
 //
 // Device loss (e.g. a USB-serial adapter unplugged): available(), readBytes(),
-// readByte() and writeBytes() detect it, close the port and log one warning,
-// so isConnected() turns false and the app can call setup() again.
+// readByte() and writeBytes() detect it, close the port, log one warning and
+// fire onDisconnect, so isConnected() turns false and the app can call
+// setup() again.
 //
 // Not thread-safe: since those calls may close the port, an app that uses one
 // Serial from several threads must guard every call with one mutex.
@@ -49,6 +50,7 @@
 #endif
 
 #include "../utils/tcLog.h"
+#include "../events/tcEvent.h"
 
 namespace trussc {
 
@@ -66,6 +68,18 @@ struct SerialDeviceInfo {
     const std::string& getDeviceName() const { return deviceName; }
 };
 
+// ---------------------------------------------------------------------------
+// Disconnect event
+// ---------------------------------------------------------------------------
+
+// Event args for Serial::onDisconnect
+struct SerialDisconnectEventArgs {
+    std::string portName;  // as passed to setup()
+    int baudRate = 0;      // the rate the port was open at
+    std::string reason;    // human-readable, e.g. "closed by close()", "read: Input/output error"
+    bool wasClean = false; // true: closed by the app (close()); false: device lost / I/O error
+};
+
 #if defined(__ANDROID__)
 // ---------------------------------------------------------------------------
 // Android backend (USB Host, CDC-ACM class devices).
@@ -76,15 +90,27 @@ struct SerialDeviceInfo {
 // and the connection completes asynchronously; isInitialized() flips to true
 // once the user grants access. Calling setup() again for the same device
 // while pending is a cheap no-op (safe to call from a reconnect loop).
+//
+// The backend's worker thread is the one that finds a lost device. It only
+// records the loss: Serial reports it (onDisconnect) from the next I/O call,
+// close() or setup() on the app's thread, and isConnected() stays true until
+// then, as it does on the other platforms until an I/O call finds the loss.
 // ---------------------------------------------------------------------------
 namespace androidserial {
     struct Impl;
+    // How close() found the connection, for Serial::onDisconnect
+    enum class CloseResult { NotOpen, Closed, Lost };
     Impl* create();
     void destroy(Impl* impl);
     std::vector<SerialDeviceInfo> listDevices();
     bool setup(Impl* impl, const std::string& devicePath, int baudRate);
-    void close(Impl* impl);
+    // Stop the worker and release the connection. Lost: the worker had found
+    // the device gone, and lostReason is the text it logged.
+    CloseResult close(Impl* impl, std::string& lostReason);
+    // Connected, or lost with the loss not reported yet (see isLost())
     bool isConnected(const Impl* impl);
+    // The worker found the device gone and close() has not collected it yet
+    bool isLost(const Impl* impl);
     int available(const Impl* impl);
     int readBytes(Impl* impl, void* buffer, int length);
     int writeBytes(Impl* impl, const void* buffer, int length);
@@ -129,6 +155,37 @@ namespace internal {
 
 class TC_PLATFORMS("macos,windows,linux,android") Serial {
 public:
+    // -------------------------------------------------------------------------
+    // Events
+    //
+    // onDisconnect fires once per open connection, when it ends:
+    // - wasClean = false: available(), readBytes(), readByte() or writeBytes()
+    //   found the device gone. reason is the text of the warning they log.
+    // - wasClean = true: close() closed the open port (setup() calls it too,
+    //   to close the previous port). reason is "closed by close()".
+    // close() on a port that is not open does not fire, and neither does the
+    // destructor or a move assignment over an open Serial.
+    //
+    // THREADING: it fires inline on the thread that made that call, normally
+    // the main thread. On Android the USB worker thread finds the loss; it
+    // only records it, and the event fires from the next of those calls (or
+    // close() / setup()) on the app's thread. A listener that must run on the
+    // main thread whichever thread uses the Serial opts in:
+    //
+    //   listener = serial.onDisconnect.listen(fn, Deliver::Main);
+    //
+    // RECONNECTING: the port is closed and isConnected() is false before any
+    // listener runs, so a listener may call setup(e.portName, e.baudRate).
+    // Check wasClean first, or every close() reopens the port. The call that
+    // found the loss still returns its error value and leaves the new
+    // connection alone.
+    //
+    // Listeners stay with the Serial they were added to: a move does not
+    // carry them over.
+    // -------------------------------------------------------------------------
+    // mutable: the const available() fires it when it finds the device gone
+    mutable Event<SerialDisconnectEventArgs> onDisconnect;
+
 #if defined(_WIN32)
     Serial() : handle_(INVALID_HANDLE_VALUE), initialized_(false) {}
 #elif defined(__ANDROID__)
@@ -137,11 +194,14 @@ public:
     Serial() : fd_(-1), initialized_(false) {}
 #endif
 
+    // Closes the port without firing onDisconnect: a listener that
+    // reconnects must not run from a destructor.
     ~Serial() {
-        close();
 #if defined(__ANDROID__)
-        androidserial::destroy(aimpl_);
+        androidserial::destroy(aimpl_);  // closes the connection too
         aimpl_ = nullptr;
+#else
+        closePort();
 #endif
     }
 
@@ -149,16 +209,19 @@ public:
     Serial(const Serial&) = delete;
     Serial& operator=(const Serial&) = delete;
 
-    // Move-enabled
+    // Move-enabled. onDisconnect listeners are not moved (see Events above).
     Serial(Serial&& other) noexcept
 #if defined(_WIN32)
-        : handle_(other.handle_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
+        : handle_(other.handle_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)),
+          baudRate_(other.baudRate_) {
         other.handle_ = INVALID_HANDLE_VALUE;
 #elif defined(__ANDROID__)
-        : aimpl_(other.aimpl_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
+        : aimpl_(other.aimpl_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)),
+          baudRate_(other.baudRate_) {
         other.aimpl_ = nullptr;
 #else
-        : fd_(other.fd_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)) {
+        : fd_(other.fd_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)),
+          baudRate_(other.baudRate_) {
         other.fd_ = -1;
 #endif
         other.initialized_ = false;
@@ -166,20 +229,24 @@ public:
 
     Serial& operator=(Serial&& other) noexcept {
         if (this != &other) {
-            close();
+            // The old port closes without onDisconnect, as in the destructor:
+            // a listener that reconnected here would be overwritten below.
 #if defined(_WIN32)
+            closePort();
             handle_ = other.handle_;
             other.handle_ = INVALID_HANDLE_VALUE;
 #elif defined(__ANDROID__)
-            androidserial::destroy(aimpl_);
+            androidserial::destroy(aimpl_);  // closes the old connection too
             aimpl_ = other.aimpl_;
             other.aimpl_ = nullptr;
 #else
+            closePort();
             fd_ = other.fd_;
             other.fd_ = -1;
 #endif
             initialized_ = other.initialized_;
             devicePath_ = std::move(other.devicePath_);
+            baudRate_ = other.baudRate_;
             other.initialized_ = false;
         }
         return *this;
@@ -280,18 +347,32 @@ public:
     // Connection
     // ---------------------------------------------------------------------------
 
-    // Connect by specifying device path
+    // Connect by specifying device path. An open port is closed first, which
+    // fires onDisconnect (wasClean = true).
     bool setup(const std::string& portName, int baudRate) {
 #if defined(__ANDROID__)
-        // Do NOT close() first here: androidserial::setup() keeps a pending
-        // permission request alive when called again for the same device
-        // (reconnect loops must not re-trigger the permission dialog).
+        // close() only when a connection is open or lost: while a permission
+        // request is pending, androidserial::setup() keeps it alive when
+        // called again for the same device (reconnect loops must not
+        // re-trigger the permission dialog).
+        if (isConnected()) close();
+        // A listener that reconnected from there is overruled by this call,
+        // which came first: androidserial::setup() closes that connection.
+        if (isConnected()) {
+            logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
+        }
         if (!aimpl_) aimpl_ = androidserial::create();
         devicePath_ = portName;
+        baudRate_ = baudRate;
         initialized_ = androidserial::setup(aimpl_, portName, baudRate);
         return initialized_;
 #else
         close();
+        // A listener that reconnected from there is overruled by this call,
+        // which came first. Close that port without another notification.
+        if (closePort()) {
+            logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
+        }
 #endif
 
 #if defined(_WIN32)
@@ -364,6 +445,7 @@ public:
         PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
         devicePath_ = portName;
+        baudRate_ = baudRate;
         initialized_ = true;
         logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
@@ -467,6 +549,7 @@ public:
         tcflush(fd_, TCIOFLUSH);
 
         devicePath_ = portName;
+        baudRate_ = appliedBaudRate;
         initialized_ = true;
         if (appliedBaudRate != baudRate) {
             logWarning() << "Serial: requested " << baudRate << " baud on " << portName
@@ -487,24 +570,25 @@ public:
         return setup(devices[deviceIndex].devicePath, baudRate);
     }
 
-    // Disconnect
+    // Disconnect. When the port was open, onDisconnect fires with
+    // wasClean = true and reason "closed by close()".
     void close() {
-#if defined(_WIN32)
-        if (handle_ != INVALID_HANDLE_VALUE) {
-            CloseHandle(handle_);
-            handle_ = INVALID_HANDLE_VALUE;
-            logVerbose() << "Serial: disconnected from " << devicePath_;
-        }
-#elif defined(__ANDROID__)
-        if (aimpl_) androidserial::close(aimpl_);
-#else
-        if (fd_ != -1) {
-            ::close(fd_);
-            fd_ = -1;
-            logVerbose() << "Serial: disconnected from " << devicePath_;
-        }
-#endif
+#if defined(__ANDROID__)
+        // A loss the USB worker recorded and no call has reported yet is
+        // reported here, as the loss it was.
+        std::string lostReason;
+        androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
+                                                  : androidserial::CloseResult::NotOpen;
         initialized_ = false;
+        if (ended == androidserial::CloseResult::Lost) {
+            notifyDisconnect(std::move(lostReason), false);
+        } else if (ended == androidserial::CloseResult::Closed) {
+            notifyDisconnect("closed by close()", true);
+        }
+#else
+        // Close first, notify last: a listener may call setup() again
+        if (closePort()) notifyDisconnect("closed by close()", true);
+#endif
     }
 
     // ---------------------------------------------------------------------------
@@ -514,10 +598,12 @@ public:
     // Whether the port is open and working. Turns false after close(), and
     // also when available() / readBytes() / readByte() / writeBytes() find
     // that the device went away (USB unplug, driver reset): the port is then
-    // closed, and setup() connects again. This call does not probe the
-    // device itself; detection happens inside those I/O calls.
+    // closed, onDisconnect fires, and setup() connects again. This call does
+    // not probe the device itself; detection happens inside those I/O calls.
     // Android: may flip to true AFTER setup() returned false, once the user
-    // grants USB permission (see androidserial note above).
+    // grants USB permission, and stays true after the USB worker finds the
+    // device gone until one of those calls reports it (see androidserial
+    // note above).
     bool isConnected() const {
 #if defined(_WIN32)
         return initialized_ && handle_ != INVALID_HANDLE_VALUE;
@@ -540,8 +626,11 @@ public:
 
     // Get number of bytes available for reading.
     // Returns 0 when not connected; a device loss found here closes the port
-    // (isConnected() turns false).
+    // (isConnected() turns false) and fires onDisconnect.
     int available() const {
+#if defined(__ANDROID__)
+        if (reportLoss()) return 0;
+#endif
         if (!isConnected()) return 0;
 
 #if defined(_WIN32)
@@ -574,8 +663,12 @@ public:
 
     // Read specified number of bytes
     // Returns: actual bytes read (>=0), -1 on error. A device loss found here
-    // closes the port (isConnected() turns false) and returns -1.
+    // closes the port (isConnected() turns false), fires onDisconnect and
+    // returns -1.
     int readBytes(void* buffer, int length) {
+#if defined(__ANDROID__)
+        if (reportLoss()) return -1;
+#endif
         if (!isConnected()) return -1;
         if (length <= 0) return 0;
 
@@ -621,8 +714,12 @@ public:
 
     // Read single byte
     // Returns: byte read (0-255), -1 if no data, -2 on error. A device loss
-    // found here closes the port (isConnected() turns false) and returns -2.
+    // found here closes the port (isConnected() turns false), fires
+    // onDisconnect and returns -2.
     int readByte() {
+#if defined(__ANDROID__)
+        if (reportLoss()) return -2;
+#endif
         if (!isConnected()) return -2;
 
         unsigned char byte;
@@ -666,8 +763,12 @@ public:
 
     // Write specified number of bytes
     // Returns: actual bytes written, -1 on error. A device loss found here
-    // closes the port (isConnected() turns false) and returns -1.
+    // closes the port (isConnected() turns false), fires onDisconnect and
+    // returns -1.
     int writeBytes(const void* buffer, int length) {
+#if defined(__ANDROID__)
+        if (reportLoss()) return -1;
+#endif
         if (!isConnected()) return -1;
         if (length <= 0) return 0;
 
@@ -765,33 +866,88 @@ private:
 #endif
     mutable bool initialized_;     // Connection state
     std::string devicePath_; // Current device path
+    int baudRate_ = 0;       // Rate the current port was opened at
+
+    // Fire onDisconnect. The caller has closed the port and cleared its state
+    // already, so a listener may call setup() to reconnect. The caller must
+    // return right after this and not touch the port: it may be a new one.
+    void notifyDisconnect(std::string reason, bool wasClean) const {
+        SerialDisconnectEventArgs args;
+        args.portName = devicePath_;
+        args.baudRate = baudRate_;
+        args.reason = std::move(reason);
+        args.wasClean = wasClean;
+        onDisconnect.notify(args);
+    }
+
+#if defined(__ANDROID__)
+    // The USB worker found the device gone and only recorded it: release the
+    // connection and fire onDisconnect here, on the app's thread. Returns
+    // true when it did, and the caller then returns its error value.
+    bool reportLoss() const {
+        if (!aimpl_ || !androidserial::isLost(aimpl_)) return false;
+        std::string reason;
+        androidserial::close(aimpl_, reason);
+        initialized_ = false;
+        notifyDisconnect(std::move(reason), false);
+        return true;
+    }
+#else
+    // Close the port without firing onDisconnect (the destructor, a move
+    // assignment, and close() before it notifies). Returns whether it was open.
+    bool closePort() {
+#if defined(_WIN32)
+        bool wasOpen = handle_ != INVALID_HANDLE_VALUE;
+        if (wasOpen) {
+            CloseHandle(handle_);
+            handle_ = INVALID_HANDLE_VALUE;
+            logVerbose() << "Serial: disconnected from " << devicePath_;
+        }
+#else
+        bool wasOpen = fd_ != -1;
+        if (wasOpen) {
+            ::close(fd_);
+            fd_ = -1;
+            logVerbose() << "Serial: disconnected from " << devicePath_;
+        }
+#endif
+        initialized_ = false;
+        return wasOpen;
+    }
+#endif
 
 #if defined(_WIN32)
     // The device went away: close the handle (a stale one would block
-    // reopening the COM port) and log once; later calls see !isConnected().
-    // Any failure of ClearCommError / ReadFile / WriteFile counts as a loss:
-    // with fAbortOnError off, line errors do not fail them, and the error
-    // code a removed device returns differs between drivers.
+    // reopening the COM port), log once and fire onDisconnect; later calls
+    // see !isConnected(). Any failure of ClearCommError / ReadFile /
+    // WriteFile counts as a loss: with fAbortOnError off, line errors do not
+    // fail them, and the error code a removed device returns differs between
+    // drivers. The caller returns right after this (see notifyDisconnect()).
     void markDisconnected(const char* call, DWORD error) const {
-        if (handle_ != INVALID_HANDLE_VALUE) {
-            CloseHandle(handle_);
-            handle_ = INVALID_HANDLE_VALUE;
-        }
+        if (handle_ == INVALID_HANDLE_VALUE) return;
+        CloseHandle(handle_);
+        handle_ = INVALID_HANDLE_VALUE;
         initialized_ = false;
-        logWarning() << "Serial: lost connection to " << devicePath_
-                     << " (" << call << " failed, error " << error << ")";
+        std::string reason = std::string(call) + " failed, error " + std::to_string(error);
+        logWarning() << "Serial: lost connection to " << devicePath_ << " (" << reason << ")";
+        notifyDisconnect(std::move(reason), false);
     }
 #elif !defined(__ANDROID__)
-    // The device went away: close the fd and log once; later calls see
-    // !isConnected(). err is the errno that showed it, 0 for a hangup.
+    // The device went away: close the fd, log once and fire onDisconnect;
+    // later calls see !isConnected(). err is the errno that showed it, 0 for
+    // a hangup. The caller returns right after this (see notifyDisconnect()).
     void markDisconnected(const char* call, int err) const {
-        if (fd_ != -1) {
-            ::close(fd_);
-            fd_ = -1;
-        }
+        if (fd_ == -1) return;
+        ::close(fd_);
+        fd_ = -1;
         initialized_ = false;
-        logWarning() << "Serial: lost connection to " << devicePath_ << " ("
-                     << call << (err ? ": " : "") << (err ? std::strerror(err) : "") << ")";
+        std::string reason = call;
+        if (err) {
+            reason += ": ";
+            reason += std::strerror(err);
+        }
+        logWarning() << "Serial: lost connection to " << devicePath_ << " (" << reason << ")";
+        notifyDisconnect(std::move(reason), false);
     }
 
     // errno values that mean the device is gone, not "try again"

@@ -238,6 +238,13 @@ struct Impl {
     std::mutex rxMutex;
     std::deque<uint8_t> rx;
     bool rxOverflowWarned = false;
+
+    // Set by the worker when it finds the device gone. Serial collects it
+    // with close() on the app's thread and fires onDisconnect there; the
+    // worker never notifies. lostReason is written before lost is set and
+    // not touched again until closeImpl() has joined the worker.
+    std::atomic<bool> lost{false};
+    std::string lostReason;
 };
 
 namespace {
@@ -458,6 +465,7 @@ void workerMain(Impl* impl) {
         bt.timeout = READ_TIMEOUT_MS;
         bt.data = buf.data();
         int r = ioctl(impl->fd, USBDEVFS_BULK, &bt);
+        int err = errno;
         if (r > 0) {
             std::lock_guard<std::mutex> lock(impl->rxMutex);
             impl->rx.insert(impl->rx.end(), buf.begin(), buf.begin() + r);
@@ -468,11 +476,16 @@ void workerMain(Impl* impl) {
                 }
                 impl->rx.erase(impl->rx.begin(), impl->rx.begin() + (impl->rx.size() - RX_BUFFER_CAP));
             }
-        } else if (r < 0 && (errno == ETIMEDOUT || errno == EAGAIN || errno == EINTR)) {
+        } else if (r < 0 && (err == ETIMEDOUT || err == EAGAIN || err == EINTR)) {
             continue;
         } else if (r < 0) {
-            // ENODEV / EIO / ESHUTDOWN: device unplugged or connection broken
-            logWarning() << "Serial: device lost: " << impl->path;
+            // ENODEV / EIO / ESHUTDOWN: device unplugged or connection broken.
+            // Only record it (see Impl::lost). lost goes up before state
+            // leaves Connected, so isConnected() never reads false before
+            // Serial has reported the loss.
+            impl->lostReason = std::string("bulk read: ") + strerror(err);
+            logWarning() << "Serial: lost connection to " << impl->path << " (" << impl->lostReason << ")";
+            impl->lost = true;
             impl->state = (int)State::Idle;
             return;
         }
@@ -480,11 +493,23 @@ void workerMain(Impl* impl) {
 }
 
 // Stop the worker and release the USB connection. Joins the thread, so it
-// must never be called from the worker itself.
-void closeImpl(Impl* impl) {
+// must never be called from the worker itself. Returns how the connection
+// had ended; lostReason is filled for Lost.
+CloseResult closeImpl(Impl* impl, std::string& lostReason) {
     impl->stop = true;
     if (impl->worker.joinable()) impl->worker.join();
     impl->stop = false;
+
+    // The worker has stopped, so state and lost no longer change under us
+    CloseResult result = CloseResult::NotOpen;
+    if (impl->lost.load()) {
+        result = CloseResult::Lost;
+        lostReason = impl->lostReason;
+    } else if (impl->state.load() == (int)State::Connected) {
+        result = CloseResult::Closed;
+    }
+    impl->lost = false;
+    impl->lostReason.clear();
 
     if (impl->connection) {
         JniScope jni;
@@ -509,6 +534,7 @@ void closeImpl(Impl* impl) {
     std::lock_guard<std::mutex> lock(impl->rxMutex);
     impl->rx.clear();
     impl->rxOverflowWarned = false;
+    return result;
 }
 
 } // anonymous namespace
@@ -523,7 +549,8 @@ Impl* create() {
 
 void destroy(Impl* impl) {
     if (!impl) return;
-    closeImpl(impl);
+    std::string lostReason;
+    closeImpl(impl, lostReason);  // Serial's destructor does not notify
     delete impl;
 }
 
@@ -599,7 +626,9 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate) {
         return false;
     }
 
-    closeImpl(impl);
+    // Serial::setup() has reported the previous connection already
+    std::string lostReason;
+    closeImpl(impl, lostReason);
     impl->path = devicePath;
     impl->baud = baudRate;
 
@@ -645,12 +674,18 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate) {
     return false;
 }
 
-void close(Impl* impl) {
-    closeImpl(impl);
+CloseResult close(Impl* impl, std::string& lostReason) {
+    return closeImpl(impl, lostReason);
 }
 
 bool isConnected(const Impl* impl) {
-    return impl->state.load() == (int)State::Connected;
+    // A recorded loss still counts until Serial reports it, so isConnected()
+    // turns false together with onDisconnect, on the app's thread
+    return impl->state.load() == (int)State::Connected || impl->lost.load();
+}
+
+bool isLost(const Impl* impl) {
+    return impl->lost.load();
 }
 
 int available(const Impl* impl) {
