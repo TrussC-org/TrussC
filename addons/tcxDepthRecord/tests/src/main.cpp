@@ -12,8 +12,8 @@
 //      frame changed (depth sample count / byte size / compressed size, color
 //      width / height / channels / byte size / compressed size, a block
 //      length, an index offset, data that doesn't decode, the stream manifest
-//      count) are skipped or refused with the expected message, and the other
-//      frames still play.
+//      count, the header magic) are skipped or refused with the expected
+//      message, and the other frames still play.
 //   3. depthToImage() draws nothing for a depth plane shorter than w*h.
 //
 // Pass a name fragment as the first argument to run only the matching cases.
@@ -423,6 +423,9 @@ static vector<Mutation> mutations() {
         {"depthRawBytesSmaller", hilo, lz4, X, R, R, "byte size doesn't match the sample count",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 put32(b, k.payload() + D_RAW, get32(b, k.payload() + D_N)); }},
+        {"depthRawBytesLargerLz4", D::LZ4, lz4, X, R, R, "byte size doesn't match the sample count",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
+                                put32(b, k.payload() + D_RAW, get32(b, k.payload() + D_RAW) + 2); }},
         // Byte size, compressed size and length all 64 larger: only the byte
         // size gives it away.
         {"depthRawBytesLargerUncompressed", D::Raw, C::Raw, X, A, A, "byte size doesn't match the sample count",
@@ -441,6 +444,9 @@ static vector<Mutation> mutations() {
         {"depthCompSizePastBlock", hilo, lz4, X, X, X, "compressed size runs past the block",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 put32(b, k.payload() + D_COMP, k.len - 12 + 1); }},
+        {"depthCompSizePastFile", hilo, lz4, X, X, X, "compressed size runs past the block",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
+                                put32(b, k.payload() + D_COMP, 0xFFFFFFF0u); }},
         {"depthCompSizeUncompressedMismatch", D::Raw, lz4, X, A, A, "compressed size doesn't fit the byte size",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 put32(b, k.payload() + D_COMP, get32(b, k.payload() + D_COMP) - 2); }},
@@ -490,10 +496,14 @@ static vector<Mutation> mutations() {
                                 put32(b, k.payload() + C_COMP, get32(b, k.payload() + C_COMP) + 16); }},
         // width x height x channels is 2^32 + the stored byte size: it only
         // matches if the product is computed in 32 bits.
-        {"colorSizeOverflows", hilo, lz4, R, X, R, "byte size doesn't match width x height x channels",
+        {"colorSizeBeyond32Bits", hilo, lz4, R, X, R, "byte size doesn't match width x height x channels",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
                                 put32(b, k.payload() + C_W, (1u << 30) + get32(b, k.payload() + C_RAW) / 4);
                                 put32(b, k.payload() + C_H, 1); }},
+        {"colorSizeHuge", hilo, lz4, R, X, R, "byte size doesn't match width x height x channels",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
+                                put32(b, k.payload() + C_W, 0x7FFFFFFFu);
+                                put32(b, k.payload() + C_H, 0x7FFFFFFFu); }},
         {"colorSizeBeyondData", hilo, lz4, R, X, R, "compressed size doesn't fit the byte size",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
                                 put32(b, k.payload() + C_W, 8192);
@@ -506,6 +516,9 @@ static vector<Mutation> mutations() {
         {"colorCompSizePastBlock", hilo, lz4, R, X, X, "compressed size runs past the block",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
                                 put32(b, k.payload() + C_COMP, k.len - 13 + 1); }},
+        {"colorCompSizePastFile", hilo, lz4, R, X, X, "compressed size runs past the block",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
+                                put32(b, k.payload() + C_COMP, 0xFFFFFFF0u); }},
         // Length reaching exactly to the end of the frame, compressed size
         // counted with 13 bytes of fields: the payload's 17 bytes of fields
         // plus the compressed data end 4 bytes past the frame.
@@ -544,6 +557,8 @@ static vector<Mutation> mutations() {
         // --- header ---
         {"manifestCountOverLimit", hilo, lz4, A, A, A, "stream manifest",
          [](auto& b, auto&) { b[offsetof(TcdcHeader, streamTypeCount)] = 200; }, true},
+        {"headerMagicWrong", hilo, lz4, A, A, A, "not a .tcdc file",
+         [](auto& b, auto&) { b[0] = 'X'; }, true},
     };
 }
 
