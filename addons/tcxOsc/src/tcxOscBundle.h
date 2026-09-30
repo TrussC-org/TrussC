@@ -85,7 +85,8 @@ public:
     // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
-    // ok is false when nesting exceeds MAX_NESTING_DEPTH or any nested
+    // ok is false when nesting exceeds MAX_NESTING_DEPTH, any element is
+    // truncated (its size runs past the end of the data), or any nested
     // bundle fails to parse: the whole bundle is rejected, not a part of it.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
 

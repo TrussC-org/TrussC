@@ -15,7 +15,11 @@ plus `OscBundle::fromBytes` directly):
   nested bundle that fails to parse, is exactly one `onParseError` and delivers
   nothing;
 - a 10-level bundle delivers each inner message exactly once, and
-  `onBundleReceived` listeners get the parsed bundles themselves, not copies.
+  `onBundleReceived` listeners get the parsed bundles themselves, not copies;
+- a bundle element or blob whose size runs past the end of the data fails to
+  parse (one `onParseError`, nothing delivered), and so do sizes up to the
+  32-bit maximum;
+- valid packets of every argument shape and padding length still parse.
 
 > Note: it does *not* assert that a non-member socket on a *different port* gets
 > nothing while another socket on the host has joined the group — IPv4 membership

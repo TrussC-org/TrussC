@@ -163,6 +163,8 @@ public:
     // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
+    // ok is false when the data is not a message or an argument runs past
+    // the end of the data (e.g. a blob larger than the bytes left).
     static OscMessage fromBytes(const uint8_t* data, size_t size, bool& ok);
 
     // -------------------------------------------------------------------------

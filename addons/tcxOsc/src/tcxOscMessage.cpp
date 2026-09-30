@@ -5,6 +5,18 @@ namespace tcx::osc {
 
 using namespace osc_internal;
 
+namespace {
+
+// Move pos past the zero padding that aligns it to 4 bytes. Requires
+// pos <= size, and the result stays <= size: padding missing at the very end
+// is tolerated (as before), the next read then finds no data left.
+size_t skipPadding(size_t pos, size_t size) {
+    size_t pad = (4 - (pos & 3)) & 3;
+    return pad > size - pos ? size : pos + pad;
+}
+
+}  // namespace
+
 // =============================================================================
 // toBytes - Serialize message to byte array
 // =============================================================================
@@ -68,6 +80,9 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
 
     if (!data || size < 4) return msg;
 
+    // pos <= size holds throughout, and each size check subtracts from size
+    // instead of adding to pos, so none of them can wrap when size_t is 32
+    // bits. An argument that runs past the end fails the parse.
     size_t pos = 0;
 
     // Read address
@@ -77,7 +92,7 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     if (addrEnd == size_t(-1)) return msg;
 
     msg.address_ = std::string(reinterpret_cast<const char*>(data + pos), addrEnd - pos);
-    pos = alignTo4(addrEnd + 1);
+    pos = skipPadding(addrEnd + 1, size);
 
     if (pos >= size) {
         // Messages without arguments (no type tags) are allowed
@@ -97,12 +112,12 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     if (typeTagEnd == size_t(-1)) return msg;
 
     msg.typeTags_ = std::string(reinterpret_cast<const char*>(data + typeTagStart), typeTagEnd - typeTagStart);
-    pos = alignTo4(typeTagEnd + 1);
+    pos = skipPadding(typeTagEnd + 1, size);
 
     // Read arguments
     for (char type : msg.typeTags_) {
         if (type == 'i') {
-            if (pos + 4 > size) return msg;  // Insufficient size
+            if (4 > size - pos) return msg;  // Insufficient size
             uint32_t be;
             std::memcpy(&be, data + pos, 4);
             int32_t value = static_cast<int32_t>(fromBigEndian(be));
@@ -110,7 +125,7 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
             pos += 4;
         }
         else if (type == 'f') {
-            if (pos + 4 > size) return msg;
+            if (4 > size - pos) return msg;
             uint32_t be;
             std::memcpy(&be, data + pos, 4);
             float value = uint32ToFloat(fromBigEndian(be));
@@ -122,18 +137,19 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
             if (strEnd == size_t(-1)) return msg;
             std::string str(reinterpret_cast<const char*>(data + pos), strEnd - pos);
             msg.args_.emplace_back(std::move(str));
-            pos = alignTo4(strEnd + 1);
+            pos = skipPadding(strEnd + 1, size);
         }
         else if (type == 'b') {
-            if (pos + 4 > size) return msg;
+            if (4 > size - pos) return msg;
             uint32_t be;
             std::memcpy(&be, data + pos, 4);
             uint32_t blobSize = fromBigEndian(be);
             pos += 4;
-            if (pos + blobSize > size) return msg;
+            // A blob larger than the data left is truncated
+            if (blobSize > size - pos) return msg;
             std::vector<uint8_t> blob(data + pos, data + pos + blobSize);
             msg.args_.emplace_back(std::move(blob));
-            pos = alignTo4(pos + blobSize);
+            pos = skipPadding(pos + blobSize, size);
         }
         else if (type == 'T') {
             msg.args_.emplace_back(true);
