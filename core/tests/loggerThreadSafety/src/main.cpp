@@ -91,11 +91,16 @@ static fs::path tempFile(const string& name) {
     return p;
 }
 
+// The Logger writes its file in text mode, so on Windows every line ends in
+// CRLF; read binary and drop the '\r' so the lines compare the same everywhere.
 static vector<string> readLines(const fs::path& p) {
     vector<string> lines;
     ifstream in(p, ios::binary);
     string line;
-    while (getline(in, line)) lines.push_back(line);
+    while (getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+    }
     return lines;
 }
 
