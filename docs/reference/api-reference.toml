@@ -3983,6 +3983,7 @@ keywords = ["log", "logging", "console"]
 description.en = "Logging core with console and file output and an onLog event; access the global instance via getLogger()"
 description.ja = "コンソール・ファイル出力と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
 description.ko = "콘솔·파일 출력과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
+details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
 related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice"]
 
 ["Logger::closeFile"]

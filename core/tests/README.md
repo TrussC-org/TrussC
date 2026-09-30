@@ -73,6 +73,21 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   from its `threadedFunction()` or by a `thread_local` owner at thread exit (it
   still terminates, see the "Destruction" notes in `tcThread.h`), and a
   destruction at the very moment the worker calls `threadedFunction()`.
+- `loggerThreadSafety/` — the Logger is safe to call from any thread, and
+  sokol's messages go through it (#265). Threads logging at once while
+  another thread switches the file (`setLogFile()`) and toggles the levels
+  leave every line whole and exactly once, in the file and on the console;
+  `setLogFile()` / `closeFile()` toggled under load tear or duplicate
+  nothing, and nothing is written after `closeFile()` returns; an `onLog`
+  listener that logs again, itself or through a thread it waits for, does
+  not deadlock. The sokol bridge (`internal::sokolLog`) maps panic / error /
+  warning / info to Fatal / Error / Warning / Verbose, with the tag as the
+  module and `id:<item> line:<line>` when sokol passes no message. POSIX
+  only, each in a forked child: a panic reaches the log file and still
+  aborts through `slog_func`; a panic while another thread holds the
+  Logger's lock does not wait for it (the line goes to stderr); and on
+  Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
+  `XOpenDisplay()` failure lands in that file.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
