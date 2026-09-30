@@ -99,9 +99,11 @@ capture it inside its own frame. So:
   signal that pauses the window, not a diagnosis, so raising the window does
   not always help: macOS: minimized, fully covered or on another Space
   (NSWindow occlusionState); Windows: minimized, or DXGI reports the window
-  occluded (covered, and also while the session is locked or the display is
-  off); Linux (X11): minimized, or fully obscured (only reported without a
-  compositing manager).
+  occluded (while the session is locked or the display is off; under DWM a
+  window that is merely covered keeps rendering and is not flagged); Linux
+  (X11): minimized, or fully obscured (only reported without a compositing
+  manager; under a compositing WM such as GNOME's a covered window keeps
+  rendering and is not flagged).
 - Otherwise the request waits for the window's next frame. If none comes
   within 5 s (the window became hidden after the check, the platform has no
   signal for how it is hidden, or `Window::setFps()` throttles it very low),
