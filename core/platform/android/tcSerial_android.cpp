@@ -255,6 +255,14 @@ struct Impl {
     // not touched again until closeImpl() has joined the worker.
     std::atomic<bool> lost{false};
     std::string lostReason;
+
+    // Set by destroy() when it runs on the worker thread itself (a Logger
+    // listener destroyed the Serial): the worker then releases the
+    // connection and deletes this Impl when it stops (see workerMain()).
+    std::atomic<bool> orphaned{false};
+    // A call refused on the worker thread has been logged (once per Impl, so
+    // a listener that calls close() on every log line does not loop)
+    std::atomic<bool> refusalLogged{false};
 };
 
 namespace {
@@ -417,9 +425,10 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
     return true;
 }
 
-// Worker thread: waits for the permission dialog result (if pending),
+// Worker thread body: waits for the permission dialog result (if pending),
 // connects, then runs the bulk read loop on the raw fd (no JNI in the loop).
-void workerMain(Impl* impl) {
+// Returns once stopped, lost or failed (see workerMain()).
+void workerRun(Impl* impl) {
     if (impl->state.load() == (int)State::Pending) {
         JniScope jni;
         if (!jni) {
@@ -518,25 +527,9 @@ void workerMain(Impl* impl) {
     }
 }
 
-// Stop the worker and release the USB connection. Joins the thread, so it
-// must never be called from the worker itself. Returns how the connection
-// had ended; lostReason is filled for Lost.
-CloseResult closeImpl(Impl* impl, std::string& lostReason) {
-    impl->stop = true;
-    if (impl->worker.joinable()) impl->worker.join();
-    impl->stop = false;
-
-    // The worker has stopped, so state and lost no longer change under us
-    CloseResult result = CloseResult::NotOpen;
-    if (impl->lost.load()) {
-        result = CloseResult::Lost;
-        lostReason = impl->lostReason;
-    } else if (impl->state.load() == (int)State::Connected) {
-        result = CloseResult::Closed;
-    }
-    impl->lost = false;
-    impl->lostReason.clear();
-
+// Release the USB connection and clear the connection state. The worker
+// must not be running: joined, or this is the worker itself as it ends.
+void releaseConnection(Impl* impl) {
     if (impl->connection) {
         JniScope jni;
         if (jni) {
@@ -560,7 +553,58 @@ CloseResult closeImpl(Impl* impl, std::string& lostReason) {
     std::lock_guard<std::mutex> lock(impl->rxMutex);
     impl->rx.clear();
     impl->rxOverflowWarned = false;
+}
+
+// Whether this runs on impl's worker thread, which cannot wait for itself:
+// a Logger listener running inline there called into the Serial
+bool onWorker(const Impl* impl) {
+    return internal::isThisThread(impl->worker);
+}
+
+void logRefusal(Impl* impl, const char* what) {
+    if (impl->refusalLogged.exchange(true)) return;
+    blog(LogLevel::Error) << "Serial: " << what << " cannot run on the USB worker thread, which it would"
+                          << " have to wait for (called from a Logger listener running there?), so it"
+                          << " does nothing. Listen with Deliver::Main";
+}
+
+// Stop the worker and release the USB connection. Returns how the connection
+// had ended; lostReason is filled for Lost. On the worker thread itself it
+// refuses (Refused) and touches nothing: joining would throw, and the worker
+// goes on using the connection once the listener that called this returns.
+CloseResult closeImpl(Impl* impl, std::string& lostReason) {
+    if (onWorker(impl)) {
+        logRefusal(impl, "close() / setup()");
+        return CloseResult::Refused;
+    }
+    impl->stop = true;
+    if (impl->worker.joinable()) impl->worker.join();
+    impl->stop = false;
+
+    // The worker has stopped, so state and lost no longer change under us
+    CloseResult result = CloseResult::NotOpen;
+    if (impl->lost.load()) {
+        result = CloseResult::Lost;
+        lostReason = impl->lostReason;
+    } else if (impl->state.load() == (int)State::Connected) {
+        result = CloseResult::Closed;
+    }
+    impl->lost = false;
+    impl->lostReason.clear();
+
+    releaseConnection(impl);
     return result;
+}
+
+// Worker thread. If destroy() ran on this thread meanwhile (a Logger listener
+// destroyed the Serial), it stopped and detached the thread and left impl to
+// it: release the connection and delete impl once the loop has ended.
+void workerMain(Impl* impl) {
+    workerRun(impl);
+    if (impl->orphaned.load()) {
+        releaseConnection(impl);
+        delete impl;
+    }
 }
 
 } // anonymous namespace
@@ -583,6 +627,21 @@ Impl* create() {
 
 void destroy(Impl* impl) {
     if (!impl) return;
+    if (onWorker(impl)) {
+        // The Serial is being destroyed on its own worker thread (from a
+        // Logger listener running there). That thread cannot wait for
+        // itself, and once the listener returns it goes on reading impl, so
+        // impl must outlive this call. Stop and detach the thread, and let
+        // it release the connection and delete impl as it ends
+        // (workerMain()). Nothing else refers to impl after this.
+        blog(LogLevel::Error) << "Serial: destroyed on its USB worker thread (from a Logger listener"
+                              << " running there?); the connection closes when that thread stops."
+                              << " Listen with Deliver::Main";
+        impl->orphaned = true;
+        impl->stop = true;
+        impl->worker.detach();
+        return;
+    }
     std::string lostReason;
     closeImpl(impl, lostReason);  // Serial's destructor does not notify
     delete impl;
@@ -655,6 +714,11 @@ std::vector<SerialDeviceInfo> listDevices() {
 bool setup(Impl* impl, const std::string& devicePath, int baudRate,
            CloseResult& ended, std::string& lostReason) {
     ended = CloseResult::NotOpen;
+    // It would have to stop and replace the worker it runs on
+    if (onWorker(impl)) {
+        logRefusal(impl, "close() / setup()");
+        return false;
+    }
     // Reconnect-loop guard: while the permission dialog for this device is
     // still pending, repeated setup() calls must not re-trigger it.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {

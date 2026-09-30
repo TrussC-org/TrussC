@@ -55,6 +55,7 @@
 #include <cstring>
 #include <sstream>
 #include <mutex>
+#include <thread>
 #if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
     #include <condition_variable>
 #endif
@@ -114,6 +115,13 @@ struct SerialDisconnectEventArgs {
 };
 
 namespace internal {
+    // Whether t is the thread this runs on. The Android backend asks before it
+    // joins its USB worker: that thread cannot wait for itself (join() would
+    // throw), which a Logger listener running inline on it could ask for.
+    inline bool isThisThread(const std::thread& t) {
+        return t.joinable() && t.get_id() == std::this_thread::get_id();
+    }
+
     // Log lines Serial makes while it holds its port lock, sent once it has
     // released it: a Logger listener that runs inline may call the same
     // Serial, and no thread may take that lock twice. Declare it before the
@@ -189,8 +197,10 @@ namespace internal {
 // ---------------------------------------------------------------------------
 namespace androidserial {
     struct Impl;
-    // How close() found the connection, for Serial::onDisconnect
-    enum class CloseResult { NotOpen, Closed, Lost };
+    // How close() found the connection, for Serial::onDisconnect. Refused:
+    // called on the backend's own worker thread, which cannot wait for
+    // itself; nothing was closed.
+    enum class CloseResult { NotOpen, Closed, Lost, Refused };
     Impl* create();
     void destroy(Impl* impl);
     std::vector<SerialDeviceInfo> listDevices();
@@ -1385,18 +1395,25 @@ private:
             internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
             if (generation_ != loss.generation || !isOpenLocked()) return;
+#if defined(__ANDROID__)
+            {
+                androidserial::HoldLogs hold(held);
+                // Refused on the USB worker thread itself: the loss stays
+                // recorded, for the next call made elsewhere
+                if (androidserial::close(aimpl_, loss.reason) == androidserial::CloseResult::Refused) return;
+            }
+            initialized_ = false;
+#else
             initialized_ = false;  // isConnected() reads it without the lock
 #if defined(_WIN32)
             // With some drivers a stale handle keeps the port from being
             // reopened (usbser.sys does not)
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
-#elif defined(__ANDROID__)
-            androidserial::HoldLogs hold(held);
-            androidserial::close(aimpl_, loss.reason);
 #else
             ::close(fd_);
             fd_ = -1;
+#endif
 #endif
             port = devicePath_;
             lost = disconnectArgs(loss.reason, false);
@@ -1416,6 +1433,8 @@ private:
         std::string lostReason;
         androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
                                                   : androidserial::CloseResult::NotOpen;
+        // Refused on the USB worker thread itself: the connection stays
+        if (ended == androidserial::CloseResult::Refused) return;
         initialized_ = false;
         closed = closeArgs(ended, lostReason, devicePath_, baudRate_);
 #else
@@ -1431,7 +1450,10 @@ private:
     // close() after an unnoticed unplug is a plain "closed by close()".)
     static PendingDisconnect closeArgs(androidserial::CloseResult ended, const std::string& lostReason,
                                        const std::string& portName, int baudRate) {
-        if (ended == androidserial::CloseResult::NotOpen) return std::nullopt;
+        if (ended == androidserial::CloseResult::NotOpen ||
+            ended == androidserial::CloseResult::Refused) {
+            return std::nullopt;
+        }
         SerialDisconnectEventArgs args;
         args.portName = portName;
         args.baudRate = baudRate;
