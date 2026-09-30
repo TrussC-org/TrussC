@@ -1,11 +1,21 @@
+// cgltf is not vendored in this repo: CMakeLists.txt fetches the upstream
+// single header at tag v1.14 (github.com/jkuhlmann/cgltf), unmodified.
+// cgltf_parse_file() only parses; it does not check that the model data is
+// consistent, and cgltf's accessor readers trust the counts and offsets they
+// are given. So load() runs checkDataRanges() and then cgltf_validate() on
+// every file before any accessor, index or image data is read.
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
 #include "tcxGltf.h"
 
 #include <algorithm>
+#include <climits>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <new>
+#include <stdexcept>
 
 using namespace std;
 using namespace tc;
@@ -34,6 +44,11 @@ static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
 // values, and it reads index data itself, so this runs first. An accessor
 // whose component type has no size is left to cgltf_validate(), which
 // refuses it before it computes any range.
+// Every accessor, with or without a buffer view, must also have a count
+// whose float array size (count * components * sizeof(float)) fits in
+// size_t: readAccessorFloats() and cgltf's unpack functions compute it, and
+// an accessor without a buffer view has no range to bound its count. This is
+// only a check that the arithmetic does not wrap, not a limit on model size.
 static bool checkDataRanges(const cgltf_data* data) {
     for (cgltf_size i = 0; i < data->buffer_views_count; i++) {
         const cgltf_buffer_view& view = data->buffer_views[i];
@@ -43,6 +58,8 @@ static bool checkDataRanges(const cgltf_data* data) {
     }
     for (cgltf_size i = 0; i < data->accessors_count; i++) {
         const cgltf_accessor& acc = data->accessors[i];
+        cgltf_size numComp = cgltf_num_components(acc.type);
+        if (acc.count > SIZE_MAX / (sizeof(float) * numComp)) return false;
         cgltf_size elemSize = cgltf_calc_size(acc.type, acc.component_type);
         if (elemSize == 0) continue;
         if (acc.buffer_view &&
@@ -99,29 +116,49 @@ static vector<float> readAccessorFloats(const cgltf_accessor* acc) {
     indices.offset = sp.indices_byte_offset;
     indices.stride = cgltf_component_size(sp.indices_component_type);
     indices.count = sp.count;
+    // Bound by the array actually allocated, not by acc->count
+    cgltf_size outElems = out.size() / numComp;
     for (cgltf_size i = 0; i < sp.count; i++) {
         cgltf_size idx = cgltf_accessor_read_index(&indices, i);
-        if (idx >= acc->count) continue;  // cgltf_validate() refuses these
+        if (idx >= outElems) continue;  // cgltf_validate() refuses these
         copy(vals.begin() + i * numComp, vals.begin() + (i + 1) * numComp,
              out.begin() + idx * numComp);
     }
     return out;
 }
 
-// Read accessor data as uint32 indices
+// Read accessor data as uint32 indices. checkDataRanges() has bounded
+// acc->count so its size arithmetic cannot wrap; the loop runs over the
+// array actually allocated.
 static vector<unsigned int> readAccessorIndices(const cgltf_accessor* acc) {
     vector<unsigned int> out(acc->count);
-    for (cgltf_size i = 0; i < acc->count; i++) {
+    for (size_t i = 0; i < out.size(); i++) {
         out[i] = (unsigned int)cgltf_accessor_read_index(acc, i);
     }
     return out;
 }
 
-// Compute world transform by walking up the node hierarchy
-static Mat4 getWorldTransform(const cgltf_node* node) {
-    float m[16];
-    cgltf_node_transform_world(node, m);
-    // cgltf outputs column-major (OpenGL convention); TrussC Mat4 is row-major
+// World transform of a node from its parent's world transform and its own
+// local one (both column-major, as cgltf writes them). This is the step
+// cgltf_node_transform_world() takes once per ancestor; load() takes it once
+// per node, carrying the parent's result down the hierarchy.
+static void composeTransform(const float* parentWorld, const float* local, float* out) {
+    for (int i = 0; i < 4; ++i) {
+        float l0 = local[i * 4 + 0];
+        float l1 = local[i * 4 + 1];
+        float l2 = local[i * 4 + 2];
+        out[i * 4 + 0] = l0 * parentWorld[0] + l1 * parentWorld[4] + l2 * parentWorld[8];
+        out[i * 4 + 1] = l0 * parentWorld[1] + l1 * parentWorld[5] + l2 * parentWorld[9];
+        out[i * 4 + 2] = l0 * parentWorld[2] + l1 * parentWorld[6] + l2 * parentWorld[10];
+        out[i * 4 + 3] = local[i * 4 + 3];
+    }
+    out[12] += parentWorld[12];
+    out[13] += parentWorld[13];
+    out[14] += parentWorld[14];
+}
+
+// cgltf outputs column-major (OpenGL convention); TrussC Mat4 is row-major
+static Mat4 toMat4(const float* m) {
     Mat4 result;
     result.m[0]  = m[0];  result.m[1]  = m[4];  result.m[2]  = m[8];  result.m[3]  = m[12];
     result.m[4]  = m[1];  result.m[5]  = m[5];  result.m[6]  = m[9];  result.m[7]  = m[13];
@@ -145,10 +182,12 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
     Pixels pixels;
 
     if (img->buffer_view) {
-        // Embedded image data (GLB or base64)
-        const uint8_t* ptr = (const uint8_t*)img->buffer_view->buffer->data
-                           + img->buffer_view->offset;
+        // Embedded image data (GLB or base64). A buffer without a uri (or a
+        // GLB without a BIN chunk) has no data; cgltf_buffer_view_data()
+        // returns NULL for it.
+        const uint8_t* ptr = cgltf_buffer_view_data(img->buffer_view);
         size_t len = img->buffer_view->size;
+        if (!ptr || len > (size_t)INT_MAX) return nullptr;
         pixels.loadFromMemory(ptr, (int)len);
     } else if (img->uri) {
         // External file reference
@@ -233,9 +272,17 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 // Mesh loading
 // ---------------------------------------------------------------------------
 
-static bool hasPositions(const cgltf_primitive* prim) {
+// True when the primitive has a POSITION accessor backed by a buffer view.
+// glTF lets a primitive leave out POSITION, and lets an accessor leave out
+// its buffer view (its values are then zeros, plus any sparse values). Such a
+// primitive has no vertex data of its own; load() skips it with a warning
+// and loads the rest of the file.
+static bool hasPositionData(const cgltf_primitive* prim) {
     for (cgltf_size a = 0; a < prim->attributes_count; a++) {
-        if (prim->attributes[a].type == cgltf_attribute_type_position) return true;
+        const cgltf_attribute& attr = prim->attributes[a];
+        if (attr.type == cgltf_attribute_type_position) {
+            return attr.data && attr.data->buffer_view;
+        }
     }
     return false;
 }
@@ -341,7 +388,8 @@ bool GltfModel::load(const string& path) {
 
     // Validate the model data before reading any of it
     if (!checkDataRanges(data)) {
-        logWarning() << "[GltfModel] model data refers past the end of a buffer: " << resolved;
+        logWarning() << "[GltfModel] model data refers past the end of a buffer, "
+                     << "or has a count too large to address: " << resolved;
         cgltf_free(data);
         return false;
     }
@@ -352,65 +400,123 @@ bool GltfModel::load(const string& path) {
         cgltf_free(data);
         return false;
     }
-    if (data->scenes_count == 0) {
-        logWarning() << "[GltfModel] no scene to load: " << resolved;
-        cgltf_free(data);
-        return false;
-    }
-
     // Base directory for relative texture paths
     string baseDir = filesystem::path(resolved).parent_path().string();
 
-    // Iterate the default scene (or scene 0)
-    const cgltf_scene* scene = data->scene ? data->scene : &data->scenes[0];
-
-    bool primitivesOk = true;
-
-    // Recursive node visitor
-    function<void(const cgltf_node*)> visitNode = [&](const cgltf_node* node) {
-        if (node->mesh) {
-            Mat4 worldXform = getWorldTransform(node);
-
-            for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
-                const cgltf_primitive* prim = &node->mesh->primitives[p];
-                if (prim->type != cgltf_primitive_type_triangles) continue;
-                // glTF lets a primitive leave out POSITION; such a primitive
-                // is not drawn
-                if (!hasPositions(prim)) continue;
-
-                Node entry;
-                if (!loadGltfPrimitive(prim, entry.mesh)) {
-                    primitivesOk = false;
-                    return;
-                }
-                entry.material = loadGltfMaterial(prim->material, textures_,
-                                                  baseDir, data);
-                entry.transform = worldXform;
-                entry.name = node->name ? node->name : "";
-
-                // Bake world transform into vertex positions and normals
-                // so draw() doesn't need multMatrix
-                bakeTransform(entry.mesh, worldXform);
-
-                nodes_.push_back(std::move(entry));
+    // Read the node hierarchy. Any failure below sets `failure` (the warning
+    // text) and stops; the model is then left empty.
+    string failure;
+    size_t skippedPrimitives = 0;
+    try {
+        // Root nodes: those of the default scene (or scene 0). A file without
+        // scenes is loaded from every node that has no parent.
+        vector<const cgltf_node*> roots;
+        if (data->scenes_count > 0) {
+            const cgltf_scene* scene = data->scene ? data->scene : &data->scenes[0];
+            roots.assign(scene->nodes, scene->nodes + scene->nodes_count);
+        } else if (data->nodes_count == 0) {
+            failure = "no scene and no nodes to load";
+        } else {
+            for (cgltf_size n = 0; n < data->nodes_count; n++) {
+                if (!data->nodes[n].parent) roots.push_back(&data->nodes[n]);
             }
         }
 
-        for (cgltf_size c = 0; c < node->children_count && primitivesOk; c++) {
-            visitNode(node->children[c]);
+        // Depth-first walk with an explicit stack (a deep hierarchy must not
+        // exhaust the call stack). Each entry carries its parent's world
+        // transform, so every world transform is computed once, from its
+        // parent's. Nodes are visited in the same order as a recursive
+        // pre-order walk.
+        struct Pending {
+            const cgltf_node* node;
+            float parentWorld[16];
+            bool hasParent;
+        };
+        vector<Pending> stack;
+        for (size_t r = roots.size(); r-- > 0;) {
+            stack.push_back({roots[r], {}, false});
         }
-    };
+        // cgltf_validate() refuses a node that is its own ancestor, and the
+        // parser refuses a node with two parents; a scene that lists a node
+        // twice is still possible, and glTF forbids it too. Every node must
+        // be reached at most once.
+        vector<bool> visited(data->nodes_count, false);
 
-    for (cgltf_size n = 0; n < scene->nodes_count && primitivesOk; n++) {
-        visitNode(scene->nodes[n]);
+        while (!stack.empty() && failure.empty()) {
+            Pending cur = stack.back();
+            stack.pop_back();
+            const cgltf_node* node = cur.node;
+            size_t nodeIndex = (size_t)(node - data->nodes);
+            if (visited[nodeIndex]) {
+                failure = "the node hierarchy reaches a node more than once";
+                break;
+            }
+            visited[nodeIndex] = true;
+
+            float local[16];
+            float world[16];
+            cgltf_node_transform_local(node, local);
+            if (cur.hasParent) {
+                composeTransform(cur.parentWorld, local, world);
+            } else {
+                memcpy(world, local, sizeof(world));
+            }
+
+            if (node->mesh) {
+                Mat4 worldXform = toMat4(world);
+
+                for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
+                    const cgltf_primitive* prim = &node->mesh->primitives[p];
+                    if (prim->type != cgltf_primitive_type_triangles) continue;
+                    if (!hasPositionData(prim)) {
+                        skippedPrimitives++;
+                        continue;
+                    }
+
+                    Node entry;
+                    if (!loadGltfPrimitive(prim, entry.mesh)) {
+                        failure = "a mesh index points past its vertices";
+                        break;
+                    }
+                    entry.material = loadGltfMaterial(prim->material, textures_,
+                                                      baseDir, data);
+                    entry.transform = worldXform;
+                    entry.name = node->name ? node->name : "";
+
+                    // Bake world transform into vertex positions and normals
+                    // so draw() doesn't need multMatrix
+                    bakeTransform(entry.mesh, worldXform);
+
+                    nodes_.push_back(std::move(entry));
+                }
+                if (!failure.empty()) break;
+            }
+
+            for (cgltf_size c = node->children_count; c-- > 0;) {
+                Pending child;
+                child.node = node->children[c];
+                memcpy(child.parentWorld, world, sizeof(world));
+                child.hasParent = true;
+                stack.push_back(child);
+            }
+        }
+    } catch (const bad_alloc&) {
+        // A count too large to allocate (no numeric cap is imposed on counts)
+        failure = "not enough memory for the model data";
+    } catch (const length_error&) {
+        failure = "not enough memory for the model data";
     }
 
     cgltf_free(data);
-    if (!primitivesOk) {
-        logWarning() << "[GltfModel] a mesh index points past its vertices: " << resolved;
+    if (!failure.empty()) {
+        logWarning() << "[GltfModel] " << failure << ": " << resolved;
         nodes_.clear();
         textures_.clear();
         return false;
+    }
+    if (skippedPrimitives > 0) {
+        logWarning() << "[GltfModel] skipped " << skippedPrimitives
+                     << " primitive(s) without POSITION data: " << resolved;
     }
     loaded_ = true;
     logNotice() << "[GltfModel] loaded " << nodes_.size() << " nodes, "

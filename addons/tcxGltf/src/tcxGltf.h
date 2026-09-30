@@ -20,7 +20,8 @@
 //
 // Does NOT support (yet):
 //   - Animation, skinning, morph targets
-//   - Multiple scenes (loads scene 0 or the default scene)
+//   - Multiple scenes (loads the default scene or scene 0; a file without
+//     scenes loads every root node)
 //   - Cameras, lights (KHR_lights_punctual)
 //
 // =============================================================================
