@@ -182,7 +182,7 @@ static rawsocket_t listenLoopback(int& port) {
 // below every platform's ephemeral range (Linux 32768+, macOS and Windows
 // 49152+), so a client's own ephemeral port cannot be it (on Linux a connect()
 // to a free ephemeral port can connect to itself). Linux refuses at once;
-// Windows after its SYN retries (about 1-2 s on loopback, not measured here).
+// Windows after its SYN retries (about 2 s on loopback; measured 2.02-2.06 s).
 // Not a socket bound without listen(): with that, macOS drops the SYN, so the
 // connect() fails only once it gives up, about 8 s later on the CI runner.
 // Returns 0 if no port in the range is free.
