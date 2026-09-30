@@ -51,8 +51,13 @@
 //   - Destroying a client while its onError listener runs for a failed
 //     handshake waits for that listener: the receive thread stays owned.
 //
+//   - No thread is left when main() returns (counted on Linux), although the
+//     clients whose listeners called connect() / disconnect() on the receive
+//     thread are kept for the life of the process.
+//
 // The scenario runs on a worker with a deadline, so a hang reports FAIL
-// instead of eating the CI job timeout.
+// instead of eating the CI job timeout. A crash prints what the test was
+// doing and a backtrace.
 // =============================================================================
 
 #include <TrussC.h>
@@ -98,6 +103,12 @@
     #include <dirent.h>
 #endif
 
+#if (defined(__linux__) || defined(__APPLE__)) && !defined(__ANDROID__)
+    #define TC_TEST_CRASH_REPORT 1
+    #include <csignal>
+    #include <execinfo.h>
+#endif
+
 #if defined(MSG_NOSIGNAL)
     #define PEER_SEND_FLAGS MSG_NOSIGNAL
 #else
@@ -116,24 +127,49 @@ static atomic<int> g_fail{0};
 // cannot tell that thread apart: once it exits, the next thread may get the
 // same id.
 static thread_local bool t_byeThread = false;
+// What the test is doing, for the fatal-signal report below
+static const char* volatile g_phase = "starting";
+
+#ifdef TC_TEST_CRASH_REPORT
+// A crash prints what the test was doing and a backtrace, then dies of the
+// same signal. macOS CI once died of SIGSEGV here after the last check, which
+// no run on Linux reproduces; this says where the next one happens.
+static void onFatalSignal(int sig) {
+    char line[160];
+    const int n = snprintf(line, sizeof(line), "\nFATAL: signal %d during %s\n",
+                           sig, g_phase);
+    if (n > 0) (void)!write(2, line, static_cast<size_t>(n));
+    void* frames[64];
+    backtrace_symbols_fd(frames, backtrace(frames, 64), 2);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
+
 static void check(const char* name, bool ok) {
     printf("%-60s %s\n", name, ok ? "PASS" : "FAIL");
     fflush(stdout);   // flush per line so CI logs survive a later abort
     if (!ok) ++g_fail;
 }
 
-// Run fn on a worker and report failure if it does not finish in time. The
-// thread is detached so a hang still ends in a FAIL line and a non-zero exit.
+// Run fn on a worker and report failure if it does not finish in time. A
+// worker that finished is joined, so it is not still exiting when main()
+// returns and the process tears down its statics; one that hangs is
+// detached, and every caller then bails out with _Exit.
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread([done, fn = move(fn)]() mutable { fn(); done->store(true); }).detach();
+    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
-    while (chrono::steady_clock::now() < deadline) {
-        if (done->load()) return true;
+    while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
     }
-    return done->load();
+    if (done->load()) {
+        worker.join();
+        return true;
+    }
+    worker.detach();
+    return false;
 }
 
 // Poll pred until it holds or ms pass
@@ -1008,6 +1044,7 @@ static void scenario() {
     // victimErr outlives its Event: disconnecting it is a no-op
 
     // --- teardown ---------------------------------------------------------
+    g_phase = "the scenario's teardown";
     client.disconnect();
     check("disconnect() leaves the client disconnected", !client.isConnected());
     peer.reset();
@@ -1016,6 +1053,11 @@ static void scenario() {
 }
 
 int main() {
+#ifdef TC_TEST_CRASH_REPORT
+    signal(SIGSEGV, onFatalSignal);
+    signal(SIGBUS, onFatalSignal);
+    signal(SIGABRT, onFatalSignal);
+#endif
     // mbedTLS starts its PSA subsystem lazily in the first TLS 1.3-capable
     // handshake, on the client's receive thread. Start it here instead, before
     // any thread exists: this build has no MBEDTLS_THREADING_C.
@@ -1023,10 +1065,30 @@ int main() {
         check("psa_crypto_init()", false);
         bail();
     }
+    g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
         bail();
     }
+    g_phase = "main(), after the scenario";
+
+    // Nothing may still run when the process tears down its statics: not the
+    // scenario's worker (joined), and not a receive thread of the clients the
+    // scenario keeps (each has stopped: joined by a disconnect(), or ended on
+    // its own once its generation was replaced).
+#ifdef __linux__
+    int threadsAtExit = -1;
+    waitFor(1000, [&] {
+        threadsAtExit = countEntries("/proc/self/task");
+        return threadsAtExit == 1;
+    });
+    printf("  (threads when main() returns: %d)\n", threadsAtExit);
+    check("no thread is left when main() returns", threadsAtExit == 1);
+#else
+    printf("%-60s %s\n", "no thread is left when main() returns", "SKIP (counted on Linux)");
+#endif
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
+    fflush(stdout);   // a crash in static destruction then still shows this
+    g_phase = "exit (static destruction)";
     return g_fail ? 1 : 0;
 }
