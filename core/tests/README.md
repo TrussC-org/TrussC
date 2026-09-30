@@ -84,6 +84,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed.
+- `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
+  (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
+  one disconnects or destroys is not called in that pass, `clear()` stops the
+  rest of the pass, a listener that removes itself does not stop the later
+  ones, and a listener added during a pass starts from the next one. Includes
+  the `Tween` shape: objects in a vector listen with `[this]` and re-listen in
+  their move constructor; growing the vector inside the pass sends no call to
+  a moved-from object.
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
