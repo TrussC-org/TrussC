@@ -17,12 +17,13 @@
 // setup() again.
 //
 // Threads: a Serial has its own reader-writer lock. The I/O calls
-// (available(), readBytes(), readByte(), writeBytes(), isConnected(), the
-// flush calls, drain()) share it, so they never wait for each other. Opening
-// and closing (setup(), close(), closing a lost port, the destructor, the
-// moves) take it alone: they wait until the I/O calls in progress have
-// returned, so no call ever uses a closed or reused port, and new I/O calls
-// wait behind them. The lock is released before onDisconnect fires, so a
+// (available(), readBytes(), readByte(), writeBytes(), the flush calls,
+// drain()) share it, so they never wait for each other. Opening and closing
+// (setup(), close(), closing a lost port, the destructor, the moves) take it
+// alone: they wait until the I/O calls in progress have returned, so no call
+// ever uses a closed or reused port, and new I/O calls wait behind them.
+// isConnected() and getDevicePath() take no part: they never wait for
+// either kind of call. The lock is released before onDisconnect fires, so a
 // listener may call setup(). Which thread reads or writes what, and in which
 // order, is still up to the app.
 // So a long I/O call (writeBytes() on Windows and Android, drain(); see
@@ -31,8 +32,18 @@
 // wait for the USB worker thread to stop (up to about 250 ms once
 // connected). On Windows the system itself runs the calls on one port
 // handle one at a time (it is opened without FILE_FLAG_OVERLAPPED), so
-// available() / readBytes() / readByte() still wait there for a
-// writeBytes() in progress; isConnected() does not.
+// available() / readBytes() / readByte() / the flush calls still wait there
+// for a writeBytes() in progress.
+//
+// Logger listeners: Serial logs only with its lock free, or held exclusive
+// on the logging thread (which may take it again), so a Logger listener
+// that runs inline may call this Serial. One exception, on Android: the USB
+// worker thread logs too (permission timeout, connected, lost connection,
+// RX overflow, open errors), and close(), setup(), the destructor and a move
+// wait for that thread to stop while they hold the lock. A listener running
+// inline on the worker thread that then calls an I/O call, setup() or
+// close() on this Serial may deadlock with them. isConnected() and
+// getDevicePath() are safe there. Listen with Deliver::Main to be safe.
 // =============================================================================
 
 #include <string>
@@ -42,8 +53,8 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
-    #include <mutex>
     #include <condition_variable>
     #include <thread>
 #endif
@@ -279,8 +290,13 @@ public:
     ~Serial() {
         Exclusive lock(lock_);
 #if defined(__ANDROID__)
-        androidserial::destroy(aimpl_);  // closes the connection too
-        aimpl_ = nullptr;
+        androidserial::Impl* old;
+        {
+            std::lock_guard<std::mutex> info(infoMutex_);
+            old = aimpl_;
+            aimpl_ = nullptr;
+        }
+        androidserial::destroy(old);  // closes the connection too
 #else
         closePort();
 #endif
@@ -296,15 +312,20 @@ public:
 #if defined(_WIN32)
         handle_ = other.handle_;
         other.handle_ = INVALID_HANDLE_VALUE;
-#elif defined(__ANDROID__)
-        aimpl_ = other.aimpl_;
-        other.aimpl_ = nullptr;
-#else
+#elif !defined(__ANDROID__)
         fd_ = other.fd_;
         other.fd_ = -1;
 #endif
-        initialized_ = other.initialized_;
-        devicePath_ = std::move(other.devicePath_);
+        {
+            std::lock_guard<std::mutex> info(other.infoMutex_);
+#if defined(__ANDROID__)
+            aimpl_ = other.aimpl_;
+            other.aimpl_ = nullptr;
+#endif
+            devicePath_ = std::move(other.devicePath_);
+            other.devicePath_.clear();
+        }
+        initialized_ = other.initialized_.load();
         baudRate_ = other.baudRate_;
         other.initialized_ = false;
         ++other.generation_;
@@ -319,17 +340,39 @@ public:
             closePort();
             handle_ = other.handle_;
             other.handle_ = INVALID_HANDLE_VALUE;
-#elif defined(__ANDROID__)
-            androidserial::destroy(aimpl_);  // closes the old connection too
-            aimpl_ = other.aimpl_;
-            other.aimpl_ = nullptr;
-#else
+#elif !defined(__ANDROID__)
             closePort();
             fd_ = other.fd_;
             other.fd_ = -1;
 #endif
-            initialized_ = other.initialized_;
-            devicePath_ = std::move(other.devicePath_);
+            // infoMutex_ one Serial at a time, and never across destroy(),
+            // which waits for the old USB worker thread (see infoMutex_)
+            std::string path;
+#if defined(__ANDROID__)
+            androidserial::Impl* moved;
+            androidserial::Impl* old;
+#endif
+            {
+                std::lock_guard<std::mutex> info(other.infoMutex_);
+#if defined(__ANDROID__)
+                moved = other.aimpl_;
+                other.aimpl_ = nullptr;
+#endif
+                path = std::move(other.devicePath_);
+                other.devicePath_.clear();
+            }
+            {
+                std::lock_guard<std::mutex> info(infoMutex_);
+#if defined(__ANDROID__)
+                old = aimpl_;
+                aimpl_ = moved;
+#endif
+                devicePath_ = std::move(path);
+            }
+#if defined(__ANDROID__)
+            androidserial::destroy(old);  // closes the old connection too
+#endif
+            initialized_ = other.initialized_.load();
             baudRate_ = other.baudRate_;
             other.initialized_ = false;
             // Both hold another connection now (see closeLost())
@@ -449,7 +492,11 @@ public:
         PendingDisconnect closed;
         {
             Exclusive lock(lock_);
-            if (!aimpl_) aimpl_ = androidserial::create();
+            if (!aimpl_) {
+                androidserial::Impl* created = androidserial::create();
+                std::lock_guard<std::mutex> info(infoMutex_);
+                aimpl_ = created;
+            }
             if (!androidserial::isPendingFor(aimpl_, portName)) closeLocked(closed);
         }
         notifyDisconnect(closed);
@@ -474,11 +521,14 @@ public:
             std::string lostReason;
             initialized_ = androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
             if (!listenerReopened) raced = closeArgs(ended, lostReason, previousPath, previousRate);
-            devicePath_ = portName;
+            {
+                std::lock_guard<std::mutex> info(infoMutex_);
+                devicePath_ = portName;
+            }
             // The rate the backend opens at: a setup() again while the
             // permission for this device is pending keeps the first rate
             baudRate_ = androidserial::baudRate(aimpl_);
-            return initialized_;
+            return initialized_.load();
         }();
         notifyDisconnect(raced);
         return ok;
@@ -568,7 +618,10 @@ public:
         // Clear buffers
         PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
 
-        devicePath_ = portName;
+        {
+            std::lock_guard<std::mutex> info(infoMutex_);
+            devicePath_ = portName;
+        }
         baudRate_ = baudRate;
         initialized_ = true;
         writeTimeoutWarned_ = false;
@@ -686,7 +739,10 @@ public:
         // Flush buffers
         tcflush(fd_, TCIOFLUSH);
 
-        devicePath_ = portName;
+        {
+            std::lock_guard<std::mutex> info(infoMutex_);
+            devicePath_ = portName;
+        }
         baudRate_ = appliedBaudRate;
         initialized_ = true;
         if (appliedBaudRate != baudRate) {
@@ -733,9 +789,19 @@ public:
     // grants USB permission, and stays true after the USB worker finds the
     // device gone until one of those calls reports it (see androidserial
     // note above).
+    // It takes no part in the I/O lock: it never waits for setup(), close()
+    // or an I/O call, and answers with the state at that moment. So a thread
+    // that setup() / close() waits for (the Android USB worker, while one of
+    // its log lines runs a Logger listener) may call it.
     bool isConnected() const {
-        Shared lock(lock_);
-        return isOpenLocked();
+#if defined(__ANDROID__)
+        // The backend's state is atomic; infoMutex_ only keeps aimpl_ alive
+        std::lock_guard<std::mutex> info(infoMutex_);
+        return aimpl_ && androidserial::isConnected(aimpl_);
+#else
+        // Set true only once the port is open, and false before it closes
+        return initialized_.load();
+#endif
     }
 
     // Same as isConnected(). The older name, kept for existing code.
@@ -743,10 +809,11 @@ public:
         return isConnected();
     }
 
-    // Get current device path. A copy, taken under the lock: another thread's
-    // setup() may change it.
+    // Get current device path. A copy: another thread's setup() may change
+    // it. Like isConnected(), it never waits for setup(), close() or an I/O
+    // call.
     std::string getDevicePath() const {
-        Shared lock(lock_);
+        std::lock_guard<std::mutex> info(infoMutex_);
         return devicePath_;
     }
 
@@ -1059,8 +1126,13 @@ private:
 #else
     mutable int fd_ = -1;                            // File descriptor (POSIX)
 #endif
-    mutable bool initialized_ = false;  // Connection state
-    std::string devicePath_;            // Current device path
+    // Connection state. Atomic: isConnected() reads it without the lock,
+    // so it is set true only once the port is open and false before it
+    // closes (not used for that on Android, whose backend state is atomic).
+    mutable std::atomic<bool> initialized_{false};
+    // Current device path. Written with the lock exclusive and infoMutex_;
+    // getDevicePath() reads it with infoMutex_ alone (see below).
+    std::string devicePath_;
     int baudRate_ = 0;                  // Rate the current port was opened at
     // Counts the connections: setup() and the moves bump it, so a loss found
     // on one connection never closes the next one (see closeLost())
@@ -1087,7 +1159,8 @@ private:
     // own calls never take it twice (the *Locked() helpers expect it held).
     // The thread that holds it exclusive may take it again, shared or
     // exclusive: Serial logs while opening and closing, and a Logger listener
-    // may use this Serial.
+    // on that thread may use this Serial (other threads: see "Logger
+    // listeners" at the top of this file).
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
     struct PortLock {  // no threads: nothing to wait for
         void lock() {}
@@ -1150,6 +1223,14 @@ private:
     };
 #endif
     mutable PortLock lock_;
+
+    // Guards what getDevicePath() and (Android) isConnected() read without
+    // lock_: devicePath_, and the aimpl_ pointer. Taken briefly, always
+    // after lock_ when both are held, never across I/O, a lock_ acquisition
+    // or androidserial::destroy() (which waits for the USB worker). So those
+    // two calls never wait for setup() / close(): a thread that close() is
+    // waiting for may make them.
+    mutable std::mutex infoMutex_;
 
     // For the I/O calls
     struct Shared {
@@ -1235,6 +1316,7 @@ private:
         {
             Exclusive lock(lock_);
             if (generation_ != loss.generation || !isOpenLocked()) return;
+            initialized_ = false;  // isConnected() reads it without the lock
 #if defined(_WIN32)
             // With some drivers a stale handle keeps the port from being
             // reopened (usbser.sys does not)
@@ -1246,7 +1328,6 @@ private:
             ::close(fd_);
             fd_ = -1;
 #endif
-            initialized_ = false;
             port = devicePath_;
             lost = disconnectArgs(loss.reason, false);
         }
@@ -1304,6 +1385,7 @@ private:
     // assignment, and close() before it notifies). Returns whether it was
     // open. With the lock held exclusive.
     bool closePort() {
+        initialized_ = false;  // isConnected() reads it without the lock
 #if defined(_WIN32)
         bool wasOpen = handle_ != INVALID_HANDLE_VALUE;
         if (wasOpen) {
@@ -1319,7 +1401,6 @@ private:
             logVerbose() << "Serial: disconnected from " << devicePath_;
         }
 #endif
-        initialized_ = false;
         return wasOpen;
     }
 #endif
