@@ -122,17 +122,24 @@ def find_examples(root_dir):
 
     return sorted(list(set(example_paths)))
 
-def find_addon_tests(root_dir):
+def find_addon_tests(root_dir, include_daily=False):
     # Behavioral test harnesses bundled with monorepo addons: addons/*/tests/
     # (a console TrussC project whose main() returns non-zero on failure). Same
     # convention as standalone addon repos (ci-actions runs tests/ if present).
+    # A harness with a `daily-only` marker file is heavy to build (e.g. tcxTls
+    # fetches and builds mbedTLS) and runs only with include_daily, which the
+    # daily workflow passes; the per-PR lane skips it.
     addons_dir = os.path.join(root_dir, "addons")
     test_paths = []
     if os.path.exists(addons_dir):
         for addon in sorted(os.listdir(addons_dir)):
             tdir = os.path.join(addons_dir, addon, "tests")
-            if os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src")):
-                test_paths.append(tdir)
+            if not (os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src"))):
+                continue
+            if not include_daily and os.path.isfile(os.path.join(tdir, "daily-only")):
+                Colors.print(f"Skipping {os.path.relpath(tdir, root_dir)} (daily-only; pass --include-daily)", Colors.YELLOW)
+                continue
+            test_paths.append(tdir)
     return test_paths
 
 def find_core_tests(root_dir):
@@ -373,7 +380,8 @@ def main():
     parser.add_argument('--web-only', action='store_true', help="Build for WebAssembly only (skip native build)")
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--one-per-addon', action='store_true', help="Build the first example-* of each bundled addon (per-addon dependency compile coverage)")
-    parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
+    parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist. Harnesses with a daily-only marker are skipped unless --include-daily is given.")
+    parser.add_argument('--include-daily', action='store_true', help="With --addon-tests-only: also run the harnesses marked daily-only (heavy to build; the daily workflow passes this)")
     parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist. With --web also, with --web-only instead: build the ones with a web-test marker for WebAssembly and run them under node.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
@@ -404,7 +412,7 @@ def main():
     # behavioral gate meant to run on every CI, separate from the example
     # builds. No-op (exit 0) when no addon ships a tests/ dir.
     if args.addon_tests_only:
-        tests = find_addon_tests(ROOT_DIR)
+        tests = find_addon_tests(ROOT_DIR, include_daily=args.include_daily)
         if not tests:
             Colors.print("No addon tests found (addons/*/tests/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
