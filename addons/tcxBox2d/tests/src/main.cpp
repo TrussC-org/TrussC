@@ -28,7 +28,12 @@
 //   - slivers are skipped with one warning; nothing usable gives no body;
 //   - Collider2D filter and trigger settings reach every fixture;
 //   - a compound touching a box with several fixtures at once gives exactly
-//     one Enter / Began, one Stay per update, and one Exit / Ended.
+//     one Enter / Began, one Stay per update, and one Exit / Ended;
+//   - the offset/inertia check runs once on the whole body: a rounded
+//     rectangle, an off-center 128-gon and a 4096-gon keep every triangle
+//     with no warning; a tiny outline far from the origin is refused as a
+//     whole, and a tiny convex ring as one polygon; bodies just inside the
+//     limit keep a positive inertia at densities 0.001 to 1000.
 // =============================================================================
 
 #include <tcxBox2d.h>
@@ -884,6 +889,200 @@ static void testCompoundEvents() {
 }
 
 // ---------------------------------------------------------------------------
+// Compound bodies: the inertia check runs once on the whole body (#427)
+// ---------------------------------------------------------------------------
+
+// A w x h rectangle centered on the origin whose corners are quarter circles
+// of radius r, `segments` segments each (segments + 1 points per corner).
+static vector<Vec2> roundedRectPoints(float w, float h, float r, int segments) {
+    const float cx[4] = {w * 0.5f - r, -w * 0.5f + r, -w * 0.5f + r, w * 0.5f - r};
+    const float cy[4] = {h * 0.5f - r, h * 0.5f - r, -h * 0.5f + r, -h * 0.5f + r};
+    vector<Vec2> pts;
+    for (int c = 0; c < 4; ++c) {
+        for (int i = 0; i <= segments; ++i) {
+            float a = QUARTER_TAU * c + QUARTER_TAU * i / segments;
+            pts.push_back(Vec2(cx[c] + cos(a) * r, cy[c] + sin(a) * r));
+        }
+    }
+    return pts;
+}
+
+static vector<Vec2> shifted(vector<Vec2> pts, float dx, float dy) {
+    for (auto& p : pts) p += Vec2(dx, dy);
+    return pts;
+}
+
+// True when `body` keeps a positive rotational inertia about its centroid at
+// every density in `densities`. b2Body::ResetMassData() sets 1 / I there, so
+// an impulse turns it the right way only if I > 0 (in Debug, I <= 0 asserts
+// instead).
+static bool inertiaPositive(b2Body* body, const vector<float>& densities) {
+    if (!body) return false;
+    bool ok = true;
+    for (float d : densities) {
+        for (b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) f->SetDensity(d);
+        body->ResetMassData();
+        body->SetAngularVelocity(0.0f);
+        body->ApplyAngularImpulse(1.0f, true);
+        float spin = body->GetAngularVelocity();
+        if (!(isfinite(spin) && spin > 0.0f)) ok = false;
+    }
+    body->SetAngularVelocity(0.0f);
+    return ok;
+}
+
+static void testCompoundOffset(box2d::World& world) {
+    // Ordinary outlines have tiny ear triangles far (for their size) from the
+    // body origin. Box2D only needs the whole body's inertia, so they are kept.
+    struct Case {
+        const char* name;
+        vector<Vec2> pts;
+        size_t triangles;
+        float area;   // analytic
+    };
+    const vector<Case> cases = {
+        {"600x40 rounded rectangle, 4 px corners", roundedRectPoints(600, 40, 4, 8), 34,
+         600.0f * 40.0f - (4.0f - TAU * 0.5f) * 16.0f},
+        {"radius-40 128-gon 1000 px off the origin", shifted(circlePoints(128, 40), 1000, 0), 126,
+         TAU * 0.5f * 40.0f * 40.0f},
+        {"radius-300 4096-gon", circlePoints(4096, 300), 4094, TAU * 0.5f * 300.0f * 300.0f},
+    };
+    for (const auto& c : cases) {
+        const string name = string("setupCompound ") + c.name;
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, c.pts, 400, 300);
+        check(name + ": created", poly.isCreated());
+        check(name + ": no warning", w.count == 0);
+        check(name + ": one fixture per triangle (" + to_string(c.triangles) + ")",
+              fixtureCount(poly.getBody()) == int(c.triangles));
+        check(name + ": mass = analytic area x density (0.5%)",
+              abs(poly.getMass() / areaMass(c.area) - 1.0f) < 0.005f);
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(roundedRectPoints(600, 40, 4, 8)));
+        check("RigidBody2D compound 600x40 rounded rectangle: 34 fixtures, no warning",
+              fixtureCount(rb->getBody()) == 34 && w.count == 0);
+    }
+
+    // A small concave outline (3 triangles) is fine at the origin; 2000 px
+    // away its whole body is too small for the offset: refused as a whole.
+    const vector<Vec2> notch = {{-0.5f, -0.5f}, {0.5f, -0.5f}, {0, 0}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, notch, 400, 300);
+        check("setupCompound 1 px notch at the origin: 3 fixtures, no warning",
+              fixtureCount(poly.getBody()) == 3 && w.count == 0);
+    }
+    {
+        int bodiesBefore = world.getBodyCount();
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, shifted(notch, 2000, 2000), 400, 300);
+        check("setupCompound 1 px notch 2000 px off: no body", !poly.isCreated());
+        check("setupCompound 1 px notch 2000 px off: no Box2D body", world.getBodyCount() == bodiesBefore);
+        check("setupCompound 1 px notch 2000 px off: one warning, says too small",
+              w.count == 1 && w.lastContains("too small for its distance"));
+        check("setupCompound 1 px notch 2000 px off: no vertices", poly.getVertices().empty());
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(shifted(notch, 2000, 2000)));
+        check("RigidBody2D compound 1 px notch 2000 px off: no body, warning says too small",
+              rb->getBody() == nullptr && w.count == 1 && w.lastContains("too small for its distance"));
+    }
+
+    // A small convex ring far from the origin is refused as one polygon for
+    // its offset, not triangulated.
+    {
+        const vector<Vec2> tiny = {{600, 600}, {600.5f, 600}, {600, 600.5f}};
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, tiny, 0, 0);
+        check("setupCompound tiny far triangle: no body", !poly.isCreated());
+        check("setupCompound tiny far triangle: warning says too small",
+              w.count == 1 && w.lastContains("too small for its distance") && !w.lastContains("no area"));
+
+        Path path(tiny);
+        path.close();
+        box2d::detail::CompoundShapes shapes;
+        bool made = box2d::detail::makeCompoundShapes(path, shapes);
+        check("makeCompoundShapes tiny far triangle: refused as one polygon, not triangulated",
+              !made && shapes.error == box2d::detail::PolygonError::TooSmallForOffset
+                    && shapes.triangles == 0 && shapes.shapes.empty());
+
+        WarningCapture w2;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(tiny));
+        check("RigidBody2D compound tiny far triangle: no body, warning says too small",
+              rb->getBody() == nullptr && w2.count == 1 && w2.lastContains("too small for its distance"));
+    }
+
+    // The combined check keeps its margin: just inside the distance where it
+    // starts refusing, every density keeps the inertia positive. (With a
+    // fixed 16-epsilon margin the 128-gon and larger fail here: Box2D's float
+    // sum over many fixtures rounds differently at other densities.)
+    {
+        vector<float> densities = {0.001f, 0.0037f, 0.01f, 0.05f, 0.3f, 1.0f, 2.5f, 7.1f, 33.0f, 100.0f, 420.0f, 1000.0f};
+        mt19937 rng(427);
+        uniform_real_distribution<float> exponent(-3.0f, 3.0f);
+        for (int i = 0; i < 20; ++i) densities.push_back(pow(10.0f, exponent(rng)));
+
+        struct Outline {
+            const char* name;
+            vector<Vec2> pts;
+        };
+        const vector<Outline> outlines = {
+            {"1 px notch", notch},
+            {"600x40 rounded rectangle", roundedRectPoints(600, 40, 4, 8)},
+            {"radius-40 128-gon", circlePoints(128, 40)},
+            {"radius-300 1024-gon", circlePoints(1024, 300)},
+        };
+        for (const auto& o : outlines) {
+            auto made = [&](double dist, box2d::detail::CompoundShapes& out) {
+                Path path(shifted(o.pts, float(dist * 0.6), float(dist * 0.8)));
+                path.close();
+                return box2d::detail::makeCompoundShapes(path, out);
+            };
+            // Bisect the distance where the check starts refusing.
+            double lo = 0.0, hi = 1.0;
+            box2d::detail::CompoundShapes out;
+            while (made(hi, out)) hi *= 2.0;
+            for (int i = 0; i < 40; ++i) {
+                double mid = (lo + hi) * 0.5;
+                (made(mid, out) ? lo : hi) = mid;
+            }
+            // Build the accepted bodies just inside through setupCompound()
+            // (in Debug, Box2D asserts while creating one if any step of it
+            // loses the inertia), then try every density on them.
+            int tried = 0, bad = 0;
+            for (int k = 0; k < 20; ++k) {
+                const double dist = lo * (1.0 - k * 1e-3);
+                if (!made(dist, out)) continue;
+                ++tried;
+                box2d::PolyShape poly;
+                poly.setupCompound(world, shifted(o.pts, float(dist * 0.6), float(dist * 0.8)), 0, 0);
+                if (!inertiaPositive(poly.getBody(), densities)) ++bad;
+            }
+            {
+                // RigidBody2D creates its fixtures its own way.
+                shared_ptr<Node> node = make_shared<Node>();
+                auto* rb = node->addMod<box2d::RigidBody2D>(
+                    world, box2d::Shape2D::compound(shifted(o.pts, float(lo * 0.6), float(lo * 0.8))));
+                if (!inertiaPositive(rb->getBody(), densities)) ++bad;
+            }
+            printf("  %s: refused from %.0f px, %d accepted bodies just inside\n", o.name, hi, tried);
+            check(string("combined inertia check, ") + o.name + ": positive at every density just inside",
+                  tried > 0 && bad == 0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // reducedConvexHull(): heap-based reduction vs the O(h^2) scan it replaced
 // ---------------------------------------------------------------------------
 
@@ -1038,6 +1237,7 @@ int main() {
     testCompoundFilters(world);
     testCompoundHole();
     testCompoundEvents();
+    testCompoundOffset(world);
     testReducedConvexHull();
 
     if (g_fail) {

@@ -34,7 +34,15 @@ outline exactly, one fixture per triangle:
 - a box pressed into a compound bar touches several of its fixtures at once,
   and still gives exactly one Enter / Began per side, one Stay per update, and
   one Exit / Ended per side when they separate (classic `Collider2D` and Mod
-  `RigidBody2D` events).
+  `RigidBody2D` events);
+- the offset/inertia check runs once on the whole body: a 600x40 rounded
+  rectangle with 4 px corners, a 128-gon 1000 px off the origin and a
+  4096-gon keep every triangle with no warning and the analytic mass; a 1 px
+  outline 2000 px off is refused as a whole, and a tiny convex ring far off
+  as one polygon, with the "too small for its distance" warning; bodies just
+  inside the limit, built through `setupCompound()` and `RigidBody2D`, keep a
+  positive inertia at densities 0.001 to 1000 (Debug: no Box2D assert while
+  the fixtures are added).
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR; a non-zero exit fails the job. Run it locally with:
