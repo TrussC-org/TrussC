@@ -588,17 +588,28 @@ public:
             // That connection is reported with the values it was opened with.
             const std::string previousPath = devicePath_;
             const int previousRate = baudRate_;
-            androidserial::CloseResult ended = androidserial::CloseResult::NotOpen;
-            std::string lostReason;
-            initialized_ = androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
-            if (!listenerReopened) raced = closeArgs(ended, lostReason, previousPath, previousRate);
+            // The path first: the backend (or later its worker, once the
+            // user grants permission) publishes Connected, and the lock-free
+            // isConnected() / getDevicePath() must never pair that with the
+            // previous path
             {
                 std::lock_guard<std::mutex> info(infoMutex_);
                 devicePath_ = portName;
             }
-            // The rate the backend opens at: a setup() again while the
-            // permission for this device is pending keeps the first rate
-            baudRate_ = androidserial::baudRate(aimpl_);
+            androidserial::CloseResult ended = androidserial::CloseResult::NotOpen;
+            std::string lostReason;
+            initialized_ = androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
+            if (!listenerReopened) raced = closeArgs(ended, lostReason, previousPath, previousRate);
+            if (initialized_ || androidserial::isPendingFor(aimpl_, portName)) {
+                // The rate the backend opens at: a setup() again while the
+                // permission for this device is pending keeps the first rate
+                baudRate_ = androidserial::baudRate(aimpl_);
+            } else {
+                // Failed: as on the other platforms, the path and the rate
+                // stay those of the previous port
+                std::lock_guard<std::mutex> info(infoMutex_);
+                devicePath_ = previousPath;
+            }
             return initialized_.load();
         }();
         notifyDisconnect(raced);
