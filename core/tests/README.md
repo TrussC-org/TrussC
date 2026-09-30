@@ -130,8 +130,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `patchWavHeader()` on a memory stream), so no 4 GiB file is written. A
   short S16 and F32 take on the null backend is plain RIFF with the `JUNK`
   chunk and loads through `SoundBuffer` with `numSamples` equal to
-  `getRecordedSeconds()` times the sample rate. Not covered: `stop()`'s RF64
-  notice and the seek of a real file past 4 GiB (they need a 4 GiB take).
+  `getRecordedSeconds()` times the sample rate. On Linux, a take whose file
+  writes fail (recorded into `/dev/full`) makes `stop()` log one error and
+  neither the RF64 notice nor the "stopped" notice. Not covered: `stop()`'s
+  RF64 notice and the seek of a real file past 4 GiB (they need a 4 GiB take).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
