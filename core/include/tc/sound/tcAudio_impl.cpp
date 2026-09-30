@@ -25,6 +25,7 @@
 #include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
+#include "tc/utils/tcFile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -626,9 +627,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     // OGG support for streaming would need a separate code path. WAV /
     // MP3 / FLAC are routed through ma_decoder, which handles all three
     // with the same API.
-    std::string ext = path.extension().string();
-    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    std::string ext = toLower(getFileExtension(path));
 
     ma_encoding_format fmt = ma_encoding_format_unknown;
     if (ext == "wav")       fmt = ma_encoding_format_wav;
