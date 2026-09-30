@@ -882,6 +882,7 @@ void NodeInspector::drawGizmo() {
 NodeInspector& NodeInspector::attach() {
     NodeInspector& s = instance();
     s.attachRoot_.reset();
+    s.attachParent_.reset();
     s.doAttach();
     return s;
 }
@@ -889,6 +890,7 @@ NodeInspector& NodeInspector::attach() {
 NodeInspector& NodeInspector::attach(Node& root) {
     NodeInspector& s = instance();
     s.attachRoot_ = root.weak_from_this();
+    s.attachParent_ = root.getParent();
     s.doAttach();
     return s;
 }
@@ -938,8 +940,10 @@ void NodeInspector::doAttach() {
     // top of the scene. Re-attaching just replaces the previous listener.
     autoDraw_ = events().onRender.listen([this] {
         // A root passed to attach(root) is held weakly: once it is freed the
-        // inspector shows the running App's tree again.
+        // inspector shows its parent from attach() time, and once that is
+        // gone too, the running App's tree.
         Node::Ptr attached = attachRoot_.lock();
+        if (!attached) attached = attachParent_.lock();
         Node* r = attached ? attached.get() : getRootNode();
         if (!r) return;
         imguiBegin();
