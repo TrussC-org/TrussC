@@ -99,8 +99,8 @@ void tcApp::setup() {
 | `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | List the widgets drawn in the last frame — in every window running imgui — with labels, types, positions and, for value widgets, their current values |
 | `tcx_imgui_get_touched` | — | The value widgets the user changed by hand since startup (or the last reset), with the current value of their variable. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector. Items that change no variable (buttons, menu headers, action menu items) are not listed — see [Touched](#touched-what-the-user-changed-by-hand) |
 | `tcx_imgui_reset_touched` | — | Clear that record. No value is changed |
-| `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label |
-| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: replaces text in input widgets, and enters numeric values directly into slider/drag widgets (Ctrl+Click temp input) |
+| `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label. A composite widget (`DragFloat3`, `ColorEdit4`, ...) is an error: set it with `tcx_imgui_input` |
+| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value. A value widget gets `text` as JSON, written into its variable and read back (see [Setting values](#setting-values)); a text field gets `text` typed in |
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
@@ -144,6 +144,49 @@ The parts of a composite widget (the `##X` / `##Y` fields of a `ColorEdit`, the
 `-` / `+` buttons of `InputInt`) are still listed, so you can click or type
 into them, but carry no value — the widget reports under its own label.
 
+### Setting values
+
+`tcx_imgui_input` on a value widget (every row of the table above except the
+custom `BeginCombo` / `BeginListBox` and text fields) does not click or type.
+It hands the value to the value hook, which writes it into the app's variable
+the next time the widget runs, before the widget reads it. The reply waits for
+that frame and reads the variable back:
+
+```json
+{"label": "position", "window": "Params", "windowId": 0, "status": "ok",
+ "widget": "drag", "valueType": "float", "value": [0.5, -1, 2.25]}
+```
+
+- `text` is the value as JSON, in the units `tcx_imgui_get_widgets` reports: a
+  number; an array for a composite widget, one element per component
+  (`[x, y, z]`; a color `[r, g, b]` or `[r, g, b, a]` as floats 0-1, or the raw
+  HSV the variable holds with `colorSpace` `hsv`); `true` / `false` for a
+  `Checkbox` or a `bool*` `MenuItem` / `Selectable`; the item index for a
+  `Combo` or `ListBox`; the variable's integer for a `RadioButton` (any button
+  of the group sets it); radians for `SliderAngle`.
+- `status: ok` means the variable holds the value when the widget returns.
+  Errors, with nothing written: a value of the wrong shape or type (component
+  count, not a number, a fraction for an int, out of the C++ type's range),
+  and a widget that is not drawn in the frame after the call (collapsed header,
+  closed or hidden window). If a hand edit changes the value again in that
+  same frame, the reply is an error carrying what the variable holds.
+- A value set this way is not an edit by hand: it does not go into
+  `tcx_imgui_get_touched`.
+
+Known limits:
+
+- In the frame the value is written, the widget returns `false`. Code that acts
+  only on the return value, such as `if (ImGui::DragFloat3("pos", v))
+  recompute();`, does not run for it. Apps that read the variable every frame
+  (the usual TrussC pattern) see the new value at once. The same goes for a
+  widget that works on a copy which the caller applies only when the widget
+  returns `true` (`CheckboxFlags`, or `float x = obj.x; if (ImGui::DragFloat("x",
+  &x)) obj.x = x;`): the copy takes the value, the app keeps the old one.
+- No range clamp: the hook does not see the widget's min / max, so a value out
+  of the slider's range is written as given.
+- Text fields (`InputText`) are still typed into (the hook does not see the
+  buffer size), and `tcx_imgui_click` still clicks buttons.
+
 ### Touched: what the user changed by hand
 
 A typical loop: you tweak sliders in the running app, then ask the AI to "make
@@ -162,9 +205,11 @@ the code, and calls `tcx_imgui_reset_touched`.
 ```
 
 - A value widget (every row of the table above) is recorded when its value is
-  changed through the widget: dragging, typing, clicking — including input sent
-  by the `tcx_imgui_*` tools. A value assigned from code is never recorded; a
-  recorded widget's value does follow later changes from code.
+  changed through the widget: dragging, typing, clicking — including a click by
+  `tcx_imgui_click` and text typed by `tcx_imgui_input`. A value assigned from
+  code, or set on a value widget by `tcx_imgui_input` (see
+  [Setting values](#setting-values)), is never recorded; a recorded widget's
+  value does follow later changes from code.
 - Only value widgets are recorded, each with the value of its variable. A click
   that sets no variable of yours is not: buttons, menu headers, action menu
   items, `MenuItem(label, shortcut, bool selected)` — even when your code uses
