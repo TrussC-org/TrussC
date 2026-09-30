@@ -16,7 +16,7 @@ Search for `[TrussC]` to find all modified sections.
 addons/tcxImGui/src/
 ├── imgui/
 │   ├── imconfig.h            # Modified (test engine hooks on + value hook)
-│   ├── imgui_widgets.cpp     # Modified (13 value-hook call sites, one line each)
+│   ├── imgui_widgets.cpp     # Modified (19 value-hook call sites, one line each)
 │   ├── imgui.cpp             # Untouched
 │   ├── imgui.h               # Untouched
 │   ├── imgui_internal.h      # Untouched
@@ -64,7 +64,8 @@ value pointer, hence this patch.
 
 **Changes (one block between `// [TrussC] begin` and `// [TrussC] end`):**
 - `enum ImGuiTcValueKind_` — what the reported data is (Drag / Slider /
-  SliderAngle / Input / Color / Combo / ComboPreview / Text).
+  SliderAngle / Input / Color / Combo / ComboPreview / Text / Bool / Radio /
+  ListBox / ListBoxBegin).
 - `struct ImGuiTcItemValue` — a scope object. Its destructor calls
   `ImGuiTcHook_ItemValue(this)`, so the hook runs when the widget function
   **returns**, through any of its return paths, and sees the final value of
@@ -94,7 +95,7 @@ value pointer, hence this patch.
 **Purpose:** Declare `IMGUI_TC_ITEM_VALUE(...)` once in each value widget,
 where the pointer to the caller's variable and its type are in hand.
 
-**Changes:** 13 inserted lines, each ending in `// [TrussC]`. No upstream line
+**Changes:** 19 inserted lines, each ending in `// [TrussC]`. No upstream line
 is modified.
 
 | Function | Placed after | Id | Kind | Data |
@@ -112,6 +113,12 @@ is modified.
 | `InputTextEx` | `const ImGuiID id = window->GetID(label);` | `id` | Text | `&buf` |
 | `ColorEdit4` (`ColorEdit3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
 | `ColorPicker4` (`ColorPicker3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
+| `Checkbox` | the clipped early return (`if (!is_visible) ... return false; }`) | `id` | Bool | `v` |
+| `RadioButton` (`int*` form) | the opening `{` | 0 | Radio | `v` |
+| `Selectable` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected` |
+| `BeginListBox` | the `IsRectVisible()` early return | `id` | ListBoxBegin | none (`NULL`) |
+| `ListBox` (getter form; the array form calls it) | `ImGuiContext& g = *GImGui;` | 0 | ListBox | `current_item` |
+| `MenuItem` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected` (may be `NULL`: nothing is reported) |
 
 Placement rules:
 - A single widget declares the hook after its `ItemAdd()` succeeded, so a
@@ -121,8 +128,13 @@ Placement rules:
   at the entry level, and takes the group's rect and visibility from
   `g.LastItemData`, which is the group at that point. A window that skips
   items returns before any of these lines; for the wrappers without their own
-  `SkipItems` check (`SliderAngle`, `Combo`) the hook ignores a window with
-  `SkipItems` set.
+  `SkipItems` check (`SliderAngle`, `Combo`, `ListBox`, `RadioButton`,
+  `Selectable`, `MenuItem`) the hook ignores a window with `SkipItems` set.
+- A wrapper that flips or sets the variable after the inner widget returns
+  (`MenuItem(bool*)`, `Selectable(bool*)`, `RadioButton(int*)`) declares it at
+  its top, with Id 0: the hook runs after the flip, and the label's ID in the
+  entry window is the inner item's ID (`MenuItemEx`'s `Selectable("")` inside
+  `PushID(label)` hashes to the pushed ID).
 - `InputTextEx` passes `&buf`, the address of its `buf` variable, rather than
   `buf` itself: a resize callback (`std::string` inputs) repoints `buf` to the
   new allocation (`buf = callback_data.Buf`).
@@ -133,13 +145,21 @@ How the hooks behave (in `tcImGuiHooks.h`):
   because `g.ColorEditCurrentID` is 0 again when its hook runs.
 - The Ctrl+Click text field of a Drag/Slider (`ImGuiInputTextFlags_TempInput`)
   reports nothing either. The Drag/Slider reports the typed value.
+- Only the value hook creates "touched" entries, so every entry carries the
+  value of a caller's variable. `ItemInfo` refreshes existing entries, and
+  routes a pick inside a combo popup (`BeginComboDepth`) or inside a list box's
+  child window (its `ChildId` is the list box ID, recorded by the
+  `BeginListBox` hook) to that combo / list box.
 
 Not hooked, on purpose:
-- `Checkbox` / `MenuItem` — their state already arrives through `ItemInfo`
-  (`ImGuiItemStatusFlags_Checked`).
+- `MenuItem(label, shortcut, bool selected)`, `Selectable(label, bool
+  selected)`, `RadioButton(label, bool active)`, `BeginMenu` — the caller's
+  variable (if any) is never passed in. Their clicks are not recorded as
+  touched. (`Checkbox` was left out until #322, because its `Checked` flag
+  arrives through `ItemInfo`; it is hooked now so that one rule holds: touched
+  entries come from value hooks only.)
 - `DragFloatRange2` / `DragIntRange2` — two separate pointers. Their `##min` /
   `##max` drags report individually.
-- `ListBox`, `RadioButton`.
 
 ---
 
@@ -190,7 +210,7 @@ Expected counts (lines containing the marker; this file excluded):
 | File | Lines |
 |---|---|
 | `imgui/imconfig.h` | 4 (the hooks-on line, `begin`, a comment, `end`) |
-| `imgui/imgui_widgets.cpp` | 13 (one per call site) |
+| `imgui/imgui_widgets.cpp` | 19 (one per call site) |
 | `sokol_imgui.h` | 5 |
 
 ---
@@ -232,7 +252,7 @@ done
 ### 3. Check what the patches rely on
 
 - Every hook is still in place and still in the right spot:
-  `grep -c "IMGUI_TC_ITEM_VALUE" addons/tcxImGui/src/imgui/imgui_widgets.cpp` = 13.
+  `grep -c "IMGUI_TC_ITEM_VALUE" addons/tcxImGui/src/imgui/imgui_widgets.cpp` = 19.
   For each one, check that the line it follows (table above) still means the
   same thing. A single widget must still declare the hook after `ItemAdd()`
   succeeded. A composite widget must declare it before `BeginGroup()` /
@@ -242,7 +262,9 @@ done
   still match `tcImGuiHooks.h`.
 - The internals the hooks read still exist: `ImGuiContext::ColorEditCurrentID`,
   `BeginComboDepth`, `LastItemData`, `TestEngineHookItems`,
-  `ImGuiInputTextFlags_TempInput`, `ImGuiColorEditFlags_InputMask_`.
+  `ImGuiInputTextFlags_TempInput`, `ImGuiColorEditFlags_InputMask_`,
+  `ImGuiWindow::ChildId` (and `BeginListBox` still opening a child window with
+  the list box ID).
 - Read the "Breaking Changes" sections of `docs/CHANGELOG.txt` between the two
   tags.
 - Temporarily build with `#define IMGUI_DISABLE_OBSOLETE_FUNCTIONS` (in
@@ -254,7 +276,9 @@ done
 
 1. Update the **Upstream base** tag/commit at the top of this file.
 2. Update the Dear ImGui version in `docs/LICENSE.md`.
-3. Build every project that uses imgui (see step 3). Run one with
+3. Build and run the headless tests in `addons/tcxImGui/tests/` (they cover
+   the touched record through real clicks: menus, check boxes, radio buttons,
+   list boxes). Build every project that uses imgui (see step 3). Run one with
    `TRUSSC_MCP=1` and check `tcx_imgui_get_widgets`: values present, a
    `DragFloat3` listed under its own label, `tcx_imgui_input` into it shows up
    in `tcx_imgui_get_touched`.
