@@ -310,6 +310,23 @@ bool TlsClient::connect(const std::string& host, int port) {
         }
     }
 
+    // After the peer closed the connection (or a TLS error ended it) the
+    // flags above are all clear, but the socket is still open. Close it:
+    // creating the new socket below would overwrite and leak it.
+#ifdef _WIN32
+    if (socket_ != INVALID_SOCKET) {
+        shutdown(socket_, SD_BOTH);
+        closesocket(socket_);
+        socket_ = INVALID_SOCKET;
+    }
+#else
+    if (socket_ >= 0) {
+        shutdown(socket_, SHUT_RDWR);
+        close(socket_);
+        socket_ = -1;
+    }
+#endif
+
     // Reset SSL context (clear previous connection state)
     if (ctx_) {
         mbedtls_ssl_free(&ctx_->ssl);
