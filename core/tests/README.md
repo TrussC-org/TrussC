@@ -157,7 +157,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `disconnectClient()` of its own client, or `stop()`, in `onSendComplete`,
   with the server destroyed while that listener still runs (the destruction
   waits for the writer); two `onReceive` listeners disconnecting each
-  other's client both return; and `disconnectAllClients()` on another
+  other's client both return; two `onReceive`, or two `onSendComplete`,
+  listeners each calling `disconnectAllClients()` both return and the
+  server keeps running; and `disconnectAllClients()` on another
   thread, while a client connects, returns and leaves that client
   connected. `stop()` on several threads at once returns on all of
   them: from `onClientConnect` on the accept thread while another client's
@@ -167,8 +169,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   while the stop hook holds the plain one after its accept-thread join, and
   the plain one returns only once that listener is done); from
   `onClientConnect` once a plain thread's `stop()` has taken the accept
-  thread and waits for it (the listener's `stop()` still closes the
-  listening socket before it returns); and from two plain threads while the
+  thread and waits for it (ordered by
+  `internal::setTcpServerAcceptTakenHookForTests()`; the listener's `stop()`
+  still closes the listening socket before it returns); and from two plain threads while the
   accept thread is held in a listener (neither throws). Every client ends up
   disconnected. `start()` while another thread's `stop()` is still waiting
   for the accept thread waits for it too, and the restarted server accepts
