@@ -93,7 +93,10 @@ bool isLogNonBlocking();
 // The console and file sinks write under one mutex, so every line lands
 // whole, and closeFile() / setLogFile() wait for a write in progress. The
 // other onLog listeners (yours) run outside that mutex, so a listener may
-// log again without deadlocking.
+// log again without deadlocking. One exception: setLogFile() with a relative
+// path resolves it through getDataPath(), which reads the data path state
+// without a lock, so it must not race setDataPathRoot() or the first
+// getDataPath() call. An absolute path does not touch that state.
 // ---------------------------------------------------------------------------
 class Logger {
 public:

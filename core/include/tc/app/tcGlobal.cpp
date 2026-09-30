@@ -829,7 +829,9 @@ Logger& getLogger() {
 // (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
 bool Logger::setLogFile(const fs::path& path) {
     // Relative paths resolve against the data folder, like every other writer.
-    const fs::path resolved = getDataPath(path);
+    // An absolute path skips getDataPath(), so it never reads the data path
+    // state (unlocked, and written by the first call on Apple).
+    const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
     const std::string pathUtf8 = internal::pathToUtf8(resolved);
 
     // Create a missing parent folder, like saveScreenshot().
