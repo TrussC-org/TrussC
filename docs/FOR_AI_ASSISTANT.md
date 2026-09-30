@@ -972,7 +972,7 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories (run `trusscli update` before the next build)
+trusscli clean                 Delete build directories
 trusscli build                 Build (auto-selects native)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
@@ -1451,11 +1451,11 @@ Rules for callbacks that are not on the main thread:
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
-The project still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. In a trusscli project, deleting the build folder is not enough: `CMakePresets.json` also stores the old ninja, include, library and compiler paths, and `trusscli build` does not configure a missing build folder (it fails with "could not load cache"). Run `trusscli update` in the project folder instead, with the same `--ide` the project uses (for example `--ide cursor`, or `--ide vs` to regenerate the `vs/` solution), then build again. It rewrites `CMakePresets.json` for the Visual Studio installed now, cleans the build folder and configures again. Only for a project without trusscli presets, delete the build folder and configure again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+The project still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. In a trusscli project, deleting the build folder is not enough, because `CMakePresets.json` also stores the old ninja, include, library and compiler paths. Run `trusscli update` in the project folder with the same `--ide` the project uses (for example `--ide cursor`). It detects the Visual Studio installed now, rewrites `CMakePresets.json` and cleans the build folder. Then build again (with `--ide vs`, from the regenerated `vs/` solution). Only for a project without trusscli presets, delete the build folder and configure again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
 
 ### Build error: "hot reload state changed -- reconfigure required"
 
-You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. This is expected, with `trusscli build` / `trusscli run` as well as with plain CMake: just build again. The next build reconfigures and succeeds.
+You added or removed `TC_HOT_RELOAD(...)`. Hot reload is switched at configure time, so the build stops once to make CMake reconfigure. It prints "TC_HOT_RELOAD detected." or "TC_HOT_RELOAD removed." first. `trusscli build` reconfigures automatically; with plain CMake, just build again.
 
 ### Windows: "... was blocked by your organization's Device Guard policy" (Smart App Control)
 

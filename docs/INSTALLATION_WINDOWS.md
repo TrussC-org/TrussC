@@ -80,7 +80,7 @@ A Task Scheduler task with an empty "Start in" runs with the working directory a
 
 - Set "Start in" to the exe folder in the task or shortcut.
 - Load assets with paths under `bin/data`, the way the examples do. `getDataPath("file")` gives the absolute path.
-- Give the log file an absolute path, e.g. `getLogger().setLogFile(getDataPath("app.log"))`, or an absolute `TRUSSC_LOG_FILE`. `setLogFile()` does not create missing folders: for a subfolder such as `logs/`, create it first (`fs::create_directories(getDataPath("logs"))`). Check the return value: `setLogFile()` returns false when it can't open the file, and a Release or RelWithDebInfo app has no console to show the error.
+- Give the log file an absolute path, e.g. `getLogger().setLogFile(getDataPath("app.log"))`, or an absolute `TRUSSC_LOG_FILE`. Check the return value: `setLogFile()` returns false when it can't open the file, and a Release or RelWithDebInfo app has no console to show the error.
 
 ## 7. GPU on dual-GPU machines
 
