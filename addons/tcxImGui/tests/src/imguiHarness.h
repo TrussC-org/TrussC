@@ -132,6 +132,33 @@ private:
     Ui ui_;
 };
 
+// Calls an MCP tool the way tc::mcp::processHttpQueue() does, on this thread.
+// A tool that defers its reply to after the next frame
+// (deferToolResultUntilAfterFrame) gets that frame, run by `h`, and its reply
+// is then built as drainDeferredResponses() builds it. Returns the tool's
+// result (the JSON in its text content). `deferred` tells whether it deferred.
+inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const nlohmann::json& args,
+                               bool* deferred = nullptr) {
+    tcx::imgui::registerImGuiTools();   // idempotent
+    nlohmann::json req = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
+                          {"params", {{"name", name}, {"arguments", args}}}};
+    auto& ds = tc::mcp::detail::deferralState();
+    ds.hasEnvelope = false;
+    ds.target = nullptr;
+    std::string reply = tc::mcp::Server::instance().processMessage(req.dump());
+    if (deferred) *deferred = ds.hasEnvelope;
+    if (ds.hasEnvelope) {
+        auto envelope = std::move(ds.envelope);
+        ds.hasEnvelope = false;
+        ds.target = nullptr;
+        h.frame();                // the frame after the call
+        reply = envelope()();     // main stage after present(), then the worker thunk
+    }
+    nlohmann::json r = nlohmann::json::parse(reply, nullptr, false);
+    if (r.is_discarded() || !r.contains("result")) return {{"rpcReply", reply}};
+    return nlohmann::json::parse(r["result"]["content"][0]["text"].get<std::string>(), nullptr, false);
+}
+
 // Touched record entries, by label (context and window not checked)
 inline const tcx::imgui::TouchedWidget* touched(const std::string& label) {
     for (auto& t : tcx::imgui::getTouched()) {
