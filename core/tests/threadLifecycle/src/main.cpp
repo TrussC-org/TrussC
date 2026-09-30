@@ -20,9 +20,10 @@
 //     object.
 //   - A subclass that waits in its own destructor (the documented contract)
 //     never has threadedFunction() running after its members are destroyed.
-//   - The base destructor logs one warning when it finds threadedFunction()
-//     still running (the subclass did not wait), also after only stopThread(),
-//     and none otherwise.
+//   - The base destructor logs one warning when it finds the worker not
+//     finished (the subclass did not wait): threadedFunction() still running,
+//     also after only stopThread(), or skipped because the subclass was
+//     destroyed right after startThread(). None otherwise.
 //
 // Not covered, because it still terminates (see "Destruction" in
 // tcThread.h): a subclass that waits and is destroyed from its own
@@ -211,21 +212,36 @@ int main() {
     // Once each only: a destruction at the very moment the worker makes the
     // call still aborts (see "Destruction" in tcThread.h), and repeating these
     // would only turn that rare race into a CI flake.
+    // The subclass did not wait, so each destruction logs exactly one warning,
+    // also when the worker skipped threadedFunction(): then the warning is the
+    // only sign that the work never ran. (A skipping worker used to clear
+    // workerActive_, which lost the warning if that landed before the
+    // destructor read it. That window is a few instructions wide, so this
+    // test cannot force it.)
     {
         g_threadWarnings.store(0);
+        g_lingerEntered.store(false);
         {
-            Loop t;
+            // Lingering, not Loop: a worker that did get into threadedFunction()
+            // first would leave Loop right away (already stopped), and one that
+            // has returned before the destructor looks gets no warning (case 1).
+            // Lingering stays inside until the warning arrives.
+            Lingering t;
             t.startThread();
             t.stopThread();
         }
         check("destroyed right after start + stopThread: no terminate", true);
+        check("destroyed right after start + stopThread: exactly one warning",
+              g_threadWarnings.load() == 1);
+
+        g_threadWarnings.store(0);
         {
-            Loop t;
+            Loop t;   // not stopped: it cannot return before the destructor looks
             t.startThread();
         }
         check("destroyed right after start: no terminate", true);
-        check("destroyed right after start: at most one warning each",
-              g_threadWarnings.load() <= 2);
+        check("destroyed right after start: exactly one warning",
+              g_threadWarnings.load() == 1);
     }
 
     // --- 3. Restarted after the first run finished, then destroyed ---

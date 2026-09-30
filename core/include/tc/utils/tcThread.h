@@ -83,9 +83,9 @@ public:
         const bool joinable = thread_.joinable();
         const bool fromOwnThread =
             joinable && thread_.get_id() == std::this_thread::get_id();
-        // The worker has not finished (threadedFunction() has not returned, or
-        // has not been called yet), yet the subclass destructor has already
-        // run: the subclass did not wait.
+        // The worker has not finished (threadedFunction() has not returned,
+        // has not been called yet, or was skipped), yet the subclass
+        // destructor has already run: the subclass did not wait.
         const bool notWaited = joinable && !fromOwnThread && workerActive_;
 
         stopThread();
@@ -155,13 +155,16 @@ public:
         std::lock_guard<std::mutex> lock(startMutex_);
         thread_ = std::thread([this]() {
             { std::lock_guard<std::mutex> started(startMutex_); }
+            // Once ~Thread() has started, the call would reach the pure
+            // virtual: skip it and touch nothing else. workerActive_ stays
+            // true, so the destructor warns (the subclass did not wait), and
+            // it joins this worker.
+            if (destroying_) return;
             // Lives on this worker's stack, so it outlives the object if
             // threadedFunction() destroys it (the destructor sets it).
             bool destroyed = false;
             selfDestroyed_ = &destroyed;
-            // Once ~Thread() has started, the call would reach the pure
-            // virtual: skip it, and let the destructor join this worker.
-            if (!destroying_) threadedFunction();
+            threadedFunction();
             if (destroyed) return;   // this object is gone: touch nothing
             // Clear workerActive_ first: once isThreadRunning() reads false
             // for a worker that returned, the destructor sees it as finished.
@@ -244,9 +247,9 @@ protected:
 private:
     std::thread thread_;
     std::atomic<bool> threadRunning_;
-    // True from startThread() until threadedFunction() returns (or is
-    // skipped, see destroying_). Unlike threadRunning_, stopThread() does not
-    // clear it.
+    // True from startThread() until threadedFunction() returns. A worker that
+    // skips threadedFunction() (see destroying_) leaves it true. Unlike
+    // threadRunning_, stopThread() does not clear it.
     std::atomic<bool> workerActive_{false};
     // Set by the worker to a flag on its own stack. Only the destructor, when
     // it runs on that same worker, writes through it.
