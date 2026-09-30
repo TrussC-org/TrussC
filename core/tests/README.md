@@ -263,7 +263,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   copies of a TrueType, a CFF and a collection font cut short in the header,
   the table directory and each table. A glyph index from the cmap past
   numGlyphs draws as .notdef. Also guards the TrussC patch in
-  `stb_truetype.h` (CFF data is read with the CFF table's own length) and the
+  `stb_truetype.h` (CFF data is read with the CFF table's own length; this
+  case runs only in builds with `NDEBUG`, as CI builds, because stb's own
+  assert stops it otherwise) and the
   padded `STBTT_malloc` (a glyph whose last contour is one off-curve point;
   meaningful under ASan). The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.

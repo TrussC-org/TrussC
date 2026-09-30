@@ -21,7 +21,8 @@
 // Plus:
 // - a glyph index from the cmap past numGlyphs is treated as .notdef,
 // - the CFF data is read with the CFF table's own length (a CharStrings
-//   offset past the table no longer reads the bytes that follow it),
+//   offset past the table no longer reads the bytes that follow it; runs only
+//   with NDEBUG, since stb asserts on that offset otherwise),
 // - a glyph whose last contour is a single off-curve point loads and
 //   rasterizes (stb reads one vertex past its array there; the padded
 //   STBTT_malloc keeps that read inside the block -- run under ASan),
@@ -493,6 +494,14 @@ static void checkSinglePointContour() {
 
 // --- CFF length ----------------------------------------------------------------
 static void checkCffLength() {
+#ifndef NDEBUG
+    // With the CFF table's own length, stb's STBTT_assert (plain assert)
+    // stops the seek to a CharStrings offset past the table, which is what
+    // this case sets up. Builds with NDEBUG (Release, as CI) run it.
+    printf("%-72s SKIP (stb asserts in builds without NDEBUG)\n",
+           "CFF: CharStrings past the CFF table are not read");
+    fflush(stdout);
+#else
     internal::FontAtlasManager m;
     const Bytes f = makeCffFontCharStringsOutside();
     const LoadOutcome r = tryLoad(m, f);
@@ -506,6 +515,7 @@ static void checkCffLength() {
           m.getGlyphPath('A').empty(),
           "'A' outline has " + to_string(m.getGlyphPath('A').size()) +
               " vertices, read from the bytes after the CFF table");
+#endif
 }
 
 // --- malformed fonts -------------------------------------------------------------
