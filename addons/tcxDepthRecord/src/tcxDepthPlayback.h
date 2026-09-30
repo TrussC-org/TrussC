@@ -73,7 +73,11 @@ public:
 protected:
     bool openDevice() override {
         // Start from an empty state, so a failed open leaves no manifest or
-        // frame index from a file opened before.
+        // frame index from a file opened before. A stream still open from an
+        // earlier open (setup() doesn't close it when openDevice() fails) is
+        // closed, and its error state cleared, so this open starts fresh.
+        if (file_.is_open()) file_.close();
+        file_.clear();
         header_ = TcdcHeader{};
         index_.clear();
         fileSize_ = 0;
@@ -88,17 +92,15 @@ protected:
         }
         if (!tcd_detail::rd(file_, header_) ||
             std::memcmp(header_.magic, "TCDC", 4) != 0) {
-            header_ = TcdcHeader{};
             logError("tcxDepthRecord") << "PlaybackDepthCamera: not a .tcdc file: " << resolved;
-            return false;
+            return refuseOpen();
         }
         if (header_.streamTypeCount > TCDC_MAX_STREAM_TYPES) {
             logError("tcxDepthRecord")
                 << "PlaybackDepthCamera: the stream manifest lists "
                 << static_cast<int>(header_.streamTypeCount) << " block types, more than the "
                 << TCDC_MAX_STREAM_TYPES << " it can hold: " << resolved;
-            header_ = TcdcHeader{};
-            return false;
+            return refuseOpen();
         }
         // Every depth plane has width x height samples, drawn as an RGBA image
         // with int sizes and indices. DepthRecorder copies the first frame's
@@ -110,8 +112,7 @@ protected:
             logError("tcxDepthRecord")
                 << "PlaybackDepthCamera: the frame size " << header_.width << "x"
                 << header_.height << " is out of range: " << resolved;
-            header_ = TcdcHeader{};
-            return false;
+            return refuseOpen();
         }
         // Frames are read only up to the end of the file.
         file_.seekg(0, std::ios::end);
@@ -221,6 +222,14 @@ protected:
 
 private:
     struct Entry { double ts = 0.0; std::uint64_t offset = 0; };
+
+    // A refused open keeps no manifest and doesn't hold the file open.
+    bool refuseOpen() {
+        header_ = TcdcHeader{};
+        file_.close();
+        file_.clear();
+        return false;
+    }
 
     // Warns about the first skipped block since open; a damaged file would
     // otherwise log on every frame of every loop.
