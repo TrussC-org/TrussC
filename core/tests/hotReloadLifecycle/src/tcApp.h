@@ -50,11 +50,6 @@ struct GuestView {
     const void* windowContext = nullptr;
 };
 
-// Browser origins allowed with mcp::allowOrigin(): by each guest generation
-// (removed with its other registrations on unload) and by the host (kept).
-inline constexpr const char* kGuestOrigin = "http://guest-origin.test:5173";
-inline constexpr const char* kHostOrigin = "http://host-origin.test:5173";
-
 // Where guest code finds the one-per-process singletons and GPU caches
 // (sharedInstances): each must be the host's instance, not one of its own.
 struct GuestInstances {
@@ -100,7 +95,6 @@ public:
         mcp::status("guest_status", std::function<double()>([this]() { return (double)ticks_; }));
         mcp::statusImage("guest_image", [this]() { (void)ticks_; return Pixels(); });
         mcp::registerControlTools();
-        mcp::allowOrigin(kGuestOrigin);
     }
 
     void setup() override;

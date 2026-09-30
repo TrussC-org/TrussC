@@ -24,6 +24,15 @@
 //   - the largest 32-bit sizes fail too, including one that brings pos + size
 //     to exactly 4 GiB (0 when size_t is 32 bits)
 //   - valid packets of every argument shape still parse
+//
+// And the polling queue:
+//   - getNextMessage() alone (no hasNewMessage()) enables the queue
+//   - a full queue drops the oldest messages and counts them in
+//     getDroppedMessages(); the default size (1024) takes a 150-message bundle
+//   - drops are logged from the polling calls, at most once every 2 s,
+//     summed since the last report
+//   - shrinking a filled queue with setBufferSize() counts and reports the
+//     discarded messages as dropped
 // =============================================================================
 
 #include <tcxOsc.h>
@@ -35,6 +44,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <cstdint>
 
 using namespace tcx;
 
@@ -250,6 +260,8 @@ int main() {
     static const int MC_PORTS[4]  = { 17111, 18111, 19111, 27111 };  // joined receiver
     static const int NEST_PORTS[4] = { 17112, 18112, 19112, 27112 };  // bundle nesting
     static const int SIZE_PORTS[4] = { 17113, 18113, 19113, 27113 };  // size checks
+    static const int POLL_PORTS[4] = { 17114, 18114, 19114, 27114 };  // getNextMessage() only
+    static const int QUEUE_PORTS[4] = { 17115, 18115, 19115, 27115 }; // queue overflow
     const int LIMIT = OscBundle::MAX_NESTING_DEPTH;
 
     // Outgoing multicast interface. macOS CI runners have no multicast route on
@@ -594,6 +606,183 @@ int main() {
             }
             check("sizes: rx: blob past the end rejected",
                   rejected(messageWithBlobSize(BAD_SIZES[0].sizeFor)));
+        }
+        rx.close();
+    }
+
+    // ----- 8. polling with getNextMessage() only -----------------------------
+    // No hasNewMessage() call anywhere: getNextMessage() has to enable the
+    // queue by itself (sendAndRecv() would enable it through hasNewMessage()).
+    {
+        OscReceiver rx;
+        const int port = bindFirstFree(rx, POLL_PORTS);
+        check("poll: receiver bound", port != 0);
+
+        OscMessage m("/poll");
+        m.addInt(5);
+        OscMessage got;
+        bool received = false;
+        for (int i = 0; port != 0 && i < 40 && !received; ++i) {
+            tx.sendTo("127.0.0.1", port, m);
+            sleepMs(25);
+            received = rx.getNextMessage(got);
+        }
+        check("poll: getNextMessage() alone receives",
+              received && got.getAddress() == "/poll" && got.getArgCount() == 1 &&
+              got.getArgAsInt(0) == 5);
+        rx.close();
+    }
+
+    // ----- 9. queue overflow: drop the oldest, count, rate-limited log --------
+    {
+        // Log lines from tcxOsc, and whether each came from this (the polling) thread
+        std::mutex logMtx;
+        std::vector<std::string> oscLogs;
+        bool logOffThread = false;
+        const std::thread::id mainThread = std::this_thread::get_id();
+        tc::EventListener logListener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& e) {
+            if (e.message.find("[tcxOsc]") == std::string::npos) return;
+            std::lock_guard<std::mutex> lock(logMtx);
+            oscLogs.push_back(e.message);
+            if (std::this_thread::get_id() != mainThread) logOffThread = true;
+        });
+        auto logCount = [&] {
+            std::lock_guard<std::mutex> lock(logMtx);
+            return oscLogs.size();
+        };
+        auto lastLog = [&] {
+            std::lock_guard<std::mutex> lock(logMtx);
+            return oscLogs.empty() ? std::string() : oscLogs.back();
+        };
+        auto has = [](const std::string& s, const std::string& part) {
+            return s.find(part) != std::string::npos;
+        };
+
+        const int COUNT = 150;
+        OscBundle bundle;
+        for (int i = 0; i < COUNT; ++i) {
+            OscMessage m("/q");
+            m.addInt(i);
+            bundle.addMessage(m);
+        }
+
+        OscReceiver rx;
+        const int port = bindFirstFree(rx, QUEUE_PORTS);
+        check("queue: receiver bound", port != 0);
+        check("queue: default size is 1024", rx.getBufferSize() == 1024);
+
+        // Counts "/q" messages as the receive thread dispatches them. The
+        // queue push for a message happens before its listener runs, so once
+        // the listener has seen all COUNT, the queue and counters are final.
+        std::mutex mtx;
+        int seen = 0;
+        tc::EventListener msgListener = rx.onMessageReceived.listen([&](OscMessage& m) {
+            if (m.getAddress() != "/q") return;
+            std::lock_guard<std::mutex> lock(mtx);
+            ++seen;
+        });
+        // Send the bundle and wait until all of it is dispatched, without
+        // draining. A datagram arrives whole or not at all, so resend only
+        // when nothing arrived (loopback can drop one).
+        auto deliverBundle = [&]() {
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                seen = 0;
+            }
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                tx.sendTo("127.0.0.1", port, bundle);
+                for (int i = 0; i < 40; ++i) {
+                    sleepMs(25);
+                    std::lock_guard<std::mutex> lock(mtx);
+                    if (seen == COUNT) return true;
+                }
+                std::lock_guard<std::mutex> lock(mtx);
+                if (seen > 0) return false;  // part of a bundle: should not happen
+            }
+            return false;
+        };
+        // Drain the queue with getNextMessage() and return the int args in
+        // order. `received` counts every message handed out in this section.
+        uint64_t received = 0;
+        auto drain = [&]() {
+            std::vector<int> ids;
+            OscMessage m;
+            while (rx.getNextMessage(m)) ids.push_back(m.getArgAsInt(0));
+            received += ids.size();
+            return ids;
+        };
+
+        if (port != 0) {
+            // Default size: the whole bundle fits
+            OscMessage scratch;
+            rx.getNextMessage(scratch);  // enables the queue
+            bool got = deliverBundle();
+            std::vector<int> ids = drain();
+            check("queue: default size keeps a 150-message bundle",
+                  got && ids.size() == size_t(COUNT) && ids.front() == 0 && ids.back() == COUNT - 1);
+            check("queue: default size drops nothing", got && rx.getDroppedMessages() == 0);
+            check("queue: default size logs nothing", logCount() == 0);
+
+            // Explicit size 100: the 50 oldest of the bundle are dropped
+            rx.setBufferSize(100);
+            check("queue: setBufferSize(100)", rx.getBufferSize() == 100);
+            got = deliverBundle();
+            ids = drain();
+            const auto firstReport = std::chrono::steady_clock::now();
+            check("queue: 100 of 150 kept", got && ids.size() == 100);
+            check("queue: dropped == 50", got && rx.getDroppedMessages() == 50);
+            check("queue: received + dropped == 150",
+                  got && ids.size() + rx.getDroppedMessages() == size_t(COUNT));
+            check("queue: the oldest are the ones dropped",
+                  got && ids.size() == 100 && ids.front() == 50 && ids.back() == COUNT - 1);
+            const std::string line = lastLog();
+            check("queue: drop logged once by the polling call", logCount() == 1);
+            check("queue: log gives the count, size and setBufferSize()",
+                  has(line, " 50 messages dropped") && has(line, "queue limit 100") &&
+                  has(line, "setBufferSize()"));
+
+            // A second overflow inside 2 s is counted but not logged yet
+            got = deliverBundle();
+            ids = drain();
+            const bool within = std::chrono::steady_clock::now() - firstReport <
+                                std::chrono::milliseconds(1500);
+            check("queue: second overflow counted (total 100)",
+                  got && ids.size() == 100 && rx.getDroppedMessages() == 100);
+            if (within) {
+                check("queue: no second log line within 2 s", logCount() == 1);
+            } else {
+                std::printf("%-56s %s\n", "queue: rate-limit check SKIPPED (delivery too slow)", "SKIP");
+                std::fflush(stdout);
+            }
+
+            // After 2 s the next polling call logs the drops summed since
+            std::this_thread::sleep_until(firstReport + std::chrono::milliseconds(2100));
+            rx.hasNewMessage();
+            const auto secondReport = std::chrono::steady_clock::now();
+            check("queue: next report after 2 s", logCount() == 2);
+            check("queue: next report sums the drops since the last",
+                  has(lastLog(), " 50 messages dropped"));
+            rx.hasNewMessage();
+            check("queue: nothing new, nothing logged", logCount() == 2);
+
+            // Shrinking a filled queue: the discarded messages count as dropped
+            rx.setBufferSize(1024);
+            got = deliverBundle();  // fits whole, not drained
+            check("queue: refill without drops", got && rx.getDroppedMessages() == 100);
+            rx.setBufferSize(40);
+            check("queue: shrink to 40 counts the 110 discarded",
+                  got && rx.getDroppedMessages() == 210);
+            std::this_thread::sleep_until(secondReport + std::chrono::milliseconds(2100));
+            ids = drain();
+            check("queue: shrink keeps the newest 40",
+                  got && ids.size() == 40 && ids.front() == 110 && ids.back() == COUNT - 1);
+            check("queue: the next poll reports the discarded ones",
+                  logCount() == 3 && has(lastLog(), " 110 messages dropped") &&
+                  has(lastLog(), "queue limit 40"));
+            // 4 bundles delivered in this section
+            check("queue: received + dropped == sent over the section",
+                  got && received + rx.getDroppedMessages() == uint64_t(4 * COUNT));
+            check("queue: drops logged only on the polling thread", !logOffThread);
         }
         rx.close();
     }

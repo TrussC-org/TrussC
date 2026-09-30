@@ -73,6 +73,21 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   from its `threadedFunction()` or by a `thread_local` owner at thread exit (it
   still terminates, see the "Destruction" notes in `tcThread.h`), and a
   destruction at the very moment the worker calls `threadedFunction()`.
+- `loggerThreadSafety/` — the Logger is safe to call from any thread, and
+  sokol's messages go through it (#265). Threads logging at once while
+  another thread switches the file (`setLogFile()`) and toggles the levels
+  leave every line whole and exactly once, in the file and on the console;
+  `setLogFile()` / `closeFile()` toggled under load tear or duplicate
+  nothing, and nothing is written after `closeFile()` returns; an `onLog`
+  listener that logs again, itself or through a thread it waits for, does
+  not deadlock. The sokol bridge (`internal::sokolLog`) maps panic / error /
+  warning / info to Fatal / Error / Warning / Verbose, with the tag as the
+  module and `id:<item> line:<line>` when sokol passes no message. POSIX
+  only, each in a forked child: a panic reaches the log file and still
+  aborts through `slog_func`; a panic while another thread holds the
+  Logger's lock does not wait for it (the line goes to stderr); and on
+  Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
+  `XOpenDisplay()` failure lands in that file.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -125,6 +140,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   subscribed (the order the constructor subscription gave); the attach is
   idempotent and subscribes nothing once `internal::detachAppAudio()` ended
   the App. The hot reload generation's path is in `hotReloadLifecycle/`.
+- `mediaDecode/` — *(also on web)* the bundled decoders read every image
+  format and Ogg Vorbis through the TrussC entry points:
+  `Pixels::loadFromMemory()` / `load()` / `loadHDR()` for PNG (8 and 16-bit),
+  JPEG, BMP (24-bit and 8-bit paletted), TGA (raw and RLE), HDR, GIF (first
+  frame of a two-frame file) and PNM, checking size and pixels;
+  `SoundBuffer::loadOgg()` / `loadOggFromMemory()` for channels, rate, length
+  and levels. Also guards the two TrussC patches in `stb_image.h`: BMP pixels
+  that index past the stored palette read as black (the stack is painted
+  first, so the check cannot pass on a zeroed stack), and a GIF with the
+  longest LZW prefix chains decodes on a 64 KB thread stack (native POSIX
+  only; elsewhere only its output is checked). Image fixtures are made at
+  runtime; the Ogg clip is embedded (`src/toneOgg.h`).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
@@ -138,6 +165,46 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `serialHangup/` — a lost serial device is reported (#260): when the device
+  behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
+  `writeBytes()` each notice it on their own, close the port, log one warning,
+  and `isConnected()` turns false so `setup()` can reconnect; a quiet but
+  present device is not a loss. `onDisconnect` fires once per open connection:
+  for the loss (`wasClean` false, the port, the rate and the warning's text as
+  `reason`) and for `close()` of an open port, but not from the destructor or
+  a move assignment. A listener may call `setup()` from inside the
+  notification, and the call that found the loss must leave that new
+  connection alone. Only the I/O calls find a loss: `close()` or `setup()`
+  after an unplug nobody noticed fire once as a clean close and leak no
+  descriptor. Several threads may share one `Serial` (it has its own
+  reader-writer lock): when they race an unplug, the loss is reported once,
+  the fd is closed once, and the descriptors the kernel hands out right after
+  (recognized by inode) are neither closed nor written to. The I/O calls never
+  wait for each other, even for a write that takes 200 ms; `close()` waits for
+  the writes in progress, is not starved by writes that keep coming, and no
+  write reaches the closed fd; a loss found on one connection never closes the
+  next one. `isConnected()` / `getDevicePath()` answer even from a thread that
+  `close()` is waiting for, and a Logger listener may call back into the
+  `Serial` whose `setup()` / `close()` logged (both would deadlock otherwise;
+  a watchdog turns that into a failure). The Android backend's guard against
+  joining its USB worker from the worker itself (`internal::isThisThread()`)
+  is checked on its own; the backend itself needs Android. `src/slowWrite.cpp`
+  plays the slow write by defining `write()` (Linux only). A pseudo-terminal plays the device, and closing its master
+  stands in for the USB unplug. POSIX only (SKIP on Windows).
+- `serialBaudRate/` — `Serial::setup()` does not report success after opening
+  at a speed other than the one asked for (#260): rates without a termios
+  B-constant used to open at 9600 and report success. Linux must apply any rate
+  exactly (termios2); on macOS a pty rejects `IOSSIOSPEED`, so there such rates
+  must fail cleanly. A real Linux driver that cannot generate a rate writes
+  another one back instead of failing, B-constant rates included, and
+  `setup()` must then fail rather than report the requested rate, also when
+  the rate it writes back is the one the tty had. A driver that applies no
+  rate at all (a USB gadget's `/dev/ttyGS*`) keeps its old rate whatever is
+  asked, and there `setup()` must succeed with a warning. A pty does neither,
+  so on Linux the test defines its own `ioctl()` that makes `TCGETS2` report
+  both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
+  `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
+  which is checked on every platform.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
@@ -186,3 +253,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
   `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
   run ends.
+- `pixelsIndex/` — `Pixels` indexes with `size_t`, so images past `INT_MAX`
+  bytes work: the offset of the far corner of a 23171x23171 RGBA image, and
+  an `allocate()` byte count that is checked before it can wrap (against a
+  32-bit limit too, standing in for wasm32). A size that would wrap, a
+  negative one, or a channel count other than 1-4 logs an error and leaves the
+  buffer empty, and `crop()` / `Image::allocate()` stop there. With 64-bit
+  `size_t` and at least 4 GiB of memory available (on Linux, the lower of
+  `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
+  `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
+  past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.

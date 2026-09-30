@@ -138,18 +138,47 @@ namespace detail {
         return out;
     }
 
+    // curl names the user it authenticates as on an info line:
+    //   Proxy auth using Basic with user 'name'
+    //   Server auth using Basic with user 'name'
+    // Some proxies take an API key as the user name, so everything from the
+    // first quote to the end of the line is replaced (the name may contain a
+    // quote, and curl may cut the line). The scheme stays readable.
+    inline bool isAuthUserLine(std::string_view line) {
+        return line.rfind("Proxy auth using ", 0) == 0 ||
+               line.rfind("Server auth using ", 0) == 0;
+    }
+
+    inline std::string redactAuthUserLine(std::string_view line, size_t eol) {
+        size_t open = line.find('\'');
+        if (open == std::string_view::npos || open >= eol) {
+            // No quote: hide everything after "auth using ".
+            constexpr std::string_view using_ = "auth using";
+            open = line.find(using_) + using_.size();
+        }
+        std::string out(line.substr(0, open + 1));
+        out += "<redacted>";
+        if (eol > open + 1 && line[eol - 1] == '\'') out += '\'';
+        out.append(line.substr(eol));
+        return out;
+    }
+
     // Returns one line of curl's debug output with a credential value replaced
     // by <redacted>. Catches both header lines ("Authorization: ...") and the
     // info lines curl writes for HTTP/2 and HTTP/3 requests
     // ("[HTTP/2] [1] [authorization: ...]"): a name counts when it starts the
     // line or follows '[' or whitespace. Inside [...] the value runs to the
     // ']' curl puts at the end of the line (a value may contain ']' itself).
-    // Also masks the password in curl's echo of an environment proxy.
+    // Also masks the password in curl's echo of an environment proxy, and the
+    // user name on curl's "Proxy/Server auth using ..." lines.
     inline std::string redactCredentialLine(std::string_view line) {
         size_t eol = line.size();
         while (eol > 0 && (line[eol - 1] == '\n' || line[eol - 1] == '\r')) --eol;
         if (isProxyEchoLine(line.substr(0, eol))) {
             return redactProxyEchoLine(line, eol);
+        }
+        if (isAuthUserLine(line.substr(0, eol))) {
+            return redactAuthUserLine(line, eol);
         }
         for (size_t pos = 0; pos < eol; ++pos) {
             if (pos > 0 && line[pos - 1] != '[' && line[pos - 1] != ' ' && line[pos - 1] != '\t') continue;
@@ -233,9 +262,10 @@ public:
     // Enable verbose curl logging to stderr (for debugging). The values of
     // the Authorization, Proxy-Authorization, X-Api-Key and Api-Key headers
     // are shown as <redacted>, and so is a proxy URL with user:password taken
-    // from the environment (https_proxy etc.). Only those are masked: a
-    // credential an app puts elsewhere (another header, the URL query,
-    // user:pass@ in the base URL) is printed as-is.
+    // from the environment (https_proxy etc.) and the user name on curl's
+    // "Proxy auth using ..." / "Server auth using ..." lines. Only those are
+    // masked: a credential an app puts elsewhere (another header, the URL
+    // query, user:pass@ in the base URL) may still be printed.
     void setVerbose(bool v) { verbose_ = v; }
 
     // Check if server is reachable
@@ -340,6 +370,14 @@ private:
             size_t eol = chunk.size();
             if (eol > 0 && chunk[eol - 1] == '\n') --eol;
             printVerbose(prefix, detail::redactProxyEchoLine(chunk, eol));
+            return 0;
+        }
+        if (type == CURLINFO_TEXT && detail::isAuthUserLine(chunk)) {
+            // Same for the user name curl authenticates as: it is URL-decoded,
+            // so it may contain a newline.
+            size_t eol = chunk.size();
+            if (eol > 0 && chunk[eol - 1] == '\n') --eol;
+            printVerbose(prefix, detail::redactAuthUserLine(chunk, eol));
             return 0;
         }
         if (type == CURLINFO_HEADER_OUT && state) {

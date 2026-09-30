@@ -86,11 +86,20 @@ your code runs:
 |---|---|---|
 | Where your code runs | receive thread | main thread (your `update()`) |
 | Mutex needed for shared data | **yes** | no |
-| Setup | store an `EventListener` | just call `hasNewMessage()` |
+| Setup | store an `EventListener` | just call `hasNewMessage()` / `getNextMessage()` |
 | Latency | lowest (fires on arrival) | one frame |
 
-Polling enables an internal buffer on the first `hasNewMessage()` call. Pick polling
-unless you specifically need lowest latency — it's the simpler, footgun-free path.
+Polling enables an internal buffer on the first `hasNewMessage()` or `getNextMessage()`
+call. Pick polling unless you specifically need lowest latency — it's the simpler,
+footgun-free path.
+
+The buffer holds up to 1024 messages by default (each message of a bundle counts as
+one). If more arrive before `update()` drains them, the oldest are dropped; shrinking
+the limit with `setBufferSize()` also discards the oldest queued messages. Either way
+the messages count as dropped: `getDroppedMessages()` is the number received but never
+handed to your code. Drops are logged as a warning from the polling calls, at most once
+every 2 s with the count since the last report. If you see that warning, raise the
+limit with `setBufferSize()` (or drain more often).
 
 ```cpp
 // Polling style — all on the main thread, no locks:
@@ -172,11 +181,13 @@ Event<OscMessage> onMessageReceived;
 Event<OscBundle>  onBundleReceived;   // see the note below
 Event<string>     onParseError;
 
-// Polling (call from update(); buffer turns on at first hasNewMessage())
-bool   hasNewMessage();
-bool   getNextMessage(OscMessage& out);
-void   setBufferSize(size_t);      // default 100; oldest dropped when full
-size_t getBufferSize() const;
+// Polling (call from update(); buffer turns on at the first
+// hasNewMessage() / getNextMessage())
+bool     hasNewMessage();
+bool     getNextMessage(OscMessage& out);
+void     setBufferSize(size_t);        // default 1024; oldest dropped when full
+size_t   getBufferSize() const;
+uint64_t getDroppedMessages() const;  // received but never handed out (also logged)
 ```
 
 > **`onBundleReceived`** hands each listener the parsed bundle itself, not a copy,
