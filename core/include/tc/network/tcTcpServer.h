@@ -241,8 +241,15 @@ public:
     // disconnects. The listen backlog is a fixed value, independent of
     // maxClients.
     //
-    // It calls stop() first. When a stop() on another thread is still waiting
-    // for the previous accept thread to end, start() waits for that too.
+    // It calls stop() first. When a stop() on another thread is still tearing
+    // the previous session down (waiting for the accept thread, or
+    // disconnecting the clients and joining their threads after it), start()
+    // waits for that stop() to finish too, so none of it reaches the
+    // restarted server. It cannot be called from an inline listener on one of
+    // the server's own threads: on the accept thread (onClientConnect, see
+    // Events above) or on a client's receive or writer thread (onReceive,
+    // onSendComplete, onClientDisconnect, onError from those threads), it logs
+    // an error and returns false without stopping anything.
     bool start(int port, int maxClients = 0);
 
     // Stop server. Returns once the accept thread and every client thread have
@@ -250,12 +257,13 @@ public:
     // inline listener that calls it: the thread it runs on is left for the
     // next stop(), start() or the destructor to join; on the accept thread it
     // returns before the clients are disconnected (see Events above); and on
-    // a client's thread (onReceive, onSendComplete, onError about a client),
-    // while a stop() on another thread is already waiting for the accept
-    // thread, it disconnects every client and returns without waiting for any
-    // thread, which that other stop() then joins. When two threads call it at
-    // once, only one of them waits for the accept thread. isRunning() is false
-    // as soon as it is called.
+    // a client's receive or writer thread (onReceive, onSendComplete,
+    // onClientDisconnect, onError from a client's receive or writer thread),
+    // while another stop() has already taken the accept thread (and is
+    // joining it or the client threads), it disconnects every client and
+    // returns without waiting for any thread, which that other stop() then
+    // joins. When two threads call it at once, only one of them waits for the
+    // accept thread. isRunning() is false as soon as it is called.
     void stop();
 
     // Whether server is running
