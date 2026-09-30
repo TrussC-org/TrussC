@@ -56,6 +56,23 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
   main thread, and `Node::destroy()` is safe from any thread.
+- `threadLifecycle/` — destroying a `tc::Thread` never calls `std::terminate`
+  (#257): not after its worker returned on its own, not after only
+  `stopThread()`, not right after `startThread()` (the worker skips
+  `threadedFunction()` instead of calling the pure virtual), not after a
+  restart, and, for a subclass that does not wait, not on its own worker:
+  from its `threadedFunction()` (the base destructor detaches instead of
+  joining itself, and the worker writes nothing to the freed object) or at
+  worker exit when a `thread_local` `shared_ptr` on the worker was its last
+  owner. A subclass that
+  calls `waitForThread()` in its own destructor never has `threadedFunction()`
+  running after its members are gone, and the base destructor logs exactly one
+  warning when the subclass did not wait, including after only `stopThread()`
+  and right after `startThread()` (also when the worker skipped
+  `threadedFunction()`). Not covered: a waiting subclass destroyed on its own worker,
+  from its `threadedFunction()` or by a `thread_local` owner at thread exit (it
+  still terminates, see the "Destruction" notes in `tcThread.h`), and a
+  destruction at the very moment the worker calls `threadedFunction()`.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -109,3 +126,22 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   asked, and there `setup()` must succeed with a warning. A pty does neither,
   so on Linux the test defines its own `ioctl()` that makes `TCGETS2` report
   both (`src/fakeDriver.cpp`). POSIX only (SKIP on Windows).
+- `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
+  origin at program start, `resetElapsedTimeCounter()` as a display offset only,
+  `getFrameElapsedTime()` constant within a frame (through the main loop's frame
+  start); fixed-Hz update steps report the nominal `1/updateFps`, catch-up is
+  capped at `setMaxUpdateSteps()` steps per frame (default 10, `<= 0` runs
+  every step; also per `runHeadlessApp` pass at any rate: the pass sleeps
+  only until the next step is due, on a timer that doesn't round up to a
+  ~15.6 ms Windows tick, so 1 kHz keeps up), each loop warning once, without
+  starving `runOnMainThread` work; runtime mode switches
+  don't replay old time and re-applying the current rates every frame changes
+  nothing; `getFrameRate()` is the measured rate (steady at non-integer ratios;
+  also in the default draw-synced mode, the independent VSYNC update and
+  headless); the fixed-fps draw skip doesn't drop frames at the display rate;
+  Node timers are countdowns that keep their phase and are not charged for
+  time before they were created, and `callEveryCatchUp` fires once per due
+  interval up to its limit (a cancel from the callback stops it); the
+  `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
+  `ScreenRecorder` reads) stays exact after long uptime and, like the
+  `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.

@@ -661,7 +661,11 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
+    desc.win32.console_utf8 = true;   // UTF-8 console output (see buildAppDescriptor)
 
+#ifdef _WIN32
+    ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
+#endif
     sapp_run(&desc);
     return 0;
 }

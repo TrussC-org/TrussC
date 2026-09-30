@@ -230,13 +230,47 @@ struct WindowContext {
     ShadowSlotState shadow;
 
     // --- frame timing (per window) ---
-    // getDeltaTime()/getFrameRate() resolve through the current context, so a
-    // window ticking at 60 Hz next to a 120 Hz main window sees its own real
-    // per-tick delta (measured wall-clock between THIS window's update calls).
+    // getDeltaTime()/getFrameRate()/getFrameElapsedTime() resolve through the
+    // current context, so a window ticking at 60 Hz next to a 120 Hz main
+    // window sees its own real per-tick delta (measured wall-clock between THIS
+    // window's update calls; the nominal 1/updateFps in the main window's
+    // fixed-Hz update mode).
     double updateDeltaTime = 0.0;
+    // Secondary windows: their platform tick (windowTick) measures the delta
+    // with these, and records none of the frame time, update time or rate
+    // samples below. Left as is until the multi-window work that follows #219.
     std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
     bool lastUpdateCallTimeInitialized = false;
-    // Frame rate measurement (10-frame moving average)
+    // Main window: the main loop (beginMainUpdateCall in TrussC.h) measures
+    // the delta on the steady clock instead, so a wall-clock step can't skew
+    // the dt that Node timers count down with.
+    std::chrono::steady_clock::time_point mainUpdateCallTime;
+    bool mainUpdateCallTimeInitialized = false;
+    // Uptime sampled once at the start of this window's frame (getFrameElapsedTime).
+    std::chrono::steady_clock::duration frameUptime{};
+    bool frameUptimeSampled = false;
+    // Node timers (Node::processTimers): the time of the update being run
+    // (the wall time of the update call; a fixed-Hz step's nominal time on the
+    // loop's timeline), whether an update is running right now, and whether it
+    // is a fixed-Hz step. A timer is charged only the time after its creation,
+    // except one created during a fixed step, which counts whole steps from
+    // the next one.
+    std::chrono::steady_clock::time_point updateTime{};
+    bool inUpdate = false;
+    bool fixedStepUpdate = false;
+    // Measured update rate (getFrameRate): per frame, the wall time it covered
+    // and the update steps it ran. Recorded by the loops, read-only in the getter.
+    // Fixed-step loops record fractional steps (the time they consumed divided
+    // by the step interval), so the rate doesn't flicker between whole-step
+    // counts when the step rate isn't a multiple of the frame rate.
+    static constexpr int rateSampleCount = 10;
+    double rateDurations[rateSampleCount] = {};
+    double rateSteps[rateSampleCount] = {};
+    int rateIndex = 0;
+    int rateCount = 0;
+    // Frame rate measurement of a secondary window, which records no rate
+    // samples: getFrameRate() averages the last 10 deltas it read (10-frame
+    // moving average), as before.
     double frameTimeBuffer[10] = {};
     int frameTimeIndex = 0;
     bool frameTimeBufferFilled = false;
@@ -245,14 +279,14 @@ struct WindowContext {
     // A secondary window's native display link always fires at the display's
     // vsync; we cannot portably retune it, so a lower target rate is realised
     // by SKIPPING display ticks via a time accumulator (windowThrottleShouldTick
-    // in the native windowTick, before beginFrame). throttleFps <= 0 (or >= the
-    // display refresh rate, which the accumulator degenerates to) = free-run at
-    // vsync, the default and the pre-Phase-2 behavior. The MAIN window ignores
-    // this field entirely (its loop is driven by updateTargetFps/drawTargetFps
-    // in _frame_cb).
+    // in the native windowTick, before beginFrame). throttleFps <= 0 = free-run
+    // at vsync, the default and the pre-Phase-2 behavior; a target at or above
+    // the display rate also runs every tick (half-tick tolerance). The MAIN
+    // window ignores this field entirely (its loop is driven by
+    // updateTargetFps/drawTargetFps in _frame_cb).
     float throttleFps = 0.0f;
     double throttleAccumulator = 0.0;
-    std::chrono::high_resolution_clock::time_point throttleLastTime;
+    std::chrono::steady_clock::time_point throttleLastTime;
     bool throttleLastTimeInitialized = false;
 
     // --- misc per-window ---
@@ -325,18 +359,30 @@ WindowContext*& currentWindowCtx();
 WindowContext& currentWindowContext();
 
 // ---------------------------------------------------------------------------
+// Per-window frame timing. Non-inline (tcGlobal.cpp).
+// ---------------------------------------------------------------------------
+// Sample the uptime getFrameElapsedTime() reports for this window's frame.
+void sampleFrameTime(WindowContext& ctx);
+// Record one frame for getFrameRate(): the wall time it covered and the number
+// of update steps it ran (1 per update in VSYNC / synced modes; in fixed-step
+// loops the time the steps consumed divided by the step interval, which may be
+// fractional).
+void recordUpdateRateSample(WindowContext& ctx, double duration, double steps);
+
+// ---------------------------------------------------------------------------
 // Per-window frame-rate throttle (T1). Shared by every platform's windowTick.
 // Called once per native display tick BEFORE beginFrame: returns true to run
 // this window's update/draw, false to skip it cheaply (the display link keeps
 // firing at vsync — this only decides whether we do the frame's work).
 // Free-run (throttleFps <= 0) always ticks. Otherwise accumulate real elapsed
-// wall-clock time and let one tick through per 1/fps interval; a target >= the
-// display rate degenerates to running every tick. Mirrors the main loop's
-// fixed-FPS draw-skip logic (TrussC.h _frame_cb).
+// time and let one tick through per 1/fps interval, with a half-tick
+// tolerance so a target at or above the display rate runs every tick. Same
+// decision as the main loop's fixed-FPS draw skip (frameSkipShouldTick,
+// tcFrameTiming.h).
 // ---------------------------------------------------------------------------
 inline bool windowThrottleShouldTick(WindowContext& ctx) {
     if (ctx.throttleFps <= 0.0f) return true;
-    auto now = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::steady_clock::now();
     if (!ctx.throttleLastTimeInitialized) {
         ctx.throttleLastTimeInitialized = true;
         ctx.throttleLastTime = now;
@@ -344,15 +390,7 @@ inline bool windowThrottleShouldTick(WindowContext& ctx) {
     }
     double elapsed = std::chrono::duration<double>(now - ctx.throttleLastTime).count();
     ctx.throttleLastTime = now;
-    ctx.throttleAccumulator += elapsed;
-    double interval = 1.0 / ctx.throttleFps;
-    if (ctx.throttleAccumulator >= interval) {
-        ctx.throttleAccumulator -= interval;
-        // Clamp after a long stall (occlusion) so we don't burst-catch-up.
-        if (ctx.throttleAccumulator > interval) ctx.throttleAccumulator = 0.0;
-        return true;
-    }
-    return false;
+    return frameSkipShouldTick(ctx.throttleAccumulator, elapsed, 1.0 / ctx.throttleFps);
 }
 
 // ---------------------------------------------------------------------------

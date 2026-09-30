@@ -31,6 +31,8 @@ static void cover_audioengine() {
 }
 
 static void cover_file() {
+    (void)pathToUtf8(af::val<const fs::path>());
+    (void)utf8ToPath(af::val<std::string_view>());
     (void)getExecutablePath();
     (void)getExecutableDir();
     (void)loadErrorName(af::val<LoadError>());
@@ -502,6 +504,7 @@ static void cover_time_elapsed() {
     (void)getElapsedTimeMillis();
     (void)getElapsedTimeMicros();
     (void)getElapsedTime();
+    (void)getFrameElapsedTime();
 }
 
 static void cover_time_frame() {
@@ -704,6 +707,8 @@ static void cover_window_system() {
     (void)getAspectRatio();
     (void)getBackendName();
     (void)setIndependentFps(af::val<float>(), af::val<float>());
+    (void)setMaxUpdateSteps(af::val<int>());
+    (void)getMaxUpdateSteps();
     (void)redraw(af::val<int>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)grabScreen(af::val<Pixels>());
@@ -2051,6 +2056,7 @@ struct Cover_Node : af::Scope<Node> {
         (void)af::val<Node>().getModByTypeName(af::val<const std::string>());
         (void)af::val<Node>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
         (void)af::val<Node>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<Node>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
         (void)af::val<Node>().cancelTimer(af::val<uint64_t>());
         (void)af::val<Node>().cancelAllTimers();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)

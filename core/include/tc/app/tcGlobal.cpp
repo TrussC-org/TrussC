@@ -514,15 +514,209 @@ CoreEvents& events() {
     return *ctx.coreEvents;
 }
 
-double getElapsedTime() {
-    auto now = std::chrono::high_resolution_clock::now();
-    if (!internal::startTimeInitialized) {
-        internal::startTime = now;
-        internal::startTimeInitialized = true;
-        return 0.0;
+// ---------------------------------------------------------------------------
+// Elapsed-time clock (#229) — see tcTime.h for the design.
+// ---------------------------------------------------------------------------
+namespace {
+// steady_clock, not high_resolution_clock: on libstdc++ the latter is
+// system_clock, which follows NTP steps and manual clock changes.
+std::chrono::steady_clock::time_point clockOrigin() {
+    static const std::chrono::steady_clock::time_point origin =
+        std::chrono::steady_clock::now();
+    return origin;
+}
+// Take the origin during static initialization, i.e. at program start, so
+// "elapsed since program start" holds whether or not anything reads the
+// clock early. (A read from another TU's static initializer that runs first
+// just takes it a little earlier; the function-local static makes that safe.)
+[[maybe_unused]] const bool clockOriginTaken = (clockOrigin(), true);
+
+// Display offset for resetElapsedTimeCounter(), in steady_clock ticks.
+// Atomic: the elapsed getters may be called from worker threads.
+std::atomic<std::chrono::steady_clock::rep> elapsedTimeOffsetTicks{0};
+} // namespace
+
+namespace internal {
+std::chrono::steady_clock::duration getUptime() {
+    return std::chrono::steady_clock::now() - clockOrigin();
+}
+
+std::chrono::steady_clock::duration getElapsedTimeOffset() {
+    return std::chrono::steady_clock::duration(
+        elapsedTimeOffsetTicks.load(std::memory_order_relaxed));
+}
+
+void setElapsedTimeOffset(std::chrono::steady_clock::duration offset) {
+    elapsedTimeOffsetTicks.store(offset.count(), std::memory_order_relaxed);
+}
+
+void sampleFrameTime(WindowContext& ctx) {
+    ctx.frameUptime = getUptime();
+    ctx.frameUptimeSampled = true;
+}
+
+void recordUpdateRateSample(WindowContext& ctx, double duration, double steps) {
+    if (!(duration >= 0.0)) return;   // also rejects NaN
+    if (!(steps >= 0.0)) steps = 0.0;
+    ctx.rateDurations[ctx.rateIndex] = duration;
+    ctx.rateSteps[ctx.rateIndex] = steps;
+    ctx.rateIndex = (ctx.rateIndex + 1) % WindowContext::rateSampleCount;
+    if (ctx.rateCount < WindowContext::rateSampleCount) ctx.rateCount++;
+}
+
+std::chrono::steady_clock::time_point getUpdateTime() {
+    return currentWindowContext().updateTime;
+}
+
+bool isInUpdate() {
+    return currentWindowContext().inUpdate;
+}
+
+bool isFixedStepUpdate() {
+    return currentWindowContext().fixedStepUpdate;
+}
+
+// ---------------------------------------------------------------------------
+// Loop timing helpers (tcFrameTiming.h)
+// ---------------------------------------------------------------------------
+FixedStepAdvance advanceFixedStep(double& accumulator, double elapsed,
+                                  double interval, int maxSteps) {
+    FixedStepAdvance r;
+    if (!(interval > 0.0) || !std::isfinite(interval)) return r;
+    if (elapsed > 0.0 && std::isfinite(elapsed)) accumulator += elapsed;
+    const int cap = maxSteps > 0 ? maxSteps : std::numeric_limits<int>::max();
+    while (r.steps < cap && accumulator >= interval) {
+        accumulator -= interval;
+        ++r.steps;
     }
-    auto duration = std::chrono::duration<double>(now - internal::startTime);
-    return duration.count();
+    if (accumulator >= interval) {
+        // Over the cap: drop whole intervals, keep the fractional phase.
+        double keep = std::fmod(accumulator, interval);
+        r.droppedTime = accumulator - keep;
+        accumulator = keep;
+    }
+    return r;
+}
+
+double headlessSleepTime(double accumulator, double interval, double spent) {
+    if (!(interval > 0.0) || !std::isfinite(interval)) return headlessMaxSleepTime;
+    if (!(spent > 0.0) || !std::isfinite(spent)) spent = 0.0;
+    const double untilDue = interval - accumulator - spent;
+    if (!(untilDue > 0.0)) return 0.0;
+    return untilDue < headlessMaxSleepTime ? untilDue : headlessMaxSleepTime;
+}
+
+#if defined(_WIN32) && !defined(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002   // Windows SDK 10.0.17134+
+#endif
+
+HeadlessSleeper::HeadlessSleeper() {
+#ifdef _WIN32
+    // nullptr before Windows 10 1803, which rejects the flag.
+    timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                    TIMER_MODIFY_STATE | SYNCHRONIZE);
+#endif
+}
+
+HeadlessSleeper::~HeadlessSleeper() {
+#ifdef _WIN32
+    if (timer_) CloseHandle((HANDLE)timer_);
+#endif
+}
+
+void HeadlessSleeper::sleep(double seconds) {
+    if (!(seconds > 0.0)) {
+        std::this_thread::yield();
+        return;
+    }
+    if (seconds > 1.0) seconds = 1.0;
+#ifdef _WIN32
+    if (timer_) {
+        LARGE_INTEGER due;
+        due.QuadPart = -(LONGLONG)std::ceil(seconds * 1e7);   // relative, 100 ns units
+        if (SetWaitableTimer((HANDLE)timer_, &due, 0, nullptr, nullptr, FALSE) &&
+            WaitForSingleObject((HANDLE)timer_, INFINITE) == WAIT_OBJECT_0) {
+            return;
+        }
+    }
+#endif
+    std::this_thread::sleep_for(std::chrono::nanoseconds((long long)std::ceil(seconds * 1e9)));
+}
+
+bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
+    if (!(interval > 0.0) || !std::isfinite(interval)) return true;
+    if (!(elapsed > 0.0) || !std::isfinite(elapsed)) elapsed = 0.0;
+    accumulator += elapsed;
+    if (accumulator + 0.5 * elapsed < interval) return false;
+    accumulator -= interval;
+    if (accumulator > interval) {
+        accumulator = 0.0;             // long stall: don't burst-catch-up
+    } else if (accumulator < -interval) {
+        accumulator = -interval;
+    }
+    return true;
+}
+
+void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
+                            int stepsRun) {
+    // One flag per loop: each loop reports its own first drop.
+    static std::atomic<bool> warned[2] = {false, false};
+    const bool headless = (loop == FixedStepLoop::Headless);
+    if (warned[headless ? 1 : 0].exchange(true)) return;
+    const char* where = headless ? "Headless loop" : "Update loop";
+    const char* frame = headless ? "loop pass" : "frame";
+    // stepsRun is the cap (getMaxUpdateSteps()): time is only dropped once
+    // the cap is reached. The main loop steps once per frame callback, so a
+    // rate above that many times the display rate can't keep up either. The
+    // headless loop sleeps only until its next step is due, so on its own it
+    // falls behind only when one OS sleep overshoots by that many steps.
+    auto warning = logWarning("Loop");
+    warning << where << " fell behind its fixed rate: ran "
+        << stepsRun << " update steps in one " << frame << " and dropped "
+        << droppedTime << " s (" << (interval > 0.0 ? droppedTime / interval : 0.0)
+        << " steps at " << (interval > 0.0 ? 1.0 / interval : 0.0)
+        << " Hz) instead of replaying it. The app stalled, or update() is too slow "
+           "for this rate";
+    if (headless) {
+        warning << ", or the rate is so high that one OS sleep spans more than "
+            << stepsRun << " steps";
+    } else {
+        warning << ", or the update rate is more than " << stepsRun
+            << "x the display's frame rate";
+    }
+    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once.";
+}
+} // namespace internal
+
+// ---------------------------------------------------------------------------
+// Update step cap of the fixed-step loops (setMaxUpdateSteps, #228). Stored
+// here, not inline in a header, so the hot-reload Host and Guest share it.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<int> maxUpdateSteps{10};
+} // namespace
+
+void setMaxUpdateSteps(int steps) {
+    maxUpdateSteps.store(steps, std::memory_order_relaxed);
+}
+
+int getMaxUpdateSteps() {
+    return maxUpdateSteps.load(std::memory_order_relaxed);
+}
+
+double getElapsedTime() {
+    return std::chrono::duration<double>(internal::getElapsedDuration()).count();
+}
+
+double getFrameElapsedTime() {
+    auto& ctx = internal::currentWindowContext();
+    // Before this window's first frame (e.g. during a window's own setup),
+    // and in secondary windows, whose platform tick doesn't sample it yet
+    // (the multi-window work that follows #219), fall back to the live clock.
+    if (!ctx.frameUptimeSampled) return getElapsedTime();
+    auto d = ctx.frameUptime - internal::getElapsedTimeOffset();
+    if (d.count() < 0) return 0.0;
+    return std::chrono::duration<double>(d).count();
 }
 
 // getFrameCount()/getUpdateCount() resolve through the CURRENT window context.
@@ -555,37 +749,76 @@ double getDeltaTime() {
 }
 
 double getFrameRate() {
+    // Measured update rate over the last few frames: update steps divided by
+    // the wall time they covered. Recorded by the main and headless loops
+    // (recordUpdateRateSample), so reading it has no side effects. In fixed-Hz
+    // update mode this is the MEASURED rate, not the configured one (#228):
+    // the fixed-step loops count the time their steps consumed (fractional
+    // steps), so a rate that isn't a multiple of the frame rate reads steady,
+    // and dropped time lowers it.
     auto& ctx = internal::currentWindowContext();
-    double dt = ctx.updateDeltaTime;
-    if (dt <= 0.0) return 0.0;
-    ctx.frameTimeBuffer[ctx.frameTimeIndex] = dt;
-    ctx.frameTimeIndex = (ctx.frameTimeIndex + 1) % 10;
-    if (ctx.frameTimeIndex == 0) {
-        ctx.frameTimeBufferFilled = true;
-    }
+    if (!ctx.isMain) {
+        // A secondary window's platform tick records no rate samples yet (the
+        // multi-window work that follows #219): average the last 10 deltas
+        // read here, as before.
+        double dt = ctx.updateDeltaTime;
+        if (dt <= 0.0) return 0.0;
+        ctx.frameTimeBuffer[ctx.frameTimeIndex] = dt;
+        ctx.frameTimeIndex = (ctx.frameTimeIndex + 1) % 10;
+        if (ctx.frameTimeIndex == 0) {
+            ctx.frameTimeBufferFilled = true;
+        }
 
-    int count = ctx.frameTimeBufferFilled ? 10 : ctx.frameTimeIndex;
-    if (count == 0) return 0.0;
+        int count = ctx.frameTimeBufferFilled ? 10 : ctx.frameTimeIndex;
+        if (count == 0) return 0.0;
 
-    double sum = 0.0;
-    for (int i = 0; i < count; i++) {
-        sum += ctx.frameTimeBuffer[i];
+        double sum = 0.0;
+        for (int i = 0; i < count; i++) {
+            sum += ctx.frameTimeBuffer[i];
+        }
+        double avgDt = sum / count;
+        return avgDt > 0.0 ? 1.0 / avgDt : 0.0;
     }
-    double avgDt = sum / count;
-    return avgDt > 0.0 ? 1.0 / avgDt : 0.0;
+    double time = 0.0;
+    double steps = 0.0;
+    for (int i = 0; i < ctx.rateCount; i++) {
+        time += ctx.rateDurations[i];
+        steps += ctx.rateSteps[i];
+    }
+    return time > 0.0 ? steps / time : 0.0;
 }
 
-namespace internal {
-ElapsedTimeClock& getElapsedClock() {
-    static ElapsedTimeClock clock;
-    return clock;
-}
-} // namespace internal
+namespace {
+// Set during static destruction, right before getLogger()'s Logger is
+// destroyed. Constant-initialized and trivially destructible, so it can be
+// read at any point of static destruction.
+std::atomic<bool> loggerDestroyed{false};
+
+struct LoggerLifetimeMark {
+    ~LoggerLifetimeMark() { loggerDestroyed.store(true); }
+};
+} // namespace
 
 Logger& getLogger() {
     static Logger logger;
+    // Constructed after logger, so destroyed right before it.
+    static LoggerLifetimeMark lifetimeMark;
+    (void)lifetimeMark;
     return logger;
 }
+
+namespace internal {
+// Declared in tcThread.h, which is included before tcLog.h and cannot log.
+void logThreadNotWaited() {
+    // A global or static Thread still running at exit can be destroyed after
+    // the Logger: skip the warning rather than log through a destroyed Logger.
+    if (loggerDestroyed.load()) return;
+    logWarning("Thread") << "destroyed while its thread was still running. "
+                            "Call waitForThread() in the subclass destructor: the base "
+                            "Thread destructor joins only after the subclass members "
+                            "are destroyed";
+}
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // More one-per-process state (#249). Each of these used to be a function-local
