@@ -290,7 +290,7 @@ static void testMainLoopUpdates() {
     check("fixed Hz: dt stays nominal across catch-up steps",
           !g_dts.empty() && g_dts.front() == 1.0 / 120.0 && g_dts.back() == 1.0 / 120.0);
     check("fixed Hz: accumulator below one interval after the cap",
-          internal::updateAccumulator >= 0.0 && internal::updateAccumulator < 1.0 / 120.0);
+          internal::mainLoop().updateAccumulator >= 0.0 && internal::mainLoop().updateAccumulator < 1.0 / 120.0);
     check("fixed Hz: dropped time warned once", g_dropWarnings == warningsBefore + 1);
     t += secs(3.0);
     internal::runIndependentUpdates(t);
@@ -315,7 +315,7 @@ static void testMainLoopUpdates() {
         snprintf(name, sizeof name, "setMaxUpdateSteps(%d): a 3 s stall replays every step (360)", cap);
         checkf(name, abs(g_updates - before - 360) <= 1 && nominal, g_updates - before);
         check("setMaxUpdateSteps(<= 0): ...and leaves less than one interval",
-              internal::updateAccumulator >= 0.0 && internal::updateAccumulator < 1.0 / 120.0);
+              internal::mainLoop().updateAccumulator >= 0.0 && internal::mainLoop().updateAccumulator < 1.0 / 120.0);
     }
     setMaxUpdateSteps(10);
 
@@ -355,8 +355,8 @@ static void testMainLoopUpdates() {
     setFps(VSYNC);
     // As if the app had been in VSYNC mode for an hour: the fixed-Hz
     // timestamp is an hour old.
-    internal::lastUpdateTime = t - secs(3600.0);
-    internal::lastUpdateTimeInitialized = true;
+    internal::mainLoop().lastUpdateTime = t - secs(3600.0);
+    internal::mainLoop().lastUpdateTimeInitialized = true;
     setIndependentFps(60, VSYNC);   // runtime switch
     before = g_updates;
     internal::runIndependentUpdates(t);
@@ -475,10 +475,10 @@ static void testMainLoopDraw() {
         if (internal::mainLoopShouldDraw(t)) { ++draws; setFps(60); }
     }
     checkf("draw: setFps(60) re-applied every frame draws 600 of 600 ticks", draws == 600, draws);
-    const double acc = internal::drawAccumulator;
+    const double acc = internal::mainLoop().drawAccumulator;
     setFps(60);
     check("draw: setFps() with the current rate leaves the draw timing alone",
-          internal::lastDrawTimeInitialized && internal::drawAccumulator == acc);
+          internal::mainLoop().lastDrawTimeInitialized && internal::mainLoop().drawAccumulator == acc);
 
     // A real switch to 30: the first tick after it draws, then every other.
     setFps(30);
@@ -772,7 +772,7 @@ static void testNodeTimersInLoop() {
         // Each step's time on the loop's timeline (what the timers count from).
         Clk::time_point prevStep{}, lastStep{};
         g_loopDuring = [&] { prevStep = lastStep; lastStep = internal::getUpdateTime(); };
-        internal::lastUpdateTime = Clk::now() - secs(3.0);   // the previous frame, 3 s ago
+        internal::mainLoop().lastUpdateTime = Clk::now() - secs(3.0);   // the previous frame, 3 s ago
         const auto createdFrom = Clk::now();
         node->callAfter(0.05, [&] { ++fired; });
         const auto createdTo = Clk::now();
@@ -810,7 +810,7 @@ static void testNodeTimersInLoop() {
         runFrames(t, 1, 1.0 / 60.0);
         perFrame = calls;
         calls = 0;
-        internal::lastUpdateTime = t - secs(3.0);   // the previous frame, 3 s ago
+        internal::mainLoop().lastUpdateTime = t - secs(3.0);   // the previous frame, 3 s ago
         const int before = g_updates;
         internal::runIndependentUpdates(t);
         const int steps = g_updates - before;
@@ -833,7 +833,7 @@ static void testNodeTimersInLoop() {
             if (++step == 1) node->callAfter(k / 120.0, [&] { firedOn = step; });
         };
         const auto now = Clk::now();
-        internal::lastUpdateTime = now - secs(3.0);
+        internal::mainLoop().lastUpdateTime = now - secs(3.0);
         const int before = g_updates;
         internal::runIndependentUpdates(now);
         g_loopDuring = nullptr;
@@ -1380,12 +1380,12 @@ static void testHealthUptime() {
     mcp::registerInspectionTools();
     // Window size without a window: pixel-perfect mode reads sokol's
     // framebuffer size (1 x 1 before init) instead of dividing by its DPI (0).
-    const bool pixelPerfect = internal::pixelPerfectMode;
-    internal::pixelPerfectMode = true;
+    const bool pixelPerfect = internal::pixelPerfectMode();
+    internal::pixelPerfectMode() = true;
     resetElapsedTimeCounter();
     string reply = mcp::Server::instance().processMessage(
         R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tc_get_health","arguments":{}}})");
-    internal::pixelPerfectMode = pixelPerfect;
+    internal::pixelPerfectMode() = pixelPerfect;
     double up = -1.0;
     try {
         auto j = json::parse(reply);

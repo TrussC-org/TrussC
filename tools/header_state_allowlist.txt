@@ -1,0 +1,120 @@
+# Header-inline state accepted by tools/check_header_state.py (CI).
+#
+# Each entry is a function-local static or an inline variable in core/include
+# that a hot reload guest can get its own copy of (docs/ARCHITECTURE.md, "One
+# instance per process"). On WINDOWS it always does: the guest is a DLL, and a
+# DLL compiles every header-inline function and variable into itself. Linux
+# and macOS give the guest the host's copy only when the host contains the
+# definition too, that is, when host code uses it. State that only guest code
+# touches is the guest's own there as well (on Linux, a fresh copy for every
+# reloaded generation). A per-module copy of every entry below breaks nothing,
+# on any platform.
+#
+# Format:  <header> <scope>::<name>   # <category>: <reason>
+#          <header> <scope>::*        # immutable: <reason>   (every immutable
+#                                       finding in that scope: a constants table)
+#
+# The category must be one of these four (the checker rejects anything else):
+#
+#   harmless       a per-module copy breaks nothing: a warn-once flag, a cache
+#                  of derived data, a counter only one side uses. NOT a cache
+#                  of GPU objects that nothing frees (sokol_gl contexts,
+#                  shaders, pipelines, samplers, font atlases): every reloaded
+#                  generation would build and keep a new set in the host's
+#                  sokol pools, and sokol_gl has 4 context slots, sokol_gfx
+#                  32 shader slots.
+#   immutable      const data, the same in every copy
+#   host-only      only code compiled into the host touches it (the core loop
+#                  in TrussC.h, which the host's main.cpp instantiates, and the
+#                  .cpp files of TrussC.lib); a guest's copy is never used
+#   no-hot-reload  only on a path hot reload never takes (Android, headless)
+#
+# The declaration in the header carries a comment saying the same, so whoever
+# edits it sees why the per-module copy is fine.
+#
+# State that must be one per process (a singleton, a registry, a setting app
+# code writes and the core loop reads) does not belong here: define it
+# non-inline in a .cpp (tcGlobal.cpp or a sibling) and declare an accessor in
+# the header.
+
+# --- TrussC.h: bitmap font atlas
+core/include/TrussC.h trussc::ensureFontAtlas::warned          # harmless: warn-once flag
+
+# --- TrussC.h: window / projection settings
+core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set by the launcher, applied in _setup_cb
+core/include/TrussC.h trussc::internal::warnIfSecondaryWindowControl::warned  # harmless: warn-once flag
+
+# --- TrussC.h: sokol_gl / GPU budgets
+core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)
+
+# --- TrussC.h: loop timing
+core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: advanced by the host's loop, read through getFrameCount() / getUpdateCount() (tcGlobal.cpp)
+core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
+core/include/TrussC.h trussc::setIndependentFps::warned        # harmless: warn-once flag
+core/include/TrussC.h trussc::redraw::warned                   # harmless: warn-once flag
+
+# --- TrussC.h: input / launcher wiring
+core/include/TrussC.h trussc::internal::touchPressedListener   # host-only: installed by the launcher
+core/include/TrussC.h trussc::internal::touchMovedListener     # host-only: installed by the launcher
+core/include/TrussC.h trussc::internal::touchReleasedListener  # host-only: installed by the launcher
+core/include/TrussC.h trussc::internal::screenshotAfterFrameListener  # host-only: installed in _setup_cb
+core/include/TrussC.h trussc::internal::appInstance            # host-only: not referenced by any code
+core/include/TrussC.h trussc::internal::currentMouseButton     # host-only: sokol event callback
+core/include/TrussC.h trussc::internal::appSetupFunc           # host-only: set by the launcher (runApp / runHotReloadApp), called by the sokol callbacks
+core/include/TrussC.h trussc::internal::appUpdateFunc          # host-only: as appSetupFunc
+core/include/TrussC.h trussc::internal::appDrawFunc            # host-only: as appSetupFunc
+core/include/TrussC.h trussc::internal::appCleanupFunc         # host-only: as appSetupFunc
+core/include/TrussC.h trussc::internal::appKeyPressedFunc      # host-only: as appSetupFunc; the MCP control tools that inject through it are defined in tcStandardTools.cpp (host code) for this reason
+core/include/TrussC.h trussc::internal::appKeyReleasedFunc     # host-only: as appKeyPressedFunc
+core/include/TrussC.h trussc::internal::appMousePressedFunc    # host-only: as appKeyPressedFunc
+core/include/TrussC.h trussc::internal::appMouseReleasedFunc   # host-only: as appKeyPressedFunc
+core/include/TrussC.h trussc::internal::appMouseMovedFunc      # host-only: as appKeyPressedFunc
+core/include/TrussC.h trussc::internal::appMouseDraggedFunc    # host-only: as appKeyPressedFunc
+core/include/TrussC.h trussc::internal::appMouseScrolledFunc   # host-only: as appKeyPressedFunc
+core/include/TrussC.h trussc::internal::appWindowResizedFunc   # host-only: as appSetupFunc
+core/include/TrussC.h trussc::internal::appFilesDroppedFunc    # host-only: as appSetupFunc
+core/include/TrussC.h trussc::buildAppDescriptor::app          # host-only: runApp's App; a hot reload build launches through runHotReloadApp instead
+core/include/TrussC.h trussc::internal::g_androidDesc          # no-hot-reload: Android only
+
+# --- tcColor.h
+core/include/tcColor.h trussc::colors::*   # immutable: the named color constants (const Color)
+
+# --- tcBitmapFont.h
+core/include/tcBitmapFont.h trussc::bitmapfont::asciiGlyph::ASCII          # immutable: glyph table
+
+# --- tcMath.h
+core/include/tcMath.h trussc::internal::getRandomEngine::engine  # harmless: thread_local RNG; guest code seeds and draws from the same copy
+
+# --- tc/3d
+core/include/tc/3d/tcEnvironment.h trussc::Environment::isIosWeb::cached                 # harmless: cached platform probe
+core/include/tc/3d/tcEnvironment.h trussc::Environment::bakeFromEquirectTexture::warned  # harmless: warn-once flag
+
+# --- tc/app
+core/include/tc/app/tcHeadlessApp.h trussc::headless::running     # no-hot-reload: runHeadlessApp only (hot reload is windowed)
+core/include/tc/app/tcHeadlessApp.h trussc::headless::targetFps   # no-hot-reload: as running
+core/include/tc/app/tcHeadlessApp.h trussc::headless::frameCount  # no-hot-reload: as running
+core/include/tc/app/tcHeadlessState.h trussc::headless::active    # no-hot-reload: false in every copy of a hot reload (windowed) process
+core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::loadCounter   # host-only: the hot reload host itself
+core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::create::generation  # host-only: the hot reload host itself
+core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::g_host  # host-only: the hot reload host itself (a guest's copy is constructed, never used)
+
+# --- tc/gpu
+core/include/tc/gpu/tcFbo.h trussc::Fbo::ensureSharedMip::quadVerts   # immutable: vertex data
+
+# --- tc/graphics
+core/include/tc/graphics/tcClipSpace.h trussc::internal::clipZOverrideForTests::v     # harmless: test hook for headless tests
+core/include/tc/graphics/tcClipSpace.h trussc::internal::toBackendClip::zeroToOne     # immutable: constant matrix
+core/include/tc/graphics/tcFont.h trussc::Font::defaultOversample_    # harmless: set and read by the code that loads fonts (the guest's own)
+core/include/tc/graphics/tcRenderTarget.h trussc::internal::pipelineOwnerCtx::m  # harmless: debug-build assertion bookkeeping; a module only checks pipelines it built itself
+core/include/tc/graphics/tcVertexWriter.h trussc::internal::sglWriter     # harmless: stateless writer object
+core/include/tc/graphics/tcVertexWriter.h trussc::internal::shaderWriter  # harmless: per-draw scratch, filled and flushed (begin() to end()) inside one function
+
+# --- tc/sound
+core/include/tc/sound/tcSound.h trussc::SoundBuffer::getAdtsSampleRateIndex::rates  # immutable: lookup table
+
+# --- tc/utils
+core/include/tc/utils/tcReflect.h trussc::internal::enumCNames::ptrs  # immutable: enum name table
+core/include/tc/utils/tcTypeName.h trussc::typeName::cache            # harmless: demangle cache
+core/include/tc/utils/tcTypeName.h trussc::typeName::mutex            # harmless: guards its module's cache
+core/include/tc/utils/tcTypeName.h trussc::shortTypeName::cache       # harmless: demangle cache
+core/include/tc/utils/tcTypeName.h trussc::shortTypeName::mutex       # harmless: guards its module's cache

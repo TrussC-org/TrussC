@@ -10,7 +10,7 @@
 // lives in one WindowContext instead of scattered process globals.
 // currentWindowContext() == mainWindowContext() while only the main window is
 // running; each secondary native window owns its own context and the native
-// layer switches internal::currentWindowCtx while dispatching that window's
+// layer switches internal::currentWindowCtx() while dispatching that window's
 // events and draw (see tcWindow.h / platform/*/tcWindow*).
 //
 // This file is included from TrussC.h AFTER tcRenderTarget.h (RenderTarget by
@@ -345,15 +345,18 @@ struct WindowContext {
 // Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
 WindowContext& mainWindowContext();
 
-// Active context while dispatching a window's events / draw. Null = main.
-// (An inline variable: a hot-reload guest may hold its own copy, which stays
-// null there and falls through to the shared mainWindowContext() — identical
-// behavior while single-window.)
-inline WindowContext* currentWindowCtx = nullptr;
+// Active context while dispatching a window's events / draw. Null = main. The
+// native window layer points it at a secondary window's context around that
+// window's tick. Non-inline (tcGlobal.cpp) like mainWindowContext(): a Windows
+// hot reload guest DLL would get its own copy of an inline variable, which
+// would stay null there and send the guest's drawing during a secondary
+// window's tick to the main window.
+WindowContext*& currentWindowCtx();
 
-inline WindowContext& currentWindowContext() {
-    return currentWindowCtx ? *currentWindowCtx : mainWindowContext();
-}
+// The context drawing and input calls act on. Also non-inline: it reads
+// currentWindowCtx(), and in a single-window app it costs the one out-of-line
+// call its inline version always made (to mainWindowContext()).
+WindowContext& currentWindowContext();
 
 // ---------------------------------------------------------------------------
 // Per-window frame timing. Non-inline (tcGlobal.cpp).

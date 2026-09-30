@@ -121,6 +121,7 @@ public:
     // -------------------------------------------------------------------------
     // Get ADTS sample rate index
     static int getAdtsSampleRateIndex(int sampleRate) {
+        // Immutable lookup table (the same in every module's copy)
         static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
         for (int i = 0; i < 13; i++) {
             if (rates[i] == sampleRate) return i;
@@ -699,7 +700,7 @@ struct AudioInBuffer {
 // ---------------------------------------------------------------------------
 struct AudioVoiceInfo {
     int         slot = 0;           // mixer slot index (0 .. maxPolyphony-1)
-    std::string path;               // source file (UTF-8); empty for generated / memory buffers
+    std::string path;               // source file (UTF-8, lexically normalized); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;
@@ -792,17 +793,10 @@ public:
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
     static constexpr int DEFAULT_BUFFER_SIZE = 0;  // 0 = let miniaudio choose
 
-    static AudioEngine& getInstance() {
-        // Intentionally leaked. A plain function-local static registers its
-        // destructor against the __dso_handle of the image whose code runs the
-        // first call — under hot reload that is the guest dylib, so dlclose()
-        // of an old guest destroys the engine the host is still using (the
-        // next listen() then dies on the destroyed Event mutex). The heap
-        // instance has no exit-time destructor; the framework cleanup path
-        // calls shutdown() explicitly for a clean device stop on normal exit.
-        static AudioEngine* instance = new AudioEngine();
-        return *instance;
-    }
+    // The one engine per process. Defined in tcAudio_impl.cpp, not inline: a
+    // hot reload guest on Windows compiles its own copy of every header-inline
+    // function, static included, and would run a second engine (#249).
+    static AudioEngine& getInstance();
 
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //

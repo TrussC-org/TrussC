@@ -778,12 +778,11 @@ private:
 
 // ---------------------------------------------------------------------------
 // Convenience: one global ScreenRecorder for "just record the whole window".
+// Defined in tcGlobal.cpp: one per process, so a recording started from a hot
+// reload guest is the one tc_stop_recording / isRecording() see (#249).
 // ---------------------------------------------------------------------------
 namespace internal {
-    inline ScreenRecorder& globalScreenRecorder() {
-        static ScreenRecorder rec;
-        return rec;
-    }
+    ScreenRecorder& globalScreenRecorder();
 }
 
 // Start recording the whole window to a video file. `path` is required;

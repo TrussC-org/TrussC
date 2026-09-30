@@ -162,29 +162,41 @@ enum class TextureWrap {
 };
 
 // Forward declarations (for RenderContext)
+//
+// The state behind the accessors below is defined in tcGlobal.cpp, not inline
+// here: host code (the frame loop, RenderContext) and app code both use it, and
+// a Windows hot reload guest DLL would get its own copy of an inline variable
+// (docs/ARCHITECTURE.md, "One instance per process").
 namespace internal {
-    inline sg_image fontTexture = {};
-    inline sg_view fontView = {};
-    inline sg_sampler fontSampler = {};
-    // True once the bitmap-font sampler is created (cheap, done at startup).
-    // Bitmap text draws through the active RenderTarget's Fill2D pipeline now,
-    // so there is no dedicated font pipeline.
-    inline bool fontInitialized = false;
-    // Atlas texture state — allocated lazily on first drawBitmapString call,
-    // grown row-by-row as new codepoint ranges are encountered, and rebuilt
-    // whenever the registry changes (via registerGlyph / updateGlyph).
-    inline bool     fontAtlasInitialized = false;
-    inline int      fontAtlasRows        = 0;   // height of current atlas in cell rows
-    inline uint64_t fontAtlasVersion     = 0;   // last bitmapfont::registryVersion baked in
-    inline uint64_t fontAtlasUploadFrame = UINT64_MAX; // frame of last sg_update_image
-    inline bool pixelPerfectMode = false;
+    // Bitmap font GPU state.
+    struct BitmapFontAtlas {
+        sg_image   texture = {};
+        sg_view    view = {};
+        sg_sampler sampler = {};
+        // True once the bitmap-font sampler is created (cheap, done at startup).
+        // Bitmap text draws through the active RenderTarget's Fill2D pipeline
+        // now, so there is no dedicated font pipeline.
+        bool initialized = false;
+        // Atlas texture state — allocated lazily on first drawBitmapString call,
+        // grown row-by-row as new codepoint ranges are encountered, and rebuilt
+        // whenever the registry changes (via registerGlyph / updateGlyph).
+        bool     atlasInitialized = false;
+        int      rows = 0;                  // height of current atlas in cell rows
+        uint64_t version = 0;               // last bitmapfont registryVersion() baked in
+        uint64_t uploadFrame = UINT64_MAX;  // frame of last sg_update_image
+    };
+    BitmapFontAtlas& bitmapFontAtlas();
+
+    // WindowSettings::pixelPerfect (set by the launcher): coordinates are
+    // framebuffer pixels instead of DPI-scaled points.
+    bool& pixelPerfectMode();
 
     // Default screen FOV (45 = perspective ~28mm equivalent, 0 = ortho)
-    inline float defaultScreenFov = 45.0f;
+    float& defaultScreenFov();
 
     // Near/far clip overrides (0 = auto-calculate based on camera distance)
-    inline float nearClipOverride = 0.0f;
-    inline float farClipOverride = 0.0f;
+    float& nearClipOverride();
+    float& farClipOverride();
 
     // Screen setup / view-projection tracking state (currentScreenFov,
     // currentViewW/H, currentCameraDist, currentView/ProjectionMatrix) and the
@@ -237,16 +249,23 @@ namespace internal {
     // clipboardSize / ScissorRect / scissorStack / currentScissor moved to
     // WindowContext (tc/app/tcWindowContext.h).
 
-    // sokol_gl vertex buffer management (auto-grows on overflow)
-    inline int sglMaxVertices = 65536;
-    inline int sglMaxCommands = 16384;
-    inline int sglPendingResize = 0;  // non-zero = need resize next frame
+    // sokol_gl vertex buffer management (auto-grows on overflow). Defined in
+    // tcGlobal.cpp: the host grows it, and an Fbo created by app code sizes its
+    // sokol_gl context from it.
+    struct SglBudget {
+        int maxVertices = 65536;
+        int maxCommands = 16384;
+        int pendingResize = 0;  // non-zero = need resize next frame
+    };
+    SglBudget& sglBudget();
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
     // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan
     // (no auto-grow there, so set this via WindowSettings::reserveUniformBuffer
     // for scenes with very high draw-call counts).
+    // Host-only, so a per-module copy is fine (tools/header_state_allowlist.txt):
+    // the launcher sets it and setup() (tcGlobal.cpp) reads it.
     inline int gpuUniformBufferReserve = 0;
 
     // ---------------------------------------------------------------------------
@@ -257,21 +276,27 @@ namespace internal {
     constexpr float VSYNC = -1.0f;        // Sync to monitor refresh rate
     constexpr float EVENT_DRIVEN = 0.0f;  // Only on redraw() call
 
-    // FPS settings
-    inline float updateTargetFps = VSYNC; // VSYNC, EVENT_DRIVEN, or fixed fps
-    inline float drawTargetFps = VSYNC;   // VSYNC, EVENT_DRIVEN, or fixed fps
-    inline bool updateSyncedToDraw = true; // true = update/draw in sync (1:1)
-    inline int redrawCount = 1;            // redraw() counter (remaining draw count)
+    // Main loop state: driven by the frame loop (_frame_cb, in the host),
+    // steered by setFps() / setIndependentFps() / redraw() from app code.
+    // Defined in tcGlobal.cpp so both reach the same instance.
+    struct MainLoopState {
+        // FPS settings
+        float updateTargetFps = VSYNC;   // VSYNC, EVENT_DRIVEN, or fixed fps
+        float drawTargetFps = VSYNC;     // VSYNC, EVENT_DRIVEN, or fixed fps
+        bool updateSyncedToDraw = true;  // true = update/draw in sync (1:1)
+        int redrawCount = 1;             // redraw() counter (remaining draw count)
 
-    // Update timing (steady clock: a wall-clock step must not skew the loop)
-    inline std::chrono::steady_clock::time_point lastUpdateTime;
-    inline bool lastUpdateTimeInitialized = false;
-    inline double updateAccumulator = 0.0; // Accumulated time for independent Update
+        // Update timing (steady clock: a wall-clock step must not skew the loop)
+        std::chrono::steady_clock::time_point lastUpdateTime;
+        bool lastUpdateTimeInitialized = false;
+        double updateAccumulator = 0.0;  // Accumulated time for independent Update
 
-    // Draw timing (frame skip)
-    inline std::chrono::steady_clock::time_point lastDrawTime;
-    inline bool lastDrawTimeInitialized = false;
-    inline double drawAccumulator = 0.0;
+        // Draw timing (frame skip)
+        std::chrono::steady_clock::time_point lastDrawTime;
+        bool lastDrawTimeInitialized = false;
+        double drawAccumulator = 0.0;
+    };
+    MainLoopState& mainLoop();
 
     // Mouse position/button state + keyboard state moved to WindowContext
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
@@ -280,16 +305,20 @@ namespace internal {
     // Default ON everywhere — the first touch synthesizes mouse press/drag, so
     // mouse-based code (incl. the web build on iPad/phones) just works. Apps that
     // want raw touch separate from mouse call setTouchAsMouse(false) in setup().
-    inline bool touchAsMouse = true;
+    // Defined in tcGlobal.cpp: app code sets it, the host's event callback reads it.
+    bool& touchAsMouse();
 
-    // Touch event listeners (must persist to keep subscriptions alive)
+    // Touch event listeners (must persist to keep subscriptions alive).
+    // Host-only, so a per-module copy is fine: installed by the launcher.
     inline EventListener touchPressedListener;
     inline EventListener touchMovedListener;
     inline EventListener touchReleasedListener;
 
     // Delta time / frame-rate state lives in WindowContext (per window).
 
-    // Frame count (number of update calls)
+    // Frame count (number of update calls). Host-only, so a per-module copy is
+    // fine: advanced by the launcher's update callback, read through the
+    // non-inline getFrameCount() / getUpdateCount() (tcGlobal.cpp).
     inline uint64_t updateFrameCount = 0;
 
     // Elapsed time: one steady clock with its origin at program start, in
@@ -348,7 +377,7 @@ inline int getFramebufferHeight() {
 }
 
 // Call at frame start (before clear)
-// Sets up the default projection based on internal::defaultScreenFov
+// Sets up the default projection based on internal::defaultScreenFov()
 namespace internal {
     // Forward declaration (implemented in tcGlobal.cpp)
     void resizeSgl(int newMaxVertices, int newMaxCommands);
@@ -359,12 +388,13 @@ inline void beginFrame() {
     if (headless::isActive()) return;
 
     // Auto-resize sokol_gl buffers if overflow was detected last frame
-    if (internal::sglPendingResize > 0) {
-        internal::resizeSgl(internal::sglPendingResize, std::max(16384, internal::sglPendingResize / 4));
+    const int pendingResize = internal::sglBudget().pendingResize;
+    if (pendingResize > 0) {
+        internal::resizeSgl(pendingResize, std::max(16384, pendingResize / 4));
     }
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
-    internal::setupScreenFov(internal::defaultScreenFov);
+    internal::setupScreenFov(internal::defaultScreenFov());
 }
 
 // Clear screen (RGB float: 0.0 ~ 1.0)
@@ -690,8 +720,10 @@ namespace internal {
         internal::currentWindowContext().currentCameraDist = dist;
 
         // Apply clip overrides or auto-calculate
-        if (nearDist == 0.0f) nearDist = (nearClipOverride > 0.0f) ? nearClipOverride : dist / 10.0f;
-        if (farDist == 0.0f) farDist = (farClipOverride > 0.0f) ? farClipOverride : dist * 10.0f;
+        const float nearOverride = nearClipOverride();
+        const float farOverride = farClipOverride();
+        if (nearDist == 0.0f) nearDist = (nearOverride > 0.0f) ? nearOverride : dist / 10.0f;
+        if (farDist == 0.0f) farDist = (farOverride > 0.0f) ? farOverride : dist * 10.0f;
 
         float eyeX = viewW / 2.0f;
         float eyeY = viewH / 2.0f;
@@ -773,8 +805,9 @@ namespace internal {
         // Per-window: framebuffer size and dpi come from the ACTIVE window
         // context (a secondary window on another display has its own scale).
         float dpiScale = getDpiScale();
-        float viewW = pixelPerfectMode ? (float)getFramebufferWidth() : getFramebufferWidth() / dpiScale;
-        float viewH = pixelPerfectMode ? (float)getFramebufferHeight() : getFramebufferHeight() / dpiScale;
+        const bool pixelPerfect = pixelPerfectMode();
+        float viewW = pixelPerfect ? (float)getFramebufferWidth() : getFramebufferWidth() / dpiScale;
+        float viewH = pixelPerfect ? (float)getFramebufferHeight() : getFramebufferHeight() / dpiScale;
         setupScreenFovWithSize(fovDeg, viewW, viewH, nearDist, farDist);
     }
 } // namespace internal
@@ -800,28 +833,28 @@ inline void setupScreenOrtho() {
 // Set/get default screen FOV (called automatically at frame start and FBO begin)
 // 0 = ortho (2D), 45 = default perspective (~28mm equivalent)
 inline void setDefaultScreenFov(float fovDeg) {
-    internal::defaultScreenFov = fovDeg;
+    internal::defaultScreenFov() = fovDeg;
 }
 
 inline float getDefaultScreenFov() {
-    return internal::defaultScreenFov;
+    return internal::defaultScreenFov();
 }
 
 // Set/get near/far clip planes (0 = auto-calculate based on camera distance)
 inline void setNearClip(float nearDist) {
-    internal::nearClipOverride = nearDist;
+    internal::nearClipOverride() = nearDist;
 }
 
 inline void setFarClip(float farDist) {
-    internal::farClipOverride = farDist;
+    internal::farClipOverride() = farDist;
 }
 
 inline float getNearClip() {
-    return internal::nearClipOverride;
+    return internal::nearClipOverride();
 }
 
 inline float getFarClip() {
-    return internal::farClipOverride;
+    return internal::farClipOverride();
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,7 +1166,8 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 uint64_t getFrameCount();  // forward decl — defined in Time section below
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
-    if (!internal::fontInitialized) return;  // pipeline/sampler not ready yet
+    auto& atlas = internal::bitmapFontAtlas();
+    if (!atlas.initialized) return;  // pipeline/sampler not ready yet
 
     // The atlas texture is fixed-width with a hard row cap (512x512 =
     // CELLS_PER_COL rows). generateAtlasPixels() clamps its buffer to that
@@ -1143,7 +1177,7 @@ inline void ensureFontAtlas(int rows) {
     // registered beyond capacity degrade gracefully: their cells are skipped
     // by generateAtlasPixels and they render as blanks.
     if (rows > bitmapfont::CELLS_PER_COL) {
-        static bool warned = false;
+        static bool warned = false;  // warn-once flag: a per-module copy is harmless
         if (!warned) {
             warned = true;
             logWarning("BitmapFont") << "Glyph atlas is full ("
@@ -1153,17 +1187,17 @@ inline void ensureFontAtlas(int rows) {
         }
         rows = bitmapfont::CELLS_PER_COL;
     }
-    const uint64_t curRegistry = bitmapfont::internal::registryVersion;
-    const bool sizeOk = internal::fontAtlasInitialized
-                     && internal::fontAtlasRows >= rows;
-    const bool versionOk = internal::fontAtlasVersion == curRegistry;
+    const uint64_t curRegistry = bitmapfont::internal::registryVersion();
+    const bool sizeOk = atlas.atlasInitialized
+                     && atlas.rows >= rows;
+    const bool versionOk = atlas.version == curRegistry;
     if (sizeOk && versionOk) return;
     if (!sg_isvalid()) return;
 
     // Same-frame upload guard. sokol allows at most one sg_update_image per
     // image per frame (VALIDATE_UPDIMG_ONCE). If we already uploaded this
     // frame and the atlas size hasn't changed, defer to next frame — the
-    // stale fontAtlasVersion makes us try again on the next call.
+    // stale atlas.version makes us try again on the next call.
     // (When size changes we destroy + create a brand-new image below, so the
     // guard only applies to the same-dimensions in-place path.)
     // Keyed on the per-window getFrameCount() (Fix 3): the guard only needs to
@@ -1171,11 +1205,11 @@ inline void ensureFontAtlas(int rows) {
     // own sg_commit, so a per-window counter is sufficient (a rare coincidental
     // counter match across windows just defers one tick — never a double
     // update). The main window is bit-identical to before.
-    if (sizeOk && internal::fontAtlasUploadFrame == getFrameCount()) return;
+    if (sizeOk && atlas.uploadFrame == getFrameCount()) return;
 
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
     // allocated rows so a same-size in-place update stays the same size.
-    int effRows = sizeOk ? internal::fontAtlasRows : rows;
+    int effRows = sizeOk ? atlas.rows : rows;
     int height  = effRows * bitmapfont::CELL_H;
     unsigned char* pixels = bitmapfont::generateAtlasPixels(effRows);
     int dataBytes = bitmapfont::ATLAS_WIDTH * height * 4;
@@ -1187,17 +1221,17 @@ inline void ensureFontAtlas(int rows) {
         sg_image_data data = {};
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
-        sg_update_image(internal::fontTexture, &data);
-        internal::fontAtlasUploadFrame = getFrameCount();
+        sg_update_image(atlas.texture, &data);
+        atlas.uploadFrame = getFrameCount();
     } else {
         // Size changed (or first allocation). Recreate the image. The old
         // image/view are destroyed deferred — sokol_gl commands recorded
         // earlier this frame still reference them until the end-of-frame
         // flush (drained in present() after sg_commit).
-        if (internal::fontAtlasInitialized) {
-            internal::deferGpuDestroy(internal::fontView);
-            internal::deferGpuDestroy(internal::fontTexture);
-            internal::fontAtlasInitialized = false;
+        if (atlas.atlasInitialized) {
+            internal::deferGpuDestroy(atlas.view);
+            internal::deferGpuDestroy(atlas.texture);
+            atlas.atlasInitialized = false;
         }
 
         sg_image_desc img_desc = {};
@@ -1207,24 +1241,24 @@ inline void ensureFontAtlas(int rows) {
         img_desc.usage.dynamic_update = true;   // enable sg_update_image()
         // (intentionally no initial data — sg expects an update call instead
         //  for non-immutable images)
-        internal::fontTexture = sg_make_image(&img_desc);
+        atlas.texture = sg_make_image(&img_desc);
 
         sg_image_data data = {};
         data.mip_levels[0].ptr  = pixels;
         data.mip_levels[0].size = dataBytes;
-        sg_update_image(internal::fontTexture, &data);
-        internal::fontAtlasUploadFrame = getFrameCount();
+        sg_update_image(atlas.texture, &data);
+        atlas.uploadFrame = getFrameCount();
 
         sg_view_desc view_desc = {};
-        view_desc.texture.image = internal::fontTexture;
-        internal::fontView = sg_make_view(&view_desc);
+        view_desc.texture.image = atlas.texture;
+        atlas.view = sg_make_view(&view_desc);
 
-        internal::fontAtlasRows        = effRows;
-        internal::fontAtlasInitialized = true;
+        atlas.rows = effRows;
+        atlas.atlasInitialized = true;
     }
 
     delete[] pixels;
-    internal::fontAtlasVersion = curRegistry;
+    atlas.version = curRegistry;
 }
 
 // Grow the atlas to fit every glyph used by `text`. No-op if already large
@@ -1315,7 +1349,8 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
                                        const Color& foreground = Color(1, 1, 1)) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
-    if (!internal::fontAtlasInitialized) return;
+    const auto& atlas = internal::bitmapFontAtlas();
+    if (!atlas.atlasInitialized) return;
 
     // Isolate style: the highlight always wants a solid background and its own
     // colors. Without this an external noFill() would leave only the rect
@@ -1376,7 +1411,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     // Draw text in foreground color
     internal::loadPipeline(internal::activeFill2D());
     sgl_enable_texture();
-    sgl_texture(internal::fontView, internal::fontSampler);
+    sgl_texture(atlas.view, atlas.sampler);
 
     sgl_begin_quads();
     sgl_c4f(foreground.r, foreground.g, foreground.b, foreground.a);
@@ -1397,7 +1432,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
             if (cp == 0) break;
 
             float u, v, u2, v2;
-            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+            bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, v, u2, v2);
             float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v);
@@ -1437,7 +1472,7 @@ namespace internal {
 // context, where the caller proceeds normally.
 inline bool warnIfSecondaryWindowControl(const char* fn, const char* why) {
     if (currentWindowContext().isMain) return false;
-    static std::unordered_set<std::string> warned;
+    static std::unordered_set<std::string> warned;  // warn-once set: a per-module copy is harmless
     if (warned.insert(fn).second) {
         logWarning("Window") << fn << "() is main-window only (" << why
             << "). Called from a secondary window's context — ignored to avoid "
@@ -1573,7 +1608,7 @@ inline void setWindowSize(int width, int height) {
         // framebuffer -> logical using THIS window's dpi scale in pixel-perfect
         // mode, mirroring the main path's sapp_dpi_scale() conversion.
         int lw = width, lh = height;
-        if (internal::pixelPerfectMode) {
+        if (internal::pixelPerfectMode()) {
             float s = ctx.dpiScale > 0.0f ? ctx.dpiScale : 1.0f;
             lw = static_cast<int>(width / s);
             lh = static_cast<int>(height / s);
@@ -1581,7 +1616,7 @@ inline void setWindowSize(int width, int height) {
         internal::routeSetWindowSizeToWindow(lw, lh);
         return;
     }
-    if (internal::pixelPerfectMode) {
+    if (internal::pixelPerfectMode()) {
         // Pixel perfect mode: convert framebuffer size to logical size
         float scale = sapp_dpi_scale();
         setWindowSizeLogical(static_cast<int>(width / scale), static_cast<int>(height / scale));
@@ -1652,7 +1687,7 @@ TC_PLATFORMS("android,ios") void setOrientation(Orientation mask);
 
 // Get window width (size corresponding to coordinate system)
 inline int getWindowWidth() {
-    if (internal::pixelPerfectMode) {
+    if (internal::pixelPerfectMode()) {
         return getFramebufferWidth();  // Framebuffer size
     }
     return static_cast<int>(getFramebufferWidth() / getDpiScale());  // Logical size
@@ -1660,7 +1695,7 @@ inline int getWindowWidth() {
 
 // Get window height (size corresponding to coordinate system)
 inline int getWindowHeight() {
-    if (internal::pixelPerfectMode) {
+    if (internal::pixelPerfectMode()) {
         return getFramebufferHeight();  // Framebuffer size
     }
     return static_cast<int>(getFramebufferHeight() / getDpiScale());  // Logical size
@@ -1745,8 +1780,8 @@ inline bool isSuperPressed()   { return isKeyPressed(SAPP_KEYCODE_LEFT_SUPER)   
 // Useful for running desktop apps (that use mousePressed) on mobile unchanged.
 // Default: ON everywhere. Call setTouchAsMouse(false) in setup() to opt out.
 // ---------------------------------------------------------------------------
-inline void setTouchAsMouse(bool enabled) { internal::touchAsMouse = enabled; }
-inline bool getTouchAsMouse() { return internal::touchAsMouse; }
+inline void setTouchAsMouse(bool enabled) { internal::touchAsMouse() = enabled; }
+inline bool getTouchAsMouse() { return internal::touchAsMouse(); }
 
 // ---------------------------------------------------------------------------
 // System Information
@@ -1801,15 +1836,18 @@ inline size_t getMemoryUsage() {
 // ---------------------------------------------------------------------------
 // Resource Counters (for debugging)
 // ---------------------------------------------------------------------------
+// Defined in tcGlobal.cpp, one per process: the objects a Windows hot reload
+// guest creates count in the same totals as the host's, and getNodeCount() in
+// either reads them all. The constructors and destructors bump them.
 namespace internal {
-    inline std::atomic<size_t> nodeCount{0};
-    inline std::atomic<size_t> textureCount{0};
-    inline std::atomic<size_t> fboCount{0};
+    std::atomic<size_t>& nodeCount();
+    std::atomic<size_t>& textureCount();
+    std::atomic<size_t>& fboCount();
 }
 
-inline size_t getNodeCount() { return internal::nodeCount.load(); }
-inline size_t getTextureCount() { return internal::textureCount.load(); }
-inline size_t getFboCount() { return internal::fboCount.load(); }
+inline size_t getNodeCount() { return internal::nodeCount().load(); }
+inline size_t getTextureCount() { return internal::textureCount().load(); }
+inline size_t getFboCount() { return internal::fboCount().load(); }
 
 // ---------------------------------------------------------------------------
 // Loop Architecture (Decoupled Update/Draw)
@@ -1856,21 +1894,22 @@ namespace internal {
 // fixed-Hz frame when the switch comes from inside update()
 // (runIndependentUpdates checks the timestamp flag).
 inline void restartLoopTiming(bool update, bool draw) {
+    auto& loop = mainLoop();
     if (update) {
-        lastUpdateTimeInitialized = false;
+        loop.lastUpdateTimeInitialized = false;
         auto& wctx = mainWindowContext();
-        const bool fixedStep = !updateSyncedToDraw && updateTargetFps > 0.0f;
+        const bool fixedStep = !loop.updateSyncedToDraw && loop.updateTargetFps > 0.0f;
         if (!wctx.inUpdate &&
             (wctx.mainUpdateCallTimeInitialized || wctx.frameUptimeSampled)) {
             wctx.mainUpdateCallTime = std::chrono::steady_clock::now();
             wctx.mainUpdateCallTimeInitialized = true;
         }
         if (!fixedStep) wctx.fixedStepUpdate = false;
-        updateAccumulator = fixedStep ? 1.0 / updateTargetFps : 0.0;
+        loop.updateAccumulator = fixedStep ? 1.0 / loop.updateTargetFps : 0.0;
     }
     if (draw) {
-        lastDrawTimeInitialized = false;
-        drawAccumulator = (drawTargetFps > 0.0f) ? 1.0 / drawTargetFps : 0.0;
+        loop.lastDrawTimeInitialized = false;
+        loop.drawAccumulator = (loop.drawTargetFps > 0.0f) ? 1.0 / loop.drawTargetFps : 0.0;
     }
 }
 } // namespace internal
@@ -1891,12 +1930,13 @@ inline void setFps(float fps) {
     }
     // Only a real change restarts the timing: re-applying the current rate
     // (setFps(guiValue) every frame) must not skip frames.
-    const bool updateChanged = !internal::updateSyncedToDraw || internal::updateTargetFps != fps;
-    const bool drawChanged = internal::drawTargetFps != fps;
+    auto& loop = internal::mainLoop();
+    const bool updateChanged = !loop.updateSyncedToDraw || loop.updateTargetFps != fps;
+    const bool drawChanged = loop.drawTargetFps != fps;
     if (!updateChanged && !drawChanged) return;
-    internal::updateTargetFps = fps;
-    internal::drawTargetFps = fps;
-    internal::updateSyncedToDraw = true;
+    loop.updateTargetFps = fps;
+    loop.drawTargetFps = fps;
+    loop.updateSyncedToDraw = true;
     internal::restartLoopTiming(updateChanged, drawChanged);
 }
 
@@ -1906,7 +1946,7 @@ inline void setFps(float fps) {
 // (Window::setFps); calling this from a secondary tick logs once and no-ops.
 inline void setIndependentFps(float updateFps, float drawFps) {
     if (!internal::currentWindowContext().isMain) {
-        static bool warned = false;
+        static bool warned = false;  // warn-once flag: a per-module copy is harmless
         if (!warned) {
             warned = true;
             logWarning("Window") << "setIndependentFps() is main-window only; a "
@@ -1918,12 +1958,13 @@ inline void setIndependentFps(float updateFps, float drawFps) {
     // Only a real change restarts the timing (per loop): re-applying the
     // current rates every frame must not starve update or skip draws, and
     // changing only the draw rate leaves the update's phase alone.
-    const bool updateChanged = internal::updateSyncedToDraw || internal::updateTargetFps != updateFps;
-    const bool drawChanged = internal::drawTargetFps != drawFps;
+    auto& loop = internal::mainLoop();
+    const bool updateChanged = loop.updateSyncedToDraw || loop.updateTargetFps != updateFps;
+    const bool drawChanged = loop.drawTargetFps != drawFps;
     if (!updateChanged && !drawChanged) return;
-    internal::updateTargetFps = updateFps;
-    internal::drawTargetFps = drawFps;
-    internal::updateSyncedToDraw = false;
+    loop.updateTargetFps = updateFps;
+    loop.drawTargetFps = drawFps;
+    loop.updateSyncedToDraw = false;
     internal::restartLoopTiming(updateChanged, drawChanged);
 }
 
@@ -1942,14 +1983,15 @@ int getMaxUpdateSteps();
 
 // Get current FPS settings
 inline FpsSettings getFpsSettings() {
+    const auto& loop = internal::mainLoop();
     FpsSettings settings;
-    settings.updateFps = internal::updateTargetFps;
-    settings.drawFps = internal::drawTargetFps;
-    settings.synced = internal::updateSyncedToDraw;
+    settings.updateFps = loop.updateTargetFps;
+    settings.drawFps = loop.drawTargetFps;
+    settings.synced = loop.updateSyncedToDraw;
 
     // Get actual VSync frequency (approximate from frame duration when VSYNC)
-    if (internal::updateTargetFps == internal::VSYNC ||
-        internal::drawTargetFps == internal::VSYNC) {
+    if (loop.updateTargetFps == internal::VSYNC ||
+        loop.drawTargetFps == internal::VSYNC) {
         double dt = sapp_frame_duration();
         settings.actualVsyncFps = (dt > 0.0) ? static_cast<float>(1.0 / dt) : 0.0f;
     } else {
@@ -1973,7 +2015,7 @@ inline float getFps() {
 // setFps throttles them); redraw() from a secondary tick logs once and no-ops.
 inline void redraw(int count = 1) {
     if (!internal::currentWindowContext().isMain) {
-        static bool warned = false;
+        static bool warned = false;  // warn-once flag: a per-module copy is harmless
         if (!warned) {
             warned = true;
             logWarning("Window") << "redraw() / event-driven loop is main-window "
@@ -1981,8 +2023,9 @@ inline void redraw(int count = 1) {
         }
         return;
     }
-    if (count > internal::redrawCount) {
-        internal::redrawCount = count;
+    auto& loop = internal::mainLoop();
+    if (count > loop.redrawCount) {
+        loop.redrawCount = count;
     }
 }
 
@@ -2067,6 +2110,7 @@ namespace internal {
         queue.clear();
     }
     // Keeps the afterFrame drain subscription alive for the app's lifetime.
+    // Host-only, so a per-module copy is fine: installed in _setup_cb.
     inline EventListener screenshotAfterFrameListener;
 }
 
@@ -2275,6 +2319,9 @@ struct WindowSettings {
 // Application execution (internal implementation)
 // ---------------------------------------------------------------------------
 
+// Host-only state, so a per-module copy is fine (tools/header_state_allowlist.txt):
+// the launcher (runApp / runHotReloadApp) and the sokol callbacks below are
+// compiled into the host; a hot reload guest's copies are never used.
 namespace internal {
     // App instance (held as void*)
     inline void* appInstance = nullptr;
@@ -2404,12 +2451,12 @@ namespace internal {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            float scale = pixelPerfectMode ? 1.0f : (1.0f / dpiScale);
+            float scale = pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
             appWindowResizedFunc(static_cast<int>(w * scale), static_cast<int>(h * scale));
         }
     }
 
-    inline bool frameReentryGuard = false;
+    inline bool frameReentryGuard = false;  // host-only: the frame callback's own guard
 
     // Set the main window's delta time and update time for one update call.
     // VSYNC and draw-synced updates report the measured wall time since the
@@ -2459,31 +2506,32 @@ namespace internal {
     //   EVENT_DRIVEN: no update.
     inline void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
         auto& wctx = mainWindowContext();
-        if (updateTargetFps == VSYNC) {
+        auto& loop = mainLoop();
+        if (loop.updateTargetFps == VSYNC) {
             runMainUpdate();
             recordUpdateRateSample(wctx, wctx.updateDeltaTime, 1.0);
-        } else if (updateTargetFps > 0) {
-            if (!lastUpdateTimeInitialized) {   // first frame, or just after a mode switch
-                lastUpdateTime = now;
-                lastUpdateTimeInitialized = true;
+        } else if (loop.updateTargetFps > 0) {
+            if (!loop.lastUpdateTimeInitialized) {   // first frame, or just after a mode switch
+                loop.lastUpdateTime = now;
+                loop.lastUpdateTimeInitialized = true;
             }
-            double updateInterval = 1.0 / updateTargetFps;
-            double elapsed = std::chrono::duration<double>(now - lastUpdateTime).count();
-            lastUpdateTime = now;
+            double updateInterval = 1.0 / loop.updateTargetFps;
+            double elapsed = std::chrono::duration<double>(now - loop.lastUpdateTime).count();
+            loop.lastUpdateTime = now;
 
-            FixedStepAdvance adv = advanceFixedStep(updateAccumulator, elapsed, updateInterval,
+            FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
                                                     getMaxUpdateSteps());
             if (adv.droppedTime > 0.0) {
                 warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
             }
             // The frame's steps are the latest adv.steps intervals on the
             // loop's timeline, ending one leftover accumulator before `now`.
-            const double leftover = updateAccumulator;
+            const double leftover = loop.updateAccumulator;
             int ran = 0;
             for (; ran < adv.steps; ++ran) {
                 // setFps()/setIndependentFps() from inside update(): the new
                 // mode starts next frame; don't finish this frame's old steps.
-                if (!lastUpdateTimeInitialized) break;
+                if (!loop.lastUpdateTimeInitialized) break;
                 double behind = leftover + (adv.steps - 1 - ran) * updateInterval;
                 auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                           std::chrono::duration<double>(behind));
@@ -2507,18 +2555,19 @@ namespace internal {
     //                 intervals (#228).
     //   EVENT_DRIVEN: only on redraw().
     inline bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now) {
-        if (!lastDrawTimeInitialized) {   // first frame, or just after a mode switch
-            lastDrawTime = now;
-            lastDrawTimeInitialized = true;
+        auto& loop = mainLoop();
+        if (!loop.lastDrawTimeInitialized) {   // first frame, or just after a mode switch
+            loop.lastDrawTime = now;
+            loop.lastDrawTimeInitialized = true;
         }
-        if (drawTargetFps == VSYNC) return true;
-        if (drawTargetFps > 0) {
-            double drawInterval = 1.0 / drawTargetFps;
-            double elapsed = std::chrono::duration<double>(now - lastDrawTime).count();
-            lastDrawTime = now;
-            return frameSkipShouldTick(drawAccumulator, elapsed, drawInterval);
+        if (loop.drawTargetFps == VSYNC) return true;
+        if (loop.drawTargetFps > 0) {
+            double drawInterval = 1.0 / loop.drawTargetFps;
+            double elapsed = std::chrono::duration<double>(now - loop.lastDrawTime).count();
+            loop.lastDrawTime = now;
+            return frameSkipShouldTick(loop.drawAccumulator, elapsed, drawInterval);
         }
-        return redrawCount > 0;
+        return loop.redrawCount > 0;
     }
 
     // One main-loop frame up to the draw decision (before _frame_cb's capture
@@ -2551,7 +2600,7 @@ namespace internal {
         // Delta time is written into the main window's context; secondary
         // windows measure their own delta in their tick (windowTick,
         // core/platform).
-        if (!updateSyncedToDraw) {
+        if (!mainLoop().updateSyncedToDraw) {
             runIndependentUpdates(now);
         }
 
@@ -2563,7 +2612,7 @@ namespace internal {
     // the measured dt, and its getFrameRate() sample. _frame_cb runs it after
     // beginFrame(). Split out so it can be driven headless.
     inline void runSyncedUpdate() {
-        if (!updateSyncedToDraw || !appUpdateFunc) return;
+        if (!mainLoop().updateSyncedToDraw || !appUpdateFunc) return;
         runMainUpdate();
         recordUpdateRateSample(mainWindowContext(), mainWindowContext().updateDeltaTime, 1.0);
     }
@@ -2606,8 +2655,9 @@ namespace internal {
             events().afterFrame.notify();
 
             // Decrement redrawCount (don't go below 0)
-            if (redrawCount > 0) {
-                redrawCount--;
+            auto& loop = mainLoop();
+            if (loop.redrawCount > 0) {
+                loop.redrawCount--;
             }
         } else {
             // Skip Present when not drawing (prevent double-buffer flickering)
@@ -2647,9 +2697,9 @@ namespace internal {
         events().rawEvent.notify(*ev);
 
         // ev->mouse_x/y arrive in framebuffer coordinates
-        // pixelPerfectMode = true: use as-is (coords = framebuffer size)
-        // pixelPerfectMode = false: divide by DPI scale to get logical coords
-        float scale = pixelPerfectMode ? 1.0f : (1.0f / sapp_dpi_scale());
+        // pixelPerfectMode() == true: use as-is (coords = framebuffer size)
+        // pixelPerfectMode() == false: divide by DPI scale to get logical coords
+        float scale = pixelPerfectMode() ? 1.0f : (1.0f / sapp_dpi_scale());
         bool hasModShift = (ev->modifiers & SAPP_MODIFIER_SHIFT) != 0;
         bool hasModCtrl = (ev->modifiers & SAPP_MODIFIER_CTRL) != 0;
         bool hasModAlt = (ev->modifiers & SAPP_MODIFIER_ALT) != 0;
@@ -2808,7 +2858,7 @@ namespace internal {
                 }
 
                 // Touch-as-mouse: map first touch to mouse events
-                if (touchAsMouse && touchArgs.numTouches > 0) {
+                if (touchAsMouse() && touchArgs.numTouches > 0) {
                     float tx = touchArgs.touches[0].x;
                     float ty = touchArgs.touches[0].y;
 
@@ -2914,7 +2964,7 @@ namespace internal {
 template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     // Set pixel perfect mode
-    internal::pixelPerfectMode = settings.pixelPerfect;
+    internal::pixelPerfectMode() = settings.pixelPerfect;
 
     // Remember the requested decoration; applied after the window is created.
     internal::windowDecorated = settings.decorated;
@@ -2923,6 +2973,8 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
 
     // Create app instance (shared_ptrで管理してNodeのweak_from_thisを有効にする)
+    // Host-only, so a per-module copy is fine: a hot reload build launches
+    // through runHotReloadApp instead, which never instantiates this.
     static std::shared_ptr<AppClass> app = nullptr;
 
     // Set callbacks
@@ -3033,7 +3085,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 //          runApp() just stores the descriptor for sokol_main() to retrieve.
 #ifdef __ANDROID__
 namespace internal {
-    inline sapp_desc g_androidDesc = {};
+    inline sapp_desc g_androidDesc = {};  // Android only: no hot reload there
 }
 
 template<typename AppClass>

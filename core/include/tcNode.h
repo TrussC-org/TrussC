@@ -87,17 +87,38 @@ namespace internal {
 namespace internal {
     // Overlay (e.g. tcxImGui) capture queries. An overlay registers these so the
     // framework knows when the pointer is over it / it owns keyboard focus. Null
-    // when no overlay is present, so plain apps are unaffected.
-    inline std::function<bool()> overlayHoveredQuery;
-    inline std::function<bool()> overlayFocusedQuery;
+    // when no overlay is present, so plain apps are unaffected. Defined in
+    // tcGlobal.cpp: the overlay (app code) installs them and the node tree's
+    // hover update, driven by the host, asks them, so both must reach one
+    // instance, also from a Windows hot reload guest DLL.
+    std::function<bool()>& overlayHoveredQuery();
+    std::function<bool()>& overlayFocusedQuery();
+
+    // Source of Node::getInstanceId(). Defined in tcGlobal.cpp so ids stay
+    // unique per process, not per module: a Windows hot reload guest DLL would
+    // otherwise count from 0 again in every generation.
+    uint64_t nextNodeInstanceId();
+
+    // Source of the ids callAfter() / callEvery() / callEveryCatchUp()
+    // return, starting at 1. Also one per process (tcGlobal.cpp): with a
+    // counter per module, host and guest code, or two guest generations, could
+    // give one node two timers with the same id, and cancelTimer(id) removes
+    // every timer with that id.
+    uint64_t nextNodeTimerId();
 }
 
 // True when an overlay currently has the pointer over it (e.g. cursor is over a
 // tcxImGui panel) / owns keyboard focus (e.g. an InputText is active). The node
 // tree's hover honors isOverlayHovered() automatically; guard raw input in user
 // code with these (e.g. `if (isOverlayFocused()) return;` in a key handler).
-inline bool isOverlayHovered() { return internal::overlayHoveredQuery && internal::overlayHoveredQuery(); }
-inline bool isOverlayFocused() { return internal::overlayFocusedQuery && internal::overlayFocusedQuery(); }
+inline bool isOverlayHovered() {
+    auto& query = internal::overlayHoveredQuery();
+    return query && query();
+}
+inline bool isOverlayFocused() {
+    auto& query = internal::overlayFocusedQuery();
+    return query && query();
+}
 
 // =============================================================================
 // Node - Scene graph base class
@@ -113,11 +134,11 @@ public:
     using Ptr = std::shared_ptr<Node>;
     using WeakPtr = std::weak_ptr<Node>;
 
-    Node() : instanceId_(nextInstanceId_++) { internal::nodeCount++; }
+    Node() : instanceId_(internal::nextNodeInstanceId()) { internal::nodeCount()++; }
     virtual ~Node() {
         cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
         for (auto& [t, m] : mods_) m->onDestroy();  // mod cleanup on node destruction
-        internal::nodeCount--;
+        internal::nodeCount()--;
     }
 
     // -------------------------------------------------------------------------
@@ -1411,7 +1432,6 @@ private:
     std::atomic<bool> dead_{false};  // Marked for removal by destroy() (atomic: destroy() is thread-safe)
     std::string name_;            // Optional instance name (see getName())
     const uint64_t instanceId_;   // Per-process unique id, fixed at construction
-    inline static std::atomic<uint64_t> nextInstanceId_{0};  // id source
     WeakPtr parent_;
     std::vector<Ptr> children_;
     bool eventsEnabled_ = false;  // Enabled via enableEvents()
@@ -1508,8 +1528,7 @@ protected:
         std::chrono::steady_clock::time_point created;
     };
 
-    std::vector<Timer> timers_;
-    inline static uint64_t nextTimerId_ = 1;
+    std::vector<Timer> timers_;   // ids from internal::nextNodeTimerId()
     // The update (getUpdateCount()) this node's timers were last counted down
     // in. A node re-parented during an update under a parent that is
     // traversed later runs updateTree() twice in that update; its timers are
@@ -1520,7 +1539,7 @@ private:
     uint64_t addTimer(double delay, double interval, bool repeating,
                       std::function<void()> callback,
                       bool catchUp = false, int maxCatchUp = 0) {
-        uint64_t id = nextTimerId_++;
+        uint64_t id = internal::nextNodeTimerId();
         const bool inUpdate = internal::isInUpdate();
         auto created = std::chrono::steady_clock::now();
         // Created during an update: never before that update's time, so the
