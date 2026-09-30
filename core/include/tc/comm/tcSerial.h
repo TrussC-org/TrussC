@@ -113,7 +113,10 @@ namespace androidserial {
     Impl* create();
     void destroy(Impl* impl);
     std::vector<SerialDeviceInfo> listDevices();
-    bool setup(Impl* impl, const std::string& devicePath, int baudRate);
+    // ended: how a connection that setup() had to close itself had ended
+    // (NotOpen when Serial had closed it already), lostReason as for close()
+    bool setup(Impl* impl, const std::string& devicePath, int baudRate,
+               CloseResult& ended, std::string& lostReason);
     // Stop the worker and release the connection. Lost: the worker had found
     // the device gone, and lostReason is the text it logged.
     CloseResult close(Impl* impl, std::string& lostReason);
@@ -121,6 +124,10 @@ namespace androidserial {
     bool isConnected(const Impl* impl);
     // The worker found the device gone and close() has not collected it yet
     bool isLost(const Impl* impl);
+    // A permission request for devicePath is still pending (setup() keeps it)
+    bool isPendingFor(const Impl* impl, const std::string& devicePath);
+    // The rate the backend opens (or will open) the device at
+    int baudRate(const Impl* impl);
     int available(const Impl* impl);
     int readBytes(Impl* impl, void* buffer, int length);
     int writeBytes(Impl* impl, const void* buffer, int length);
@@ -175,6 +182,11 @@ public:
     //   to close the previous port). reason is "closed by close()".
     // close() on a port that is not open does not fire, and neither does the
     // destructor or a move assignment over an open Serial.
+    // Only those four I/O calls find a loss: a device that went away before
+    // close() / setup() without one of them noticing ends with wasClean =
+    // true and "closed by close()". On Android, where the worker thread may
+    // have found it already, reason then goes on with "(the device had
+    // already been lost: <reason>)", still with wasClean = true.
     //
     // THREADING: it fires inline on the thread that made that call, normally
     // the main thread, after the call has released the Serial's lock. On
@@ -363,23 +375,46 @@ public:
     // fires onDisconnect (wasClean = true).
     bool setup(const std::string& portName, int baudRate) {
 #if defined(__ANDROID__)
-        // close() only when a connection is open or lost: while a permission
-        // request is pending, androidserial::setup() keeps it alive when
-        // called again for the same device (reconnect loops must not
-        // re-trigger the permission dialog). close() fires onDisconnect with
-        // the lock released.
-        if (isConnected()) close();
-        TC_LOCK_GUARD(mutex_);
-        // A listener that reconnected from there is overruled by this call,
-        // which came first: androidserial::setup() closes that connection.
-        if (isConnected()) {
-            logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
+        // End the previous connection first, so that onDisconnect reports it
+        // with its own port and rate, and with the lock released. Not a
+        // permission request still pending for this same device:
+        // androidserial::setup() keeps that one alive (reconnect loops must
+        // not re-trigger the permission dialog).
+        PendingDisconnect closed;
+        {
+            TC_LOCK_GUARD(mutex_);
+            if (!aimpl_) aimpl_ = androidserial::create();
+            if (!androidserial::isPendingFor(aimpl_, portName)) closeLocked(closed);
         }
-        if (!aimpl_) aimpl_ = androidserial::create();
-        devicePath_ = portName;
-        baudRate_ = baudRate;
-        initialized_ = androidserial::setup(aimpl_, portName, baudRate);
-        return initialized_;
+        notifyDisconnect(closed);
+
+        PendingDisconnect raced;
+        bool ok = [&] {
+            TC_LOCK_GUARD(mutex_);
+            // A listener that reconnected from that notification is overruled
+            // by this call, which came first: androidserial::setup() closes
+            // its connection.
+            bool listenerReopened = closed && isConnected();
+            if (listenerReopened) {
+                logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
+            }
+            // Otherwise the backend closes a connection only when the pending
+            // permission for this device came through after the check above.
+            // That connection is reported with the values it was opened with.
+            const std::string previousPath = devicePath_;
+            const int previousRate = baudRate_;
+            androidserial::CloseResult ended = androidserial::CloseResult::NotOpen;
+            std::string lostReason;
+            initialized_ = androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
+            if (!listenerReopened) raced = closeArgs(ended, lostReason, previousPath, previousRate);
+            devicePath_ = portName;
+            // The rate the backend opens at: a setup() again while the
+            // permission for this device is pending keeps the first rate
+            baudRate_ = androidserial::baudRate(aimpl_);
+            return initialized_;
+        }();
+        notifyDisconnect(raced);
+        return ok;
 #else
         // The previous port closes first, and onDisconnect reports it with
         // the lock released
@@ -602,7 +637,8 @@ public:
     }
 
     // Disconnect. When the port was open, onDisconnect fires with
-    // wasClean = true and reason "closed by close()".
+    // wasClean = true and reason "closed by close()" (see Events above for
+    // a loss nobody had reported yet).
     void close() {
         PendingDisconnect closed;
         {
@@ -972,23 +1008,36 @@ private:
     // notification to fire once the lock is released
     void closeLocked(PendingDisconnect& closed) {
 #if defined(__ANDROID__)
-        // A loss the USB worker recorded and no call has reported yet is
-        // reported here, as the loss it was.
         std::string lostReason;
         androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
                                                   : androidserial::CloseResult::NotOpen;
         initialized_ = false;
-        if (ended == androidserial::CloseResult::Lost) {
-            closed = disconnectArgs(std::move(lostReason), false);
-        } else if (ended == androidserial::CloseResult::Closed) {
-            closed = disconnectArgs("closed by close()", true);
-        }
+        closed = closeArgs(ended, lostReason, devicePath_, baudRate_);
 #else
         if (closePort()) closed = disconnectArgs("closed by close()", true);
 #endif
     }
 
 #if defined(__ANDROID__)
+    // The notification for a connection closed on the app's request. The app
+    // ended it, so wasClean is true even when the worker had found the device
+    // gone and no call had reported that yet; the reason then says so. (The
+    // other platforms find a loss only inside the I/O calls, so there a
+    // close() after an unnoticed unplug is a plain "closed by close()".)
+    static PendingDisconnect closeArgs(androidserial::CloseResult ended, const std::string& lostReason,
+                                       const std::string& portName, int baudRate) {
+        if (ended == androidserial::CloseResult::NotOpen) return std::nullopt;
+        SerialDisconnectEventArgs args;
+        args.portName = portName;
+        args.baudRate = baudRate;
+        args.reason = "closed by close()";
+        if (ended == androidserial::CloseResult::Lost) {
+            args.reason += " (the device had already been lost: " + lostReason + ")";
+        }
+        args.wasClean = true;
+        return args;
+    }
+
     // With the lock held: the USB worker found the device gone and only
     // recorded it. Release the connection and set `lost` to the notification,
     // for the caller to fire on the app's thread once it has released the

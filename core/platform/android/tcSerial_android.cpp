@@ -451,6 +451,14 @@ void workerMain(Impl* impl) {
             impl->state = (int)State::Idle;
             return;
         }
+        // setup() or close() may have asked this worker to stop while it
+        // opened the device. Then do not publish a connection that nobody
+        // will read: closeImpl() releases it, and reports no connection the
+        // app could never have seen.
+        if (impl->stop.load()) {
+            impl->state = (int)State::Idle;
+            return;
+        }
         impl->state = (int)State::Connected;
         logNotice() << "Serial: connected to " << impl->path << " at " << impl->baud << " baud";
     }
@@ -618,7 +626,9 @@ std::vector<SerialDeviceInfo> listDevices() {
     return devices;
 }
 
-bool setup(Impl* impl, const std::string& devicePath, int baudRate) {
+bool setup(Impl* impl, const std::string& devicePath, int baudRate,
+           CloseResult& ended, std::string& lostReason) {
+    ended = CloseResult::NotOpen;
     // Reconnect-loop guard: while the permission dialog for this device is
     // still pending, repeated setup() calls must not re-trigger it.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {
@@ -626,9 +636,9 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate) {
         return false;
     }
 
-    // Serial::setup() has reported the previous connection already
-    std::string lostReason;
-    closeImpl(impl, lostReason);
+    // Serial::setup() has closed the previous connection already, unless the
+    // permission pending for this device came through since it checked
+    ended = closeImpl(impl, lostReason);
     impl->path = devicePath;
     impl->baud = baudRate;
 
@@ -686,6 +696,14 @@ bool isConnected(const Impl* impl) {
 
 bool isLost(const Impl* impl) {
     return impl->lost.load();
+}
+
+bool isPendingFor(const Impl* impl, const std::string& devicePath) {
+    return impl->state.load() == (int)State::Pending && impl->path == devicePath;
+}
+
+int baudRate(const Impl* impl) {
+    return impl->baud;
 }
 
 int available(const Impl* impl) {
