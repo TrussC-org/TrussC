@@ -6799,9 +6799,9 @@ description.ja = "ミキサーでこのボイスがアクティブな間 true。
 description.ko = "믹서에서 이 보이스가 활성인 동안 true. atomic"
 
 ["PlayingSound::positionF"]
-description.en = "Floating-point playback cursor in source samples; advances by speed * rateRatio each output frame."
-description.ja = "ソースサンプル単位の浮動小数点再生カーソル。各出力フレームで speed * rateRatio ずつ進む"
-description.ko = "소스 샘플 단위의 부동소수점 재생 커서. 각 출력 프레임마다 speed * rateRatio 만큼 진행"
+description.en = "Floating-point playback cursor; advances by speed * rateRatio each output frame. An eager voice counts source sample frames; a stream counts frames at the engine rate its decoder outputs at (the voice's position rate, which a re-init at another rate can change), not source samples. Use Sound::getPosition() for seconds."
+description.ja = "浮動小数点の再生カーソル。各出力フレームで speed * rateRatio ずつ進む。eager ボイスはソースのサンプルフレーム単位、ストリームはデコーダが出力するエンジンレートのフレーム単位 (ボイスの位置レート。別レートでの再初期化で変わりうる) で、ソースサンプル単位ではない。秒で欲しいときは Sound::getPosition() を使う"
+description.ko = "부동소수점 재생 커서. 각 출력 프레임마다 speed * rateRatio 만큼 진행. eager 보이스는 소스 샘플 프레임 단위, 스트림은 디코더가 출력하는 엔진 레이트의 프레임 단위(보이스의 위치 레이트로, 다른 레이트로 재초기화하면 바뀔 수 있음)이며 소스 샘플 단위가 아님. 초 단위는 Sound::getPosition() 사용"
 
 ["PlayingSound::rateRatio"]
 description.en = "Source-to-engine sample-rate ratio (buffer sampleRate / engine sampleRate), set when queued so the voice plays at correct pitch regardless of engine rate."
