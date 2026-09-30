@@ -43,12 +43,27 @@ trusscli update -p path/to/myProject --android
 # Enable iOS build
 trusscli update -p path/to/myProject --ios
 
+# Drop a target again (also --no-android / --no-ios)
+trusscli update -p path/to/myProject --no-web
+
+# Switch the IDE (vscode, cursor, xcode, vs, cmake)
+trusscli update -p path/to/myProject --ide cursor
+
 # Specify TrussC root explicitly (if auto-detection fails)
 trusscli update -p path/to/myProject --tc-root path/to/TrussC
 
 # Generate a new project
 trusscli new path/to/myNewApp
 ```
+
+`update`, `addon add` and `addon remove` keep the project's IDE, its Web /
+Android / iOS targets and its web backend: they read them back from the
+project's `CMakePresets.json` (the IDE is stored there as
+`"vendor": {"trussc": {"ide": "..."}}`), then apply the flags you pass. So
+`trusscli update --web` once is enough, and `--no-web` / `--no-android` /
+`--no-ios` drop a target again. `CMakePresets.json` is gitignored, so after a
+fresh clone the defaults apply (`vscode`, native only) until you pass the
+flags again.
 
 ### Keeping `trusscli` in sync
 

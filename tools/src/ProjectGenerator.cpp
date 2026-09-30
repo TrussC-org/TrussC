@@ -499,7 +499,20 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         presets["buildPresets"].push_back(webBuildPreset);
     }
 
+    // Remember the IDE (CMake and CMake Tools ignore vendor data). Targets and
+    // the web backend need no entry: they are the presets above.
+    presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
+
     saveJson(presets, destPath + "/CMakePresets.json");
+}
+
+string ProjectGenerator::writePresets(const string& projectPath) {
+    try {
+        writeCMakePresets(fs::absolute(projectPath).string());
+        return "";
+    } catch (const exception& e) {
+        return string("Error: ") + e.what();
+    }
 }
 
 string ProjectGenerator::generate() {

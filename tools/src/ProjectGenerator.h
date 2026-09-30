@@ -51,6 +51,11 @@ public:
     // Update existing project
     std::string update(const std::string& projectPath);
 
+    // Write only CMakePresets.json into an existing project, from the current
+    // settings (no addons.make, CMakeLists.txt, IDE files or configure).
+    // Returns empty string on success, error message on failure.
+    std::string writePresets(const std::string& projectPath);
+
     // Get destination path
     std::string getDestPath() const;
 
@@ -81,6 +86,8 @@ private:
     // Write CMakePresets.json (OS-specific preset with TRUSSC_DIR)
     // DESIGN NOTE: All project-specific configuration goes into CMakePresets.json
     // CMakeLists.txt is copied as-is from template (no modifications)
+    // The IDE is stored there too, as "vendor": {"trussc": {"ide": "<id>"}},
+    // so update / addon add / addon remove can keep it (see ProjectState.h).
     void writeCMakePresets(const std::string& destPath);
 
     // Run cmake --preset for enabled cross-compile targets (iOS, Android).

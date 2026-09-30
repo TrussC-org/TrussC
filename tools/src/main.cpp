@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "ProjectState.h"
 #include "VsDetector.h"
 #include <iostream>
 #include <string>
@@ -113,13 +114,7 @@ static string autoDetectProjectRoot(const string& startPath) {
 
 // Map IDE name string to enum. Returns true on success.
 static bool parseIdeType(const string& s, IdeType& out) {
-    if      (s == "vscode") out = IdeType::VSCode;
-    else if (s == "cursor") out = IdeType::Cursor;
-    else if (s == "xcode")  out = IdeType::Xcode;
-    else if (s == "vs")     out = IdeType::VisualStudio;
-    else if (s == "cmake")  out = IdeType::CMakeOnly;
-    else return false;
-    return true;
+    return IdeHelper::parseIdeId(s, out);
 }
 
 // Parse a -a / --addon / --addons value: accepts a single name or a comma-list.
@@ -565,6 +560,22 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
         return 1;
     }
     return 0;
+}
+
+// Set the IDE, targets and web backend of `settings` for a command that
+// regenerates an existing project (update / addon add / addon remove): the
+// project's own CMakePresets.json first, then the explicit flags, which win.
+// Prints the result when anything was read back, so the user sees what the
+// regeneration keeps.
+static void fillGenerationOptions(ProjectSettings& settings,
+                                  const string& projectPath,
+                                  const GenerationFlags& flags) {
+    PresetState state = readPresetState(projectPath);
+    applyGenerationOptions(settings, state, flags);
+    if (state.found) {
+        cout << "Project settings: " << describeGenerationOptions(settings)
+             << " (kept from CMakePresets.json unless a flag changed them)\n";
+    }
 }
 
 // Rebuild a project from a populated ProjectSettings. Used by update / add /
@@ -1129,11 +1140,20 @@ static void printUpdateHelp() {
          << "for the TrussC project in the current directory. The addon list is\n"
          << "read from the existing addons.make.\n"
          << "\n"
+         << "The IDE, the Web / Android / iOS targets and the web backend are kept\n"
+         << "from the project's CMakePresets.json. Flags change them: --ide switches\n"
+         << "the IDE, --web adds a target, --no-web drops it. Without a\n"
+         << "CMakePresets.json (e.g. a fresh clone) the defaults apply: vscode,\n"
+         << "native only.\n"
+         << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "      --web                  Enable Web build\n"
          << "      --android              Enable Android build\n"
          << "      --ios                  Enable iOS build\n"
+         << "      --no-web               Disable Web build\n"
+         << "      --no-android           Disable Android build\n"
+         << "      --no-ios               Disable iOS build\n"
          << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
          << "      --tc-root <path>       Path to TrussC root directory\n"
          << "  -h, --help                 Show this help\n";
@@ -1141,8 +1161,7 @@ static void printUpdateHelp() {
 
 static int cmdUpdate(const vector<string>& args) {
     string projectPath;
-    bool web = false, android = false, ios = false;
-    string ideStr = "vscode";
+    GenerationFlags flags;
     string tcRoot;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -1160,14 +1179,25 @@ static int cmdUpdate(const vector<string>& args) {
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, projectPath)) return 1;
         }
-        else if (a == "--web") web = true;
-        else if (a == "--android") android = true;
-        else if (a == "--ios") ios = true;
         else if (a == "--ide") {
+            string ideStr;
             if (!needValue(i, a, ideStr)) return 1;
+            IdeType ide;
+            if (!parseIdeType(ideStr, ide)) {
+                cerr << "Error: unknown IDE type '" << ideStr
+                     << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
+                return 1;
+            }
+            flags.ide = ide;
         }
         else if (a == "--tc-root") {
             if (!needValue(i, a, tcRoot)) return 1;
+        }
+        else if (string err; parseTargetFlag(a, flags, err)) {
+            if (!err.empty()) {
+                cerr << "Error: " << err << "\n";
+                return 1;
+            }
         }
         else {
             cerr << "Error: unknown argument '" << a << "'\n"
@@ -1192,16 +1222,8 @@ static int cmdUpdate(const vector<string>& args) {
     settings.projectName = fs::canonical(projectPath).filename().string();
     settings.addons = availableAddons;
     parseAddonsMake(projectPath, availableAddons, settings.addonSelected);
-    settings.generateWebBuild = web;
-    settings.generateAndroidBuild = android;
-    settings.generateIosBuild = ios;
+    fillGenerationOptions(settings, projectPath, flags);
     settings.detectBuildEnvironment();
-
-    if (!parseIdeType(ideStr, settings.ideType)) {
-        cerr << "Error: unknown IDE type '" << ideStr
-             << "'. Valid: vscode, cursor, xcode, vs, cmake\n";
-        return 1;
-    }
 
     settings.templatePath = tcRoot + "/examples/templates/emptyExample";
 
@@ -1305,6 +1327,8 @@ static void printAddHelp() {
          << "Add one or more addons to the TrussC project in the current directory.\n"
          << "The project is detected by walking up from CWD. The addons.make file\n"
          << "is updated and the build files are regenerated.\n"
+         << "The IDE and the Web / Android / iOS targets are kept from the\n"
+         << "project's CMakePresets.json (change them with 'trusscli update').\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1473,6 +1497,7 @@ static int cmdAdd(const vector<string>& args) {
     settings.projectName = fs::canonical(projectPath).filename().string();
     settings.addons = availableAddons;
     settings.addonSelected = addonSelected;
+    fillGenerationOptions(settings, projectPath, GenerationFlags());
     settings.detectBuildEnvironment();
     settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
 
@@ -1491,6 +1516,8 @@ static void printRemoveHelp() {
          << "Remove one or more addons from the TrussC project in the current\n"
          << "directory. The project is detected by walking up from CWD. The\n"
          << "addons.make file is updated and the build files are regenerated.\n"
+         << "The IDE and the Web / Android / iOS targets are kept from the\n"
+         << "project's CMakePresets.json (change them with 'trusscli update').\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -1598,6 +1625,7 @@ static int cmdRemove(const vector<string>& args) {
     settings.projectName = fs::canonical(projectPath).filename().string();
     settings.addons = availableAddons;
     settings.addonSelected = addonSelected;
+    fillGenerationOptions(settings, projectPath, GenerationFlags());
     settings.detectBuildEnvironment();
     settings.templatePath = resolvedTcRoot + "/examples/templates/emptyExample";
 
@@ -3682,7 +3710,7 @@ _trusscli() {
         update|build|run|clean)
             local -a opts
             case "$words[2]" in
-                update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
+                update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
                 build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
                 run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
                 clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
@@ -3769,7 +3797,7 @@ _trusscli() {
                     ;;
             esac
             case "${COMP_WORDS[1]}" in
-                update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --ide --tc-root" -- "$cur")) ;;
+                update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --no-web --no-android --no-ios --ide --tc-root" -- "$cur")) ;;
                 build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --warnings -p --path" -- "$cur")) ;;
                 run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --warnings -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
