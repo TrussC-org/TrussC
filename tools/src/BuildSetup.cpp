@@ -1,9 +1,13 @@
 #include "BuildSetup.h"
+#include "ProjectGenerator.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 using namespace std;
 using Json = nlohmann::json;
+namespace fs = std::filesystem;
 
 ConfigurePlan planConfigure(const ConfigureInputs& in) {
     ConfigurePlan plan;
@@ -37,12 +41,17 @@ ConfigurePlan planConfigure(const ConfigureInputs& in) {
         }
     }
 
-    if (!in.hasCache) {
+    if (!in.hasCache || !in.generated) {
         // `cmake --build` does not configure a missing or empty build folder
         // ("... is not a directory" / "could not load cache"), so configure
-        // first. Without a build-type flag no -D is added and the
-        // trussc_app.cmake default applies, as after `trusscli update`.
-        string msg = "[build] No CMake cache in " + in.buildDir + ", configuring";
+        // first. A configure that failed leaves CMakeCache.txt but no build
+        // system ("No rule to make target 'Makefile'"), so that folder is
+        // configured again too. Without a build-type flag no -D is added and
+        // the trussc_app.cmake default applies, as after `trusscli update`.
+        string msg = in.hasCache
+            ? "[build] No build files in " + in.buildDir +
+                  " (an earlier configure did not finish), configuring"
+            : "[build] No CMake cache in " + in.buildDir + ", configuring";
         if (!pinType.empty()) msg += " (CMAKE_BUILD_TYPE=" + pinType + ")";
         plan.messages.push_back(msg + "...");
         plan.configure = true;
@@ -56,6 +65,65 @@ ConfigurePlan planConfigure(const ConfigureInputs& in) {
         }
     }
     return plan;
+}
+
+// CMAKE_BUILD_TYPE in a CMakeCache.txt ("" when the file or entry is missing).
+static string readCachedBuildType(const fs::path& cachePath) {
+    ifstream cache(cachePath);
+    if (!cache) return "";
+    string line;
+    while (getline(cache, line)) {
+        // Format: CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
+        if (line.rfind("CMAKE_BUILD_TYPE:", 0) == 0) {
+            auto eq = line.find('=');
+            if (eq != string::npos) return line.substr(eq + 1);
+        }
+    }
+    return "";
+}
+
+// Whether a finished configure left a build system in dir. The generate
+// step writes it only after the whole configure succeeded; a failed one
+// leaves CMakeCache.txt and CMakeFiles/ alone.
+static bool hasBuildSystem(const fs::path& dir) {
+    error_code ec;
+    if (fs::is_regular_file(dir / "Makefile", ec) ||
+        fs::is_regular_file(dir / "build.ninja", ec)) {
+        return true;
+    }
+    // Xcode (ios) and Visual Studio generators: <project>.xcodeproj / .sln
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        const string ext = it->path().extension().string();
+        if (ext == ".xcodeproj" || ext == ".sln") return true;
+    }
+    return false;
+}
+
+ConfigureInputs inspectBuildFolder(const string& projectDir,
+                                   const string& targetPreset,
+                                   const string& nativePreset) {
+    ConfigureInputs in;
+    in.buildDir = ProjectGenerator::buildDirForPreset(targetPreset);
+    in.isNative = !nativePreset.empty() && targetPreset == nativePreset;
+    const fs::path dir = fs::path(projectDir) / in.buildDir;
+    error_code ec;
+    in.hasCache = fs::is_regular_file(dir / "CMakeCache.txt", ec);
+    in.generated = hasBuildSystem(dir);
+    in.cachedBuildType = readCachedBuildType(dir / "CMakeCache.txt");
+    return in;
+}
+
+vector<string> buildFoldersToClean(const string& nativePreset, bool all) {
+    vector<string> dirs;
+    if (all) {
+        for (const string& preset : ProjectGenerator::allPresetNames()) {
+            dirs.push_back(ProjectGenerator::buildDirForPreset(preset));
+        }
+    } else if (!nativePreset.empty()) {
+        dirs.push_back(ProjectGenerator::buildDirForPreset(nativePreset));
+    }
+    dirs.push_back("build");
+    return dirs;
 }
 
 // Split a ';'-separated environment value into its entries.
@@ -123,23 +191,76 @@ ToolchainCheck checkPresetToolchain(const string& presetsJson,
     return result;
 }
 
-string presetCacheVariable(const string& presetsJson,
-                           const string& preset,
-                           const string& variable) {
+static string toForwardSlash(string path) {
+    for (char& c : path) {
+        if (c == '\\') c = '/';
+    }
+    return path;
+}
+
+bool canPinToolchain(const VsVersionInfo& vs) {
+    return !vs.vcToolsVersion.empty() && !vs.windowsSdkVersion.empty();
+}
+
+WindowsToolchainPins windowsToolchainPins(const VsVersionInfo& vs) {
+    WindowsToolchainPins pins;
+    if (!vs.ninjaPath.empty()) pins.makeProgram = toForwardSlash(vs.ninjaPath);
+    if (!canPinToolchain(vs)) return pins;
+
+    const string vsPath = toForwardSlash(vs.installPath);
+    const string& vcToolsVer = vs.vcToolsVersion;
+    const string& sdkVer = vs.windowsSdkVersion;
+    pins.include =
+        vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/include;" +
+        "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/ucrt;" +
+        "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/shared;" +
+        "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/um;" +
+        "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/winrt";
+    pins.lib =
+        vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/lib/x64;" +
+        "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/ucrt/x64;" +
+        "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/um/x64";
+    pins.path =
+        vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/bin/Hostx64/x64;" +
+        "C:/Program Files (x86)/Windows Kits/10/bin/" + sdkVer + "/x64;$penv{PATH}";
+    return pins;
+}
+
+string repinWindowsToolchain(const string& presetsJson, const WindowsToolchainPins& pins) {
     Json data = Json::parse(presetsJson, nullptr, /*allow_exceptions=*/false);
     if (!data.is_object()) return "";
     auto presets = data.find("configurePresets");
     if (presets == data.end() || !presets->is_array()) return "";
-    for (const auto& p : *presets) {
+
+    for (auto& p : *presets) {
         if (!p.is_object()) continue;
         auto name = p.find("name");
-        if (name == p.end() || !name->is_string() || name->get<string>() != preset) continue;
-        auto vars = p.find("cacheVariables");
-        if (vars == p.end() || !vars->is_object()) return "";
-        auto v = vars->find(variable);
-        if (v == vars->end()) return "";
-        const Json& value = v->is_object() ? v->value("value", Json()) : *v;
-        return value.is_string() ? value.get<string>() : "";
+        if (name == p.end() || !name->is_string() || name->get<string>() != "windows") continue;
+
+        // CMAKE_MAKE_PROGRAM (the other cache variables, e.g. TRUSSC_DIR, stay)
+        if (!pins.makeProgram.empty()) {
+            p["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
+        } else if (p.contains("cacheVariables") && p["cacheVariables"].is_object()) {
+            p["cacheVariables"].erase("CMAKE_MAKE_PROGRAM");
+        }
+
+        // INCLUDE / LIB / PATH (other environment entries stay)
+        const pair<const char*, const string*> envPins[] = {
+            {"INCLUDE", &pins.include}, {"LIB", &pins.lib}, {"PATH", &pins.path},
+        };
+        for (const auto& [key, value] : envPins) {
+            if (!value->empty()) {
+                p["environment"][key] = *value;
+            } else if (p.contains("environment") && p["environment"].is_object()) {
+                p["environment"].erase(key);
+            }
+        }
+        if (p.contains("environment") && p["environment"].is_object() &&
+            p["environment"].empty()) {
+            p.erase("environment");
+        }
+        // Same format as ProjectGenerator writes (saveJson, indent 2)
+        return data.dump(2);
     }
     return "";
 }

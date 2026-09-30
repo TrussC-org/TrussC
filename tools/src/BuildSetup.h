@@ -11,7 +11,9 @@
 //     pins the ninja, MSVC and Windows SDK paths found when it was written.
 //     After a Visual Studio update or a move to another VS version those
 //     paths no longer exist. `trusscli doctor` reports this, and
-//     `trusscli build` rewrites CMakePresets.json (see main.cpp).
+//     `trusscli build` re-pins them in CMakePresets.json (see main.cpp).
+
+#include "VsDetector.h"
 
 #include <functional>
 #include <string>
@@ -22,6 +24,8 @@ struct ConfigureInputs {
     std::string buildDir;             // folder name for messages, e.g. "build-linux"
     bool isNative = false;            // the native preset (macos / windows / linux)
     bool hasCache = false;            // <buildDir>/CMakeCache.txt exists
+    bool generated = false;           // a configure finished there: the build system
+                                      // (Makefile, build.ninja, *.xcodeproj, ...) exists
     std::string cachedBuildType;      // CMAKE_BUILD_TYPE in that cache ("" if none)
     std::string requestedBuildType;   // from --debug / --release / --relwithdebinfo ("" if none)
     bool warnings = false;            // --warnings
@@ -34,8 +38,21 @@ struct ConfigurePlan {
 };
 
 // Decide the configure pass. A build with a cache that already holds what
-// was asked for stays configure-free.
+// was asked for stays configure-free. A cache without a build system (a
+// configure that failed) is configured again.
 ConfigurePlan planConfigure(const ConfigureInputs& in);
+
+// Fill the folder part of ConfigureInputs (buildDir, isNative, hasCache,
+// generated, cachedBuildType) from <projectDir>/<the target preset's build
+// folder> on disk. nativePreset is "" when the platform has none.
+ConfigureInputs inspectBuildFolder(const std::string& projectDir,
+                                   const std::string& targetPreset,
+                                   const std::string& nativePreset);
+
+// The build folders `trusscli clean` removes (when they exist): the native
+// preset's folder and a plain "build", or with --all every preset's folder
+// (xcode-ios for ios) and "build".
+std::vector<std::string> buildFoldersToClean(const std::string& nativePreset, bool all);
 
 // Pinned toolchain paths in a CMakePresets.json.
 struct ToolchainCheck {
@@ -53,12 +70,29 @@ struct ToolchainCheck {
 ToolchainCheck checkPresetToolchain(const std::string& presetsJson,
                                     const std::function<bool(const std::string&)>& exists);
 
-// The string value of a cache variable of one configure preset ("" when the
-// preset, the variable or the file is missing). Used to keep the project's
-// TRUSSC_DIR when the presets are refreshed.
-std::string presetCacheVariable(const std::string& presetsJson,
-                                const std::string& preset,
-                                const std::string& variable);
+// The toolchain paths the "windows" configure preset pins for one Visual
+// Studio install. ProjectGenerator writes them, and `trusscli build` puts
+// fresh ones into an existing CMakePresets.json.
+struct WindowsToolchainPins {
+    std::string makeProgram;   // CMAKE_MAKE_PROGRAM ("" = not pinned)
+    std::string include;       // environment INCLUDE / LIB / PATH
+    std::string lib;           // (all "" = no environment block)
+    std::string path;
+};
+WindowsToolchainPins windowsToolchainPins(const VsVersionInfo& vs);
+
+// Whether a detected Visual Studio entry has what the pins need (MSVC and
+// Windows SDK versions). VsDetector's fallback entry, returned when no
+// Visual Studio was found, does not.
+bool canPinToolchain(const VsVersionInfo& vs);
+
+// presetsJson with the "windows" configure preset's CMAKE_MAKE_PROGRAM and
+// INCLUDE / LIB / PATH environment replaced by `pins` (a pin that is "" is
+// removed). Everything else in the file (other presets, TRUSSC_DIR, the
+// remembered IDE, hand edits) stays. "" when the text is not a presets file
+// or has no "windows" configure preset.
+std::string repinWindowsToolchain(const std::string& presetsJson,
+                                  const WindowsToolchainPins& pins);
 
 // Whether `trusscli build` refreshes CMakePresets.json before building:
 // only for the native Windows preset, and only when its pinned toolchain is

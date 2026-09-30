@@ -1,4 +1,5 @@
 #include "ProjectGenerator.h"
+#include "BuildSetup.h"
 #include "TrussC.h"
 #include <fstream>
 #include <sstream>
@@ -345,46 +346,16 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
         const auto& vsInfo = settings_.installedVsVersions[settings_.selectedVsIndex];
 
-        // Convert path to forward slashes for JSON
-        auto toForwardSlash = [](string path) {
-            for (char& c : path) {
-                if (c == '\\') c = '/';
-            }
-            return path;
-        };
-
-        if (!vsInfo.ninjaPath.empty()) {
-            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = toForwardSlash(vsInfo.ninjaPath);
+        // CMAKE_MAKE_PROGRAM and the INCLUDE / LIB / PATH environment
+        // (`trusscli build` re-pins the same values after a VS change)
+        const WindowsToolchainPins pins = windowsToolchainPins(vsInfo);
+        if (!pins.makeProgram.empty()) {
+            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
         }
-
-        // Add environment for INCLUDE, LIB, PATH
-        if (!vsInfo.vcToolsVersion.empty() && !vsInfo.windowsSdkVersion.empty()) {
-            string vsPath = toForwardSlash(vsInfo.installPath);
-            string vcToolsVer = vsInfo.vcToolsVersion;
-            string sdkVer = vsInfo.windowsSdkVersion;
-
-            // INCLUDE paths
-            string includePath =
-                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/include;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/ucrt;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/shared;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/um;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/winrt";
-
-            // LIB paths
-            string libPath =
-                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/lib/x64;" +
-                "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/ucrt/x64;" +
-                "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/um/x64";
-
-            // PATH additions
-            string pathAddition =
-                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/bin/Hostx64/x64;" +
-                "C:/Program Files (x86)/Windows Kits/10/bin/" + sdkVer + "/x64;$penv{PATH}";
-
-            windowsPreset["environment"]["INCLUDE"] = includePath;
-            windowsPreset["environment"]["LIB"] = libPath;
-            windowsPreset["environment"]["PATH"] = pathAddition;
+        if (!pins.include.empty()) {
+            windowsPreset["environment"]["INCLUDE"] = pins.include;
+            windowsPreset["environment"]["LIB"] = pins.lib;
+            windowsPreset["environment"]["PATH"] = pins.path;
         }
     }
     presets["configurePresets"].push_back(windowsPreset);

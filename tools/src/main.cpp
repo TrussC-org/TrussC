@@ -3142,11 +3142,12 @@ static void printBuildHelp() {
          << "(MinSizeRel / Release). The three build-type flags are mutually exclusive.\n"
          << "\n"
          << "When the target's build folder has no CMake cache (after 'trusscli clean',\n"
-         << "or a deleted folder), build configures it first. On Windows, when\n"
-         << "Visual Studio changed since the project was generated (the MSVC, SDK\n"
-         << "or ninja path in CMakePresets.json is gone), build detects Visual Studio\n"
-         << "again, rewrites CMakePresets.json (keeping the IDE and targets) and\n"
-         << "removes build-windows before configuring. It prints what it did.\n";
+         << "or a deleted folder) or only the cache of a failed configure, build\n"
+         << "configures it first. On Windows, when Visual Studio changed since the\n"
+         << "project was generated (the MSVC, SDK or ninja path in CMakePresets.json\n"
+         << "is gone), build detects Visual Studio again, replaces only those paths\n"
+         << "in CMakePresets.json and removes build-windows before configuring.\n"
+         << "It prints what it did.\n";
 }
 
 // =============================================================================
@@ -3191,22 +3192,12 @@ static int cmdClean(const vector<string>& args) {
         return 1;
     }
 
-    // Every preset's build folder (the same mapping the presets are written
-    // with, so iOS's xcode-ios is included), plus a plain "build".
-    vector<string> buildDirs;
-    for (const string& preset : ProjectGenerator::allPresetNames()) {
-        buildDirs.push_back(ProjectGenerator::buildDirForPreset(preset));
-    }
-    buildDirs.push_back("build");
-    const string nativeDir = kNativePreset ? ProjectGenerator::buildDirForPreset(kNativePreset) : "";
-
+    // The native folder and "build", or with --all every preset's folder (the
+    // same mapping the presets are written with, so iOS's xcode-ios too)
     int removed = 0;
-    for (const string& dir : buildDirs) {
+    for (const string& dir : buildFoldersToClean(kNativePreset ? kNativePreset : "", cleanAll)) {
         string fullPath = projectPath + "/" + dir;
         if (fs::exists(fullPath)) {
-            if (!cleanAll && dir != nativeDir && dir != "build") {
-                continue;  // skip non-native dirs unless --all
-            }
             cout << "  Removing " << dir << "/\n";
             fs::remove_all(fullPath);
             removed++;
@@ -3225,23 +3216,6 @@ static int cmdClean(const vector<string>& args) {
 // Subcommand: build
 // =============================================================================
 
-// Read CMAKE_BUILD_TYPE from an existing CMake cache. Returns "" if the cache
-// (or the variable) is absent. Used to decide whether a reconfigure is needed
-// to change the build type on single-config generators.
-static string readCachedBuildType(const string& buildDir) {
-    ifstream cache(buildDir + "/CMakeCache.txt");
-    if (!cache) return "";
-    string line;
-    while (getline(cache, line)) {
-        // Format: CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
-        if (line.rfind("CMAKE_BUILD_TYPE:", 0) == 0) {
-            auto eq = line.find('=');
-            if (eq != string::npos) return line.substr(eq + 1);
-        }
-    }
-    return "";
-}
-
 // Map a build-type flag to its CMAKE_BUILD_TYPE value, or nullptr if the
 // argument is not one. --debug / --release / --relwithdebinfo are mutually
 // exclusive; the default (no flag) is RelWithDebInfo (see trussc_app.cmake).
@@ -3252,13 +3226,15 @@ static const char* buildTypeForFlag(const string& a) {
     return nullptr;
 }
 
-// Rewrite only CMakePresets.json after Visual Studio changed (#357): detect
-// VS again, keep the targets, web backend, IDE (#350) and TRUSSC_DIR the
-// presets hold, and remove the native build folder so the next configure
-// starts clean. Addons, CMakeLists.txt and IDE files are not touched.
-// Always prints what it did.
+// Re-pin the Visual Studio toolchain in CMakePresets.json after Visual Studio
+// changed (#357): detect VS again and replace only the "windows" preset's
+// CMAKE_MAKE_PROGRAM and INCLUDE / LIB / PATH. The targets, web backend, IDE
+// (#350), TRUSSC_DIR, the other presets and hand edits stay. build-windows is
+// removed so the next configure starts clean. Nothing is changed when no
+// usable Visual Studio is found, or when its paths are missing too, so the
+// next build tries again. Always prints what it did.
 static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck& toolchain) {
-    const string presetsPath = projectPath + "/CMakePresets.json";
+    const fs::path presetsPath = fs::path(projectPath) / "CMakePresets.json";
     string presetsText;
     {
         ifstream file(presetsPath, ios::binary);
@@ -3267,49 +3243,65 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
         presetsText = ss.str();
     }
     const string missing = toolchain.missing.empty() ? string() : toolchain.missing[0];
+    const string changed = "Visual Studio changed since this project was generated (" +
+                           missing + " is missing)";
 
-    // TrussC root: the one the presets point at (TRUSSC_DIR = <root>/core),
-    // else the auto-detected one, as `trusscli update` uses
-    string tcRoot;
-    string trusscDir = presetCacheVariable(presetsText, kNativePreset, "TRUSSC_DIR");
-    if (!trusscDir.empty() && fs::exists(fs::path(trusscDir) / "cmake" / "trussc_app.cmake")) {
-        tcRoot = fs::path(trusscDir).parent_path().string();
-    } else {
-        tcRoot = autoDetectTcRoot();
+    // The newest install, as `trusscli new` / `update` pick it. Without a VS
+    // the detector returns a fallback entry with no MSVC / SDK version.
+    vector<VsVersionInfo> installed = VsDetector::detectInstalledVersions();
+    if (installed.empty() || !canPinToolchain(installed[0])) {
+        cerr << "Error: " << changed << ", and no Visual Studio with the C++ tools "
+                "was found.\n"
+             << "Install Visual Studio (Desktop development with C++) and run "
+                "'trusscli build' again. CMakePresets.json and "
+             << ProjectGenerator::buildDirForPreset(kNativePreset) << " were left as they are.\n";
+        return 1;
     }
-    if (tcRoot.empty()) {
-        cerr << "Error: Visual Studio changed since this project was generated ("
-             << missing << " is missing), and the TrussC root was not found.\n"
-             << "Run 'trusscli update --tc-root <path>' to refresh CMakePresets.json.\n";
+    const VsVersionInfo& vs = installed[0];
+
+    string repinned = repinWindowsToolchain(presetsText, windowsToolchainPins(vs));
+    if (repinned.empty()) {
+        cerr << "Error: " << changed << ", and CMakePresets.json has no readable "
+                "\"windows\" preset. Run 'trusscli update' to rewrite it.\n";
+        return 1;
+    }
+    // The detected install's paths must exist, or every build would repeat this
+    ToolchainCheck fresh = checkPresetToolchain(repinned, [](const string& path) {
+        error_code e;
+        return fs::exists(fs::path(path), e);
+    });
+    if (fresh.stale()) {
+        cerr << "Error: " << changed << ", and the paths of the detected "
+             << vs.displayName << " are missing too (" << fresh.missing[0] << ").\n"
+             << "Repair Visual Studio or build from a Visual Studio developer prompt. "
+                "CMakePresets.json was left as it is.\n";
         return 1;
     }
 
-    ProjectSettings settings;
-    settings.tcRoot = tcRoot;
-    settings.projectName = fs::canonical(projectPath).filename().string();
-    applyGenerationOptions(settings, readPresetState(projectPath), GenerationFlags());
-    settings.detectBuildEnvironment();
-
-    ProjectGenerator gen(settings);
-    string err = gen.writePresets(projectPath);
-    if (!err.empty()) {
-        cerr << "Error: Visual Studio changed since this project was generated ("
-             << missing << " is missing), and rewriting CMakePresets.json failed: "
-             << err << "\n";
-        return 1;
-    }
+    // Remove the old build folder first: if that fails, the presets stay
+    // stale and the next build tries again.
     const string buildDir = ProjectGenerator::buildDirForPreset(kNativePreset);
     error_code ec;
     fs::remove_all(fs::path(projectPath) / buildDir, ec);
-
-    cout << "[build] Visual Studio changed since this project was generated ("
-         << missing << " is missing): refreshed CMakePresets.json and removed "
-         << buildDir << "\n";
-    if (settings.installedVsVersions.empty()) {
-        cout << "[build] No Visual Studio found: CMakePresets.json pins no toolchain now. "
-                "Build from a Visual Studio developer prompt, or install Visual Studio "
-                "and run 'trusscli build' again.\n";
+    if (ec) {
+        cerr << "Error: " << changed << ", and " << buildDir << " could not be removed ("
+             << ec.message() << ").\n"
+             << "Close programs that use files in it and run 'trusscli build' again.\n";
+        return 1;
     }
+    {
+        ofstream out(presetsPath, ios::binary | ios::trunc);
+        out << repinned;
+        out.close();
+        if (!out) {
+            cerr << "Error: " << changed << ", and CMakePresets.json could not be "
+                    "written. Check that it is writable and run 'trusscli build' again.\n";
+            return 1;
+        }
+    }
+
+    cout << "[build] " << changed << ": pinned " << vs.displayName
+         << " in CMakePresets.json and removed " << buildDir << "\n";
     cout.flush();
     return 0;
 }
@@ -3461,15 +3453,13 @@ static int cmdBuild(const vector<string>& args) {
     fs::current_path(projectPath);
 
     // `cmake --build` cannot pass -D and does not configure a build folder
-    // that has no cache, so those cases need a configure pass
+    // that has no cache (or only the cache of a failed configure), so those
+    // cases need a configure pass
     // (`cmake --preset`) first. planConfigure() decides; a steady-state build
     // whose cache already holds what was asked for stays configure-free.
-    const string buildDir = ProjectGenerator::buildDirForPreset(targetPreset);
-    ConfigureInputs cfgIn;
-    cfgIn.buildDir = buildDir;
-    cfgIn.isNative = kNativePreset && targetPreset == kNativePreset;
-    cfgIn.hasCache = fs::exists(fs::path(buildDir) / "CMakeCache.txt");
-    cfgIn.cachedBuildType = readCachedBuildType(buildDir);
+    // (the cwd is the project now; projectPath may be relative)
+    ConfigureInputs cfgIn = inspectBuildFolder(".", targetPreset,
+                                               kNativePreset ? kNativePreset : "");
     cfgIn.requestedBuildType = buildType;
     cfgIn.warnings = warnings;
     ConfigurePlan plan = planConfigure(cfgIn);
