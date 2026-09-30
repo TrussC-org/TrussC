@@ -664,7 +664,7 @@ font.load("myfont.ttf", 24);   // Loads bin/data/myfont.ttf
 
 When building, `bin/` is the working directory. No need for absolute paths.
 
-File extensions are matched case-insensitively; paths are used as given.
+File extensions are matched case-insensitively; file names keep their case as written.
 Wherever TrussC picks a format from the extension (`Sound::load`, `Pixels::save`,
 `saveScreenshot`, the hot reload watcher, ...), `photo.JPG`, `loop.Wav` and
 `shot.Png` pick the same decoder or encoder as lower case. The file opened or
