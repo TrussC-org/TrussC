@@ -108,12 +108,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   notification, and the call that found the loss must leave that new
   connection alone. Only the I/O calls find a loss: `close()` or `setup()`
   after an unplug nobody noticed fire once as a clean close and leak no
-  descriptor. Several threads may share one `Serial` (it has its own lock):
-  when they race an unplug, the loss is reported once, the fd is closed once,
-  and the descriptors the kernel hands out right after (recognized by inode)
-  are neither closed nor written to. A pseudo-terminal plays the device, and
-  closing its master stands in for the USB unplug. POSIX only (SKIP on
-  Windows).
+  descriptor. Several threads may share one `Serial` (it has its own
+  reader-writer lock): when they race an unplug, the loss is reported once,
+  the fd is closed once, and the descriptors the kernel hands out right after
+  (recognized by inode) are neither closed nor written to. The I/O calls never
+  wait for each other, even for a write that takes 200 ms; `close()` waits for
+  the writes in progress, is not starved by writes that keep coming, and no
+  write reaches the closed fd; a loss found on one connection never closes the
+  next one. `src/slowWrite.cpp` plays the slow write by defining `write()`
+  (Linux only). A pseudo-terminal plays the device, and closing its master
+  stands in for the USB unplug. POSIX only (SKIP on Windows).
 - `serialBaudRate/` — `Serial::setup()` does not report success after opening
   at a speed other than the one asked for (#260): rates without a termios
   B-constant used to open at 9600 and report success. Linux must apply any rate

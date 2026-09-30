@@ -21,9 +21,13 @@
 // connection alone (sections 6 - 8). Only the I/O calls find a loss: close()
 // or setup() after an unplug nobody noticed is a plain close (section 9).
 //
-// Every call holds the Serial's lock, so several threads may use one Serial:
-// an unplug found by one of them closes the fd exactly once, and no other
-// thread reads, writes or closes that fd number afterwards (section 10).
+// Several threads may use one Serial: an unplug found by one of them closes
+// the fd exactly once, and no other thread reads, writes or closes that fd
+// number afterwards (section 10). The I/O calls share the Serial's lock, so
+// they never wait for each other, even for a write that takes long; opening
+// and closing wait for the I/O calls in progress (section 11), and a loss
+// found on one connection never closes the next one (section 12). A slow
+// write is played by slowWrite.cpp (Linux only).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -137,6 +141,26 @@ struct Pty {
 };
 
 // Open a Serial on a fresh pty; false (and a FAIL line) if that fails.
+#if defined(__linux__)
+// slowWrite.cpp: a write() to fd that first waits ms (fd -1: off)
+void setSlowWrite(int fd, int ms);
+int slowWritesInProgress();
+int slowWritesToClosedFd();
+
+// The fd this process has open on path (the port Serial opened), or -1
+static int fdOf(const string& path) {
+    char target[256];
+    for (int fd = 0; fd < 1024; ++fd) {
+        string link = "/proc/self/fd/" + to_string(fd);
+        ssize_t n = readlink(link.c_str(), target, sizeof(target) - 1);
+        if (n <= 0) continue;
+        target[n] = '\0';
+        if (path == target) return fd;
+    }
+    return -1;
+}
+#endif
+
 static bool connect(Pty& pty, Serial& serial, const char* what) {
     bool ok = pty.open() && serial.setup(pty.slavePath, 115200) && serial.isConnected();
     check(what, ok);
@@ -602,6 +626,120 @@ int main() {
         for (int fd : toClose) ::close(fd);
         check("10. no descriptor left open", countOpenFds() == fdsBefore);
     }
+
+#if defined(__linux__)
+    // --- 11. the I/O calls do not wait for each other ------------------------
+    // Two workers write back to back, staggered, and each write takes 200 ms,
+    // as a WriteFile() to a slow device does on Windows: there is always a
+    // write in progress. The main thread's isConnected() and available() must
+    // not wait for those writes. close() must, and must still get in: it
+    // returns once the writes in progress have, no write reaches the fd after
+    // it is closed, and the writes that keep coming do not starve it.
+    {
+        Pty pty;
+        Serial serial;
+        if (connect(pty, serial, "11. setup() connects")) {
+            fcntl(pty.master, F_SETFL, fcntl(pty.master, F_GETFL) | O_NONBLOCK);
+            const int fd = fdOf(pty.slavePath);
+            check("11. the test finds the port's fd", fd >= 0);
+            setSlowWrite(fd, 200);
+            atomic<bool> stop{false};
+            atomic<int> writes{0};
+            auto writeLoop = [&] {
+                while (!stop) {
+                    if (serial.writeBytes(string("x")) == 1) ++writes;
+                }
+            };
+            thread first(writeLoop);
+            this_thread::sleep_for(chrono::milliseconds(100));
+            thread second(writeLoop);
+            check("11. slow writes are in progress", waitFor(1000, [] { return slowWritesInProgress() > 0; }));
+
+            // One second of calls, as a frame loop makes them. On a thread of
+            // its own, so that a starved call fails the check instead of
+            // hanging the test: after 3 s the workers stop and let it in.
+            atomic<long long> worstUs{0};
+            atomic<bool> probed{false};
+            thread prober([&] {
+                char sink[64];
+                const auto until = chrono::steady_clock::now() + chrono::milliseconds(1000);
+                while (chrono::steady_clock::now() < until) {
+                    const auto t0 = chrono::steady_clock::now();
+                    bool connected = serial.isConnected();
+                    int n = serial.available();
+                    const long long us = chrono::duration_cast<chrono::microseconds>(
+                        chrono::steady_clock::now() - t0).count();
+                    if (us > worstUs) worstUs = us;
+                    (void)connected;
+                    (void)n;
+                    while (::read(pty.master, sink, sizeof(sink)) > 0) {}
+                    this_thread::sleep_for(chrono::milliseconds(5));
+                }
+                probed = true;
+            });
+            bool probedInTime = waitFor(3000, [&] { return probed.load(); });
+            if (!probedInTime) stop = true;
+            prober.join();
+            string name = "11. isConnected() / available() do not wait for the writes (worst " +
+                          to_string(worstUs / 1000) + " ms)";
+            check(name.c_str(), probedInTime && worstUs < 50000);
+            check("11. the workers kept writing meanwhile", writes >= 6);
+
+            // close() from a third thread, while the writes keep coming
+            atomic<bool> closed{false};
+            atomic<int> stillWriting{-1};
+            thread closer([&] {
+                serial.close();
+                stillWriting = slowWritesInProgress();
+                closed = true;
+            });
+            bool gotIn = waitFor(1500, [&] { return closed.load(); });
+            stop = true;  // lets a starved close() in, so the test ends
+            closer.join();
+            first.join();
+            second.join();
+            setSlowWrite(-1, 0);
+            check("11. close() gets in while writes keep coming (within 1.5 s)", gotIn);
+            check("11. close() returns only after the writes in progress", stillWriting == 0);
+            check("11. no write reached the closed fd", slowWritesToClosedFd() == 0);
+            check("11. the port is closed", !serial.isConnected());
+        }
+    }
+
+    // --- 12. a loss found on the old connection leaves the new one alone -----
+    // The worker's write to the first pty is in progress when the device goes
+    // away, and the main thread calls setup() for a second pty meanwhile. That
+    // setup() closes the first port once the write has returned (a clean
+    // close) and opens the second. The worker's write fails, and its loss
+    // belongs to the connection that is already closed: it must not close
+    // the new one, whichever of the two gets the lock first afterwards.
+    {
+        Pty oldPty, newPty;
+        Serial serial;
+        Recorder rec;
+        rec.attach(serial);
+        if (connect(oldPty, serial, "12. setup() connects") && newPty.open()) {
+            const int fd = fdOf(oldPty.slavePath);
+            setSlowWrite(fd, 200);
+            int written = 0;
+            thread worker([&] { written = serial.writeBytes(string("x")); });
+            check("12. the write to the old port is in progress",
+                  waitFor(1000, [] { return slowWritesInProgress() > 0; }));
+            oldPty.unplug();
+            bool ok = serial.setup(newPty.slavePath, 115200);
+            worker.join();
+            setSlowWrite(-1, 0);
+            check("12. that write fails", written == -1);
+            check("12. setup() on the new port succeeds", ok);
+            check("12. one notification, a clean close of the old port",
+                  rec.count == 1 && rec.first.wasClean && rec.first.portName == oldPty.slavePath);
+            check("12. the new connection stays open",
+                  serial.isConnected() && serial.getDevicePath() == newPty.slavePath);
+            check("12. the new port carries data", newPty.send("n") &&
+                  waitFor(1000, [&] { return serial.readByte() == 'n'; }));
+        }
+    }
+#endif
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
