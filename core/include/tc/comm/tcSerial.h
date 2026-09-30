@@ -644,6 +644,7 @@ public:
         // androidserial::setup() keeps that one alive (reconnect loops must
         // not re-trigger the permission dialog).
         PendingDisconnect closed;
+        std::uint64_t firstGeneration = 0;
         {
             internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
@@ -654,6 +655,7 @@ public:
                 aimpl_ = created;
             }
             if (!androidserial::isPendingFor(aimpl_, portName)) closeLocked(closed, held);
+            firstGeneration = generation_;
         }
         notifyDisconnect(closed);
 
@@ -662,33 +664,54 @@ public:
             internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
             androidserial::HoldLogs hold(held);
+            // Another setup() ran while the lock was released (a listener of
+            // that notification reconnecting, or another thread) when the
+            // generation moved on. A connection open now is then that one's,
+            // and this call, which came first, overrules it: closed without
+            // onDisconnect, with a warning, as on the other platforms.
+            // Otherwise the only connection that can be open now is the one
+            // the permission pending for this device completed after the
+            // check above: this Serial's previous connection, reported with
+            // the values it was opened with.
+            const bool otherSetupMeanwhile = generation_ != firstGeneration;
             ++generation_;
-            // A listener that reconnected from that notification is overruled
-            // by this call, which came first: androidserial::setup() closes
-            // its connection.
-            bool listenerReopened = closed && isOpenLocked();
-            if (listenerReopened) {
-                held(LogLevel::Warning) << "Serial: setup() closes the port an onDisconnect listener opened";
-            }
-            // Otherwise the backend closes a connection only when the pending
-            // permission for this device came through after the check above.
-            // That connection is reported with the values it was opened with.
             const std::string previousPath = devicePath_;
             const int previousRate = baudRate_;
-            // The path first: the backend (or later its worker, once the
-            // user grants permission) publishes Connected, and the lock-free
-            // isConnected() / getDevicePath() must never pair that with the
-            // previous path
+            // Close what the backend holds before the new path shows, so that
+            // the lock-free isConnected() / getDevicePath() never pair a
+            // connection with a port it is not to (isConnected() turns false
+            // first, as on the other platforms). Not a permission request
+            // still pending for this same device (see above), whose path is
+            // this one already.
+            androidserial::CloseResult ended = androidserial::CloseResult::NotOpen;
+            std::string lostReason;
+            if (!androidserial::isPendingFor(aimpl_, portName)) {
+                ended = androidserial::close(aimpl_, lostReason);
+                initialized_ = false;
+            }
+            // The path next: the backend (or later its worker, once the user
+            // grants permission) publishes Connected
             {
                 std::lock_guard<std::mutex> info(infoMutex_);
                 devicePath_ = portName;
             }
-            androidserial::CloseResult ended = androidserial::CloseResult::NotOpen;
-            std::string lostReason;
+            // The backend closes a connection itself only when that pending
+            // request completed since the isPendingFor() above
+            androidserial::CloseResult endedInSetup = androidserial::CloseResult::NotOpen;
+            std::string lostInSetup;
             const internal::SerialSetupResult result =
-                androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
+                androidserial::setup(aimpl_, portName, baudRate, endedInSetup, lostInSetup);
             initialized_ = result == internal::SerialSetupResult::Connected;
-            if (!listenerReopened) raced = closeArgs(ended, lostReason, previousPath, previousRate);
+            if (ended == androidserial::CloseResult::NotOpen) {
+                ended = endedInSetup;
+                lostReason = lostInSetup;
+            }
+            PendingDisconnect found = closeArgs(ended, lostReason, previousPath, previousRate);
+            if (found && otherSetupMeanwhile) {
+                held(LogLevel::Warning) << "Serial: setup() closes the port an onDisconnect listener opened";
+            } else {
+                raced = std::move(found);
+            }
             // By the result, not by the state read back now: the worker of a
             // Pending setup() may have connected already
             if (internal::serialSetupStarted(result)) {
