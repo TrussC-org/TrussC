@@ -131,7 +131,7 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 | `BeginCombo` (a custom combo) | `combo` | Only `item`, the text shown |
 | `InputText`, `InputTextMultiline` | `text` | The string. A password field reports `"password": true` and never its text |
 | `Checkbox`, `MenuItem(label, shortcut, bool* p_selected)`, `Selectable(label, bool* p_selected)` | `checkbox` | `true` / `false`, the variable after the click (a `Checkbox` or toggle `MenuItem` also has `checked`) |
-| `RadioButton(label, int* v, int v_button)` | `radio` | The variable the button group sets (`valueType` `int`), under the label of each button in the group |
+| `RadioButton(label, int* v, int v_button)` | `radio` | The variable the button group sets (`valueType` `int`), under the label of each button in the group. `buttonValue` is that button's own value (`v_button`), the value pressing it sets |
 | `ListBox` | `listbox` | The selected index, under the list box's own label |
 | `BeginListBox` (a custom list box) | `listbox` | No value, only the label |
 
@@ -173,12 +173,24 @@ frame.
   (`[x, y, z]`; a color `[r, g, b]` or `[r, g, b, a]` as floats 0-1, or the raw
   HSV the variable holds with `colorSpace` `hsv`); `true` / `false` for a
   `Checkbox` or a `bool*` `MenuItem` / `Selectable`; the item index for a
-  `Combo` or `ListBox`; the variable's integer for a `RadioButton` (any button
-  of the group sets it); radians for `SliderAngle`.
+  `Combo` or `ListBox`; for a `RadioButton(label, int* v, v_button)`, that
+  button's own value (its `buttonValue`): target the button whose value you
+  want. Another value is refused, because in ImGui `true` from a radio button
+  means the variable now holds that button's value (`if
+  (ImGui::RadioButton("B", &mode, 1)) onB();` must run for 1 only); radians
+  for `SliderAngle`.
+- A value the variable already holds changes nothing: the widget does not
+  return `true` (a toggle handler such as `if (ImGui::MenuItem("Fullscreen",
+  nullptr, &fs)) toggleFullscreen();` does not run), and the reply is `ok`. A
+  `CheckboxFlags` with only some of its bits set (drawn mixed, reported
+  `false`) holds neither value, so `false` clears its bits and `true` sets
+  them.
 - `status: ok` means the variable held the value when the widget returned, and
   still held it when the widget ran in the next frame (if the widget is not
   drawn in that next frame, or the app draws no imgui in it — say the value
-  hid the GUI — the first read-back stands). If the app took the value and
+  hid the GUI — or its window renders no frame until 4 s after the call — a
+  window rendering less often than once every 2 s, or one that stopped — the
+  first read-back stands). If the app took the value and
   changed it by the next frame (a clamp, a setter that converts it, such as
   the inspector's `rotation` in degrees), the reply is still `ok`, with a
   `message` saying so and `value` = what the variable holds.
@@ -187,10 +199,13 @@ frame.
   widget that is not drawn in the frame after the call (collapsed header,
   closed or hidden window, no imgui drawn in that frame); a disabled widget
   (inside `BeginDisabled()`, `MenuItem(..., enabled = false)`,
-  `ImGuiSelectableFlags_Disabled`) or a read-only one; a check box or menu item
-  with no variable (an action `MenuItem`); a window so slow that the widget
-  runs more than 2 s after the call (`Window::setFps` below 0.5), since the
-  value could not be checked before the reply.
+  `ImGuiSelectableFlags_Disabled`) or a read-only one; a `RadioButton` given
+  another button's value; an item with no variable that takes no text (a
+  button, an action `MenuItem`, `MenuItem(label, shortcut, bool selected)`,
+  `RadioButton(label, bool active)`, a plain `Selectable`: use
+  `tcx_imgui_click`); a widget that runs more than 2 s after the call (a window
+  rendering less often than once every 2 s, e.g. `Window::setFps` below 0.5),
+  since the value could not be checked before the reply.
 - Errors after the write, carrying what the variable holds: a hand edit that
   changed the value again in the same frame; and a variable that holds its old
   value again in the next frame — code that ignores the widget's return value
@@ -248,7 +263,8 @@ the code, and calls `tcx_imgui_reset_touched`.
 - A toggle `MenuItem` / `Selectable` with a `bool*` reports the state after the
   click, even when the click closed its menu.
 - Each `RadioButton(label, int* v, v_button)` the user pressed gets its own
-  entry, and all of them show the same variable's current value.
+  entry, and all of them show the same variable's current value (each with its
+  own `buttonValue`).
 - A widget that is not drawn right now (collapsed header, closed window) keeps
   its last known value and reports `"visible": false`.
 - The record starts when the MCP tools are registered (`TRUSSC_MCP=1`) and is
@@ -264,10 +280,13 @@ widget record with a `tcx::imgui::TouchedExclusionScope` while it draws them.
 
 ## How It Works
 
-tcxImGui connects to TrussC via two core events:
+tcxImGui connects to TrussC via these core events:
 
 - **`events().rawEvent`** (priority: BeforeApp) — Routes input events to ImGui
 - **`events().onRender`** (priority: 1000) — Renders ImGui after all sokol_gl content is flushed
+- **the main window's `events().afterFrame`** (priority: BeforeApp) — Answers a
+  `tcx_imgui_input` whose check frame did not come in time (see
+  [Setting values](#setting-values)), before the MCP server's own timeout
 
 This means ImGui always renders on top and receives input before your app.
 
