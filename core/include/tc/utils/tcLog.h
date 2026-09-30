@@ -163,9 +163,9 @@ public:
         return fileLevel_.load();
     }
 
-    // Not synchronized (it returns a reference): read it on the thread that
-    // calls setLogFile() / closeFile(), not while another thread does.
-    const std::string& getLogFilePath() const {
+    // A copy taken under the lock (empty when no file is open).
+    std::string getLogFilePath() const {
+        TC_LOCK_GUARD(mutex_);
         return filePath_;
     }
 

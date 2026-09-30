@@ -11,6 +11,7 @@
 //     lost, none duplicated). The console sink the same (std::cout captured).
 //     The file listener used to write to one std::ofstream without a lock:
 //     lines came out mixed, duplicated and missing.
+//     getLogFilePath() read from another thread meanwhile is a whole path.
 //   - setLogFile() / closeFile() toggled while threads log: no torn or
 //     duplicated line, and nothing lands in the file once closeFile() has
 //     returned.
@@ -205,6 +206,8 @@ static void testFileSwitching() {
     const fs::path a = tempFile("switch_a.log");
     const fs::path b = tempFile("switch_b.log");
     int switches = 0;
+    int pathReads = 0;
+    int badPaths = 0;
     runWithWatchdog("file: concurrent lines while switching files", [&] {
         Logger lg;
         lg.setConsoleLogLevel(LogLevel::Silent);
@@ -212,6 +215,18 @@ static void testFileSwitching() {
         atomic<bool> go{false};
         atomic<int> done{0};
         auto ts = startWorkers(lg, go, done);
+        // getLogFilePath() from another thread while the file switches: a
+        // whole path every time (a copy taken under the lock).
+        const string pathA = internal::pathToUtf8(a);
+        const string pathB = internal::pathToUtf8(b);
+        thread reader([&] {
+            while (!go) this_thread::yield();
+            while (done < kThreads) {
+                const string p = lg.getLogFilePath();
+                if (p != pathA && p != pathB && !p.empty()) ++badPaths;
+                ++pathReads;
+            }
+        });
         go = true;
         // Every level set here still passes Notice to the file and keeps it
         // off the console; each setLogFile() closes one file and opens the
@@ -225,6 +240,7 @@ static void testFileSwitching() {
             this_thread::sleep_for(chrono::microseconds(100));
         }
         for (auto& t : ts) t.join();
+        reader.join();
         lg.closeFile();
     });
     vector<string> lines = readLines(a);
@@ -236,6 +252,8 @@ static void testFileSwitching() {
     check("file: exactly 8000 lines, none lost or duplicated", r.total == kThreads * kLines && r.duplicated == 0 && r.missing == 0);
     if (r.torn || r.duplicated || r.missing || r.total != kThreads * kLines) printTally(r);
     check("file: the switches overlapped the workers", switches > 1);
+    printf("  (%d getLogFilePath() reads)\n", pathReads);
+    check("file: getLogFilePath() from another thread is a whole path", pathReads > 0 && badPaths == 0);
     error_code ec;
     fs::remove(a, ec);
     fs::remove(b, ec);

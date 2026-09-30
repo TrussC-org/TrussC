@@ -3023,7 +3023,7 @@ LoadResult LoadResult::success()  // Make a success result (static)
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-const std::string & Logger::getLogFilePath() const  // Get the path of the current log file
+std::string Logger::getLogFilePath() const  // Get the path of the current log file
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
