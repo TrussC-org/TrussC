@@ -723,7 +723,7 @@ internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int
     // connection that request starts is still under way.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {
         blog(LogLevel::Verbose) << "Serial: USB permission still pending for " << devicePath;
-        return Result::Pending;
+        return Result::KeptPending;
     }
 
     // Serial::setup() has closed the previous connection already, unless the

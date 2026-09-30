@@ -178,17 +178,28 @@ namespace internal {
     };
 
     // What the Android backend's setup() did. Pending: it asked for the USB
-    // permission and started the worker that finishes the connection, or such
-    // a request for the same device was pending already. The worker may have
-    // connected by the time setup() returns, so Serial::setup() goes by this
-    // result, never by the state it reads back afterwards.
-    enum class SerialSetupResult { Failed, Pending, Connected };
+    // permission and started the worker that finishes the connection.
+    // KeptPending: such a request for the same device was pending already,
+    // and setup() kept it and started nothing. The worker may have connected
+    // by the time setup() returns, so Serial::setup() goes by this result,
+    // never by the state it reads back afterwards.
+    enum class SerialSetupResult { Failed, Pending, KeptPending, Connected };
 
-    // Whether that setup() started a connection to the new port (connected,
-    // or connecting once the permission comes through): Serial::setup() then
-    // keeps the new port's path and rate, else the previous port's.
+    // Whether that setup() leaves a connection to the new port under way
+    // (connected, or connecting once the permission comes through):
+    // Serial::setup() then keeps the new port's path and rate, else the
+    // previous port's.
     inline bool serialSetupStarted(SerialSetupResult result) {
         return result != SerialSetupResult::Failed;
+    }
+
+    // Whether Serial::setup() counts that setup() as a new connection (bumps
+    // its generation). Not KeptPending: the connection that request
+    // completes is still the one an earlier setup() started, so another
+    // setup() waiting to run meanwhile still reports it as this Serial's
+    // previous connection.
+    inline bool serialSetupCountsAsNew(SerialSetupResult result) {
+        return result != SerialSetupResult::KeptPending;
     }
 
     // Log lines Serial makes while it holds its port lock, sent once it has
@@ -284,7 +295,9 @@ namespace androidserial {
     void destroy(Impl* impl);
     std::vector<SerialDeviceInfo> listDevices();
     // Connected, Pending (the worker connects once the user grants the
-    // permission, and may have by the time this returns) or Failed. ended:
+    // permission, and may have by the time this returns), KeptPending (that
+    // permission was pending for devicePath already; nothing changed) or
+    // Failed. ended:
     // how a connection that setup() had to close itself had ended (NotOpen
     // when Serial had closed it already), lostReason as for close()
     internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int baudRate,
@@ -644,6 +657,15 @@ public:
     bool setup(const std::string& portName, int baudRate) {
         if (refusedOnWorkerThread("setup()")) return false;
 #if defined(__ANDROID__)
+        // With the lock held: a moved-from Serial has no backend state, and
+        // a move may take it between the two phases below
+        auto ensureImpl = [this] {
+            if (aimpl_) return;
+            androidserial::Impl* created = androidserial::create();
+            std::lock_guard<std::mutex> info(infoMutex_);
+            aimpl_ = created;
+        };
+
         // End the previous connection first, so that onDisconnect reports it
         // with its own port and rate, and with the lock released. Not a
         // permission request still pending for this same device:
@@ -655,11 +677,7 @@ public:
             internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
             androidserial::HoldLogs hold(held);
-            if (!aimpl_) {
-                androidserial::Impl* created = androidserial::create();
-                std::lock_guard<std::mutex> info(infoMutex_);
-                aimpl_ = created;
-            }
+            ensureImpl();
             if (!androidserial::isPendingFor(aimpl_, portName)) closeLocked(closed, held);
             firstGeneration = generation_;
         }
@@ -670,17 +688,22 @@ public:
             internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
             androidserial::HoldLogs hold(held);
-            // Another setup() ran while the lock was released (a listener of
-            // that notification reconnecting, or another thread) when the
-            // generation moved on. A connection open now is then that one's,
-            // and this call, which came first, overrules it: closed without
-            // onDisconnect, with a warning, as on the other platforms.
+            // A move from this Serial while the lock was released took its
+            // backend state (the move bumped the generation too)
+            ensureImpl();
+            // Another setup() started a connection while the lock was
+            // released (a listener of that notification reconnecting, or
+            // another thread), or a move brought one in, when the generation
+            // moved on. A connection open now is then that one's, and this
+            // call, which came first, overrules it: closed without
+            // onDisconnect, with a warning, as on the other platforms. A
+            // setup() that only kept the permission request pending for
+            // this device started nothing and leaves the generation alone.
             // Otherwise the only connection that can be open now is the one
             // the permission pending for this device completed after the
             // check above: this Serial's previous connection, reported with
             // the values it was opened with.
             const bool otherSetupMeanwhile = generation_ != firstGeneration;
-            ++generation_;
             const std::string previousPath = devicePath_;
             const int previousRate = baudRate_;
             // Close what the backend holds before the new path shows, so that
@@ -707,6 +730,9 @@ public:
             std::string lostInSetup;
             const internal::SerialSetupResult result =
                 androidserial::setup(aimpl_, portName, baudRate, endedInSetup, lostInSetup);
+            // No I/O call runs before the lock is released, so bumping it
+            // only now is the same as before the call
+            if (internal::serialSetupCountsAsNew(result)) ++generation_;
             initialized_ = result == internal::SerialSetupResult::Connected;
             if (ended == androidserial::CloseResult::NotOpen) {
                 ended = endedInSetup;
@@ -719,7 +745,7 @@ public:
                 raced = std::move(found);
             }
             // By the result, not by the state read back now: the worker of a
-            // Pending setup() may have connected already
+            // Pending / KeptPending setup() may have connected already
             if (internal::serialSetupStarted(result)) {
                 // The rate the backend opens at: a setup() again while the
                 // permission for this device is pending keeps the first rate
