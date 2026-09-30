@@ -45,8 +45,9 @@ public:
         // Not registered as a window's scene-graph root here: the root is
         // held weakly (getRootNode()), and weak_from_this() is empty until
         // the constructor returns. Whoever creates the App through a
-        // shared_ptr registers it: runApp() and the hot reload host for the
-        // main window, Window::setApp() for a secondary window.
+        // shared_ptr registers it: runApp(), runHeadlessApp() and the hot
+        // reload host for the main window, Window::setApp() for a secondary
+        // window.
     }
 
     // -------------------------------------------------------------------------
