@@ -42,6 +42,16 @@ namespace androidserial {
 
 namespace {
 
+// Where this thread's log lines go while Serial holds its port lock around a
+// backend call (see HoldLogs). nullptr: straight to the Logger, as on the USB
+// worker thread.
+thread_local internal::SerialHeldLog* t_heldLog = nullptr;
+
+// Every log line of the backend goes through here
+internal::SerialHeldLog::Line blog(LogLevel level) {
+    return internal::SerialHeldLog::line(t_heldLog, level);
+}
+
 // USB / CDC constants
 constexpr int USB_CLASS_COMM     = 2;    // CDC control interface
 constexpr int USB_CLASS_CDC_DATA = 10;   // CDC data interface
@@ -105,7 +115,7 @@ struct JniScope {
 bool clearJniException(JNIEnv* env, const char* what) {
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
-        logError() << "Serial: " << what << " threw a Java exception";
+        blog(LogLevel::Error) << "Serial: " << what << " threw a Java exception";
         return true;
     }
     return false;
@@ -256,12 +266,12 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
 
     jobject usbManager = jni.getSystemService("usb");
     if (!usbManager) {
-        logError() << "Serial: UsbManager unavailable";
+        blog(LogLevel::Error) << "Serial: UsbManager unavailable";
         return false;
     }
     jobject device = findDeviceByPath(env, usbManager, impl->path);
     if (!device) {
-        logError() << "Serial: device not found: " << impl->path;
+        blog(LogLevel::Error) << "Serial: device not found: " << impl->path;
         env->DeleteLocalRef(usbManager);
         return false;
     }
@@ -273,7 +283,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
     env->DeleteLocalRef(umClass);
     env->DeleteLocalRef(usbManager);
     if (clearJniException(env, "openDevice") || !connection) {
-        logError() << "Serial: openDevice failed for " << impl->path;
+        blog(LogLevel::Error) << "Serial: openDevice failed for " << impl->path;
         env->DeleteLocalRef(device);
         return false;
     }
@@ -312,7 +322,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
     jmethodID connClose = env->GetMethodID(connClass, "close", "()V");
 
     auto fail = [&](const char* msg) {
-        logError() << "Serial: " << msg << " (" << impl->path << ")";
+        blog(LogLevel::Error) << "Serial: " << msg << " (" << impl->path << ")";
         env->CallVoidMethod(connection, connClose);
         clearJniException(env, "close");
         if (commIface) env->DeleteLocalRef(commIface);
@@ -381,7 +391,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
             CDC_REQ_TYPE, CDC_SET_LINE_CODING, 0, commIfaceId, arr, 7, WRITE_TIMEOUT_MS);
         clearJniException(env, "controlTransfer(SET_LINE_CODING)");
         env->DeleteLocalRef(arr);
-        if (r < 0) logWarning() << "Serial: SET_LINE_CODING not accepted (continuing)";
+        if (r < 0) blog(LogLevel::Warning) << "Serial: SET_LINE_CODING not accepted (continuing)";
 
         // Assert DTR + RTS so the device starts sending
         env->CallIntMethod(connection, controlTransfer,
@@ -433,7 +443,7 @@ void workerMain(Impl* impl) {
                 break;
             }
             if (std::chrono::steady_clock::now() > deadline) {
-                logWarning() << "Serial: USB permission not granted within "
+                blog(LogLevel::Warning) << "Serial: USB permission not granted within "
                              << PERMISSION_TIMEOUT_SEC << "s for " << impl->path
                              << " (setup() will re-show the dialog)";
                 break;
@@ -460,7 +470,7 @@ void workerMain(Impl* impl) {
             return;
         }
         impl->state = (int)State::Connected;
-        logNotice() << "Serial: connected to " << impl->path << " at " << impl->baud << " baud";
+        blog(LogLevel::Notice) << "Serial: connected to " << impl->path << " at " << impl->baud << " baud";
     }
 
     // Bulk read loop. usbfs returns -ETIMEDOUT when no data arrived within
@@ -490,7 +500,7 @@ void workerMain(Impl* impl) {
             // Logged with rxMutex released: an inline Logger listener may call
             // available() / readBytes() / flushInput(), which take it
             if (warnOverflow) {
-                logWarning() << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
+                blog(LogLevel::Warning) << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
             }
         } else if (r < 0 && (err == ETIMEDOUT || err == EAGAIN || err == EINTR)) {
             continue;
@@ -500,7 +510,7 @@ void workerMain(Impl* impl) {
             // leaves Connected, so isConnected() never reads false before
             // Serial has reported the loss.
             impl->lostReason = std::string("bulk read: ") + strerror(err);
-            logWarning() << "Serial: lost connection to " << impl->path << " (" << impl->lostReason << ")";
+            blog(LogLevel::Warning) << "Serial: lost connection to " << impl->path << " (" << impl->lostReason << ")";
             impl->lost = true;
             impl->state = (int)State::Idle;
             return;
@@ -539,7 +549,7 @@ CloseResult closeImpl(Impl* impl, std::string& lostReason) {
         }
         impl->connection = nullptr;
         if (impl->state.load() == (int)State::Connected) {
-            logVerbose() << "Serial: disconnected from " << impl->path;
+            blog(LogLevel::Verbose) << "Serial: disconnected from " << impl->path;
         }
     }
     impl->fd = -1;
@@ -558,6 +568,14 @@ CloseResult closeImpl(Impl* impl, std::string& lostReason) {
 // ---------------------------------------------------------------------------
 // Public backend API (called from tcSerial.h)
 // ---------------------------------------------------------------------------
+
+HoldLogs::HoldLogs(internal::SerialHeldLog& held) : previous_(t_heldLog) {
+    t_heldLog = &held;
+}
+
+HoldLogs::~HoldLogs() {
+    t_heldLog = previous_;
+}
 
 Impl* create() {
     return new Impl();
@@ -640,7 +658,7 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
     // Reconnect-loop guard: while the permission dialog for this device is
     // still pending, repeated setup() calls must not re-trigger it.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {
-        logVerbose() << "Serial: USB permission still pending for " << devicePath;
+        blog(LogLevel::Verbose) << "Serial: USB permission still pending for " << devicePath;
         return false;
     }
 
@@ -652,17 +670,17 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
 
     JniScope jni;
     if (!jni) {
-        logError() << "Serial: JNI unavailable";
+        blog(LogLevel::Error) << "Serial: JNI unavailable";
         return false;
     }
     jobject usbManager = jni.getSystemService("usb");
     if (!usbManager) {
-        logError() << "Serial: UsbManager unavailable";
+        blog(LogLevel::Error) << "Serial: UsbManager unavailable";
         return false;
     }
     jobject device = findDeviceByPath(jni.env, usbManager, devicePath);
     if (!device) {
-        logError() << "Serial: device not found: " << devicePath;
+        blog(LogLevel::Error) << "Serial: device not found: " << devicePath;
         jni.env->DeleteLocalRef(usbManager);
         return false;
     }
@@ -673,7 +691,7 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
         if (!openAndClaim(impl, jni)) return false;
         impl->state = (int)State::Connected;
         impl->worker = std::thread(workerMain, impl);
-        logNotice() << "Serial: connected to " << devicePath << " at " << baudRate << " baud";
+        blog(LogLevel::Notice) << "Serial: connected to " << devicePath << " at " << baudRate << " baud";
         return true;
     }
 
@@ -682,12 +700,12 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
     jni.env->DeleteLocalRef(device);
     jni.env->DeleteLocalRef(usbManager);
     if (!requested) {
-        logError() << "Serial: USB permission request failed for " << devicePath;
+        blog(LogLevel::Error) << "Serial: USB permission request failed for " << devicePath;
         return false;
     }
     impl->state = (int)State::Pending;
     impl->worker = std::thread(workerMain, impl);
-    logNotice() << "Serial: requesting USB permission for " << devicePath
+    blog(LogLevel::Notice) << "Serial: requesting USB permission for " << devicePath
                 << " (isInitialized() becomes true once granted)";
     return false;
 }

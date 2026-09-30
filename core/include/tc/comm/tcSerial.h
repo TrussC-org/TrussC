@@ -35,8 +35,8 @@
 // available() / readBytes() / readByte() / the flush calls still wait there
 // for a writeBytes() in progress.
 //
-// Logger listeners: Serial logs only with its lock free, or held exclusive
-// on the logging thread (which may take it again), so a Logger listener
+// Logger listeners: Serial logs only with its lock released (what to log is
+// decided under the lock, the line goes out after it), so a Logger listener
 // that runs inline may call this Serial. One exception, on Android: the USB
 // worker thread logs too (permission timeout, connected, lost connection,
 // RX overflow, open errors), and close(), setup(), the destructor and a move
@@ -53,10 +53,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <sstream>
 #include <mutex>
 #if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
     #include <condition_variable>
-    #include <thread>
 #endif
 
 // Platform-specific headers
@@ -113,6 +113,53 @@ struct SerialDisconnectEventArgs {
     bool wasClean = false; // true: closed by the app (close()); false: device lost / I/O error
 };
 
+namespace internal {
+    // Log lines Serial makes while it holds its port lock, sent once it has
+    // released it: a Logger listener that runs inline may call the same
+    // Serial, and no thread may take that lock twice. Declare it before the
+    // lock guard, so that it goes after the guard:
+    //
+    //   internal::SerialHeldLog held;
+    //   Exclusive lock(lock_);
+    //   held(LogLevel::Error) << "Serial: ...";
+    class SerialHeldLog {
+    public:
+        // One line. Kept when it goes away, or sent at once with no
+        // SerialHeldLog (the Android USB worker thread).
+        struct Line {
+            SerialHeldLog* held;
+            LogLevel level;
+            std::ostringstream text;
+
+            template <typename T>
+            Line& operator<<(const T& value) {
+                text << value;
+                return *this;
+            }
+            ~Line() {
+                if (held) {
+                    held->lines_.emplace_back(level, text.str());
+                } else {
+                    getLogger().log(level, text.str());
+                }
+            }
+        };
+
+        static Line line(SerialHeldLog* held, LogLevel level) { return Line{held, level, {}}; }
+        Line operator()(LogLevel level) { return line(this, level); }
+
+        SerialHeldLog() = default;
+        SerialHeldLog(const SerialHeldLog&) = delete;
+        SerialHeldLog& operator=(const SerialHeldLog&) = delete;
+        ~SerialHeldLog() {
+            for (const auto& l : lines_) getLogger().log(l.first, l.second);
+        }
+
+    private:
+        std::vector<std::pair<LogLevel, std::string>> lines_;
+    };
+}
+
 #if defined(__ANDROID__)
 // ---------------------------------------------------------------------------
 // Android backend (USB Host, CDC-ACM class devices).
@@ -162,6 +209,20 @@ namespace androidserial {
     bool isPendingFor(const Impl* impl, const std::string& devicePath);
     // The rate the backend opens (or will open) the device at
     int baudRate(const Impl* impl);
+    // While alive, the backend's log lines on this thread go to held
+    // instead of the Logger: Serial calls setup() / close() / destroy() with
+    // its lock held, and sends them once it has let go. (The USB worker
+    // thread logs at once.)
+    class HoldLogs {
+    public:
+        explicit HoldLogs(internal::SerialHeldLog& held);
+        ~HoldLogs();
+        HoldLogs(const HoldLogs&) = delete;
+        HoldLogs& operator=(const HoldLogs&) = delete;
+
+    private:
+        internal::SerialHeldLog* previous_;
+    };
     int available(const Impl* impl);
     int readBytes(Impl* impl, void* buffer, int length);
     // error: the errno of a failed bulk transfer, 0 otherwise. The backend
@@ -288,6 +349,7 @@ public:
     // Closes the port without firing onDisconnect: a listener that
     // reconnects must not run from a destructor.
     ~Serial() {
+        internal::SerialHeldLog held;  // sent after the lock is released
         Exclusive lock(lock_);
 #if defined(__ANDROID__)
         androidserial::Impl* old;
@@ -296,9 +358,10 @@ public:
             old = aimpl_;
             aimpl_ = nullptr;
         }
+        androidserial::HoldLogs hold(held);
         androidserial::destroy(old);  // closes the connection too
 #else
-        closePort();
+        closePort(held);
 #endif
     }
 
@@ -333,15 +396,16 @@ public:
 
     Serial& operator=(Serial&& other) noexcept {
         if (this != &other) {
+            internal::SerialHeldLog held;  // sent after the locks are released
             ExclusiveBoth locks(lock_, other.lock_);
             // The old port closes without onDisconnect, as in the destructor:
             // a listener that reconnected here would be overwritten below.
 #if defined(_WIN32)
-            closePort();
+            closePort(held);
             handle_ = other.handle_;
             other.handle_ = INVALID_HANDLE_VALUE;
 #elif !defined(__ANDROID__)
-            closePort();
+            closePort(held);
             fd_ = other.fd_;
             other.fd_ = -1;
 #endif
@@ -370,7 +434,10 @@ public:
                 devicePath_ = std::move(path);
             }
 #if defined(__ANDROID__)
-            androidserial::destroy(old);  // closes the old connection too
+            {
+                androidserial::HoldLogs hold(held);
+                androidserial::destroy(old);  // closes the old connection too
+            }
 #endif
             initialized_ = other.initialized_.load();
             baudRate_ = other.baudRate_;
@@ -491,26 +558,30 @@ public:
         // not re-trigger the permission dialog).
         PendingDisconnect closed;
         {
+            internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
+            androidserial::HoldLogs hold(held);
             if (!aimpl_) {
                 androidserial::Impl* created = androidserial::create();
                 std::lock_guard<std::mutex> info(infoMutex_);
                 aimpl_ = created;
             }
-            if (!androidserial::isPendingFor(aimpl_, portName)) closeLocked(closed);
+            if (!androidserial::isPendingFor(aimpl_, portName)) closeLocked(closed, held);
         }
         notifyDisconnect(closed);
 
         PendingDisconnect raced;
         bool ok = [&] {
+            internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
+            androidserial::HoldLogs hold(held);
             ++generation_;
             // A listener that reconnected from that notification is overruled
             // by this call, which came first: androidserial::setup() closes
             // its connection.
             bool listenerReopened = closed && isOpenLocked();
             if (listenerReopened) {
-                logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
+                held(LogLevel::Warning) << "Serial: setup() closes the port an onDisconnect listener opened";
             }
             // Otherwise the backend closes a connection only when the pending
             // permission for this device came through after the check above.
@@ -536,13 +607,14 @@ public:
         // The previous port closes first, and onDisconnect reports it with
         // the lock released
         close();
+        internal::SerialHeldLog held;  // sent after the lock is released
         Exclusive lock(lock_);
         ++generation_;
         // A port opened since then, by a listener of that notification (or by
         // another thread), is overruled by this call, which came first. Close
         // it without another notification.
-        if (closePort()) {
-            logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
+        if (closePort(held)) {
+            held(LogLevel::Warning) << "Serial: setup() closes the port an onDisconnect listener opened";
         }
 #endif
 
@@ -563,7 +635,7 @@ public:
                               nullptr);
 
         if (handle_ == INVALID_HANDLE_VALUE) {
-            logError() << "Serial: failed to open " << portName << " (error: " << GetLastError() << ")";
+            held(LogLevel::Error) << "Serial: failed to open " << portName << " (error: " << GetLastError() << ")";
             return false;
         }
 
@@ -583,7 +655,7 @@ public:
         DCB dcb = {};
         dcb.DCBlength = sizeof(DCB);
         if (!GetCommState(handle_, &dcb)) {
-            logError() << "Serial: failed to get comm state";
+            held(LogLevel::Error) << "Serial: failed to get comm state";
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
             return false;
@@ -609,7 +681,7 @@ public:
         dcb.fAbortOnError = FALSE;
 
         if (!SetCommState(handle_, &dcb)) {
-            logError() << "Serial: failed to set comm state";
+            held(LogLevel::Error) << "Serial: failed to set comm state";
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
             return false;
@@ -625,7 +697,7 @@ public:
         baudRate_ = baudRate;
         initialized_ = true;
         writeTimeoutWarned_ = false;
-        logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
+        held(LogLevel::Notice) << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
 
 #elif !defined(__ANDROID__)
@@ -633,20 +705,20 @@ public:
         // Reject a nonsense rate before opening: opening asserts DTR, which
         // resets auto-reset boards such as most Arduinos.
         if (baudRate <= 0) {
-            logError() << "Serial: invalid baud rate " << baudRate;
+            held(LogLevel::Error) << "Serial: invalid baud rate " << baudRate;
             return false;
         }
 
         // Open device (non-blocking)
         fd_ = open(portName.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (fd_ == -1) {
-            logError() << "Serial: failed to open " << portName;
+            held(LogLevel::Error) << "Serial: failed to open " << portName;
             return false;
         }
 
         // Get exclusive lock
         if (ioctl(fd_, TIOCEXCL) == -1) {
-            logError() << "Serial: failed to get exclusive access";
+            held(LogLevel::Error) << "Serial: failed to get exclusive access";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -655,7 +727,7 @@ public:
         // Get terminal settings
         struct termios options;
         if (tcgetattr(fd_, &options) == -1) {
-            logError() << "Serial: failed to get terminal attributes";
+            held(LogLevel::Error) << "Serial: failed to get terminal attributes";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -696,7 +768,7 @@ public:
 
         // Apply settings
         if (tcsetattr(fd_, TCSANOW, &options) == -1) {
-            logError() << "Serial: failed to set terminal attributes";
+            held(LogLevel::Error) << "Serial: failed to set terminal attributes";
             ::close(fd_);
             fd_ = -1;
             return false;
@@ -711,7 +783,7 @@ public:
             if (internal::readSerialBaudRate(fd_, readBack)) appliedBaudRate = readBack;
         } else if (!internal::setSerialCustomBaudRate(fd_, baudRate, appliedBaudRate)) {
             int err = errno;
-            logError() << "Serial: cannot set " << baudRate << " baud on " << portName
+            held(LogLevel::Error) << "Serial: cannot set " << baudRate << " baud on " << portName
                        << " (" << std::strerror(err) << ")";
             ::close(fd_);
             fd_ = -1;
@@ -723,12 +795,12 @@ public:
         if (!internal::isBaudRateClose(baudRate, appliedBaudRate)) {
             if (havePreviousRate && appliedBaudRate == previousBaudRate &&
                 driverIgnoresBaudRates(previousBaudRate)) {
-                logWarning() << "Serial: the driver of " << portName << " does not apply baud rates"
+                held(LogLevel::Warning) << "Serial: the driver of " << portName << " does not apply baud rates"
                              << " (it keeps " << previousBaudRate << "), so " << baudRate
                              << " has no effect there";
                 appliedBaudRate = baudRate;
             } else {
-                logError() << "Serial: cannot set " << baudRate << " baud on " << portName
+                held(LogLevel::Error) << "Serial: cannot set " << baudRate << " baud on " << portName
                            << " (the driver applied " << appliedBaudRate << ")";
                 ::close(fd_);
                 fd_ = -1;
@@ -746,10 +818,10 @@ public:
         baudRate_ = appliedBaudRate;
         initialized_ = true;
         if (appliedBaudRate != baudRate) {
-            logWarning() << "Serial: requested " << baudRate << " baud on " << portName
+            held(LogLevel::Warning) << "Serial: requested " << baudRate << " baud on " << portName
                          << ", the driver applied " << appliedBaudRate;
         }
-        logNotice() << "Serial: connected to " << portName << " at " << appliedBaudRate << " baud";
+        held(LogLevel::Notice) << "Serial: connected to " << portName << " at " << appliedBaudRate << " baud";
         return true;
 #endif
     }
@@ -770,8 +842,9 @@ public:
     void close() {
         PendingDisconnect closed;
         {
+            internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
-            closeLocked(closed);
+            closeLocked(closed, held);
         }
         notifyDisconnect(closed);  // lock released: a listener may call setup() again
     }
@@ -1152,15 +1225,17 @@ private:
     }
 #endif
 
-    // A reader-writer lock that lets a waiting writer in first: once lock()
-    // waits, new lock_shared() calls wait behind it, so I/O calls that keep
-    // coming cannot starve a close(). std::shared_mutex does not promise
-    // that (libstdc++ uses glibc's reader-preferring pthread_rwlock). Serial's
-    // own calls never take it twice (the *Locked() helpers expect it held).
-    // The thread that holds it exclusive may take it again, shared or
-    // exclusive: Serial logs while opening and closing, and a Logger listener
-    // on that thread may use this Serial (other threads: see "Logger
-    // listeners" at the top of this file).
+    // A reader-writer lock with two rules:
+    // 1. The I/O calls share it.
+    // 2. Opening and closing take it alone: they wait until no I/O call is
+    //    left, and while they wait, new I/O calls wait behind them, so I/O
+    //    calls that keep coming cannot starve a close().
+    // std::shared_mutex does not promise rule 2 (libstdc++ uses glibc's
+    // reader-preferring pthread_rwlock), so Serial has its own. No thread
+    // takes it twice: the public calls never call each other with it held
+    // (the *Locked() helpers expect it held), and nothing that could call
+    // back into Serial runs under it (log lines wait in SerialHeldLog,
+    // onDisconnect fires after it).
 #if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
     struct PortLock {  // no threads: nothing to wait for
         void lock() {}
@@ -1171,40 +1246,26 @@ private:
 #else
     struct PortLock {
         std::mutex m;
-        std::condition_variable entry;    // anyone, while a writer is in or waiting
+        std::condition_variable entry;    // new callers, while a writer is in or waits
         std::condition_variable drained;  // the writer, for the readers to leave
         bool writer = false;              // a writer holds it or waits for readers
-        std::thread::id owner;            // that writer, once it holds it
-        unsigned depth = 0;               // the owner's nested lock() / lock_shared()
         unsigned readers = 0;
 
         void lock() {
             std::unique_lock<std::mutex> g(m);
-            if (writer && owner == std::this_thread::get_id()) {
-                ++depth;
-                return;
-            }
             entry.wait(g, [this] { return !writer; });
             writer = true;
             drained.wait(g, [this] { return readers == 0; });
-            owner = std::this_thread::get_id();
-            depth = 1;
         }
         void unlock() {
             {
                 std::lock_guard<std::mutex> g(m);
-                if (--depth > 0) return;
-                owner = std::thread::id();
                 writer = false;
             }
             entry.notify_all();
         }
         void lock_shared() {
             std::unique_lock<std::mutex> g(m);
-            if (writer && owner == std::this_thread::get_id()) {
-                ++depth;
-                return;
-            }
             entry.wait(g, [this] { return !writer; });
             ++readers;
         }
@@ -1212,10 +1273,6 @@ private:
             bool last;
             {
                 std::lock_guard<std::mutex> g(m);
-                if (writer && owner == std::this_thread::get_id()) {
-                    --depth;
-                    return;
-                }
                 last = --readers == 0 && writer;
             }
             if (last) drained.notify_one();
@@ -1314,6 +1371,7 @@ private:
         PendingDisconnect lost;
         std::string port;
         {
+            internal::SerialHeldLog held;  // sent after the lock is released
             Exclusive lock(lock_);
             if (generation_ != loss.generation || !isOpenLocked()) return;
             initialized_ = false;  // isConnected() reads it without the lock
@@ -1323,6 +1381,7 @@ private:
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
 #elif defined(__ANDROID__)
+            androidserial::HoldLogs hold(held);
             androidserial::close(aimpl_, loss.reason);
 #else
             ::close(fd_);
@@ -1338,16 +1397,18 @@ private:
     }
 
     // close() with the lock held exclusive: closes the port and sets `closed`
-    // to the notification to fire once the lock is released
-    void closeLocked(PendingDisconnect& closed) {
+    // to the notification to fire once the lock is released. Its log lines
+    // go to held.
+    void closeLocked(PendingDisconnect& closed, internal::SerialHeldLog& held) {
 #if defined(__ANDROID__)
+        androidserial::HoldLogs hold(held);
         std::string lostReason;
         androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
                                                   : androidserial::CloseResult::NotOpen;
         initialized_ = false;
         closed = closeArgs(ended, lostReason, devicePath_, baudRate_);
 #else
-        if (closePort()) closed = disconnectArgs("closed by close()", true);
+        if (closePort(held)) closed = disconnectArgs("closed by close()", true);
 #endif
     }
 
@@ -1383,22 +1444,22 @@ private:
 #else
     // Close the port without firing onDisconnect (the destructor, a move
     // assignment, and close() before it notifies). Returns whether it was
-    // open. With the lock held exclusive.
-    bool closePort() {
+    // open. With the lock held exclusive; its log line goes to held.
+    bool closePort(internal::SerialHeldLog& held) {
         initialized_ = false;  // isConnected() reads it without the lock
 #if defined(_WIN32)
         bool wasOpen = handle_ != INVALID_HANDLE_VALUE;
         if (wasOpen) {
             CloseHandle(handle_);
             handle_ = INVALID_HANDLE_VALUE;
-            logVerbose() << "Serial: disconnected from " << devicePath_;
+            held(LogLevel::Verbose) << "Serial: disconnected from " << devicePath_;
         }
 #else
         bool wasOpen = fd_ != -1;
         if (wasOpen) {
             ::close(fd_);
             fd_ = -1;
-            logVerbose() << "Serial: disconnected from " << devicePath_;
+            held(LogLevel::Verbose) << "Serial: disconnected from " << devicePath_;
         }
 #endif
         return wasOpen;
