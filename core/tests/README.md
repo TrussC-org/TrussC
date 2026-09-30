@@ -275,7 +275,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
 - `extensionCase/` — loaders and savers match the file extension
-  case-insensitively and use the path as given (#305). `Sound::load()` picks
+  case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
   `SoundBuffer::load()` and `loadStream()` do (garbage under such a name
   reaches the decoder instead of failing as an unsupported extension), and

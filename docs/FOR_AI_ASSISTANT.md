@@ -668,9 +668,11 @@ File extensions are matched case-insensitively; file names keep their case as wr
 Wherever TrussC picks a format from the extension (`Sound::load`, `Pixels::save`,
 `saveScreenshot`, the hot reload watcher, ...), `photo.JPG`, `loop.Wav` and
 `shot.Png` pick the same decoder or encoder as lower case. The file opened or
-written is exactly the one named: on a case-sensitive file system `a.wav` and
-`a.WAV` stay two files. `getFileExtension()` returns the extension as written;
-compare `toLower(getFileExtension(path))` to do the same in app code.
+written is exactly the one named (except `saveScreenshot` on Windows, which
+appends `.png` to an unknown extension; see #455): on a case-sensitive file
+system `a.wav` and `a.WAV` stay two files. `getFileExtension()` returns the
+extension as written; compare `toLower(getFileExtension(path))` to do the same
+in app code.
 
 ## 3D
 
@@ -3753,7 +3755,7 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the path is used as given)
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
 LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.

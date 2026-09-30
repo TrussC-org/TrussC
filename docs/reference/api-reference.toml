@@ -8462,9 +8462,9 @@ description.ko = "loadStream()으로 로드되었으면 true"
 ["Sound::load"]
 category = "sound"
 keywords = ["open", "read", "file"]
-description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the path is used as given)"
-description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。パスは指定どおりに使う）"
-description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 경로는 지정한 그대로 사용)"
+description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)"
+description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）"
+description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지)"
 
 ["Sound::loadFromBuffer"]
 description.en = "Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr."
