@@ -26,15 +26,21 @@
 //     destructor has started. Before #256 the audio thread kept calling the
 //     derived audioOut() until ~App() disconnected it, after the derived
 //     members were already gone.
-//   - AudioRecorder::stop() waits for the audioOut pass in flight.
+//   - AudioRecorder::stop() waits for the audioOut pass in flight, and a
+//     capture still in flight when stop() is called (held by a test hook
+//     after its checks, before it hands the buffer to the writer) ends up in
+//     the WAV and in getRecordedSeconds(): the writer keeps draining until
+//     stop()'s barrier has passed.
 // =============================================================================
 
 #include <TrussC.h>
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -306,6 +312,61 @@ int main() {
               entered && !inside.load(), ms(took));
         slow.disconnect();
         engine.waitForCallbackIdle();
+        std::error_code ec;
+        fs::remove(wav, ec);
+    }
+
+    // --- AudioRecorder::stop(): a capture in flight still reaches the file ---------------
+    // A capture that passed its checks and copied its buffer, but has not handed
+    // it to the writer yet, is held there (test hook) while another thread calls
+    // stop(). The writer must keep draining until stop()'s barrier has seen that
+    // capture finish: the buffer is in the WAV and in getRecordedSeconds().
+    // Before, the writer followed running_, which stop() clears first; with
+    // nothing pending it finished during the hold, and the buffer was lost.
+    {
+        static atomic<uint64_t> accepted{0};
+        static atomic<bool> armed{false}, holding{false}, release{false};
+        internal::setAudioRecorderCaptureHookForTests([](int frames) {
+            accepted += (uint64_t)frames;
+            if (!armed.exchange(false)) return;
+            holding = true;
+            while (!release) this_thread::sleep_for(chrono::milliseconds(1));
+            holding = false;
+        });
+        const fs::path wav = fs::temp_directory_path() / "tc_audioListenerTeardown_inflight.wav";
+        AudioRecorder rec;   // engine 2 ch -> stereo s16
+        const bool recording = rec.start(wav);
+        const bool some = waitFor([&] { return accepted.load() >= 2048; }, 3000);
+        armed = true;
+        const bool held = waitFor([&] { return holding.load(); }, 3000);
+        thread stopper([&] { rec.stop(); });
+        // Longer than the writer's 10 ms poll: a writer that followed running_
+        // sees it cleared with nothing pending and finishes in here.
+        this_thread::sleep_for(chrono::milliseconds(100));
+        release = true;
+        stopper.join();
+        internal::setAudioRecorderCaptureHookForTests(nullptr);
+
+        const uint64_t want = accepted.load();
+        const uint64_t counted = (uint64_t)llround(rec.getRecordedSeconds() * settings.sampleRate);
+        uint32_t dataBytes = 0;
+        uintmax_t fileBytes = 0;
+        {
+            ifstream f(wav, ios::binary);
+            char tag[4] = {};
+            f.seekg(36);
+            f.read(tag, 4);
+            f.read(reinterpret_cast<char*>(&dataBytes), 4);
+            if (string(tag, 4) != "data") dataBytes = 0;
+            std::error_code ec;
+            fileBytes = fs::file_size(wav, ec);
+        }
+        const uint64_t inFile = dataBytes / (2 * sizeof(int16_t));
+        check("AudioRecorder records and a capture is held in flight", recording && some && held);
+        check("the held capture's buffer is counted by getRecordedSeconds()", counted == want,
+              to_string(counted) + " of " + to_string(want) + " frames");
+        check("... and written to the WAV", inFile == want && fileBytes == 44u + dataBytes,
+              to_string(inFile) + " of " + to_string(want) + " frames, " + to_string(fileBytes) + " bytes");
         std::error_code ec;
         fs::remove(wav, ec);
     }

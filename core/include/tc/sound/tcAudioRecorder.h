@@ -33,6 +33,16 @@
 
 namespace trussc {
 
+namespace internal {
+// Test hook, not a user setting: the audio-thread capture calls `hook` with
+// the frame count of every buffer it takes, after copying it into the ring
+// and before handing it to the writer, so a headless test can hold a capture
+// in flight (core/tests/audioListenerTeardown). nullptr, the default, turns
+// it off. State lives in tcAudio_impl.cpp.
+void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+}
+
 // -----------------------------------------------------------------------------
 // AudioRecordSettings
 // -----------------------------------------------------------------------------
@@ -115,6 +125,7 @@ public:
         framesWritten_.store(0, std::memory_order_relaxed);
 
         running_.store(true, std::memory_order_release);
+        writing_.store(true, std::memory_order_release);
         writer_ = std::thread([this] { writerLoop(); });
 
         // Monitor priority: runs after every generator/effect listener, so the
@@ -129,15 +140,24 @@ public:
         return true;
     }
 
-    // Stop and finalize the file. Safe to call when not recording. May wait
-    // for a capture already running on the audio thread (about one buffer).
+    // Stop and finalize the file. Safe to call when not recording.
+    // It waits on AudioEngine::waitForCallbackIdle(), the engine-wide barrier:
+    // for every audioOut / audioIn listener running at that moment, not only
+    // this recorder's capture (usually well under one buffer). So don't call
+    // it while holding a lock that an audioOut / audioIn listener takes: the
+    // listener would block on it, stop() would wait up to one second for it,
+    // and the audio drops out meanwhile.
     void stop() {
         if (!running_.exchange(false, std::memory_order_acq_rel)) return;
         listener_ = EventListener();   // unsubscribe (audio thread stops feeding)
         // Unsubscribing does not wait for a capture() already running on the
-        // audio thread: wait for it before the writer's final drain, and
-        // before the ring can be refilled by start() or freed (#256).
+        // audio thread: one that passed its running_ check before the exchange
+        // above may still be copying into the ring (#256). Wait for it, and
+        // only then let the writer finish, so its final drain includes that
+        // buffer. The wait also comes before the ring can be refilled by
+        // start() or freed.
         AudioEngine::getInstance().waitForCallbackIdle();
+        writing_.store(false, std::memory_order_release);
         if (writer_.joinable()) writer_.join();
         patchHeader();
         file_.close();
@@ -187,6 +207,7 @@ private:
         const size_t first = std::min(n, ringCap_ - at);
         std::memcpy(ring_.data() + at, b.data, first * sizeof(float));
         if (n > first) std::memcpy(ring_.data(), b.data + first, (n - first) * sizeof(float));
+        internal::runAudioRecorderCaptureHookForTests(b.frameCount);
         head_.store(head + n, std::memory_order_release);
     }
 
@@ -195,7 +216,9 @@ private:
         std::vector<float> chunk;      // interleaved engine-format samples
         std::vector<float> mapped;     // interleaved file-format samples
         std::vector<int16_t> s16;
-        while (running_.load(std::memory_order_acquire) || pending() > 0) {
+        // writing_, not running_: stop() clears it only after the captures
+        // in flight have finished, so the final sweep sees their samples.
+        while (writing_.load(std::memory_order_acquire) || pending() > 0) {
             drain(chunk, mapped, s16);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
@@ -312,7 +335,8 @@ private:
     std::atomic<uint64_t> head_{0}, tail_{0};      // in floats
     std::atomic<uint64_t> droppedFrames_{0};       // in frames
     std::atomic<uint64_t> framesWritten_{0};       // in frames
-    std::atomic<bool>     running_{false};
+    std::atomic<bool>     running_{false};   // capture() takes buffers
+    std::atomic<bool>     writing_{false};   // the writer keeps draining (see stop())
 
     std::thread   writer_;
     EventListener listener_;

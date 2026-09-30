@@ -101,8 +101,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   hook through `cleanup()`, then its destructor neither starts during
   `audioOut()` nor sees it called afterwards (the windowed exit, hot reload
   and closing a secondary window use the same `internal::detachAppAudio()`);
-  `AudioRecorder::stop()` waits for the pass in flight. A watchdog turns a
-  barrier that never returns into a FAIL.
+  `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
+  flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
+  while another thread calls `stop()` still ends up in the WAV and in
+  `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
+  a FAIL.
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×

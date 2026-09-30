@@ -25,6 +25,7 @@
 #include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
+#include "tc/sound/tcAudioRecorder.h"   // the capture test hook declared there
 
 #include <algorithm>
 #include <atomic>
@@ -55,6 +56,9 @@ ma_result maDecoderInitPathA(const fs::path& path,
 // Set by internal::setNullAudioBackendForTests(): the engine, device
 // enumeration and MicInput open miniaudio's null backend only.
 std::atomic<bool> g_nullBackendForTests{false};
+
+// Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
+std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
 const ma_backend kNullBackend = ma_backend_null;
 
 // ma_context_init with miniaudio's default backend order for the platform,
@@ -70,6 +74,15 @@ ma_result initContext(ma_context* ctx) {
 namespace internal {
 void setNullAudioBackendForTests(bool on) {
     g_nullBackendForTests.store(on, std::memory_order_relaxed);
+}
+
+void setAudioRecorderCaptureHookForTests(void (*hook)(int frames)) {
+    g_recorderCaptureHook.store(hook, std::memory_order_release);
+}
+
+void runAudioRecorderCaptureHookForTests(int frames) {
+    // Audio thread, once per captured buffer: one load when unset.
+    if (auto hook = g_recorderCaptureHook.load(std::memory_order_acquire)) hook(frames);
 }
 } // namespace internal
 
