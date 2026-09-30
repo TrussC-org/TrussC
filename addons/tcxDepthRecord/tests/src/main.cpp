@@ -19,7 +19,9 @@
 //      open; negative sizes and larger ones are refused.
 //   4. The parsers refuse a byte size above INT_MAX before allocating.
 //   5. Reopening one object warns about a skipped block again, and a failed
-//      reopen leaves the manifest empty.
+//      reopen leaves the manifest empty. A refused open (wrong magic, manifest
+//      count, header frame size) doesn't keep the file open, and the same
+//      object then opens a valid file; setup() twice opens again.
 //   6. depthToImage() draws nothing for a depth plane shorter than w*h.
 //
 // Pass a name fragment as the first argument to run only the matching cases.
@@ -798,6 +800,90 @@ static void runReopen(const filesystem::path& dir) {
           !p.hasBlockType(BLOCK_DEPTH));
 }
 
+// Whether this process has `path` open. Read from /proc/self/fd on Linux;
+// elsewhere it isn't checked and counts as closed.
+static bool fileHeldOpen(const filesystem::path& path) {
+#if defined(__linux__)
+    error_code ec;
+    const filesystem::path want = filesystem::canonical(path, ec);
+    if (ec) return false;
+    for (const auto& fd : filesystem::directory_iterator("/proc/self/fd", ec)) {
+        error_code lec;
+        const filesystem::path target = filesystem::read_symlink(fd.path(), lec);
+        if (!lec && target == want) return true;
+    }
+#else
+    (void)path;
+#endif
+    return false;
+}
+
+// An open refused for the file's contents doesn't keep the file open, and the
+// same object then opens a valid file at the same path. setup() twice without
+// close() in between opens the file again.
+static void runReopenAfterRefusal(const filesystem::path& dir) {
+    struct Case { const char* name; function<void(vector<uint8_t>&)> apply; };
+    const Case cases[] = {
+        {"magicWrong", [](vector<uint8_t>& b) { b[0] = 'X'; }},
+        {"manifestOverLimit",
+         [](vector<uint8_t>& b) { b[offsetof(TcdcHeader, streamTypeCount)] = 200; }},
+        {"frameSizeOutOfRange",
+         [](vector<uint8_t>& b) { put32(b, offsetof(TcdcHeader, width), 0xFFFFFFC0u); }},
+    };
+    for (const Case& c : cases) {
+        const string base = string("reopenAfterRefusal/") + c.name;
+        if (!selected(base)) continue;
+        const filesystem::path path = dir / (string("reopenAfterRefusal-") + c.name + ".tcdc");
+        if (!writeRecording(path, Dims{}, DepthCodecId::HiloLZ4, ColorCodecId::LZ4)) {
+            check(base + ": write source recording", false);
+            continue;
+        }
+        const vector<uint8_t> valid = readAll(path);
+        vector<uint8_t> bytes = valid;
+        c.apply(bytes);
+        writeAll(path, bytes);
+
+        LogCapture cap;
+        ProbePlayback p(path.string());
+        p.enableDepth();
+        p.enableColor();
+        p.setLoop(false);
+        const bool refused = !p.setup();
+        check(base + ": refused open doesn't keep the file open",
+              refused && !fileHeldOpen(path));
+
+        writeAll(path, valid);
+        const bool opened = p.setup();
+        p.update();
+        const bool reopened = opened && p.getFrameCount() == FRAMES && p.isFrameNew() &&
+                              p.isColorFrameNew() && cap.lines.size() == 1;
+        check(base + ": valid file opens on the same object", reopened);
+        if (!reopened) {
+            for (const string& line : cap.lines) printf("  logged: %s\n", line.c_str());
+        }
+        p.close();
+    }
+
+    const string base = "reopenAfterRefusal/setupTwice";
+    if (!selected(base)) return;
+    const filesystem::path path = dir / "reopenAfterRefusal-setupTwice.tcdc";
+    if (!writeRecording(path, Dims{}, DepthCodecId::HiloLZ4, ColorCodecId::LZ4)) {
+        check(base + ": write source recording", false);
+        return;
+    }
+    LogCapture cap;
+    ProbePlayback p(path.string());
+    p.enableDepth();
+    p.setLoop(false);
+    const bool first = p.setup();
+    const bool second = p.setup();
+    p.update();
+    check(base + ": second setup() opens again",
+          first && second && p.getFrameCount() == FRAMES && p.isFrameNew() &&
+          cap.lines.empty());
+    p.close();
+}
+
 // -----------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
@@ -866,6 +952,7 @@ int main(int argc, char** argv) {
 
     // ----- 5. reopen ----------------------------------------------------------
     runReopen(dir);
+    runReopenAfterRefusal(dir);
 
     // ----- 6. depthToImage ----------------------------------------------------
     if (selected("depthToImageShortPlane")) {
