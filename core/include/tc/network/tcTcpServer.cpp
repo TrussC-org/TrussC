@@ -192,6 +192,11 @@ private:
     int held_ = 0;
 };
 
+// The server whose accept thread this is, null on every other thread. stop()
+// and start() behave differently there, and asking the std::thread object
+// instead would race with a stop() on another thread moving it out to join it.
+thread_local const TcpServer* tlAcceptThreadOf = nullptr;
+
 } // namespace
 
 // =============================================================================
@@ -238,16 +243,15 @@ TcpServer::~TcpServer() {
 bool TcpServer::start(int port, int maxClients) {
     // A listener on the accept thread cannot restart the server from there:
     // the old accept thread would have to be joined, and it is the caller.
-    if (acceptThread_.joinable() && acceptThread_.get_id() == std::this_thread::get_id()) {
+    if (tlAcceptThreadOf == this) {
         logError() << "TcpServer::start() cannot be called from the server's own accept thread";
         return false;
     }
 
-    // An accept thread can outlive running_ when stop() was called from it (a
-    // listener on one of its events); this is where it gets joined then.
-    if (running_ || acceptThread_.joinable()) {
-        stop();
-    }
+    // Tear down whatever is left. An accept thread can outlive running_ when
+    // stop() was called from it (a listener on one of its events), and so can
+    // client threads; this is where they get joined then. A no-op otherwise.
+    stop();
 
     port_ = port;
     maxClients_ = maxClients < 0 ? 0 : maxClients;
@@ -307,8 +311,19 @@ bool TcpServer::start(int port, int maxClients) {
     // Accepted sockets are made non-blocking on their own below either way.
     setNonBlocking(serverSocket_);
 
+    // The accept thread owns the listening socket from here on and closes it
+    // on its way out, so a thread that cannot be started must close it here.
     running_ = true;
-    acceptThread_ = std::thread(&TcpServer::acceptThreadFunc, this);
+    try {
+        std::thread accept(&TcpServer::acceptThreadFunc, this);
+        std::lock_guard<std::mutex> lock(acceptThreadMutex_);
+        acceptThread_ = std::move(accept);
+    } catch (const std::system_error& e) {
+        running_ = false;
+        releaseListenSocket(true);
+        notifyError("Failed to start the accept thread", e.code().value());
+        return false;
+    }
 
     logNotice() << "TCP server started on port " << port;
     return true;
@@ -319,40 +334,50 @@ void TcpServer::stop() {
     // logging "stopped" from e.g. a static instance's destructor in a CLI
     // that never called start() would be announcing an event that didn't
     // happen. Cleanup below is idempotent either way.
-    bool wasRunning = running_;
-    running_ = false;
+    const bool wasRunning = running_.exchange(false);
 
-    const bool onAcceptThread = acceptThread_.joinable() &&
-                                acceptThread_.get_id() == std::this_thread::get_id();
-
-    // Wake the accept loop, wait for it, and only then close the listening
-    // socket: closing it while the loop still waits on it could hand the
-    // descriptor to something else first. The loop waits in slices, so it
-    // notices running_ even where shutdown() does not wake the wait.
-    releaseListenSocket(false);
-
-    if (onAcceptThread) {
+    if (tlAcceptThreadOf == this) {
         // Called from the accept thread itself: a listener on an event that
         // fires there (onClientConnect, onError about accepting, or
         // onClientDisconnect for a client whose receive thread could not
-        // start). That thread cannot join itself, but it is also the only one
-        // that uses the listening socket, and it is done with it: once the
-        // listener returns it sees running_ and leaves the loop. So the socket
-        // is closed here, before stop() returns. shutdown() alone tears a
-        // listener down on Linux only; on macOS and Windows the socket would
-        // keep listening, holding the port and completing connections that
-        // nobody accepts. The thread itself is joined by the next stop(),
-        // start() or the destructor.
+        // start). It waits for nothing. The accept thread cannot join itself,
+        // and it must not join client threads either: one of them may be in a
+        // stop() of its own, waiting for this very thread to end.
+        //
+        // It is the only thread that uses the listening socket, and it is done
+        // with it, so the socket is closed here, before stop() returns.
+        // shutdown() alone tears a listener down on Linux only; on macOS and
+        // Windows the socket would keep listening, holding the port and
+        // completing connections that nobody accepts. Once the listener
+        // returns, the loop sees running_ and ends, and the accept thread
+        // disconnects every client on its way out (acceptThreadFunc). The
+        // client threads and the accept thread itself are joined by the next
+        // stop(), start() or the destructor.
         releaseListenSocket(true);
-    } else {
-        // Wait for accept thread
-        if (acceptThread_.joinable()) {
-            acceptThread_.join();
-        }
-        releaseListenSocket(true);
+        if (wasRunning) logNotice() << "TCP server stopped";
+        return;
     }
 
-    // Disconnect all clients
+    // Wake the accept loop and wait for it. The loop waits in slices, so it
+    // notices running_ even where shutdown() does not wake the wait. On its
+    // way out it disconnects every client and closes the listening socket,
+    // which it alone uses: closing it from here while the loop still waits on
+    // it could hand the descriptor to something else first.
+    releaseListenSocket(false);
+
+    // Moved out under the lock, so that of two threads stopping at once only
+    // one joins it; the other finds nothing to join. Joined outside the lock:
+    // the accept thread's own stop() never takes it.
+    std::thread accept;
+    {
+        std::lock_guard<std::mutex> lock(acceptThreadMutex_);
+        accept = std::move(acceptThread_);
+    }
+    if (accept.joinable()) accept.join();
+
+    // Join the client threads (the accept thread has already disconnected
+    // their clients), and disconnect any client it has not: a stop() that
+    // found no accept thread to join does not wait for it.
     disconnectAllClients();
 
     // Every receive thread has been joined above (except the caller's own, if
@@ -367,10 +392,11 @@ void TcpServer::stop() {
 }
 
 void TcpServer::releaseListenSocket(bool andClose) {
-    // stop() can run on the accept thread and on another thread at once. The
-    // lock makes them take turns, and whoever closes the socket marks it gone
-    // under the same lock, so exactly one of them closes it and neither ever
-    // shuts down or closes a descriptor that has been handed out again.
+    // stop() on another thread shuts the socket down while the accept thread
+    // closes it (in a stop() of its own, or on its way out). The lock makes
+    // them take turns, and whoever closes the socket marks it gone under the
+    // same lock, so exactly one of them closes it and neither ever shuts down
+    // or closes a descriptor that has been handed out again.
     std::lock_guard<std::mutex> lock(listenSocketMutex_);
     if (serverSocket_ == INVALID_SOCKET) return;
     if (andClose) {
@@ -393,6 +419,7 @@ bool TcpServer::isRunning() const {
 // Accept thread
 // =============================================================================
 void TcpServer::acceptThreadFunc() {
+    tlAcceptThreadOf = this;
     LogThrottle fullLog;    // connections closed because the server is full
 
     // Each kind of failure has its own throttle, so one that persists does not
@@ -576,6 +603,18 @@ void TcpServer::acceptThreadFunc() {
 
         backoffMs = 0;
     }
+
+    // The server is stopping, whether stop() was called here (by a listener)
+    // or on another thread. Every client is disconnected before this thread
+    // ends, so none is left connected however stop() was reached, but none of
+    // their threads is joined: one of them may be in a stop() of its own,
+    // waiting for this thread to end. Whoever joins this thread joins those.
+    shutAllClients();
+
+    // This thread is the only one that uses the listening socket, so it
+    // closes it (unless stop() on this thread already has).
+    releaseListenSocket(true);
+    tlAcceptThreadOf = nullptr;
 }
 
 void TcpServer::reapClientThreads() {
@@ -782,20 +821,38 @@ void TcpServer::disconnectAllClients() {
             }
             it = clientThreads_.erase(it);
         }
-        // Writers whose client was already gone from the registry, so nothing
-        // above claimed them
-        for (auto& pair : clientWriters_) {
-            if (pair.second.joinable()) {
-                threadsToJoin.push_back(std::move(pair.second));
+        // Writers whose client was already gone from the registry (the accept
+        // thread disconnects clients without joining their writers), so
+        // nothing above claimed them. The caller's own writer, if it is one
+        // (stop() from onSendComplete), stays behind like its receive thread.
+        for (auto it = clientWriters_.begin(); it != clientWriters_.end();) {
+            if (it->second.get_id() == std::this_thread::get_id()) {
+                ++it;
+                continue;
             }
+            if (it->second.joinable()) {
+                threadsToJoin.push_back(std::move(it->second));
+            }
+            it = clientWriters_.erase(it);
         }
-        clientWriters_.clear();
     }
 
     // Join threads without holding mutex
     for (auto& t : threadsToJoin) {
         t.join();
     }
+}
+
+void TcpServer::shutAllClients() {
+    std::vector<std::shared_ptr<internal::TcpSendChannel>> channels;
+    {
+        std::unique_lock<std::shared_mutex> lock(clientsMutex_);
+        for (const auto& pair : clients_) channels.push_back(pair.second.channel_);
+        clients_.clear();
+    }
+    // Outside clientsMutex_, like closeChannel(). The threads stay in
+    // clientThreads_ and clientWriters_ for disconnectAllClients() to join.
+    for (const auto& ch : channels) shutChannel(ch);
 }
 
 bool TcpServer::removeClient(int clientId) {
@@ -861,13 +918,13 @@ TcpServer::snapshotChannels() const {
     return out;
 }
 
-void TcpServer::closeChannel(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch) {
-    if (!ch) return;
+bool TcpServer::shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch) {
+    if (!ch) return false;
     // Order matters: refuse new sends, wake everything parked on the channel,
     // then shut the socket down so a send already blocked inside the kernel
     // returns. The descriptor itself is closed by the writer thread on its way
-    // out — joining it below is what makes that ordering safe.
-    if (!ch->open.exchange(false)) return;
+    // out, never here, so this cannot pull it out from under a send in flight.
+    if (!ch->open.exchange(false)) return false;
 
     // The shutdown goes under the mutex because the writer closes the
     // descriptor under it too: without that, a writer that woke, found the
@@ -889,6 +946,11 @@ void TcpServer::closeChannel(int clientId, const std::shared_ptr<internal::TcpSe
     }
     ch->queued.notify_all();
     ch->room.notify_all();
+    return true;
+}
+
+void TcpServer::closeChannel(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch) {
+    if (!shutChannel(ch)) return;
 
     // Wait for the writer to drain what is left of the queue — every queued id
     // still has to complete exactly once — and to close the descriptor.
