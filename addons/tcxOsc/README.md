@@ -28,7 +28,9 @@ and other bundles.
 - **Bundles** — build nested `OscBundle`s with a timetag; the receiver dispatches each
   contained message individually (and also emits `onBundleReceived`).
 - **Robust parser** — malformed packets are rejected (reported via `onParseError`)
-  rather than crashing.
+  rather than crashing. Bundles nest up to `OscBundle::MAX_NESTING_DEPTH` (16)
+  levels; a packet nested deeper, or one whose nested bundle fails to parse, is
+  rejected as a whole.
 
 ## Install
 
@@ -131,7 +133,10 @@ bundle.setTimetag(ntp);            // optional scheduled execution (NTP format)
 
 size_t count = bundle.getElementCount();
 if (bundle.isMessage(i)) OscMessage m = bundle.getMessageAt(i);
-if (bundle.isBundle(i))  OscBundle  b = bundle.getBundleAt(i);
+if (bundle.isBundle(i))  OscBundle  b = bundle.getBundleAt(i);   // copy
+const OscBundle* child = bundle.bundleAt(i);  // no copy; nullptr if not a bundle
+
+OscBundle::MAX_NESTING_DEPTH       // 16: deepest nesting the parser accepts
 ```
 
 ### OscSender
