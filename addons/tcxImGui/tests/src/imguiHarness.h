@@ -68,9 +68,20 @@ public:
     // The UI every frame draws until the next setUi()
     void setUi(Ui ui) { ui_ = std::move(ui); }
 
-    // One frame, as tcxImGui runs it: imguiBegin() ... imguiEnd() + render.
+    // Whether the app runs imgui in a window frame (checked at the start of
+    // each frame). Null: every frame. Emulates `if (showGui) { imguiBegin();
+    // ... imguiEnd(); }`.
+    void setImGuiWhen(std::function<bool()> when) { imguiWhen_ = std::move(when); }
+
+    // One window frame, as tcxImGui runs it: imguiBegin() ... imguiEnd() +
+    // render; or, in a frame where the app runs no imgui, what ImGuiManager's
+    // render listener does then.
     void frame() {
         ImGui::SetCurrentContext(ctx_);
+        if (imguiWhen_ && !imguiWhen_()) {
+            tcx::imgui::detail::settleWithoutImGuiFrame(ctx_);
+            return;
+        }
         ImGui::NewFrame();
         tcx::imgui::beginFrame();
         if (ui_) ui_();
@@ -131,6 +142,7 @@ private:
     ImGuiContext* ctx_ = nullptr;
     ImGuiContext* prev_ = nullptr;
     Ui ui_;
+    std::function<bool()> imguiWhen_;
 };
 
 // Calls an MCP tool the way tc::mcp::processHttpQueue() does, on this thread.
@@ -140,8 +152,10 @@ private:
 // at another target is answered when its owner drains it (up to `maxFrames`).
 // Returns the tool's result (the JSON in its text content). `deferred` tells
 // whether it deferred, `frames` how many frames the reply took.
+// `beforeFrames` runs between the call and the first frame.
 inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const nlohmann::json& args,
-                               bool* deferred = nullptr, int* frames = nullptr, int maxFrames = 10) {
+                               bool* deferred = nullptr, int* frames = nullptr, int maxFrames = 10,
+                               const std::function<void()>& beforeFrames = nullptr) {
     namespace md = tc::mcp::detail;
     tcx::imgui::registerImGuiTools();   // idempotent
     nlohmann::json req = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
@@ -168,6 +182,7 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
         ds.hasEnvelope = false;
         ds.target = nullptr;
         reply.clear();
+        if (beforeFrames) beforeFrames();
         for (int i = 0; i < maxFrames; i++) {
             h.frame();
             tc::mcp::drainDeferredResponses();   // the main window's afterFrame

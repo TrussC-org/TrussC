@@ -34,12 +34,23 @@
 //     CheckboxFlags and ColorPicker3 take the value (once, without Edited); a
 //     clipped Checkbox is written; a copy that ignores the return value gets
 //     the verify error; disabled and read-only widgets are refused
+//   - every settable widget used as a copy applied only on true takes the
+//     value, whichever return it leaves by (clipped, popup open, text mode)
+//   - a disabled MenuItem / Selectable and the ReadOnly flags are refused; a
+//     clamp or conversion after the return is ok with the value held
+//   - a frame without imgui settles the reply at once; a widget that runs
+//     past the value's lifetime is not written
+//   - tcxNodeInspector does not record an injected value as a hand edit
 // =============================================================================
 
 #include "imguiHarness.h"
+#include <tcxNodeInspector.h>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <thread>
 
 using namespace std;
 using harness::callTool;
@@ -527,6 +538,291 @@ static void testValueInputReturnsTrue() {
     check("returns true: injected values not recorded as touched", tcx::imgui::getTouched().empty());
 }
 
+// ---------------------------------------------------------------------------
+// Every settable widget used as a copy the app applies only when the widget
+// returns true (`T c = model; if (Widget(&c)) model = c;`): the model takes
+// the injected value, whichever return the widget leaves by.
+// ---------------------------------------------------------------------------
+static void testCopyOnReturn() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    float drag3M[3] = {0, 0, 0}, slider2M[2] = {0, 0}, colorM[4] = {1, 1, 1, 1}, picker4M[4] = {1, 1, 1, 1};
+    float sliderM = 0, angleM = 0, vsliderM = 0, inputFloatM = 0, tempDragM = 0, tempSliderM = 0;
+    int inputStepM = 0, inputEnterM = 0, input2M[2] = {0, 0}, comboM = 0, comboOpenM = 0, listM = 0,
+        listClippedM = 0, radioM = 0;
+    bool selM = false, menuM = false, farM = false, nearM = false;
+    bool clipList = false;
+    static const char* items[] = {"Zero", "One", "Two"};
+    // Copy `model` into a local, run the widget on it, copy it back on true
+    #define COPY_ON_TRUE(model, call) \
+        do { auto c = model; if (call) model = c; } while (0)
+    #define COPY_ARRAY_ON_TRUE(model, call) \
+        do { decltype(model) c; std::memcpy(c, model, sizeof(c)); if (call) std::memcpy(model, c, sizeof(c)); } while (0)
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(600, 740));
+        ImGui::Begin("Copies");
+        COPY_ARRAY_ON_TRUE(drag3M, ImGui::DragFloat3("c drag3", c));
+        COPY_ON_TRUE(sliderM, ImGui::SliderFloat("c slider", &c, 0, 10));
+        COPY_ARRAY_ON_TRUE(slider2M, ImGui::SliderFloat2("c slider2", c, 0, 10));
+        COPY_ON_TRUE(angleM, ImGui::SliderAngle("c angle", &c));
+        COPY_ON_TRUE(vsliderM, ImGui::VSliderFloat("c vslider", ImVec2(20, 60), &c, 0, 10));
+        COPY_ON_TRUE(inputStepM, ImGui::InputInt("c input step", &c));
+        COPY_ON_TRUE(inputFloatM, ImGui::InputFloat("c input float", &c));
+        COPY_ON_TRUE(inputEnterM, ImGui::InputInt("c input enter", &c, 1, 100, ImGuiInputTextFlags_EnterReturnsTrue));
+        COPY_ARRAY_ON_TRUE(input2M, ImGui::InputInt2("c input2", c));
+        COPY_ARRAY_ON_TRUE(colorM, ImGui::ColorEdit4("c color", c));
+        COPY_ON_TRUE(comboM, ImGui::Combo("c combo", &c, items, 3));
+        COPY_ON_TRUE(comboOpenM, ImGui::Combo("c combo open", &c, items, 3));
+        COPY_ON_TRUE(listM, ImGui::ListBox("c list", &c, items, 3));
+        COPY_ON_TRUE(radioM, ImGui::RadioButton("c radio", &c, 1));
+        COPY_ON_TRUE(selM, ImGui::Selectable("c selectable", &c));
+        COPY_ON_TRUE(menuM, ImGui::MenuItem("c menu item", nullptr, &c));
+        COPY_ON_TRUE(tempDragM, ImGui::DragFloat("c temp drag", &c));
+        COPY_ON_TRUE(tempSliderM, ImGui::SliderFloat("c temp slider", &c, 0, 10));
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(620, 10));
+        ImGui::SetNextWindowSize(ImVec2(300, 400));
+        ImGui::Begin("Big");
+        COPY_ARRAY_ON_TRUE(picker4M, ImGui::ColorPicker4("c picker4", c));
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(620, 420));
+        ImGui::SetNextWindowSize(ImVec2(300, 200));
+        ImGui::Begin("Far");
+        ImGui::Checkbox("c near", &nearM);
+        // Scrolled out of view once clipList is set (listed while visible)
+        ImGui::Dummy(ImVec2(10, clipList ? 1000.0f : 1.0f));
+        COPY_ON_TRUE(listClippedM, ImGui::ListBox("c list clipped", &c, items, 3));
+        ImGui::Dummy(ImVec2(10, 1000));
+        COPY_ON_TRUE(farM, ImGui::Checkbox("c far", &c));   // below the window's bottom edge: clipped
+        ImGui::End();
+    });
+    #undef COPY_ON_TRUE
+    #undef COPY_ARRAY_ON_TRUE
+    h.frames(3);
+
+    nlohmann::json r = input(h, "c drag3", "[1, 2, 3]");
+    check("copy on true: DragFloat3", isOk(r) && drag3M[0] == 1 && drag3M[1] == 2 && drag3M[2] == 3);
+    r = input(h, "c slider", "2.5");
+    check("copy on true: SliderFloat", isOk(r) && sliderM == 2.5f);
+    r = input(h, "c slider2", "[3, 4]");
+    check("copy on true: SliderFloat2", isOk(r) && slider2M[0] == 3 && slider2M[1] == 4);
+    r = input(h, "c angle", "0.5");
+    check("copy on true: SliderAngle", isOk(r) && angleM == 0.5f);
+    r = input(h, "c vslider", "6");
+    check("copy on true: VSliderFloat", isOk(r) && vsliderM == 6);
+    r = input(h, "c input step", "7");
+    check("copy on true: InputInt with step buttons", isOk(r) && inputStepM == 7);
+    r = input(h, "c input float", "1.25");
+    check("copy on true: InputFloat without step", isOk(r) && inputFloatM == 1.25f);
+    r = input(h, "c input enter", "9");
+    check("copy on true: InputInt with EnterReturnsTrue", isOk(r) && inputEnterM == 9);
+    r = input(h, "c input2", "[5, 6]");
+    check("copy on true: InputInt2", isOk(r) && input2M[0] == 5 && input2M[1] == 6);
+    r = input(h, "c color", "[0.25, 0.5, 0.75, 1]");
+    check("copy on true: ColorEdit4", isOk(r) && colorM[0] == 0.25f && colorM[2] == 0.75f);
+    r = input(h, "c picker4", "[0.5, 0.25, 0.125, 0.5]");
+    check("copy on true: ColorPicker4", isOk(r) && picker4M[0] == 0.5f && picker4M[3] == 0.5f);
+    r = input(h, "c combo", "2");
+    check("copy on true: Combo, popup closed", isOk(r) && comboM == 2);
+    r = input(h, "c list", "1");
+    check("copy on true: ListBox", isOk(r) && listM == 1);
+    r = input(h, "c radio", "1");
+    check("copy on true: RadioButton(int*)", isOk(r) && radioM == 1);
+    r = input(h, "c selectable", "true");
+    check("copy on true: Selectable(bool*)", isOk(r) && selM);
+    r = input(h, "c menu item", "true");
+    check("copy on true: MenuItem(bool*)", isOk(r) && menuM);
+    // ImGui never clips the nav-focused item: move the focus off "c far" first
+    h.click("c near");
+    const tcx::imgui::WidgetInfo* farW = h.find("c far");
+    check("setup: \"c far\" is clipped and not focused",
+          farW && farW->rect.Min.y > 768 && h.context()->NavId != farW->id);
+    r = input(h, "c far", "true");
+    check("copy on true: clipped Checkbox", isOk(r) && farM);
+
+    clipList = true;   // listed in the last frame, clipped from the next one on
+    r = input(h, "c list clipped", "2");
+    check("copy on true: clipped ListBox", isOk(r) && listClippedM == 2);
+
+    // Combo with its popup open
+    if (h.click("c combo open")) {
+        h.frames(2);
+        check("setup: combo popup open", h.context()->OpenPopupStack.Size == 1);
+        r = input(h, "c combo open", "1");
+        check("copy on true: Combo, popup open", isOk(r) && comboOpenM == 1);
+    } else {
+        check("setup: combo listed", false);
+    }
+    h.clickAt(ImVec2(5, 5));   // close the popup
+    h.frames(2);
+
+    // Drag / Slider in Ctrl+Click text input mode
+    auto ctrlClick = [&](const char* label) {
+        const tcx::imgui::WidgetInfo* w = h.find(label);
+        if (!w) return false;
+        ImGui::SetCurrentContext(h.context());
+        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+        h.clickAt(w->rect.GetCenter());
+        ImGui::SetCurrentContext(h.context());
+        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+        h.frame();
+        return ImGui::GetCurrentContext()->TempInputId != 0;
+    };
+    check("setup: DragFloat in text input mode", ctrlClick("c temp drag"));
+    r = input(h, "c temp drag", "4");
+    check("copy on true: DragFloat in text input mode", isOk(r) && tempDragM == 4);
+    h.clickAt(ImVec2(5, 5));
+    h.frames(2);
+    check("setup: SliderFloat in text input mode", ctrlClick("c temp slider"));
+    r = input(h, "c temp slider", "3");
+    check("copy on true: SliderFloat in text input mode", isOk(r) && tempSliderM == 3);
+    h.clickAt(ImVec2(5, 5));
+    h.frames(2);
+}
+
+// ---------------------------------------------------------------------------
+// Refusals the widget decides for itself, and what the app does with the
+// value after the widget returned (#321 audit).
+// ---------------------------------------------------------------------------
+static void testRefusalsAndAdjust() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    bool autosave = false, selDisabled = false;
+    int saved = 0, selRuns = 0;
+    float roSlider = 1, roItem = 1, roPicker[4] = {1, 1, 1, 1};
+    int clamped = 5;
+    float quantized = 0;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(600, 740));
+        ImGui::Begin("Refusals");
+        {
+            bool c = autosave;
+            if (ImGui::MenuItem("autosave", nullptr, &c, false)) { autosave = c; ++saved; }
+        }
+        {
+            bool c = selDisabled;
+            if (ImGui::Selectable("selectable disabled", &c, ImGuiSelectableFlags_Disabled)) { selDisabled = c; ++selRuns; }
+        }
+        ImGui::DragFloat("slider flag read only", &roSlider, 1, 0, 0, "%.3f", ImGuiSliderFlags_ReadOnly);
+        ImGui::PushItemFlag(ImGuiItemFlags_ReadOnly, true);
+        ImGui::SliderFloat("item flag read only", &roItem, 0, 10);
+        ImGui::PopItemFlag();
+        ImGui::GetCurrentContext()->NextItemData.ItemFlagsSet |= ImGuiItemFlags_ReadOnly;
+        ImGui::ColorPicker4("picker read only", roPicker);
+        if (ImGui::DragInt("clamped", &clamped)) clamped = std::max(clamped, 1);
+        if (ImGui::DragFloat("quantized", &quantized)) quantized = std::round(quantized * 4) / 4;
+        ImGui::End();
+    });
+    h.frames(3);
+
+    nlohmann::json r = input(h, "autosave", "true");
+    check("refused: MenuItem(bool*) with enabled = false",
+          isError(r) && !autosave && saved == 0 && r.value("message", "").find("disabled") != std::string::npos);
+    r = input(h, "selectable disabled", "true");
+    check("refused: Selectable(bool*) with ImGuiSelectableFlags_Disabled",
+          isError(r) && !selDisabled && selRuns == 0 && r.value("message", "").find("disabled") != std::string::npos);
+    r = input(h, "slider flag read only", "5");
+    check("refused: ImGuiSliderFlags_ReadOnly",
+          isError(r) && roSlider == 1 && r.value("message", "").find("read-only") != std::string::npos);
+    r = input(h, "item flag read only", "5");
+    check("refused: PushItemFlag(ImGuiItemFlags_ReadOnly)",
+          isError(r) && roItem == 1 && r.value("message", "").find("read-only") != std::string::npos);
+    r = input(h, "picker read only", "[0, 0, 0, 1]");
+    check("refused: ColorPicker4 with the ReadOnly flag set for the next item",
+          isError(r) && roPicker[0] == 1 && r.value("message", "").find("read-only") != std::string::npos);
+
+    // The app clamps the value it takes: ok, with what the variable holds
+    r = input(h, "clamped", "0");
+    check("adjusted: a clamp after the return is ok, not the revert error",
+          isOk(r) && clamped == 1 && r.contains("message") && r.value("value", -1) == 1);
+    r = input(h, "quantized", "0.3");
+    check("adjusted: a conversion after the return is ok with the value held",
+          isOk(r) && quantized == 0.25f && r.contains("value") && r["value"] == 0.25);
+    // ... but the old value back is still the revert error
+    r = input(h, "clamped", "-3");
+    check("reverted: a clamp back to the old value is the revert error", isError(r) && clamped == 1);
+}
+
+// ---------------------------------------------------------------------------
+// The reply when the app draws no imgui in the frame after the write or the
+// call (a value that hides the GUI): answered in that frame, not by the core
+// timeout. And a widget that runs too late for the reply is not written.
+// ---------------------------------------------------------------------------
+static void testFramesWithoutImGui() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    bool showGui = true;
+    float late = 0;
+    h.setImGuiWhen([&] { return showGui; });
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(400, 300));
+        ImGui::Begin("Panel");
+        ImGui::Checkbox("Show GUI", &showGui);
+        ImGui::DragFloat("late", &late);
+        ImGui::End();
+    });
+    h.frames(3);
+
+    int frames = 0;
+    nlohmann::json r = callTool(h, "tcx_imgui_input", {{"label", "Show GUI"}, {"text", "false"}}, nullptr, &frames);
+    check("no imgui next frame: the write that hid the GUI is ok after two frames",
+          isOk(r) && !showGui && frames == 2);
+
+    r = callTool(h, "tcx_imgui_input", {{"label", "Show GUI"}, {"text", "true"}}, nullptr, &frames);
+    check("no imgui next frame: a call while the GUI is hidden is answered at once as not drawn",
+          isError(r) && !showGui && frames == 1 && r.value("message", "").find("not drawn") != std::string::npos);
+    h.frames(2);
+    check("no imgui next frame: the dropped value is not written later", !showGui);
+    showGui = true;
+    h.frames(2);
+
+    // Past the value's lifetime before the widget runs: not written
+    r = callTool(h, "tcx_imgui_input", {{"label", "late"}, {"text", "3"}}, nullptr, &frames, 10, [] {
+        std::this_thread::sleep_for(tcx::imgui::detail::kPendingValueLifetime + std::chrono::milliseconds(100));
+    });
+    check("expired: a widget that runs after the lifetime is not written",
+          isError(r) && late == 0 && r.value("message", "").find("too late") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// tcxNodeInspector records its own touched list from the widget's return
+// value: an injected value is applied but not recorded as a hand edit.
+// ---------------------------------------------------------------------------
+static void testInspectorRecord() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    float radius = 1;
+    bool visible = false;
+    std::vector<std::string> recorded;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(400, 300));
+        ImGui::Begin("Inspector");
+        tcx::nodeinspector::ImGuiReflector r;
+        r.visit("radius", radius);
+        r.visit("visible", visible);
+        for (auto& e : r.edited) recorded.push_back(e);
+        ImGui::End();
+    });
+    h.frames(3);
+
+    nlohmann::json r = input(h, "radius", "10");
+    check("inspector: injected value applied", isOk(r) && radius == 10);
+    check("inspector: injected value not recorded as an edit", recorded.empty());
+    h.click("visible");
+    check("inspector: a hand click is still recorded",
+          visible && std::find(recorded.begin(), recorded.end(), "visible") != recorded.end());
+}
+
 int main() {
     testMenus();
     testPanel();
@@ -534,5 +830,9 @@ int main() {
     testListBoxInCombo();
     testValueInput();
     testValueInputReturnsTrue();
+    testCopyOnReturn();
+    testRefusalsAndAdjust();
+    testFramesWithoutImGui();
+    testInspectorRecord();
     return harness::summary();
 }

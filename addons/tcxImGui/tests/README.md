@@ -10,7 +10,9 @@ checks what the MCP tools would report.
   the CPU (the "backend" claims `RendererHasTextures` and never uploads), no
   `imgui.ini`;
 - `frame()` runs one frame the way tcxImGui does (`beginFrame()` → your UI →
-  `swapFrames()` → `Render()`), with widget collection on;
+  `swapFrames()` → `Render()`), with widget collection on; with
+  `setImGuiWhen(pred)`, a frame where `pred()` is false runs no imgui and
+  settles the queued values as tcxImGui's render listener does;
 - `click(label)` clicks the centre of a widget found by label in the last
   frame's registry, feeding mouse events through `ImGuiIO` one per frame;
 - `touched(label)` / `touchedJson(label)` read the touched record, the latter
@@ -41,6 +43,23 @@ Cases (`src/main.cpp`):
   ++count;` counts once and `IsItemEdited()` stays false; a clipped `Checkbox`
   is written; a copy that ignores the return value gets the verify error;
   disabled and read-only widgets and an action `MenuItem` are refused.
+- the return value of every settable widget: each one used as a copy applied
+  only on `true` (`DragFloat3`, `SliderFloat(2)`, `SliderAngle`,
+  `VSliderFloat`, `InputInt` with and without step, `EnterReturnsTrue`,
+  `InputInt2`, `ColorEdit4`, `ColorPicker4`, `Combo` closed and open,
+  `ListBox` visible and clipped, `RadioButton(int*)`, `Selectable(bool*)`,
+  `MenuItem(bool*)`, a clipped `Checkbox`, a Drag / Slider in Ctrl+Click text
+  mode) takes the value.
+- refusals and what the app does next: a disabled `MenuItem(bool*)` /
+  `Selectable(bool*)`, `ImGuiSliderFlags_ReadOnly`,
+  `PushItemFlag(ImGuiItemFlags_ReadOnly)` and a `ColorPicker4` with the next
+  item's ReadOnly flag are refused; a clamp or conversion after the return is
+  `ok` with the value held, a clamp back to the old value is the revert error.
+- frames without imgui: a value that hides the GUI is answered after two
+  frames, a call while it is hidden after one; a widget that runs past the
+  value's lifetime is not written.
+- tcxNodeInspector's `ImGuiReflector` (a test dependency, see `addons.make`):
+  an injected value is applied but not recorded as an edit; a click is.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it
