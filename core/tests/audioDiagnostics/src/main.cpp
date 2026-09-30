@@ -26,6 +26,10 @@
 // - A reused SoundBuffer's getPath() follows its last fill: a file load sets
 //   it, a memory decode, PCM fill or generator clears it (a voice must not
 //   report the previous file).
+// - A file named .ogg that is not Ogg Vorbis fails to load (DecodeFailed,
+//   logged), and the file is closed once: stb_vorbis closes it on the failed
+//   open, SoundBuffer does not close it again (counted by fcloseProbe.cpp on
+//   Linux).
 // =============================================================================
 
 #include <TrussC.h>
@@ -86,6 +90,14 @@ static string lastLog(LogLevel level) {
 }
 
 // --- Helpers -----------------------------------------------------------------
+
+#if defined(__linux__) && !defined(__ANDROID__)
+// fcloseProbe.cpp: counts this thread's fclose() calls between arm and disarm
+void fcloseProbeArm();
+void fcloseProbeDisarm();
+int fcloseProbeCloses();
+int fcloseProbeRepeats();
+#endif
 
 // 16-bit mono PCM WAV with a 440 Hz tone.
 static bool writeWav(const fs::path& path, float seconds, int rate) {
@@ -310,6 +322,43 @@ int main() {
         reused.loadWav(wav);
         reused.generateSineWave(440.0f, 0.1f);
         check("path: a generated wave clears it", reused.getPath().empty());
+    }
+
+    // A file named .ogg that is not Ogg Vorbis: the load fails and is
+    // reported, and the file is closed once (stb_vorbis closes it on the
+    // failed open), through loadOgg() and through load()'s dispatch.
+    {
+        const fs::path notOgg = fs::temp_directory_path() / ("tc_audio_diag_" + tag + "_text.ogg");
+        {
+            ofstream out(notOgg, ios::binary);
+            out << "plain text, not an Ogg Vorbis stream\n";
+        }
+        check("ogg: text file with an .ogg extension written", fs::exists(notOgg));
+        const string openFailedLine = internal::pathToUtf8(notOgg) + " (stb_vorbis error=";
+        for (int via = 0; via < 2; ++via) {
+            const string name = via == 0 ? "ogg: loadOgg()" : "ogg: load()";
+            SoundBuffer buf;
+            const size_t errorsBefore = countLogs(LogLevel::Error, openFailedLine);
+#if defined(__linux__) && !defined(__ANDROID__)
+            fcloseProbeArm();
+#endif
+            const LoadResult r = via == 0 ? buf.loadOgg(notOgg) : buf.load(notOgg);
+#if defined(__linux__) && !defined(__ANDROID__)
+            fcloseProbeDisarm();
+#endif
+            check(name + " of a non-Vorbis file fails with DecodeFailed",
+                  !r && r.error == LoadError::DecodeFailed, loadErrorName(r.error));
+            check(name + " failure is logged",
+                  countLogs(LogLevel::Error, openFailedLine) == errorsBefore + 1, lastLog(LogLevel::Error));
+#if defined(__linux__) && !defined(__ANDROID__)
+            check(name + " closes the file once", fcloseProbeCloses() == 1,
+                  to_string(fcloseProbeCloses()) + " fclose calls");
+            check(name + " does not close the file again", fcloseProbeRepeats() == 0,
+                  to_string(fcloseProbeRepeats()) + " repeat closes");
+#endif
+        }
+        std::error_code rmEc;
+        fs::remove(notOgg, rmEc);
     }
 
     Sound gone;

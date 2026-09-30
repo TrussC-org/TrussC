@@ -47,8 +47,15 @@ std::vector<uint8_t> OscBundle::toBytes() const {
 // fromBytes - Parse bundle from byte array (robust implementation)
 // =============================================================================
 OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
+    return fromBytesAtDepth(data, size, ok, 1);
+}
+
+OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok, int depth) {
     ok = false;
     OscBundle bundle;
+
+    // Nesting limit (the outermost bundle is level 1)
+    if (depth > MAX_NESTING_DEPTH) return bundle;
 
     // Minimum size check: "#bundle\0" (8) + timetag (8) = 16
     if (!data || size < 16) return bundle;
@@ -82,10 +89,11 @@ OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
         // Determine if bundle or message
         if (isBundle(elementData, elementSize)) {
             bool elementOk = false;
-            OscBundle childBundle = fromBytes(elementData, elementSize, elementOk);
-            if (elementOk) {
-                bundle.elements_.emplace_back(std::move(childBundle));
-            }
+            OscBundle childBundle = fromBytesAtDepth(elementData, elementSize, elementOk, depth + 1);
+            // A nested bundle that fails rejects this bundle too, so the
+            // caller sees one parse error instead of a partial bundle.
+            if (!elementOk) return OscBundle();
+            bundle.elements_.emplace_back(std::move(childBundle));
         }
         else {
             bool elementOk = false;

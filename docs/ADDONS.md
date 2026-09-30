@@ -312,6 +312,10 @@ private:
 };
 ```
 
+### Holding on to Nodes
+
+An addon that keeps a `Node` beyond a single call (a target to follow, a selection, a root to draw) stores it as `std::weak_ptr<tc::Node>`, or as `Node::Ptr` when the addon means to own it, never as a raw `Node*`. The app can remove and free the node at any time, and a raw pointer then dangles. Call `lock()` for each use and keep the returned `shared_ptr` while you work with the node. `tcxNodeInspector` keeps its attached root, drag target and selection this way.
+
 ---
 
 ## Naming Conventions

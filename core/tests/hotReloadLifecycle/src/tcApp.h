@@ -29,6 +29,9 @@ using namespace tc;
 // reaches, work it queues for the main thread, and the secondary windows'
 // double-attach guard (guest setApp() adds, the host's close() removes), all
 // of which a Windows guest DLL used to keep its own copy of (#249).
+// addGuestChild makes a node in guest code (make_shared, so its control block
+// is the guest's) for the window contexts' weak references the host must
+// drop before it unloads the guest (#255).
 //
 // setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
 // lifecycle cycles never call them. They use tcxImGui so the guest target is
@@ -112,6 +115,8 @@ public:
     // Whether guest code sees `app` in the secondary windows' double-attach
     // guard (internal::attachedApps()).
     virtual bool seesAttached(const App* app);
+    // A node made with make_shared in guest code, added as this App's child.
+    virtual std::shared_ptr<Node> addGuestChild();
 
 private:
     EventListener updateListener_;

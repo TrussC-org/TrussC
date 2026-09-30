@@ -1051,7 +1051,7 @@ If you start copy-pasting the same block into two nodes' `update()`, that block 
 
 ### Constructor vs setup() in a Node? (common trap)
 
-Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
+Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). The App is a Node too, with two App-specific points: in its constructor (before a `shared_ptr` owns it) `setSize()` doesn't resize the window (it changes only the App's own size and warns once) and `getRootNode()` doesn't return the App yet. Do both in `setup()`. Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
 
 ### How do I structure a whole scene?
 
@@ -1450,8 +1450,9 @@ Apps build as RelWithDebInfo by default, which includes debug symbols, so the st
 ### What usually makes a TrussC app crash? (safe patterns)
 
 Most crashes come from a handful of patterns. Write it the safe way from the start:
-- **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs.
+- **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs. The same goes for the App's `setSize()` (until a `shared_ptr` owns the App, as in its constructor, it doesn't resize the window, and warns once) and `getRootNode()` (not this App yet).
 - **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
+- **Keep a node beyond one call only as `weak_ptr` (or `Ptr` when you mean to own it), never as a raw pointer.** A `Node*` kept in a member, a global or a lambda capture dangles once the node is removed and freed. `lock()` tells you the node is gone, and the `shared_ptr` it returns keeps the node alive while you use it. The `Node*` from `getSelectedNode()` / `getRootNode()` is for the current call only.
 - **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
 - **Stop your own threads before your members go away.** A `Thread` subclass must call `waitForThread()` in its **own** destructor. The base class also stops and joins the thread, but only after your members are already destroyed, and it logs a warning when it finds the thread still running.
 - **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. For an event fired on another thread (e.g. `audioOut`), also wait for a callback in flight before your members go: disconnect, then `AudioEngine::getInstance().waitForCallbackIdle()`, in your own destructor or `cleanup()`. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
@@ -2193,9 +2194,9 @@ Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated 
 ### Scene Graph
 
 ```cpp
-Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around.
-Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode().
-void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection.
+Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around. Not yet the App inside its own constructor: use it from setup() on.
+Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this().
+void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it.
 ```
 
 ### 3D Setup
@@ -2374,7 +2375,7 @@ void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
 void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size
+void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()
 void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
 void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
 void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
@@ -4769,7 +4770,7 @@ Sound sfx = bundle.build();
 9. **GPU classes are main-thread only.** `Image` / `Texture` / `Fbo` / `Font` call into sokol; using them on a background thread crashes (no framework assert catches it). Load `Pixels` on the background thread, create the `Image`/`Texture` on the main thread.
 10. **`Pixels` / `Image` / `Texture` are non-copyable** (deleted copy ctor). Use `std::move()`, or `Pixels::clone()` for a deep copy.
 11. **Create nodes with `make_shared<>()`.** `addChild()` asserts if the node isn't owned by a `shared_ptr`.
-12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override.
+12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override. In the App's constructor, `setSize()` doesn't resize the window either (no `shared_ptr` owns the App yet: it changes only the App's own size and warns once), and `getRootNode()` doesn't return the App yet: call both in `setup()`.
 13. **Event-driven draw needs `redraw()`.** With `setIndependentFps(updateFps, EVENT_DRIVEN)`, draw runs only when `redraw()` was called — forgetting it looks like a frozen screen.
 14. **Prefer `Event<T>` + `EventListener` over raw `function<>` callbacks.** `EventListener` is RAII: it auto-disconnects on destruction, so no dangling-callback crashes.
 15. **`LayoutMod` never auto-relayouts.** Call `updateLayout()` after adding/removing/resizing children (property setters like `setSpacing()` do trigger it).

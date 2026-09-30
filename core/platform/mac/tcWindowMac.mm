@@ -301,7 +301,7 @@ void Window::close() {
         internal::detachAppAudio(*app_);
         internal::attachedApps().erase(app_.get());
         app_.reset();
-        ctx_.rootNode = nullptr;
+        ctx_.rootNode.reset();
     }
 }
 

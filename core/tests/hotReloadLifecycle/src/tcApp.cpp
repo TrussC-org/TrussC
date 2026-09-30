@@ -109,3 +109,11 @@ bool tcApp::attachApp(Window& window, std::shared_ptr<App> app) {
 bool tcApp::seesAttached(const App* app) {
     return trussc::internal::attachedApps().count(app) != 0;
 }
+
+// make_shared runs here, in the guest: the node's control block (and the code
+// that frees it once the last weak reference goes) belongs to the guest.
+std::shared_ptr<Node> tcApp::addGuestChild() {
+    auto node = std::make_shared<RectNode>();
+    addChild(node);
+    return node;
+}

@@ -12,14 +12,22 @@
 //   - unicast loopback still works
 //   - a receiver that JOINED a group receives multicast sent to it
 //   - traffic for a group NOBODY joined is not received (multicast is join-gated)
+//
+// It also checks bundle parsing and dispatch:
+//   - bundle nesting is limited to OscBundle::MAX_NESTING_DEPTH levels; past
+//     that, or when a nested bundle fails, the whole packet is one parse error
+//   - dispatch hands listeners the parsed bundles themselves, not copies
 // =============================================================================
 
 #include <tcxOsc.h>
 
 #include <chrono>
 #include <cstdio>
+#include <map>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace tcx;
 
@@ -91,11 +99,50 @@ static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4]) {
     return 0;
 }
 
+// A bundle `levels` deep (the outermost is level 1). Level n holds the message
+// "/level/n" followed by the level n+1 bundle, so every level has a message.
+static OscBundle makeNestedBundle(int levels) {
+    OscBundle inner;
+    inner.addMessage(OscMessage("/level/" + std::to_string(levels)));
+    for (int n = levels - 1; n >= 1; --n) {
+        OscBundle outer;
+        outer.addMessage(OscMessage("/level/" + std::to_string(n)));
+        outer.addBundle(inner);
+        inner = std::move(outer);
+    }
+    return inner;
+}
+
+// Messages in a parsed bundle tree, walked through bundleAt() (no copies).
+static int countMessages(const OscBundle& b) {
+    int n = 0;
+    for (size_t i = 0; i < b.getElementCount(); ++i) {
+        if (b.isMessage(i)) ++n;
+        else if (const OscBundle* child = b.bundleAt(i)) n += countMessages(*child);
+    }
+    return n;
+}
+
+// A valid message, then a nested bundle that ends before its timetag
+// ("#bundle\0" plus 4 bytes, where 16 is the minimum), so it cannot parse.
+static std::vector<uint8_t> bundleWithShortChild() {
+    OscBundle outer;
+    outer.addMessage(OscMessage("/level/1"));
+    std::vector<uint8_t> bytes = outer.toBytes();
+    const uint8_t child[12] = { '#', 'b', 'u', 'n', 'd', 'l', 'e', '\0', 0, 0, 0, 0 };
+    const uint8_t childSize[4] = { 0, 0, 0, sizeof(child) };  // big-endian
+    bytes.insert(bytes.end(), childSize, childSize + 4);
+    bytes.insert(bytes.end(), child, child + sizeof(child));
+    return bytes;
+}
+
 int main() {
     const std::string GROUP_A = "239.77.0.1";
     const std::string GROUP_B = "239.77.0.2";
     static const int UNI_PORTS[4] = { 17110, 18110, 19110, 27110 };
     static const int MC_PORTS[4]  = { 17111, 18111, 19111, 27111 };  // joined receiver
+    static const int NEST_PORTS[4] = { 17112, 18112, 19112, 27112 };  // bundle nesting
+    const int LIMIT = OscBundle::MAX_NESTING_DEPTH;
 
     // Outgoing multicast interface. macOS CI runners have no multicast route on
     // the default NIC (send -> EHOSTUNREACH), but lo0 is multicast-capable, so
@@ -164,6 +211,130 @@ int main() {
             mb.addInt(99);
             check("scoping: unjoined group's traffic does not reach the receiver",
                   sendAndExpectNone(rx, tx, GROUP_B, portMc, mb) == Recv::NotReceived);
+        }
+        rx.close();
+    }
+
+    // ----- 4. bundle nesting limit (parser) ----------------------------------
+    // fromBytes accepts LIMIT levels (the outermost is level 1). Past that, or
+    // when a nested bundle fails, it rejects the whole bundle.
+    {
+        bool ok = false;
+        std::vector<uint8_t> atLimit = makeNestedBundle(LIMIT).toBytes();
+        OscBundle parsed = OscBundle::fromBytes(atLimit.data(), atLimit.size(), ok);
+        check("nesting: MAX_NESTING_DEPTH levels parse", ok);
+        check("nesting: every level is kept", ok && countMessages(parsed) == LIMIT);
+
+        std::vector<uint8_t> past = makeNestedBundle(LIMIT + 1).toBytes();
+        OscBundle::fromBytes(past.data(), past.size(), ok);
+        check("nesting: one level past the limit fails", !ok);
+
+        std::vector<uint8_t> shortChild = bundleWithShortChild();
+        OscBundle::fromBytes(shortChild.data(), shortChild.size(), ok);
+        check("nesting: a failing nested bundle fails the whole", !ok);
+    }
+
+    // ----- 5. bundle nesting through OscReceiver -----------------------------
+    // Each packet is sent once over unicast loopback, then a "/sync" message.
+    // Loopback keeps the order of datagrams from one socket, so once the sync
+    // arrives the receive thread has finished the packet before it.
+    {
+        OscReceiver rx;
+        const int port = bindFirstFree(rx, NEST_PORTS);
+        check("nesting: receiver bound", port != 0);
+
+        std::mutex mtx;  // guards the counters below (listeners run on the receive thread)
+        std::map<std::string, int> perAddress;
+        int messages = 0, errors = 0, bundles = 0, syncSeen = 0;
+        std::vector<const OscBundle*> chain;  // bundles notified for the current packet
+        bool sameObjects = true;
+
+        tc::EventListener msgListener = rx.onMessageReceived.listen([&](OscMessage& m) {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (m.getAddress() == "/sync") { syncSeen = m.getArgAsInt(0); return; }
+            ++messages;
+            ++perAddress[m.getAddress()];
+        });
+        tc::EventListener errListener = rx.onParseError.listen([&](std::string&) {
+            std::lock_guard<std::mutex> lock(mtx);
+            ++errors;
+        });
+        tc::EventListener bundleListener = rx.onBundleReceived.listen([&](OscBundle& b) {
+            std::lock_guard<std::mutex> lock(mtx);
+            ++bundles;
+            // A nested bundle must be the parent's own element, not a copy of it.
+            // (The parent is still being dispatched, so the pointer is live.)
+            if (!chain.empty()) {
+                const OscBundle* parent = chain.back();
+                if (parent->bundleAt(parent->getElementCount() - 1) != &b) sameObjects = false;
+            }
+            chain.push_back(&b);
+        });
+
+        tc::UdpSocket raw;  // sends the bytes exactly as built
+        int token = 0;
+        // Send `packet` once and wait for the sync after it (false on timeout).
+        auto deliver = [&](const std::vector<uint8_t>& packet) {
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                perAddress.clear();
+                messages = errors = bundles = 0;
+                chain.clear();
+                sameObjects = true;
+            }
+            ++token;
+            raw.sendTo("127.0.0.1", port, packet.data(), packet.size());
+            OscMessage sync("/sync");
+            sync.addInt(token);
+            std::vector<uint8_t> syncBytes = sync.toBytes();
+            for (int i = 0; i < 80; ++i) {
+                if (i % 10 == 0) raw.sendTo("127.0.0.1", port, syncBytes.data(), syncBytes.size());
+                sleepMs(25);
+                std::lock_guard<std::mutex> lock(mtx);
+                if (syncSeen == token) return true;
+            }
+            return false;
+        };
+
+        if (port != 0) {
+            // 10 levels, one message per level
+            bool got = deliver(makeNestedBundle(10).toBytes());
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                bool eachOnce = perAddress.size() == 10;
+                for (int n = 1; n <= 10; ++n) {
+                    auto it = perAddress.find("/level/" + std::to_string(n));
+                    eachOnce = eachOnce && it != perAddress.end() && it->second == 1;
+                }
+                check("nesting: 10 levels: each message delivered once", got && eachOnce && messages == 10);
+                check("nesting: 10 levels: one onBundleReceived per level", got && bundles == 10);
+                check("nesting: 10 levels: no parse error", got && errors == 0);
+                check("dispatch: nested bundles passed by reference", got && bundles == 10 && sameObjects);
+            }
+
+            // Exactly at the limit
+            got = deliver(makeNestedBundle(LIMIT).toBytes());
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check("nesting: MAX_NESTING_DEPTH levels delivered",
+                      got && messages == LIMIT && bundles == LIMIT && errors == 0);
+            }
+
+            // One level past the limit
+            got = deliver(makeNestedBundle(LIMIT + 1).toBytes());
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check("nesting: past the limit: onParseError once", got && errors == 1);
+                check("nesting: past the limit: nothing delivered", got && messages == 0 && bundles == 0);
+            }
+
+            // A nested bundle that fails to parse
+            got = deliver(bundleWithShortChild());
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check("nesting: failing nested bundle: onParseError once", got && errors == 1);
+                check("nesting: failing nested bundle: nothing delivered", got && messages == 0 && bundles == 0);
+            }
         }
         rx.close();
     }

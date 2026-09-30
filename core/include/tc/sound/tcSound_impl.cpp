@@ -160,7 +160,8 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     int error = 0;
     stb_vorbis* vorbis = stb_vorbis_open_file(f, 1, &error, nullptr);
     if (!vorbis) {
-        fclose(f);
+        // No fclose(f) here: with close_on_free=1, stb_vorbis owns f and has
+        // already closed it when the open failed.
         logError("SoundBuffer") << "failed to open " << pathStr << " (stb_vorbis error="
                                 << error << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
