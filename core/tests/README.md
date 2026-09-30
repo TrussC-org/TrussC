@@ -295,6 +295,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `extensionCase/` — loaders and savers match the file extension
+  case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
+  its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
+  `SoundBuffer::load()` and `loadStream()` do (garbage under such a name
+  reaches the decoder instead of failing as an unsupported extension), and
+  `Pixels::save()` writes JPEG / BMP / PNG for `.Jpg` / `.jPeG` / `.Bmp` /
+  `.PnG` (checked by magic bytes) under exactly the name given. On a
+  case-sensitive file system `a.wav` and `a.WAV` load as two files; otherwise
+  that part prints SKIP. The hot reload watcher's side is in
+  `hotReloadLifecycle/`; the per-platform screenshot savers are not covered
+  (they need a framebuffer).
 - `trusscliPresets/` — trusscli's project files (#350): `update`, `addon add`
   and `addon remove` keep the project's IDE, web / android / ios targets and
   web backend. Its `local.cmake` compiles trusscli's own sources

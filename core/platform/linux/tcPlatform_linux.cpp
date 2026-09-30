@@ -194,7 +194,8 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     // Use stb_image_write to save
-    std::string ext = path.extension().string();
+    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    std::string ext = toLower(getFileExtension(path));
     std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
     int width = pixels.getWidth();
@@ -202,11 +203,11 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     unsigned char* data = pixels.getData();
 
     int result = 0;
-    if (ext == ".png") {
+    if (ext == "png") {
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == ".jpg" || ext == ".jpeg") {
+    } else if (ext == "jpg" || ext == "jpeg") {
         result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == ".bmp") {
+    } else if (ext == "bmp") {
         result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
     } else {
         // Default to PNG

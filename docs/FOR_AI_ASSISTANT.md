@@ -664,6 +664,16 @@ font.load("myfont.ttf", 24);   // Loads bin/data/myfont.ttf
 
 When building, `bin/` is the working directory. No need for absolute paths.
 
+File extensions are matched case-insensitively; file names keep their case as written.
+Wherever TrussC picks a format from the extension (`Sound::load`, `Pixels::save`,
+`saveScreenshot`, the hot reload watcher, ...), `photo.JPG`, `loop.Wav` and
+`shot.Png` pick the same decoder or encoder as lower case. The file opened or
+written is exactly the one named (except `saveScreenshot` on Windows, which
+appends `.png` to an unknown extension; see #455): on a case-sensitive file
+system `a.wav` and `a.WAV` stay two files. `getFileExtension()` returns the
+extension as written; compare `toLower(getFileExtension(path))` to do the same
+in app code.
+
 ## 3D
 
 TrussC defaults to 2D (orthographic). For 3D, use `EasyCam`:
@@ -2043,7 +2053,7 @@ int recordingFrameCount()  // Number of frames captured so far in the current re
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
+bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
@@ -2140,7 +2150,7 @@ fs::path getDataPath(const fs::path & filename)  // Resolve a relative path agai
 fs::path getDataPathRoot()  // Get the current data path root as fs::path.
 fs::path getExecutableDir()  // Get the directory containing the running executable.
 fs::path getExecutablePath()  // Get the absolute path of the running executable.
-std::string getFileExtension(const fs::path & path)  // Get file extension without dot
+std::string getFileExtension(const fs::path & path)  // Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do.
 std::string getFileName(const fs::path & path)  // Get filename from path
 int64_t getFileSize(const fs::path & path)  // Get file size in bytes
 std::string getParentDirectory(const fs::path & path)  // Get parent directory
@@ -3467,7 +3477,7 @@ void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save image to file (PNG, JPG or BMP by extension; PNG otherwise). Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned
+bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned
 void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
@@ -3745,7 +3755,7 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
 LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.

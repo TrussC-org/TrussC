@@ -82,6 +82,10 @@
 // to nodes (hover, grab, selection, the main root), which here name a node
 // guest code made.
 //
+// The host's source watcher (#305) picks the files it watches by extension,
+// whatever the case: .CPP / .H / .Hpp / .MM count like .cpp / .h / .hpp / .mm,
+// other extensions do not (checkWatcherExtensions()).
+//
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
 // no GPU, no file watcher, no cmake rebuild — CI-safe on every desktop
@@ -107,6 +111,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -626,6 +631,40 @@ static int runCycles(const std::string& guestPath, int port) {
     return 0;
 }
 
+// FileWatcher::init() watches the sources under src/ by extension, compared
+// case-insensitively (#305). Returns 0 when it picked exactly the right files.
+static int checkWatcherExtensions() {
+    const fs::path dir = fs::temp_directory_path() / "tc_hotReloadLifecycle_watch";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "sub", ec);
+    const std::vector<std::string> watched = {"a.cpp", "b.CPP", "c.h", "d.H", "e.Hpp",
+                                              "f.mm", "sub/g.MM"};
+    const std::vector<std::string> ignored = {"h.txt", "i.CPPX", "j.c", "k"};
+    for (auto& n : watched) std::ofstream(dir / n) << "// x\n";
+    for (auto& n : ignored) std::ofstream(dir / n) << "// x\n";
+
+    trussc::hot_reload::FileWatcher w;
+    w.init(internal::pathToUtf8(dir));
+    int rc = 0;
+    for (auto& n : watched) {
+        bool found = false;
+        for (auto& p : w.watchPaths) found = found || fs::equivalent(p, dir / n, ec);
+        if (!found) {
+            std::printf("hotReloadLifecycle: FAIL - watcher skipped %s\n", n.c_str());
+            rc = 40;
+        }
+    }
+    if (w.watchPaths.size() != watched.size()) {
+        std::printf("hotReloadLifecycle: FAIL - watcher took %zu files, expected %zu\n",
+                    w.watchPaths.size(), watched.size());
+        rc = 40;
+    }
+    fs::remove_all(dir, ec);
+    if (rc == 0) std::printf("hotReloadLifecycle: watcher extensions ok\n");
+    return rc;
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--app") {
         WindowSettings settings;
@@ -636,6 +675,8 @@ int main(int argc, char** argv) {
     // Record the main thread id first, as _setup_cb does: isMainThread() and
     // runOnMainThread() key off whichever thread asks first.
     getMainThreadId();
+
+    if (int rc = checkWatcherExtensions()) return rc;
 
     std::string guestPath = findGuestLibrary();
     if (guestPath.empty()) {
