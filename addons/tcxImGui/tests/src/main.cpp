@@ -477,7 +477,7 @@ static void testValueInputReturnsTrue() {
     float pick[3] = {1, 1, 1};
     float counted = 0;
     int count = 0;
-    bool editedSeen = false, far = false, boolRadio = false;
+    bool editedSeen = false, farBox = false, boolRadio = false;
     int presses = 0;
     float model = 2;              // copied into `ignored` every frame, the return value ignored
     float disabledV = 1, readOnlyV = 1;
@@ -508,7 +508,7 @@ static void testValueInputReturnsTrue() {
         ImGui::SetNextWindowSize(ImVec2(300, 200));
         ImGui::Begin("Far");
         ImGui::Dummy(ImVec2(10, 1000));
-        ImGui::Checkbox("far", &far);   // below the window's bottom edge: clipped
+        ImGui::Checkbox("far", &farBox);   // below the window's bottom edge: clipped
         ImGui::End();
     });
     h.frames(3);
@@ -530,7 +530,7 @@ static void testValueInputReturnsTrue() {
     const tcx::imgui::WidgetInfo* w = h.find("far");
     check("clipped checkbox: listed with a bool value", w && w->value.kind == ImGuiTcValueKind_Bool);
     r = input(h, "far", "true");
-    check("clipped checkbox: written", isOk(r) && far);
+    check("clipped checkbox: written", isOk(r) && farBox);
 
     r = input(h, "ignored", "5");
     check("verify: a copy that ignores the return value is an error",
