@@ -30,10 +30,26 @@ When enabled:
 
 ### Related: `TRUSSC_LOG_FILE`
 
-Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes the app
-call `setLogFile()` before `setup()` runs, so every log line — including
-setup-time output — is appended to that file with zero app code. This is how a
-supervisor process (e.g. `anchorbolt start`) captures logs from an unmodified app.
+Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes a
+native app call `setLogFile()` before the window and graphics start
+(`runApp()`, before `sapp_run()`), so every log line — including setup-time
+output — is appended to that file with zero app code. (Web builds don't read
+`TRUSSC_LOG_FILE`.) A relative value resolves against the data folder
+(`getDataPath()` with the root in effect when `runApp()` starts — normally
+the default; it is read before `setup()`, so a `setDataPathRoot()` in `setup()`
+does not apply, while one in `main()` before `runApp()` does), and a
+missing parent folder is created. If the file still cannot be opened, the app
+runs on and logs a warning. sokol's own errors, warnings and panics go through the
+logger too, and lines logged from worker threads land whole. A window or GPU
+setup failure reaches the file where sokol reports it as text: on Linux (no X
+display; GLX setup, framebuffer config, GL context or window creation; EGL
+setup in GLES3 builds) and on iOS (Metal swapchain textures). On the web,
+WebGPU instance, adapter and device request failures reach the logger (the
+browser console and `onLog`), not a file. On Android sokol's app messages
+(lifecycle, the app thread's startup) reach the logger too, but an EGL setup
+failure is not logged; on Windows and macOS a window or GPU setup failure is
+not logged yet. This is how a supervisor process (e.g. `anchorbolt start`)
+captures logs from an unmodified app.
 
 The audio engine reports through the logger too, so the file also receives
 the plays it had to drop (`Sound::play()` returned false: every voice busy, a
@@ -148,7 +164,7 @@ The **tcxImGui** addon provides additional MCP tools for AI agents to inspect an
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | Widgets drawn in the last frame, in every window running imgui: label, `window` (ImGui panel), `windowId` (OS window, `tc_list_windows` numbering), type, rect, and for value widgets `widget` / `valueType` / `value` — floats at full precision, N-component widgets (`DragFloat3`) as one array under their own label, colors as the variable holds them (0-1, `colorSpace` `rgb`/`hsv`), `SliderAngle` in radians. `touched` = changed by hand |
-| `tcx_imgui_get_touched` | (none) | What the user changed by hand since startup or the last reset, with current values. `widgets`: ImGui widgets (not drawn right now = last known value, `visible: false`); `inspector`: tcxNodeInspector edits per node (node type / name / id, mod, member path, value in the `tc_get_node_tree` encoding). Code assignments and `tc_set_node_members` writes are not recorded |
+| `tcx_imgui_get_touched` | (none) | What the user changed by hand since startup or the last reset, with current values. `widgets`: the ImGui value widgets changed — sliders, drags, inputs, colors, combos, text, `Checkbox`, `MenuItem` / `Selectable` with a `bool*`, `RadioButton` with an `int*`, `ListBox` (under its own label, with the index) — each with the value of its variable (not drawn right now = last known value, `visible: false`). Items that change no variable are not recorded: buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` even as a toggle, plain `Selectable`s, `RadioButton(label, bool)`; `inspector`: tcxNodeInspector edits per node (node type / name / id, mod, member path, value in the `tc_get_node_tree` encoding). Code assignments and `tc_set_node_members` writes are not recorded |
 | `tcx_imgui_reset_touched` | (none) | Clear that record (both lists). No value changes |
 | `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox` | `label` + tool args, `window` / `windowId` (optional) | Drive a widget by label |
 
@@ -365,8 +381,10 @@ Configure your MCP client with the HTTP URL:
 
 By default the MCP server binds to **localhost only** and sends no CORS headers,
 so it is reachable only by native MCP clients on the same machine (a wildcard
-CORS origin would otherwise let any web page in your browser drive it). For
-remote access, SSH tunnelling is the simplest safe option.
+CORS origin would otherwise let any web page in your browser drive it). The
+server is for native MCP clients: a web page cannot call it, neither directly
+nor through a dev-server proxy that forwards the page's `Origin`. For remote
+access, SSH tunnelling is the simplest safe option.
 
 A web page can still *send* requests to a loopback server without CORS, so
 every request is also checked before anything runs (as the MCP HTTP transport
@@ -375,18 +393,8 @@ spec requires):
 | Check | Refused with |
 |-------|--------------|
 | When bound to loopback, `Host` must be `localhost`, `127.0.0.1` or `[::1]` (any port) — a DNS-rebinding page arrives under its own name | 403 |
-| An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) or one added with `mcp::allowOrigin(...)`. Native MCP clients send none | 403 |
+| An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) — a browser page on any other origin, including another localhost port, is refused. Native MCP clients send none | 403 |
 | `POST /mcp` must be `Content-Type: application/json` (parameters such as `; charset=utf-8` are fine) | 415 |
-
-To call the server from your own web page (a debug UI served by a dev server,
-for example), allow its origin in code:
-
-```cpp
-mcp::allowOrigin("http://localhost:5173");
-```
-
-There is deliberately no environment variable for this: environment variables
-can narrow what the MCP server exposes, never widen it.
 
 To expose it directly instead, set both:
 

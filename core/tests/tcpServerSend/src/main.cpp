@@ -11,7 +11,7 @@
 //
 // The pre-fix build does not fail these checks, it HANGS on them, so every
 // assertion runs on a worker with a wait_for() deadline instead of blocking the
-// test process.
+// test process. A crash prints what the test was doing and a backtrace.
 // =============================================================================
 
 #include <TrussC.h>
@@ -21,6 +21,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -41,33 +42,75 @@
     using rawsocket_t = int;
 #endif
 
+#if (defined(__linux__) || defined(__APPLE__)) && !defined(__ANDROID__)
+    #define TC_TEST_CRASH_REPORT 1
+    #include <csignal>
+    #include <execinfo.h>
+#endif
+
 using namespace std;
 using namespace tc;
 
 static int g_fail = 0;
+
+// What the test is doing, for the fatal-signal report below
+static const char* volatile g_phase = "starting";
+
+#ifdef TC_TEST_CRASH_REPORT
+// A crash prints what the test was doing and a backtrace, then dies of the
+// same signal (as in tcpClientReconnect)
+static void onFatalSignal(int sig) {
+    char line[160];
+    const int n = snprintf(line, sizeof(line), "\nFATAL: signal %d during %s\n",
+                           sig, g_phase);
+    if (n > 0) (void)!write(2, line, static_cast<size_t>(n));
+    void* frames[64];
+    backtrace_symbols_fd(frames, backtrace(frames, 64), 2);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
+
 static void check(const char* name, bool ok) {
     printf("%-56s %s\n", name, ok ? "PASS" : "FAIL");
     fflush(stdout);   // flush per line so CI logs survive a later hang
     if (!ok) ++g_fail;
 }
 
-// Run fn on a worker and report failure if it does not finish in time.
+// Run fn on a worker and report failure if it does not finish in time. A
+// worker that finished is joined, so it is not still exiting when main()
+// returns and the process tears down its statics; one that hangs is
+// detached, and the caller then bails out with _Exit.
 //
-// The thread is DETACHED and the flag is shared, deliberately: when the
-// regression is present, fn never returns, and we still want a clean FAIL line
-// plus a non-zero exit rather than a hung process burning the CI job timeout.
-// std::async is unusable for this — its future's destructor joins the task, so
-// it would block forever on exactly the case under test.
+// When the regression is present, fn never returns, and we still want a clean
+// FAIL line plus a non-zero exit rather than a hung process burning the CI job
+// timeout. std::async is unusable for this — its future's destructor joins the
+// task, so it would block forever on exactly the case under test.
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread([done, fn = move(fn)]() mutable { fn(); done->store(true); }).detach();
+    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
-    while (chrono::steady_clock::now() < deadline) {
-        if (done->load()) return true;
+    while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
     }
-    return done->load();
+    if (done->load()) {
+        worker.join();
+        return true;
+    }
+    worker.detach();
+    return false;
+}
+
+// Poll pred until it holds or ms pass
+template <typename P>
+static bool waitFor(int ms, P pred) {
+    const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
+    while (chrono::steady_clock::now() < deadline) {
+        if (pred()) return true;
+        this_thread::sleep_for(chrono::milliseconds(2));
+    }
+    return pred();
 }
 
 // Leave without running destructors. ~TcpServer calls stop(), which joins the
@@ -120,7 +163,13 @@ static rawsocket_t connectSilentPeer(int port, bool shrinkRecvBuffer = true) {
 }
 
 int main() {
+#ifdef TC_TEST_CRASH_REPORT
+    signal(SIGSEGV, onFatalSignal);
+    signal(SIGBUS, onFatalSignal);
+    signal(SIGABRT, onFatalSignal);
+#endif
     const int port = 45871;
+    g_phase = "a send parked behind a non-reading peer";
 
     TcpServer server;
     if (!server.start(port, 8)) {
@@ -226,6 +275,7 @@ int main() {
     }
 
     // --- teardown must not hang behind the parked send ----------------------
+    g_phase = "disconnecting the client with the parked send";
     // Print what it measured. The waits inside send() and the receive thread
     // re-check on a 100 ms slice, so a disconnect that lands well under that is
     // being woken by shutdown() rather than waiting for the next check --
@@ -243,20 +293,34 @@ int main() {
     if (healthy != static_cast<rawsocket_t>(-1)) TC_CLOSE(healthy);
     TC_CLOSE(stalled);
 
-    check("server stops cleanly", completesWithin(4000, [&] { server.stop(); }));
+    const bool stopped = completesWithin(4000, [&] { server.stop(); });
+    check("server stops cleanly", stopped);
+    if (!stopped) bail();
 
     // --- onError must not run while the send lock is held --------------------
     // Disconnecting the offending client is the obvious thing to write in an
     // onError listener. Listeners run inline on the sending thread by default,
     // so firing the event under the send mutex made that handler re-enter the
     // same non-recursive mutex through closeChannel() and wedge the caller.
+    //
+    // Getting there is the premise, not the invariant: the listener runs only
+    // once a send has filled the socket buffers and then sat idle past the
+    // timeout, and how much data and time that takes depends on the platform's
+    // buffers and on how busy the machine is (a fixed 15 s limit on the whole
+    // sequence failed once on a loaded machine). So the wait for the send to
+    // block has no fixed limit, only one on going without progress, and the
+    // deadline applies from the moment the listener is entered: the listener
+    // and the send it cut short must then finish.
+    g_phase = "an onError listener disconnecting its own client";
     {
         TcpServer s2;
         if (!s2.start(port + 1, 8)) { printf("could not start second server\n"); bail(); }
         s2.setSendTimeout(0.5f);
 
+        auto entered = make_shared<atomic<bool>>(false);
         auto handled = make_shared<atomic<bool>>(false);
-        EventListener sub = s2.onError.listen([&s2, handled](TcpServerErrorEventArgs& e) {
+        EventListener sub = s2.onError.listen([&s2, entered, handled](TcpServerErrorEventArgs& e) {
+            entered->store(true);
             s2.disconnectClient(e.clientId);   // re-enters the send path's mutex
             handled->store(true);
         });
@@ -268,17 +332,75 @@ int main() {
 
         vector<int> ids2 = s2.getClientIds();
         if (ids2.empty()) { printf("no client id (2)\n"); bail(); }
+        const int deafId = ids2[0];
 
+        // Send until a send blocks. One 8 MB payload is enough on Linux and
+        // macOS, but Winsock may take a multi-megabyte payload whole. Once the
+        // listener has dropped the client, send() returns false and this stops.
         vector<char> big(8u * 1024u * 1024u, 'y');
-        check("onError listener may disconnect its own client",
-              completesWithin(15000, [&] { s2.send(ids2[0], big.data(), big.size()); }));
+        auto sendsThrough = make_shared<atomic<int>>(0);
+        auto senderDone = make_shared<atomic<bool>>(false);
+        thread sender([&s2, &big, deafId, sendsThrough, senderDone] {
+            while (s2.send(deafId, big.data(), big.size())) {
+                if (sendsThrough->fetch_add(1) + 1 >= 64) break;   // 512 MB: give up, not our bug
+            }
+            senderDone->store(true);
+        });
+
+        // Wait for the send to block and time out; the listener being entered
+        // is what says it did. A payload that goes through whole is progress
+        // and restarts the wait. 30 s without either is 60 times the idle
+        // timeout: the send is stuck without timing out.
+        const auto t0 = chrono::steady_clock::now();
+        auto lastProgress = t0;
+        int lastThrough = 0;
+        while (!entered->load() && !senderDone->load()) {
+            const auto now = chrono::steady_clock::now();
+            const int through = sendsThrough->load();
+            if (through != lastThrough) {
+                lastThrough = through;
+                lastProgress = now;
+            }
+            if (now - lastProgress > chrono::seconds(30)) break;
+            this_thread::sleep_for(chrono::milliseconds(5));
+        }
+        const double blockSecs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+
+        if (entered->load()) {
+            printf("  (the send blocked and timed out after %.2fs, %d whole payload(s) through first)\n",
+                   blockSecs, sendsThrough->load());
+            const auto t1 = chrono::steady_clock::now();
+            const bool finished = waitFor(10000, [&] { return handled->load() && senderDone->load(); });
+            printf("  (the listener and the send %s %.0f ms after the listener was entered)\n",
+                   finished ? "returned" : "had not returned",
+                   chrono::duration<double, milli>(chrono::steady_clock::now() - t1).count());
+            check("onError listener may disconnect its own client", finished);
+        } else if (senderDone->load()) {
+            // The premise is not the invariant: a platform that swallowed every
+            // payload never ran the listener, which says nothing either way.
+            printf("%-56s %s\n", "onError listener may disconnect its own client",
+                   "SKIP (no send blocked: every payload went through)");
+            fflush(stdout);
+        } else {
+            printf("  (no progress and no onError for 30 s; %.2fs since the first send)\n", blockSecs);
+            check("a send to a non-reading peer times out into onError", false);
+        }
+
+        if (g_fail) {
+            sender.detach();
+            bail();
+        }
+        sender.join();
 
         TC_CLOSE(deaf);
         if (g_fail) bail();
-        check("second server stops cleanly", completesWithin(4000, [&] { s2.stop(); }));
+        const bool s2Stopped = completesWithin(4000, [&] { s2.stop(); });
+        check("second server stops cleanly", s2Stopped);
+        if (!s2Stopped) bail();
     }
 
     // --- the timeout measures silence, not the length of the send -----------
+    g_phase = "a slow but draining peer";
     // A peer that drains a little at a time keeps the send progressing, so a
     // payload that takes far longer than the timeout to deliver must still go
     // through. Measuring total elapsed time instead would drop a healthy client
@@ -344,10 +466,13 @@ int main() {
 
         TC_CLOSE(slow);
         if (g_fail) bail();
-        check("third server stops cleanly", completesWithin(4000, [&] { s3.stop(); }));
+        const bool s3Stopped = completesWithin(4000, [&] { s3.stop(); });
+        check("third server stops cleanly", s3Stopped);
+        if (!s3Stopped) bail();
     }
 
     // --- teardown waits for the client threads it started ---------------------
+    g_phase = "stop() with a listener still running";
     // stop() used to detach every client thread instead of joining it, so it
     // returned — and ~TcpServer() finished — while those threads were still
     // reading members of the object being destroyed.
@@ -356,15 +481,19 @@ int main() {
     // client's receive thread, so a listener that is still busy when stop() is
     // called holds that thread. Joining waits for it; detaching does not. A
     // stop() that returns while the listener is mid-call is the bug, and it is
-    // observable without a sanitizer.
+    // observable without a sanitizer. The listener says when it is done, so the
+    // check reads that rather than how long stop() took: on a busy machine the
+    // listener can be well into its 600 ms before stop() even starts.
     {
         TcpServer s5;
         if (!s5.start(port + 4, 8)) { printf("could not start fifth server\n"); bail(); }
 
         auto entered = make_shared<atomic<bool>>(false);
-        EventListener busy = s5.onReceive.listen([entered](TcpServerReceiveEventArgs&) {
+        auto left = make_shared<atomic<bool>>(false);
+        EventListener busy = s5.onReceive.listen([entered, left](TcpServerReceiveEventArgs&) {
             entered->store(true);
             this_thread::sleep_for(chrono::milliseconds(600));
+            left->store(true);
         });
 
         rawsocket_t talker = connectSilentPeer(port + 4);
@@ -376,18 +505,30 @@ int main() {
             this_thread::sleep_for(chrono::milliseconds(5));
         check("the listener is running on the client thread", entered->load());
 
+        const bool busyAtStop = !left->load();
+        bool leftAtReturn = false;
         const auto t0 = chrono::steady_clock::now();
-        const bool returned = completesWithin(10000, [&] { s5.stop(); });
+        const bool returned = completesWithin(10000, [&] {
+            s5.stop();
+            leftAtReturn = left->load();
+        });
         const double stopMs = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
         printf("  (stop() took %.0f ms against a listener busy for 600 ms)\n", stopMs);
         check("stop() returns rather than hanging", returned);
         if (!returned) { bail(); }
-        check("stop() waits for a client thread still inside a listener", stopMs >= 300.0);
+        if (busyAtStop) {
+            check("stop() waits for a client thread still inside a listener", leftAtReturn);
+        } else {
+            printf("%-56s %s\n", "stop() waits for a client thread still inside a listener",
+                   "SKIP (the listener finished before stop() was called)");
+            fflush(stdout);
+        }
 
         TC_CLOSE(talker);
     }
 
     // --- sendAsync() returns without waiting for the peer ---------------------
+    g_phase = "sendAsync() to a non-reading peer";
     // The request this whole thing started from: a send issued from a draw loop
     // to a peer that has stopped reading has to return in microseconds. The
     // synchronous send() cannot — it is done only once the kernel has the
@@ -449,7 +590,9 @@ int main() {
         check("a refused send is falsy and has no id", !refused && refused.id == 0);
         check("a full queue does not disconnect the client", s6.getClientCount() == 1);
 
-        check("sixth server stops cleanly", completesWithin(10000, [&] { s6.stop(); }));
+        const bool s6Stopped = completesWithin(10000, [&] { s6.stop(); });
+        check("sixth server stops cleanly", s6Stopped);
+        if (!s6Stopped) bail();
 
         // stop() joins the writer, so every completion has already fired.
         {
@@ -494,6 +637,7 @@ int main() {
     }
 
     // --- one queue per client, shared by send() and sendAsync() ---------------
+    g_phase = "send() and sendAsync() ordering";
     // send() is sendAsync() plus a wait on that one id. Sharing the queue is
     // what keeps the two in order: a synchronous send that wrote directly to the
     // socket would overtake everything already queued ahead of it.
@@ -549,13 +693,16 @@ int main() {
         }
         check("broadcastAsync reaches every client", a == "hi" && b == "hi");
 
-        check("seventh server stops cleanly", completesWithin(4000, [&] { s7.stop(); }));
+        const bool s7Stopped = completesWithin(4000, [&] { s7.stop(); });
+        check("seventh server stops cleanly", s7Stopped);
+        if (!s7Stopped) bail();
 
         TC_CLOSE(reader);
         TC_CLOSE(second);
     }
 
     // --- a timeout that wrote nothing is not a disconnect ---------------------
+    g_phase = "a timeout that wrote nothing";
     // The completion has to say which of two very different things happened:
     // the peer is gone, or the peer is merely too slow and the connection is
     // still there. Reporting both as Disconnected left a listener parsing the
@@ -614,12 +761,15 @@ int main() {
             check("that timeout reports no bytes sent", sawTimeoutBytes->load() == 0);
             check("a pure timeout leaves the client connected", s8.getClientCount() == 1);
         }
-        check("eighth server stops cleanly", completesWithin(15000, [&] { s8.stop(); }));
+        const bool s8Stopped = completesWithin(15000, [&] { s8.stop(); });
+        check("eighth server stops cleanly", s8Stopped);
+        if (!s8Stopped) bail();
 
         TC_CLOSE(deaf);
     }
 
     // --- the same teardown, repeatedly, to shake out a deadlock ---------------
+    g_phase = "repeated teardown with live clients";
     // Joining is the kind of fix that fails loudly in the other direction: a
     // server torn down while a client thread holds, or waits for, the same lock
     // hangs instead of returning. Churn through it.
@@ -646,6 +796,9 @@ int main() {
         if (!ok) bail();                        // a hang here means the join deadlocked
     }
 
+    g_phase = "main(), after the checks";
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
+    fflush(stdout);   // a crash in static destruction then still shows this
+    g_phase = "exit (static destruction)";
     return g_fail ? 1 : 0;
 }

@@ -12,11 +12,18 @@
 // - Per ImGui context, the widgets of the last completed frame (labels, rects,
 //   status flags, values). Rebuilt every frame; what tcx_imgui_get_widgets
 //   lists. One per context, so every window running imgui is listed.
-// - "Touched": every widget whose value was changed through the widget (drag,
-//   typing, a click) since startup or the last resetTouched(). Kept across
-//   frames with the last known value, so it survives the widget not being
-//   drawn (collapsed tree, closed window). ImGuiItemStatusFlags_Edited is only
-//   set by widget interaction, never by code assigning the variable.
+// - "Touched": every value widget whose value was changed through the widget
+//   (drag, typing, a click) since startup or the last resetTouched(). Kept
+//   across frames with the last known value, so it survives the widget not
+//   being drawn (collapsed tree, closed window). ImGuiItemStatusFlags_Edited is
+//   only set by widget interaction, never by code assigning the variable.
+//   Only the value hook creates entries, plus the combo / list box routing in
+//   the ItemInfo hook: a pick inside a combo popup or a list box is an edit of
+//   that widget. So an entry carries the value of a caller's variable, except
+//   one routed to a custom BeginCombo / BeginListBox, which has no variable
+//   (only its label, and for a combo the item shown). Items that change no
+//   variable (menu headers, action menu items, plain Selectables, buttons)
+//   are not recorded.
 // =============================================================================
 
 #include "imgui/imgui.h"
@@ -65,7 +72,7 @@ struct TouchedWidget {
     ImGuiID id = 0;
     std::string label;
     std::string windowName;
-    ImGuiItemStatusFlags statusFlags = 0;   // last seen (Checkable/Checked for checkboxes)
+    ImGuiItemStatusFlags statusFlags = 0;   // last seen
     WidgetValue value;                 // last known value
 };
 
@@ -88,6 +95,13 @@ struct ContextState {
     // a pick in the popup (a Selectable) is an edit of that combo.
     struct OpenCombo { ImGuiID id = 0; std::string label, windowName; };
     std::vector<OpenCombo> openCombos;
+
+    // The list boxes drawn this frame, by their ID, which is also the ChildId
+    // of the child window BeginListBox opens: a pick inside that child window
+    // (a Selectable) is an edit of the list box. Upstream has no depth counter
+    // for list boxes, so the child window stands in for BeginComboDepth.
+    struct OpenListBox { std::string label, windowName; };
+    std::unordered_map<ImGuiID, OpenListBox> listBoxes;
 
     // Opaque owner tag (tcxImGui: the tc::internal::WindowContext*), so tools
     // can say which OS window a widget is in
@@ -152,6 +166,8 @@ inline void captureValue(WidgetValue& out, const ImGuiTcItemValue& item, ImGuiCo
         if (s) out.text = s;
         break;
     }
+    case ImGuiTcValueKind_ListBoxBegin:
+        break;   // no value: only which list box it is
     default: {
         out.dataType = item.DataType;
         out.components = item.Components;
@@ -193,6 +209,7 @@ inline void beginFrame() {
     auto& cs = detail::contexts()[ctx];
     cs.currentFrame.clear();
     cs.currentIdMap.clear();
+    cs.listBoxes.clear();
 }
 
 // Swap frames: move current to last
@@ -269,6 +286,12 @@ inline void ImGuiTestEngineHook_ItemAdd(ImGuiContext* ctx, ImGuiID id, const ImR
     if (item_data) {
         info.statusFlags = item_data->StatusFlags;
     }
+    // EndListBox adds the list box's child window as an item under the list
+    // box ID, with no ItemInfo: name it after the list box.
+    if (auto lb = cs.listBoxes.find(id); lb != cs.listBoxes.end()) {
+        info.label = lb->second.label;
+        info.value.kind = ImGuiTcValueKind_ListBoxBegin;
+    }
 
     size_t idx = cs.currentFrame.size();
     cs.currentFrame.push_back(std::move(info));
@@ -289,8 +312,25 @@ inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const ch
     if (label) widget.label = label;
     widget.statusFlags = flags;
 
-    // A pick inside a combo popup is an edit of the combo, not of the item
-    // picked (also covers custom BeginCombo/Selectable combos).
+    // A pick inside a list box (its child window) is an edit of the list box,
+    // not of the item picked (also covers custom BeginListBox/Selectable
+    // lists). Checked before the combo popup: a list box inside a combo popup
+    // is the closer owner of its items.
+    if (ImGuiWindow* cw = ctx->CurrentWindow; cw && (cw->Flags & ImGuiWindowFlags_ChildWindow)) {
+        auto lb = cs.listBoxes.find(cw->ChildId);
+        if (lb != cs.listBoxes.end()) {
+            if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
+                !d::findTouched(ctx, lb->first)) {
+                auto& t = d::markTouched(ctx, lb->first);
+                t.label = lb->second.label;
+                t.windowName = lb->second.windowName;
+            }
+            return;
+        }
+    }
+
+    // Likewise, a pick inside a combo popup is an edit of the combo (also
+    // covers custom BeginCombo/Selectable combos).
     if (ctx->BeginComboDepth > 0) {
         if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
             (size_t)ctx->BeginComboDepth <= cs.openCombos.size()) {
@@ -304,14 +344,12 @@ inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const ch
         return;
     }
 
-    // Touched: an interaction changed this widget. Widgets that report a value
-    // are also marked from the value hook (which also catches the widgets
-    // that set Edited only after their ItemInfo, e.g. InputScalar).
+    // Touched entries are created by the value hook only: an edit that no
+    // value hook reports (a menu header, an action menu item, a plain
+    // Selectable) changes no variable of the caller. Here the entries that
+    // exist are only refreshed.
     if (widget.label.empty() || d::insideColorWidget(ctx)) return;
     tcx::imgui::TouchedWidget* t = d::findTouched(ctx, id);
-    if (!t && (flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0) {
-        t = &d::markTouched(ctx, id);
-    }
     if (t) {
         t->label = widget.label;
         t->windowName = widget.windowName;
@@ -357,9 +395,12 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
     // Edited by this call: its own item, or any part of it (a component of
     // DragFloat3, ##X inside ColorEdit). Counting it also lets an enclosing
     // widget see this edit.
+    // BeginCombo and BeginListBox return with their popup / child window
+    // current, before anything in it was picked: they only say which widget.
+    const bool opener = item->Kind == ImGuiTcValueKind_ComboPreview ||
+                        item->Kind == ImGuiTcValueKind_ListBoxBegin;
     bool edited = cs.editCount != item->EditCountAtEntry;
-    if (item->Kind != ImGuiTcValueKind_ComboPreview &&   // BeginCombo may return inside its popup
-        (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Edited)) {
+    if (!opener && (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Edited)) {
         edited = true;
     }
     if (edited) cs.editCount++;
@@ -372,6 +413,8 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
     if (item->Kind == ImGuiTcValueKind_Text && (item->Flags & ImGuiInputTextFlags_TempInput)) return;
     // A component of a multi-component widget (label ""): the group reports.
     if (!item->Label || !item->Label[0]) return;
+    // MenuItem(label, shortcut, bool* p_selected) with p_selected == NULL: no variable.
+    if (item->Kind == ImGuiTcValueKind_Bool && !item->Data) return;
 
     const ImGuiID id = item->Id ? item->Id : window->GetID(item->Label);
 
@@ -380,6 +423,12 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
         ctx->CurrentWindow != window) {
         cs.openCombos.resize((size_t)ctx->BeginComboDepth);
         cs.openCombos.back() = {id, item->Label, window->Name};
+    }
+    // BeginListBox returns with its child window current; that window's
+    // ChildId is the list box ID.
+    if (item->Kind == ImGuiTcValueKind_ListBoxBegin && ctx->CurrentWindow != window &&
+        ctx->CurrentWindow->ChildId == id) {
+        cs.listBoxes[id] = {item->Label, window->Name};
     }
 
     tcx::imgui::WidgetValue value;
@@ -409,7 +458,7 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
 
     // Touched registry
     tcx::imgui::TouchedWidget* t = d::findTouched(ctx, id);
-    if (!t && edited && item->Kind != ImGuiTcValueKind_ComboPreview && d::touchedExcludeDepth == 0) {
+    if (!t && edited && !opener && d::touchedExcludeDepth == 0) {
         t = &d::markTouched(ctx, id);
     }
     if (t) {

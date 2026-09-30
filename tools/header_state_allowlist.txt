@@ -100,6 +100,9 @@ core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::lo
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::create::generation  # host-only: the hot reload host itself
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::g_host  # host-only: the hot reload host itself (a guest's copy is constructed, never used)
 
+# --- tc/comm
+core/include/tc/comm/tcSerial.h trussc::internal::serialWorkerThread::state  # no-hot-reload: thread_local; only the Android USB worker sets it, false in every other thread and copy
+
 # --- tc/gpu
 core/include/tc/gpu/tcFbo.h trussc::Fbo::ensureSharedMip::quadVerts   # immutable: vertex data
 
