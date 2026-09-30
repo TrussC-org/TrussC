@@ -149,9 +149,11 @@ The inspector records every value the user changes by hand, per node: a
 member edited in the Inspector panel (nested members as a path such as
 `outline.color`, mod members under the mod's type), the name field, and the
 `pos` / `rotation` of every node moved or rotated with the gizmo. Changes made
-from code, or by the MCP tools `tc_set_node_members` and `tcx_imgui_input` (a
-value set on an Inspector widget is applied to the member, but it is not an
-edit by hand), are not recorded.
+from code or by the MCP tool `tc_set_node_members` are not recorded, nor is a
+value set with `tcx_imgui_input` on an Inspector value widget (it is applied to
+the member, but it is not an edit by hand). Text typed with `tcx_imgui_input`
+into the name field or a `std::string` member is keyboard input and is
+recorded, as in tcxImGui.
 
 With MCP on, `tcx_imgui_get_touched` returns the record under `inspector`,
 next to tcxImGui's own `widgets`. Each entry carries the member's current value
