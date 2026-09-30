@@ -51,6 +51,17 @@
 // - After the engine is re-initialized at another rate, getPosition()
 //   carries over, also for a voice that has ended (and its pending seek),
 //   and setPosition() lands at the target.
+// - A voice that ended and whose slot another play() took, and a voice
+//   whose decoder does not reopen at the re-init (a test hook), keep their
+//   getPosition() across the re-init (the latter also a pending target).
+// - The re-init migration clamps a pending target past the end of a long
+//   MP3 (the seek does not fail), and a migration seek that fails (a test
+//   hook) ends the stream with one error log.
+// - A seek near the end plays every remaining frame before the voice ends,
+//   also when the mixer read the ring's write position before the worker
+//   wrote the tail (a test hook delays the mixer there).
+// - A stream whose length is unknown restarts from the beginning at a
+//   re-init, and getPosition() says so.
 // A watchdog turns a StreamWorker that never comes back into a FAIL.
 // =============================================================================
 
@@ -198,6 +209,7 @@ static atomic<uint64_t> g_blocks{0};
 static atomic<bool> g_record{false};
 static mutex g_blockMutex;
 static vector<pair<uint64_t, float>> g_blockLevels;
+static double g_recordSum = 0.0;   // left-channel sum of the recorded blocks
 
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }
 
@@ -296,6 +308,7 @@ int main() {
         if (g_record.load()) {
             lock_guard<mutex> lock(g_blockMutex);
             g_blockLevels.push_back({n, level});
+            g_recordSum += sum;
         }
     });
 
@@ -314,6 +327,7 @@ int main() {
     const fs::path emptyFlac = dir / "empty.flac";       // no frames, length unknown
     const fs::path shortMp3 = dir / "short.mp3";         // silent, 31.2 s
     const fs::path longMp3 = dir / "long.mp3";           // silent, ~18 min (see below)
+    const fs::path endWav = dir / "end.wav";      // 0 for 11000 frames, 0.5 for 1000
     // A length whose float duration (what loadStream() stores) times the
     // rate, minus one, is past the last frame: Sound::setPosition(getDuration())
     // then targets a frame after the end (~18 minutes, ~4 MB).
@@ -333,7 +347,7 @@ int main() {
           writeWav(loopWav, {{9216.0f / kRate, 0.0f}}) &&
           writeFlacUnknownLength(unknownFlac, 6, 0.3f) &&
           writeFlacUnknownLength(emptyFlac, 0, 0.3f) &&
-          writeSilentMp3(shortMp3, 1300) &&
+          writeSilentMp3(shortMp3, 1300) && writeWav(endWav, {{11000.0f / kRate, 0.0f}, {1000.0f / kRate, 0.5f}}) &&
           longMp3Frames > 0 && writeSilentMp3(longMp3, longMp3Frames));
 
     // --- seek while playing ------------------------------------------------------
@@ -790,6 +804,159 @@ int main() {
               m.isPlaying() && internal::lastStreamSeekPointsForTests() == 32,
               to_string(internal::lastStreamSeekPointsForTests()));
         m.stop();
+    }
+
+    // The engine rate to re-init at next: any rate but the current one.
+    auto otherRate = [&] { return engine.getSampleRate() == 96000 ? 48000 : 96000; };
+    auto reinitAt = [&](int rate) {
+        AudioSettings a = settings;
+        a.sampleRate = rate;
+        return engine.init(a);
+    };
+    check("back to 48 kHz", reinitAt(kRate));
+
+    // --- a seek near the end plays the whole tail ------------------------------------
+    // The mixer reads how far the ring is written at the top of its callback.
+    // The file is shorter than the ring, so the worker has written all of it
+    // and there is room for the tail after a seek. A seek to 1000 frames
+    // before the end: the worker publishes the seek, writes those frames and
+    // marks the end. MixerLags holds the worker until the mixer has read the
+    // write position with the seek pending, and makes the mixer wait for all
+    // that right after its read, so it moves to the seek and meets the end
+    // with the tail past the write position it read: it must still play it.
+    {
+        Sound e;
+        check("near end: a stream plays (silent part)", (bool)e.loadStream(endWav) && e.play());
+        sleepMs(50);
+        {
+            lock_guard<mutex> lock(g_blockMutex);
+            g_blockLevels.clear();
+            g_recordSum = 0.0;
+        }
+        g_record.store(true);
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::MixerLags);
+        e.setPosition(11000.0f / kRate);
+        const bool ended = waitFor([&] { return !e.isPlaying(); }, 3000);
+        g_record.store(false);
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+        double sum;
+        {
+            lock_guard<mutex> lock(g_blockMutex);
+            sum = g_recordSum;
+        }
+        // Every frame of the tail is 0.5 (the last one only feeds the
+        // interpolation of the one before it).
+        const double frames = sum / 0.5;
+        check("near end: the voice ends", ended);
+        check("near end: every remaining frame is played before it ends (999 of 1000)",
+              frames > 990.0 && frames < 1002.0, to_string(frames) + " frames at 0.5");
+        e.stop();
+    }
+
+    // --- the re-init migration clamps a pending target past the end ------------------
+    // The pending target of setPosition(getDuration()) on the long MP3 is past
+    // its last frame at 48 kHz, and so at 96 kHz. The migration seeks the new
+    // decoder there itself; it clamps like the worker.
+    {
+        Sound l;
+        check("re-init clamp: the long MP3 streams, looping",
+              (bool)l.loadStream(longMp3) && (l.setLoop(true), l.play()));
+        sleepMs(100);
+        l.pause();   // the seek stays pending: a paused voice does not apply it
+        l.setPosition(l.getDuration());
+        const size_t failed = countLogs(LogLevel::Error, "seek to frame");
+        check("re-init clamp: the engine restarts at 96 kHz", reinitAt(96000));
+        check("re-init clamp: the migration's seek to the end does not fail",
+              countLogs(LogLevel::Error, "seek to frame") == failed, lastLog(LogLevel::Error));
+        l.resume();
+        sleepMs(400);
+        const float p = l.getPosition();
+        check("re-init clamp: it looped to the start", l.isPlaying() && p < 1.0f, to_string(p));
+        l.stop();
+
+        // A failed migration seek halts the stream, like a failed seek
+        // request: one error log, and a non-looping voice ends.
+        Sound f;
+        check("re-init seek fails: a stream plays", (bool)f.loadStream(dcWav) && f.play());
+        sleepMs(200);
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
+        const size_t logged = countLogs(LogLevel::Error, "failed after an engine re-init");
+        const bool restarted = reinitAt(otherRate());
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+        check("re-init seek fails: the engine restarts", restarted);
+        check("re-init seek fails: one error log",
+              countLogs(LogLevel::Error, "failed after an engine re-init") == logged + 1,
+              lastLog(LogLevel::Error));
+        check("re-init seek fails: the voice ends", waitFor([&] { return !f.isPlaying(); }, 1000));
+        f.stop();
+    }
+
+    // --- an ended voice whose slot another play() took --------------------------------
+    // The migration only sees the engine's slots. A voice pushed out of them
+    // keeps its position at the rate it counts it in.
+    {
+        Sound ended;
+        check("slot reused: a short stream plays to its end",
+              (bool)ended.loadStream(shortWav) && ended.play() &&
+              waitFor([&] { return !ended.isPlaying(); }, 1000));
+        const float before = ended.getPosition();
+        // Eight eager voices take all eight slots, the ended voice's too.
+        vector<Sound> fill(8);
+        bool allPlay = true;
+        for (auto& f : fill) allPlay = allPlay && (bool)f.load(shortWav) && f.play();
+        check("slot reused: eight voices take every slot", allPlay);
+        for (auto& f : fill) f.stop();
+        check("slot reused: the engine restarts at another rate", reinitAt(otherRate()));
+        check("slot reused: the ended voice's getPosition() carries over",
+              before > 0.15f && near(ended.getPosition(), before, 0.001f),
+              to_string(before) + " -> " + to_string(ended.getPosition()));
+    }
+
+    // --- a voice whose decoder does not reopen at the re-init ------------------------------
+    {
+        Sound a, b;
+        check("reopen fails: two streams play",
+              (bool)a.loadStream(dcWav) && a.play() && (bool)b.loadStream(dcWav) && b.play());
+        sleepMs(300);
+        // b holds a seek that stays pending (paused).
+        b.pause();
+        b.setPosition(2.5f);
+        const float before = a.getPosition();
+        const size_t warned = countLogs(LogLevel::Warning, "stream voice migration failed");
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
+        const bool restarted = reinitAt(otherRate());
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+        check("reopen fails: the engine restarts", restarted);
+        check("reopen fails: both voices end with a warning",
+              !a.isPlaying() &&
+              countLogs(LogLevel::Warning, "stream voice migration failed") == warned + 2,
+              lastLog(LogLevel::Warning));
+        check("reopen fails: getPosition() carries over",
+              before > 0.2f && near(a.getPosition(), before, 0.05f),
+              to_string(before) + " -> " + to_string(a.getPosition()));
+        check("reopen fails: a pending target carries over",
+              near(b.getPosition(), 2.5f, 0.001f), to_string(b.getPosition()));
+        a.stop();
+        b.stop();
+    }
+
+    // --- a stream whose length is unknown restarts at a re-init --------------------------
+    {
+        Sound u;
+        check("unknown length re-init: the FLAC plays (level 0.3)",
+              (bool)u.loadStream(unknownFlac) && u.play() &&
+              waitFor([] { return near(g_level.load(), 0.3f, 0.02f); }, 500));
+        sleepMs(200);
+        const float before = u.getPosition();
+        check("unknown length re-init: the engine restarts at another rate", reinitAt(otherRate()));
+        const float after = u.getPosition();
+        check("unknown length re-init: getPosition() restarts from 0 with the audio",
+              before > 0.15f && after < 0.05f, to_string(before) + " -> " + to_string(after));
+        check("unknown length re-init: it plays again (level 0.3)",
+              waitFor([] { return near(g_level.load(), 0.3f, 0.02f); }, 500),
+              to_string(g_level.load()));
+        check("unknown length re-init: then it ends", waitFor([&] { return !u.isPlaying(); }, 2000));
+        u.stop();
     }
 
     levelSub.disconnect();   // the listener only touches globals: no barrier needed
