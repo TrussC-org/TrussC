@@ -160,7 +160,7 @@ static bool waitFor(int ms, P pred) {
 // -----------------------------------------------------------------------------
 
 // A listening TCP socket on 127.0.0.1 with a port the OS picks
-static rawsocket_t listenLoopback(int& port, bool listening = true) {
+static rawsocket_t listenLoopback(int& port) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == kNoSocket) return kNoSocket;
     sockaddr_in addr{};
@@ -170,7 +170,7 @@ static rawsocket_t listenLoopback(int& port, bool listening = true) {
     socklen_t len = sizeof(addr);
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0 ||
         ::getsockname(s, (sockaddr*)&addr, &len) != 0 ||
-        (listening && ::listen(s, 8) != 0)) {
+        ::listen(s, 8) != 0) {
         TC_CLOSE(s);
         return kNoSocket;
     }
@@ -178,12 +178,30 @@ static rawsocket_t listenLoopback(int& port, bool listening = true) {
     return s;
 }
 
-// A port on 127.0.0.1 that refuses connections: bound but not listening, and
-// held until closed, so nothing else can take it and a client's own
-// ephemeral port cannot be it (on Linux a connect() to a free ephemeral port
-// can connect to itself)
-static rawsocket_t refusedLoopback(int& port) {
-    return listenLoopback(port, false);
+// A port on 127.0.0.1 that refuses a connect() at once: one nothing is bound
+// to, below every platform's ephemeral range (Linux 32768+, macOS and Windows
+// 49152+), so a client's own ephemeral port cannot be it (on Linux a connect()
+// to a free ephemeral port can connect to itself). Not a socket bound without
+// listen(): Linux and Windows refuse a connect() to that, but macOS drops the
+// SYN, so the connect() fails only once it gives up, seconds later.
+// Returns 0 if no port in the range is free.
+static int refusingPort() {
+    const int base = 21000, span = 8000;
+    const int start = static_cast<int>(
+        chrono::steady_clock::now().time_since_epoch().count() % span);
+    for (int i = 0; i < span; ++i) {
+        const int port = base + (start + i) % span;
+        rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s == kNoSocket) return 0;
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(port));
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        const bool free = ::bind(s, (sockaddr*)&addr, sizeof(addr)) == 0;
+        TC_CLOSE(s);
+        if (free) return port;
+    }
+    return 0;
 }
 
 static rawsocket_t acceptWithin(rawsocket_t listener, int ms) {
@@ -826,9 +844,8 @@ static void scenario() {
     // onError listener that reconnects has replaced the socket by then: the
     // close after it returned shut the listener's new connection, in the
     // middle of its handshake.
-    int refusedPort = 0;
-    rawsocket_t refusedSock = refusedLoopback(refusedPort);
-    check("refused connect(): refusing port is reserved", refusedSock != kNoSocket);
+    const int refusedPort = refusingPort();
+    check("refused connect(): a refusing port is free", refusedPort != 0);
     if (g_fail) bail();
     atomic<bool> refusedArmed{true};
     atomic<int> refusedReconnect{-1};   // -1 not run, 0 connect() failed, 1 ok
@@ -851,7 +868,6 @@ static void scenario() {
           peerToClient(peer, "so am I"));
     client.disconnect();
     peer.reset();
-    TC_CLOSE(refusedSock);
     if (g_fail) bail();
 
     // --- onReceive disconnects, the main thread reconnects without threads ---

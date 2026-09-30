@@ -167,6 +167,33 @@ static rawsocket_t listenLoopback(int& port) {
     return s;
 }
 
+// A port on 127.0.0.1 that refuses a connect() at once: one nothing is bound
+// to, below every platform's ephemeral range (Linux 32768+, macOS and Windows
+// 49152+), so a client's own ephemeral port cannot be it (on Linux a connect()
+// to a free ephemeral port can connect to itself). Not a socket bound without
+// listen(): Linux and Windows refuse a connect() to that, but macOS drops the
+// SYN (its TCP drops segments for a socket in the CLOSED state), so the
+// connect() fails only once it gives up, about 8 s later on the CI runner.
+// Returns 0 if no port in the range is free.
+static int refusingPort() {
+    const int base = 21000, span = 8000;
+    const int start = static_cast<int>(
+        chrono::steady_clock::now().time_since_epoch().count() % span);
+    for (int i = 0; i < span; ++i) {
+        const int port = base + (start + i) % span;
+        rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s == kNoSocket) return 0;
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(static_cast<uint16_t>(port));
+        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+        const bool free = ::bind(s, (sockaddr*)&addr, sizeof(addr)) == 0;
+        TC_CLOSE(s);
+        if (free) return port;
+    }
+    return 0;
+}
+
 static rawsocket_t acceptWithin(rawsocket_t listener, int ms) {
 #ifdef _WIN32
     fd_set fds;
@@ -418,13 +445,10 @@ static void scenario() {
 
     // --- refused reconnects, then a successful one --------------------------
     // The usual recovery while the peer device is still rebooting. The refused
-    // port is bound but not listening, and held until the end, so nothing else
-    // can take it and the client's own ephemeral port cannot be it (on Linux a
-    // connect() to a free ephemeral port can connect to itself).
-    int refusedPort = 0;
-    rawsocket_t refusedSock = bindLoopback(refusedPort);
-    check("refused port is reserved", refusedSock != kNoSocket);
-    if (refusedSock == kNoSocket) bail();
+    // port is one nothing is bound to (see refusingPort()).
+    const int refusedPort = refusingPort();
+    check("a refusing port is free", refusedPort != 0);
+    if (refusedPort == 0) bail();
 
     TC_CLOSE(peer);
     peer = kNoSocket;
@@ -493,15 +517,22 @@ static void scenario() {
     // (a loopback connect to the refused port is pending first on Linux). It
     // notified onError and only then disconnected: an onError listener that
     // reconnects had its new pending connect torn down by that disconnect().
-    // The test pumps the update event itself, as the app's frame loop would.
+    // The test pumps the update event itself, as the app's frame loop would,
+    // and prints what it saw, so a failure on a platform we cannot run here
+    // says where it stopped.
     {
         TcpClient nt;
         nt.setUseThread(false);
         bool ntArmed = true;
         int ntReconnect = -1;   // -1 not run, 0 connect() failed, 1 ok
-        EventListener ntErrSub = nt.onError.listen([&](TcpErrorEventArgs&) {
+        int ntErrors = 0, ntErrorCode = 0;
+        string ntErrorMessage;
+        EventListener ntErrSub = nt.onError.listen([&](TcpErrorEventArgs& e) {
+            ++ntErrors;
             if (ntArmed) {
                 ntArmed = false;
+                ntErrorCode = e.errorCode;
+                ntErrorMessage = e.message;
                 ntReconnect = nt.connect("127.0.0.1", port) ? 1 : 0;
             }
         });
@@ -509,17 +540,27 @@ static void scenario() {
         EventListener ntRxSub = nt.onReceive.listen([&](TcpReceiveEventArgs& e) {
             ntReceived.append(e.data.begin(), e.data.end());
         });
+        int ticks = 0;
         auto pumpUntil = [&](int ms, auto pred) {
-            return waitFor(ms, [&] { events().update.notify(); return pred(); });
+            return waitFor(ms, [&] { ++ticks; events().update.notify(); return pred(); });
         };
 
         // true when the connect is pending (the processNetwork() path); false
         // where the refusal comes back at once (connect()'s own path)
+        const auto started = chrono::steady_clock::now();
         const bool pending = nt.connect("127.0.0.1", refusedPort);
+        const int errorsFromConnect = ntErrors;
         printf("  (the refused connect was %s)\n",
                pending ? "pending: processNetwork() reports it" : "refused at once");
-        check("no threads: onError reconnects",
-              pumpUntil(3000, [&] { return ntReconnect != -1; }) && ntReconnect == 1);
+        const bool reconnected =
+            pumpUntil(5000, [&] { return ntReconnect != -1; }) && ntReconnect == 1;
+        const long long reconnectMs = chrono::duration_cast<chrono::milliseconds>(
+            chrono::steady_clock::now() - started).count();
+        printf("  (onError: %d call(s), %d from connect() itself; first: code %d, \"%s\"; "
+               "listener's connect(): %d; %d update tick(s), %lld ms)\n",
+               ntErrors, errorsFromConnect, ntErrorCode, ntErrorMessage.c_str(),
+               ntReconnect, ticks, reconnectMs);
+        check("no threads: onError reconnects", reconnected);
         check("no threads: client is connected",
               pumpUntil(3000, [&] { return nt.isConnected(); }));
         ntErrSub.disconnect();
@@ -858,7 +899,6 @@ static void scenario() {
 
     // --- teardown ---------------------------------------------------------
     TC_CLOSE(peer);
-    TC_CLOSE(refusedSock);
     TC_CLOSE(listenerB);
     TC_CLOSE(listener);
 }
