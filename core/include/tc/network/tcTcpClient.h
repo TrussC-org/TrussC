@@ -96,6 +96,8 @@ public:
     //  - "Disconnected by client" (wasClean true): the app ended it, with
     //    disconnect() or with connect() on a connected client. Fires
     //    synchronously on the calling thread, before that call returns.
+    // Without threads (setUseThread(false), the default on the web) the first
+    // two fire on the main thread instead, from the update event.
     // The destructor disconnects without firing it. An auto-reconnect
     // listener should not reconnect on "Disconnected by client", the app's
     // own doing:
@@ -106,21 +108,24 @@ public:
     //       reconnectPending = true;  // reconnect from update(), main thread
     //   });
     //
-    // A listener that reconnects from inside connect()'s own disconnect
-    // anyway is overruled: connect() closes that connection again, without
-    // another notification, and connects where it was asked to.
+    // A listener that reconnects with connect() from inside connect()'s own
+    // disconnect anyway is overruled: connect() closes that connection again,
+    // without another notification, and connects where it was asked to. A
+    // reconnect with connectAsync() is not covered: connect() does not wait
+    // for its connect thread (#261).
     //
     // RECONNECTING ON THE RECEIVE THREAD: when an event fires on the receive
     // thread (onDisconnect for a remote close or an error, onReceive; for
     // TlsClient also onConnect and onError around the handshake), a plain
     // (inline) listener that calls connect() runs it on that old receive
-    // thread, which connect() detaches from the client first. Nothing waits
-    // for it then: neither disconnect() nor the destructor. Until that
-    // connect() has returned, do not destroy the client, and do not call
+    // thread, which connect() detaches from the client first. A listener
+    // that calls disconnect() there detaches it the same way. Nothing waits
+    // for the thread then: neither disconnect() nor the destructor. Until
+    // that call has returned, do not destroy the client, and do not call
     // disconnect() on it from another thread. Either can end in a
     // use-after-free, or in a connection that completes after disconnect()
     // has returned. Reconnecting from the main thread, as above, avoids this.
-    // (A connect() that can be cancelled is #261.)
+    // (A connect() that can be cancelled is #261; see also #262.)
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive
@@ -249,7 +254,8 @@ private:
     // the destructor do not wait for it, and socket_ is not atomic. A
     // disconnect() or destruction from another thread in that window races
     // it (a use-after-free, or a connection that completes after disconnect()
-    // returned), hence the rule in the Events comment above. The fix belongs
+    // returned), hence the rule in the Events comment above. disconnect()
+    // called on the receive thread detaches it the same way. The fix belongs
     // to #261 (a cancellable connect) and #262.
     std::atomic<unsigned> receiveGeneration_{0};
 

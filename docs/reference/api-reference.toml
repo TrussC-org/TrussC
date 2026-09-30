@@ -8521,6 +8521,10 @@ details.en = '''
   [`connect()`](#TcpClient::connect) on a connected client. Fires
   synchronously on the calling thread, before that call returns.
 
+Without threads ([`setUseThread(false)`](#TcpClient::setUseThread), the
+default on the web) the first two fire on the main thread instead, from the
+update event.
+
 The destructor disconnects without firing it. An auto-reconnect listener
 should not reconnect on `"Disconnected by client"`, which is the app's own
 doing:
@@ -8533,15 +8537,18 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 });
 ```
 
-A listener that reconnects from inside `connect()`'s own disconnect anyway is
-overruled: `connect()` closes that connection again, without another
-notification, and connects where it was asked to.
+A listener that reconnects with `connect()` from inside `connect()`'s own
+disconnect anyway is overruled: `connect()` closes that connection again,
+without another notification, and connects where it was asked to. A reconnect
+with [`connectAsync()`](#TcpClient::connectAsync) is not covered: `connect()`
+does not wait for its connect thread (#261).
 
 When the event fires on the receive thread, a plain (inline) listener that
 calls `connect()` runs it on that thread, which nothing waits for until
-`connect()` returns: do not destroy the client or call `disconnect()` from
-another thread until then. Reconnecting from the main thread, as above,
-avoids this.
+`connect()` returns. A listener that calls `disconnect()` there detaches the
+thread the same way. Until that call has returned, do not destroy the client
+or call `disconnect()` from another thread. Reconnecting from the main thread,
+as above, avoids this.
 '''
 details.ja = '''
 [`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason) が理由を示す：
@@ -8555,6 +8562,9 @@ details.ja = '''
   [`connect()`](#TcpClient::connect) で切った。呼び出し元のスレッドで、
   その呼び出しが返る前に同期で発火する。
 
+スレッドなし（[`setUseThread(false)`](#TcpClient::setUseThread)、Web では既定）
+のときは、最初の 2 つはメインスレッドで update イベントから発火する。
+
 デストラクタは発火させずに切断する。自動再接続のリスナーは、アプリ自身が
 切った `"Disconnected by client"` では再接続しないこと：
 
@@ -8566,13 +8576,17 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 });
 ```
 
-それでも `connect()` 自身の切断の中からリスナーが再接続した場合、その接続は
-`connect()` が通知なしで閉じ直し、頼まれた先へ接続する。
+それでも `connect()` 自身の切断の中からリスナーが `connect()` で再接続した
+場合、その接続は `connect()` が通知なしで閉じ直し、頼まれた先へ接続する。
+[`connectAsync()`](#TcpClient::connectAsync) での再接続は対象外：`connect()`
+はその接続スレッドを待たない（#261）。
 
 受信スレッドで発火したとき、そこで `connect()` を呼ぶ通常の（inline の）
 リスナーは、その受信スレッドの上で動き、`connect()` が返るまで誰もそれを
-待たない。それまでは別スレッドからクライアントを破棄したり `disconnect()`
-を呼んだりしないこと。上の例のようにメインスレッドで再接続すれば避けられる。
+待たない。そこで `disconnect()` を呼ぶリスナーも、同じようにスレッドを切り
+離す。その呼び出しが返るまでは、別スレッドからクライアントを破棄したり
+`disconnect()` を呼んだりしないこと。上の例のようにメインスレッドで再接続
+すれば避けられる。
 '''
 details.ko = '''
 [`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason)가 이유를 알려 준다:
@@ -8586,6 +8600,9 @@ details.ko = '''
   [`connect()`](#TcpClient::connect)로 끊었다. 호출한 스레드에서, 그 호출이
   반환되기 전에 동기적으로 발생한다.
 
+스레드 없이 동작할 때([`setUseThread(false)`](#TcpClient::setUseThread), 웹에서는
+기본값)는 앞의 두 가지가 메인 스레드에서 update 이벤트로부터 발생한다.
+
 소멸자는 이벤트를 발생시키지 않고 연결을 끊는다. 자동 재연결 리스너는 앱이
 스스로 끊은 `"Disconnected by client"`에서는 재연결하지 않아야 한다:
 
@@ -8597,14 +8614,17 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 });
 ```
 
-그래도 `connect()` 자신의 연결 해제 안에서 리스너가 재연결하면, `connect()`가
-그 연결을 알림 없이 다시 닫고 요청받은 곳으로 연결한다.
+그래도 `connect()` 자신의 연결 해제 안에서 리스너가 `connect()`로 재연결하면,
+`connect()`가 그 연결을 알림 없이 다시 닫고 요청받은 곳으로 연결한다.
+[`connectAsync()`](#TcpClient::connectAsync)로 재연결한 경우는 해당하지 않는다:
+`connect()`는 그 연결 스레드를 기다리지 않는다(#261).
 
 수신 스레드에서 발생했을 때 그 자리에서 `connect()`를 호출하는 일반(inline)
 리스너는 그 수신 스레드 위에서 실행되며, `connect()`가 반환될 때까지 아무도
-그 스레드를 기다리지 않는다. 그때까지 다른 스레드에서 클라이언트를 파괴하거나
-`disconnect()`를 호출하지 말 것. 위 예처럼 메인 스레드에서 재연결하면 피할 수
-있다.
+그 스레드를 기다리지 않는다. 그 자리에서 `disconnect()`를 호출하는 리스너도
+같은 방식으로 스레드를 떼어 낸다. 그 호출이 반환될 때까지 다른 스레드에서
+클라이언트를 파괴하거나 `disconnect()`를 호출하지 말 것. 위 예처럼 메인
+스레드에서 재연결하면 피할 수 있다.
 '''
 
 ["TcpClient::onError"]

@@ -105,6 +105,7 @@ private:
     // context, leaving tlsReceiveThread_ alone. The receive thread calls it
     // on itself when a handshake fails: the thread stays owned (joinable),
     // so disconnect() and the destructor still join it while it notifies.
+    // Only a listener that calls connect() or disconnect() there detaches it.
     void teardown();
 
     // Shut down and close the socket, if there is one
@@ -140,13 +141,14 @@ private:
     //
     // Not covered: the reconnect itself. connect() on the receive thread
     // detaches that thread and then, on it, creates the socket, resolves the
-    // host, connects (blocking) and starts the new receive thread. No one
-    // owns the detached thread meanwhile: disconnect() and the destructor do
-    // not wait for it, and socket_ is not atomic. So, as for TcpClient (see
-    // its Events comment): until a connect() called from a listener has
-    // returned, do not destroy the client, and do not call disconnect() on it
-    // from another thread. The fix belongs to #261 (a cancellable connect)
-    // and #262.
+    // host, connects (blocking) and starts the new receive thread. A
+    // disconnect() called on the receive thread detaches it the same way. No
+    // one owns the detached thread meanwhile: disconnect() and the destructor
+    // do not wait for it, and socket_ is not atomic. So, as for TcpClient
+    // (see its Events comment): until a connect() or disconnect() called from
+    // a listener on the receive thread has returned, do not destroy the
+    // client, and do not call disconnect() on it from another thread. The fix
+    // belongs to #261 (a cancellable connect) and #262.
     std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()

@@ -503,7 +503,7 @@ bool TlsClient::performHandshake() {
         // then run the listeners below with no owner, and destroying the
         // client meanwhile would free it under them. teardown() leaves the
         // thread joinable, so disconnect() and the destructor still wait for
-        // it; only a listener's own connect() lets go of it.
+        // it; only a listener's own connect() or disconnect() lets go of it.
         teardown();
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
 
