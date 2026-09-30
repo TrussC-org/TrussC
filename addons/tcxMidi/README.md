@@ -71,9 +71,10 @@ Enumeration follows the TrussC convention (`AudioEngine::listDevices()` etc.):
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,
 `onMessage` event, and the polling API `hasNewMessage()` / `getNextMessage()` /
 `setBufferSize()` / `getDroppedMessages()`. The polling queue holds up to 1024
-messages by default; when it is full the oldest message is dropped, counted in
-`getDroppedMessages()` and logged as a warning (at most once every 2 s). Raise
-`setBufferSize()` if you see it.
+messages by default; when it is full the oldest message is dropped (shrinking it
+with `setBufferSize()` also discards the oldest queued ones). Dropped messages are
+counted in `getDroppedMessages()` and logged as a warning (at most once every 2 s).
+Raise `setBufferSize()` if you see it.
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,

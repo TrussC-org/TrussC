@@ -122,20 +122,28 @@ public:
     }
 
     // Set the queue limit (default 1024). Past it, the oldest message is
-    // dropped. Shrinking the limit discards the oldest queued messages now.
+    // dropped. Shrinking the limit discards the oldest queued messages now;
+    // they count as dropped too.
     void setBufferSize(size_t size) {
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        bufferMax_ = size;
-        // Trim queue if over limit
-        while (messageQueue_.size() > bufferMax_) {
-            messageQueue_.pop();
+        uint64_t dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            bufferMax_ = size;
+            // Trim queue if over limit
+            while (messageQueue_.size() > bufferMax_) {
+                messageQueue_.pop();
+                ++dropped;
+            }
         }
+        countDrops(dropped);
     }
 
     size_t getBufferSize() const { return bufferMax_; }
 
-    // Messages dropped from the full polling queue since this receiver was
-    // created (a running total, never reset). Cheap to call from any thread.
+    // Messages received but never handed to the app, since this receiver was
+    // created: dropped from the full polling queue, or discarded when
+    // setBufferSize() shrank it (a running total, never reset). Cheap to
+    // call from any thread.
     uint64_t getDroppedMessages() const {
         return droppedMessages_.load(std::memory_order_relaxed);
     }
@@ -155,10 +163,15 @@ private:
                 ++dropped;
             }
         }
-        if (dropped > 0) {
-            droppedMessages_.fetch_add(dropped, std::memory_order_relaxed);
-            unreportedDrops_.fetch_add(dropped, std::memory_order_relaxed);
-        }
+        countDrops(dropped);
+    }
+
+    // Any thread: add drops to the total and to the next report. Only
+    // touches atomics (no lock, no log), so the receive thread can call it.
+    void countDrops(uint64_t dropped) {
+        if (dropped == 0) return;
+        droppedMessages_.fetch_add(dropped, std::memory_order_relaxed);
+        unreportedDrops_.fetch_add(dropped, std::memory_order_relaxed);
     }
 
     // Polling side: log the drops counted since the last report, at most
@@ -182,7 +195,7 @@ private:
         }
         tc::logWarning("tcxOsc") << "OscReceiver on port " << port_ << ": " << n
                                  << (n == 1 ? " message" : " messages")
-                                 << " dropped since the last report (queue full at "
+                                 << " dropped since the last report (queue limit "
                                  << limit << ", oldest dropped first); raise setBufferSize()";
     }
 
@@ -261,8 +274,8 @@ private:
     std::atomic<bool> bufferEnabled_{false};
     size_t bufferMax_ = 1024;
 
-    // Drop accounting: the receive thread only adds to the counters; the
-    // polling calls read and log them.
+    // Drop accounting: the receive thread and setBufferSize() only add to
+    // the counters (countDrops()); the polling calls read and log them.
     static constexpr std::chrono::seconds kDropReportInterval{2};
     static constexpr int64_t kNeverReported = INT64_MIN;
     std::atomic<uint64_t> droppedMessages_{0};   // running total
