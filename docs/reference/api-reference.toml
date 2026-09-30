@@ -2440,9 +2440,9 @@ description.ja = "ファイルが開いているか確認"
 description.ko = "파일이 열려 있는지 확인"
 
 ["FileWriter::open"]
-description.en = "Open file for writing"
-description.ja = "書き込み用にファイルを開く"
-description.ko = "쓰기용으로 파일을 엶"
+description.en = "Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
+description.ja = "書き込み用にファイルを開く（append = true で既存ファイルに追記）。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
+description.ko = "쓰기용으로 파일을 엶 (append = true면 기존 파일에 추가). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
 
 ["FileWriter::write"]
 description.en = "Write data to file"
@@ -3983,7 +3983,7 @@ keywords = ["log", "logging", "console"]
 description.en = "Logging core with console and file output and an onLog event; access the global instance via getLogger()"
 description.ja = "コンソール・ファイル出力と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
 description.ko = "콘솔·파일 출력과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
-details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
+details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. One exception: `setLogFile()` with a relative path resolves it through `getDataPath()`, which reads the data path state without a lock, so it must not race `setDataPathRoot()` or the first `getDataPath()` call; an absolute path does not touch that state. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
 related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice"]
 
 ["Logger::closeFile"]
@@ -4002,9 +4002,9 @@ description.ja = "現在のファイルログレベルを取得"
 description.ko = "현재 파일 로그 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
-description.en = "Get the path of the current log file"
-description.ja = "現在のログファイルのパスを取得"
-description.ko = "현재 로그 파일의 경로를 얻음"
+description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
+description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）"
+description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열)"
 
 ["Logger::isFileOpen"]
 description.en = "Check whether a log file is currently open"
@@ -4032,9 +4032,9 @@ description.ja = "ファイルの最小ログレベルを設定"
 description.ko = "파일 최소 로그 레벨을 설정"
 
 ["Logger::setLogFile"]
-description.en = "Open a file to receive log output"
-description.ja = "ログ出力を受けるファイルを開く"
-description.ko = "로그 출력을 받을 파일을 엶"
+description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
+description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
+description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
 
 ["MOUSE_BUTTON_LEFT"]
 keywords = ["left click", "primary"]
@@ -6603,9 +6603,9 @@ description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom �
 ["Pixels::save"]
 category = "graphics_pixels"
 keywords = ["write", "export", "file", "png", "store"]
-description.en = "Save image to file"
-description.ja = "ファイルに画像を保存"
-description.ko = "이미지를 파일로 저장"
+description.en = "Save image to file (PNG, JPG or BMP by extension; PNG otherwise). Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned"
+description.ja = "ファイルに画像を保存（拡張子で PNG / JPG / BMP、それ以外は PNG）。相対パスは getDataPath で解決し、親フォルダがなければ作る。作れないときはエラーをログに出して false を返す"
+description.ko = "이미지를 파일로 저장 (확장자에 따라 PNG / JPG / BMP, 그 외는 PNG). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 만들 수 없으면 오류를 로그에 남기고 false 반환"
 
 ["Pixels::setColor"]
 category = "graphics_pixels"
@@ -12511,9 +12511,9 @@ description.ja = "ドキュメントのルート要素ノードを取得"
 description.ko = "문서의 루트 요소 노드를 얻음"
 
 ["Xml::save"]
-description.en = "Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success."
-description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決される。indent は各レベルのインデント文字列を設定する。成功時に true を返す"
-description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석됨. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환"
+description.en = "Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false."
+description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決され、親フォルダがなければ作られる。indent は各レベルのインデント文字列を設定する。成功時に true を返し、失敗時はエラーをログに出して false を返す"
+description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석되고, 상위 폴더가 없으면 만들어진다. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
 
 ["Xml::toString"]
 description.en = "Serialize the document to an XML string. indent sets the per-level indentation string."
@@ -12656,9 +12656,9 @@ related = ["drawSuperellipse", "appendArc", "beginShape"]
 ["appendToFile"]
 category = "file"
 keywords = ["write", "add", "concat"]
-description.en = "Append string to file"
-description.ja = "ファイルに追記"
-description.ko = "파일에 문자열을 추가"
+description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
+description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
+description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
 related = ["saveTextFile"]
 
 ["applyWindow"]
@@ -15728,9 +15728,9 @@ platform_note.ja = "非同期のファイル保存。iOS は UIDocumentPickerVie
 ["saveJson"]
 category = "file"
 keywords = ["write", "store", "serialize"]
-description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success."
-description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返す"
-description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환"
+description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false."
+description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返し、失敗時はエラーをログに出してfalseを返す"
+description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
 related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 
 ["saveScreenshot"]
@@ -15747,9 +15747,9 @@ platform_note.ja = "Web では未実装（canvas の読み戻しはない）: �
 category = "file"
 keywords = ["write", "store"]
 of = ["ofBufferToFile"]
-description.en = "Save string to text file"
-description.ja = "文字列をファイルに保存"
-description.ko = "문자열을 텍스트 파일로 저장"
+description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
+description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
+description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
 related = ["loadTextFile", "appendToFile", "saveJson"]
 
 ["scale"]
@@ -15982,9 +15982,9 @@ platform_note.ja = "Linux / Web では no-op（xdg-screensaver / Wake Lock API �
 ["setLogFile"]
 category = "utility"
 keywords = ["output", "write", "path"]
-description.en = "Open a file to receive log output"
-description.ja = "ログ出力を受けるファイルを開く"
-description.ko = "로그 출력을 받을 파일을 엶"
+description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
+description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
+description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
 related = ["closeLogFile", "setFileLogLevel"]
 
 ["setMaxUpdateSteps"]

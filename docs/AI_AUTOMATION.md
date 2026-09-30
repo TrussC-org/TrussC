@@ -34,7 +34,12 @@ Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes a
 native app call `setLogFile()` before the window and graphics start
 (`runApp()`, before `sapp_run()`), so every log line — including setup-time
 output — is appended to that file with zero app code. (Web builds don't read
-`TRUSSC_LOG_FILE`.) sokol's own errors, warnings and panics go through the
+`TRUSSC_LOG_FILE`.) A relative value resolves against the data folder
+(`getDataPath()` with the root in effect when `runApp()` starts — normally
+the default; it is read before `setup()`, so a `setDataPathRoot()` in `setup()`
+does not apply, while one in `main()` before `runApp()` does), and a
+missing parent folder is created. If the file still cannot be opened, the app
+runs on and logs a warning. sokol's own errors, warnings and panics go through the
 logger too, and lines logged from worker threads land whole. A window or GPU
 setup failure reaches the file where sokol reports it as text: on Linux (no X
 display; GLX setup, framebuffer config, GL context or window creation; EGL
