@@ -193,5 +193,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   fill the settings and explicit flags win (`--ide`, `--no-web` /
   `--no-android` / `--no-ios`, `--web` with `--no-web` is an error); without a
   `CMakePresets.json` the old defaults stay (vscode, native only, WebGPU).
+  Saved settings that cannot be used are reported as warnings: a file that
+  does not parse or cannot be read, wrongly typed entries, an unknown IDE id,
+  and an IDE this OS cannot generate (xcode off macOS, vs off Windows).
   Not covered: the commands in `tools/src/main.cpp` that call these, and the
   IDE files and CMake configure that `update` runs.

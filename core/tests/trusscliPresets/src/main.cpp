@@ -15,6 +15,9 @@
 //     win, and without a CMakePresets.json the old defaults stay.
 //   - parseTargetFlag(): --no-web / --no-android / --no-ios, and --web with
 //     --no-web is an error.
+//   - Saved settings that cannot be used are reported, not dropped silently:
+//     an unparsable file, wrongly typed entries, an unknown IDE id, and an IDE
+//     this OS cannot generate (xcode off macOS, vs off Windows).
 // Not covered: the commands themselves (tools/src/main.cpp), which call these
 // functions; the IDE files and CMake configure that `update` runs.
 // =============================================================================
@@ -85,6 +88,17 @@ static const IdeType kAllIdes[] = {
     IdeType::Xcode, IdeType::VisualStudio,
 };
 
+// Whether this host can generate projects for `ide` (the GUI's IDE list)
+static bool ideOnThisHost(IdeType ide) {
+#ifndef __APPLE__
+    if (ide == IdeType::Xcode) return false;
+#endif
+#ifndef _WIN32
+    if (ide == IdeType::VisualStudio) return false;
+#endif
+    return true;
+}
+
 // -----------------------------------------------------------------------------
 // 1. The IDE survives a write + read of CMakePresets.json, for every IDE
 // -----------------------------------------------------------------------------
@@ -96,8 +110,16 @@ static void testIdeRoundTrip() {
         s.ideType = ide;
         bool written = writePresets(s, project);
         PresetState st = readPresetState(project.string());
-        check("ide round trip: " + id + " written and read back",
-              written && st.found && st.hasIde && st.ide == ide);
+        if (ideOnThisHost(ide)) {
+            check("ide round trip: " + id + " written and read back",
+                  written && st.found && st.hasIde && st.ide == ide &&
+                  st.ideWarning.empty() && st.warnings.empty());
+        } else {
+            // Written elsewhere (shared folder), read here: not used, reported
+            check("ide round trip: " + id + " is ignored with a warning on this OS",
+                  written && st.found && !st.hasIde &&
+                  st.ideWarning.find(id) != string::npos && st.warnings.empty());
+        }
 
         // Stored where the decision put it, under the stable --ide id
         Json j = Json::parse(readFile(project / "CMakePresets.json"), nullptr, false);
@@ -166,10 +188,27 @@ static void testTargetRoundTrip() {
 static void testParseEdgeCases() {
     fs::path project = makeProject("no-presets");
     PresetState st = readPresetState(project.string());
-    check("no CMakePresets.json: found == false", !st.found);
+    check("no CMakePresets.json: found == false, no warning",
+          !st.found && st.warnings.empty() && st.ideWarning.empty());
 
-    check("malformed JSON: found == false", !parsePresetState("{ not json").found);
-    check("JSON array: found == false", !parsePresetState("[1, 2]").found);
+    PresetState malformed = parsePresetState("{ \"configurePresets\": [], }");
+    check("malformed JSON: found == false, warned",
+          !malformed.found && malformed.warnings.size() == 1);
+    PresetState array = parsePresetState("[1, 2]");
+    check("JSON array: found == false, warned", !array.found && array.warnings.size() == 1);
+
+    // An unparsable file on disk is reported too
+    fs::path broken = makeProject("broken-presets");
+    writeFile(broken / "CMakePresets.json", "{ \"vendor\": {\"trussc\": {\"ide\": \"cursor\"}}, }");
+    PresetState brokenSt = readPresetState(broken.string());
+    check("unparsable file on disk: found == false, warned",
+          !brokenSt.found && !brokenSt.hasIde && brokenSt.warnings.size() == 1);
+
+    fs::path dirPresets = makeProject("presets-is-a-dir");
+    fs::create_directories(dirPresets / "CMakePresets.json");
+    PresetState dirSt = readPresetState(dirPresets.string());
+    check("CMakePresets.json that cannot be read: found == false, warned",
+          !dirSt.found && dirSt.warnings.size() == 1);
 
     // Written by a trusscli before #350: no vendor entry
     PresetState old = parsePresetState(R"({
@@ -179,17 +218,66 @@ static void testParseEdgeCases() {
             {"name": "web", "cacheVariables": {"TC_WEB_BACKEND": "GLES3"}}
         ]
     })");
-    check("pre-#350 presets: targets read, no IDE",
-          old.found && old.web && old.webBackend == 1 && !old.hasIde);
+    check("pre-#350 presets: targets read, no IDE, no warning",
+          old.found && old.web && old.webBackend == 1 && !old.hasIde &&
+          old.ideWarning.empty() && old.warnings.empty());
 
     PresetState unknown = parsePresetState(
         R"({"configurePresets": [], "vendor": {"trussc": {"ide": "emacs"}}})");
-    check("unknown IDE id is ignored", unknown.found && !unknown.hasIde);
+    check("unknown IDE id is ignored with a warning naming it",
+          unknown.found && !unknown.hasIde &&
+          unknown.ideWarning.find("'emacs'") != string::npos);
+
+    // Ids are exact: a hand-edited "Cursor" is not "cursor"
+    PresetState miscased = parsePresetState(R"({"vendor": {"trussc": {"ide": "Cursor"}}})");
+    check("miscased IDE id is ignored with a warning",
+          miscased.found && !miscased.hasIde && !miscased.ideWarning.empty());
 
     PresetState wrongType = parsePresetState(
         R"({"configurePresets": {"name": "web"}, "vendor": {"trussc": "cursor"}})");
-    check("wrongly typed fields are ignored",
-          wrongType.found && !wrongType.web && !wrongType.hasIde);
+    check("wrongly typed fields are ignored with warnings",
+          wrongType.found && !wrongType.web && !wrongType.hasIde &&
+          wrongType.warnings.size() == 1 && !wrongType.ideWarning.empty());
+
+    PresetState ideNumber = parsePresetState(R"({"vendor": {"trussc": {"ide": 3}}})");
+    PresetState vendorArray = parsePresetState(R"({"vendor": ["trussc"]})");
+    check("non-string ide / non-object vendor: ignored with a warning",
+          !ideNumber.hasIde && !ideNumber.ideWarning.empty() &&
+          !vendorArray.hasIde && !vendorArray.ideWarning.empty());
+
+    // Other tools' vendor data is none of our business
+    PresetState otherVendor = parsePresetState(R"({"vendor": {"someTool": 1}})");
+    check("vendor entry without trussc: no IDE, no warning",
+          otherVendor.found && !otherVendor.hasIde && otherVendor.ideWarning.empty());
+
+    // A project folder shared between OSes: xcode / vs saved elsewhere
+    PresetState xcode = parsePresetState(R"({"vendor": {"trussc": {"ide": "xcode"}}})");
+    PresetState vs = parsePresetState(R"({"vendor": {"trussc": {"ide": "vs"}}})");
+#ifdef __APPLE__
+    check("saved xcode is used on macOS", xcode.hasIde && xcode.ide == IdeType::Xcode);
+#else
+    check("saved xcode is ignored off macOS, with a warning",
+          !xcode.hasIde && xcode.ideWarning.find("macOS") != string::npos);
+#endif
+#ifdef _WIN32
+    check("saved vs is used on Windows", vs.hasIde && vs.ide == IdeType::VisualStudio);
+#else
+    check("saved vs is ignored off Windows, with a warning",
+          !vs.hasIde && vs.ideWarning.find("Windows") != string::npos);
+#endif
+    {
+        // ...and the regeneration then uses the default IDE, targets kept
+        PresetState foreign = parsePresetState(R"({
+            "configurePresets": [{"name": "web"}],
+            "vendor": {"trussc": {"ide": ")" +
+            string(IdeHelper::getIdeId(ideOnThisHost(IdeType::Xcode)
+                                           ? IdeType::VisualStudio : IdeType::Xcode)) +
+            R"("}}})");
+        ProjectSettings s;
+        applyGenerationOptions(s, foreign, GenerationFlags());
+        check("IDE of another OS: regenerates with the default IDE, web kept",
+              s.ideType == IdeType::VSCode && s.generateWebBuild);
+    }
 
     PresetState noBackend = parsePresetState(R"({"configurePresets": [{"name": "web"}]})");
     check("web preset without TC_WEB_BACKEND means WebGPU",

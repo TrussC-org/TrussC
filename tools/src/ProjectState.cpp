@@ -8,13 +8,35 @@ using namespace std;
 namespace fs = std::filesystem;
 using Json = nlohmann::json;
 
+// Whether this OS can generate projects for `ide`. Matches the IDE list of
+// the GUI (tcApp.cpp): Xcode on macOS only, Visual Studio on Windows only.
+// Returns the OS name for the message when it cannot.
+static const char* ideHostOnly(IdeType ide) {
+#ifndef __APPLE__
+    if (ide == IdeType::Xcode) return "macOS";
+#endif
+#ifndef _WIN32
+    if (ide == IdeType::VisualStudio) return "Windows";
+#endif
+    (void)ide;
+    return nullptr;
+}
+
 PresetState parsePresetState(const string& jsonText) {
     PresetState state;
     Json data = Json::parse(jsonText, nullptr, /*allow_exceptions=*/false);
-    if (!data.is_object()) return state;
+    if (!data.is_object()) {
+        state.warnings.push_back("CMakePresets.json does not parse as a JSON object; "
+                                 "its IDE and targets are ignored");
+        return state;
+    }
     state.found = true;
 
     auto presets = data.find("configurePresets");
+    if (presets != data.end() && !presets->is_array()) {
+        state.warnings.push_back("\"configurePresets\" in CMakePresets.json is not an "
+                                 "array; its targets are ignored");
+    }
     if (presets != data.end() && presets->is_array()) {
         for (const auto& p : *presets) {
             if (!p.is_object()) continue;
@@ -38,25 +60,54 @@ PresetState parsePresetState(const string& jsonText) {
         }
     }
 
+    // "vendor": {"trussc": {"ide": "<id>"}}. A missing entry (a file from a
+    // trusscli before #350) is fine; a present but unusable one is reported.
     auto vendor = data.find("vendor");
-    if (vendor != data.end() && vendor->is_object()) {
-        auto trussc = vendor->find("trussc");
-        if (trussc != vendor->end() && trussc->is_object()) {
-            auto ide = trussc->find("ide");
-            if (ide != trussc->end() && ide->is_string()) {
-                state.hasIde = IdeHelper::parseIdeId(ide->get<string>(), state.ide);
-            }
-        }
+    if (vendor == data.end()) return state;
+    if (!vendor->is_object()) {
+        state.ideWarning = "\"vendor\" in CMakePresets.json is not an object";
+        return state;
     }
+    auto trussc = vendor->find("trussc");
+    if (trussc == vendor->end()) return state;
+    if (!trussc->is_object()) {
+        state.ideWarning = "\"vendor.trussc\" in CMakePresets.json is not an object";
+        return state;
+    }
+    auto ide = trussc->find("ide");
+    if (ide == trussc->end()) return state;
+    if (!ide->is_string()) {
+        state.ideWarning = "\"vendor.trussc.ide\" in CMakePresets.json is not a string";
+        return state;
+    }
+    const string id = ide->get<string>();
+    IdeType parsed;
+    if (!IdeHelper::parseIdeId(id, parsed)) {
+        state.ideWarning = "unknown IDE '" + id + "' in CMakePresets.json "
+                           "(valid: vscode, cursor, xcode, vs, cmake)";
+        return state;
+    }
+    if (const char* os = ideHostOnly(parsed)) {
+        state.ideWarning = "IDE '" + id + "' in CMakePresets.json is " + os + " only";
+        return state;
+    }
+    state.ide = parsed;
+    state.hasIde = true;
     return state;
 }
 
 PresetState readPresetState(const string& projectPath) {
     fs::path path = fs::path(projectPath) / "CMakePresets.json";
     error_code ec;
-    if (!fs::is_regular_file(path, ec)) return PresetState();
-    ifstream file(path, ios::binary);
-    if (!file) return PresetState();
+    if (!fs::exists(path, ec)) return PresetState();
+    ifstream file;
+    if (fs::is_regular_file(path, ec)) file.open(path, ios::binary);
+    if (!file.is_open()) {
+        PresetState state;
+        state.warnings.push_back("CMakePresets.json exists but cannot be read; "
+                                 "its IDE and targets are ignored");
+        return state;
+    }
     stringstream ss;
     ss << file.rdbuf();
     return parsePresetState(ss.str());

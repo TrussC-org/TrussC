@@ -566,15 +566,26 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
 // regenerates an existing project (update / addon add / addon remove): the
 // project's own CMakePresets.json first, then the explicit flags, which win.
 // Prints the result when anything was read back, so the user sees what the
-// regeneration keeps.
+// regeneration keeps, and warns about saved settings that could not be used
+// (the file is rewritten, so they would otherwise vanish unnoticed).
 static void fillGenerationOptions(ProjectSettings& settings,
                                   const string& projectPath,
                                   const GenerationFlags& flags) {
     PresetState state = readPresetState(projectPath);
     applyGenerationOptions(settings, state, flags);
+    for (const string& w : state.warnings) {
+        cerr << "Warning: " << w << ", and the file is rewritten.\n";
+    }
+    if (!state.ideWarning.empty() && !flags.ide) {
+        cerr << "Warning: " << state.ideWarning << "; using the default IDE ("
+             << IdeHelper::getIdeId(settings.ideType) << "). Choose one with "
+             << "'trusscli update --ide <type>'.\n";
+    }
     if (state.found) {
         cout << "Project settings: " << describeGenerationOptions(settings)
-             << " (kept from CMakePresets.json unless a flag changed them)\n";
+             << " (kept from CMakePresets.json unless a flag changed them";
+        if (!state.hasIde && !flags.ide) cout << "; the IDE is the default";
+        cout << ")\n";
     }
 }
 

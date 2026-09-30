@@ -14,10 +14,15 @@
 // IDE is stored by ProjectGenerator::writeCMakePresets() as
 //   "vendor": {"trussc": {"ide": "<id>"}}
 // with the ids of IdeHelper::getIdeId().
+//
+// Whatever cannot be used is left out and reported, never guessed: a file
+// that does not parse, wrongly typed entries, an unknown IDE id, and an IDE
+// this OS cannot generate (xcode off macOS, vs off Windows, as in the GUI).
 
 #include "ProjectGenerator.h"
 #include <optional>
 #include <string>
+#include <vector>
 
 // What an existing CMakePresets.json says about how the project was generated.
 struct PresetState {
@@ -26,16 +31,26 @@ struct PresetState {
     bool android = false;   // an "android" configure preset exists
     bool ios = false;       // an "ios" configure preset exists
     int webBackend = 0;     // TC_WEB_BACKEND of the web preset: 0 = WGPU, 1 = GLES3
-    bool hasIde = false;    // the vendor entry holds a known IDE id
+    bool hasIde = false;    // the vendor entry holds an IDE id usable on this OS
     IdeType ide = IdeType::VSCode;
+
+    // Why a saved IDE was not used (empty when there was none or it was used):
+    // a wrongly typed vendor entry, an unknown id, or an IDE this OS cannot
+    // generate. hasIde is false whenever this is set.
+    std::string ideWarning;
+    // Other parts of an existing file that were ignored: the whole file when
+    // it does not parse as a JSON object (found stays false), or a wrongly
+    // typed configurePresets.
+    std::vector<std::string> warnings;
 };
 
 // Parse the text of a CMakePresets.json. Text that is not a JSON object
-// gives found == false.
+// gives found == false and a warning.
 PresetState parsePresetState(const std::string& jsonText);
 
-// Read <projectPath>/CMakePresets.json. A missing or unreadable file gives
-// found == false.
+// Read <projectPath>/CMakePresets.json. A missing file gives found == false
+// and no warning; an unreadable or unparsable one gives found == false and a
+// warning.
 PresetState readPresetState(const std::string& projectPath);
 
 // Generation options given explicitly on the command line. An unset value
