@@ -90,6 +90,10 @@ struct GlyphCell {
 // -----------------------------------------------------------------------------
 // Internal registry storage
 // -----------------------------------------------------------------------------
+// Defined in tcGlobal.cpp, not inline here: app code registers glyphs and the
+// host bakes the atlas from them, so both must reach one registry, also from a
+// Windows hot reload guest DLL (docs/ARCHITECTURE.md, "One instance per
+// process").
 namespace internal {
     struct StoredGlyph {
         uint32_t       cp;
@@ -98,15 +102,15 @@ namespace internal {
         uint8_t        width;  // 1 or 2
     };
     // Sorted by `cp` for binary-search lookup.
-    inline std::vector<StoredGlyph> registry;
+    std::vector<StoredGlyph>& registry();
 
     // Next free atlas cell for newly registered glyphs.
-    inline uint16_t nextFreeCell = FIRST_REGISTERED_CELL;
+    uint16_t& nextFreeCell();
 
     // Monotonically incremented every time the registry changes. The runtime
-    // (TrussC.h ensureFontAtlas) compares against `builtAtlasVersion` to
-    // decide when to re-upload the atlas texture.
-    inline uint64_t registryVersion = 0;
+    // (TrussC.h ensureFontAtlas) compares it against the version the atlas
+    // was baked from to decide when to re-upload the atlas texture.
+    uint64_t& registryVersion();
 }
 
 // -----------------------------------------------------------------------------
@@ -140,7 +144,7 @@ inline uint32_t utf8Decode(const char*& p, const char* end) {
 // Registry queries
 // -----------------------------------------------------------------------------
 inline const internal::StoredGlyph* findRegistered(uint32_t cp) {
-    auto& reg = internal::registry;
+    auto& reg = internal::registry();
     auto it = std::lower_bound(reg.begin(), reg.end(), cp,
         [](const internal::StoredGlyph& a, uint32_t b){ return a.cp < b; });
     if (it != reg.end() && it->cp == cp) return &*it;
@@ -263,7 +267,7 @@ constexpr std::array<uint8_t, 26> compile16x13(const char* const (&rows)[13]) {
 // drawBitmapString call.
 inline void registerGlyph(const Glyph& g) {
     using internal::StoredGlyph;
-    auto& reg = internal::registry;
+    auto& reg = internal::registry();
 
     uint8_t w = (uint8_t)g.width;
 
@@ -283,21 +287,22 @@ inline void registerGlyph(const Glyph& g) {
             it = reg.end();  // re-search below
         }
         if (it != reg.end() && it->cp == g.codepoint) {
-            ++internal::registryVersion;
+            ++internal::registryVersion();
             return;
         }
     }
 
     // Allocate fresh cells. Fullwidth glyphs must start on an even cell so
     // their 2 cells don't straddle a row boundary.
-    if (w == 2 && (internal::nextFreeCell % 2 != 0)) ++internal::nextFreeCell;
-    StoredGlyph sg{ g.codepoint, internal::nextFreeCell, g.data, w };
-    internal::nextFreeCell = (uint16_t)(internal::nextFreeCell + w);
+    uint16_t& nextCell = internal::nextFreeCell();
+    if (w == 2 && (nextCell % 2 != 0)) ++nextCell;
+    StoredGlyph sg{ g.codepoint, nextCell, g.data, w };
+    nextCell = (uint16_t)(nextCell + w);
 
     it = std::lower_bound(reg.begin(), reg.end(), g.codepoint,
         [](const StoredGlyph& a, uint32_t b){ return a.cp < b; });
     reg.insert(it, sg);
-    ++internal::registryVersion;
+    ++internal::registryVersion();
 }
 
 // Register a batch of glyphs.
@@ -312,7 +317,7 @@ inline void registerGlyphs(const Glyph (&glyphs)[N]) {
 inline void updateGlyph(uint32_t cp, const uint8_t* newData) {
     if (auto* g = const_cast<internal::StoredGlyph*>(findRegistered(cp))) {
         g->data = newData;
-        ++internal::registryVersion;
+        ++internal::registryVersion();
     }
 }
 
@@ -320,6 +325,7 @@ inline void updateGlyph(uint32_t cp, const uint8_t* newData) {
 // ASCII glyph data (freeglut/X11 8x13 fixed-width)
 // -----------------------------------------------------------------------------
 inline const uint8_t* asciiGlyph(uint32_t cp) {
+    // Immutable: the same in every module's copy
     static const uint8_t ASCII[95][13] = {
         {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // ' '
         {0x00,0x00,0x18,0x18,0x18,0x18,0x18,0x18,0x18,0x00,0x18,0x18,0x00}, // '!'
@@ -517,7 +523,7 @@ inline unsigned char* generateAtlasPixels(int rows) {
     }
 
     // Registered glyphs
-    for (const auto& sg : internal::registry) {
+    for (const auto& sg : internal::registry()) {
         int cy = (sg.cellStart / CELLS_PER_ROW) * CELL_H;
         if (cy + CELL_H > height) continue;
         int cx = (sg.cellStart % CELLS_PER_ROW) * CELL_W;

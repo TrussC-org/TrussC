@@ -23,63 +23,27 @@
 // docs/ARCHITECTURE.md, section 5.D "Deferred Draw Model" — read that before
 // adding a new deferred draw path.
 
-#include <vector>
+// The queues are one per process, so the functions below are defined in
+// tcGlobal.cpp rather than inline over header-inline vectors: a hot reload
+// guest on Windows compiles its own copy of header-inline state, and every
+// handle guest code released went into a queue present() never drained -- a
+// GPU leak that grew each frame a guest released a temporary resource (#249).
 
 namespace trussc {
 namespace internal {
 
-inline std::vector<sg_buffer>   pendingGpuBufferDestroys;
-inline std::vector<sg_image>    pendingGpuImageDestroys;
-inline std::vector<sg_view>     pendingGpuViewDestroys;
-inline std::vector<sg_sampler>  pendingGpuSamplerDestroys;
-inline std::vector<sg_pipeline> pendingGpuPipelineDestroys;
-inline std::vector<sg_shader>   pendingGpuShaderDestroys;
-
-inline void deferGpuDestroy(sg_buffer buf) {
-    if (buf.id != 0) pendingGpuBufferDestroys.push_back(buf);
-}
-
-inline void deferGpuDestroy(sg_image img) {
-    if (img.id != 0) pendingGpuImageDestroys.push_back(img);
-}
-
-inline void deferGpuDestroy(sg_view view) {
-    if (view.id != 0) pendingGpuViewDestroys.push_back(view);
-}
-
-inline void deferGpuDestroy(sg_sampler smp) {
-    if (smp.id != 0) pendingGpuSamplerDestroys.push_back(smp);
-}
-
-inline void deferGpuDestroy(sg_pipeline pip) {
-    if (pip.id != 0) pendingGpuPipelineDestroys.push_back(pip);
-}
-
-inline void deferGpuDestroy(sg_shader shd) {
-    if (shd.id != 0) pendingGpuShaderDestroys.push_back(shd);
-}
+void deferGpuDestroy(sg_buffer buf);
+void deferGpuDestroy(sg_image img);
+void deferGpuDestroy(sg_view view);
+void deferGpuDestroy(sg_sampler smp);
+void deferGpuDestroy(sg_pipeline pip);
+void deferGpuDestroy(sg_shader shd);
 
 // Destroy everything queued this frame. Called from present() after
 // sg_commit(). Skips the sg_destroy calls entirely when sokol_gfx has
 // already shut down (handles queued during teardown are reclaimed by
 // sg_shutdown itself).
-inline void drainPendingGpuDestroys() {
-    if (sg_isvalid()) {
-        for (sg_buffer buf : pendingGpuBufferDestroys)   sg_destroy_buffer(buf);
-        for (sg_view view : pendingGpuViewDestroys)      sg_destroy_view(view);
-        for (sg_image img : pendingGpuImageDestroys)     sg_destroy_image(img);
-        for (sg_sampler smp : pendingGpuSamplerDestroys) sg_destroy_sampler(smp);
-        // Pipelines before shaders: a pipeline references its shader.
-        for (sg_pipeline pip : pendingGpuPipelineDestroys) sg_destroy_pipeline(pip);
-        for (sg_shader shd : pendingGpuShaderDestroys)     sg_destroy_shader(shd);
-    }
-    pendingGpuBufferDestroys.clear();
-    pendingGpuImageDestroys.clear();
-    pendingGpuViewDestroys.clear();
-    pendingGpuSamplerDestroys.clear();
-    pendingGpuPipelineDestroys.clear();
-    pendingGpuShaderDestroys.clear();
-}
+void drainPendingGpuDestroys();
 
 } // namespace internal
 } // namespace trussc

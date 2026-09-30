@@ -856,11 +856,11 @@ private:
     bool fallbackInitialized_{false};
 };
 
-// Singleton accessor. The instance lives in the first TU that calls this.
-inline PbrPipeline& getPbrPipeline() {
-    static PbrPipeline instance;
-    return instance;
-}
+// Singleton accessor, defined in tcGlobal.cpp: one PBR pipeline (shaders,
+// fallback textures, shadow maps) per process. Header-inline, a hot reload
+// guest on Windows built its own copy, whose shadow passes and GPU objects the
+// host's flush never saw (#249).
+PbrPipeline& getPbrPipeline();
 
 // Flush the PBR draws deferred during an FBO pass, interleaved per-layer with the
 // FBO context's sokol_gl 2D content (mirror of flushDeferredShaderDraws but for a

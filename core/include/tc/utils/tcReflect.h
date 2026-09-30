@@ -241,7 +241,10 @@ template <class E>
 inline const char* const* enumCNames() {
     static constexpr auto buf = enumCharBuf<E>();
     static constexpr auto off = enumOffsets<E>();
-    static const auto ptrs = [] {
+    // Immutable once built. The type is spelled out (const pointers to const
+    // chars) so tools/check_header_state.py can see that: a `const auto` is
+    // immutable to it only with a literal initializer.
+    static const std::array<const char*, enumValidCount<E>()> ptrs = [] {
         std::array<const char*, enumValidCount<E>()> p{};
         for (std::size_t i = 0; i < p.size(); ++i) p[i] = buf.data() + off[i];
         return p;

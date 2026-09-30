@@ -225,11 +225,9 @@ private:
     std::map<int, sg_pipeline> primPipelineCache_;
 };
 
-// Singleton accessor. The instance lives in the first TU that calls this.
-inline PointPipeline& getPointPipeline() {
-    static PointPipeline instance;
-    return instance;
-}
+// Singleton accessor, defined in tcGlobal.cpp: one point pipeline per process
+// (see getPbrPipeline(); a Windows hot reload guest built its own, #249).
+PointPipeline& getPointPipeline();
 
 } // namespace internal
 

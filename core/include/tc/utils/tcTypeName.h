@@ -52,8 +52,11 @@ inline std::string demangleTypeName(const char* mangled) {
 } // namespace internal
 
 // Readable name for a type, cached per type (one demangle per type, ever).
-// Returns a reference into a process-wide cache, valid for the program's life.
+// Returns a reference into a cache that is never cleared, valid for the
+// program's life.
 inline const std::string& typeName(const std::type_info& ti) {
+    // Per module on a Windows hot reload guest, which is harmless: a cache of
+    // derived data, and each module's mutex guards its own cache.
     static std::unordered_map<std::type_index, std::string> cache;
     static std::mutex mutex;  // contended only on first sight of a new type
     std::lock_guard<std::mutex> lock(mutex);
@@ -88,6 +91,7 @@ inline std::string unqualifiedTypeName(const std::string& full) {
 
 // Short (unqualified) type name, cached per type like typeName().
 inline const std::string& shortTypeName(const std::type_info& ti) {
+    // A per-module cache is harmless (see typeName()).
     static std::unordered_map<std::type_index, std::string> cache;
     static std::mutex mutex;
     std::lock_guard<std::mutex> lock(mutex);

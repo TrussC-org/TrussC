@@ -23,12 +23,47 @@ namespace trussc {
 namespace internal {
 void pumpAudioDiagnostics();
 void flushAudioDiagnostics();
+
+#ifdef _WIN32
+// The code page HeadlessConsoleUtf8 will restore, for the console control
+// handler's forced exit (headless::consoleHandler); 0 when there is none.
+// Headless only, where hot reload never runs, so a per-module copy is fine
+// (tools/header_state_allowlist.txt).
+inline std::atomic<UINT> headlessRestoreConsoleCP{0};
+
+// runHeadlessApp()'s console output code page: UTF-8 for the guard's
+// lifetime, as the windowed app gets from sapp_desc.win32.console_utf8 (log
+// text is UTF-8). runHeadlessApp() declares it before the app, so the code
+// page comes back after the app's destructor, and when an exception that
+// the caller catches leaves the function. An uncaught exception ends the
+// process without unwinding, and does not restore it. Without a console
+// the set fails and nothing is restored.
+struct HeadlessConsoleUtf8 {
+    HeadlessConsoleUtf8()
+        : original(GetConsoleOutputCP()), set(SetConsoleOutputCP(CP_UTF8) != 0) {
+        if (set) headlessRestoreConsoleCP = original;
+    }
+    ~HeadlessConsoleUtf8() {
+        if (!set) return;
+        headlessRestoreConsoleCP = 0;
+        SetConsoleOutputCP(original);
+    }
+    HeadlessConsoleUtf8(const HeadlessConsoleUtf8&) = delete;
+    HeadlessConsoleUtf8& operator=(const HeadlessConsoleUtf8&) = delete;
+
+    UINT original;
+    bool set;
+};
+#endif
 }
 
 // ---------------------------------------------------------------------------
 // Headless mode internal state (extends tcHeadlessState.h)
 // ---------------------------------------------------------------------------
 namespace headless {
+    // Headless-only state: hot reload is windowed and never runs this loop, so
+    // a per-module copy is fine (tools/header_state_allowlist.txt).
+
     // Running flag (set to false by signal handler)
     inline std::atomic<bool> running{true};
 
@@ -42,9 +77,21 @@ namespace headless {
     inline std::chrono::high_resolution_clock::time_point startTime;
 
 #ifdef _WIN32
-    // Windows console control handler
+    // Windows console control handler. The first Ctrl+C or Ctrl+Break stops
+    // the loop, so the app is destroyed and the console code page restored
+    // (internal::HeadlessConsoleUtf8). A second one, while the loop is
+    // already stopping, means the app is stuck where the loop flag is not
+    // read (setup(), a long update()): restore the code page and fall
+    // through to the default handler (ExitProcess), so the keyboard can
+    // still end a hung app.
     inline BOOL WINAPI consoleHandler(DWORD signal) {
-        if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT) {
+        if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
+            if (running.exchange(false)) return TRUE;
+            const UINT cp = internal::headlessRestoreConsoleCP.load();
+            if (cp != 0) SetConsoleOutputCP(cp);
+            return FALSE;
+        }
+        if (signal == CTRL_CLOSE_EVENT) {
             running = false;
             return TRUE;
         }
@@ -102,6 +149,12 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 
     // Install signal handlers
     headless::installSignalHandlers();
+
+#ifdef _WIN32
+    // Console output code page UTF-8 until the app is destroyed (see
+    // internal::HeadlessConsoleUtf8)
+    internal::HeadlessConsoleUtf8 consoleUtf8;
+#endif
 
     // Record the main thread id (this runner owns the app/update loop), so
     // isMainThread() / runOnMainThread() behave the same as in the windowed app.
