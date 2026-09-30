@@ -47,6 +47,9 @@ public:
     // -------------------------------------------------------------------------
     // World-level contact events (fired for ALL touching body pairs, whether or
     // not they carry a Collider2D). Used by the Mod layer (RigidBody2D).
+    // Events are per body pair: when several fixtures touch (compound bodies),
+    // Began fires on the first contact, Stay once per update, and Ended when
+    // the last contact ends. The Collider2D events below count the same way.
     // -------------------------------------------------------------------------
     tc::Event<WorldContact> contactBegan;   // started touching
     tc::Event<WorldContact> contactStay;    // still touching, every step
@@ -67,32 +70,27 @@ public:
 
 private:
     // -------------------------------------------------------------------------
-    // Contact Pair Tracking (for Stay events)
+    // Contact Pair Tracking
     // -------------------------------------------------------------------------
+    // The touching contacts of one pair (colliders or bodies, unordered).
+    // Enter/Began fires when the first one begins, Exit/Ended when the last
+    // one ends, and Stay once per update with the first contact.
+    template<typename T>
     struct ContactPair {
-        Collider2D* a = nullptr;
-        Collider2D* b = nullptr;
-        b2Contact* contact = nullptr;
+        T* a = nullptr;
+        T* b = nullptr;
+        std::vector<b2Contact*> contacts;
 
-        bool operator==(const ContactPair& other) const {
-            return (a == other.a && b == other.b) ||
-                   (a == other.b && b == other.a);
+        bool is(const T* x, const T* y) const {
+            return (a == x && b == y) || (a == y && b == x);
         }
     };
 
-    struct ContactPairHash {
-        size_t operator()(const ContactPair& p) const {
-            // Order-independent hash
-            auto ha = std::hash<void*>{}(p.a);
-            auto hb = std::hash<void*>{}(p.b);
-            return ha ^ hb;
-        }
-    };
+    // Collider pairs (Collider2D events)
+    std::vector<ContactPair<Collider2D>> activeContacts_;
 
-    std::vector<ContactPair> activeContacts_;
-
-    // World-level touching contacts (for contactStay), independent of colliders.
-    std::vector<b2Contact*> worldContacts_;
+    // Body pairs (world-level events), independent of colliders.
+    std::vector<ContactPair<b2Body>> worldPairs_;
 
     // -------------------------------------------------------------------------
     // Helper Methods
@@ -107,8 +105,14 @@ private:
     // Create CollisionEvent from contact
     static CollisionEvent createEvent(b2Contact* contact, Collider2D* self, Collider2D* other);
 
-    // Find and remove contact pair
-    void removeContactPair(Collider2D* a, Collider2D* b);
+    // Add a contact to its pair. Returns true if it is the pair's first.
+    template<typename T>
+    static bool addContact(std::vector<ContactPair<T>>& pairs, T* a, T* b, b2Contact* contact);
+
+    // Remove a contact from its pair. Returns true if it was the pair's last
+    // (the pair is then dropped).
+    template<typename T>
+    static bool removeContact(std::vector<ContactPair<T>>& pairs, T* a, T* b, b2Contact* contact);
 };
 
 } // namespace tcx::box2d
