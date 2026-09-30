@@ -477,6 +477,10 @@ void unregisterWindow(Window* w) {
     auto& list = windowRegistryStorage();
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
+WindowOccludedHook& windowOccludedHookForTests() {
+    static WindowOccludedHook hook = nullptr;
+    return hook;
+}
 std::vector<Window*> openWindows() {
     std::vector<Window*> out;
     for (Window* w : windowRegistryStorage()) {

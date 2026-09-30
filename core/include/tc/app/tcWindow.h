@@ -34,6 +34,14 @@ void registerWindow(Window* w);
 void unregisterWindow(Window* w);
 std::vector<Window*> openWindows();   // only windows whose native side is alive
 
+// Test hook, not a user setting: a headless test has no native window the OS
+// could cover or minimize. While a hook is set, Window::isOccluded() returns
+// hook(window) instead of the native flag (core/tests/mcpOccludedWindow).
+// nullptr, the default, turns it off. Defined in tcGlobal.cpp (one per
+// process), next to the window registry.
+using WindowOccludedHook = bool (*)(const Window&);
+WindowOccludedHook& windowOccludedHookForTests();
+
 // RAII registrar: a Window member, so every ~Window() unregisters no matter
 // which platform adapter defines the destructor.
 struct WindowRegistryEntry {
@@ -86,6 +94,16 @@ public:
     const std::string& getTitle() const { return title_; }
     int getWidth() const;    // logical size (matches the window's coordinates)
     int getHeight() const;
+
+    // True while the OS reports this window as not visible, so it renders no
+    // frames (its update/draw are paused until it is visible again). The
+    // signals are the ones that pause the window's tick: macOS: minimized,
+    // fully covered or on another Space (NSWindow occlusionState); Windows:
+    // minimized, or DXGI reports the window occluded; Linux (X11): minimized,
+    // or fully obscured (without a compositing manager). False for a closed
+    // window. A window can turn hidden or visible at any time, so this is a
+    // snapshot. The MCP screenshot tools use it to fail fast (#347).
+    bool isOccluded() const;
 
     // Resize this window's content area to the given LOGICAL size (points),
     // matching getWidth()/getHeight() units. Implemented natively per platform
@@ -365,6 +383,10 @@ inline void Window::close() {}
 inline void Window::setTitle(const std::string&) {}
 inline int Window::getWidth() const { return 0; }
 inline int Window::getHeight() const { return 0; }
+inline bool Window::isOccluded() const {
+    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
+    return false;
+}
 inline void Window::setSize(int, int) {}
 inline void Window::setFullscreen(bool) {}
 inline bool Window::isFullscreen() const { return false; }

@@ -21,7 +21,8 @@ void registerInspectionTools() {
 
     // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
     // secondary windows in the order tc_list_windows reports). Returns the
-    // WindowContext to capture from, or null on a bad index (error filled in).
+    // WindowContext to capture from, or null on a bad index or a hidden
+    // window (error filled in).
     // Resolved when the request is handled; the capture itself then runs in
     // that window's own tick (deferral target), see drainPendingScreenshots().
     auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
@@ -33,28 +34,42 @@ void registerInspectionTools() {
                                    std::to_string(wins.size()) + " secondary)"}};
             return nullptr;
         }
-        return &wins[(size_t)windowIdx - 1]->context();
+        trussc::Window* win = wins[(size_t)windowIdx - 1];
+        // The OS reports the window hidden, and a hidden secondary window
+        // runs no tick, so a capture deferred to it could only time out after
+        // kTargetedDeferralTimeout (#347). Only this direct signal fails fast;
+        // a window that turns hidden later still gets the timeout.
+        if (win->isOccluded()) {
+            err = json{{"status", "error"},
+                       {"message", "window " + std::to_string(windowIdx) +
+                                   " is not visible (minimized or fully covered): "
+                                   "bring it to the front"}};
+            return nullptr;
+        }
+        return &win->context();
     };
 
-    tool("tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot)")
+    tool("tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it minimized or fully covered; it then renders no frames and cannot be captured.")
         .bind(std::function<json()>([]() -> json {
             json arr = json::array();
+            // The main window keeps rendering while hidden: no occluded field.
             arr.push_back(json{{"index", 0}, {"main", true},
                                {"width", getWindowWidth()}, {"height", getWindowHeight()}});
             int i = 1;
             for (auto* w : trussc::internal::openWindows()) {
                 arr.push_back(json{{"index", i++}, {"main", false},
                                    {"title", w->getTitle()},
-                                   {"width", w->getWidth()}, {"height", w->getHeight()}});
+                                   {"width", w->getWidth()}, {"height", w->getHeight()},
+                                   {"occluded", w->isOccluded()}});
             }
             return json{{"windows", arr}};
         }));
 
-    tool("tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app.")
+    tool("tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)
         .arg<int>("width", "Target width in pixels, aspect preserved (clamped 16-4096; never upscales; omit = full resolution)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75; ignored for png)", false)
-        .arg<int>("window", "Window index from tc_list_windows (default 0 = main)", false)
+        .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
         .bind([resolveWindowCtx](const json& args) -> json {
             std::string format = "png";
             if (args.contains("format") && args.at("format").is_string()) {
@@ -97,9 +112,9 @@ void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("tc_save_screenshot", "Save screenshot to file")
+    tool("tc_save_screenshot", "Save screenshot to file. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .arg<std::string>("path", "File path")
-        .arg<int>("window", "Window index from list_windows (default 0 = main)", false)
+        .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
         .bind([resolveWindowCtx](const json& args) -> json {
             // JSON strings are UTF-8 — convert explicitly (fs::path(string)
             // would interpret them in the ACP on Windows)
