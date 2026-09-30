@@ -59,6 +59,11 @@ public:
                 simgui_tc_set_context(simguiCtx_);
                 simgui_render();
                 renderPending_ = false;
+            } else {
+                // No imgui frame in this window frame: the values the MCP
+                // tools queued for this context are settled now (swapFrames()
+                // settles them when imgui runs).
+                detail::settleWithoutImGuiFrame(imguiCtx_);
             }
         }, 1000);
 

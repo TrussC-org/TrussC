@@ -130,13 +130,13 @@ is modified.
 | `InputScalarN` | `bool value_changed = false;` | 0 | Input | `p_data`, `components` |
 | `InputTextEx` | `const ImGuiID id = window->GetID(label);` | `id` | Text | `&buf` |
 | `ColorEdit4` (`ColorEdit3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
-| `ColorPicker4` (`ColorPicker3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
+| `ColorPicker4` (`ColorPicker3` calls it) | `const bool is_readonly = ...;` (before `g.NextItemData.ClearFlags();`) | 0 | Color | `col`, 3 or 4 |
 | `Checkbox` | `const bool is_visible = ItemAdd(total_bb, id);` (before the clip return) | `id` | Bool | `v` |
 | `RadioButton` (`int*` form) | the opening `{` | 0 | Radio | `v` |
-| `Selectable` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected` |
+| `Selectable` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected`; Flags `ImGuiItemFlags_Disabled` with `ImGuiSelectableFlags_Disabled` |
 | `BeginListBox` | the `IsRectVisible()` early return | `id` | ListBoxBegin | none (`NULL`) |
 | `ListBox` (getter form; the array form calls it) | `ImGuiContext& g = *GImGui;` | 0 | ListBox | `current_item` |
-| `MenuItem` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected` (may be `NULL`: nothing is reported) |
+| `MenuItem` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected` (may be `NULL`: nothing is reported); Flags `ImGuiItemFlags_Disabled` when `!enabled` |
 
 Placement rules:
 - A single widget declares the hook after its `ItemAdd()` succeeded, so a
@@ -159,6 +159,12 @@ Placement rules:
   its top, with Id 0: the hook runs after the flip, and the label's ID in the
   entry window is the inner item's ID (`MenuItemEx`'s `Selectable("")` inside
   `PushID(label)` hashes to the pushed ID).
+- A Bool hook's Flags are the item flags the widget adds for itself once the
+  hook has run (`MenuItem` calls `BeginDisabled()` inside `MenuItemEx` when
+  `enabled` is false; `Selectable` disables itself for
+  `ImGuiSelectableFlags_Disabled`), so the hook can refuse a disabled one.
+- `ColorPicker4` reads a ReadOnly flag set for the next item and then clears
+  it; its hook sits before that clear, so the hook sees the flag too.
 - `InputTextEx` passes `&buf`, the address of its `buf` variable, rather than
   `buf` itself: a resize callback (`std::string` inputs) repoints `buf` to the
   new allocation (`buf = callback_data.Buf`).
@@ -200,16 +206,21 @@ How the hooks behave (in `tcImGuiHooks.h`):
   next widget with that ID and kind (`SliderAngle`'s inner `SliderFloat` and
   `Combo`'s `BeginCombo` share the ID, not the kind) writes them through
   `Data`, checking that the data type and component count still match and
-  that the widget is not disabled (`ImGuiItemFlags_Disabled`) or read-only
+  that the widget is not disabled (`ImGuiItemFlags_Disabled` in the current
+  or next-item flags, or a Bool hook's Flags) or read-only
   (`ImGuiItemFlags_ReadOnly`, `ImGuiSliderFlags_ReadOnly`,
-  `ImGuiInputTextFlags_ReadOnly` on an InputScalar); it sets `Injected`, so
-  the widget returns true that frame. The return hook of that same call reads
-  the variable back, and the entry hook of the widget's next frame checks,
-  before any new write, that the variable still holds the value (a copy that
-  ignores the return value and is re-filled every frame fails here). The
-  outcome is handed to the tool at the end of the frame it is known
-  (`swapFrames()`). The write sets no Edited flag, so it is not recorded as
-  touched. Text (buffer size unknown) and the openers (`BeginCombo`,
+  `ImGuiInputTextFlags_ReadOnly` on an InputScalar); it keeps the variable's
+  old bytes and sets `Injected`, so the widget returns true that frame. The
+  return hook of that same call reads the variable back, and the entry hook of
+  the widget's next frame checks, before any new write, what the variable
+  holds: the value (applied), the old value (a copy that ignores the return
+  value and is re-filled every frame, reported as an error), or a third value
+  (the app took the value and changed it, e.g. a setter that converts it:
+  applied, with a note). The outcome is handed to the tool at the end of the
+  frame it is known (`swapFrames()`), or, in a window frame where the app runs
+  no imgui for that context, from tcxImGui's render listener
+  (`settleWithoutImGuiFrame()`). The write sets no Edited flag, so it is not
+  recorded as touched. Text (buffer size unknown) and the openers (`BeginCombo`,
   `BeginListBox`: no variable) are never written. `ColorPicker3` and
   `CheckboxFlags` need no hook of their own: the inner `ColorPicker4` /
   `Checkbox` is written and returns true, and they copy the value out.

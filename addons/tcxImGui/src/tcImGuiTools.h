@@ -465,9 +465,14 @@ inline bool valueToBytes(const WidgetValue& w, const nlohmann::json& v,
 }
 
 // A queued value is dropped when it could not be written this long after the
-// call, so it never lands after the tool has answered. Shorter than tc::mcp's
-// timeout for a deferred reply that is never produced (kTargetedDeferralTimeout).
-inline constexpr std::chrono::seconds kPendingValueLifetime{4};
+// call, so it never lands after the tool has answered. The reply takes the
+// write frame and the frame after it, and both must end within tc::mcp's
+// timeout for a deferred reply that is never produced (kTargetedDeferralTimeout,
+// 5 s): with 2 s, a window that renders at least every 2.5 s gets its value
+// written and checked in time. A slower one gets an Expired error.
+inline constexpr std::chrono::seconds kPendingValueLifetime{2};
+static_assert(2 * kPendingValueLifetime + std::chrono::seconds{1} <= tc::mcp::detail::kTargetedDeferralTimeout,
+              "the write frame and the check frame must fit in the deferred reply's timeout");
 
 // The reply of tcx_imgui_input for a value written through the value hook,
 // once its outcome is known: after the frame after the call (not drawn, a
@@ -489,6 +494,12 @@ inline nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<P
         r["status"] = "ok";
         addValueFields(r, p->readBack);   // read back from the variable
         return r;
+    case State::Adjusted:
+        r["status"] = "ok";
+        r["message"] = "'" + label + "' took the value, and the app changed it in the next frame (a clamp, "
+                       "or a conversion in its setter?). value = what the variable holds now";
+        addValueFields(r, p->readBack);
+        return r;
     case State::Changed:
         addValueFields(r, p->readBack);
         return error("The value was written, but '" + label + "' changed it again in the same frame "
@@ -496,11 +507,17 @@ inline nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<P
     case State::Reverted:
         addValueFields(r, p->readBack);
         return error("The value was written and '" + label + "' returned true, but in the next frame "
-                     "its variable held another value again (value = that value). The app ignores the "
-                     "widget's return value and copies its own value into the variable every frame, so "
-                     "this widget cannot be set from MCP; change the value in the app instead");
+                     "its variable held its old value again (value = that value). The app ignores the "
+                     "widget's return value and copies its own value into the variable every frame, or "
+                     "it turned the value back (a clamp to the old value?); if it is the former, this "
+                     "widget cannot be set from MCP: change the value in the app instead");
     case State::Disabled:
-        return error("'" + label + "' is disabled (inside BeginDisabled()). Nothing was written");
+        return error("'" + label + "' is disabled (inside BeginDisabled(), a disabled MenuItem or "
+                     "Selectable). Nothing was written");
+    case State::Expired:
+        return error("'" + label + "' ran only more than " + std::to_string(kPendingValueLifetime.count()) +
+                     " s after the call (a window that renders very slowly, e.g. Window::setFps below "
+                     "0.5?), too late to be written and checked before the reply. Nothing was written");
     case State::ReadOnly:
         return error("'" + label + "' is read-only. Nothing was written");
     case State::ShapeChanged:
@@ -640,7 +657,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_input — set the value of a widget: value widgets through the
     // value hook, text fields by typing
-    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget. Value widgets (slider, drag, number input, SliderAngle, color, checkbox, combo, radio, list box, MenuItem/Selectable with a bool*; composites such as DragFloat3 and ColorEdit4 included): text is the value as JSON, in the units tcx_imgui_get_widgets reports — a number; an array for a composite ([x, y, z]; colors [r, g, b(, a)] as floats 0-1, raw HSV with colorSpace hsv); true/false for a bool; the item index for Combo/ListBox; the variable's integer for RadioButton; radians for SliderAngle. It is written into the app's variable on the widget's next frame, and the widget returns true in that frame (so if (ImGui::DragFloat(\"x\", &x)) node->setX(x); and recompute-on-change code run once; the Edited flag is not set). status ok (with the value read back) means the variable held it at the widget's return and still held it in the next frame. Errors (nothing written): wrong shape or type (component count, not a number, out of the type's range), the widget not drawn in the frame after the call (collapsed, closed or hidden), disabled (BeginDisabled) or read-only, no variable (an action MenuItem). Errors after the write: a hand edit in the same frame; app code that ignores the return value and copies its own value in every frame (the value is gone in the next frame: such a widget cannot be set from MCP). No clamping to the widget's min/max. Not recorded in tcx_imgui_get_touched. Text fields (InputText): text replaces the text, typed as keystrokes")
+    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget. Value widgets (slider, drag, number input, SliderAngle, color, checkbox, combo, radio, list box, MenuItem/Selectable with a bool*; composites such as DragFloat3 and ColorEdit4 included): text is the value as JSON, in the units tcx_imgui_get_widgets reports — a number; an array for a composite ([x, y, z]; colors [r, g, b(, a)] as floats 0-1, raw HSV with colorSpace hsv); true/false for a bool; the item index for Combo/ListBox; the variable's integer for RadioButton; radians for SliderAngle. It is written into the app's variable on the widget's next frame, and the widget returns true in that frame (so if (ImGui::DragFloat(\"x\", &x)) node->setX(x); and recompute-on-change code run once; the Edited flag is not set). status ok (with the value read back) means the variable held it at the widget's return and still held it in the next frame; if the app changed it by then (a clamp, a converting setter), ok with a message and the value it holds. Errors (nothing written): wrong shape or type (component count, not a number, out of the type's range), the widget not drawn in the frame after the call (collapsed, closed or hidden), disabled (BeginDisabled, a disabled MenuItem/Selectable) or read-only, no variable (an action MenuItem), a window rendering slower than one frame per 2 s. Errors after the write: a hand edit in the same frame; the old value back in the next frame (app code that ignores the return value and copies its own value in every frame: such a widget cannot be set from MCP). No clamping to the widget's min/max. Not recorded in tcx_imgui_get_touched. Text fields (InputText): text replaces the text, typed as keystrokes")
         .arg<std::string>("label", "Widget label")
         .arg<std::string>("text", "Value widgets: the value as JSON (5, 0.25, [1, 2, 3], true, an index). Text fields: the replacement text")
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)

@@ -6138,8 +6138,8 @@ bool ImGui::ColorPicker4(const char* label, float col[4], ImGuiColorEditFlags fl
 
     const float width = CalcItemWidth();
     const bool is_readonly = ((g.NextItemData.ItemFlagsSet | g.CurrentItemFlags) & ImGuiItemFlags_ReadOnly) != 0;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Color, ImGuiDataType_Float, col, (flags & ImGuiColorEditFlags_NoAlpha) ? 3 : 4, flags); // [TrussC] before ClearFlags(): sees the ReadOnly flag set for this item
     g.NextItemData.ClearFlags();
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Color, ImGuiDataType_Float, col, (flags & ImGuiColorEditFlags_NoAlpha) ? 3 : 4, flags); // [TrussC]
 
     PushID(label);
     const bool set_current_color_edit_id = (g.ColorEditCurrentID == 0);
@@ -7602,7 +7602,7 @@ bool ImGui::Selectable(const char* label, bool selected, ImGuiSelectableFlags fl
 
 bool ImGui::Selectable(const char* label, bool* p_selected, ImGuiSelectableFlags flags, const ImVec2& size_arg)
 {
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, 0); // [TrussC]
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, (flags & ImGuiSelectableFlags_Disabled) ? ImGuiItemFlags_Disabled : 0); // [TrussC]
     if (Selectable(label, *p_selected, flags, size_arg))
     {
         *p_selected = !*p_selected;
@@ -9754,7 +9754,7 @@ bool ImGui::MenuItem(const char* label, const char* shortcut, bool selected, boo
 
 bool ImGui::MenuItem(const char* label, const char* shortcut, bool* p_selected, bool enabled)
 {
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, 0); // [TrussC]
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, enabled ? 0 : ImGuiItemFlags_Disabled); // [TrussC]
     if (MenuItemEx(label, NULL, shortcut, p_selected ? *p_selected : false, enabled))
     {
         if (p_selected)

@@ -177,21 +177,30 @@ frame.
   of the group sets it); radians for `SliderAngle`.
 - `status: ok` means the variable held the value when the widget returned, and
   still held it when the widget ran in the next frame (if the widget is not
-  drawn in that next frame, the first read-back stands). Errors, with nothing
-  written: a value of the wrong shape or type (component count, not a number,
-  a fraction for an int, out of the C++ type's range); a widget that is not
-  drawn in the frame after the call (collapsed header, closed or hidden
-  window); a widget inside `BeginDisabled()` or a read-only one; a check box
-  or menu item with no variable (an action `MenuItem`).
+  drawn in that next frame, or the app draws no imgui in it — say the value
+  hid the GUI — the first read-back stands). If the app took the value and
+  changed it by the next frame (a clamp, a setter that converts it, such as
+  the inspector's `rotation` in degrees), the reply is still `ok`, with a
+  `message` saying so and `value` = what the variable holds.
+- Errors, with nothing written: a value of the wrong shape or type (component
+  count, not a number, a fraction for an int, out of the C++ type's range); a
+  widget that is not drawn in the frame after the call (collapsed header,
+  closed or hidden window, no imgui drawn in that frame); a disabled widget
+  (inside `BeginDisabled()`, `MenuItem(..., enabled = false)`,
+  `ImGuiSelectableFlags_Disabled`) or a read-only one; a check box or menu item
+  with no variable (an action `MenuItem`); a window so slow that the widget
+  runs more than 2 s after the call (`Window::setFps` below 0.5), since the
+  value could not be checked before the reply.
 - Errors after the write, carrying what the variable holds: a hand edit that
-  changed the value again in the same frame; and code that ignores the
-  widget's return value and copies its own value into the variable every frame
-  (`float y = model.y; ImGui::DragFloat("y", &y);`) — the value is gone again
-  in the next frame, so such a widget cannot be set from MCP.
+  changed the value again in the same frame; and a variable that holds its old
+  value again in the next frame — code that ignores the widget's return value
+  and copies its own value into the variable every frame (`float y = model.y;
+  ImGui::DragFloat("y", &y);`), so such a widget cannot be set from MCP (or an
+  app that turned the value back itself).
 - A value set this way is not an edit by hand: the Edited flag is not set, so
   `ImGui::IsItemEdited()` and `IsItemDeactivatedAfterEdit()` do not fire for
-  it, and it does not go into `tcx_imgui_get_touched`. Only the return value
-  says `true`.
+  it, and it does not go into `tcx_imgui_get_touched` (tcxNodeInspector's
+  record included). Only the return value says `true`.
 
 Known limits:
 
