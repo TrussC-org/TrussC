@@ -33,16 +33,22 @@ enum class PolygonError {
 // holds at any density. A list that passes never reaches those asserts
 // (Debug), the SetAsBox(1, 1) fallback or NaN inertia (Release).
 // On success `shape` is set and `hull` receives the polygon Box2D built, in
-// pixels. When Box2D kept every point, that is `points` unchanged, in the
-// caller's order; otherwise (concave input, collinear middle points, merged
-// points) it is Box2D's hull in Box2D's order, starting at the rightmost
-// point. On failure neither is touched.
+// pixels. When Box2D kept every point and `points` already go around the hull
+// in order (either winding, any starting point), that is `points` unchanged;
+// otherwise (concave input, collinear middle points, merged points, or hull
+// points in a crossing order) it is Box2D's hull in Box2D's order, starting at
+// the rightmost point. On failure neither is touched.
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
                               std::vector<tc::Vec2>& hull);
 
 // Short English reason for a warning ("" for None).
 std::string describePolygonError(PolygonError err);
+
+// Reason for fewer than 3 points left after reducedConvexHull(), which drops
+// duplicate and collinear points; `caller` names the call that did it
+// (e.g. "setupConvex()").
+std::string describeCollapsedHull(const std::string& caller);
 
 // Convex hull of any number of points (pixels), reduced to at most `maxPoints`
 // by repeatedly dropping the vertex whose removal loses the least area (ties:

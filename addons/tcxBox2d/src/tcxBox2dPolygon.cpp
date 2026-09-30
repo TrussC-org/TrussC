@@ -47,6 +47,12 @@ void PolyShape::setup(World& world, const tc::Path& polyline, float cx, float cy
 
 void PolyShape::setupConvex(World& world, const std::vector<tc::Vec2>& points, float cx, float cy) {
     std::vector<tc::Vec2> reduced = detail::reducedConvexHull(points);
+    if (reduced.size() < 3) {
+        tc::logWarning() << "tcxBox2d: PolyShape::setupConvex() got " << points.size()
+                         << " points: " << detail::describeCollapsedHull("setupConvex()")
+                         << ". Body not created.";
+        return;
+    }
     b2PolygonShape polygon;
     std::vector<tc::Vec2> hull;
     detail::PolygonError err = detail::makePolygonShape(reduced, polygon, hull);

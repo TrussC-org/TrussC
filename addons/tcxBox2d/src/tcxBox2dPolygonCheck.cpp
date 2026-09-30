@@ -11,6 +11,41 @@
 
 namespace tcx::box2d::detail {
 
+namespace {
+
+// True when `shape` holds every point of `input` and `input`, read in its own
+// order, walks around the hull: a cyclic rotation of shape.m_vertices, in
+// either direction. Only then is the caller's order a simple convex polygon;
+// a crossing order of hull vertices (a Z-ordered square, a star-ordered
+// pentagon) is not.
+bool keepsHullOrder(const std::vector<b2Vec2>& input, const b2PolygonShape& shape) {
+    const size_t count = input.size();
+    if (static_cast<size_t>(shape.m_count) != count) return false;
+    // Position of each input point in Box2D's hull. The points are distinct
+    // (none were merged) and Set() copies them unchanged, so they match exactly.
+    int32 pos[b2_maxPolygonVertices];
+    for (size_t i = 0; i < count; ++i) {
+        pos[i] = -1;
+        for (int32 k = 0; k < shape.m_count; ++k) {
+            if (shape.m_vertices[k].x == input[i].x && shape.m_vertices[k].y == input[i].y) {
+                pos[i] = k;
+                break;
+            }
+        }
+        if (pos[i] < 0) return false;
+    }
+    const int32 m = shape.m_count;
+    bool forward = true, backward = true;
+    for (size_t i = 0; i < count; ++i) {
+        const int32 next = pos[(i + 1) % count];
+        if (next != (pos[i] + 1) % m) forward = false;
+        if (next != (pos[i] + m - 1) % m) backward = false;
+    }
+    return forward || backward;
+}
+
+} // namespace
+
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
                               std::vector<tc::Vec2>& hull) {
@@ -108,9 +143,10 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
 
     shape = built;
     hull.clear();
-    if (static_cast<size_t>(shape.m_count) == count) {
-        // Box2D kept every point: hand them back as given, in the caller's
-        // order (Set() starts at the rightmost point and may flip the winding).
+    if (keepsHullOrder(input, shape)) {
+        // Box2D kept every point and the caller's order already goes around
+        // the hull: hand the points back as given (Set() starts at the
+        // rightmost point and may flip the winding).
         hull = points;
     } else {
         hull.reserve(shape.m_count);
@@ -132,6 +168,11 @@ std::string describePolygonError(PolygonError err) {
                    "is lost to float rounding); give points relative to the body position instead";
     }
     return "";
+}
+
+std::string describeCollapsedHull(const std::string& caller) {
+    return "fewer than 3 distinct, non-collinear points (" + caller
+           + " drops duplicate and collinear points)";
 }
 
 std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points, size_t maxPoints) {

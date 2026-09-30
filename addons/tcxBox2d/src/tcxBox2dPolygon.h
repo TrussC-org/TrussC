@@ -74,8 +74,10 @@ public:
     // -------------------------------------------------------------------------
     // The polygon Box2D built (local pixels): the convex hull of the setup()
     // points, or the reduced hull of setupConvex(). When every setup() point
-    // is a hull vertex (convex input), they come back as given, in their
-    // order; otherwise the order is Box2D's (from the rightmost point).
+    // is a hull vertex and they already go around the outline in order
+    // (either winding, any start), they come back as given; otherwise (points
+    // dropped, or listed in a crossing order) the order is Box2D's (from the
+    // rightmost point).
     // Empty without a body.
     const std::vector<tc::Vec2>& getVertices() const { return vertices_; }
     int getNumVertices() const { return static_cast<int>(vertices_.size()); }

@@ -57,13 +57,15 @@ struct Shape2D {
     static Shape2D box(float size) { return box(size, size); }
     // One convex polygon of 3 to 8 points. Concave input becomes its convex
     // hull, as Box2D does; once the body exists, RigidBody2D::shape() (and so
-    // ColliderRenderer2D) holds that hull. Convex input is kept as given, in
-    // its order; a hull that dropped points is in Box2D's order (from the
-    // rightmost point). More than 8 points, or degenerate points (collinear,
-    // nearly coincident, tiny next to their distance from the origin), log a
-    // warning when the RigidBody2D is attached and create no body: getBody()
-    // stays null and ColliderRenderer2D draws nothing. For more points use
-    // convex() (convex approximation).
+    // ColliderRenderer2D) holds that hull. Convex input that already goes
+    // around its outline in order (either winding, any start) is kept as
+    // given; otherwise (points dropped, or listed in a crossing order) the
+    // hull is in Box2D's order (from the rightmost point). More than 8
+    // points, or degenerate points (collinear, nearly coincident, tiny next
+    // to their distance from the origin), log a warning when the RigidBody2D
+    // is attached and create no body: getBody() stays null and
+    // ColliderRenderer2D draws nothing. For more points use convex() (convex
+    // approximation).
     static Shape2D polygon(const std::vector<tc::Vec2>& v) {
         Shape2D s; s.kind = Polygon; s.verts = v; return s;
     }
@@ -254,8 +256,14 @@ protected:
             detail::PolygonError err = detail::makePolygonShape(shape_.verts, poly, hull);
             if (err != detail::PolygonError::None) {
                 auto log = tc::logWarning();
-                log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: "
-                    << detail::describePolygonError(err) << ".";
+                log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: ";
+                if (err == detail::PolygonError::TooFewPoints) {
+                    // Shape2D::convex() may have reduced many points to these
+                    // few, so "needs at least 3 points" would mislead.
+                    log << detail::describeCollapsedHull("Shape2D::convex()") << ".";
+                } else {
+                    log << detail::describePolygonError(err) << ".";
+                }
                 if (err == detail::PolygonError::TooManyPoints) {
                     log << " Use Shape2D::convex() for a convex approximation.";
                 }
