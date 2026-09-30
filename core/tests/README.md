@@ -91,14 +91,20 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   audio (the level ~200 ms later is the target's), `getPosition()` reports
   the target from the call on and never the old position, a paused stream
   reports the target at once while the voice itself does not move, and
-  resumes from it, and of several seeks the last wins (also while paused);
-  eager sounds seek at once. `loadStream()` rejects a file with no frames
-  (`DecodeFailed`). A looping stream whose file was emptied after loading
-  ends with one warning while another stream keeps being refilled; a decoder
-  read error, a failed loop seek and a failed seek request each end the
-  stream with one warning (`internal::setStreamFaultForTests()`), and after a
-  failed seek request the voice ends. A watchdog turns a StreamWorker that
-  never comes back into a FAIL.
+  resumes from it, and of several seeks the last wins (also while paused).
+  While a seek is pending (the worker held back by
+  `internal::setStreamFaultForTests(Stalls)`) no block after the call holds
+  the old position's audio, and a non-looping stream does not end at the old
+  data's end; a seek after an underrun at speed 10 keeps the ring bounded, so
+  another stream is still refilled; after a re-init at another rate
+  `getPosition()` carries over and `setPosition()` lands at the target; eager
+  sounds seek at once. `loadStream()` rejects a file with no frames
+  (`DecodeFailed`) and accepts a FLAC whose length is unknown (STREAMINFO
+  total 0), which plays to its end. A looping stream whose file was emptied
+  after loading ends with one warning while another stream keeps being
+  refilled; a decoder read error, a failed loop seek and a failed seek
+  request each end the stream with one warning, and the voice ends, looping
+  or not. A watchdog turns a StreamWorker that never comes back into a FAIL.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
