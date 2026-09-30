@@ -825,6 +825,45 @@ Logger& getLogger() {
     return logger;
 }
 
+// Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
+// (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
+bool Logger::setLogFile(const fs::path& path) {
+    // Relative paths resolve against the data folder, like every other writer.
+    const fs::path resolved = getDataPath(path);
+    const std::string pathUtf8 = internal::pathToUtf8(resolved);
+
+    // Create a missing parent folder, like saveScreenshot().
+    std::error_code ec;
+    const fs::path parent = resolved.parent_path();
+    if (!parent.empty()) {
+        fs::create_directories(parent, ec);
+        if (ec) {
+            log(LogLevel::Error, "Failed to open log file: " + pathUtf8
+                + " (cannot create its folder: " + ec.message() + ")");
+            return false;
+        }
+    }
+
+    // Open into a local stream first: a failed call leaves the current log
+    // open, so the error line below still lands in it.
+    std::ofstream stream(resolved, std::ios::app);
+    if (!stream.is_open()) {
+        log(LogLevel::Error, "Failed to open log file: " + pathUtf8);
+        return false;
+    }
+
+    {
+        // Swap under the lock: every line goes whole to the old file or to
+        // the new one. Errors above are logged outside it (log() runs the
+        // onLog listeners).
+        TC_LOCK_GUARD(mutex_);
+        closeFileLocked();
+        fileStream_ = std::move(stream);
+        filePath_ = pathUtf8;
+    }
+    return true;
+}
+
 namespace internal {
 // Declared in tcThread.h, which is included before tcLog.h and cannot log.
 void logThreadNotWaited() {
