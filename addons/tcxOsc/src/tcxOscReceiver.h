@@ -170,9 +170,13 @@ private:
         }
     }
 
-    // Recursively dispatch messages inside bundle
-    void dispatchBundle(OscBundle bundle) {
-        onBundleReceived.notify(bundle);
+    // Recursively dispatch messages inside bundle. Walks the parsed tree in
+    // place (no per-level copy); fromBytes() bounds the depth.
+    void dispatchBundle(const OscBundle& bundle) {
+        // Event<T>::notify() takes T&, and listeners could always edit the
+        // bundle before its elements are dispatched. Every node belongs to
+        // the non-const bundle parsePacket() owns, so the cast is well-defined.
+        onBundleReceived.notify(const_cast<OscBundle&>(bundle));
 
         for (size_t i = 0; i < bundle.getElementCount(); ++i) {
             if (bundle.isMessage(i)) {
@@ -187,8 +191,8 @@ private:
                 }
                 onMessageReceived.notify(msg);
             }
-            else if (bundle.isBundle(i)) {
-                dispatchBundle(bundle.getBundleAt(i));
+            else if (const OscBundle* child = bundle.bundleAt(i)) {
+                dispatchBundle(*child);
             }
         }
     }
