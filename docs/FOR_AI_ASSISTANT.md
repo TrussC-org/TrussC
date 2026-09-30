@@ -1703,7 +1703,7 @@ float getBitmapStringWidth(const std::string & text)  // Get text width
 Direction getTextAlignH()  // Get horizontal text alignment
 Direction getTextAlignV()  // Get vertical text alignment
 void setBitmapLineHeight(float h)  // Set line height for bitmap string newlines (default: 16)
-void setFps(float fps)  // Set target frame rate (VSYNC = -1.0)
+void setFps(float fps)  // Set the target frame rate; update and draw run together (VSYNC = -1, EVENT_DRIVEN = 0, or a fixed fps). A fixed fps at or just above the display rate draws every display frame. Switching at runtime starts the new rate from the switch (no catch-up; a fixed fps draws the next frame, and the first update's getDeltaTime() leaves out the previous mode: called between updates it counts from the call, called inside an update from that update's start; the time dropped is under a frame in the usual modes, long only after an idle like EVENT_DRIVEN). Calling it again with the current rate does nothing, so it is safe to call every frame; on the frame where the value changes (setFps(guiValue) in draw() while a slider moves), that update's dt counts only from the call and is shorter than the frame
 void setTextAlign(Direction h, Direction v)  // Set text alignment
 void vertex(float x, float y, float z) [+3]  // Add a vertex
 ```
@@ -1820,12 +1820,12 @@ void unbindCursorImage(Cursor cursor)  // Unbind a custom cursor image, restorin
 ### Time - Frame
 
 ```cpp
-double getDeltaTime()  // Seconds since last frame
+double getDeltaTime()  // Seconds since the previous update. Measured wall time in VSYNC / setFps modes; in fixed-Hz update mode (setIndependentFps with an update rate) and in runHeadlessApp every step reports exactly 1 / updateFps. Per window; a secondary window still measures its delta with high_resolution_clock (the system clock on Linux) until #307: a forward system clock step (NTP, a manual change) lands in one delta, so that window's due Node timers fire at once, and an uncapped callEveryCatchUp fires once per interval of the step; a backward step makes one delta negative: getDeltaTime() is negative on that tick and the window's Node timers are not counted down on it
 uint64_t getDrawCount()  // Get the number of draw() calls since the app started
-float getFps()  // Get current FPS (alias for getFrameRate)
+float getFps()  // Get the measured FPS (alias for getFrameRate). In a secondary window it is currently the average of the last 10 calls, like getFrameRate()
 FpsSettings getFpsSettings()  // Get the current FPS configuration (update/draw target rates, actual VSync rate, sync flag)
 uint64_t getFrameCount()  // Total frames rendered
-double getFrameRate()  // Current FPS
+double getFrameRate()  // Measured update rate (updates per second over the last 10 frames). In fixed-Hz update mode and runHeadlessApp this is the measured rate, not the configured one: the fixed steps are counted by the time they consumed, so it reads steady when the rate isn't a multiple of the frame rate and drops when time is dropped. Recorded by the main loop and runHeadlessApp; in a secondary window each call currently adds the window's last delta and returns the average of the last 10 calls, so reading it once per second gives a ~10 s average
 uint64_t getUpdateCount()  // Get the number of update() calls since the app started
 void sleepMicros(int micros)  // Block the current thread for the given number of microseconds
 void sleepMillis(int millis)  // Block the current thread for the given number of milliseconds
@@ -1875,18 +1875,19 @@ void setup()  // Initialize sokol_gfx + sokol_gl (called for you by the app loop
 ### Time - Elapsed
 
 ```cpp
-double getElapsedTime()  // Elapsed seconds (double) since program start. A separate clock from getElapsedTimef(); it is NOT reset by resetElapsedTimeCounter().
-float getElapsedTimef()  // Elapsed seconds (float)
-uint64_t getElapsedTimeMicros()  // Elapsed microseconds (int64)
-uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (int64)
-void resetElapsedTimeCounter()  // Reset elapsed time
+double getElapsedTime()  // Elapsed seconds (double) since program start, on a steady clock (system clock changes don't affect it). The same clock as getElapsedTimef/Millis/Micros: resetElapsedTimeCounter() restarts all of them, so the difference of two readings is only a duration if nothing resets the counter in between. Keeps full precision where getElapsedTimef() loses it after long uptimes
+float getElapsedTimef()  // Elapsed seconds (float) since program start. Same clock as getElapsedTime(); a float loses precision after about a day of uptime (7.8 ms steps at 18 h), so use it for animation and display, and getElapsedTime() (double) where precision matters
+uint64_t getElapsedTimeMicros()  // Elapsed microseconds (uint64) since program start. Same clock as getElapsedTime()
+uint64_t getElapsedTimeMillis()  // Elapsed milliseconds (uint64) since program start. Same clock as getElapsedTime()
+double getFrameElapsedTime()  // Elapsed seconds (double) sampled once at the start of the current frame, so every update step and the draw of one frame see the same value (getElapsedTime() moves during the frame). Same clock and reset as getElapsedTime(). Sampled by the main loop and runHeadlessApp; in a secondary window it currently returns the live getElapsedTime()
+void resetElapsedTimeCounter()  // Restart the elapsed-time counter: getElapsedTime/f/Millis/Micros and getFrameElapsedTime count from 0 again. Display only: Node timers, the loop, recording and the tc_get_health uptime keep running on the underlying clock. A duration taken as the difference of two of those readings across a reset comes out wrong (negative, or wrapped for the unsigned Millis/Micros); measure durations with getSystemTimeMicros()
 ```
 
 ### Time - System
 
 ```cpp
-uint64_t getSystemTimeMicros()  // Unix time in microseconds
-uint64_t getSystemTimeMillis()  // Unix time in milliseconds
+uint64_t getSystemTimeMicros()  // Unix time in microseconds (wall clock). To measure a duration, take the difference of two readings as int64_t: it follows system clock adjustments, so a clock step can make t1 < t0 and an unsigned difference would wrap. Unlike the getElapsedTime family, resetElapsedTimeCounter() doesn't affect it
+uint64_t getSystemTimeMillis()  // Unix time in milliseconds (wall clock). It follows system clock adjustments, so take differences as int64_t (see getSystemTimeMicros)
 std::string getTimestampString(const std::string & timestampFormat) [+1]  // Formatted timestamp
 uint64_t getUnixTime()  // Current Unix timestamp in seconds
 ```
@@ -1991,6 +1992,7 @@ float getDpiScale()  // Get display DPI scale factor (e.g. 2.0 for Retina)
 int getFramebufferHeight()  // Get framebuffer height in pixels (window height * DPI scale)
 int getFramebufferWidth()  // Get framebuffer width in pixels (window width * DPI scale)
 bool getKeepScreenOn() [macos,windows,android,ios]  // Check whether keep-screen-on is currently enabled
+int getMaxUpdateSteps()  // The cap on fixed-rate update steps per frame (and per runHeadlessApp loop pass) set by setMaxUpdateSteps(). 10 by default; 0 or less means no cap
 IVec2 getWindowPosition() [macos,windows]  // Get window position in screen coordinates (top-left origin). macOS/Windows only; other platforms return (-1, -1)
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
@@ -1998,12 +2000,13 @@ bool isRecording()  // Check whether a recording is in progress
 int recordingFrameCount()  // Number of frames captured so far in the current recording
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
-int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Template on the app type; returns the process exit code
+int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
 bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
-void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw frame rates
+void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
 void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Prevent display sleep / auto-lock while the app is running. Supported: Android, iOS, macOS, Windows. Linux / Web: no-op
+void setMaxUpdateSteps(int steps)  // Set the most fixed-rate update steps run in one frame (setIndependentFps with an update rate) or in one runHeadlessApp loop pass. More are pending after a stall, when update() is slower than its own rate, or when the update rate is more than this many times the display rate; the time beyond the cap is dropped with a one-time warning instead of replayed. Default 10. 0 or less removes the cap so every step runs (e.g. a deterministic simulation), at the cost of a freeze while a long stall is replayed and of frames that keep growing while update() is slower than its rate
 void setOrientation(Orientation mask) [android,ios]  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
 void setWindowDecorated(bool decorated)  // Toggle the window's standard decorations (title bar, borders, buttons). false = borderless but still focusable and closable. Desktop only
 void setWindowPosition(int x, int y) [macos,windows]  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
@@ -3243,10 +3246,11 @@ const std::string & NetworkInterface::getNetmask() const  // Subnet mask
 void Node::addChild(Ptr child, bool keepGlobalPosition = false)  // Add a child node (C++ only)
 T * Node::addMod(Args &&... args)  // Attach a mod of type T to this node, forwarding any arguments to its constructor; returns the mod for chaining (C++ only)
 void Node::beginDraw()  // Hook called before draw() and drawChildren(); override for clipping etc.
-uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. Fired from the update loop (frame-quantized). Returns a timer id.
+uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run callback once after delay seconds. A frame timer fired from the update loop: the delay counts down by getDeltaTime() on each update of this node, so it pauses while the node is inactive and resetElapsedTimeCounter() doesn't affect it. Only time after the call counts: it starts with the next update, and in the main window nothing before the call is charged (the earlier part of a long update or setup(), an idle gap or a stall before an event handler or draw() made it). In VSYNC / setFps modes it fires on the first update that starts at least delay after the call. In fixed-Hz update mode it counts step time (1 / updateFps per step): when a frame runs several steps (after a stall, or when updateFps is above the display rate: callAfter(1.0 / 120) made in the first step of a frame at a fixed 120 Hz on a 60 Hz display fires on the next step of that frame) it can fire within that frame, before delay has passed in wall time, and time the loop drops (beyond setMaxUpdateSteps() steps per frame) is not counted, so it fires that much later in wall time. A runtime setFps() / setIndependentFps() that switches the update into a measured mode (VSYNC / setFps) between updates (a key handler, draw()) drops the time since the last update, so the timer fires that much later: under a frame in the usual modes, long only after an idle like EVENT_DRIVEN. Called inside an update, the time counts from that update's start. Changing only the draw rate drops nothing, but switching between synced (setFps) and independent (setIndependentFps) update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (144 Hz display to a fixed 60: the step is ~9.7 ms longer than the 1/144 s since the last update). A node moved during an update, before that update reached it, under a parent the update has already traversed misses that update's countdown (one delta late); a node that moves itself from its own update() is not delayed. In a secondary window, until #307, a timer created in or between its ticks counts the window's whole next delta, time before the call included (after a 3 s setup(), callAfter(2.0) fires about one frame later). Returns a timer id.
 uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
-uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. Fired from the update loop (frame-quantized). Returns a timer id.
+uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval (callEveryCatchUp does that). Like callAfter, a runtime setFps() / setIndependentFps() that switches the update into a measured mode between updates drops the time since the last update (under a frame in the usual modes; see callAfter). Returns a timer id.
 uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
+uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp = 0)  // Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id.
 void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
 void Node::cancelAllTimers()  // Cancel all frame timers on this node.
 void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
@@ -3326,7 +3330,7 @@ bool Node::onMousePress(const MouseEventArgs & e) [+1]  // Handle a mouse press 
 bool Node::onMouseRelease(const MouseEventArgs & e) [+1]  // Handle a mouse release (event localized to this node); return true to consume.
 bool Node::onMouseScroll(const ScrollEventArgs & e) [+1]  // Handle a scroll event (event localized to this node); return true to consume.
 void Node::onVisibleChanged(bool visible)  // Callback invoked when the node's visible state changes.
-void Node::processTimers()  // Process due timers (callAfter / callEvery), invoked within the update pass.
+void Node::processTimers()  // Count this node's timers (callAfter / callEvery) down by getDeltaTime() and fire the due ones, invoked within the update pass.
 void Node::removeAllChildren()  // Remove all child nodes (C++ only)
 void Node::removeChild(Ptr child)  // Remove a child node (C++ only)
 void Node::removeMod()  // Remove the attached mod of type T, calling its onDestroy() before it is freed (C++ only)

@@ -97,3 +97,22 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
+  origin at program start, `resetElapsedTimeCounter()` as a display offset only,
+  `getFrameElapsedTime()` constant within a frame (through the main loop's frame
+  start); fixed-Hz update steps report the nominal `1/updateFps`, catch-up is
+  capped at `setMaxUpdateSteps()` steps per frame (default 10, `<= 0` runs
+  every step; also per `runHeadlessApp` pass at any rate: the pass sleeps
+  only until the next step is due, on a timer that doesn't round up to a
+  ~15.6 ms Windows tick, so 1 kHz keeps up), each loop warning once, without
+  starving `runOnMainThread` work; runtime mode switches
+  don't replay old time and re-applying the current rates every frame changes
+  nothing; `getFrameRate()` is the measured rate (steady at non-integer ratios;
+  also in the default draw-synced mode, the independent VSYNC update and
+  headless); the fixed-fps draw skip doesn't drop frames at the display rate;
+  Node timers are countdowns that keep their phase and are not charged for
+  time before they were created, and `callEveryCatchUp` fires once per due
+  interval up to its limit (a cancel from the callback stops it); the
+  `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
+  `ScreenRecorder` reads) stays exact after long uptime and, like the
+  `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.
