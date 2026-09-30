@@ -129,7 +129,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   rate at all (a USB gadget's `/dev/ttyGS*`) keeps its old rate whatever is
   asked, and there `setup()` must succeed with a warning. A pty does neither,
   so on Linux the test defines its own `ioctl()` that makes `TCGETS2` report
-  both (`src/fakeDriver.cpp`). POSIX only (SKIP on Windows).
+  both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
+  `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
+  which is checked on every platform.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame

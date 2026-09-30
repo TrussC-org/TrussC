@@ -26,22 +26,66 @@
 //    on its own.
 //
 // A pseudo-terminal stands in for the port; its master reads back the speed
-// Serial set on the slave. POSIX only; prints SKIP and passes on Windows,
-// where the rate goes to the driver unchanged (dcb.BaudRate).
+// Serial set on the slave. POSIX only; skipped on Windows, where the rate
+// goes to the driver unchanged (dcb.BaudRate).
+//
+// On every platform: the Windows write timeout that setup() derives from the
+// rate (internal::serialWriteTimeout()) leaves a write at least 4 times its
+// time on the wire plus 5 s, rounded up to whole ms per byte.
 // =============================================================================
 
 #include <TrussC.h>
 
 #include <cstdio>
+#include <string>
 
 using namespace std;
 using namespace tc;
 
+static int g_fail = 0;
+static void check(const string& name, bool ok) {
+    std::printf("%-60s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    if (!ok) ++g_fail;
+}
+
+// --- the Windows write timeout, from the rate ---------------------------------
+static void checkWriteTimeouts() {
+    auto t9600 = internal::serialWriteTimeout(9600);
+    check("write timeout at 9600: 5 ms per byte + 5000 ms",
+          t9600.multiplierMs == 5 && t9600.constantMs == 5000);
+    auto t115200 = internal::serialWriteTimeout(115200);
+    check("write timeout at 115200: 1 ms per byte + 5000 ms",
+          t115200.multiplierMs == 1 && t115200.constantMs == 5000);
+    check("write timeout at 300: 134 ms per byte", internal::serialWriteTimeout(300).multiplierMs == 134);
+    check("write timeout at 40000: exactly 1 ms per byte", internal::serialWriteTimeout(40000).multiplierMs == 1);
+    check("write timeout at 40001: rounded up to 1 ms per byte",
+          internal::serialWriteTimeout(40001).multiplierMs == 1);
+    check("write timeout at 39999: rounded up to 2 ms per byte",
+          internal::serialWriteTimeout(39999).multiplierMs == 2);
+    check("write timeout for a nonsense rate is still finite",
+          internal::serialWriteTimeout(0).multiplierMs == 40000 &&
+          internal::serialWriteTimeout(-9600).multiplierMs == 40000);
+
+    // 4 times the wire time of a 64 KB write (10 bits per byte), at least
+    bool generous = true;
+    for (int rate : {300, 1200, 9600, 31250, 57600, 74880, 115200, 250000, 921600, 2000000}) {
+        auto t = internal::serialWriteTimeout(rate);
+        const double bytes = 65536;
+        const double wireMs = bytes * 10 * 1000 / rate;
+        const double timeoutMs = t.multiplierMs * bytes + t.constantMs;
+        if (timeoutMs < 4 * wireMs + 5000) generous = false;
+    }
+    check("write timeout is at least 4x the wire time + 5 s, 300 to 2000000 baud", generous);
+}
+
 #if defined(_WIN32) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
 
 int main() {
-    std::printf("SKIP: serialBaudRate needs a POSIX pseudo-terminal\n");
-    return 0;
+    checkWriteTimeouts();
+    std::printf("SKIP: the rest of serialBaudRate needs a POSIX pseudo-terminal\n");
+    std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
+    return g_fail ? 1 : 0;
 }
 
 #else
@@ -49,7 +93,6 @@ int main() {
 #include <fcntl.h>
 #include <unistd.h>
 #include <cstdlib>
-#include <string>
 #include <vector>
 
 // baudReadback.cpp
@@ -61,13 +104,6 @@ void setFakeDriverRate(unsigned rate);
 // fakeDriver.cpp: while from is non-zero, TCGETS2 reports `to` for `from`
 void setFakeDriverSwap(unsigned from, unsigned to);
 #endif
-
-static int g_fail = 0;
-static void check(const string& name, bool ok) {
-    std::printf("%-60s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
-    std::fflush(stdout);
-    if (!ok) ++g_fail;
-}
 
 static vector<string> g_logs;
 
@@ -209,6 +245,8 @@ int main() {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
         g_logs.push_back(e.message);
     });
+
+    checkWriteTimeouts();
 
     // --- 1. rates with a termios B-constant everywhere ------------------------
     for (int rate : {9600, 115200, 230400}) expectApplied(rate);

@@ -184,6 +184,35 @@ namespace internal {
 }
 #endif
 
+namespace internal {
+    // The write timeout Serial::setup() gives a Windows port (COMMTIMEOUTS):
+    // WriteFile() gives up after multiplierMs per byte plus constantMs. It is
+    // generous on purpose: a write that stalls a frame is easy to notice and
+    // does little harm, while data that never goes out hurts more, and an
+    // app that must not stall writes from a thread. So it allows 4 times the
+    // time the bytes take on the wire at the port's rate, a byte being 10
+    // bits (8N1 with its start and stop bits), rounded up to whole ms per
+    // byte as COMMTIMEOUTS counts them, plus 5 s for a device that is merely
+    // busy. A native USB (CDC) device ignores the rate, but a lower rate only
+    // makes the timeout longer. Examples: 9600 baud gives 5 ms per byte (64 KB
+    // in about 5.5 min), 40000 baud and up give 1 ms per byte (64 KB in about
+    // 70 s). Here, not in the Windows branch, so the tests check it on every
+    // platform.
+    struct SerialWriteTimeout {
+        unsigned long multiplierMs;  // per byte
+        unsigned long constantMs;    // per WriteFile() call
+    };
+
+    inline SerialWriteTimeout serialWriteTimeout(int baudRate) {
+        const unsigned long bitsPerByte = 10;
+        const unsigned long slack = 4;
+        const unsigned long constantMs = 5000;
+        unsigned long baud = baudRate > 0 ? static_cast<unsigned long>(baudRate) : 1;
+        unsigned long msPerByte = (bitsPerByte * 1000 * slack + baud - 1) / baud;  // rounded up
+        return {msPerByte, constantMs};
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Serial Communication Class
 // ---------------------------------------------------------------------------
@@ -299,6 +328,9 @@ public:
             // Both hold another connection now (see closeLost())
             ++generation_;
             ++other.generation_;
+#if defined(_WIN32)
+            writeTimeoutWarned_ = false;
+#endif
         }
         return *this;
     }
@@ -478,13 +510,16 @@ public:
             return false;
         }
 
-        // Timeout settings (near non-blocking behavior)
+        // Timeouts: reads return at once with what has arrived. Writes wait
+        // for the device, but give up after internal::serialWriteTimeout()
+        // (see writeBytes()).
+        internal::SerialWriteTimeout writeTimeout = internal::serialWriteTimeout(baudRate);
         COMMTIMEOUTS timeouts = {};
         timeouts.ReadIntervalTimeout = MAXDWORD;
         timeouts.ReadTotalTimeoutMultiplier = 0;
         timeouts.ReadTotalTimeoutConstant = 0;
-        timeouts.WriteTotalTimeoutMultiplier = 0;
-        timeouts.WriteTotalTimeoutConstant = 0;
+        timeouts.WriteTotalTimeoutMultiplier = writeTimeout.multiplierMs;
+        timeouts.WriteTotalTimeoutConstant = writeTimeout.constantMs;
         SetCommTimeouts(handle_, &timeouts);
 
         // Get DCB settings
@@ -529,6 +564,7 @@ public:
         devicePath_ = portName;
         baudRate_ = baudRate;
         initialized_ = true;
+        writeTimeoutWarned_ = false;
         logNotice() << "Serial: connected to " << portName << " at " << baudRate << " baud";
         return true;
 
@@ -866,15 +902,21 @@ public:
     // returns -1. How long it may take depends on the platform:
     // - macOS / Linux: never blocks (the port is O_NONBLOCK). It may write
     //   fewer bytes than asked, or return -1 while the output buffer is full.
-    // - Windows: waits until the driver has taken every byte (no write
-    //   timeout).
+    // - Windows: waits until the driver has taken every byte, at most
+    //   internal::serialWriteTimeout(): 4 times the time the bytes take at the
+    //   port's rate, plus 5 s. On a timeout it returns the bytes written so
+    //   far (possibly 0), logs a warning once per connection, and the port
+    //   stays open.
     // - Android: waits up to 1 s per 16 KB for the device to take the data.
     // A write that must never stall the app belongs on a thread of its own:
     // the other I/O calls do not wait for it (on Windows available() and the
     // reads still do; see the top of this file).
     int writeBytes(const void* buffer, int length) {
         LossFound loss;
-#if defined(__ANDROID__)
+#if defined(_WIN32)
+        bool timedOut = false;
+        std::string port;  // for the timeout warning, read under the lock
+#elif defined(__ANDROID__)
         int writeError = 0;
 #endif
         int n = [&]() -> int {
@@ -888,8 +930,20 @@ public:
 #if defined(_WIN32)
             DWORD bytesWritten = 0;
             if (!WriteFile(handle_, buffer, length, &bytesWritten, nullptr)) {
-                markLost(loss, "WriteFile", GetLastError());
+                DWORD error = GetLastError();
+                // A driver may report the write timeout as a failure too
+                if (error == ERROR_SEM_TIMEOUT || error == ERROR_TIMEOUT) {
+                    timedOut = true;
+                    port = devicePath_;
+                    return (int)bytesWritten;
+                }
+                markLost(loss, "WriteFile", error);
                 return -1;
+            }
+            // The write timeout ends the call with part of the data written
+            if ((int)bytesWritten < length) {
+                timedOut = true;
+                port = devicePath_;
             }
             return (int)bytesWritten;
 #elif defined(__ANDROID__)
@@ -906,7 +960,13 @@ public:
         }();
         // Logged here, with the lock released: a Logger listener may use
         // this Serial
-#if defined(__ANDROID__)
+#if defined(_WIN32)
+        if (timedOut && !writeTimeoutWarned_.exchange(true)) {
+            logWarning() << "Serial: a write to " << port << " timed out (" << n << " of "
+                         << length << " bytes sent); writeBytes() returns what was sent. Write"
+                         << " from a thread of its own if the device takes data slowly";
+        }
+#elif defined(__ANDROID__)
         if (writeError != 0) {
             logError() << "Serial: write failed (" << std::strerror(writeError) << ")";
         }
@@ -1000,6 +1060,10 @@ private:
     // Counts the connections: setup() and the moves bump it, so a loss found
     // on one connection never closes the next one (see closeLost())
     std::uint64_t generation_ = 0;
+#if defined(_WIN32)
+    // Set once a write of this connection timed out (see writeBytes())
+    std::atomic<bool> writeTimeoutWarned_{false};
+#endif
 
     // A reader-writer lock that lets a waiting writer in first: once lock()
     // waits, new lock_shared() calls wait behind it, so I/O calls that keep
