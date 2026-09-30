@@ -16,13 +16,19 @@
 // fire onDisconnect, so isConnected() turns false and the app can call
 // setup() again.
 //
-// Not thread-safe: since those calls may close the port, an app that uses one
-// Serial from several threads must guard every call with one mutex.
+// Threads: every call takes the Serial's own lock, so calls from several
+// threads never race on the port: no call closes it while another is reading
+// or writing it. The lock is released before onDisconnect fires, so a
+// listener may call setup(). Which thread reads or writes what, and in which
+// order, is still up to the app. A call that blocks holds the lock meanwhile
+// (drain(), setup(), and writeBytes() on Windows and Android; see
+// writeBytes()).
 // =============================================================================
 
 #include <string>
 #include <vector>
 #include <optional>
+#include <functional>
 #include <cstdint>
 #include <cstring>
 
@@ -95,6 +101,10 @@ struct SerialDisconnectEventArgs {
 // records the loss: Serial reports it (onDisconnect) from the next I/O call,
 // close() or setup() on the app's thread, and isConnected() stays true until
 // then, as it does on the other platforms until an I/O call finds the loss.
+//
+// Serial makes every call below with its lock held, so the backend sees one
+// app-side call at a time. The worker shares only the receive buffer (under
+// its own mutex) and the atomic state / loss flags with them.
 // ---------------------------------------------------------------------------
 namespace androidserial {
     struct Impl;
@@ -167,18 +177,19 @@ public:
     // destructor or a move assignment over an open Serial.
     //
     // THREADING: it fires inline on the thread that made that call, normally
-    // the main thread. On Android the USB worker thread finds the loss; it
-    // only records it, and the event fires from the next of those calls (or
-    // close() / setup()) on the app's thread. A listener that must run on the
-    // main thread whichever thread uses the Serial opts in:
+    // the main thread, after the call has released the Serial's lock. On
+    // Android the USB worker thread finds the loss; it only records it, and
+    // the event fires from the next of those calls (or close() / setup()) on
+    // the app's thread. A listener that must run on the main thread whichever
+    // thread uses the Serial opts in:
     //
     //   listener = serial.onDisconnect.listen(fn, Deliver::Main);
     //
     // RECONNECTING: the port is closed and isConnected() is false before any
-    // listener runs, so a listener may call setup(e.portName, e.baudRate).
-    // Check wasClean first, or every close() reopens the port. The call that
-    // found the loss still returns its error value and leaves the new
-    // connection alone.
+    // listener runs, and the lock is free, so a listener may call
+    // setup(e.portName, e.baudRate). Check wasClean first, or every close()
+    // reopens the port. The call that found the loss still returns its error
+    // value and leaves the new connection alone.
     //
     // Listeners stay with the Serial they were added to: a move does not
     // carry them over.
@@ -186,17 +197,16 @@ public:
     // mutable: the const available() fires it when it finds the device gone
     mutable Event<SerialDisconnectEventArgs> onDisconnect;
 
-#if defined(_WIN32)
-    Serial() : handle_(INVALID_HANDLE_VALUE), initialized_(false) {}
-#elif defined(__ANDROID__)
-    Serial() : aimpl_(androidserial::create()), initialized_(false) {}
+#if defined(__ANDROID__)
+    Serial() : aimpl_(androidserial::create()) {}
 #else
-    Serial() : fd_(-1), initialized_(false) {}
+    Serial() {}
 #endif
 
     // Closes the port without firing onDisconnect: a listener that
     // reconnects must not run from a destructor.
     ~Serial() {
+        TC_LOCK_GUARD(mutex_);
 #if defined(__ANDROID__)
         androidserial::destroy(aimpl_);  // closes the connection too
         aimpl_ = nullptr;
@@ -210,25 +220,27 @@ public:
     Serial& operator=(const Serial&) = delete;
 
     // Move-enabled. onDisconnect listeners are not moved (see Events above).
-    Serial(Serial&& other) noexcept
+    Serial(Serial&& other) noexcept {
+        TC_LOCK_GUARD(other.mutex_);
 #if defined(_WIN32)
-        : handle_(other.handle_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)),
-          baudRate_(other.baudRate_) {
+        handle_ = other.handle_;
         other.handle_ = INVALID_HANDLE_VALUE;
 #elif defined(__ANDROID__)
-        : aimpl_(other.aimpl_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)),
-          baudRate_(other.baudRate_) {
+        aimpl_ = other.aimpl_;
         other.aimpl_ = nullptr;
 #else
-        : fd_(other.fd_), initialized_(other.initialized_), devicePath_(std::move(other.devicePath_)),
-          baudRate_(other.baudRate_) {
+        fd_ = other.fd_;
         other.fd_ = -1;
 #endif
+        initialized_ = other.initialized_;
+        devicePath_ = std::move(other.devicePath_);
+        baudRate_ = other.baudRate_;
         other.initialized_ = false;
     }
 
     Serial& operator=(Serial&& other) noexcept {
         if (this != &other) {
+            LockBoth locks(mutex_, other.mutex_);
             // The old port closes without onDisconnect, as in the destructor:
             // a listener that reconnected here would be overwritten below.
 #if defined(_WIN32)
@@ -354,8 +366,10 @@ public:
         // close() only when a connection is open or lost: while a permission
         // request is pending, androidserial::setup() keeps it alive when
         // called again for the same device (reconnect loops must not
-        // re-trigger the permission dialog).
+        // re-trigger the permission dialog). close() fires onDisconnect with
+        // the lock released.
         if (isConnected()) close();
+        TC_LOCK_GUARD(mutex_);
         // A listener that reconnected from there is overruled by this call,
         // which came first: androidserial::setup() closes that connection.
         if (isConnected()) {
@@ -367,9 +381,13 @@ public:
         initialized_ = androidserial::setup(aimpl_, portName, baudRate);
         return initialized_;
 #else
+        // The previous port closes first, and onDisconnect reports it with
+        // the lock released
         close();
-        // A listener that reconnected from there is overruled by this call,
-        // which came first. Close that port without another notification.
+        TC_LOCK_GUARD(mutex_);
+        // A port opened since then, by a listener of that notification (or by
+        // another thread), is overruled by this call, which came first. Close
+        // it without another notification.
         if (closePort()) {
             logWarning() << "Serial: setup() closes the port an onDisconnect listener opened";
         }
@@ -586,22 +604,12 @@ public:
     // Disconnect. When the port was open, onDisconnect fires with
     // wasClean = true and reason "closed by close()".
     void close() {
-#if defined(__ANDROID__)
-        // A loss the USB worker recorded and no call has reported yet is
-        // reported here, as the loss it was.
-        std::string lostReason;
-        androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
-                                                  : androidserial::CloseResult::NotOpen;
-        initialized_ = false;
-        if (ended == androidserial::CloseResult::Lost) {
-            notifyDisconnect(std::move(lostReason), false);
-        } else if (ended == androidserial::CloseResult::Closed) {
-            notifyDisconnect("closed by close()", true);
+        PendingDisconnect closed;
+        {
+            TC_LOCK_GUARD(mutex_);
+            closeLocked(closed);
         }
-#else
-        // Close first, notify last: a listener may call setup() again
-        if (closePort()) notifyDisconnect("closed by close()", true);
-#endif
+        notifyDisconnect(closed);  // lock released: a listener may call setup() again
     }
 
     // ---------------------------------------------------------------------------
@@ -618,6 +626,7 @@ public:
     // device gone until one of those calls reports it (see androidserial
     // note above).
     bool isConnected() const {
+        TC_LOCK_GUARD(mutex_);
 #if defined(_WIN32)
         return initialized_ && handle_ != INVALID_HANDLE_VALUE;
 #elif defined(__ANDROID__)
@@ -641,33 +650,39 @@ public:
     // Returns 0 when not connected; a device loss found here closes the port
     // (isConnected() turns false) and fires onDisconnect.
     int available() const {
+        PendingDisconnect lost;
+        int n = [&]() -> int {
+            TC_LOCK_GUARD(mutex_);
 #if defined(__ANDROID__)
-        if (reportLoss()) return 0;
+            if (takeLoss(lost)) return 0;
 #endif
-        if (!isConnected()) return 0;
+            if (!isConnected()) return 0;
 
 #if defined(_WIN32)
-        COMSTAT comStat;
-        DWORD errors;
-        if (ClearCommError(handle_, &errors, &comStat)) {
-            return (int)comStat.cbInQue;
-        }
-        markDisconnected("ClearCommError", GetLastError());
-        return 0;
-#elif defined(__ANDROID__)
-        return androidserial::available(aimpl_);
-#else
-        int bytesAvailable = 0;
-        if (ioctl(fd_, FIONREAD, &bytesAvailable) == -1) {
-            int err = errno;
-            if (isDeviceLostError(err)) markDisconnected("ioctl(FIONREAD)", err);
+            COMSTAT comStat;
+            DWORD errors;
+            if (ClearCommError(handle_, &errors, &comStat)) {
+                return (int)comStat.cbInQue;
+            }
+            markDisconnected("ClearCommError", GetLastError(), lost);
             return 0;
-        }
-        if (bytesAvailable > 0) return bytesAvailable;
-        // Nothing buffered: tell a quiet port from a hung-up one
-        if (isHungUp()) markDisconnected("hangup", 0);
-        return 0;
+#elif defined(__ANDROID__)
+            return androidserial::available(aimpl_);
+#else
+            int bytesAvailable = 0;
+            if (ioctl(fd_, FIONREAD, &bytesAvailable) == -1) {
+                int err = errno;
+                if (isDeviceLostError(err)) markDisconnected("ioctl(FIONREAD)", err, lost);
+                return 0;
+            }
+            if (bytesAvailable > 0) return bytesAvailable;
+            // Nothing buffered: tell a quiet port from a hung-up one
+            if (isHungUp()) markDisconnected("hangup", 0, lost);
+            return 0;
 #endif
+        }();
+        notifyDisconnect(lost);
+        return n;
     }
 
     // ---------------------------------------------------------------------------
@@ -677,42 +692,48 @@ public:
     // Read specified number of bytes
     // Returns: actual bytes read (>=0), -1 on error. A device loss found here
     // closes the port (isConnected() turns false), fires onDisconnect and
-    // returns -1.
+    // returns -1. Never blocks: it returns what has arrived so far.
     int readBytes(void* buffer, int length) {
+        PendingDisconnect lost;
+        int n = [&]() -> int {
+            TC_LOCK_GUARD(mutex_);
 #if defined(__ANDROID__)
-        if (reportLoss()) return -1;
+            if (takeLoss(lost)) return -1;
 #endif
-        if (!isConnected()) return -1;
-        if (length <= 0) return 0;
+            if (!isConnected()) return -1;
+            if (length <= 0) return 0;
 
 #if defined(_WIN32)
-        DWORD bytesRead = 0;
-        if (!ReadFile(handle_, buffer, length, &bytesRead, nullptr)) {
-            markDisconnected("ReadFile", GetLastError());
-            return -1;
-        }
-        return (int)bytesRead;
-#elif defined(__ANDROID__)
-        return androidserial::readBytes(aimpl_, buffer, length);
-#else
-        ssize_t result = read(fd_, buffer, length);
-        if (result > 0) return static_cast<int>(result);
-        if (result == -1) {
-            int err = errno;
-            // EAGAIN/EWOULDBLOCK means "no data available", like 0 below
-            if (err != EAGAIN && err != EWOULDBLOCK) {
-                if (isDeviceLostError(err)) markDisconnected("read", err);
+            DWORD bytesRead = 0;
+            if (!ReadFile(handle_, buffer, length, &bytesRead, nullptr)) {
+                markDisconnected("ReadFile", GetLastError(), lost);
                 return -1;
             }
-        }
-        // No data. With VMIN = VTIME = 0, read() returns 0 both for a quiet
-        // port and for a hung-up tty, so only poll() can tell them apart.
-        if (isHungUp()) {
-            markDisconnected("hangup", 0);
-            return -1;
-        }
-        return 0;
+            return (int)bytesRead;
+#elif defined(__ANDROID__)
+            return androidserial::readBytes(aimpl_, buffer, length);
+#else
+            ssize_t result = read(fd_, buffer, length);
+            if (result > 0) return static_cast<int>(result);
+            if (result == -1) {
+                int err = errno;
+                // EAGAIN/EWOULDBLOCK means "no data available", like 0 below
+                if (err != EAGAIN && err != EWOULDBLOCK) {
+                    if (isDeviceLostError(err)) markDisconnected("read", err, lost);
+                    return -1;
+                }
+            }
+            // No data. With VMIN = VTIME = 0, read() returns 0 both for a quiet
+            // port and for a hung-up tty, so only poll() can tell them apart.
+            if (isHungUp()) {
+                markDisconnected("hangup", 0, lost);
+                return -1;
+            }
+            return 0;
 #endif
+        }();
+        notifyDisconnect(lost);
+        return n;
     }
 
     // Read into std::string (convenience method)
@@ -730,44 +751,50 @@ public:
     // found here closes the port (isConnected() turns false), fires
     // onDisconnect and returns -2.
     int readByte() {
+        PendingDisconnect lost;
+        int n = [&]() -> int {
+            TC_LOCK_GUARD(mutex_);
 #if defined(__ANDROID__)
-        if (reportLoss()) return -2;
+            if (takeLoss(lost)) return -2;
 #endif
-        if (!isConnected()) return -2;
+            if (!isConnected()) return -2;
 
-        unsigned char byte;
+            unsigned char byte;
 #if defined(_WIN32)
-        DWORD bytesRead = 0;
-        if (!ReadFile(handle_, &byte, 1, &bytesRead, nullptr)) {
-            markDisconnected("ReadFile", GetLastError());
-            return -2;  // Error
-        }
-        if (bytesRead == 1) {
-            return byte;
-        }
-        return -1;  // No data
-#elif defined(__ANDROID__)
-        int result = androidserial::readBytes(aimpl_, &byte, 1);
-        if (result == 1) return byte;
-        if (result == 0) return -1;  // No data
-        return -2;  // Error
-#else
-        ssize_t result = read(fd_, &byte, 1);
-        if (result == 1) return byte;
-        if (result == -1) {
-            int err = errno;
-            if (err != EAGAIN && err != EWOULDBLOCK) {
-                if (isDeviceLostError(err)) markDisconnected("read", err);
+            DWORD bytesRead = 0;
+            if (!ReadFile(handle_, &byte, 1, &bytesRead, nullptr)) {
+                markDisconnected("ReadFile", GetLastError(), lost);
                 return -2;  // Error
             }
-        }
-        // No data, or a hung-up tty (see readBytes())
-        if (isHungUp()) {
-            markDisconnected("hangup", 0);
-            return -2;
-        }
-        return -1;  // No data
+            if (bytesRead == 1) {
+                return byte;
+            }
+            return -1;  // No data
+#elif defined(__ANDROID__)
+            int result = androidserial::readBytes(aimpl_, &byte, 1);
+            if (result == 1) return byte;
+            if (result == 0) return -1;  // No data
+            return -2;  // Error
+#else
+            ssize_t result = read(fd_, &byte, 1);
+            if (result == 1) return byte;
+            if (result == -1) {
+                int err = errno;
+                if (err != EAGAIN && err != EWOULDBLOCK) {
+                    if (isDeviceLostError(err)) markDisconnected("read", err, lost);
+                    return -2;  // Error
+                }
+            }
+            // No data, or a hung-up tty (see readBytes())
+            if (isHungUp()) {
+                markDisconnected("hangup", 0, lost);
+                return -2;
+            }
+            return -1;  // No data
 #endif
+        }();
+        notifyDisconnect(lost);
+        return n;
     }
 
     // ---------------------------------------------------------------------------
@@ -778,31 +805,42 @@ public:
     // Returns: actual bytes written, -1 on error. A device loss found here
     // closes the port (isConnected() turns false), fires onDisconnect and
     // returns -1.
+    // macOS / Linux: never blocks (the port is O_NONBLOCK): it may write fewer
+    // bytes than asked, or return -1 while the output buffer is full.
+    // Windows: blocks until the driver has taken every byte (no write
+    // timeout). Android: blocks up to 1 s per 16 KB while the device does not
+    // take the data. Other calls on this Serial wait for it meanwhile.
     int writeBytes(const void* buffer, int length) {
+        PendingDisconnect lost;
+        int n = [&]() -> int {
+            TC_LOCK_GUARD(mutex_);
 #if defined(__ANDROID__)
-        if (reportLoss()) return -1;
+            if (takeLoss(lost)) return -1;
 #endif
-        if (!isConnected()) return -1;
-        if (length <= 0) return 0;
+            if (!isConnected()) return -1;
+            if (length <= 0) return 0;
 
 #if defined(_WIN32)
-        DWORD bytesWritten = 0;
-        if (!WriteFile(handle_, buffer, length, &bytesWritten, nullptr)) {
-            markDisconnected("WriteFile", GetLastError());
-            return -1;
-        }
-        return (int)bytesWritten;
+            DWORD bytesWritten = 0;
+            if (!WriteFile(handle_, buffer, length, &bytesWritten, nullptr)) {
+                markDisconnected("WriteFile", GetLastError(), lost);
+                return -1;
+            }
+            return (int)bytesWritten;
 #elif defined(__ANDROID__)
-        return androidserial::writeBytes(aimpl_, buffer, length);
+            return androidserial::writeBytes(aimpl_, buffer, length);
 #else
-        ssize_t result = write(fd_, buffer, length);
-        if (result == -1) {
-            int err = errno;
-            if (isDeviceLostError(err)) markDisconnected("write", err);
-            return -1;
-        }
-        return static_cast<int>(result);
+            ssize_t result = write(fd_, buffer, length);
+            if (result == -1) {
+                int err = errno;
+                if (isDeviceLostError(err)) markDisconnected("write", err, lost);
+                return -1;
+            }
+            return static_cast<int>(result);
 #endif
+        }();
+        notifyDisconnect(lost);
+        return n;
     }
 
     // Write std::string
@@ -821,6 +859,7 @@ public:
 
     // Flush input buffer
     void flushInput() {
+        TC_LOCK_GUARD(mutex_);
         if (!isInitialized()) return;
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR);
@@ -833,6 +872,7 @@ public:
 
     // Flush output buffer
     void flushOutput() {
+        TC_LOCK_GUARD(mutex_);
         if (!isInitialized()) return;
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_TXCLEAR);
@@ -845,6 +885,7 @@ public:
 
     // Flush both input and output buffers
     void flush() {
+        TC_LOCK_GUARD(mutex_);
         if (!isInitialized()) return;
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
@@ -855,8 +896,9 @@ public:
 #endif
     }
 
-    // Wait until output completes
+    // Wait until output completes. Other calls on this Serial wait meanwhile.
     void drain() {
+        TC_LOCK_GUARD(mutex_);
         if (!isInitialized()) return;
 #if defined(_WIN32)
         FlushFileBuffers(handle_);
@@ -868,46 +910,102 @@ public:
     }
 
 private:
-    // mutable: the const available() closes the port when it finds the
-    // device gone (see markDisconnected()).
+    // The port state below is guarded by mutex_. mutable: the const
+    // available() closes the port when it finds the device gone (see
+    // markDisconnected()).
 #if defined(_WIN32)
-    mutable HANDLE handle_;        // Windows handle
+    mutable HANDLE handle_ = INVALID_HANDLE_VALUE;  // Windows handle
 #elif defined(__ANDROID__)
-    androidserial::Impl* aimpl_;  // Android backend state
+    androidserial::Impl* aimpl_ = nullptr;           // Android backend state
 #else
-    mutable int fd_;               // File descriptor (POSIX)
+    mutable int fd_ = -1;                            // File descriptor (POSIX)
 #endif
-    mutable bool initialized_;     // Connection state
-    std::string devicePath_; // Current device path
-    int baudRate_ = 0;       // Rate the current port was opened at
+    mutable bool initialized_ = false;  // Connection state
+    std::string devicePath_;            // Current device path
+    int baudRate_ = 0;                  // Rate the current port was opened at
 
-    // Fire onDisconnect. The caller has closed the port and cleared its state
-    // already, so a listener may call setup() to reconnect. The caller must
-    // return right after this and not touch the port: it may be a new one.
-    void notifyDisconnect(std::string reason, bool wasClean) const {
+    // Every public call holds it while it touches the state above. Recursive:
+    // setup() calls close(), isInitialized() calls isConnected(), and so on.
+    // Never held while onDisconnect fires (see notifyDisconnect()).
+    mutable TC_MUTEX mutex_;
+
+    // Locks two Serials in one order (by address), for a move assignment, so
+    // that two threads moving them into each other cannot deadlock
+    struct LockBoth {
+        TC_MUTEX& first;
+        TC_MUTEX& second;
+        LockBoth(TC_MUTEX& a, TC_MUTEX& b)
+            : first(std::less<TC_MUTEX*>()(&a, &b) ? a : b),
+              second(std::less<TC_MUTEX*>()(&a, &b) ? b : a) {
+            first.lock();
+            second.lock();
+        }
+        ~LockBoth() {
+            second.unlock();
+            first.unlock();
+        }
+    };
+
+    // A disconnect found while the lock was held, to fire once it is released
+    using PendingDisconnect = std::optional<SerialDisconnectEventArgs>;
+
+    // The args for the current port (with the lock held)
+    SerialDisconnectEventArgs disconnectArgs(std::string reason, bool wasClean) const {
         SerialDisconnectEventArgs args;
         args.portName = devicePath_;
         args.baudRate = baudRate_;
         args.reason = std::move(reason);
         args.wasClean = wasClean;
-        onDisconnect.notify(args);
+        return args;
+    }
+
+    // Fire onDisconnect for a disconnect found under the lock. The caller has
+    // closed the port, cleared its state and released the lock by now, so a
+    // listener may call setup() to reconnect, from this thread or another.
+    // The caller must return right after this and not touch the port: it may
+    // be a new one.
+    void notifyDisconnect(PendingDisconnect& pending) const {
+        if (pending) onDisconnect.notify(*pending);
+    }
+
+    // close() with the lock held: closes the port and sets `closed` to the
+    // notification to fire once the lock is released
+    void closeLocked(PendingDisconnect& closed) {
+#if defined(__ANDROID__)
+        // A loss the USB worker recorded and no call has reported yet is
+        // reported here, as the loss it was.
+        std::string lostReason;
+        androidserial::CloseResult ended = aimpl_ ? androidserial::close(aimpl_, lostReason)
+                                                  : androidserial::CloseResult::NotOpen;
+        initialized_ = false;
+        if (ended == androidserial::CloseResult::Lost) {
+            closed = disconnectArgs(std::move(lostReason), false);
+        } else if (ended == androidserial::CloseResult::Closed) {
+            closed = disconnectArgs("closed by close()", true);
+        }
+#else
+        if (closePort()) closed = disconnectArgs("closed by close()", true);
+#endif
     }
 
 #if defined(__ANDROID__)
-    // The USB worker found the device gone and only recorded it: release the
-    // connection and fire onDisconnect here, on the app's thread. Returns
-    // true when it did, and the caller then returns its error value.
-    bool reportLoss() const {
+    // With the lock held: the USB worker found the device gone and only
+    // recorded it. Release the connection and set `lost` to the notification,
+    // for the caller to fire on the app's thread once it has released the
+    // lock. Returns true when it did, and the caller then returns its error
+    // value.
+    bool takeLoss(PendingDisconnect& lost) const {
         if (!aimpl_ || !androidserial::isLost(aimpl_)) return false;
         std::string reason;
         androidserial::close(aimpl_, reason);
         initialized_ = false;
-        notifyDisconnect(std::move(reason), false);
+        lost = disconnectArgs(std::move(reason), false);
         return true;
     }
 #else
     // Close the port without firing onDisconnect (the destructor, a move
-    // assignment, and close() before it notifies). Returns whether it was open.
+    // assignment, and close() before it notifies). Returns whether it was
+    // open. With the lock held.
     bool closePort() {
 #if defined(_WIN32)
         bool wasOpen = handle_ != INVALID_HANDLE_VALUE;
@@ -931,25 +1029,25 @@ private:
 
 #if defined(_WIN32)
     // The device went away: close the handle (a stale one would block
-    // reopening the COM port), log once and fire onDisconnect; later calls
-    // see !isConnected(). Any failure of ClearCommError / ReadFile /
-    // WriteFile counts as a loss: with fAbortOnError off, line errors do not
-    // fail them, and the error code a removed device returns differs between
-    // drivers. The caller returns right after this (see notifyDisconnect()).
-    void markDisconnected(const char* call, DWORD error) const {
+    // reopening the COM port) and log once; later calls see !isConnected().
+    // Sets `lost` for the caller to fire once it has released the lock. Any
+    // failure of ClearCommError / ReadFile / WriteFile counts as a loss: with
+    // fAbortOnError off, line errors do not fail them, and the error code a
+    // removed device returns differs between drivers.
+    void markDisconnected(const char* call, DWORD error, PendingDisconnect& lost) const {
         if (handle_ == INVALID_HANDLE_VALUE) return;
         CloseHandle(handle_);
         handle_ = INVALID_HANDLE_VALUE;
         initialized_ = false;
         std::string reason = std::string(call) + " failed, error " + std::to_string(error);
         logWarning() << "Serial: lost connection to " << devicePath_ << " (" << reason << ")";
-        notifyDisconnect(std::move(reason), false);
+        lost = disconnectArgs(std::move(reason), false);
     }
 #elif !defined(__ANDROID__)
-    // The device went away: close the fd, log once and fire onDisconnect;
-    // later calls see !isConnected(). err is the errno that showed it, 0 for
-    // a hangup. The caller returns right after this (see notifyDisconnect()).
-    void markDisconnected(const char* call, int err) const {
+    // The device went away: close the fd and log once; later calls see
+    // !isConnected(). Sets `lost` for the caller to fire once it has released
+    // the lock. err is the errno that showed it, 0 for a hangup.
+    void markDisconnected(const char* call, int err, PendingDisconnect& lost) const {
         if (fd_ == -1) return;
         ::close(fd_);
         fd_ = -1;
@@ -960,7 +1058,7 @@ private:
             reason += std::strerror(err);
         }
         logWarning() << "Serial: lost connection to " << devicePath_ << " (" << reason << ")";
-        notifyDisconnect(std::move(reason), false);
+        lost = disconnectArgs(std::move(reason), false);
     }
 
     // Whether the driver ignores rate changes altogether. The kernel then
@@ -969,7 +1067,7 @@ private:
     // usb-serial-simple, xHCI DbC). A driver that rejected just the
     // requested rate, and kept the old one, still applies another standard
     // rate, so try one once (termios2 takes any rate, B-constant ones too).
-    // Called while setup() opens the port.
+    // With the lock held, while setup() opens the port.
     bool driverIgnoresBaudRates(int keptRate) const {
         int probe = keptRate == 9600 ? 19200 : 9600;
         int probeApplied = 0;
