@@ -30,6 +30,7 @@
 
 #include <tcxDepthCamera.h>
 
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -175,13 +176,22 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
 // the payload takes, or 0 when that isn't known to lie within the block and the
 // frame; the caller then can't tell where the next block starts.
 //
-// The size fields are checked against the block, the frame dimensions and each
-// other BEFORE anything is allocated or decoded, decompress() gets the real size
+// The size fields are checked against the block, the frame dimensions, each
+// other and the largest size decompress() can produce BEFORE anything is
+// allocated or decoded, decompress() gets the real size
 // of the destination, and decoding must produce exactly the expected number of
 // bytes. If a check fails the parser returns false with `why` set and leaves
 // that stream empty in dst; the caller skips the block. Blocks written by
 // DepthRecorder pass as long as the header's width x height (taken from the
 // first recorded frame) matches the depth plane.
+
+// decompress() takes and returns the decoded size as an int, so a byte size
+// above INT_MAX can't be decoded. DepthRecorder doesn't produce a valid block
+// above it: compress() fails past LZ4_MAX_INPUT_SIZE bytes (LZ4) or INT_MAX
+// bytes (plain copy).
+inline bool decodableSize(std::uint32_t rawBytes) {
+    return rawBytes <= static_cast<std::uint32_t>(INT_MAX);
+}
 
 // Whether `compSize` bytes can decode to `rawBytes`: Codec::None is a plain
 // copy, and LZ4 turns each input byte into at most 255 output bytes. This caps
@@ -216,6 +226,7 @@ inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32
     if (pixels == 0 || n != pixels) return fail("sample count doesn't match the frame size");
     if (rawBytes != static_cast<std::uint64_t>(n) * 2)
         return fail("byte size doesn't match the sample count");
+    if (!decodableSize(rawBytes)) return fail("byte size is too large to decode");
     if (!decodedSizeFits(rawBytes, compSize, codec))
         return fail("compressed size doesn't fit the byte size");
     scratch.resize(compSize);
@@ -261,6 +272,7 @@ inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32
     // cw, ch < 2^31 and chn <= 4, so the 64-bit product can't wrap.
     if (rawBytes != static_cast<std::uint64_t>(cw) * static_cast<std::uint64_t>(ch) * chn)
         return fail("byte size doesn't match width x height x channels");
+    if (!decodableSize(rawBytes)) return fail("byte size is too large to decode");
     if (!decodedSizeFits(rawBytes, compSize, codec))
         return fail("compressed size doesn't fit the byte size");
     scratch.resize(compSize);
