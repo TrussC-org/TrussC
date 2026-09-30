@@ -8506,9 +8506,106 @@ description.ja = "接続完了時に発火"
 description.ko = "연결 완료 시 발생"
 
 ["TcpClient::onDisconnect"]
-description.en = "Fired when disconnected"
-description.ja = "切断時に発火"
-description.ko = "연결 해제 시 발생"
+description.en = "Fired when the connection ends: the peer closed it, an error ended it, or disconnect() / connect() on a connected client (not from the destructor)"
+description.ja = "接続が終わったときに発火：相手が閉じた、エラーで切れた、または disconnect() / 接続中の connect()（デストラクタでは発火しない）"
+description.ko = "연결이 끝났을 때 발생: 상대가 닫음, 오류로 끊김, 또는 disconnect() / 연결 중 connect() (소멸자에서는 발생하지 않음)"
+details.en = '''
+[`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason) says why:
+
+- `"Connection closed by remote"` (`wasClean` true) — the peer closed the
+  connection. Fires on the receive thread.
+- `"Connection error"` (`wasClean` false; `TlsClient`: `"TLS error: ..."`) —
+  an error ended it. Fires on the receive thread.
+- `"Disconnected by client"` (`wasClean` true) — the app ended it, with
+  [`disconnect()`](#TcpClient::disconnect) or with
+  [`connect()`](#TcpClient::connect) on a connected client. Fires
+  synchronously on the calling thread, before that call returns.
+
+The destructor disconnects without firing it. An auto-reconnect listener
+should not reconnect on `"Disconnected by client"`, which is the app's own
+doing:
+
+```cpp
+listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
+    if (e.reason == "Disconnected by client") return;  // the app did it
+    // e.wasClean: true if the peer closed it, false if an error did
+    reconnectPending = true;  // reconnect from update(), on the main thread
+});
+```
+
+A listener that reconnects from inside `connect()`'s own disconnect anyway is
+overruled: `connect()` closes that connection again, without another
+notification, and connects where it was asked to.
+
+When the event fires on the receive thread, a plain (inline) listener that
+calls `connect()` runs it on that thread, which nothing waits for until
+`connect()` returns: do not destroy the client or call `disconnect()` from
+another thread until then. Reconnecting from the main thread, as above,
+avoids this.
+'''
+details.ja = '''
+[`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason) が理由を示す：
+
+- `"Connection closed by remote"`（`wasClean` は true）— 相手が接続を閉じた。
+  受信スレッドで発火する。
+- `"Connection error"`（`wasClean` は false。`TlsClient` では
+  `"TLS error: ..."`）— エラーで切れた。受信スレッドで発火する。
+- `"Disconnected by client"`（`wasClean` は true）— アプリが
+  [`disconnect()`](#TcpClient::disconnect) か、接続中の
+  [`connect()`](#TcpClient::connect) で切った。呼び出し元のスレッドで、
+  その呼び出しが返る前に同期で発火する。
+
+デストラクタは発火させずに切断する。自動再接続のリスナーは、アプリ自身が
+切った `"Disconnected by client"` では再接続しないこと：
+
+```cpp
+listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
+    if (e.reason == "Disconnected by client") return;  // アプリが切った
+    // e.wasClean: 相手が閉じたなら true、エラーなら false
+    reconnectPending = true;  // 再接続は update()（メインスレッド）で
+});
+```
+
+それでも `connect()` 自身の切断の中からリスナーが再接続した場合、その接続は
+`connect()` が通知なしで閉じ直し、頼まれた先へ接続する。
+
+受信スレッドで発火したとき、そこで `connect()` を呼ぶ通常の（inline の）
+リスナーは、その受信スレッドの上で動き、`connect()` が返るまで誰もそれを
+待たない。それまでは別スレッドからクライアントを破棄したり `disconnect()`
+を呼んだりしないこと。上の例のようにメインスレッドで再接続すれば避けられる。
+'''
+details.ko = '''
+[`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason)가 이유를 알려 준다:
+
+- `"Connection closed by remote"` (`wasClean`은 true) — 상대가 연결을 닫았다.
+  수신 스레드에서 발생한다.
+- `"Connection error"` (`wasClean`은 false, `TlsClient`에서는
+  `"TLS error: ..."`) — 오류로 끊겼다. 수신 스레드에서 발생한다.
+- `"Disconnected by client"` (`wasClean`은 true) — 앱이
+  [`disconnect()`](#TcpClient::disconnect) 또는 연결 중인
+  [`connect()`](#TcpClient::connect)로 끊었다. 호출한 스레드에서, 그 호출이
+  반환되기 전에 동기적으로 발생한다.
+
+소멸자는 이벤트를 발생시키지 않고 연결을 끊는다. 자동 재연결 리스너는 앱이
+스스로 끊은 `"Disconnected by client"`에서는 재연결하지 않아야 한다:
+
+```cpp
+listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
+    if (e.reason == "Disconnected by client") return;  // 앱이 끊었다
+    // e.wasClean: 상대가 닫았으면 true, 오류면 false
+    reconnectPending = true;  // 재연결은 update()(메인 스레드)에서
+});
+```
+
+그래도 `connect()` 자신의 연결 해제 안에서 리스너가 재연결하면, `connect()`가
+그 연결을 알림 없이 다시 닫고 요청받은 곳으로 연결한다.
+
+수신 스레드에서 발생했을 때 그 자리에서 `connect()`를 호출하는 일반(inline)
+리스너는 그 수신 스레드 위에서 실행되며, `connect()`가 반환될 때까지 아무도
+그 스레드를 기다리지 않는다. 그때까지 다른 스레드에서 클라이언트를 파괴하거나
+`disconnect()`를 호출하지 말 것. 위 예처럼 메인 스레드에서 재연결하면 피할 수
+있다.
+'''
 
 ["TcpClient::onError"]
 description.en = "Fired on error"

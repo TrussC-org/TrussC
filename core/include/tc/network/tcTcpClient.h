@@ -87,18 +87,40 @@ public:
     // firing thread. With setUseThread(false) everything runs on the main
     // thread and this does not apply.
     //
-    // onDisconnect does not fire from the destructor: destroying a connected
-    // client disconnects it without telling listeners, so one that reconnects
-    // cannot reconnect a client that is going away.
+    // onDisconnect: TcpDisconnectEventArgs::reason says why the connection
+    // ended.
+    //  - "Connection closed by remote" (wasClean true): the peer closed it.
+    //    Fires on the receive thread.
+    //  - "Connection error" (wasClean false; TlsClient: "TLS error: ..."):
+    //    an error ended it. Fires on the receive thread.
+    //  - "Disconnected by client" (wasClean true): the app ended it, with
+    //    disconnect() or with connect() on a connected client. Fires
+    //    synchronously on the calling thread, before that call returns.
+    // The destructor disconnects without firing it. An auto-reconnect
+    // listener should not reconnect on "Disconnected by client", the app's
+    // own doing:
     //
-    // RECONNECTING FROM A LISTENER: a plain (inline) onDisconnect or onReceive
-    // listener may call connect() to reconnect. That connect() runs on the
-    // old receive thread and detaches it from the client first, so nothing
-    // waits for it: neither disconnect() nor the destructor. Until that
+    //   listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
+    //       if (e.reason == "Disconnected by client") return;  // the app did it
+    //       // e.wasClean: true if the peer closed it, false if an error did
+    //       reconnectPending = true;  // reconnect from update(), main thread
+    //   });
+    //
+    // A listener that reconnects from inside connect()'s own disconnect
+    // anyway is overruled: connect() closes that connection again, without
+    // another notification, and connects where it was asked to.
+    //
+    // RECONNECTING ON THE RECEIVE THREAD: when an event fires on the receive
+    // thread (onDisconnect for a remote close or an error, onReceive; for
+    // TlsClient also onConnect and onError around the handshake), a plain
+    // (inline) listener that calls connect() runs it on that old receive
+    // thread, which connect() detaches from the client first. Nothing waits
+    // for it then: neither disconnect() nor the destructor. Until that
     // connect() has returned, do not destroy the client, and do not call
     // disconnect() on it from another thread. Either can end in a
     // use-after-free, or in a connection that completes after disconnect()
-    // has returned. (A connect() that can be cancelled is #261.)
+    // has returned. Reconnecting from the main thread, as above, avoids this.
+    // (A connect() that can be cancelled is #261.)
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive
