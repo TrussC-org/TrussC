@@ -1215,8 +1215,7 @@ private:
     static void mixEagerVoice(PlayingSound& sound, const SoundBuffer& src,
                               float* buffer, int num_frames, int num_channels) {
         // A buffer with no frames, or with fewer samples than numSamples *
-        // channels, has nothing to index: stop the voice (a looping voice
-        // would otherwise wrap its position modulo a length of 0).
+        // channels, has nothing to play: the voice stops, looping or not.
         size_t srcCount = 0;
         if (src.numSamples == 0 ||
             !internal::interleavedSampleCount(src.numSamples, src.channels, src.samples.size(),
@@ -1826,7 +1825,7 @@ public:
         // (decoder seek happens lazily in the stream mixer).
         if (buffer_->kind() == SoundSource::Eager) {
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
-            // An empty buffer clamps to 0, not to -1.
+            // An empty buffer clamps to 0.
             if (pos >= (double)eager->numSamples) {
                 pos = eager->numSamples > 0 ? (double)eager->numSamples - 1 : 0.0;
             }

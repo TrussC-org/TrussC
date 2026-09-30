@@ -377,8 +377,7 @@ static void checkMixFrom() {
     SoundBuffer mono;
     mono.generateSineWave(440.0f, 0.01f, 0.5f, 48000);
     refused("a mono buffer into a stereo one", mono, 0, "channel counts differ");
-    // offset + frames wraps a size_t: formed unchecked, the end lands inside
-    // the buffer and the write starts before it
+    // An offset whose end would wrap a size_t is refused
     const size_t kSizeMax = numeric_limits<size_t>::max();
     refused("an offset of SIZE_MAX", other, kSizeMax, "past what a buffer holds");
     refused("an offset of SIZE_MAX - 1", other, kSizeMax - 1, "past what a buffer holds");
@@ -829,8 +828,8 @@ static void checkVorbisSizing(const fs::path& dir, const string& tag) {
 
 // --- Voices on buffers with nothing to play ------------------------------------
 // A voice on an empty buffer (or one whose samples are shorter than
-// numSamples * channels) stops at its first mix instead of indexing it;
-// setPosition() on an empty buffer lands on 0.
+// numSamples * channels) stops at its first mix; setPosition() on an empty
+// buffer lands on 0.
 static void checkEmptyVoices() {
     auto stops = [](Sound& s) {
         return waitFor([&] { return !s.isPlaying(); }, 1000);
