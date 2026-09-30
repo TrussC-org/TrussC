@@ -63,7 +63,7 @@ public:
     // destroy bodies.
     // -------------------------------------------------------------------------
     tc::Event<WorldContact> contactBegan;   // started touching
-    tc::Event<WorldContact> contactStay;    // still touching, every step
+    tc::Event<WorldContact> contactStay;    // still touching, once per World::update()
     tc::Event<WorldContact> contactEnded;   // stopped touching
 
     // -------------------------------------------------------------------------

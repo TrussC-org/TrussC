@@ -251,7 +251,7 @@ public:
 
     // Collision events (listen via EventListener; fired on the main thread).
     tc::Event<Contact2D> onCollisionBegan;   // started touching (Enter)
-    tc::Event<Contact2D> onCollisionStay;    // still touching, every step (Stay)
+    tc::Event<Contact2D> onCollisionStay;    // still touching, once per World::update() (Stay)
     tc::Event<Contact2D> onCollisionEnded;   // stopped touching (Exit)
 
     // Trigger events — fired instead of the collision ones when EITHER side is a
