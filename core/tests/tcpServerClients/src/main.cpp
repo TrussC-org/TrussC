@@ -22,7 +22,8 @@
 //   - A listener's teardown waits for none of the server's threads, and the
 //     server's destruction waits for all of them: stop() from onError after a
 //     send timed out mid-payload while the receive thread removes that client
-//     (a later start() works); disconnectClient() of its own client, or
+//     (a later start() works; SKIP where the send is not cut mid-payload, as
+//     Winsock may take the whole payload in one send()); disconnectClient() of its own client, or
 //     stop(), from onSendComplete with the server destroyed while the
 //     listener still runs; two onReceive listeners disconnecting each other's
 //     client; disconnectAllClients() on another thread while a client
@@ -31,8 +32,10 @@
 //     onClientConnect (accept thread) together with one from another client's
 //     onReceive or onSendComplete, in either order; from two clients'
 //     onReceive, or two onSendComplete; from a plain thread together with
-//     onSendComplete (the plain one waits for that listener to finish); and
-//     from two plain threads. The stop hook orders the plain thread and the
+//     onSendComplete (the plain one waits for that listener to finish), or
+//     with onClientConnect once the plain one has taken the accept thread
+//     (the listening socket is still closed before the listener's stop()
+//     returns); and from two plain threads. The stop hook orders the plain thread and the
 //     writer. Every client ends up disconnected. start()
 //     while another thread's stop() still waits for the accept thread waits
 //     for it too, and so does start() while that stop() has joined the accept
@@ -721,6 +724,11 @@ static void testListenerTeardown() {
 // calls stop() only once it has: a removal that waited for the writer, with the
 // writer's stop() waiting for that receive thread, would never return. A later
 // start() must not wait for it either.
+//
+// The mid-payload timeout is a premise, not the invariant. Winsock may accept
+// the whole payload in one send() and refuse a later one whole instead of
+// cutting it part-way, so on a platform where the send is not cut the checks
+// that depend on it report SKIP.
 static void stopFromOnErrorAfterSendTimeout() {
     const char* const prefix = "teardown: stop() from onError after a send timeout";
     Watchdog dog(prefix, 20000);
@@ -728,12 +736,17 @@ static void stopFromOnErrorAfterSendTimeout() {
     auto server = make_unique<TcpServer>();
     TcpServer* srv = server.get();
     srv->setSendTimeout(0.3f);
-    atomic<bool> errorIn{false}, removedFirst{false}, stopped{false};
+    atomic<bool> errorIn{false}, removedFirst{false}, stopped{false}, notCut{false};
     EventListener onErr = srv->onError.listen([&, srv](TcpServerErrorEventArgs& e) {
         if (e.message.find("mid-payload") == string::npos || errorIn.exchange(true)) return;
         removedFirst = waitUntil(3000, [&] { return srv->getClientCount() == 0; });
         srv->stop();
         stopped = true;
+    });
+    // The payload went out whole, or timed out having written nothing: either
+    // way the stream was not cut
+    EventListener onSent = srv->onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+        if (e.error == SendError::None || e.error == SendError::Timeout) notCut = true;
     });
 
     const int port = startOnFreePort(*srv, -1);
@@ -746,7 +759,21 @@ static void stopFromOnErrorAfterSendTimeout() {
     // Far more than the socket buffers on both ends hold; the peer never reads
     if (joined) srv->sendAsync(srv->getClientIds().front(), vector<char>(32 * 1024 * 1024, 'x'));
 
-    const bool returned = joined && waitUntil(5000, [&] { return stopped.load(); });
+    const bool returned = joined && waitUntil(5000, [&] {
+        return stopped.load() || (notCut.load() && !errorIn.load());
+    }) && stopped.load();
+    if (joined && !errorIn.load() && notCut.load()) {
+        const char* const why = "the send was not cut mid-payload on this platform";
+        skip((string(prefix) + ": the send times out and the client is removed first").c_str(), why);
+        skip((string(prefix) + ": stop() returns").c_str(), why);
+        skip((string(prefix) + ": the client is disconnected").c_str(), why);
+        skip((string(prefix) + ": start() afterwards succeeds").c_str(), why);
+        skip((string(prefix) + ": and the server accepts a client").c_str(), why);
+        server.reset();
+        check((string(prefix) + ": the server is destroyed afterwards").c_str(), true);
+        if (c != kBadSocket) TC_CLOSE(c);
+        return;
+    }
     check((string(prefix) + ": the send times out and the client is removed first").c_str(),
           errorIn.load() && removedFirst.load());
     check((string(prefix) + ": stop() returns").c_str(), returned);
@@ -773,6 +800,8 @@ static void stopFromOnErrorAfterSendTimeout() {
 // stops the server, so the accept loop is gone too) and keeps running; the
 // server is destroyed from this thread meanwhile. The writer returns into the
 // server once the listener is done, so the destruction has to wait for it.
+// With `viaStop` it also guards destruction when no accept loop is left to
+// reap that writer.
 static void destroyWhileWriterListenerRuns(bool viaStop) {
     const string prefix = string("teardown: onSendComplete ") +
                           (viaStop ? "stops the server" : "disconnects its own client") +
@@ -781,11 +810,12 @@ static void destroyWhileWriterListenerRuns(bool viaStop) {
 
     auto server = make_unique<TcpServer>();
     TcpServer* srv = server.get();
-    atomic<bool> listenerIn{false}, listenerDone{false};
+    atomic<bool> listenerIn{false}, callReturned{false}, listenerDone{false};
     EventListener onSent = srv->onSendComplete.listen([&, srv](TcpSendCompleteEventArgs& e) {
         if (listenerIn.exchange(true)) return;
         if (viaStop) srv->stop();
         else srv->disconnectClient(e.clientId);
+        callReturned = true;
         this_thread::sleep_for(chrono::milliseconds(300));
         listenerDone = true;
     });
@@ -798,8 +828,10 @@ static void destroyWhileWriterListenerRuns(bool viaStop) {
     const bool joined = c != kBadSocket &&
                         waitUntil(3000, [&] { return srv->getClientCount() == 1; });
     if (joined) srv->sendAsync(srv->getClientIds().front(), string("x"));
-    const bool gone = joined && waitUntil(3000, [&] { return listenerIn.load() &&
-                                                             srv->getClientCount() == 0; });
+    // The client count reaches 0 inside the call, before it would wait for
+    // anything, so what shows the call returned is the listener going on
+    const bool gone = joined && waitUntil(3000, [&] { return callReturned.load(); }) &&
+                      srv->getClientCount() == 0;
     if (viaStop) {
         // Past the accept loop's last slice: nothing reaps any more
         this_thread::sleep_for(chrono::milliseconds(200));
@@ -935,11 +967,12 @@ static void testListenerTeardownThreads() {
 // `fromWriter`), which is parked in a listener while the accept thread is in
 // onClientConnect for the second client.
 //
-// By default the accept thread goes first. Its stop() waits for nothing, so it
-// usually returns before the other one starts. With `acceptLast` the other
-// thread goes first, and the accept thread calls stop() only once that one is
-// waiting for it to end, having taken it out of the server: the accept thread
-// then has to recognize itself without it.
+// By default the accept thread goes first. With `acceptLast` the other thread
+// goes first, and the accept thread calls stop() only once that one has
+// cleared isRunning(). Neither stop() waits for any thread: a receive or
+// writer thread's stop() does not take the accept thread either, so that is
+// left to the destruction below. stopOnAcceptThreadAfterAnotherTookIt()
+// covers an accept thread whose stop() comes after another has taken it.
 static void concurrentStopWithAcceptThread(bool fromWriter, bool acceptLast) {
     const char* const other = fromWriter ? "onSendComplete" : "onReceive";
     const string prefix = acceptLast
@@ -961,8 +994,8 @@ static void concurrentStopWithAcceptThread(bool fromWriter, bool acceptLast) {
         }
         connectIn = true;
         if (acceptLast) {
-            // The other stop() has cleared isRunning(); give it time to take
-            // the accept thread and start waiting for it
+            // The other stop() has cleared isRunning(); give it time to get on
+            // with disconnecting the clients
             waitUntil(3000, [&] { return !srv->isRunning(); });
             this_thread::sleep_for(chrono::milliseconds(200));
         } else {
@@ -1024,11 +1057,92 @@ static void concurrentStopWithAcceptThread(bool fromWriter, bool acceptLast) {
     if (second != kBadSocket) TC_CLOSE(second);
 }
 
+// stop() from onClientConnect after a stop() on a plain thread has taken the
+// accept thread out of the server and is waiting for it to end. The accept
+// thread then has to recognize itself without it: its stop() still closes the
+// listening socket before it returns and waits for nothing, and the plain
+// thread's stop() returns once the listener is done.
+static void stopOnAcceptThreadAfterAnotherTookIt() {
+    const char* const prefix = "concurrent stop: onClientConnect during a plain stop()";
+    Watchdog dog(prefix, 20000);
+
+    auto server = make_unique<TcpServer>();
+    TcpServer* srv = server.get();
+    atomic<int> connects{0}, oldPort{0};
+    atomic<bool> plainIn{false}, listenerStopped{false}, refusedAfterStop{false};
+#ifdef __linux__
+    atomic<unsigned long> listenInode{0};
+    atomic<bool> socketClosed{false};
+#endif
+    EventListener onCon = srv->onClientConnect.listen([&, srv](TcpClientConnectEventArgs&) {
+        if (connects++ != 0) return;
+        // The plain thread's stop() has cleared isRunning(); give it time to
+        // take the accept thread and start waiting for it
+        waitUntil(3000, [&] { return plainIn.load() && !srv->isRunning(); });
+        this_thread::sleep_for(chrono::milliseconds(200));
+        srv->stop();
+        // Nothing may be listening on the old port any more
+        rawsocket_t probe = connectTo(oldPort.load());
+        refusedAfterStop = probe == kBadSocket;
+        if (probe != kBadSocket) TC_CLOSE(probe);
+#ifdef __linux__
+        // shutdown() by the plain thread's stop() already refuses connections
+        // on Linux, so also check that the descriptor itself is gone
+        socketClosed = listenInode.load() != 0 && !holdsSocket(listenInode.load());
+#endif
+        listenerStopped = true;
+    });
+
+    const int port = startOnFreePort(*srv, -1);
+    check((string(prefix) + ": server started").c_str(), port != 0);
+    if (!port) return;
+    oldPort = port;
+#ifdef __linux__
+    listenInode = listeningInode(port);
+#endif
+
+    rawsocket_t c = connectTo(port);
+    const bool inListener = c != kBadSocket && waitUntil(3000, [&] { return connects.load() == 1; });
+
+    atomic<bool> plainReturned{false}, stoppedAtReturn{false};
+    thread plain([&, srv] {
+        if (!inListener) return;
+        plainIn = true;
+        srv->stop();
+        stoppedAtReturn = listenerStopped.load();
+        plainReturned = true;
+    });
+    const bool returned = inListener && waitUntil(5000, [&] { return plainReturned.load(); });
+
+    check((string(prefix) + ": the listener's stop() returns").c_str(), listenerStopped.load());
+    check((string(prefix) + ": the other stop() returns once the listener is done").c_str(),
+          returned && stoppedAtReturn.load());
+    check((string(prefix) + ": the old port refuses connections once stop() returns").c_str(),
+          refusedAfterStop.load());
+#ifdef __linux__
+    check((string(prefix) + ": the listening socket is closed once stop() returns").c_str(),
+          socketClosed.load());
+#endif
+    check((string(prefix) + ": the client is disconnected").c_str(),
+          c != kBadSocket && closedByServer(c, 3000) && srv->getClientCount() == 0);
+
+    if (returned || !inListener) {
+        plain.join();
+        server.reset();
+        check((string(prefix) + ": the server is destroyed afterwards").c_str(), true);
+    } else {
+        plain.detach();
+        server.release();
+    }
+    if (c != kBadSocket) TC_CLOSE(c);
+}
+
 // stop() from two clients' threads at once: both receive threads (onReceive),
 // or both writers (onSendComplete). Each listener waits until the other is in
-// its own before calling stop(). Only one of the two can wait for the accept
-// thread and then join the other client threads; the other must not wait for
-// any of them in turn.
+// its own before calling stop(). Neither may wait for the accept thread or the
+// other client's threads: the other one is in a listener too. Both only
+// disconnect the clients, and the threads are joined when the server is
+// destroyed below.
 static void concurrentStopOnTwoClientThreads(bool fromWriter) {
     const string prefix = string("concurrent stop: two ") +
                           (fromWriter ? "onSendComplete" : "onReceive") + " listeners";
@@ -1374,6 +1488,7 @@ static void testConcurrentStop() {
     concurrentStopWithAcceptThread(true, false);
     concurrentStopWithAcceptThread(false, true);
     concurrentStopWithAcceptThread(true, true);
+    stopOnAcceptThreadAfterAnotherTookIt();
     concurrentStopOnTwoClientThreads(false);
     concurrentStopOnTwoClientThreads(true);
     concurrentStopOnPlainAndWriterThread();

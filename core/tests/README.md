@@ -151,7 +151,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   listener returns. A listener's teardown waits for none of the server's
   threads, and the server's destruction waits for all of them: `stop()` in
   `onError` after a send timed out mid-payload (the receive thread removes
-  the client meanwhile) returns and a later `start()` works;
+  the client meanwhile) returns and a later `start()` works (SKIP where the
+  send is not cut mid-payload, as Winsock may take the whole payload in one
+  `send()`);
   `disconnectClient()` of its own client, or `stop()`, in `onSendComplete`,
   with the server destroyed while that listener still runs (the destruction
   waits for the writer); two `onReceive` listeners disconnecting each
@@ -163,7 +165,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   (either one first); from two clients' `onReceive`, or two `onSendComplete`;
   from a plain thread together with `onSendComplete` (the listener calls it
   while the stop hook holds the plain one after its accept-thread join, and
-  the plain one returns only once that listener is done); and from two plain threads while the
+  the plain one returns only once that listener is done); from
+  `onClientConnect` once a plain thread's `stop()` has taken the accept
+  thread and waits for it (the listener's `stop()` still closes the
+  listening socket before it returns); and from two plain threads while the
   accept thread is held in a listener (neither throws). Every client ends up
   disconnected. `start()` while another thread's `stop()` is still waiting
   for the accept thread waits for it too, and the restarted server accepts
