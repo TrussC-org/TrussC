@@ -567,7 +567,10 @@ void TlsClient::processNetworkImpl(unsigned generation) {
         }
     }
 
-    if (!connected_) return;
+    // A listener on onConnect above may have reconnected and waited for the
+    // new connection: connected_ is then the new connection's, and the new
+    // receive thread owns tlsRecvBuf_. Stop before touching it.
+    if (!connected_ || tlsReceiveGeneration_ != generation) return;
 
     // 3. Handle data receive. The buffer is this client's own: every
     // client's receive thread runs this at the same time.

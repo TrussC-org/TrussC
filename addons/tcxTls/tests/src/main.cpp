@@ -568,7 +568,11 @@ static void scenario() {
     // its receive loop. This listener reconnects and then waits until the new
     // connection's handshake is done. The old thread took its generation only
     // after onConnect returned, so it took the new one and went on reading
-    // the new connection next to the new receive thread.
+    // the new connection next to the new receive thread. It also has to stop
+    // before the receive section at all: that resizes the receive buffer when
+    // the size changed, which reallocates the buffer the new thread is blocked
+    // reading into (its data then lands in freed memory, and it reports the
+    // new, empty buffer). So the listener changes the size before returning.
 #ifdef __linux__
     const int threadsBeforeOnConnect = countEntries("/proc/self/task");
 #endif
@@ -578,6 +582,9 @@ static void scenario() {
         if (e.success && onConnectArmed.exchange(false)) {
             onConnectReconnect = client.connect("127.0.0.1", port) ? 1 : 0;
             waitFor(3000, [&] { return client.isConnected(); });
+            // Let the new receive thread block in its read, then change the size
+            this_thread::sleep_for(chrono::milliseconds(300));
+            client.setReceiveBufferSize(4 * 65536);   // growing reallocates
             onConnectListenerDone = true;
         }
     });
@@ -612,6 +619,7 @@ static void scenario() {
            "SKIP (counted on Linux)");
 #endif
     client.disconnect();
+    client.setReceiveBufferSize(65536);   // back to the default
     peer.reset();
     if (g_fail) bail();
 
