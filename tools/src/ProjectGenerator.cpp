@@ -176,6 +176,19 @@ void ProjectGenerator::log(const string& msg) {
     }
 }
 
+string ProjectGenerator::buildDirForPreset(const string& preset) {
+    // iOS uses the Xcode generator; its folder is named after it
+    if (preset == "ios") return "xcode-ios";
+    return "build-" + preset;
+}
+
+const vector<string>& ProjectGenerator::allPresetNames() {
+    static const vector<string> names = {
+        "macos", "linux", "windows", "web", "android", "ios",
+    };
+    return names;
+}
+
 string ProjectGenerator::getDestPath() const {
     string dir = settings_.projectDir;
     while (!dir.empty() && dir.back() == '/') {
@@ -245,16 +258,16 @@ void ProjectGenerator::cleanBuildDirectories(const string& path) {
 
     // Add platform-specific build directory
 #ifdef __APPLE__
-    dirsToClean.push_back("build-macos");
+    dirsToClean.push_back(buildDirForPreset("macos"));
 #elif defined(_WIN32)
-    dirsToClean.push_back("build-windows");
+    dirsToClean.push_back(buildDirForPreset("windows"));
 #else
-    dirsToClean.push_back("build-linux");
+    dirsToClean.push_back(buildDirForPreset("linux"));
 #endif
 
     // Add web build directory if web build is enabled
     if (settings_.generateWebBuild) {
-        dirsToClean.push_back("build-web");
+        dirsToClean.push_back(buildDirForPreset("web"));
     }
 
     // Remove existing build directories
@@ -291,7 +304,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json macosPreset;
     macosPreset["name"] = "macos";
     macosPreset["displayName"] = "macOS";
-    macosPreset["binaryDir"] = "${sourceDir}/build-macos";
+    macosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("macos");
     macosPreset["generator"] = "Unix Makefiles";
     macosPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     macosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
@@ -319,7 +332,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json windowsPreset;
     windowsPreset["name"] = "windows";
     windowsPreset["displayName"] = "Windows";
-    windowsPreset["binaryDir"] = "${sourceDir}/build-windows";
+    windowsPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("windows");
     windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
@@ -386,7 +399,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json linuxPreset;
     linuxPreset["name"] = "linux";
     linuxPreset["displayName"] = "Linux";
-    linuxPreset["binaryDir"] = "${sourceDir}/build-linux";
+    linuxPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("linux");
     linuxPreset["generator"] = "Unix Makefiles";
     linuxPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
@@ -407,7 +420,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json androidPreset;
         androidPreset["name"] = "android";
         androidPreset["displayName"] = "Android (ARM64)";
-        androidPreset["binaryDir"] = "${sourceDir}/build-android";
+        androidPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("android");
         androidPreset["generator"] = "Unix Makefiles";
         androidPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "Release";
         androidPreset["cacheVariables"]["ANDROID_ABI"] = "arm64-v8a";
@@ -459,7 +472,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json iosPreset;
         iosPreset["name"] = "ios";
         iosPreset["displayName"] = "iOS";
-        iosPreset["binaryDir"] = "${sourceDir}/xcode-ios";
+        iosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("ios");
         iosPreset["generator"] = "Xcode";
         iosPreset["cacheVariables"]["CMAKE_SYSTEM_NAME"] = "iOS";
         iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "15.0";
@@ -480,7 +493,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json webPreset;
         webPreset["name"] = "web";
         webPreset["displayName"] = "Web (Emscripten)";
-        webPreset["binaryDir"] = "${sourceDir}/build-web";
+        webPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("web");
         webPreset["generator"] = "Unix Makefiles";
         webPreset["toolchainFile"] = detectEmscriptenToolchain();
         webPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "MinSizeRel";
@@ -1016,19 +1029,12 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
     // configures correctly without needing `emcmake`.
     if (settings_.generateWebBuild) presets.push_back("web");
 
-    // Map preset name to build directory
-    auto getBuildDir = [](const string& preset) -> string {
-        if (preset == "ios") return "xcode-ios";
-        if (preset == "android") return "build-android";
-        return "build-" + preset;
-    };
-
     bool ok = true;
     for (auto& preset : presets) {
         // Clean existing build directory to avoid stale cache
-        string buildDir = path + "/" + getBuildDir(preset);
+        string buildDir = path + "/" + buildDirForPreset(preset);
         if (fs::exists(buildDir)) {
-            log("Cleaning " + getBuildDir(preset) + "...");
+            log("Cleaning " + buildDirForPreset(preset) + "...");
             fs::remove_all(buildDir);
         }
 

@@ -56,6 +56,14 @@ trusscli update -p path/to/myProject --tc-root path/to/TrussC
 trusscli new path/to/myNewApp
 ```
 
+`trusscli build` configures the target's build folder itself when it has no
+CMake cache (after `trusscli clean`, or a deleted folder), and prints one line
+saying so. On Windows it also notices when Visual Studio changed since the
+project was generated (a pinned MSVC, Windows SDK or ninja path in
+`CMakePresets.json` is gone): it detects Visual Studio again, rewrites
+`CMakePresets.json` with the same targets and IDE, removes `build-windows`
+and configures again. `trusscli doctor` reports the same check.
+
 `update`, `addon add` and `addon remove` keep the project's IDE, its Web /
 Android / iOS targets and its web backend: they read them back from the
 project's `CMakePresets.json` (the IDE is stored there as

@@ -59,6 +59,16 @@ public:
     // Get destination path
     std::string getDestPath() const;
 
+    // Build folder of a configure preset, relative to the project:
+    // "ios" -> "xcode-ios", any other preset -> "build-<preset>". The one
+    // mapping for the presets written here, `trusscli build` and
+    // `trusscli clean`.
+    static std::string buildDirForPreset(const std::string& preset);
+
+    // Every configure preset trusscli can write:
+    // macos, linux, windows, web, android, ios
+    static const std::vector<std::string>& allPresetNames();
+
 private:
     ProjectSettings settings_;
     LogCallback logCallback_;

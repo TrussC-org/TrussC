@@ -982,8 +982,8 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories
-trusscli build                 Build (auto-selects native)
+trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
@@ -1484,7 +1484,11 @@ Rules for callbacks that are not on the main thread:
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
-The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. Delete the app's build folder (`build-windows`, or whichever `build-*` folder the preset uses) and build again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. The project's `CMakePresets.json` pins the same old MSVC, Windows SDK and ninja paths. `trusscli build` handles this: when a pinned path is gone, it detects Visual Studio again, rewrites `CMakePresets.json` (keeping the project's targets and IDE), removes `build-windows` and configures again, and prints what it did. `trusscli doctor` reports the missing path. With plain CMake, run `trusscli update` (or `trusscli build` once) first. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+
+### Build error: "... is not a directory" or "could not load cache"
+
+The build folder is missing or empty, e.g. after `trusscli clean` or deleting it by hand. `cmake --build --preset <x>` does not configure by itself. `trusscli build` does: when the target's build folder has no `CMakeCache.txt`, it runs `cmake --preset <x>` first and prints `[build] No CMake cache in <folder>, configuring...`. With plain CMake, run `cmake --preset <x>` before `cmake --build --preset <x>`.
 
 ### Build error: "hot reload state changed -- reconfigure required"
 
