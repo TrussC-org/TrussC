@@ -19,7 +19,8 @@ embedded as a base64 data URI) to a temp directory and loads it with
   data in memory (no buffer view, or a view on a buffer without data), is
   skipped with one warning per load (with the count) and the rest of the
   model loads, without allocating an array from that accessor's count;
-- a sparse accessor with more values than elements fails to load;
+- a sparse accessor with more values than elements, or with a repeated or
+  decreasing index (glTF requires them strictly increasing), fails to load;
 - an image in a buffer without data (no uri) is skipped; the mesh loads;
 - an external image that cannot be loaded, or whose uri holds a byte that is
   not valid UTF-8, is skipped with a warning; the mesh loads. The image path

@@ -21,7 +21,8 @@
 //   - a primitive without POSITION, or whose POSITION or index accessor has
 //     no data in memory (no buffer view, or a buffer without data), is
 //     skipped with one warning per load; no array is allocated from its count
-//   - a sparse accessor with more values than elements fails to load
+//   - a sparse accessor with more values than elements, or whose indices
+//     are not strictly increasing, fails to load
 //   - an image in a buffer without data is skipped
 //   - an external image that cannot be loaded, or whose uri is not valid
 //     UTF-8, is skipped with a warning; the mesh loads
@@ -563,6 +564,31 @@ int main() {
         b.primitive = R"({"attributes":{"POSITION":3}})";
         GltfModel m;
         loadCase("more sparse values than elements", b, false, m);
+    }
+    {
+        // Sparse indices must be strictly increasing: a repeated index and a
+        // decreasing one are refused
+        const uint16_t repeated[2] = { 1, 1 };
+        const uint16_t decreasing[2] = { 2, 1 };
+        const struct { const char* name; const uint16_t* idx; } cases[] = {
+            { "repeated sparse index", repeated },
+            { "decreasing sparse index", decreasing },
+        };
+        for (const auto& c : cases) {
+            GltfBuilder b = triangle();
+            int siv = b.addView(c.idx, 2 * sizeof(uint16_t));
+            const float sparseVal[6] = { 5, 5, 5,  6, 6, 6 };
+            int svv = b.addView(sparseVal, sizeof(sparseVal));
+            b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+                ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
+                ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+            b.primitive = R"({"attributes":{"POSITION":3}})";
+            GltfModel m;
+            string warning;
+            loadCase(c.name, b, false, m, &warning);
+            check(string(c.name) + ": reported as not increasing",
+                  warning.find("strictly increasing") != string::npos);
+        }
     }
 
     // ----- textures -------------------------------------------------------------

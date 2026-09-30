@@ -39,50 +39,89 @@ static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
     return stride == 0 || count - 1 <= room / stride;
 }
 
-// Our own range checks, run before cgltf_validate().
+// Reads sparse index `k` (component type 8u, 16u or 32u) from `data`.
+static cgltf_size readSparseIndex(const uint8_t* data, cgltf_component_type type,
+                                  cgltf_size k) {
+    switch (type) {
+        case cgltf_component_type_r_8u:
+            return data[k];
+        case cgltf_component_type_r_16u: {
+            uint16_t v;
+            memcpy(&v, data + k * sizeof(v), sizeof(v));
+            return v;
+        }
+        default: {
+            uint32_t v;
+            memcpy(&v, data + k * sizeof(v), sizeof(v));
+            return v;
+        }
+    }
+}
+
+// Our own range checks, run before cgltf_validate(). Returns nullptr when
+// the data passes, or the reason it is refused (for the warning).
 //   - Every buffer view lies inside its buffer, and every accessor
 //     (including sparse parts) inside its buffer view.
 //   - Every accessor, with or without a buffer view, has a count whose float
 //     array size (count * components * sizeof(float)) can be addressed in
 //     size_t; a count that cannot is refused. This is not a limit on model
 //     size.
-//   - A sparse accessor lists no more values than it has elements.
+//   - A sparse accessor's indices are strictly increasing and below its
+//     count, as glTF requires (checked when its index data is in memory), so
+//     it never lists more values than it has elements.
 // An accessor or sparse index type whose component type has no size is left
 // to cgltf_validate(), which refuses it.
-static bool checkDataRanges(const cgltf_data* data) {
+static const char* checkDataRanges(const cgltf_data* data) {
+    const char* outOfRange =
+        "model data refers past the end of a buffer, or has a count too large to address";
     for (cgltf_size i = 0; i < data->buffer_views_count; i++) {
         const cgltf_buffer_view& view = data->buffer_views[i];
         if (view.buffer && !rangeFits(view.buffer->size, view.offset, 0, view.size, 1)) {
-            return false;
+            return outOfRange;
         }
     }
     for (cgltf_size i = 0; i < data->accessors_count; i++) {
         const cgltf_accessor& acc = data->accessors[i];
         cgltf_size numComp = cgltf_num_components(acc.type);
-        if (acc.count > SIZE_MAX / (sizeof(float) * numComp)) return false;
+        if (acc.count > SIZE_MAX / (sizeof(float) * numComp)) return outOfRange;
         cgltf_size elemSize = cgltf_calc_size(acc.type, acc.component_type);
         if (elemSize == 0) continue;
         if (acc.buffer_view &&
             !rangeFits(acc.buffer_view->size, acc.offset, acc.stride, elemSize, acc.count)) {
-            return false;
+            return outOfRange;
         }
         if (acc.is_sparse) {
             const cgltf_accessor_sparse& sp = acc.sparse;
-            if (sp.count > acc.count) return false;
+            if (sp.count > acc.count) return outOfRange;
             cgltf_size indexSize = cgltf_component_size(sp.indices_component_type);
             if (indexSize == 0) continue;
             if (!rangeFits(sp.indices_buffer_view->size, sp.indices_byte_offset,
                            indexSize, indexSize, sp.count)) {
-                return false;
+                return outOfRange;
             }
             // Sparse values are tightly packed (see readAccessorFloats)
             if (!rangeFits(sp.values_buffer_view->size, sp.values_byte_offset,
                            elemSize, elemSize, sp.count)) {
-                return false;
+                return outOfRange;
+            }
+            bool indexType = sp.indices_component_type == cgltf_component_type_r_8u ||
+                             sp.indices_component_type == cgltf_component_type_r_16u ||
+                             sp.indices_component_type == cgltf_component_type_r_32u;
+            const uint8_t* indexData = cgltf_buffer_view_data(sp.indices_buffer_view);
+            if (indexType && indexData) {
+                indexData += sp.indices_byte_offset;
+                cgltf_size prev = 0;
+                for (cgltf_size k = 0; k < sp.count; k++) {
+                    cgltf_size idx = readSparseIndex(indexData, sp.indices_component_type, k);
+                    if (idx >= acc.count || (k > 0 && idx <= prev)) {
+                        return "sparse accessor indices are not strictly increasing below its count";
+                    }
+                    prev = idx;
+                }
             }
         }
     }
-    return true;
+    return nullptr;
 }
 
 // Read accessor data as float array (handles all component types)
@@ -121,7 +160,7 @@ static vector<float> readAccessorFloats(const cgltf_accessor* acc) {
     cgltf_size outElems = out.size() / numComp;
     for (cgltf_size i = 0; i < sp.count; i++) {
         cgltf_size idx = cgltf_accessor_read_index(&indices, i);
-        if (idx >= outElems) continue;  // cgltf_validate() refuses these
+        if (idx >= outElems) continue;  // checkDataRanges() refuses these
         copy(vals.begin() + i * numComp, vals.begin() + (i + 1) * numComp,
              out.begin() + idx * numComp);
     }
@@ -437,9 +476,8 @@ bool GltfModel::load(const string& path) {
         }
 
         // Validate the model data before reading any of it
-        if (!checkDataRanges(data)) {
-            logWarning() << "[GltfModel] model data refers past the end of a buffer, "
-                         << "or has a count too large to address: " << resolved;
+        if (const char* reason = checkDataRanges(data)) {
+            logWarning() << "[GltfModel] " << reason << ": " << resolved;
             return false;
         }
         result = cgltf_validate(data);
