@@ -55,6 +55,9 @@
 //   that decodes to more than its reservation still ends with one buffer
 //   of exactly its length. The same holds for Ogg Vorbis (vorbisTone.cpp),
 //   whose stated length (the last page's granule) may also be unknown.
+//   Near a memory limit the buffer grows in smaller steps, whether the limit
+//   shows as a refused check (setAllocationLimitForTests, as on the web) or
+//   as a std::bad_alloc (allocProbe.cpp, elsewhere).
 // - A voice on a buffer with no frames, or with fewer samples than
 //   numSamples * channels, stops at its first mix (looping or not), and
 //   setPosition() on an empty buffer lands on 0.
@@ -133,6 +136,8 @@ int fcloseProbeRepeats();
 void allocProbeArm();
 void allocProbeDisarm();
 size_t allocProbeLargest();
+// allocProbe.cpp: requests on this thread above `bytes` throw std::bad_alloc (0: off)
+void allocProbeFailAbove(size_t bytes);
 
 // vorbisTone.cpp: 10000 frames of 8 kHz stereo Ogg Vorbis
 vector<char> vorbisToneBytes();
@@ -561,6 +566,48 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
               refusedAgain && v.capacity() == fullCapacity && v.size() == fullSize);
     }
 
+#ifndef __EMSCRIPTEN__
+    // Growth where a reserve throws std::bad_alloc (allocProbeFailAbove), with
+    // no allocationFits limit set: the same smaller steps are tried, and
+    // growth is refused only when `needed` cannot be allocated either.
+    // (Web builds do not catch exceptions; there allocationFits decides.)
+    {
+        using internal::growSampleBuffer;
+        auto growFailingAbove = [](vector<float>& v, size_t needed, size_t failAboveBytes,
+                                   bool& threw) {
+            bool grown = false;
+            threw = false;
+            allocProbeFailAbove(failAboveBytes);
+            try {
+                grown = growSampleBuffer(v, needed);
+            } catch (const bad_alloc&) {
+                threw = true;
+            }
+            allocProbeFailAbove(0);
+            return grown;
+        };
+        bool threw = false;
+        vector<float> v;
+        v.reserve(1000);
+        const bool stepped = growFailingAbove(v, 1001, 1300 * sizeof(float), threw);
+        check("grow: a failing reserve falls back to the largest smaller step",
+              stepped && !threw && v.capacity() == 1250,
+              to_string(v.capacity()) + (threw ? ", threw" : ""));
+        v = vector<float>();
+        v.reserve(1000);
+        const bool exact = growFailingAbove(v, 1001, 1001 * sizeof(float), threw);
+        check("grow: a failing reserve falls back to what is needed",
+              exact && !threw && v.capacity() == 1001,
+              to_string(v.capacity()) + (threw ? ", threw" : ""));
+        v = vector<float>();
+        v.reserve(1000);
+        const bool refused = !growFailingAbove(v, 1001, 1000 * sizeof(float), threw);
+        check("grow: when no reserve succeeds it refuses with the buffer unchanged",
+              refused && !threw && v.capacity() == 1000,
+              to_string(v.capacity()) + (threw ? ", threw" : ""));
+    }
+#endif
+
     // A FLAC whose STREAMINFO states far more samples than its frames hold
     // (a 36-bit field): the load gets the frames that decode, and no
     // allocation along the way is sized from the stated length (2^27 frames
@@ -632,6 +679,29 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
     internal::setAllocationLimitForTests(0);
     check("decode: a FLAC that does not fit under a memory limit fails to load", !limitedOk,
           to_string(limited.numSamples) + " frames");
+
+#ifndef __EMSCRIPTEN__
+    // A FLAC stating more than it holds, where every reserve above its
+    // decoded length (plus 4 KiB for MSVC's allocator) throws
+    // std::bad_alloc: the doubled size fails, smaller steps are taken, and
+    // the load still gets every frame
+    {
+        const vector<char> overstated = flacBytes(longBlocks, (uint64_t)1 << 27);
+        SoundBuffer tight;
+        allocProbeFailAbove((size_t)longFrames * sizeof(float) + 4096);
+        bool tightOk = false;
+        bool threw = false;
+        try {
+            tightOk = (bool)tight.loadFlacFromMemory(overstated.data(), overstated.size());
+        } catch (const bad_alloc&) {
+            threw = true;
+        }
+        allocProbeFailAbove(0);
+        check("decode: a FLAC loads when a reserve near its length fails",
+              tightOk && !threw && flacIntact(tight, longBlocks),
+              to_string(tight.numSamples) + " frames" + (threw ? ", threw" : ""));
+    }
+#endif
 
     // A WAV decodes in steps to exactly its frames
     const uint32_t frames = 10000;   // two full steps and a partial one
