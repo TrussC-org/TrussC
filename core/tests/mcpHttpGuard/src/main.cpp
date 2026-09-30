@@ -12,6 +12,10 @@
 // - a POST whose Content-Type is not application/json                  -> 415
 // Native MCP clients (no Origin, JSON body, localhost Host) keep working.
 //
+// The server runs with a token, so /mcp also needs "Authorization: Bearer
+// <token>": a missing, shorter, longer or different token -> 401. The token
+// comparison helper (detail::constantTimeEquals) is also checked directly.
+//
 // The main thread pumps mcp::processHttpQueue() the way the frame loop does;
 // the requests run on a worker with a deadline.
 // =============================================================================
@@ -36,9 +40,33 @@ static void check(const string& name, bool ok, const string& detail = "") {
 }
 
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
+static const string kToken = "test-token-0123456789abcdef";
 
 int main() {
-    mcp::startHttpServer(0, "localhost");
+    // Token comparison helper, no server needed.
+    {
+        using mcp::detail::constantTimeEquals;
+        using mcp::detail::bearerTokenMatches;
+        check("equal strings -> equal", constantTimeEquals("abc123", "abc123"));
+        check("both empty -> equal", constantTimeEquals("", ""));
+        check("same length, last byte differs -> not equal", !constantTimeEquals("abc123", "abc124"));
+        check("same length, first byte differs -> not equal", !constantTimeEquals("abc123", "xbc123"));
+        check("shorter first -> not equal", !constantTimeEquals("abc", "abc123"));
+        check("longer first -> not equal", !constantTimeEquals("abc123", "abc"));
+        check("empty vs non-empty -> not equal", !constantTimeEquals("", "a"));
+        check("non-empty vs empty -> not equal", !constantTimeEquals("a", ""));
+        check("trailing NUL is not padding -> not equal",
+              !constantTimeEquals(string_view("abc\0", 4), "abc"));
+        check("embedded NUL, equal -> equal",
+              constantTimeEquals(string_view("a\0b", 3), string_view("a\0b", 3)));
+        check("Bearer <token> -> match", bearerTokenMatches("Bearer " + kToken, kToken));
+        check("token without scheme -> no match", !bearerTokenMatches(kToken, kToken));
+        check("scheme only -> no match", !bearerTokenMatches("Bearer ", kToken));
+        check("scheme without space -> no match", !bearerTokenMatches("Bearer" + kToken, kToken));
+        check("empty header -> no match", !bearerTokenMatches("", kToken));
+    }
+
+    mcp::startHttpServer(0, "localhost", kToken);
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {
         this_thread::sleep_for(chrono::milliseconds(10));
@@ -55,6 +83,7 @@ int main() {
         httplib::Client cli("localhost", port);
         cli.set_connection_timeout(5);
         cli.set_read_timeout(10);
+        cli.set_bearer_token_auth(kToken);
 
         auto post = [&](const httplib::Headers& h, const string& contentType) {
             return cli.Post("/mcp", h, kListTools, contentType);
@@ -86,6 +115,27 @@ int main() {
         check("Host 127.0.0.1 -> 200", status(post({{"Host", "127.0.0.1"}}, "application/json")) == 200);
         check("Host [::1]:port -> 200", status(post({{"Host", "[::1]:" + p}}, "application/json")) == 200);
         check("Host localhost.evil.example -> 403", status(post({{"Host", "localhost.evil.example"}}, "application/json")) == 403);
+
+        // Bearer token on /mcp. `raw` sends only the headers given here.
+        {
+            httplib::Client raw("localhost", port);
+            raw.set_connection_timeout(5);
+            raw.set_read_timeout(10);
+            auto postAuth = [&](const string& value) {
+                return status(raw.Post("/mcp", {{"Authorization", value}}, kListTools, "application/json"));
+            };
+            string sameLength = kToken;
+            sameLength.back() = (sameLength.back() == 'x') ? 'y' : 'x';
+            check("correct token -> 200", postAuth("Bearer " + kToken) == 200);
+            check("no Authorization header -> 401",
+                  status(raw.Post("/mcp", kListTools, "application/json")) == 401);
+            check("same-length wrong token -> 401", postAuth("Bearer " + sameLength) == 401);
+            check("token prefix -> 401", postAuth("Bearer " + kToken.substr(0, kToken.size() - 1)) == 401);
+            check("token plus a byte -> 401", postAuth("Bearer " + kToken + "x") == 401);
+            check("scheme only -> 401", postAuth("Bearer ") == 401);
+            check("token without scheme -> 401", postAuth(kToken) == 401);
+            check("GET / needs no token -> 200", status(raw.Get("/")) == 200);
+        }
 
         // GET / (server info) takes the Host / Origin checks too
         check("GET / -> 200", status(cli.Get("/")) == 200);

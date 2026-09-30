@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <map>
 #include <functional>
@@ -607,6 +608,30 @@ inline bool isJsonContentType(const std::string& contentType) {
     return asciiLower(trimSpaces(t)) == "application/json";
 }
 
+// Equality without an early exit: every byte of the longer input is visited
+// and the differences are OR-ed together, so the time taken does not depend
+// on where the inputs first differ. A length mismatch is folded into the
+// result instead of returning early; the time still follows the longer
+// length.
+inline bool constantTimeEquals(std::string_view a, std::string_view b) {
+    const size_t n = a.size() > b.size() ? a.size() : b.size();
+    unsigned int diff = (a.size() == b.size()) ? 0u : 1u;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char x = i < a.size() ? (unsigned char)a[i] : 0;
+        unsigned char y = i < b.size() ? (unsigned char)b[i] : 0;
+        diff |= (unsigned int)(x ^ y);
+    }
+    return diff == 0;
+}
+
+// Authorization header value "Bearer <token>". The scheme is not secret and
+// is checked first; the token part goes through constantTimeEquals().
+inline bool bearerTokenMatches(std::string_view header, std::string_view token) {
+    constexpr std::string_view scheme = "Bearer ";
+    if (header.substr(0, scheme.size()) != scheme) return false;
+    return constantTimeEquals(header.substr(scheme.size()), token);
+}
+
 inline void rejectRequest(httplib::Response& res, int status, const std::string& why) {
     res.status = status;
     res.set_content(json{{"error", why}}.dump(), "application/json");
@@ -697,7 +722,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         const std::string& tok = detail::mcpAuthToken();
         if (!tok.empty()) {
             auto it = req.headers.find("Authorization");
-            if (it == req.headers.end() || it->second != ("Bearer " + tok)) {
+            if (it == req.headers.end() || !detail::bearerTokenMatches(it->second, tok)) {
                 res.status = 401;
                 res.set_content("{\"error\":\"unauthorized\"}", "application/json");
                 return;
