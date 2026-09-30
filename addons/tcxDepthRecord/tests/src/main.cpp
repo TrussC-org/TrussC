@@ -7,7 +7,11 @@
 //   1. Round trip: recordings written by DepthRecorder (every depth / color
 //      codec, 1/3/4-channel color, depth only, a camera-sized frame, a custom
 //      block per frame, and frames that are smooth, incompressible and all
-//      zero) play back byte-for-byte, with no warnings.
+//      zero) play back byte-for-byte, with no warnings. Each block's length
+//      is its payload size, so walking a frame by type and length alone
+//      visits every block and ends exactly at the next frame. A copy with
+//      every color block length written the old way (13 + compressed size)
+//      plays the same.
 //   2. Block sizes: copies of a valid recording with one field of the middle
 //      frame changed (depth sample count / byte size / compressed size, color
 //      width / height / channels / byte size / compressed size, a block
@@ -286,10 +290,8 @@ struct BlockAt {
 constexpr size_t D_N = 0, D_RAW = 4, D_COMP = 8, D_DATA = 12;
 constexpr size_t C_W = 0, C_H = 4, C_CHN = 8, C_RAW = 9, C_COMP = 13, C_DATA = 17;
 
-// Blocks of each frame, read from a valid file. Depth and color payloads end
-// where their own size fields say: DepthRecorder writes a color block's length
-// as 13 + compressed size, though its fields take 17 bytes.
-static vector<vector<BlockAt>> layoutOf(const vector<uint8_t>& b) {
+// Frame start offsets from the index, and where the last frame ends.
+static vector<uint64_t> frameOffsets(const vector<uint8_t>& b, uint64_t& indexOffset) {
     TcdcHeader h;
     memcpy(&h, b.data(), sizeof(h));
     vector<uint64_t> offsets;
@@ -298,9 +300,20 @@ static vector<vector<BlockAt>> layoutOf(const vector<uint8_t>& b) {
         memcpy(&off, b.data() + h.indexOffset + i * 16 + 8, 8);
         offsets.push_back(off);
     }
+    indexOffset = h.indexOffset;
+    return offsets;
+}
+
+// Blocks of each frame, read from a valid file. Depth and color payloads end
+// where their own size fields say, as the official player reads them (a file
+// written before the color length was fixed states it as 13 + compressed size,
+// though the fields take 17 bytes).
+static vector<vector<BlockAt>> layoutOf(const vector<uint8_t>& b) {
+    uint64_t indexOffset = 0;
+    const vector<uint64_t> offsets = frameOffsets(b, indexOffset);
     vector<vector<BlockAt>> frames;
     for (size_t i = 0; i < offsets.size(); ++i) {
-        const uint64_t end = i + 1 < offsets.size() ? offsets[i + 1] : h.indexOffset;
+        const uint64_t end = i + 1 < offsets.size() ? offsets[i + 1] : indexOffset;
         vector<BlockAt> blocks;
         size_t at = static_cast<size_t>(offsets[i]) + 8;  // after the timestamp
         while (at < end) {
@@ -320,6 +333,54 @@ static vector<vector<BlockAt>> layoutOf(const vector<uint8_t>& b) {
         frames.push_back(blocks);
     }
     return frames;
+}
+
+// Walks every frame the way a reader that skips blocks by length does: using
+// only each block's type and length. Every block must end within its frame, the
+// last one exactly at the next frame, the frame must hold `types` in order, and
+// a depth / color block's length must equal its fields plus compressed size.
+static bool walksByLength(const vector<uint8_t>& b, const vector<uint8_t>& types) {
+    uint64_t indexOffset = 0;
+    const vector<uint64_t> offsets = frameOffsets(b, indexOffset);
+    if (offsets.size() != FRAMES) return false;
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        const uint64_t end = i + 1 < offsets.size() ? offsets[i + 1] : indexOffset;
+        uint64_t at = offsets[i] + 8;  // after the timestamp
+        vector<uint8_t> seen;
+        while (at < end) {
+            if (at + 5 > end) {
+                printf("  frame %zu: block header at %llu runs past the frame\n", i,
+                       static_cast<unsigned long long>(at));
+                return false;
+            }
+            const uint8_t type = b[at];
+            const uint32_t len = get32(b, at + 1);
+            const size_t payload = static_cast<size_t>(at) + 5;
+            if (type == BLOCK_DEPTH || type == BLOCK_COLOR) {
+                if (payload + (type == BLOCK_DEPTH ? D_DATA : C_DATA) > end) {
+                    printf("  frame %zu: block type %d has no room for its fields\n", i, type);
+                    return false;
+                }
+                const uint64_t want = type == BLOCK_DEPTH
+                    ? D_DATA + uint64_t(get32(b, payload + D_COMP))
+                    : C_DATA + uint64_t(get32(b, payload + C_COMP));
+                if (len != want) {
+                    printf("  frame %zu: block type %d has length %u, payload %llu\n", i, type,
+                           len, static_cast<unsigned long long>(want));
+                    return false;
+                }
+            }
+            seen.push_back(type);
+            at = payload + uint64_t(len);
+        }
+        if (at != end || seen != types) {
+            printf("  frame %zu: walk by length ends at %llu, frame ends at %llu, %zu blocks\n",
+                   i, static_cast<unsigned long long>(at), static_cast<unsigned long long>(end),
+                   seen.size());
+            return false;
+        }
+    }
+    return true;
 }
 
 static const BlockAt& blockOf(const vector<vector<BlockAt>>& layout, int frame, uint8_t type) {
@@ -383,7 +444,7 @@ static void secondBlockWithoutData(uint8_t type, vector<uint8_t>& b,
     }
     memcpy(b.data() + e.at, b.data() + k.at, 5 + fields);
     // The length DepthRecorder writes for a block with no compressed data.
-    put32(b, e.at + 1, type == BLOCK_DEPTH ? 12 : 13);
+    put32(b, e.at + 1, static_cast<uint32_t>(fields));
     put32(b, e.payload() + (type == BLOCK_DEPTH ? D_COMP : C_COMP), 0);
     const size_t filler = e.at + 5 + fields;
     if (filler < e.at + total) {
@@ -538,11 +599,16 @@ static vector<Mutation> mutations() {
          [](auto& b, auto& L) { secondBlockWithoutData(BLOCK_DEPTH, b, L); }},
 
         // --- color block ---
-        // The length counting all 17 bytes of fields plays like the length
-        // DepthRecorder writes (13 + compressed size).
-        {"colorLenCountsAllFields", hilo, lz4, R, R, R, nullptr,
+        // The length files written before the color length was fixed state
+        // (13 + compressed size) plays like the one DepthRecorder writes now.
+        {"colorLenBeforeFix", hilo, lz4, R, R, R, nullptr,
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
-                                put32(b, k.at + 1, k.len + 4); }},
+                                put32(b, k.at + 1, k.len - 4); }},
+        // A length between the two (15 + compressed size) is neither: the
+        // payload runs 2 bytes past the block.
+        {"colorLenBetweenForms", hilo, lz4, R, X, X, "compressed size runs past the block",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
+                                put32(b, k.at + 1, k.len - 2); }},
         {"colorWidthNegative", hilo, lz4, R, X, R, "width and height must be positive",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
                                 put32(b, k.payload() + C_W, static_cast<uint32_t>(-80)); }},
@@ -584,7 +650,7 @@ static vector<Mutation> mutations() {
                                 memset(b.data() + k.payload() + C_DATA, 0xFF, n); }},
         {"colorCompSizePastBlock", hilo, lz4, R, X, X, "compressed size runs past the block",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
-                                put32(b, k.payload() + C_COMP, k.len - 13 + 1); }},
+                                put32(b, k.payload() + C_COMP, k.len - 17 + 1); }},
         {"colorCompSizePastFile", hilo, lz4, R, X, X, "compressed size runs past the block",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
                                 put32(b, k.payload() + C_COMP, 0xFFFFFFF0u); }},
@@ -739,7 +805,7 @@ static void runByteSizeAboveIntMax() {
         vector<uint8_t> scratch;
         uint64_t used = 0;
         const char* why = nullptr;
-        const bool ok = tcd_detail::parseColorPayload(in, h, 13 + comp, 17 + comp, dst,
+        const bool ok = tcd_detail::parseColorPayload(in, h, 17 + comp, 17 + comp, dst,
                                                       scratch, used, why);
         check(base + "/color: refused before allocating",
               !ok && why && string(why).find("too large to decode") != string::npos &&
@@ -928,6 +994,25 @@ int main(int argc, char** argv) {
         check(base + ": stream manifest", r.blockTypes == types);
         check(base + ": nothing logged", r.log.empty());
         for (const string& line : r.log) printf("  logged: %s\n", line.c_str());
+
+        const vector<uint8_t> bytes = readAll(path);
+        check(base + ": every block walks by length", walksByLength(bytes, types));
+
+        // The same file with every color block length written the old way.
+        if (t.chn == 0) continue;
+        vector<uint8_t> legacy = bytes;
+        const vector<vector<BlockAt>> layout = layoutOf(legacy);
+        for (int k = 0; k < FRAMES; ++k) {
+            const BlockAt& blk = blockOf(layout, k, BLOCK_COLOR);
+            put32(legacy, blk.at + 1, 13 + get32(legacy, blk.payload() + C_COMP));
+        }
+        const filesystem::path legacyPath = dir / (string(t.name) + "-legacyColorLen.tcdc");
+        writeAll(legacyPath, legacy);
+        const Played old = play(legacyPath);
+        bool oldOk = old.opened && old.frames.size() == FRAMES && old.blockTypes == types;
+        for (int k = 0; oldOk && k < FRAMES; ++k) oldOk = frameIntact(old.frames[k], d, k);
+        check(base + ": old color block length plays", oldOk && old.log.empty());
+        for (const string& line : old.log) printf("  logged: %s\n", line.c_str());
     }
 
     // The official player reports the custom block as unknown.
