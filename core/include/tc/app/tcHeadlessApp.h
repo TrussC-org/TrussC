@@ -62,9 +62,11 @@ namespace headless {
     inline std::chrono::high_resolution_clock::time_point startTime;
 
 #ifdef _WIN32
-    // Windows console control handler
+    // Windows console control handler. Ctrl+Break stops the loop like Ctrl+C,
+    // so the app is destroyed and the console code page restored
+    // (internal::HeadlessConsoleUtf8) instead of the default ExitProcess.
     inline BOOL WINAPI consoleHandler(DWORD signal) {
-        if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT) {
+        if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT || signal == CTRL_CLOSE_EVENT) {
             running = false;
             return TRUE;
         }
