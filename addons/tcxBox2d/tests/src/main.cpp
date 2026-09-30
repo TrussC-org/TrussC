@@ -22,13 +22,18 @@
 // Compound bodies (#427). setupCompound() / Shape2D::compound() keep any
 // outline exactly, one fixture per triangle of Path::buildFillTriangles():
 //   - a 20-point circle gives many fixtures and the 20-gon's mass; a convex
-//     outline of at most 8 points gives exactly one fixture;
+//     outline of at most 8 points gives exactly one fixture; a pentagram's
+//     doubly covered center weighs twice; the fill kept for drawing is
+//     Path::buildFillTriangles()' own;
 //   - concave notches and holes stay empty: a ball in the hole falls to the
 //     hole's floor, a ball above the solid part lands on it;
 //   - slivers are skipped with one warning; nothing usable gives no body;
 //   - Collider2D filter and trigger settings reach every fixture;
 //   - a compound touching a box with several fixtures at once gives exactly
 //     one Enter / Began, one Stay per update, and one Exit / Ended;
+//   - a sensor box moved across the seam between two fixtures gets no Exit /
+//     Ended, whichever contact Box2D updates first;
+//   - Stay listeners may destroy bodies of the next pair or of their own;
 //   - the offset/inertia check runs once on the whole body: a rounded
 //     rectangle, an off-center 128-gon and a 4096-gon keep every triangle
 //     with no warning; a tiny outline far from the origin is refused as a
@@ -650,6 +655,32 @@ static void testCompoundShapes(box2d::World& world) {
         box2d::PolyShape poly;
         poly.setupCompound(world, star, 400, 300);
         check("setupCompound pentagram: triangulated, not one polygon", fixtureCount(poly.getBody()) > 1);
+        // The center pentagon has winding 2: it is covered twice and weighs
+        // twice (documented). Star: 10 triangles center-tip-notch; the notch
+        // radius is r = R cos(TAU/5) / cos(TAU/10).
+        const float R = 40, r = R * cos(TAU / 5) / cos(TAU / 10);
+        const float starArea = 5 * R * r * sin(TAU / 10);
+        const float centerArea = 2.5f * r * r * sin(TAU / 5);
+        check("setupCompound pentagram: the doubly covered center weighs twice",
+              abs(poly.getMass() / areaMass(starArea + centerArea) - 1.0f) < 0.01f);
+    }
+
+    // The fill kept for drawing is Path::buildFillTriangles()' own.
+    {
+        Path ring = squareRing(200, 80);
+        box2d::detail::CompoundShapes shapes;
+        bool made = box2d::detail::makeCompoundShapes(ring, shapes);
+        const auto tris = ring.buildFillTriangles();
+        bool same = made && shapes.fill.size() == tris.size();
+        for (size_t i = 0; same && i < tris.size(); ++i) {
+            same = shapes.fill[i].x == tris[i][0] && shapes.fill[i].y == tris[i][1];
+        }
+        check("setupCompound: the fill kept for drawing is Path's fill", same);
+        Path pentagon(circlePoints(5, 40));
+        pentagon.close();
+        box2d::detail::CompoundShapes convex;
+        box2d::detail::makeCompoundShapes(pentagon, convex);
+        check("setupCompound convex 5 points: a fill is kept too", convex.fill.size() == 9);
     }
 
     // The notched 5-point polygon keeps its notch.

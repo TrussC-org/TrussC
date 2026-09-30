@@ -24,7 +24,9 @@ outline exactly, one fixture per triangle:
 
 - a 20-point circle gives one fixture per triangle and the 20-gon's mass; a
   convex outline of at most 8 points (also with a closing point) gives exactly
-  one fixture, a pentagram does not;
+  one fixture, a pentagram does not (its center, covered twice by the fill,
+  weighs twice, as documented);
+- the fill kept for drawing is `Path::buildFillTriangles()`' own;
 - a notch and a hole stay empty: a ball in a ring's hole falls to the hole's
   floor, and a ball above the solid part lands on it;
 - slivers are skipped with one warning; an outline with nothing usable gives a
@@ -51,6 +53,18 @@ outline exactly, one fixture per triangle:
   inside the limit, built through `setupCompound()` and `RigidBody2D`, keep a
   positive inertia at densities 0.001 to 1000 (Debug: no Box2D assert while
   the fixtures are added).
+
+CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the
+default build type, or Release). Adding the fixtures at density 0 (and
+setting the density once all are in) is guarded only by a Debug build:
+without it, "combined inertia check ... just inside" aborts on Box2D's
+`m_I > 0` assert in Debug and still passes in CI. Run a Debug build after
+touching fixture creation:
+
+```bash
+cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-debug && ./bin/tests
+```
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR; a non-zero exit fails the job. Run it locally with:
