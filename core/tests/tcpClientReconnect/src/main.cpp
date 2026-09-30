@@ -167,13 +167,14 @@ static rawsocket_t listenLoopback(int& port) {
     return s;
 }
 
-// A port on 127.0.0.1 that refuses a connect() at once: one nothing is bound
-// to, below every platform's ephemeral range (Linux 32768+, macOS and Windows
+// A port on 127.0.0.1 that refuses a connect(): one nothing is bound to,
+// below every platform's ephemeral range (Linux 32768+, macOS and Windows
 // 49152+), so a client's own ephemeral port cannot be it (on Linux a connect()
-// to a free ephemeral port can connect to itself). Not a socket bound without
-// listen(): Linux and Windows refuse a connect() to that, but macOS drops the
-// SYN (its TCP drops segments for a socket in the CLOSED state), so the
-// connect() fails only once it gives up, about 8 s later on the CI runner.
+// to a free ephemeral port can connect to itself). Linux refuses at once;
+// Windows after its SYN retries (about 1-2 s on loopback, not measured here).
+// Not a socket bound without listen(): with that, macOS drops the SYN (its TCP
+// drops segments for a socket in the CLOSED state), so the connect() fails
+// only once it gives up, about 8 s later on the CI runner.
 // Returns 0 if no port in the range is free.
 static int refusingPort() {
     const int base = 21000, span = 8000;
@@ -249,7 +250,11 @@ static int countEntries(const char* path) {
 #endif
 
 static void scenario() {
-    TcpClient client;   // constructed first: it also starts Winsock
+    // Constructed first: it also starts Winsock. Kept for the life of the
+    // process, as TcpClient's Events comment asks of a client whose
+    // receive-thread listener called connect() (the listener reconnects
+    // below do): the old receive threads those let go of are never joined.
+    TcpClient& client = *new TcpClient();
 
     int port = 0;
     rawsocket_t listener = listenLoopback(port);
