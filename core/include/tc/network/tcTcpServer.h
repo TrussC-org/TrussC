@@ -234,15 +234,22 @@ public:
     // seconds however many arrive. A slot frees up as soon as a client
     // disconnects. The listen backlog is a fixed value, independent of
     // maxClients.
+    //
+    // It calls stop() first. When a stop() on another thread is still waiting
+    // for the previous accept thread to end, start() waits for that too.
     bool start(int port, int maxClients = 0);
 
     // Stop server. Returns once the accept thread and every client thread have
-    // ended and every client is disconnected, with two exceptions for an
+    // ended and every client is disconnected, with these exceptions for an
     // inline listener that calls it: the thread it runs on is left for the
-    // next stop(), start() or the destructor to join, and on the accept thread
-    // it returns before the clients are disconnected (see Events above). When
-    // two threads call it at once, only one of them waits for the accept
-    // thread. isRunning() is false as soon as it is called.
+    // next stop(), start() or the destructor to join; on the accept thread it
+    // returns before the clients are disconnected (see Events above); and on
+    // a client's thread (onReceive, onSendComplete, onError about a client),
+    // while a stop() on another thread is already waiting for the accept
+    // thread, it disconnects every client and returns without waiting for any
+    // thread, which that other stop() then joins. When two threads call it at
+    // once, only one of them waits for the accept thread. isRunning() is false
+    // as soon as it is called.
     void stop();
 
     // Whether server is running
@@ -350,7 +357,8 @@ private:
 
     // Disconnect every client without joining any of its threads; they stay
     // registered for disconnectAllClients() to join. The accept thread does
-    // this on its way out.
+    // this on its way out, and so does stop() on a client thread while another
+    // stop() is waiting for the accept thread.
     void shutAllClients();
 
 #ifdef _WIN32
@@ -369,6 +377,11 @@ private:
     // Guards acceptThread_ itself, so two threads calling stop() at once never
     // both join it. Held only to move the thread in or out, never to join.
     std::mutex acceptThreadMutex_;
+    // How many stop() calls are joining an accept thread they moved out, and
+    // the signal that one of them has finished; start() waits until none is
+    // left. Both guarded by acceptThreadMutex_.
+    int acceptJoins_ = 0;
+    std::condition_variable acceptJoined_;
     std::atomic<bool> running_{false};
 
     std::unordered_map<int, TcpServerClient> clients_;
