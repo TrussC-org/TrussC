@@ -18,6 +18,9 @@
 //     ("pure virtual method called").
 //   - After that self-destruction, the worker writes nothing to the freed
 //     object.
+//   - A Thread whose last owner is a thread_local shared_ptr on its own
+//     worker, released at thread exit after threadedFunction() returned, is
+//     destroyed there without terminate and without a warning.
 //   - A subclass that waits in its own destructor (the documented contract)
 //     never has threadedFunction() running after its members are destroyed.
 //   - The base destructor logs one warning when it finds the worker not
@@ -42,6 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -81,6 +85,10 @@ static atomic<int>  g_ranAfterMembersGone{0};
 static atomic<bool> g_lingerEntered{false};
 static atomic<bool> g_lingerExited{false};
 static atomic<bool> g_selfDeleted{false};
+static atomic<bool> g_tlsKept{false};
+static atomic<bool> g_tlsReleased{false};
+static atomic<bool> g_tlsDtorOnWorker{false};
+static atomic<bool> g_tlsBaseDone{false};
 
 // Returns without looping: the worker finishes on its own.
 struct OneShot : Thread {
@@ -158,6 +166,35 @@ static bool selfStorageUntouched() {
     }
     return true;
 }
+
+// Destroyed after the Thread base (bases go in reverse order), so it marks
+// that ~Thread() has returned.
+struct BaseDoneMark {
+    ~BaseDoneMark() { g_tlsBaseDone.store(true); }
+};
+
+struct TlsOwned;
+// Only the worker of case 9 ever touches it, so only that thread's copy is
+// destroyed, when the thread exits.
+static thread_local shared_ptr<TlsOwned> t_tlsOwner;
+static thread::id g_tlsWorkerId;   // written and read on that worker only
+
+// Its worker keeps it alive through t_tlsOwner, which becomes the last owner.
+// So ~Thread() runs on the worker again, at thread exit, after
+// threadedFunction() and startThread()'s lambda have returned. Does NOT wait
+// (waiting would join its own thread).
+struct TlsOwned : BaseDoneMark, Thread, enable_shared_from_this<TlsOwned> {
+    ~TlsOwned() override {
+        g_tlsDtorOnWorker.store(this_thread::get_id() == g_tlsWorkerId);
+    }
+protected:
+    void threadedFunction() override {
+        g_tlsWorkerId = this_thread::get_id();
+        t_tlsOwner = shared_from_this();
+        g_tlsKept.store(true);
+        waitUntil([] { return g_tlsReleased.load(); });
+    }
+};
 
 int main() {
     // A join that never returns would hang CI; fail loudly instead.
@@ -331,6 +368,25 @@ int main() {
         this_thread::sleep_for(chrono::milliseconds(50));
         check("self-destroy: nothing written to the object after delete",
               selfStorageUntouched());
+    }
+
+    // --- 9. Last owner is a thread_local on its worker, released at exit ---
+    // ~Thread() runs on the worker after startThread()'s lambda returned, so
+    // it must detach, and must not write through the self-destroy pointer
+    // into that lambda's finished frame. That write is only visible to ASan
+    // (stack-use-after-return); without it, this case checks the rest.
+    {
+        g_threadWarnings.store(0);
+        auto t = make_shared<TlsOwned>();
+        t->startThread();
+        check("thread_local owner: worker took ownership",
+              waitUntil([] { return g_tlsKept.load(); }));
+        t.reset();                  // t_tlsOwner is now the last owner
+        g_tlsReleased.store(true);  // threadedFunction() returns, the worker exits
+        check("thread_local owner: destructor returned at worker exit",
+              waitUntil([] { return g_tlsBaseDone.load(); }));
+        check("thread_local owner: destroyed on the worker", g_tlsDtorOnWorker.load());
+        check("thread_local owner: no warning", g_threadWarnings.load() == 0);
     }
 
     printf("\n%s  (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",

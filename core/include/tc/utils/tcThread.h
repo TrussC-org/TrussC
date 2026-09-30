@@ -94,10 +94,13 @@ public:
         }
         if (joinable) {
             if (fromOwnThread) {
-                // Destroyed from inside threadedFunction(). Joining itself would
-                // throw resource_deadlock_would_occur, so detach, and tell the
-                // worker not to touch this object once threadedFunction()
-                // returns (see startThread()).
+                // Destroyed on the worker: from inside threadedFunction(), or
+                // after it returned (e.g. a thread_local owner released at
+                // thread exit). Joining itself would throw
+                // resource_deadlock_would_occur, so detach. In the first case,
+                // also tell the worker not to touch this object once
+                // threadedFunction() returns (see startThread()). In the
+                // second, selfDestroyed_ is null: its flag's frame is gone.
                 if (selfDestroyed_) *selfDestroyed_ = true;
                 thread_.detach();
             } else {
@@ -166,6 +169,10 @@ public:
             selfDestroyed_ = &destroyed;
             threadedFunction();
             if (destroyed) return;   // this object is gone: touch nothing
+            // `destroyed` dies with this lambda, but a destructor may still
+            // run on this worker (a thread_local owner released at thread
+            // exit): it must not write to it.
+            selfDestroyed_ = nullptr;
             // Clear workerActive_ first: once isThreadRunning() reads false
             // for a worker that returned, the destructor sees it as finished.
             workerActive_ = false;
@@ -251,8 +258,9 @@ private:
     // skips threadedFunction() (see destroying_) leaves it true. Unlike
     // threadRunning_, stopThread() does not clear it.
     std::atomic<bool> workerActive_{false};
-    // Set by the worker to a flag on its own stack. Only the destructor, when
-    // it runs on that same worker, writes through it.
+    // Points to a flag on the worker's stack while threadedFunction() runs,
+    // null otherwise. Only the worker thread touches it: startThread()'s
+    // lambda, and the destructor when it runs on that worker.
     bool* selfDestroyed_ = nullptr;
     // Held by startThread() while it assigns thread_ (see there).
     std::mutex startMutex_;

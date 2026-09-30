@@ -60,16 +60,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   (#257): not after its worker returned on its own, not after only
   `stopThread()`, not right after `startThread()` (the worker skips
   `threadedFunction()` instead of calling the pure virtual), not after a
-  restart, and not from its own `threadedFunction()` when the subclass does not
+  restart, not from its own `threadedFunction()` when the subclass does not
   wait (the base destructor detaches instead of joining itself, and the worker
-  writes nothing to the freed object). A subclass that calls `waitForThread()`
-  in its own destructor never has `threadedFunction()` running after its
-  members are gone, and the base destructor logs exactly one warning when the
-  subclass did not wait, including after only `stopThread()` and right after
-  `startThread()` (also when the worker skipped `threadedFunction()`). Not
-  covered: a waiting subclass destroyed from its own `threadedFunction()` (it
-  still terminates, see the "Destruction" notes in `tcThread.h`), and a
-  destruction at the very moment the worker calls `threadedFunction()`.
+  writes nothing to the freed object), and not at worker exit when a
+  `thread_local` `shared_ptr` on the worker was its last owner. A subclass that
+  calls `waitForThread()` in its own destructor never has `threadedFunction()`
+  running after its members are gone, and the base destructor logs exactly one
+  warning when the subclass did not wait, including after only `stopThread()`
+  and right after `startThread()` (also when the worker skipped
+  `threadedFunction()`). Not covered: a waiting subclass destroyed from its own
+  `threadedFunction()` (it still terminates, see the "Destruction" notes in
+  `tcThread.h`), and a destruction at the very moment the worker calls
+  `threadedFunction()`.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
