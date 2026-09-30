@@ -660,9 +660,9 @@ struct PlayingSound {
     // re-expresses positionF at the new rate and updates this. A voice the
     // migration does not rebuild (it had ended, or its decoder did not
     // reopen) keeps positionF and this at the old rate, so its position in
-    // seconds does not change. 0 until play() sets it. Implementation
-    // detail, not API (the trailing underscore keeps it out of the
-    // reference and the Lua bindings).
+    // seconds does not change. 0 until play() sets it.
+    // internal: set by the engine, do not modify (the trailing underscore
+    // keeps it out of the reference and the Lua bindings).
     std::atomic<int> positionRateHz_{0};
 
     // Buffer-to-engine sample-rate ratio, set when the sound is queued for
