@@ -12,6 +12,8 @@
 //     in Debug and Release alike (no Box2D assert, no 2x2 m fallback box);
 //   - concave input with 3..8 points becomes its convex hull, and
 //     getVertices() / shape().verts hold that hull, so what draws collides;
+//     convex input already in outline order keeps its order, and hull points
+//     in a crossing order come back in hull order;
 //   - setupConvex() / Shape2D::convex() take any number of points and make one
 //     fixture of at most 8 points whose mass is close to the outline's.
 //
@@ -92,6 +94,82 @@ static bool hasPoint(const vector<Vec2>& pts, float x, float y) {
     return false;
 }
 
+// z of (b - a) x (c - b), in double.
+static double turn(const Vec2& a, const Vec2& b, const Vec2& c) {
+    return (double(b.x) - a.x) * (double(c.y) - b.y) - (double(b.y) - a.y) * (double(c.x) - b.x);
+}
+
+// True when v, read in order, is a simple convex polygon: every corner turns
+// the same way and the edges turn exactly once around (a star-ordered
+// pentagon turns the same way at every corner but goes around twice).
+static bool isSimpleConvexCycle(const vector<Vec2>& v) {
+    const size_t n = v.size();
+    if (n < 3) return false;
+    int sign = 0;
+    double angle = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const Vec2& a = v[i];
+        const Vec2& b = v[(i + 1) % n];
+        const Vec2& c = v[(i + 2) % n];
+        double t = turn(a, b, c);
+        int s = (t > 0) - (t < 0);
+        if (s == 0 || (sign != 0 && s != sign)) return false;
+        sign = s;
+        double d = (double(b.x) - a.x) * (double(c.x) - b.x) + (double(b.y) - a.y) * (double(c.y) - b.y);
+        angle += atan2(t, d);
+    }
+    return abs(abs(angle) - TAU) < 1e-3;
+}
+
+// Area a triangle fan from v[0] covers (how draw() / drawFill() /
+// ColliderRenderer2D fill a polygon): the sum of the fan triangles' areas when
+// they all face the same way (so they don't overlap), otherwise 0.
+static double fanArea(const vector<Vec2>& v) {
+    double area = 0.0;
+    int sign = 0;
+    for (size_t i = 1; i + 1 < v.size(); ++i) {
+        double t = turn(v[0], v[i], v[i + 1]);
+        int s = (t > 0) - (t < 0);
+        if (s == 0 || (sign != 0 && s != sign)) return 0.0;
+        sign = s;
+        area += 0.5 * abs(t);
+    }
+    return area;
+}
+
+// Area of the regular n-gon circlePoints(n, r).
+static double regularArea(int n, float r) {
+    return 0.5 * n * double(r) * r * sin(TAU / n);
+}
+
+// Hull points in a crossing order: Box2D keeps every point, but the order
+// does not go around the outline.
+struct CrossingInput {
+    const char* name;
+    vector<Vec2> pts;
+    double area;
+};
+
+static vector<CrossingInput> crossingInputs() {
+    vector<CrossingInput> v;
+    v.push_back({"Z-ordered square", {{-20, -20}, {-20, 20}, {20, -20}, {20, 20}}, 1600.0});
+    v.push_back({"bowtie-ordered square", {{-20, -20}, {20, 20}, {20, -20}, {-20, 20}}, 1600.0});
+    vector<Vec2> penta = circlePoints(5, 40);
+    v.push_back({"star-ordered pentagon", {penta[0], penta[2], penta[4], penta[1], penta[3]},
+                 regularArea(5, 40)});
+    return v;
+}
+
+// Hull points already in outline order: both windings, rotated starts.
+static vector<pair<string, vector<Vec2>>> cyclicInputs() {
+    vector<pair<string, vector<Vec2>>> v;
+    vector<Vec2> penta = circlePoints(5, 40);
+    v.push_back({"pentagon, start 2", {penta[2], penta[3], penta[4], penta[0], penta[1]}});
+    v.push_back({"pentagon reversed, start 3", {penta[3], penta[2], penta[1], penta[0], penta[4]}});
+    v.push_back({"square, other winding, start 1", {{20, 20}, {-20, 20}, {-20, -20}, {20, -20}}});
+    return v;
+}
+
 // Mass of a disc of radius r px at density 1 (Box2D units: kg per m^2).
 static float discMass(float r) {
     float m = box2d::World::toBox2d(r);
@@ -115,6 +193,12 @@ static vector<BadInput> badInputs() {
     // Hull of 3 points, area ~1.1e-7 m^2 < FLT_EPSILON at 30 px/m.
     v.push_back({"3 nearly collinear points (area < b2_epsilon)", {{0, 0}, {20, 0}, {10, 0.00001f}}});
     v.push_back({"9 points", circlePoints(9, 40)});
+    // Tiny next to their distance from the local origin: a dynamic body's
+    // inertia about its centroid rounds to <= 0 (Box2D assert in Debug, NaN
+    // motion in Release).
+    v.push_back({"0.5 px triangle at (600, 600)", {{600, 600}, {600.5f, 600}, {600, 600.5f}}});
+    v.push_back({"0.25 px triangle at (800, 800)", {{800, 800}, {800.25f, 800}, {800, 800.25f}}});
+    v.push_back({"0.5 px triangle at (1600, 1600)", {{1600, 1600}, {1600.5f, 1600}, {1600, 1600.5f}}});
     return v;
 }
 
@@ -126,6 +210,15 @@ static void testPolyShapeRefuses(box2d::World& world) {
         check(string("PolyShape::setup ") + in.name + ": no body", !poly.isCreated());
         check(string("PolyShape::setup ") + in.name + ": one warning", w.count == 1);
         check(string("PolyShape::setup ") + in.name + ": no vertices", poly.getVertices().empty());
+    }
+
+    // A tiny polygon far from the origin: the warning says why.
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, {{600, 600}, {600.5f, 600}, {600, 600.5f}}, 0, 0);
+        check("PolyShape::setup tiny far triangle: warning says too small",
+              w.lastContains("too small for its distance"));
     }
 
     // More than 8 points: the warning points to setupConvex().
@@ -186,11 +279,82 @@ static void testPolyShapeValid(box2d::World& world) {
         check("PolyShape::setup notched: no warning", w.count == 0);
     }
 
-    // setupRegular() still works.
+    // setupRegular() still works, and its first vertex is still the top one.
     {
         box2d::PolyShape poly;
         poly.setupRegular(world, 400, 300, 30, 6);
         check("PolyShape::setupRegular 6 sides: created", poly.isCreated());
+    }
+    {
+        box2d::PolyShape poly;
+        poly.setupRegular(world, 400, 300, 30, 3);
+        const auto& v = poly.getVertices();
+        check("PolyShape::setupRegular 3 sides: getVertices()[0] is the top",
+              v.size() == 3 && abs(v[0].x) < 1e-3f && abs(v[0].y + 30) < 1e-3f);
+    }
+
+    // Convex input comes back as given, in its order (Box2D itself starts at
+    // the rightmost point and flips the winding of this square).
+    {
+        vector<Vec2> square = {{-20, -20}, {-20, 20}, {20, 20}, {20, -20}};
+        box2d::PolyShape poly;
+        poly.setup(world, square, 400, 300);
+        check("PolyShape::setup convex square: getVertices() keeps the input order",
+              poly.isCreated() && poly.getVertices() == square);
+    }
+
+    // Hull points in a crossing order come back in hull order, so draw()
+    // outlines the fixture and the fan fill covers all of it.
+    for (const auto& in : crossingInputs()) {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, in.pts, 400, 300);
+        const auto& v = poly.getVertices();
+        check(string("PolyShape::setup ") + in.name + ": created, no warning",
+              poly.isCreated() && w.count == 0 && v.size() == in.pts.size());
+        check(string("PolyShape::setup ") + in.name + ": getVertices() is a simple convex cycle",
+              isSimpleConvexCycle(v));
+        check(string("PolyShape::setup ") + in.name + ": fan fill covers the whole polygon",
+              abs(fanArea(v) - in.area) < 1e-3 * in.area);
+    }
+
+    // Hull points already in outline order keep that order.
+    for (const auto& in : cyclicInputs()) {
+        box2d::PolyShape poly;
+        poly.setup(world, in.second, 400, 300);
+        check("PolyShape::setup " + in.first + ": getVertices() keeps the input order",
+              poly.isCreated() && poly.getVertices() == in.second);
+    }
+
+    // A collinear middle point is not concave: the square is built, and the
+    // hull (without that point) is what getVertices() returns.
+    {
+        vector<Vec2> pts = {{-20, -20}, {0, -20}, {20, -20}, {20, 20}, {-20, 20}};
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, pts, 400, 300);
+        check("PolyShape::setup collinear middle point: 4-point square",
+              poly.isCreated() && poly.getNumVertices() == 4 && !hasPoint(poly.getVertices(), 0, -20) &&
+              w.count == 0);
+    }
+
+    // The same tiny triangle at the origin is fine.
+    {
+        box2d::PolyShape poly;
+        poly.setup(world, {{0, 0}, {0.5f, 0}, {0, 0.5f}}, 400, 300);
+        check("PolyShape::setup 0.5 px triangle at the origin: created", poly.isCreated());
+    }
+
+    // A normal-sized polygon far from its origin is fine: it is created and
+    // steps without NaN.
+    {
+        box2d::PolyShape poly;
+        poly.setup(world, {{600, 600}, {640, 600}, {600, 640}}, 0, 0);
+        poly.getBody()->SetAngularVelocity(1.0f);
+        for (int i = 0; i < 60; ++i) world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        check("PolyShape::setup 40 px triangle at (600, 600): created and finite",
+              poly.isCreated() && isfinite(poly.getBody()->GetPosition().x) &&
+              isfinite(poly.getBody()->GetAngle()));
     }
 }
 
@@ -214,8 +378,9 @@ static void testSetupConvex(box2d::World& world) {
         check("setupConvex 20-point circle (" + tag + "): no warning", w.count == 0);
     }
 
-    // The reduction keeps the extreme points: a long thin diamond with many
-    // points along its edges keeps its 4 tips.
+    // Sharp tips cost the most area to drop: a long thin diamond with many
+    // points along its edges keeps its 4 tips. (Blunt tips are not kept on
+    // purpose.)
     {
         vector<Vec2> pts;
         Vec2 tips[4] = {{-100, 0}, {0, -10}, {100, 0}, {0, 10}};
@@ -246,6 +411,20 @@ static void testSetupConvex(box2d::World& world) {
         poly.setupConvex(world, line, 400, 300);
         check("setupConvex 12 collinear points: no body", !poly.isCreated());
         check("setupConvex 12 collinear points: one warning", w.count == 1);
+        check("setupConvex 12 collinear points: warning says they collapsed",
+              w.lastContains("got 12 points: fewer than 3 distinct, non-collinear points") &&
+              w.lastContains("drops duplicate and collinear points"));
+    }
+    {
+        vector<Vec2> same(50, Vec2(7, 3));
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupConvex(world, same, 400, 300);
+        check("setupConvex 50 copies of one point: no body", !poly.isCreated());
+        check("setupConvex 50 copies of one point: one warning", w.count == 1);
+        check("setupConvex 50 copies of one point: warning says they collapsed",
+              w.lastContains("got 50 points: fewer than 3 distinct, non-collinear points") &&
+              w.lastContains("drops duplicate and collinear points"));
     }
     {
         WarningCapture w;
@@ -300,6 +479,28 @@ static void testRigidBody2D(box2d::World& world) {
               polygonVertexCount(rb->getBody()) == 4);
     }
     {
+        vector<Vec2> square = {{-20, -20}, {-20, 20}, {20, 20}, {20, -20}};
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(square));
+        check("RigidBody2D polygon convex square: shape() keeps the input order",
+              rb->getBody() && rb->shape().verts == square);
+    }
+    for (const auto& in : crossingInputs()) {
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(in.pts));
+        const auto& v = rb->shape().verts;
+        check(string("RigidBody2D polygon ") + in.name + ": shape() is a simple convex cycle",
+              rb->getBody() && v.size() == in.pts.size() && isSimpleConvexCycle(v));
+        check(string("RigidBody2D polygon ") + in.name + ": fan fill covers the whole polygon",
+              abs(fanArea(v) - in.area) < 1e-3 * in.area);
+    }
+    for (const auto& in : cyclicInputs()) {
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(in.second));
+        check("RigidBody2D polygon " + in.first + ": shape() keeps the input order",
+              rb->getBody() && rb->shape().verts == in.second);
+    }
+    {
         WarningCapture w;
         shared_ptr<Node> node;
         auto* rb = attach(world, node, box2d::Shape2D::convex(circlePoints(20, 50)));
@@ -325,6 +526,19 @@ static void testRigidBody2D(box2d::World& world) {
         auto* rb = attach(world, node, box2d::Shape2D::convex(line));
         check("RigidBody2D Shape2D::convex collinear: no body", rb->getBody() == nullptr);
         check("RigidBody2D Shape2D::convex collinear: one warning", w.count == 1);
+        check("RigidBody2D Shape2D::convex collinear: warning says they collapsed",
+              w.lastContains("fewer than 3 distinct, non-collinear points") &&
+              w.lastContains("Shape2D::convex() drops duplicate and collinear points"));
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::convex(vector<Vec2>(50, Vec2(7, 3))));
+        check("RigidBody2D Shape2D::convex 50 copies of one point: no body", rb->getBody() == nullptr);
+        check("RigidBody2D Shape2D::convex 50 copies of one point: one warning", w.count == 1);
+        check("RigidBody2D Shape2D::convex 50 copies of one point: warning says they collapsed",
+              w.lastContains("fewer than 3 distinct, non-collinear points") &&
+              w.lastContains("Shape2D::convex() drops duplicate and collinear points"));
     }
 }
 

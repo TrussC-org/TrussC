@@ -32,10 +32,15 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
 - **Concave input** to `setup()` / `polygon()` silently becomes its convex
   hull, as Box2D itself does. `PolyShape::getVertices()` and
   `RigidBody2D::shape().verts` hold that hull, and `draw()` / `drawFill()` /
-  `ColliderRenderer2D` draw it, so what you see is what collides.
+  `ColliderRenderer2D` draw it, so what you see is what collides. Convex
+  input whose points already go around the outline in order (either winding,
+  any starting point) comes back as given. Otherwise, when points were dropped
+  or listed in a crossing order (a Z-ordered square, a star-ordered pentagon),
+  the hull comes back in Box2D's order, starting at the rightmost point.
 - **`setupConvex()` / `convex()`** take the convex hull of the points and drop
-  the vertices whose removal loses the least area until 8 remain. The extreme
-  points survive, but concave parts and holes are filled and curves become
+  the vertices whose removal loses the least area until 8 remain. No point is
+  guaranteed to survive: tips and extents can shrink, a symmetric outline can
+  come back lopsided, concave parts and holes are filled and curves become
   coarser.
 - **`setupCompound()` / `compound()`** keep any outline exactly: concave parts,
   holes and any number of points. `Path::buildFillTriangles()` triangulates it,
@@ -62,9 +67,14 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
   - collinear points, or a hull with almost no area;
   - points that nearly coincide (Box2D merges points closer than
     `0.5 * b2_linearSlop`, 0.075 px at the default scale) so fewer than 3 are
-    left.
+    left;
+  - a polygon so small next to its distance from the local origin that a
+    dynamic body's rotational inertia rounds to zero (for example a 0.5 px
+    triangle at (600, 600)): give points relative to the body position.
 
   Check `PolyShape::isCreated()` or `RigidBody2D::getBody() != nullptr`.
+  Without a body, `PolyShape::draw()` and `ColliderRenderer2D` draw nothing
+  for the polygon.
 
 ## Tests
 

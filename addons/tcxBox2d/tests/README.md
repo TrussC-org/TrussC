@@ -11,9 +11,11 @@ Polygon points (#342). `PolyShape::setup()` and `RigidBody2D` with
   Debug and Release alike;
 - concave input with 3 to 8 points becomes its convex hull, and
   `getVertices()` / `shape().verts` hold that hull (what draws is what
-  collides);
+  collides); convex input already in outline order keeps its order, and hull
+  points listed in a crossing order come back in hull order;
 - `setupConvex()` / `Shape2D::convex()` take any number of points and make one
-  fixture of at most 8 points whose mass is close to the outline's.
+  fixture of at most 8 points whose mass is close to the outline's; input
+  they collapse to fewer than 3 points gets a warning saying so.
 
 Compound bodies (#427). `setupCompound()` / `Shape2D::compound()` keep any
 outline exactly, one fixture per triangle:

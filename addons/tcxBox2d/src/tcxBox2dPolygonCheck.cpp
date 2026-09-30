@@ -5,10 +5,46 @@
 #include "tcxBox2dPolygonCheck.h"
 #include "tcxBox2dWorld.h"
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <limits>
 
 namespace tcx::box2d::detail {
+
+namespace {
+
+// True when `shape` holds every point of `input` and `input`, read in its own
+// order, walks around the hull: a cyclic rotation of shape.m_vertices, in
+// either direction. Only then is the caller's order a simple convex polygon;
+// a crossing order of hull vertices (a Z-ordered square, a star-ordered
+// pentagon) is not.
+bool keepsHullOrder(const std::vector<b2Vec2>& input, const b2PolygonShape& shape) {
+    const size_t count = input.size();
+    if (static_cast<size_t>(shape.m_count) != count) return false;
+    // Position of each input point in Box2D's hull. The points are distinct
+    // (none were merged) and Set() copies them unchanged, so they match exactly.
+    int32 pos[b2_maxPolygonVertices];
+    for (size_t i = 0; i < count; ++i) {
+        pos[i] = -1;
+        for (int32 k = 0; k < shape.m_count; ++k) {
+            if (shape.m_vertices[k].x == input[i].x && shape.m_vertices[k].y == input[i].y) {
+                pos[i] = k;
+                break;
+            }
+        }
+        if (pos[i] < 0) return false;
+    }
+    const int32 m = shape.m_count;
+    bool forward = true, backward = true;
+    for (size_t i = 0; i < count; ++i) {
+        const int32 next = pos[(i + 1) % count];
+        if (next != (pos[i] + 1) % m) forward = false;
+        if (next != (pos[i] + m - 1) % m) backward = false;
+    }
+    return forward || backward;
+}
+
+} // namespace
 
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
@@ -86,10 +122,36 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
     if (!(area > b2_epsilon)) return PolygonError::Degenerate;
 
     // Same input as the checks above, so Set() takes the same path.
-    shape.Set(input.data(), static_cast<int32>(count));
+    b2PolygonShape built;
+    built.Set(input.data(), static_cast<int32>(count));
+
+    // A dynamic body's b2Body::ResetMassData() takes the polygon's inertia
+    // about the body origin and subtracts mass * |centroid|^2. For a polygon
+    // that is tiny next to its distance from the origin the two nearly cancel
+    // in float, and the result can be <= 0: an assert (Debug) or NaN motion
+    // (Release). Mirror that step at density 1 and demand a margin of
+    // 16 float epsilons of the subtracted term, so the result stays positive
+    // at any density (fuzzed at densities 0.001 to 1000).
+    b2MassData md;
+    built.ComputeMass(&md, 1.0f);
+    b2Vec2 center = b2Vec2_zero;
+    center += md.mass * md.center;
+    center *= 1.0f / md.mass;
+    const float shift = md.mass * b2Dot(center, center);
+    const float centered = md.I - shift;
+    if (!(centered > 16.0f * FLT_EPSILON * shift)) return PolygonError::TooSmallForOffset;
+
+    shape = built;
     hull.clear();
-    hull.reserve(shape.m_count);
-    for (int32 i = 0; i < shape.m_count; ++i) hull.push_back(World::toPixels(shape.m_vertices[i]));
+    if (keepsHullOrder(input, shape)) {
+        // Box2D kept every point and the caller's order already goes around
+        // the hull: hand the points back as given (Set() starts at the
+        // rightmost point and may flip the winding).
+        hull = points;
+    } else {
+        hull.reserve(shape.m_count);
+        for (int32 i = 0; i < shape.m_count; ++i) hull.push_back(World::toPixels(shape.m_vertices[i]));
+    }
     return PolygonError::None;
 }
 
@@ -101,8 +163,16 @@ std::string describePolygonError(PolygonError err) {
         case PolygonError::MergedPoints:  return "fewer than 3 points are left after merging points closer than "
                                                  + tc::toString(World::toPixels(0.5f * b2_linearSlop), 3) + " px";
         case PolygonError::Degenerate:    return "the points are collinear or enclose almost no area";
+        case PolygonError::TooSmallForOffset:
+            return "the polygon is too small for its distance from the body origin (its rotational inertia "
+                   "is lost to float rounding); give points relative to the body position instead";
     }
     return "";
+}
+
+std::string describeCollapsedHull(const std::string& caller) {
+    return "fewer than 3 distinct, non-collinear points (" + caller
+           + " drops duplicate and collinear points)";
 }
 
 std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points, size_t maxPoints) {

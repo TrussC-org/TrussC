@@ -58,17 +58,22 @@ struct Shape2D {
     static Shape2D box(float size) { return box(size, size); }
     // One convex polygon of 3 to 8 points. Concave input becomes its convex
     // hull, as Box2D does; once the body exists, RigidBody2D::shape() (and so
-    // ColliderRenderer2D) holds that hull. More than 8 points, or degenerate
-    // points (collinear, nearly coincident), log a warning when the RigidBody2D
-    // is attached and create no body: getBody() stays null. For more points
-    // use convex() (convex approximation) or compound() (exact shape).
+    // ColliderRenderer2D) holds that hull. Convex input that already goes
+    // around its outline in order (either winding, any start) is kept as
+    // given; otherwise (points dropped, or listed in a crossing order) the
+    // hull is in Box2D's order (from the rightmost point). More than 8
+    // points, or degenerate points (collinear, nearly coincident, tiny next
+    // to their distance from the origin), log a warning when the RigidBody2D
+    // is attached and create no body: getBody() stays null and
+    // ColliderRenderer2D draws nothing. For more points use convex() (convex
+    // approximation) or compound() (exact shape).
     static Shape2D polygon(const std::vector<tc::Vec2>& v) {
         Shape2D s; s.kind = Polygon; s.verts = v; return s;
     }
     // Any number of points (3 or more), approximated by their convex hull
     // reduced to at most 8 points (the vertices that lose the least area are
-    // dropped). Concave parts and holes are filled. Degenerate input behaves
-    // like polygon(): a warning and no body.
+    // dropped; tips and extents can shrink). Concave parts and holes are
+    // filled. Degenerate input behaves like polygon(): a warning and no body.
     static Shape2D convex(const std::vector<tc::Vec2>& points) {
         Shape2D s; s.kind = Polygon; s.verts = detail::reducedConvexHull(points); return s;
     }
@@ -269,8 +274,14 @@ protected:
             detail::PolygonError err = detail::makePolygonShape(shape_.verts, poly, hull);
             if (err != detail::PolygonError::None) {
                 auto log = tc::logWarning();
-                log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: "
-                    << detail::describePolygonError(err) << ".";
+                log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: ";
+                if (err == detail::PolygonError::TooFewPoints) {
+                    // Shape2D::convex() may have reduced many points to these
+                    // few, so "needs at least 3 points" would mislead.
+                    log << detail::describeCollapsedHull("Shape2D::convex()") << ".";
+                } else {
+                    log << detail::describePolygonError(err) << ".";
+                }
                 if (err == detail::PolygonError::TooManyPoints) {
                     log << " Use Shape2D::convex() for a convex approximation or"
                         << " Shape2D::compound() for the exact shape.";
@@ -499,7 +510,8 @@ protected:
     void draw() override {
         tc::Node* n = getOwner();
         if (!n->hasMod<RigidBody2D>()) return;
-        const Shape2D& s = n->getMod<RigidBody2D>()->shape();
+        const RigidBody2D* rb = n->getMod<RigidBody2D>();
+        const Shape2D& s = rb->shape();
 
         tc::setColor(color_);
         filled_ ? tc::fill() : tc::noFill();
@@ -513,10 +525,17 @@ protected:
                 tc::drawRect(-s.size.x * 0.5f, -s.size.y * 0.5f, s.size.x, s.size.y);
                 break;
             case Shape2D::Polygon:
-                drawPolygon(s.verts);
+                // Only a polygon Box2D accepted. Without a body (refused
+                // points, or no world yet) verts are the raw points: they
+                // may be concave, and nothing collides there (PolyShape
+                // draws nothing either).
+                if (rb->getBody()) drawPolygon(s.verts);
                 break;
             case Shape2D::Compound:
-                // The fill is the triangulation the fixtures were made from.
+                // Only an outline Box2D accepted (PolyShape draws nothing
+                // without a body either). The fill is the triangulation the
+                // fixtures were made from.
+                if (!rb->getBody()) break;
                 filled_ ? s.path.drawFill() : detail::drawPathOutline(s.path);
                 break;
         }
@@ -528,8 +547,9 @@ private:
     void drawPolygon(const std::vector<tc::Vec2>& verts) {
         if (verts.size() < 3) return;
         if (filled_) {
-            // Fan from the first vertex: verts is convex (the hull Box2D
-            // built), but the body origin need not lie inside it.
+            // Fan from the first vertex: verts is convex (checked by
+            // makePolygonShape, since a body exists), but the body origin
+            // need not lie inside it.
             tc::Mesh mesh;
             mesh.setMode(tc::PrimitiveMode::TriangleFan);
             for (const auto& v : verts) mesh.addVertex(tc::Vec3(v.x, v.y, 0.0f));
