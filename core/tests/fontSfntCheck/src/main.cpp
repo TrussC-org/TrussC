@@ -63,9 +63,13 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
+#ifdef __linux__
+#include <sys/resource.h>
+#endif
 
 using namespace std;
 using namespace tc;
@@ -86,6 +90,8 @@ extern size_t tcStbttTestMallocMax;
 
 static int g_warnings = 0;
 static string g_lastWarning;
+static int g_errors = 0;
+static string g_lastError;
 
 // --- big-endian helpers ------------------------------------------------------
 using Bytes = vector<uint8_t>;
@@ -1059,6 +1065,64 @@ static void checkInstalledFonts(const vector<string>& extra) {
     if (found == 0) printf("installed fonts: none found at the usual paths, skipped\n");
 }
 
+// --- setup() from a path -----------------------------------------------------------
+// setup() opens only regular files, and refuses a file of 1 GiB or more
+// before its buffer is allocated.
+#ifdef __linux__
+static long maxRssKb() {
+    rusage ru{};
+    getrusage(RUSAGE_SELF, &ru);
+    return ru.ru_maxrss;
+}
+#endif
+
+static void checkSetupPath() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) /
+                         ("fontSfntCheck-" + to_string((unsigned long long)getElapsedTimeMicros()));
+    if (ec || !fs::create_directories(dir, ec)) {
+        check("setup(): temp directory can be created", false, dir.string());
+        return;
+    }
+    {
+        internal::FontAtlasManager m;
+        g_lastError.clear();
+        const int before = g_errors;
+        const bool ok = m.setup(dir.string(), kFontSize);
+        check("setup(): a directory is refused as not a regular file",
+              !ok && g_errors > before && g_lastError.find("not a regular file") != string::npos,
+              string("ok=") + (ok ? "true" : "false") + " last=\"" + g_lastError + "\"");
+    }
+#ifdef __linux__
+    {
+        // A sparse file: no disk blocks are written.
+        const fs::path big = dir / "big.ttf";
+        { ofstream(big, ios::binary); }
+        fs::resize_file(big, (uintmax_t)0x40000000u + 1, ec);
+        if (ec) {
+            printf("setup(): sparse 1 GiB + 1 file could not be created, skipped\n");
+        } else {
+            internal::FontAtlasManager m;
+            g_lastWarning.clear();
+            const int before = g_warnings;
+            const long rssBefore = maxRssKb();
+            const bool ok = m.setup(big.string(), kFontSize);
+            const long grownKb = maxRssKb() - rssBefore;
+            check("setup(): a 1 GiB + 1 file is refused",
+                  !ok && g_warnings > before && g_lastWarning.find("1 GiB") != string::npos,
+                  string("ok=") + (ok ? "true" : "false") + " last=\"" + g_lastWarning + "\"");
+            // Peak RSS would grow by about 1 GiB had the file been read.
+            check("setup(): the 1 GiB + 1 file is refused before it is read",
+                  grownKb < 64 * 1024, "peak RSS grew by " + to_string(grownKb) + " KiB");
+        }
+    }
+#else
+    printf("setup(): 1 GiB + 1 file check runs only on Linux (sparse file), skipped\n");
+#endif
+    fs::remove_all(dir, ec);
+}
+
 // --- metrics dump (compare two builds) ---------------------------------------------
 static void dumpMetrics(const vector<string>& paths) {
     const uint32_t cps[] = {'A', 'g', 'W', 'j', '0', '?', 0x00E9, 0x3042, 0x6F22, 0xFF01};
@@ -1097,6 +1161,9 @@ int main(int argc, char** argv) {
         if (e.level == LogLevel::Warning) {
             ++g_warnings;
             g_lastWarning = e.message;
+        } else if (e.level == LogLevel::Error) {
+            ++g_errors;
+            g_lastError = e.message;
         }
     });
 
@@ -1132,6 +1199,7 @@ int main(int argc, char** argv) {
     checkSinglePointContour();
     checkCffLength();
     checkMalformed();
+    checkSetupPath();
     checkInstalledFonts(args);
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

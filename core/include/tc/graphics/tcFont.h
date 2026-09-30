@@ -21,6 +21,7 @@
 #include <memory>
 #include <cstdint>
 #include <fstream>
+#include <filesystem>
 #include <functional>
 #include <cstring>
 
@@ -203,7 +204,13 @@ public:
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
         // survive on Windows)
-        std::ifstream file(internal::utf8ToPath(fontPath), std::ios::binary | std::ios::ate);
+        const auto path = internal::utf8ToPath(fontPath);
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec)) {
+            logError() << "FontAtlasManager: not a regular file: " << fontPath;
+            return false;
+        }
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file) {
             logError() << "FontAtlasManager: failed to open " << fontPath;
             return false;
@@ -212,6 +219,12 @@ public:
         const std::streamoff end = file.tellg();
         if (end < 0) {
             logError() << "FontAtlasManager: cannot get the size of " << fontPath;
+            return false;
+        }
+        // Same size limit as checkSfntSkeleton, checked before the buffer
+        // is allocated.
+        if ((uint64_t)end >= kMaxFontDataSize) {
+            logWarning() << "FontAtlasManager: not a usable font (" << kTooLargeReason << ")";
             return false;
         }
         const size_t fileSize = (size_t)end;
@@ -370,6 +383,10 @@ private:
     // drop it together with stb if the backend is replaced. Offsets and
     // lengths are added in 64 bits.
     // -------------------------------------------------------------------------
+    static constexpr uint64_t kMaxFontDataSize = 0x40000000u;
+    static constexpr const char* kTooLargeReason =
+        "the bundled font engine (stb_truetype) cannot handle fonts larger than 1 GiB";
+
     static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
                                   std::string& reason) {
         auto u16 = [data](uint64_t o) -> uint64_t {
@@ -398,9 +415,8 @@ private:
             return false;
         }
         // The stb backend handles fonts below 1 GiB.
-        if (n >= 0x40000000u) {
-            reason = "the bundled font engine (stb_truetype) cannot handle fonts "
-                     "larger than 1 GiB";
+        if (n >= kMaxFontDataSize) {
+            reason = kTooLargeReason;
             return false;
         }
 
