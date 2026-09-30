@@ -199,14 +199,22 @@ public:
     // onClientConnect fires on the accept thread, and so do onError for
     // server-level failures (accept() failing, a thread that cannot be started
     // for a new client) and onClientDisconnect for a client whose receive
-    // thread could not start. An inline listener there may call stop(), but
-    // not start(). stop() from there closes the listening socket and returns
-    // without waiting for anything, so clients may still be connected when it
-    // returns: once the listener returns, the accept thread disconnects every
-    // client and ends. Their threads and the accept thread are joined by the
-    // next stop(), start() or the destructor. Those server-level failures
-    // reach onError at most once every 5 s for each kind while they persist;
-    // the log counts the rest.
+    // thread could not start. Those server-level failures reach onError at
+    // most once every 5 s for each kind while they persist; the log counts
+    // the rest. onReceive and onClientDisconnect otherwise fire on that
+    // client's receive thread, and onSendComplete, and onError for a queued
+    // send that failed, on its writer thread.
+    //
+    // An inline listener on any of these threads may call stop(),
+    // disconnectClient() (for its own client or any other) and
+    // disconnectAllClients(). There they disconnect and return without
+    // waiting for any of the server's threads, since such a thread may be
+    // waiting for the caller in turn. Those threads are joined later: by the
+    // server once they have ended, by the next stop() or start() on another
+    // thread, or by the destructor. stop() on the accept thread closes the
+    // listening socket before it returns, and the accept thread disconnects
+    // every client once the listener returns. start() cannot be called from
+    // such a listener (see start()).
     // -------------------------------------------------------------------------
     Event<TcpClientConnectEventArgs> onClientConnect;       // On client connect
     Event<TcpServerReceiveEventArgs> onReceive;             // On data receive
@@ -221,6 +229,10 @@ public:
     // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpServer();
+
+    // Stops the server and waits for all of its threads, including those a
+    // listener's stop() or disconnect left running. Must not run on one of
+    // the server's own threads (in a listener).
     ~TcpServer();
 
     // Copy prohibited
@@ -240,11 +252,11 @@ public:
     // disconnects. The listen backlog is a fixed value, independent of
     // maxClients.
     //
-    // It calls stop() first. When a stop() on another thread is still tearing
-    // the previous session down (waiting for the accept thread, or
-    // disconnecting the clients and joining their threads after it), start()
-    // waits for that stop() to finish too, so none of it reaches the
-    // restarted server. It cannot be called from an inline listener on one of
+    // It calls stop() first, which also joins any thread a listener's stop()
+    // left running. When a stop() on another thread is still tearing the
+    // previous session down (waiting for the accept thread, disconnecting the
+    // clients or joining their threads), start() waits for that stop() to
+    // finish too, so none of it reaches the restarted server. It cannot be called from an inline listener on one of
     // the server's own threads: on the accept thread (onClientConnect, see
     // Events above) or on a client's receive or writer thread (onReceive,
     // onSendComplete, onClientDisconnect, onError from those threads), it logs
@@ -252,17 +264,16 @@ public:
     bool start(int port, int maxClients = 0);
 
     // Stop server. Returns once the accept thread and every client thread have
-    // ended and every client is disconnected, with these exceptions for an
-    // inline listener that calls it: the thread it runs on is left for the
-    // next stop(), start() or the destructor to join; on the accept thread it
-    // returns before the clients are disconnected (see Events above); and on
-    // a client's receive or writer thread (onReceive, onSendComplete,
-    // onClientDisconnect, onError from a client's receive or writer thread),
-    // while another stop() has already taken the accept thread (and is
-    // joining it or the client threads), it disconnects every client and
-    // returns without waiting for any thread, which that other stop() then
-    // joins. When two threads call it at once, only one of them waits for the
-    // accept thread. isRunning() is false as soon as it is called.
+    // ended and every client is disconnected. When two threads call it at
+    // once, only one of them waits for the accept thread.
+    //
+    // From an inline listener on one of the server's own threads (see Events
+    // above) it waits for no thread and returns at once: on a client's receive
+    // or writer thread it disconnects every client first, and on the accept
+    // thread it closes the listening socket, leaving the clients to the
+    // accept thread once the listener returns. The threads are joined by the
+    // next stop() or start() on another thread, or the destructor.
+    // isRunning() is false as soon as it is called.
     void stop();
 
     // Whether server is running
@@ -272,10 +283,15 @@ public:
     // Client management
     // -------------------------------------------------------------------------
 
-    // Disconnect specified client
+    // Disconnect specified client. Returns once that client's threads have
+    // ended; from an inline listener on one of the server's own threads (see
+    // Events above), for its own client or any other, it returns without
+    // waiting for them.
     void disconnectClient(int clientId);
 
-    // Disconnect all clients
+    // Disconnect all clients. Waits for their threads like disconnectClient(),
+    // except in an inline listener on one of the server's own threads. A
+    // client that connects while it runs may stay connected.
     void disconnectAllClients();
 
     // Number of connected clients
