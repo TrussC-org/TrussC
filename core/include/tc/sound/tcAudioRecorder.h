@@ -249,6 +249,8 @@ public:
 
     // Stop and finalize the file. Safe to call when not recording.
     // A take past 4 GiB of samples is finalized as RF64 (logged as a notice).
+    // If writing the file failed on the way (disk full, a file size limit),
+    // it logs an error instead: the file is incomplete.
     // It waits on AudioEngine::waitForCallbackIdle(), the engine-wide barrier:
     // for every audioOut / audioIn listener running at that moment, not only
     // this recorder's capture (usually well under one buffer). So don't call
@@ -269,10 +271,23 @@ public:
         if (writer_.joinable()) writer_.join();
         const bool rf64 = patchHeader();
         file_.close();
+        // A write that failed (disk full, a file size limit such as FAT32's
+        // 4 GiB) leaves the stream failed: later writes, the header patch and
+        // the close's flush did nothing, so the file is cut short and its
+        // header was not finalized. framesWritten_ counts what was handed to
+        // the stream, not what reached the file, so the RF64 decision above
+        // says nothing about the file then.
+        const bool writeFailed = file_.fail();
         uint64_t dropped = droppedFrames_.load(std::memory_order_relaxed);
         if (dropped > 0) {
             logWarning("AudioRecorder") << "stopped, " << dropped
                 << " frames dropped (writer thread fell behind)";
+        }
+        if (writeFailed) {
+            logError("AudioRecorder") << "writing " << internal::pathToDisplayUtf8(path_)
+                << " failed (disk full or a file size limit?): the file is incomplete"
+                   " and its header is not finalized";
+            return;
         }
         if (rf64) {
             logNotice("AudioRecorder") << "the take passed 4 GiB: "

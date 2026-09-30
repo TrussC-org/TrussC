@@ -25,6 +25,10 @@
 //     the JUNK chunk, its sizes match the frames written, and it loads through
 //     SoundBuffer with numSamples == getRecordedSeconds() * sampleRate. No
 //     RF64 notice is logged for it.
+//   - (Linux) A take whose file writes fail (recorded into /dev/full) logs an
+//     error on stop() and neither an RF64 notice nor the "stopped" notice:
+//     the frame count says what was handed to the stream, not what reached
+//     the file.
 // =============================================================================
 
 #include <TrussC.h>
@@ -239,13 +243,16 @@ static void checkHeaderBytes() {
 
 static mutex g_logMutex;
 static vector<string> g_notices;
+static vector<string> g_errors;
 
-static size_t countNotices(const string& needle) {
+static size_t countIn(const vector<string>& list, const string& needle) {
     lock_guard<mutex> lock(g_logMutex);
     size_t n = 0;
-    for (auto& m : g_notices) if (m.find(needle) != string::npos) ++n;
+    for (auto& m : list) if (m.find(needle) != string::npos) ++n;
     return n;
 }
+static size_t countNotices(const string& needle) { return countIn(g_notices, needle); }
+static size_t countErrors(const string& needle) { return countIn(g_errors, needle); }
 
 static void recordTake(AudioRecordSettings::SampleFormat format, int sampleRate) {
     const bool isF32 = format == AudioRecordSettings::SampleFormat::F32;
@@ -292,6 +299,30 @@ static void recordTake(AudioRecordSettings::SampleFormat format, int sampleRate)
     fs::remove(wav, ec);
 }
 
+// A take whose writes fail: /dev/full opens fine and fails every flush with
+// ENOSPC, like a full disk or a file that hit the FAT32 size limit.
+static void recordIntoFullDevice() {
+#if defined(__linux__)
+    const size_t noticesBefore = countNotices("[AudioRecorder]");
+    AudioRecorder rec;
+    const bool started = rec.start(fs::path("/dev/full"));
+    // Past the stream's buffer, so writes fail before stop().
+    const bool some = started && waitFor([&] { return rec.getRecordedSeconds() >= 0.25; }, 5000);
+    rec.stop();
+    check("a take into /dev/full starts and counts frames", started && some);
+    check("... stop() logs the failed write as an error",
+          countErrors("[AudioRecorder] writing /dev/full failed") == 1);
+    // start() logs "recording ->"; stop() must add neither the RF64 notice
+    // nor "stopped:", which would report the counted frames as written.
+    check("... and no RF64 or \"stopped\" notice",
+          countNotices("[AudioRecorder]") == noticesBefore + 1
+          && countNotices("RF64") == 0,
+          to_string(countNotices("[AudioRecorder]") - noticesBefore) + " notices");
+#else
+    printf("%-72s SKIP (no /dev/full)\n", "a take into /dev/full logs an error on stop()");
+#endif
+}
+
 int main() {
     // A recorder that never finishes would hang CI; fail loudly instead.
     thread([] {
@@ -309,9 +340,9 @@ int main() {
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
-        if (e.level != LogLevel::Notice) return;
         lock_guard<mutex> lock(g_logMutex);
-        g_notices.push_back(e.message);
+        if (e.level == LogLevel::Notice) g_notices.push_back(e.message);
+        else if (e.level == LogLevel::Error) g_errors.push_back(e.message);
     });
 
     auto& engine = AudioEngine::getInstance();
@@ -331,6 +362,9 @@ int main() {
     recordTake(AudioRecordSettings::SampleFormat::F32, settings.sampleRate);
     check("a short take logs no RF64 notice", countNotices("RF64") == 0);
     check("... and both takes log their stop", countNotices("[AudioRecorder] stopped") == 2);
+    check("... and no error", countErrors("[AudioRecorder]") == 0);
+
+    recordIntoFullDevice();
 
     tone.stop();
     engine.shutdown();
