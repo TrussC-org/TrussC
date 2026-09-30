@@ -122,20 +122,29 @@ inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t
     return (size_t)n;
 }
 
+// Test hook, not a user setting: while nonzero, allocationFits() also
+// refuses any single allocation larger than this many bytes, so a headless
+// test can run the growth policy below against a memory limit on any
+// platform (core/tests/audioDiagnostics). 0, the default, turns it off.
+// State lives in tcSound_impl.cpp.
+void setAllocationLimitForTests(size_t bytes);
+size_t allocationLimitForTests();
+
 // Whether one allocation of `bytes` can be made right now. Web (wasm) builds
 // have exception catching off, so there a failed operator new aborts the page
 // instead of throwing std::bad_alloc; malloc, which returns null on failure
 // under ALLOW_MEMORY_GROWTH, is tried and released first. Elsewhere a failed
-// allocation throws and the callers catch it, so this is always true.
+// allocation throws and the callers catch it, so this is true unless a test
+// set a limit (setAllocationLimitForTests).
 inline bool allocationFits(size_t bytes) {
+    const size_t limit = allocationLimitForTests();
+    if (limit != 0 && bytes > limit) return false;
 #ifdef __EMSCRIPTEN__
     // Held in a volatile: the compiler may otherwise drop an unused
     // malloc / free pair and assume the allocation succeeded.
     void* volatile p = std::malloc(bytes);
     if (!p) return false;
     std::free(p);
-#else
-    (void)bytes;
 #endif
     return true;
 }
@@ -143,21 +152,46 @@ inline bool allocationFits(size_t bytes) {
 // Grow the capacity of `buf` to hold at least `needed` samples. The new
 // capacity is twice the current one (geometric growth), or `preferred` when
 // it lies between `needed` and that (a decoder's stated length, so a stream
-// whose length is stated correctly ends without spare capacity), or only
-// `needed` when the larger size cannot be allocated (allocationFits). Never
-// more than twice the current capacity, so the growth follows what was
-// actually written. False, with `buf` unchanged, when even `needed` cannot
-// be allocated; elsewhere than on the web a failed allocation throws
-// std::bad_alloc instead.
+// whose length is stated correctly ends without spare capacity). Never more
+// than twice the current capacity, so the growth follows what was actually
+// written.
+//
+// When that size cannot be allocated (allocationFits), smaller steps are
+// tried, the current capacity plus a half, a quarter, an eighth, ... of it,
+// down to the smallest one that still holds `needed`, and last `needed`
+// itself; the first that fits is taken. A smaller step is only taken after one at most twice
+// its growth failed, so under a fixed memory limit every such step leaves
+// less than half of the room that was left before it: near the limit the
+// buffer is reallocated a logarithmic number of times, not once per decode
+// step, and a load that cannot finish fails as soon as a step no longer fits.
+// (`needed` itself needs no special rule: it is only reached when a step at
+// most twice its growth failed, too.)
+//
+// False, with `buf` unchanged, when even `needed` cannot be allocated;
+// elsewhere than on the web a failed allocation throws std::bad_alloc instead.
 inline bool growSampleBuffer(std::vector<float>& buf, size_t needed, size_t preferred = 0) {
-    if (needed <= buf.capacity()) return true;
+    const size_t capacity = buf.capacity();
+    if (needed <= capacity) return true;
     if (needed > buf.max_size()) return false;
-    size_t target = buf.capacity() > buf.max_size() / 2 ? buf.max_size() : buf.capacity() * 2;
+    size_t target = capacity > buf.max_size() / 2 ? buf.max_size() : capacity * 2;
     if (preferred >= needed && preferred < target) target = preferred;
     if (target < needed) target = needed;
     if (!allocationFits(target * sizeof(float))) {
-        if (target == needed || !allocationFits(needed * sizeof(float))) return false;
-        target = needed;
+        size_t smaller = needed;
+        for (size_t step = capacity / 2; step > 0 && capacity + step >= needed; step /= 2) {
+            // Only sizes below what failed; target <= max_size(), so the
+            // byte count below cannot wrap
+            if (capacity + step >= target) continue;
+            if (allocationFits((capacity + step) * sizeof(float))) {
+                smaller = capacity + step;
+                break;
+            }
+        }
+        if (smaller == needed &&
+            (target == needed || !allocationFits(needed * sizeof(float)))) {
+            return false;
+        }
+        target = smaller;
     }
     buf.reserve(target);
     return true;

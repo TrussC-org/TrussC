@@ -42,6 +42,21 @@ extern "C" {
 
 namespace trussc {
 
+namespace internal {
+namespace {
+// Set by setAllocationLimitForTests(); 0 (no limit) normally.
+std::atomic<size_t> g_allocationLimitForTests{0};
+} // namespace
+
+void setAllocationLimitForTests(size_t bytes) {
+    g_allocationLimitForTests.store(bytes, std::memory_order_relaxed);
+}
+
+size_t allocationLimitForTests() {
+    return g_allocationLimitForTests.load(std::memory_order_relaxed);
+}
+} // namespace internal
+
 namespace {
 
 // Frames decoded per step. Samples are appended as they decode, so the
