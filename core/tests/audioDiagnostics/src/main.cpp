@@ -41,6 +41,19 @@
 //   frame size in loadPcmFromMemory only matters on a 32-bit build.)
 //   The loaders' 32-bit arithmetic is covered by the helper checks with
 //   maxCount = 0xFFFFFFFF, not by a 32-bit build of this test.
+// - SoundBuffer::mixFrom() counts its offset in frames (samples per channel,
+//   like numSamples) and mixes with the channel stride; buffers of different
+//   channel counts, and an offset whose end wraps or passes what a buffer
+//   holds, are refused and logged with the buffer untouched.
+// - Decoders size buffers from what decodes, not from the stated stream
+//   length: the first reservation is capped by the input's size
+//   (internal::decodeReserveSamples), and a FLAC whose STREAMINFO states
+//   more samples than it holds loads the frames it has without any
+//   allocation of the stated size (allocProbe.cpp records the largest
+//   operator new request of the load).
+// - A voice on a buffer with no frames, or with fewer samples than
+//   numSamples * channels, stops at its first mix (looping or not), and
+//   setPosition() on an empty buffer lands on 0.
 // =============================================================================
 
 #include <TrussC.h>
@@ -111,6 +124,11 @@ void fcloseProbeDisarm();
 int fcloseProbeCloses();
 int fcloseProbeRepeats();
 #endif
+
+// allocProbe.cpp: the largest operator new request between arm and disarm
+void allocProbeArm();
+void allocProbeDisarm();
+size_t allocProbeLargest();
 
 // 16-bit mono PCM WAV with a 440 Hz tone.
 static bool writeWav(const fs::path& path, float seconds, int rate) {
@@ -297,6 +315,241 @@ static void checkPcmLoading() {
           buf.samples.empty() && buf.channels == 2);
 }
 
+// --- SoundBuffer::mixFrom: frames, channel stride, checked end ----------------
+// offsetSamples counts samples per channel (the unit of numSamples); the mix
+// runs frame by frame with the channel stride and keeps numSamples * channels
+// == samples.size().
+static void checkMixFrom() {
+    auto stereo = [](const vector<float>& interleaved) {
+        SoundBuffer b;
+        b.loadPcmFromMemory(interleaved.data(), interleaved.size() * sizeof(float), 2, 48000, 32);
+        return b;
+    };
+    const SoundBuffer other = stereo({0.5f, -0.5f, 0.25f, -0.25f});   // 2 frames (L, R)
+
+    SoundBuffer base = stereo({1, 2, 3, 4, 5, 6, 7, 8});                  // 4 frames
+    base.mixFrom(other, 3);
+    check("mix: a stereo mix past the end grows by frames",
+          base.numSamples == 5 && pcmConsistent(base), to_string(base.numSamples) + " frames");
+    check("mix: the offset counts frames, channels keep their stride",
+          base.samples.size() == 10 && base.samples[5] == 6 && base.samples[6] == 7.5f &&
+          base.samples[7] == 7.5f && base.samples[8] == 0.25f && base.samples[9] == -0.25f);
+
+    base = stereo({1, 2, 3, 4, 5, 6, 7, 8});
+    base.mixFrom(other, 1, 2.0f);
+    check("mix: a stereo mix inside the buffer adds frame by frame",
+          base.numSamples == 4 && pcmConsistent(base) && base.samples[1] == 2 &&
+          base.samples[2] == 4 && base.samples[3] == 3 && base.samples[4] == 5.5f &&
+          base.samples[5] == 5.5f && base.samples[6] == 7);
+
+    // `other` claiming more frames than it holds mixes only the frames it has
+    SoundBuffer shortOther = other;
+    shortOther.numSamples = 1000;
+    base = stereo({1, 2, 3, 4});
+    base.mixFrom(shortOther, 0);
+    check("mix: only the whole frames `other` holds are mixed",
+          base.numSamples == 2 && pcmConsistent(base) && base.samples[3] == 3.75f,
+          to_string(base.numSamples) + " frames");
+
+    // Refused: nothing is mixed or resized, and the refusal is logged
+    const vector<float> before = {1, 2, 3, 4, 5, 6, 7, 8};
+    auto refused = [&](const string& name, const SoundBuffer& src, size_t offset,
+                       const string& logNeedle) {
+        SoundBuffer b = stereo(before);
+        const size_t logsBefore = countLogs(LogLevel::Error, logNeedle);
+        b.mixFrom(src, offset);
+        check("mix: " + name + " is refused", b.samples == before && b.numSamples == 4);
+        check("mix: " + name + " is logged",
+              countLogs(LogLevel::Error, logNeedle) == logsBefore + 1, lastLog(LogLevel::Error));
+    };
+    SoundBuffer mono;
+    mono.generateSineWave(440.0f, 0.01f, 0.5f, 48000);
+    refused("a mono buffer into a stereo one", mono, 0, "channel counts differ");
+    // offset + frames wraps a size_t: formed unchecked, the end lands inside
+    // the buffer and the write starts before it
+    const size_t kSizeMax = numeric_limits<size_t>::max();
+    refused("an offset of SIZE_MAX", other, kSizeMax, "past what a buffer holds");
+    refused("an offset of SIZE_MAX - 1", other, kSizeMax - 1, "past what a buffer holds");
+    // The end fits a size_t, but not end * channels in a vector
+    refused("an end past max_size() / channels", other, before.max_size() / 2,
+            "past what a buffer holds");
+}
+
+// --- Decoder buffer sizing ----------------------------------------------------
+// 16-bit mono PCM WAV of `frames` frames (440 Hz tone)
+static vector<char> wavBytes(uint32_t frames, int rate) {
+    vector<char> out;
+    auto put = [&](const void* p, size_t n) {
+        out.insert(out.end(), (const char*)p, (const char*)p + n);
+    };
+    auto u32 = [&](uint32_t v) { put(&v, 4); };
+    auto u16 = [&](uint16_t v) { put(&v, 2); };
+    put("RIFF", 4); u32(36 + frames * 2); put("WAVE", 4);
+    put("fmt ", 4); u32(16); u16(1); u16(1); u32((uint32_t)rate); u32((uint32_t)rate * 2); u16(2); u16(16);
+    put("data", 4); u32(frames * 2);
+    for (uint32_t i = 0; i < frames; ++i) u16((uint16_t)(int16_t)(8000.0f * sin(TAU * 440.0f * (float)i / (float)rate)));
+    return out;
+}
+
+// 16-bit mono 48 kHz FLAC of `blocks` frames of 4096 samples, each a
+// CONSTANT subframe of 1000, whose STREAMINFO states `statedSamples` samples
+// (36-bit field).
+static vector<char> flacBytes(int blocks, uint64_t statedSamples) {
+    vector<uint8_t> out = {'f', 'L', 'a', 'C', 0x80, 0x00, 0x00, 34};   // last block: STREAMINFO
+    // STREAMINFO: min / max block size 4096, min / max frame size unknown,
+    // then 64 bits of sample rate (20), channels - 1 (3), bits - 1 (5) and
+    // total samples (36)
+    vector<uint8_t> si = {0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0};
+    const uint64_t packed = ((uint64_t)48000 << 44) | ((uint64_t)15 << 36) |
+                            (statedSamples & 0xFFFFFFFFFull);
+    for (int i = 0; i < 8; ++i) si.push_back((uint8_t)(packed >> (56 - 8 * i)));
+    out.insert(out.end(), si.begin(), si.end());
+    out.insert(out.end(), 16, 0);   // MD5 unknown
+    auto crc8 = [](const uint8_t* p, size_t n) {
+        uint8_t c = 0;
+        for (size_t i = 0; i < n; ++i) {
+            c ^= p[i];
+            for (int b = 0; b < 8; ++b) c = (uint8_t)((c & 0x80) ? (c << 1) ^ 0x07 : c << 1);
+        }
+        return c;
+    };
+    auto crc16 = [](const uint8_t* p, size_t n) {
+        uint16_t c = 0;
+        for (size_t i = 0; i < n; ++i) {
+            c ^= (uint16_t)(p[i] << 8);
+            for (int b = 0; b < 8; ++b) c = (uint16_t)((c & 0x8000) ? (c << 1) ^ 0x8005 : c << 1);
+        }
+        return c;
+    };
+    for (int f = 0; f < blocks; ++f) {
+        // sync + fixed blocking, block size 4096 / 48 kHz, mono / 16-bit, frame number
+        vector<uint8_t> fr = {0xFF, 0xF8, 0xCA, 0x08, (uint8_t)f};
+        fr.push_back(crc8(fr.data(), fr.size()));
+        fr.insert(fr.end(), {0x00, 0x03, 0xE8});   // CONSTANT subframe: 1000
+        const uint16_t c = crc16(fr.data(), fr.size());
+        fr.push_back((uint8_t)(c >> 8));
+        fr.push_back((uint8_t)c);
+        out.insert(out.end(), fr.begin(), fr.end());
+    }
+    return vector<char>(out.begin(), out.end());
+}
+
+static void checkDecodeSizing(const fs::path& dir, const string& tag) {
+    // The reservation: the stated length, capped by 16 samples per input
+    // byte and by the limit. UINT32_MAX stands in for a 32-bit size_t.
+    {
+        using internal::decodeReserveSamples;
+        const size_t kSizeMax = numeric_limits<size_t>::max();
+        check("decode: a stated length below the input's cap is reserved as stated",
+              decodeReserveSamples(1000, 2, 1000, kSizeMax) == 2000);
+        check("decode: a stated length above the input's cap is capped by the input",
+              decodeReserveSamples(0xFFFFFFFFull, 2, 1000, kSizeMax) == 16000);
+        check("decode: an unknown input size reserves nothing",
+              decodeReserveSamples(0xFFFFFFFFull, 2, 0, kSizeMax) == 0);
+        check("decode: stated frames x channels saturates instead of wrapping",
+              decodeReserveSamples(0x8000000000000001ull, 4, 1000, kSizeMax) == 16000);
+        check("decode: input bytes x 16 saturates instead of wrapping",
+              decodeReserveSamples(1000, 2, 0x1000000000000001ull, kSizeMax) == 2000);
+        check("decode: the reservation stops at a 32-bit limit",
+              decodeReserveSamples(0xFFFFFFFFull, 16, 0xFFFFFFFFull, 0xFFFFFFFFu) == 0xFFFFFFFFu);
+        check("decode: a longest 36-bit length stops at a 32-bit limit",
+              decodeReserveSamples(0xFFFFFFFFFull, 8, 0xFFFFFFFFFull, 0xFFFFFFFFu) == 0xFFFFFFFFu);
+        check("decode: no channels reserve nothing", decodeReserveSamples(1000, 0, 1000, kSizeMax) == 0);
+    }
+
+    // A FLAC whose STREAMINFO states far more samples than its frames hold
+    // (a 36-bit field): the load gets the frames that decode, and no
+    // allocation along the way is sized from the stated length (2^27 frames
+    // = 512 MiB as floats). The bound: the reservation cap (16 samples per
+    // input byte) plus 1 MiB for the decode step and the decoder's own state.
+    const vector<char> flac = flacBytes(2, (uint64_t)1 << 27);
+    const size_t capBytes = flac.size() * 16 * sizeof(float) + (1u << 20);
+    auto flacIntact = [](const SoundBuffer& buf) {
+        if (buf.numSamples != 2 * 4096 || buf.channels != 1 || !pcmConsistent(buf)) return false;
+        for (float v : buf.samples) if (v != 1000 / 32768.0f) return false;
+        return true;
+    };
+    SoundBuffer m;
+    allocProbeArm();
+    const bool memOk = (bool)m.loadFlacFromMemory(flac.data(), flac.size());
+    allocProbeDisarm();
+    check("decode: a FLAC stating more samples than it holds loads from memory",
+          memOk && flacIntact(m), to_string(m.numSamples) + " frames");
+    check("decode: no allocation of the load is sized from the stated length",
+          allocProbeLargest() <= capBytes, to_string(allocProbeLargest()) + " bytes requested");
+    check("decode: the buffer keeps no capacity from the stated length",
+          m.samples.capacity() <= 2 * m.samples.size(), to_string(m.samples.capacity()));
+    const fs::path flacPath = dir / ("tc_audio_diag_" + tag + "_stated.flac");
+    {
+        ofstream out(flacPath, ios::binary);
+        out.write(flac.data(), (streamsize)flac.size());
+    }
+    SoundBuffer f;
+    allocProbeArm();
+    const bool fileOk = (bool)f.loadFlac(flacPath);
+    allocProbeDisarm();
+    check("decode: the same FLAC loads from a file", fileOk && flacIntact(f),
+          to_string(f.numSamples) + " frames");
+    check("decode: no allocation of the file load is sized from the stated length",
+          allocProbeLargest() <= capBytes, to_string(allocProbeLargest()) + " bytes requested");
+    std::error_code ec;
+    fs::remove(flacPath, ec);
+
+    // A WAV decodes in steps to exactly its frames
+    const uint32_t frames = 10000;   // two full steps and a partial one
+    const vector<char> wav = wavBytes(frames, 48000);
+    SoundBuffer w;
+    bool same = (bool)w.loadWavFromMemory(wav.data(), wav.size()) && w.numSamples == frames &&
+                pcmConsistent(w);
+    for (uint32_t i = 0; same && i < frames; ++i) {
+        same = w.samples[i] == (float)(int16_t)(8000.0f * sin(TAU * 440.0f * (float)i / 48000.0f)) / 32768.0f;
+    }
+    check("decode: a WAV loads every frame intact", same, to_string(w.numSamples) + " frames");
+}
+
+// --- Voices on buffers with nothing to play ------------------------------------
+// A voice on an empty buffer (or one whose samples are shorter than
+// numSamples * channels) stops at its first mix instead of indexing it;
+// setPosition() on an empty buffer lands on 0.
+static void checkEmptyVoices() {
+    auto stops = [](Sound& s) {
+        return waitFor([&] { return !s.isPlaying(); }, 1000);
+    };
+
+    auto empty = make_shared<SoundBuffer>();
+    const int16_t none[1] = {};
+    check("voice: an empty buffer loads", (bool)empty->loadPcmFromMemory(none, 0, 2, 48000) &&
+                                             empty->numSamples == 0);
+    Sound looping;
+    looping.loadFromBuffer(empty);
+    looping.setLoop(true);
+    check("voice: a looping voice on an empty buffer starts", looping.play());
+    check("voice: a looping voice on an empty buffer stops", stops(looping));
+    looping.stop();
+
+    Sound seek;
+    seek.loadFromBuffer(empty);
+    check("voice: a voice on an empty buffer starts again", seek.play());
+    seek.setPosition(1.0f);
+    check("voice: setPosition() on an empty buffer lands on 0", seek.getPosition() == 0.0f,
+          to_string(seek.getPosition()));
+    check("voice: after setPosition() it stops", stops(seek));
+    seek.stop();
+
+    // numSamples claims more frames than samples holds
+    auto shortBuf = make_shared<SoundBuffer>();
+    shortBuf->channels = 2;
+    shortBuf->sampleRate = 48000;
+    shortBuf->numSamples = 48000;
+    shortBuf->samples.assign(10, 0.25f);
+    Sound shortVoice;
+    shortVoice.loadFromBuffer(shortBuf);
+    shortVoice.setLoop(true);
+    check("voice: a looping voice on a short buffer starts", shortVoice.play());
+    check("voice: a looping voice on a short buffer stops", stops(shortVoice));
+    shortVoice.stop();
+}
+
 struct PumpApp : App {
     int frames = 0;
     void setup() override { playCopyOffMain(); }
@@ -470,6 +723,9 @@ int main() {
     }
 
     checkPcmLoading();
+    checkMixFrom();
+    checkDecodeSizing(fs::temp_directory_path(), tag);
+    checkEmptyVoices();
 
     // A file named .ogg that is not Ogg Vorbis: the load fails and is
     // reported, and the file is closed once (stb_vorbis closes it on the
