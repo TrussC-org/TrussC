@@ -7734,8 +7734,10 @@ Every call takes the `Serial`'s own lock, so one `Serial` may be used from
 several threads without racing on the port: no call closes it while another
 is reading or writing it. Which thread reads or writes what, and in which
 order, is still up to the app. A call that blocks holds the lock meanwhile:
-`drain()`, `setup()`, and `writeBytes()` on Windows (no write timeout) and
-Android (up to 1 s per 16 KB); on macOS and Linux `writeBytes()` never blocks.
+`drain()`, `setup()`, `writeBytes()` on Windows (no write timeout) and
+Android (up to 1 s per 16 KB), and on Android `close()`, the destructor and a
+move assignment, which wait for the USB worker thread to stop (up to about
+250 ms once connected). On macOS and Linux `writeBytes()` never blocks.
 '''
 details.ja = '''
 USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
@@ -7760,7 +7762,9 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 ポートが閉じられることはない）。ただ、どのスレッドが何をどの順に読み書きするかは
 アプリ側で決める必要がある。ブロックする呼び出しはその間ロックを持ち続ける:
 `drain()`、`setup()`、Windows（書き込みのタイムアウトなし）と Android（16 KB ごとに
-最大1秒）の `writeBytes()`。macOS と Linux の `writeBytes()` はブロックしない。
+最大1秒）の `writeBytes()`、そして Android の `close()`、デストラクタ、ムーブ代入
+（USB ワーカースレッドが止まるのを待つ。接続後なら最大で約 250 ms）。macOS と
+Linux の `writeBytes()` はブロックしない。
 '''
 details.ko = '''
 USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
@@ -7783,9 +7787,10 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 모든 호출이 `Serial` 자신의 락을 잡으므로, 하나의 `Serial`을 여러 스레드에서
 사용해도 포트를 두고 경합하지 않는다(다른 호출이 읽거나 쓰는 도중에 포트가
 닫히는 일은 없다). 다만 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야
-한다. 블록되는 호출은 그동안 락을 계속 잡는다: `drain()`, `setup()`, 그리고
-Windows(쓰기 타임아웃 없음)와 Android(16 KB마다 최대 1초)의 `writeBytes()`.
-macOS와 Linux의 `writeBytes()`는 블록되지 않는다.
+한다. 블록되는 호출은 그동안 락을 계속 잡는다: `drain()`, `setup()`,
+Windows(쓰기 타임아웃 없음)와 Android(16 KB마다 최대 1초)의 `writeBytes()`, 그리고
+Android의 `close()`, 소멸자, 이동 대입(USB 워커 스레드가 멈추기를 기다린다. 연결
+후라면 최대 약 250 ms). macOS와 Linux의 `writeBytes()`는 블록되지 않는다.
 '''
 
 ["Serial::isInitialized"]
@@ -7819,7 +7824,9 @@ It fires for two reasons, each once per open connection:
 
 `close()` on a port that is not open does not fire. Destroying a `Serial`, or
 move-assigning another one over it, closes the port without firing, so a
-listener never runs from a destructor.
+listener never runs from a destructor. Neither does `setup()` when it closes a
+port that a listener or another thread opened while it was closing the
+previous one; it logs a warning instead.
 
 Only those four I/O calls find a loss. A device that went away before
 `close()` or `setup()` without one of them noticing ends as a close
@@ -7836,12 +7843,14 @@ next `available()`, `readBytes()`, `readByte()`, `writeBytes()`, `close()` or
 A listener that must run on the main thread whichever thread uses the `Serial`
 passes `Deliver::Main`: `serial.onDisconnect.listen(fn, Deliver::Main)`.
 
-**Reconnecting.** The port is already closed, `isConnected()` is false and the
-lock is free when a listener runs, so a listener may call
-`setup(e.portName, e.baudRate)`. Check
-`wasClean` first, or every `close()` reopens the port. The call that found the
-loss still returns its error value (`available()` returns 0) and leaves the new
-connection alone.
+**Reconnecting.** When a listener runs, the port of the connection that ended
+is closed and the lock is free, so a listener may call
+`setup(e.portName, e.baudRate)`. Check `wasClean` first, or every `close()`
+reopens the port. The call that found the loss still returns its error value
+(`available()` returns 0) and leaves the new connection alone. Another thread
+may call `setup()` in the meantime, so an app that also connects from other
+threads checks `isConnected()` / `getDevicePath()` in the listener before it
+reconnects.
 
 ```cpp
 listener = serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
@@ -7869,7 +7878,8 @@ details.ja = '''
 
 開いていないポートへの `close()` では発火しない。`Serial` の破棄や、別の `Serial`
 のムーブ代入でもポートは閉じるが発火しないので、リスナーがデストラクタから
-呼ばれることはない。
+呼ばれることはない。`setup()` が前のポートを閉じている間にリスナーや別のスレッドが
+開いたポートを、`setup()` が閉じるときも発火しない（代わりに警告をログに出す）。
 
 消失を見つけるのは上の4つの I/O 呼び出しだけ。それらが気づかないうちに抜けた
 デバイスを `close()` や `setup()` で閉じた場合は、クローズとして終わる
@@ -7886,11 +7896,13 @@ reason の後ろに `(the device had already been lost: <理由>)` が付く。
 どのスレッドから使っていてもメインスレッドで動く必要のあるリスナーは
 `Deliver::Main` を渡す: `serial.onDisconnect.listen(fn, Deliver::Main)`。
 
-**再接続。** リスナーが呼ばれる時点でポートは閉じていて、`isConnected()` は false、
-ロックも外れているので、リスナーから `setup(e.portName, e.baudRate)` を呼んでよい。先に
+**再接続。** リスナーが呼ばれる時点で、終わった接続のポートは閉じていて、ロックも
+外れているので、リスナーから `setup(e.portName, e.baudRate)` を呼んでよい。先に
 `wasClean` を確認すること。そうしないと `close()` のたびにポートが開き直される。
 消失を見つけた呼び出しは、それでも通常のエラー値を返し（`available()` は 0）、
-新しい接続には手を触れない。
+新しい接続には手を触れない。その間に別のスレッドが `setup()` を呼ぶこともあるので、
+ほかのスレッドからも接続するアプリは、再接続の前にリスナーの中で `isConnected()` /
+`getDevicePath()` を確かめること。
 
 ```cpp
 listener = serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
@@ -7917,7 +7929,8 @@ details.ko = '''
 
 열려 있지 않은 포트에 대한 `close()`는 발생하지 않는다. `Serial`을 파괴하거나
 다른 `Serial`을 이동 대입해도 포트는 닫히지만 발생하지 않으므로, 리스너가
-소멸자에서 실행되는 일은 없다.
+소멸자에서 실행되는 일은 없다. `setup()`이 이전 포트를 닫는 동안 리스너나 다른
+스레드가 연 포트를 `setup()`이 닫을 때도 발생하지 않는다(대신 경고를 로그로 남긴다).
 
 소실을 찾는 것은 위의 네 I/O 호출뿐이다. 이들이 알아채기 전에 분리된 장치를
 `close()`나 `setup()`으로 닫으면 닫기로 끝난다(`wasClean = true`,
@@ -7934,11 +7947,13 @@ true이다.
 실행되어야 하는 리스너는 `Deliver::Main`을 넘긴다:
 `serial.onDisconnect.listen(fn, Deliver::Main)`.
 
-**재연결.** 리스너가 실행될 때 포트는 이미 닫혀 있고, `isConnected()`는 false이며
-락도 풀려 있으므로, 리스너에서 `setup(e.portName, e.baudRate)`를 호출해도 된다. 먼저 `wasClean`을
+**재연결.** 리스너가 실행될 때 끝난 연결의 포트는 닫혀 있고 락도 풀려 있으므로,
+리스너에서 `setup(e.portName, e.baudRate)`를 호출해도 된다. 먼저 `wasClean`을
 확인할 것. 그렇지 않으면 `close()`할 때마다 포트가 다시 열린다. 소실을 발견한
 호출은 그래도 평소의 오류 값을 반환하며(`available()`은 0), 새 연결은 건드리지
-않는다.
+않는다. 그 사이에 다른 스레드가 `setup()`을 호출할 수도 있으므로, 다른
+스레드에서도 연결하는 앱은 재연결하기 전에 리스너 안에서 `isConnected()` /
+`getDevicePath()`를 확인할 것.
 
 ```cpp
 listener = serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
@@ -8109,9 +8124,9 @@ description.ja = "setup() に渡したポート名"
 description.ko = "setup()에 전달한 포트 이름"
 
 ["SerialDisconnectEventArgs::reason"]
-description.en = "Human-readable reason: \"closed by close()\", or the loss warning's text such as \"read: Input/output error\""
-description.ja = "人が読める理由。\"closed by close()\"、または \"read: Input/output error\" のような消失の警告と同じ文字列"
-description.ko = "사람이 읽을 수 있는 사유. \"closed by close()\" 또는 \"read: Input/output error\" 같은 소실 경고와 같은 문자열"
+description.en = "Human-readable reason: \"closed by close()\" (on Android it may go on with \"(the device had already been lost: ...)\"), or the loss warning's text such as \"read: Input/output error\". For display and logs; tell a close from a loss with wasClean"
+description.ja = "人が読める理由。\"closed by close()\"（Android では後ろに \"(the device had already been lost: ...)\" が付くことがある）、または \"read: Input/output error\" のような消失の警告と同じ文字列。表示やログ用で、クローズか消失かの判定には wasClean を使う"
+description.ko = "사람이 읽을 수 있는 사유. \"closed by close()\"(Android에서는 뒤에 \"(the device had already been lost: ...)\"가 붙을 수 있음) 또는 \"read: Input/output error\" 같은 소실 경고와 같은 문자열. 표시와 로그용이며, 닫기인지 소실인지는 wasClean으로 판단할 것"
 
 ["SerialDisconnectEventArgs::wasClean"]
 description.en = "true: closed by the app (close()); false: device lost / I/O error"

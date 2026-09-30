@@ -20,9 +20,11 @@
 // threads never race on the port: no call closes it while another is reading
 // or writing it. The lock is released before onDisconnect fires, so a
 // listener may call setup(). Which thread reads or writes what, and in which
-// order, is still up to the app. A call that blocks holds the lock meanwhile
-// (drain(), setup(), and writeBytes() on Windows and Android; see
-// writeBytes()).
+// order, is still up to the app. A call that blocks holds the lock meanwhile:
+// drain(), setup(), writeBytes() on Windows and Android (see writeBytes()),
+// and on Android close(), the destructor and a move assignment, which wait
+// for the USB worker thread to stop (up to about 250 ms once connected,
+// longer while it is still opening the device).
 // =============================================================================
 
 #include <string>
@@ -181,7 +183,9 @@ public:
     // - wasClean = true: close() closed the open port (setup() calls it too,
     //   to close the previous port). reason is "closed by close()".
     // close() on a port that is not open does not fire, and neither does the
-    // destructor or a move assignment over an open Serial.
+    // destructor or a move assignment over an open Serial, nor setup() when
+    // it closes a port that a listener or another thread opened while
+    // setup() was closing the previous one (it logs a warning instead).
     // Only those four I/O calls find a loss: a device that went away before
     // close() / setup() without one of them noticing ends with wasClean =
     // true and "closed by close()". On Android, where the worker thread may
@@ -197,11 +201,14 @@ public:
     //
     //   listener = serial.onDisconnect.listen(fn, Deliver::Main);
     //
-    // RECONNECTING: the port is closed and isConnected() is false before any
-    // listener runs, and the lock is free, so a listener may call
+    // RECONNECTING: the port of the connection that ended is closed and the
+    // lock is free before any listener runs, so a listener may call
     // setup(e.portName, e.baudRate). Check wasClean first, or every close()
     // reopens the port. The call that found the loss still returns its error
-    // value and leaves the new connection alone.
+    // value and leaves the new connection alone. Another thread may call
+    // setup() in the meantime, so an app that also connects from other
+    // threads checks isConnected() / getDevicePath() in the listener before
+    // it reconnects.
     //
     // Listeners stay with the Serial they were added to: a move does not
     // carry them over.
