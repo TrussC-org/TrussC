@@ -19,13 +19,20 @@
 // Guards (#357): `trusscli build` and `trusscli clean`.
 //   - ProjectGenerator::buildDirForPreset() is the one preset -> build folder
 //     mapping (ios -> xcode-ios), and the written presets' binaryDir follow it.
-//   - planConfigure(): a build folder without a CMake cache is configured
-//     first (one message, the build-type pin folded in), a cache that holds
-//     what was asked for stays configure-free.
+//   - planConfigure(): a build folder without a CMake cache, or with only the
+//     cache of a failed configure, is configured first (one message, the
+//     build-type pin folded in); a cache that holds what was asked for stays
+//     configure-free.
+//   - inspectBuildFolder() / buildFoldersToClean(): the folder `build` looks
+//     at (ios -> xcode-ios) and what it finds there on a real filesystem,
+//     and the folders `clean` / `clean --all` remove.
 //   - checkPresetToolchain() / shouldRefreshPresets(): a Visual Studio
 //     update that removed a pinned MSVC / SDK / ninja path is found (fake
 //     filesystem), and only a native Windows build refreshes the presets.
 //     On Windows, also through the real writer and filesystem.
+//   - windowsToolchainPins() / repinWindowsToolchain(): the refresh replaces
+//     only the windows preset's pins, keeps TRUSSC_DIR, the other presets
+//     and the IDE, and the no-VS fallback entry cannot pin.
 // Not covered: the commands themselves (tools/src/main.cpp), which call these
 // functions; the IDE files and CMake configure that `update` runs; the
 // Visual Studio detection and the refresh on a real Windows toolchain change.
@@ -375,7 +382,7 @@ static void testBuildDirMapping() {
 
     const auto& all = ProjectGenerator::allPresetNames();
     bool hasIos = find(all.begin(), all.end(), "ios") != all.end();
-    check("all preset names include ios (clean --all removes xcode-ios)",
+    check("all preset names: six, ios among them",
           all.size() == 6 && hasIos);
 
     // Every preset the writer emits puts its build folder where the helper says
@@ -434,6 +441,7 @@ static void testConfigurePlan() {
     {
         ConfigureInputs in = native;
         in.hasCache = true;
+        in.generated = true;
         in.cachedBuildType = "RelWithDebInfo";
         ConfigurePlan p = planConfigure(in);
         check("cache holds the default, no flag: no configure (steady state)",
@@ -442,6 +450,7 @@ static void testConfigurePlan() {
     {
         ConfigureInputs in = native;
         in.hasCache = true;
+        in.generated = true;
         in.cachedBuildType = "Release";
         in.requestedBuildType = "Release";
         ConfigurePlan p = planConfigure(in);
@@ -450,6 +459,7 @@ static void testConfigurePlan() {
     {
         ConfigureInputs in = native;
         in.hasCache = true;
+        in.generated = true;
         in.cachedBuildType = "Debug";
         ConfigurePlan p = planConfigure(in);
         check("cache Debug, no flag: switch back to RelWithDebInfo",
@@ -459,6 +469,7 @@ static void testConfigurePlan() {
     {
         ConfigureInputs in = native;
         in.hasCache = true;
+        in.generated = true;
         in.cachedBuildType = "RelWithDebInfo";
         in.warnings = true;
         ConfigurePlan p = planConfigure(in);
@@ -478,6 +489,7 @@ static void testConfigurePlan() {
         ConfigureInputs in;
         in.buildDir = "build-web";
         in.hasCache = true;
+        in.generated = true;
         in.cachedBuildType = "MinSizeRel";
         in.requestedBuildType = "Debug";
         ConfigurePlan p = planConfigure(in);
@@ -487,9 +499,92 @@ static void testConfigurePlan() {
         ConfigureInputs in;
         in.buildDir = "xcode-ios";
         ConfigurePlan p = planConfigure(in);
-        check("ios, no cache: configure xcode-ios",
+        check("no cache: the message names the folder it was given",
               p.configure && p.defines.empty() && firstMessageHas(p, "xcode-ios"));
     }
+    {
+        // A configure that failed (emsdk not active, a broken local.cmake)
+        // leaves CMakeCache.txt but no Makefile / build.ninja
+        ConfigureInputs in = native;
+        in.hasCache = true;
+        in.cachedBuildType = "RelWithDebInfo";
+        ConfigurePlan p = planConfigure(in);
+        check("cache without build files (failed configure): configure again",
+              p.configure && p.defines.empty() && p.messages.size() == 1 &&
+              firstMessageHas(p, "No build files in build-linux"));
+    }
+    {
+        ConfigureInputs in = native;
+        in.hasCache = true;
+        in.cachedBuildType = "RelWithDebInfo";
+        in.requestedBuildType = "Debug";
+        ConfigurePlan p = planConfigure(in);
+        check("failed configure, --debug: one configure with the type, one message",
+              p.configure && p.defines.size() == 1 &&
+              hasDefine(p, "-DCMAKE_BUILD_TYPE=Debug") && p.messages.size() == 1 &&
+              firstMessageHas(p, "No build files in build-linux"));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7b. The build folder on disk: which folder `build` looks at, and what
+//     `clean` removes
+// -----------------------------------------------------------------------------
+static void testBuildFolders() {
+    fs::path project = makeProject("build-folders");
+    {
+        ConfigureInputs in = inspectBuildFolder(project.string(), "linux", "linux");
+        check("inspect: empty project -> build-linux, native, no cache",
+              in.buildDir == "build-linux" && in.isNative && !in.hasCache &&
+              !in.generated && in.cachedBuildType.empty());
+    }
+    {
+        // A configure that failed: the cache (with a build type) and no Makefile
+        fs::create_directories(project / "build-linux" / "CMakeFiles");
+        writeFile(project / "build-linux" / "CMakeCache.txt",
+                  "# comment\nCMAKE_BUILD_TYPE:STRING=Debug\nOTHER:BOOL=ON\n");
+        ConfigureInputs in = inspectBuildFolder(project.string(), "linux", "linux");
+        check("inspect: cache only -> cache, type read, not generated",
+              in.hasCache && !in.generated && in.cachedBuildType == "Debug");
+        writeFile(project / "build-linux" / "Makefile", "all:\n");
+        in = inspectBuildFolder(project.string(), "linux", "linux");
+        check("inspect: cache + Makefile -> generated", in.hasCache && in.generated);
+    }
+    {
+        fs::create_directories(project / "build-web");
+        writeFile(project / "build-web" / "CMakeCache.txt", "");
+        writeFile(project / "build-web" / "build.ninja", "");
+        ConfigureInputs in = inspectBuildFolder(project.string(), "web", "linux");
+        check("inspect: web on linux -> build-web, not native, build.ninja counts",
+              in.buildDir == "build-web" && !in.isNative && in.hasCache && in.generated);
+    }
+    {
+        // iOS builds in xcode-ios (not build-ios); a stray build-ios is ignored
+        fs::create_directories(project / "build-ios");
+        writeFile(project / "build-ios" / "CMakeCache.txt", "");
+        ConfigureInputs in = inspectBuildFolder(project.string(), "ios", "macos");
+        bool before = !in.hasCache && in.buildDir == "xcode-ios";
+        fs::create_directories(project / "xcode-ios" / "app.xcodeproj");
+        writeFile(project / "xcode-ios" / "CMakeCache.txt", "");
+        in = inspectBuildFolder(project.string(), "ios", "macos");
+        check("inspect: ios looks in xcode-ios, the .xcodeproj counts",
+              before && in.buildDir == "xcode-ios" && !in.isNative &&
+              in.hasCache && in.generated);
+    }
+
+    auto has = [](const vector<string>& v, const string& x) {
+        return find(v.begin(), v.end(), x) != v.end();
+    };
+    vector<string> all = buildFoldersToClean("macos", true);
+    check("clean --all: every preset's folder, xcode-ios not build-ios, and build",
+          all.size() == 7 && has(all, "xcode-ios") && !has(all, "build-ios") &&
+          has(all, "build-web") && has(all, "build-android") &&
+          has(all, "build-linux") && has(all, "build") && all.back() == "build");
+    vector<string> native = buildFoldersToClean("linux", false);
+    check("clean: the native folder and build only",
+          native == vector<string>({"build-linux", "build"}));
+    check("clean: no native preset -> build only",
+          buildFoldersToClean("", false) == vector<string>({"build"}));
 }
 
 // -----------------------------------------------------------------------------
@@ -610,18 +705,71 @@ static void testToolchainCheck() {
               !other.pinned && !broken.pinned);
     }
 
-    // The refresh keeps the project's TRUSSC_DIR from the old presets
+    // The refresh: re-pin only the windows preset's toolchain
     {
-        const char* text = R"({"configurePresets": [
-            {"name": "windows", "cacheVariables": {"TRUSSC_DIR": "D:/TrussC/core"}},
-            {"name": "web", "cacheVariables": {"TRUSSC_DIR": {"type": "PATH", "value": "E:/x/core"}}}
-        ]})";
-        check("preset cache variable: string and object forms, missing ones empty",
-              presetCacheVariable(text, "windows", "TRUSSC_DIR") == "D:/TrussC/core" &&
-              presetCacheVariable(text, "web", "TRUSSC_DIR") == "E:/x/core" &&
-              presetCacheVariable(text, "linux", "TRUSSC_DIR").empty() &&
-              presetCacheVariable(text, "windows", "CMAKE_MAKE_PROGRAM").empty() &&
-              presetCacheVariable("{ nope", "windows", "TRUSSC_DIR").empty());
+        VsVersionInfo fallback;   // what VsDetector returns when no VS is found
+        fallback.version = 17;
+        fallback.displayName = "Visual Studio 2022";
+        VsVersionInfo vs = fallback;
+        vs.installPath = "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community";
+        vs.ninjaPath = vs.installPath + "\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja\\ninja.exe";
+        vs.vcToolsVersion = "14.44.35207";
+        vs.windowsSdkVersion = "10.0.26100.0";
+        check("repin: the no-VS fallback entry cannot pin, a real one can",
+              !canPinToolchain(fallback) && canPinToolchain(vs));
+
+        WindowsToolchainPins pins = windowsToolchainPins(vs);
+        WindowsToolchainPins none = windowsToolchainPins(fallback);
+        check("repin: pins use forward slashes and the detected versions",
+              pins.makeProgram == string(kVs) +
+                  "/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" &&
+              pins.include.find(string(kVs) + "/VC/Tools/MSVC/14.44.35207/include;") == 0 &&
+              pins.lib.find("/Lib/10.0.26100.0/um/x64") != string::npos &&
+              pins.path.find(";$penv{PATH}") != string::npos &&
+              none.makeProgram.empty() && none.include.empty() && none.path.empty());
+
+        // An old project: stale VS pins, plus things the refresh must keep
+        Json old = Json::parse(windowsPresets("14.43.34808", "10.0.22621.0"));
+        Json& win = old["configurePresets"][0];
+        win["cacheVariables"]["TRUSSC_DIR"] = "D:/TrussC/core";
+        win["environment"]["MY_VAR"] = "keep";
+        Json web;
+        web["name"] = "web";
+        web["toolchainFile"] = "C:/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+        old["configurePresets"].push_back(web);
+        old["vendor"]["trussc"]["ide"] = "cursor";
+        const string oldText = old.dump(2);
+        check("repin: old presets are stale", checkPresetToolchain(oldText, installed).stale());
+
+        string text = repinWindowsToolchain(oldText, pins);
+        Json j = Json::parse(text, nullptr, false);
+        bool keeps = false;
+        if (j.is_object()) {
+            const Json& w = j["configurePresets"][0];
+            keeps = w["cacheVariables"].value("TRUSSC_DIR", "") == "D:/TrussC/core" &&
+                    w["environment"].value("MY_VAR", "") == "keep" &&
+                    w.value("binaryDir", "") == "${sourceDir}/build-windows" &&
+                    j["configurePresets"][1] == web &&
+                    j["vendor"]["trussc"].value("ide", "") == "cursor";
+        }
+        check("repin: fresh pins are current", !text.empty() &&
+              checkPresetToolchain(text, installed).pinned &&
+              !checkPresetToolchain(text, installed).stale());
+        check("repin: TRUSSC_DIR, other env, web toolchainFile and IDE stay", keeps);
+
+        // A VS without the bundled ninja: the stale ninja pin goes, env stays
+        VsVersionInfo noNinja = vs;
+        noNinja.ninjaPath.clear();
+        Json k = Json::parse(repinWindowsToolchain(oldText, windowsToolchainPins(noNinja)),
+                             nullptr, false);
+        check("repin: no ninja -> CMAKE_MAKE_PROGRAM removed, environment pinned",
+              k.is_object() &&
+              !k["configurePresets"][0]["cacheVariables"].contains("CMAKE_MAKE_PROGRAM") &&
+              k["configurePresets"][0]["environment"].contains("INCLUDE"));
+
+        check("repin: no windows preset or broken text -> \"\"",
+              repinWindowsToolchain(R"({"configurePresets": [{"name": "linux"}]})", pins).empty() &&
+              repinWindowsToolchain("{ nope", pins).empty());
     }
 
     // What `trusscli build` does with the result
@@ -662,6 +810,21 @@ static void testToolchainCheck() {
         bool ninjaListed = find(c.missing.begin(), c.missing.end(),
                                 "C:/NoSuchVisualStudio/2022/ninja.exe") != c.missing.end();
         check("toolchain (Windows): writer's pinned paths are checked", written && c.stale() && ninjaListed);
+        // The writer and the refresh pin the same values
+        Json j = Json::parse(readFile(project / "CMakePresets.json"), nullptr, false);
+        WindowsToolchainPins pins = windowsToolchainPins(vs);
+        bool same = false;
+        if (j.is_object()) {
+            for (const auto& p : j["configurePresets"]) {
+                if (p.value("name", "") != "windows" || !p.contains("cacheVariables") ||
+                    !p.contains("environment")) continue;
+                same = p["cacheVariables"].value("CMAKE_MAKE_PROGRAM", "") == pins.makeProgram &&
+                       p["environment"].value("INCLUDE", "") == pins.include &&
+                       p["environment"].value("LIB", "") == pins.lib &&
+                       p["environment"].value("PATH", "") == pins.path;
+            }
+        }
+        check("toolchain (Windows): writer pins what windowsToolchainPins() gives", written && same);
     }
 #endif
 }
@@ -679,6 +842,7 @@ int main() {
     testTargetFlags();
     testBuildDirMapping();
     testConfigurePlan();
+    testBuildFolders();
     testToolchainCheck();
 
     std::error_code ec;
