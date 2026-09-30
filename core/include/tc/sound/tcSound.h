@@ -850,12 +850,13 @@ public:
     // FFT analysis buffer is internal-only and unaffected by AudioSettings.
     static constexpr int ANALYSIS_BUFFER_SIZE = 4096;
 
-    // Default values used when init() is called without an explicit
-    // AudioSettings, and as initial values for the runtime fields. 48 kHz
-    // is the de-facto pro/video/web standard (DAWs, Web Audio, modern OS
-    // mixers, game engines all default to 48k), and avoids extra resampling
-    // on the way out of the engine. Use init({.sampleRate = 96000}) to opt
-    // into a higher rate when needed.
+    // Initial values of the runtime fields: init() with no arguments uses
+    // them only until init(settings) is first called (after that it reuses
+    // the last settings), and init(settings) picks them for a field given
+    // as 0 or less. 48 kHz is the de-facto pro/video/web standard (DAWs,
+    // Web Audio, modern OS mixers, game engines all default to 48k), and
+    // avoids extra resampling on the way out of the engine. Use
+    // init({.sampleRate = 96000}) to opt into a higher rate when needed.
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;
     static constexpr int DEFAULT_CHANNELS = 2;
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
@@ -903,10 +904,11 @@ public:
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values
-    // passed to init(AudioSettings) — or the defaults if init() was called
-    // without an argument. They return the default even before init() is
-    // called, so video / audio code that needs the rate up front can rely
-    // on the value being sensible.
+    // stored by the last init(AudioSettings) call, whether it succeeded or
+    // failed (a zero-arg init() reuses them), or the DEFAULT_* values if
+    // init(settings) was never called. They are valid even before init(),
+    // so video / audio code that needs the rate up front can rely on the
+    // value being sensible.
     int getSampleRate()   const { return sampleRate_; }
     int getChannels()     const { return channels_; }
     int getMaxPolyphony() const { return (int)playingSounds_.size(); }
@@ -1283,8 +1285,9 @@ private:
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;
 
-    // Runtime engine configuration. Initialized to defaults; replaced when
-    // init(AudioSettings) succeeds. Reading these before init() returns the
+    // Runtime engine configuration. Initialized to defaults; overwritten by
+    // every init(AudioSettings) call, success or failure, and reused by a
+    // zero-arg init(). Reading these before init() returns the
     // defaults (intentional — code that needs the rate up front, e.g. video
     // resampler setup in tcVideoPlayer_*, can pull the value without first
     // forcing engine startup).
