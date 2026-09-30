@@ -54,10 +54,12 @@ namespace trussc {
 //   Only waiting in the subclass destructor (waitForThread()) rules out all
 //   three, and threadedFunction() then always runs.
 //
-//   A subclass that waits must not be destroyed from its own
-//   threadedFunction() (delete this, or dropping the last shared_ptr on the
-//   worker): its waitForThread() would then join its own thread, which throws
-//   std::system_error (resource_deadlock_would_occur) and terminates.
+//   A subclass that waits must not be destroyed on its own worker: from its
+//   threadedFunction() (delete this, or dropping the last shared_ptr there),
+//   or after it returned (a thread_local owner released at thread exit). Its
+//   waitForThread() would then join its own thread, which throws
+//   std::system_error (resource_deadlock_would_occur) and terminates. Only a
+//   subclass that does not wait survives this: the base destructor detaches.
 //
 // Mutex usage:
 //   As documented, no custom wrappers provided.
