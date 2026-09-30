@@ -323,9 +323,9 @@ related = ["shutdownAudio"]
 ["AudioEngine::waitForCallbackIdle"]
 category = "audioengine"
 keywords = ["teardown", "wait", "in-flight", "barrier", "destructor", "disconnect", "use-after-free"]
-description.en = "Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false)."
-description.ja = "audioOut / audioIn リスナーの後始末用バリア。呼んだ時点で実行中だったオーディオコールバックがすべて終わってから返る。EventListener::disconnect() はオーディオスレッドで実行中のコールバックを待たないので、リスナーが自分のメンバーを使うオブジェクトは、切断してからこれを呼び、その後でメンバーを手放す (自分のデストラクタか cleanup() で。基底クラスのデストラクタでは遅い)。オーディオが動いていないとき、リスナーの中から呼んだときはすぐ true を返す。約 1 秒止まったままのリスナーは待つのをやめ、警告を出して false を返す"
-description.ko = "audioOut / audioIn 리스너 정리용 배리어. 호출 시점에 실행 중이던 오디오 콜백이 모두 끝난 뒤 반환한다. EventListener::disconnect() 는 오디오 스레드에서 실행 중인 콜백을 기다리지 않으므로, 리스너가 자기 멤버를 쓰는 객체는 연결을 끊고 이것을 호출한 다음에야 멤버를 놓아준다 (자신의 소멸자나 cleanup() 에서. 기반 클래스 소멸자는 늦다). 오디오가 동작하지 않을 때나 리스너 안에서 호출하면 바로 true 를 반환한다. 약 1 초 동안 멈춘 리스너는 기다리기를 포기하고 경고를 남기며 false 를 반환한다"
+description.en = "Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile."
+description.ja = "audioOut / audioIn リスナーの後始末用バリア。呼んだ時点で実行中だったオーディオコールバックがすべて終わってから返る。EventListener::disconnect() はオーディオスレッドで実行中のコールバックを待たないので、リスナーが自分のメンバーを使うオブジェクトは、切断してからこれを呼び、その後でメンバーを手放す (自分のデストラクタか cleanup() で。基底クラスのデストラクタでは遅い)。オーディオが動いていないとき、リスナーの中から呼んだときはすぐ true を返す。約 1 秒止まったままのリスナーは待つのをやめ、警告を出して false を返す。自分のリスナーだけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つので、リスナーが取るロックを持ったまま呼ばないこと。そのリスナーが止まり、呼び出しは 1 秒待ち、その間は音が途切れる"
+description.ko = "audioOut / audioIn 리스너 정리용 배리어. 호출 시점에 실행 중이던 오디오 콜백이 모두 끝난 뒤 반환한다. EventListener::disconnect() 는 오디오 스레드에서 실행 중인 콜백을 기다리지 않으므로, 리스너가 자기 멤버를 쓰는 객체는 연결을 끊고 이것을 호출한 다음에야 멤버를 놓아준다 (자신의 소멸자나 cleanup() 에서. 기반 클래스 소멸자는 늦다). 오디오가 동작하지 않을 때나 리스너 안에서 호출하면 바로 true 를 반환한다. 약 1 초 동안 멈춘 리스너는 기다리기를 포기하고 경고를 남기며 false 를 반환한다. 자기 리스너만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다리므로, 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 그 리스너가 멈추고, 호출은 1 초를 기다리며, 그동안 소리가 끊긴다"
 related = ["AudioEngine::audioOut", "AudioEngine::audioIn", "EventListener::disconnect", "AudioRecorder::stop"]
 
 ["AudioInBuffer"]
@@ -442,9 +442,9 @@ description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getD
 ["AudioRecorder::stop"]
 category = "sound"
 keywords = ["end", "finalize", "close"]
-description.en = "Stop and finalize the file (patches the WAV header sizes). Safe to call when not recording; also runs automatically on destruction. Waits for an audio callback already running (about one buffer)"
-description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す）。未録音時に呼んでも安全。デストラクタでも自動実行される。実行中のオーディオコールバックを待つ (バッファ 1 つ分程度)"
-description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록). 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. 실행 중인 오디오 콜백을 기다린다 (버퍼 하나 분량 정도)"
+description.en = "Stop and finalize the file (patches the WAV header sizes); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
+description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForCallbackIdle() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
+description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForCallbackIdle() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
 
 ["AudioRecorder::isRecording"]
 category = "sound"
