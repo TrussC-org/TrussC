@@ -96,6 +96,14 @@ bool TcpClient::connect(const std::string& host, int port) {
         logWarning() << "TcpClient: connect() closes the connection an onDisconnect listener opened";
     }
 
+    // This connection's generation, taken before running_ or connected_ is
+    // set for it (and before onConnect). A receive thread that a listener's
+    // disconnect() let go of may still be running: it checks the generation
+    // together with those flags, and has to see the new generation by the
+    // time it can see them set, or it reads the new socket next to the new
+    // receive thread (or, without threads, next to the update event).
+    const unsigned generation = ++receiveGeneration_;
+
     // Create socket
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
@@ -181,8 +189,7 @@ bool TcpClient::connect(const std::string& host, int port) {
         if (useThread_) {
             // Start receive thread (ensure blocking mode for thread unless explicitly set otherwise)
             setBlocking(true);
-            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this,
-                                         ++receiveGeneration_);
+            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this, generation);
         } else {
             // Register update listener
             updateListener_ = events().update.listen(this, &TcpClient::processNetwork);

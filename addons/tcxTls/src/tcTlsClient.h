@@ -131,8 +131,9 @@ private:
 
     std::thread tlsReceiveThread_;
 
-    // Bumped for every receive thread started. A thread whose generation is
-    // no longer current stops: processNetwork()'s receive loop and the loop
+    // Bumped by every connect(), before it sets any flag for the new
+    // connection; its receive thread gets that value. A thread whose
+    // generation is no longer current stops: processNetwork()'s receive loop and the loop
     // in tlsReceiveThreadFunc() both check it. So a listener on the receive
     // thread can reconnect without the old thread reading the new
     // connection: onReceive, onDisconnect, and onError or onConnect(false)

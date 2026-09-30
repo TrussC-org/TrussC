@@ -43,6 +43,11 @@
 //     listener returned, taking the new connection with it.
 //   - An onError listener that reconnects after a refused connect() keeps
 //     its connection: connect() closes the failed socket before notifying.
+//   - The "bye" pattern without threads: an onReceive listener calls
+//     disconnect() and the main thread reconnects with setUseThread(false).
+//     The old receive thread stops (counted on Linux) and does not drive the
+//     new connection's handshake (onConnect fires once, not on it). The
+//     reconnect used to leave the generation unchanged.
 //   - Destroying a client while its onError listener runs for a failed
 //     handshake waits for that listener: the receive thread stays owned.
 //
@@ -106,6 +111,11 @@ using tcx::tls::TlsClient;
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
 static atomic<int> g_fail{0};
+
+// Set on the thread that ran a listener's "bye" disconnect(). A thread id
+// cannot tell that thread apart: once it exits, the next thread may get the
+// same id.
+static thread_local bool t_byeThread = false;
 static void check(const char* name, bool ok) {
     printf("%-60s %s\n", name, ok ? "PASS" : "FAIL");
     fflush(stdout);   // flush per line so CI logs survive a later abort
@@ -843,6 +853,100 @@ static void scenario() {
     peer.reset();
     TC_CLOSE(refusedSock);
     if (g_fail) bail();
+
+    // --- onReceive disconnects, the main thread reconnects without threads ---
+    // An onReceive listener calls disconnect(), which lets go of its receive
+    // thread, and the main thread reconnects with setUseThread(false). That
+    // reconnect did not bump the generation, so the old thread, back from its
+    // listener, went on driving the new connection next to the update event:
+    // the pending connect and the handshake on the same SSL context from two
+    // threads, for as long as the client lived.
+    {
+        TlsClient bn;
+        bn.setVerifyNone();
+#ifdef __linux__
+        const int threadsBaseline = countEntries("/proc/self/task");
+#endif
+        atomic<bool> byeArmed{true}, byeDisconnected{false}, mainReconnected{false};
+        mutex bnMutex;
+        string bnReceived;
+        EventListener bnRxSub = bn.onReceive.listen([&](TcpReceiveEventArgs& e) {
+            const string d(e.data.begin(), e.data.end());
+            if (d == "bye" && byeArmed.exchange(false)) {
+                t_byeThread = true;
+                bn.disconnect();
+                byeDisconnected = true;
+                waitFor(3000, [&] { return mainReconnected.load(); });
+                return;
+            }
+            lock_guard<mutex> lock(bnMutex);
+            bnReceived += d;
+        });
+        check("bye, no threads: connect()", bn.connect("127.0.0.1", port));
+        check("bye, no threads: TLS peer completes the handshake",
+              peer.accept(listener, server.conf, 5000));
+        check("bye, no threads: client is connected",
+              waitFor(3000, [&] { return bn.isConnected(); }));
+        if (g_fail) bail();
+        check("bye, no threads: the onReceive listener disconnected",
+              peer.write("bye") && waitFor(3000, [&] { return byeDisconnected.load(); }));
+        peer.reset();
+        if (g_fail) bail();
+
+        atomic<int> connects{0}, connectsOnOldThread{0};
+        EventListener bnConnSub = bn.onConnect.listen([&](TcpConnectEventArgs& e) {
+            if (e.success) {
+                ++connects;
+                if (t_byeThread) ++connectsOnOldThread;
+            }
+        });
+        bn.setUseThread(false);
+        const bool pendingOrDone = bn.connect("127.0.0.1", port);
+        mainReconnected = true;
+        check("bye, no threads: the main thread's connect()", pendingOrDone);
+        // The peer's handshake runs on a helper thread while this thread
+        // pumps the update event, as the app's frame loop would
+        atomic<bool> serverDone{false}, serverOk{false};
+        thread handshaker([&] {
+            serverOk = peer.accept(listener, server.conf, 5000);
+            serverDone = true;
+        });
+        const bool pumped = waitFor(6000, [&] {
+            events().update.notify();
+            return serverDone.load() && bn.isConnected();
+        });
+        handshaker.join();
+        check("bye, no threads: TLS peer completes the new handshake", serverOk.load());
+        check("bye, no threads: connected, driven by the update event", pumped);
+        check("bye, no threads: onConnect once, not on the old thread",
+              connects == 1 && connectsOnOldThread == 0);
+        if (g_fail) bail();
+        check("bye, no threads: data reaches the peer",
+              bn.send("pumped") && peer.expect("pumped", 3000));
+        peer.write("pong");
+        check("bye, no threads: the client receives the peer's data",
+              waitFor(3000, [&] {
+                  events().update.notify();
+                  lock_guard<mutex> lock(bnMutex);
+                  return bnReceived == "pong";
+              }));
+#ifdef __linux__
+        int threadsAfterBye = -1;
+        waitFor(1000, [&] {
+            events().update.notify();
+            threadsAfterBye = countEntries("/proc/self/task");
+            return threadsAfterBye <= threadsBaseline;
+        });
+        printf("  (threads: %d before connect(), %d after; no receive thread expected)\n",
+               threadsBaseline, threadsAfterBye);
+        check("bye, no threads: the old receive thread stopped", threadsAfterBye <= threadsBaseline);
+#else
+        printf("%-60s %s\n", "bye, no threads: the old receive thread stopped", "SKIP (counted on Linux)");
+#endif
+        bn.disconnect();
+        peer.reset();
+        if (g_fail) bail();
+    }
 
     // --- destroying a client while it reports a failed handshake -------------
     // onError runs on the receive thread. That thread used to detach itself

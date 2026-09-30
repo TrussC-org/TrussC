@@ -335,6 +335,14 @@ bool TlsClient::connect(const std::string& host, int port) {
     // Reset SSL context (clear previous connection state)
     resetSslContext();
 
+    // This connection's generation, taken before running_ is set for it. A
+    // receive thread that a listener's disconnect() let go of may still be
+    // running: it checks the generation together with running_, and has to
+    // see the new generation by the time it can see running_ set, or it
+    // handshakes and reads on the new connection next to the new receive
+    // thread (or, without threads, next to the update event).
+    const unsigned generation = ++tlsReceiveGeneration_;
+
     // Create socket
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 #ifdef _WIN32
@@ -409,7 +417,7 @@ bool TlsClient::connect(const std::string& host, int port) {
             // Thread mode: wait for TCP then handshake
             setBlocking(true);
             tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this,
-                                            ++tlsReceiveGeneration_);
+                                            generation);
         } else {
             // Register update listener for async connect/handshake/recv
             updateListener_ = events().update.listen(this, &TlsClient::processNetwork);
@@ -523,7 +531,9 @@ void TlsClient::processNetwork() {
 
 // generation: the receive thread's own (the generation it was started with)
 void TlsClient::processNetworkImpl(unsigned generation) {
-    if (!running_) return;
+    // A thread whose connection was replaced does nothing more, not even
+    // the pending connect or the handshake of the new one
+    if (!running_ || tlsReceiveGeneration_ != generation) return;
 
     // 1. Handle TCP connection pending
     if (connectPending_) {

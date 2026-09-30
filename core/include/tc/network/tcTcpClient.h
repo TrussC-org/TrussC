@@ -241,8 +241,9 @@ private:
     std::thread receiveThread_;
     std::thread connectThread_;
 
-    // Bumped for every receive thread started. A thread whose generation is
-    // no longer current stops: processNetwork()'s receive loop and the loop
+    // Bumped by every connect(), before it sets any flag for the new
+    // connection; its receive thread gets that value. A thread whose
+    // generation is no longer current stops: processNetwork()'s receive loop and the loop
     // in receiveThreadFunc() both check it. So a listener on the receive
     // thread (onReceive or onDisconnect) can reconnect without the old
     // thread reading the new connection's socket.

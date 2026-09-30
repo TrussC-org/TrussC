@@ -28,6 +28,12 @@
 //     its connection: connect() closes the failed socket before notifying.
 //     The same without threads, where the refused connect is pending and
 //     processNetwork() (driven by the update event) reports the failure.
+//   - The "bye" pattern: an onReceive listener calls disconnect() and the
+//     main thread reconnects. The old receive thread reads none of the new
+//     connection's data and stops (counted on Linux); without threads it
+//     does not drive the new connection either (onConnect fires on the main
+//     thread). connect() used to set the flags before it bumped the
+//     generation, and a reconnect without threads did not bump it at all.
 //   - connect() to another peer while connected, with a listener that
 //     reconnects on every onDisconnect: the listener's reconnect (to the old
 //     peer, from inside connect()'s own disconnect) is closed again without
@@ -88,6 +94,11 @@ using namespace tc;
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
 static atomic<int> g_fail{0};
+
+// Set on the thread that ran a listener's "bye" disconnect(). A thread id
+// cannot tell that thread apart: once it exits, the next thread may get the
+// same id.
+static thread_local bool t_byeThread = false;
 static void check(const char* name, bool ok) {
     printf("%-60s %s\n", name, ok ? "PASS" : "FAIL");
     fflush(stdout);   // flush per line so CI logs survive a later abort
@@ -521,6 +532,168 @@ static void scenario() {
               pumpUntil(3000, [&] { return ntReceived == "pong"; }));
         nt.disconnect();
         TC_CLOSE(ntPeer);
+        if (g_fail) bail();
+    }
+
+    // --- onReceive disconnects, the main thread reconnects --------------------
+    // The common "bye" pattern: an onReceive listener calls disconnect() (which
+    // lets go of its receive thread) and the app's update, seeing
+    // !isConnected(), calls connect(). connect() set running_ / connected_ and
+    // notified onConnect before it bumped the generation, so the old thread,
+    // back from its listener in that window, saw its own generation still
+    // current and went on reading the new socket next to the new receive
+    // thread. Here the listener stays until the main thread is inside
+    // connect()'s onConnect, which keeps that window open for a while.
+    {
+        TcpClient bc;
+#ifdef __linux__
+        const int threadsBaseline = countEntries("/proc/self/task");
+#endif
+        atomic<bool> byeArmed{true}, byeDisconnected{false}, mainInOnConnect{false};
+        mutex bcMutex;
+        string bcReceived;
+        bool fromOldThread = false;
+        EventListener bcRxSub = bc.onReceive.listen([&](TcpReceiveEventArgs& e) {
+            const string d(e.data.begin(), e.data.end());
+            if (d == "bye" && byeArmed.exchange(false)) {
+                t_byeThread = true;
+                bc.disconnect();
+                byeDisconnected = true;
+                waitFor(3000, [&] { return mainInOnConnect.load(); });
+                return;
+            }
+            lock_guard<mutex> lock(bcMutex);
+            bcReceived += d;
+            if (t_byeThread) fromOldThread = true;
+        });
+        atomic<bool> holdOnConnect{false};
+        EventListener bcConnSub = bc.onConnect.listen([&](TcpConnectEventArgs& e) {
+            if (e.success && holdOnConnect.exchange(false)) {
+                mainInOnConnect = true;
+                // The old thread returns from its listener meanwhile
+                this_thread::sleep_for(chrono::milliseconds(200));
+            }
+        });
+
+        check("bye, reconnect: connect()", bc.connect("127.0.0.1", port));
+        rawsocket_t bp = acceptWithin(listener, 2000);
+        check("bye, reconnect: peer accepted", bp != kNoSocket);
+        if (g_fail) bail();
+        ::send(bp, "bye", 3, 0);
+        check("bye, reconnect: the onReceive listener disconnected",
+              waitFor(3000, [&] { return byeDisconnected.load(); }));
+        TC_CLOSE(bp);
+        if (g_fail) bail();
+
+        holdOnConnect = true;
+        check("bye, reconnect: the main thread's connect()", bc.connect("127.0.0.1", port));
+        bp = acceptWithin(listener, 2000);
+        check("bye, reconnect: peer accepted the new connection", bp != kNoSocket);
+        if (g_fail) bail();
+        string expected;
+        for (int i = 0; i < 8; ++i) {
+            const string m = "m" + to_string(i) + ";";
+            expected += m;
+            ::send(bp, m.data(), static_cast<int>(m.size()), 0);
+            this_thread::sleep_for(chrono::milliseconds(5));
+        }
+        bool arrived = waitFor(3000, [&] {
+            lock_guard<mutex> lock(bcMutex);
+            return bcReceived.size() >= expected.size();
+        });
+        {
+            lock_guard<mutex> lock(bcMutex);
+            arrived = arrived && bcReceived == expected;
+        }
+        check("bye, reconnect: the client receives the new peer's data in order", arrived);
+        {
+            lock_guard<mutex> lock(bcMutex);
+            check("bye, reconnect: the old receive thread reads none of it", !fromOldThread);
+        }
+#ifdef __linux__
+        int threadsAfterBye = -1;
+        waitFor(1000, [&] {
+            threadsAfterBye = countEntries("/proc/self/task");
+            return threadsAfterBye <= threadsBaseline + 1;
+        });
+        printf("  (threads: %d before connect(), %d after; one receive thread expected)\n",
+               threadsBaseline, threadsAfterBye);
+        check("bye, reconnect: the old receive thread stopped", threadsAfterBye <= threadsBaseline + 1);
+#else
+        printf("%-60s %s\n", "bye, reconnect: the old receive thread stopped", "SKIP (counted on Linux)");
+#endif
+        bc.disconnect();
+        TC_CLOSE(bp);
+        if (g_fail) bail();
+    }
+
+    // --- the same, reconnecting without threads ---------------------------------
+    // A reconnect with setUseThread(false) did not bump the generation at all,
+    // so the old thread, back from its listener, kept driving the new
+    // connection (the pending connect, onConnect, reads) next to the update
+    // event, for as long as the client lived.
+    {
+        TcpClient bn;
+#ifdef __linux__
+        const int threadsBaseline = countEntries("/proc/self/task");
+#endif
+        atomic<bool> byeArmed{true}, byeDisconnected{false}, mainReconnected{false};
+        EventListener bnRxSub = bn.onReceive.listen([&](TcpReceiveEventArgs& e) {
+            const string d(e.data.begin(), e.data.end());
+            if (d == "bye" && byeArmed.exchange(false)) {
+                t_byeThread = true;
+                bn.disconnect();
+                byeDisconnected = true;
+                waitFor(3000, [&] { return mainReconnected.load(); });
+            }
+        });
+        check("bye, no threads: connect()", bn.connect("127.0.0.1", port));
+        rawsocket_t bp = acceptWithin(listener, 2000);
+        check("bye, no threads: peer accepted", bp != kNoSocket);
+        if (g_fail) bail();
+        ::send(bp, "bye", 3, 0);
+        check("bye, no threads: the onReceive listener disconnected",
+              waitFor(3000, [&] { return byeDisconnected.load(); }));
+        TC_CLOSE(bp);
+        if (g_fail) bail();
+
+        const thread::id mainThread = this_thread::get_id();
+        mutex bnMutex;
+        vector<thread::id> connectedOn;
+        EventListener bnConnSub = bn.onConnect.listen([&](TcpConnectEventArgs& e) {
+            if (e.success) {
+                lock_guard<mutex> lock(bnMutex);
+                connectedOn.push_back(this_thread::get_id());
+            }
+        });
+        bn.setUseThread(false);
+        const bool pendingOrDone = bn.connect("127.0.0.1", port);
+        mainReconnected = true;
+        check("bye, no threads: the main thread's connect()", pendingOrDone);
+        check("bye, no threads: connected, driven by the update event",
+              waitFor(3000, [&] { events().update.notify(); return bn.isConnected(); }));
+        {
+            lock_guard<mutex> lock(bnMutex);
+            check("bye, no threads: onConnect fired once, on the main thread",
+                  connectedOn.size() == 1 && connectedOn[0] == mainThread);
+        }
+        bp = acceptWithin(listener, 2000);
+        check("bye, no threads: peer accepted the new connection", bp != kNoSocket);
+#ifdef __linux__
+        int threadsAfterBye = -1;
+        waitFor(1000, [&] {
+            events().update.notify();
+            threadsAfterBye = countEntries("/proc/self/task");
+            return threadsAfterBye <= threadsBaseline;
+        });
+        printf("  (threads: %d before connect(), %d after; no receive thread expected)\n",
+               threadsBaseline, threadsAfterBye);
+        check("bye, no threads: the old receive thread stopped", threadsAfterBye <= threadsBaseline);
+#else
+        printf("%-60s %s\n", "bye, no threads: the old receive thread stopped", "SKIP (counted on Linux)");
+#endif
+        bn.disconnect();
+        if (bp != kNoSocket) TC_CLOSE(bp);
         if (g_fail) bail();
     }
 
