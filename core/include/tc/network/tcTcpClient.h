@@ -225,13 +225,15 @@ protected:
     std::atomic<size_t> receiveBufferSize_{65536};
     std::mutex sendMutex_;
 
+    // Atomic, both: a receive thread that a listener's disconnect() let go of
+    // may still read them while the app calls setUseThread() or connect()
 #ifdef __EMSCRIPTEN__
-    bool useThread_ = false;
+    std::atomic<bool> useThread_{false};
 #else
-    bool useThread_ = true;
+    std::atomic<bool> useThread_{true};
 #endif
     EventListener updateListener_;
-    bool connectPending_ = false;
+    std::atomic<bool> connectPending_{false};
 
 private:
     void receiveThreadFunc(unsigned generation);
