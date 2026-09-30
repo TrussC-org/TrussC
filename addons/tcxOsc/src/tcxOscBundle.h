@@ -74,6 +74,13 @@ public:
         return OscBundle();
     }
 
+    // Child bundle without a copy; nullptr if the element is not a bundle.
+    // Valid while this bundle is alive and no element is added or removed.
+    const OscBundle* bundleAt(size_t index) const {
+        if (index >= elements_.size()) return nullptr;
+        return std::get_if<OscBundle>(&elements_[index]);
+    }
+
     // -------------------------------------------------------------------------
     // Serialize
     // -------------------------------------------------------------------------
