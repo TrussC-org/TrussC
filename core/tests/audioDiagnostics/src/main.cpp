@@ -506,6 +506,61 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
                                                    v.capacity() == 5000);
     }
 
+    // Growth under a memory limit (internal::setAllocationLimitForTests
+    // refuses what the web's malloc probe would): when the doubled size does
+    // not fit, the largest of the smaller steps that fits is taken, so the
+    // buffer is reallocated a logarithmic number of times on its way to the
+    // limit rather than once per append, and growth fails as soon as the
+    // next append no longer fits.
+    {
+        using internal::growSampleBuffer;
+        using internal::setAllocationLimitForTests;
+        vector<float> v;
+        v.reserve(1000);
+        setAllocationLimitForTests(1300 * sizeof(float));
+        const bool stepped = growSampleBuffer(v, 1001);
+        setAllocationLimitForTests(0);
+        check("grow: under a limit takes the largest smaller step that fits",
+              stepped && v.capacity() == 1250, to_string(v.capacity()));
+        v = vector<float>();
+        v.reserve(1000);
+        setAllocationLimitForTests(1001 * sizeof(float));
+        const bool exact = growSampleBuffer(v, 1001);
+        setAllocationLimitForTests(0);
+        check("grow: under a limit takes what is needed when only that fits",
+              exact && v.capacity() == 1001, to_string(v.capacity()));
+
+        // 1024 samples per append from 600 towards a limit of 2^20: doubling
+        // stops at 614400, and appending up to the limit takes 424 appends
+        const size_t limit = (size_t)1 << 20;
+        const size_t step = 1024;
+        v = vector<float>();
+        v.reserve(600);
+        setAllocationLimitForTests(limit * sizeof(float));
+        int reallocs = 0;
+        bool refused = false;
+        for (size_t i = 0; i <= limit / step; ++i) {
+            const size_t before = v.capacity();
+            if (!growSampleBuffer(v, v.size() + step)) {
+                refused = true;
+                break;
+            }
+            if (v.capacity() != before) ++reallocs;
+            v.resize(v.size() + step);
+        }
+        const size_t fullSize = v.size();
+        const size_t fullCapacity = v.capacity();
+        const bool refusedAgain = !growSampleBuffer(v, v.size() + step);
+        setAllocationLimitForTests(0);
+        check("grow: under a limit it fills up to the limit, then refuses",
+              refused && fullSize == limit && fullCapacity == limit,
+              to_string(fullSize) + " samples, capacity " + to_string(fullCapacity));
+        check("grow: under a limit it reallocates a logarithmic number of times",
+              reallocs <= 30, to_string(reallocs) + " reallocations");
+        check("grow: past the limit it keeps refusing with the buffer unchanged",
+              refusedAgain && v.capacity() == fullCapacity && v.size() == fullSize);
+    }
+
     // A FLAC whose STREAMINFO states far more samples than its frames hold
     // (a 36-bit field): the load gets the frames that decode, and no
     // allocation along the way is sized from the stated length (2^27 frames
@@ -563,9 +618,20 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
           longOk && flacIntact(lf, longBlocks), to_string(lf.numSamples) + " frames");
     check("decode: its growth lands on the stated length",
           lf.samples.capacity() == lf.samples.size(), to_string(lf.samples.capacity()));
+    // Up to 4 KiB over the stated length: MSVC's allocator adds a few
+    // bytes to every aligned request of 4 KiB or more
     check("decode: no allocation of it goes past the stated length",
-          allocProbeLargest() <= longFrames * sizeof(float),
+          allocProbeLargest() <= longFrames * sizeof(float) + 4096,
           to_string(allocProbeLargest()) + " bytes requested");
+
+    // The same FLAC under a memory limit below its length: the load fails
+    // with an error once the buffer cannot grow any further
+    SoundBuffer limited;
+    internal::setAllocationLimitForTests((size_t)(longFrames / 2) * sizeof(float));
+    const bool limitedOk = (bool)limited.loadFlacFromMemory(longFlac.data(), longFlac.size());
+    internal::setAllocationLimitForTests(0);
+    check("decode: a FLAC that does not fit under a memory limit fails to load", !limitedOk,
+          to_string(limited.numSamples) + " frames");
 
     // A WAV decodes in steps to exactly its frames
     const uint32_t frames = 10000;   // two full steps and a partial one
