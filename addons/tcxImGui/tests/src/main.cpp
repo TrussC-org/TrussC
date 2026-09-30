@@ -33,13 +33,23 @@
 //   - the widget returns true in the write frame, so getter/setter copies,
 //     CheckboxFlags and ColorPicker3 take the value (once, without Edited); a
 //     clipped Checkbox is written; a copy that ignores the return value gets
-//     the verify error; disabled and read-only widgets are refused
+//     the verify error; disabled and read-only widgets are refused; items with
+//     no variable that take no text (an action MenuItem, RadioButton(label,
+//     bool), a button) are errors and are not pressed
 //   - every settable widget used as a copy applied only on true takes the
 //     value, whichever return it leaves by (clipped, popup open, text mode)
 //   - a disabled MenuItem / Selectable and the ReadOnly flags are refused; a
 //     clamp or conversion after the return is ok with the value held
-//   - a frame without imgui settles the reply at once; a widget that runs
-//     past the value's lifetime is not written
+//   - a frame without imgui settles the reply at once, and the value it
+//     dropped is not written later; a widget that runs past the value's
+//     lifetime is not written; a window that renders no frame after the write
+//     gets its reply at the check deadline, ok on the read-back
+//   - RadioButton(int*): each button lists its own value (buttonValue); only
+//     the button whose value it is takes a value, its handler runs once;
+//     another button's value is refused by the tool, and by the hook when the
+//     button's value changed since it was listed
+//   - the value the variable already holds changes nothing (no handler runs,
+//     ok); a mixed-state CheckboxFlags still takes false and true
 //   - tcxNodeInspector does not record an injected value as a hand edit
 // =============================================================================
 
@@ -365,8 +375,9 @@ static void testValueInput() {
     r = input(h, "count", "42");
     check("input: InputInt set", isOk(r) && count == 42);
 
-    r = input(h, "Mode A", "1");
-    check("input: RadioButton sets the group's variable", isOk(r) && mode == 1);
+    r = input(h, "Mode B", "1");
+    check("input: RadioButton sets the group's variable to its own value",
+          isOk(r) && mode == 1 && r.value("buttonValue", -1) == 1);
 
     r = input(h, "fruit", "2");
     check("input: ListBox set by index", isOk(r) && fruit == 2);
@@ -466,7 +477,8 @@ static void testValueInputReturnsTrue() {
     float pick[3] = {1, 1, 1};
     float counted = 0;
     int count = 0;
-    bool editedSeen = false, far = false;
+    bool editedSeen = false, far = false, boolRadio = false;
+    int presses = 0;
     float model = 2;              // copied into `ignored` every frame, the return value ignored
     float disabledV = 1, readOnlyV = 1;
     h.setUi([&] {
@@ -488,6 +500,8 @@ static void testValueInputReturnsTrue() {
         ImGui::EndDisabled();
         ImGui::InputFloat("read only", &readOnlyV, 0, 0, "%.3f", ImGuiInputTextFlags_ReadOnly);
         ImGui::MenuItem("action");
+        if (ImGui::RadioButton("bool radio", boolRadio)) boolRadio = !boolRadio;
+        if (ImGui::Button("press")) ++presses;
         ImGui::End();
 
         ImGui::SetNextWindowPos(ImVec2(620, 10));
@@ -533,6 +547,13 @@ static void testValueInputReturnsTrue() {
 
     r = input(h, "action", "true");
     check("no variable: an action MenuItem is an error, not typed into", isError(r));
+    r = input(h, "bool radio", "true");
+    h.frames(3);
+    check("no variable: RadioButton(label, bool) is an error, not pressed",
+          isError(r) && !boolRadio && r.value("message", "").find("no variable") != std::string::npos);
+    r = input(h, "press", "1");
+    h.frames(3);
+    check("no variable: a button is an error, not pressed", isError(r) && presses == 0);
 
     h.frame();
     check("returns true: injected values not recorded as touched", tcx::imgui::getTouched().empty());
@@ -664,11 +685,14 @@ static void testCopyOnReturn() {
     auto ctrlClick = [&](const char* label) {
         const tcx::imgui::WidgetInfo* w = h.find(label);
         if (!w) return false;
+        // As tcx_imgui_input's typing does: with ConfigMacOSXBehaviors (macOS)
+        // imgui swaps Cmd and Ctrl, and Ctrl+click becomes a right click
         ImGui::SetCurrentContext(h.context());
-        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+        const ImGuiKey mod = ImGui::GetIO().ConfigMacOSXBehaviors ? ImGuiMod_Super : ImGuiMod_Ctrl;
+        ImGui::GetIO().AddKeyEvent(mod, true);
         h.clickAt(w->rect.GetCenter());
         ImGui::SetCurrentContext(h.context());
-        ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+        ImGui::GetIO().AddKeyEvent(mod, false);
         h.frame();
         return ImGui::GetCurrentContext()->TempInputId != 0;
     };
@@ -758,15 +782,18 @@ static void testFramesWithoutImGui() {
     ImGuiHarness h;
     tcx::imgui::resetTouched();
 
-    bool showGui = true;
-    float late = 0;
+    bool showGui = true, rendering = true;
+    float late = 0, slow = 0;
+    int slowRuns = 0;
     h.setImGuiWhen([&] { return showGui; });
+    h.setRenderWhen([&] { return rendering; });
     h.setUi([&] {
         ImGui::SetNextWindowPos(ImVec2(10, 10));
         ImGui::SetNextWindowSize(ImVec2(400, 300));
         ImGui::Begin("Panel");
         ImGui::Checkbox("Show GUI", &showGui);
         ImGui::DragFloat("late", &late);
+        if (ImGui::DragFloat("slow", &slow)) ++slowRuns;
         ImGui::End();
     });
     h.frames(3);
@@ -776,20 +803,144 @@ static void testFramesWithoutImGui() {
     check("no imgui next frame: the write that hid the GUI is ok after two frames",
           isOk(r) && !showGui && frames == 2);
 
-    r = callTool(h, "tcx_imgui_input", {{"label", "Show GUI"}, {"text", "true"}}, nullptr, &frames);
+    r = callTool(h, "tcx_imgui_input", {{"label", "late"}, {"text", "7"}}, nullptr, &frames);
     check("no imgui next frame: a call while the GUI is hidden is answered at once as not drawn",
-          isError(r) && !showGui && frames == 1 && r.value("message", "").find("not drawn") != std::string::npos);
-    h.frames(2);
-    check("no imgui next frame: the dropped value is not written later", !showGui);
+          isError(r) && late == 0 && frames == 1 && r.value("message", "").find("not drawn") != std::string::npos);
+    // Shown again (by the app, not by the dropped value): "late" runs again
+    // and keeps its own value
     showGui = true;
-    h.frames(2);
+    h.frames(3);
+    check("no imgui next frame: the dropped value is not written when the widget runs again",
+          late == 0 && tcx::imgui::detail::contexts()[h.context()].pendingValues.empty());
 
     // Past the value's lifetime before the widget runs: not written
-    r = callTool(h, "tcx_imgui_input", {{"label", "late"}, {"text", "3"}}, nullptr, &frames, 10, [] {
-        std::this_thread::sleep_for(tcx::imgui::detail::kPendingValueLifetime + std::chrono::milliseconds(100));
+    r = callTool(h, "tcx_imgui_input", {{"label", "late"}, {"text", "3"}}, nullptr, &frames, 10, [](int i) {
+        if (i == 0) std::this_thread::sleep_for(tcx::imgui::detail::kPendingValueLifetime + std::chrono::milliseconds(100));
     });
     check("expired: a widget that runs after the lifetime is not written",
           isError(r) && late == 0 && r.value("message", "").find("too late") != std::string::npos);
+
+    // The window renders no frame after the write frame (very slow, or it
+    // stopped): the value is settled on its read-back at return from the main
+    // window's afterFrame, 4 s after the call (the clock is advanced before
+    // frame 3), not left to the core's 5 s timeout and its generic error.
+    namespace d = tcx::imgui::detail;
+    r = callTool(h, "tcx_imgui_input", {{"label", "slow"}, {"text", "4"}}, nullptr, &frames, 10, [&](int i) {
+        if (i == 1) rendering = false;
+        if (i == 3) d::clockSkew += d::kValueCheckDeadline;
+    });
+    check("slow window: written value settled ok at the check deadline, not by the core timeout",
+          isOk(r) && slow == 4 && slowRuns == 1 && frames == 4 && r.value("value", 0.0) == 4);
+    d::clockSkew = {};
+    rendering = true;
+    h.frames(2);
+}
+
+// ---------------------------------------------------------------------------
+// RadioButton(int*): true from a button means the variable holds that
+// button's value, so a value is set through the button whose value it is.
+// ---------------------------------------------------------------------------
+static void testRadioButtons() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    int mode = 0, runsA = 0, runsB = 0, runsC = 0, valueC = 2;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(600, 300));
+        ImGui::Begin("Modes");
+        if (ImGui::RadioButton("Mode A", &mode, 0)) ++runsA;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Mode B", &mode, 1)) ++runsB;
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Mode C", &mode, valueC)) ++runsC;
+        ImGui::End();
+    });
+    h.frames(3);
+
+    nlohmann::json widgets = callTool(h, "tcx_imgui_get_widgets", nlohmann::json::object());
+    nlohmann::json listedC;
+    for (auto& e : widgets.value("widgets", nlohmann::json::array())) {
+        if (e.value("label", "") == "Mode C") listedC = e;
+    }
+    check("radio: get_widgets lists each button's own value",
+          isValue(listedC, "radio", 0) && listedC.value("buttonValue", -1) == 2);
+
+    nlohmann::json r = input(h, "Mode C", "2");
+    h.frames(2);
+    check("radio: the matching button's handler runs once",
+          isOk(r) && mode == 2 && runsC == 1 && runsA == 0 && runsB == 0);
+
+    bool deferred = true;
+    r = input(h, "Mode A", "1", &deferred);
+    h.frames(2);
+    check("radio: another button's value is refused at once, nothing written",
+          isError(r) && !deferred && mode == 2 && runsA == 0 && runsB == 0 && runsC == 1);
+    check("radio: the refusal names this button's value and the button to target",
+          r.value("message", "").find("this button's value is 0") != std::string::npos &&
+          r.value("message", "").find("target the button whose value is 1") != std::string::npos);
+
+    // The button's value changed after it was listed: the value hook refuses it
+    mode = 1;   // set by the app
+    h.frames(2);
+    r = callTool(h, "tcx_imgui_input", {{"label", "Mode C"}, {"text", "2"}}, nullptr, nullptr, 10, [&](int i) {
+        if (i == 0) valueC = 5;   // listed with 2, runs as the button for 5
+    });
+    check("radio: a button whose value changed since it was listed is refused by the hook",
+          isError(r) && mode == 1 && runsC == 1 &&
+          r.value("message", "").find("this button's value is 5") != std::string::npos);
+    valueC = 2;
+    h.frames(2);
+}
+
+// ---------------------------------------------------------------------------
+// A value the variable already holds changes nothing: the widget does not
+// return true, so toggle handlers do not run. A mixed-state CheckboxFlags
+// holds neither value and is still set.
+// ---------------------------------------------------------------------------
+static void testCurrentValue() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    bool fullscreen = false;
+    int toggles = 0, drags = 0, radios = 0, mode = 1;
+    float speed = 3;
+    unsigned int bits = 1;   // flags_value 3: only one of its bits set (mixed)
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(600, 300));
+        ImGui::Begin("Current");
+        {
+            bool c = fullscreen;
+            if (ImGui::MenuItem("Fullscreen", nullptr, &c)) { fullscreen = c; ++toggles; }
+        }
+        if (ImGui::DragFloat("speed", &speed)) ++drags;
+        if (ImGui::RadioButton("mode one", &mode, 1)) ++radios;
+        ImGui::CheckboxFlags("mixed", &bits, 3u);
+        ImGui::End();
+    });
+    h.frames(3);
+
+    nlohmann::json r = input(h, "Fullscreen", "false");
+    h.frames(2);
+    check("current value: a toggle MenuItem set to its value runs no handler",
+          isOk(r) && !fullscreen && toggles == 0 && r["value"] == false);
+    r = input(h, "speed", "3");
+    h.frames(2);
+    check("current value: a drag set to its value does not return true", isOk(r) && speed == 3 && drags == 0);
+    r = input(h, "mode one", "1");
+    h.frames(2);
+    check("current value: the radio button already selected does not return true",
+          isOk(r) && mode == 1 && radios == 0);
+
+    r = input(h, "mixed", "false");
+    check("mixed CheckboxFlags: false clears its bits", isOk(r) && bits == 0);
+    bits = 1;
+    h.frames(2);
+    r = input(h, "mixed", "true");
+    check("mixed CheckboxFlags: true sets its bits", isOk(r) && bits == 3);
+    r = input(h, "mixed", "true");
+    check("mixed CheckboxFlags: set again, no change", isOk(r) && bits == 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -833,6 +984,8 @@ int main() {
     testCopyOnReturn();
     testRefusalsAndAdjust();
     testFramesWithoutImGui();
+    testRadioButtons();
+    testCurrentValue();
     testInspectorRecord();
     return harness::summary();
 }

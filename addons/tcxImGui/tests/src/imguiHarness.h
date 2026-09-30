@@ -73,10 +73,17 @@ public:
     // ... imguiEnd(); }`.
     void setImGuiWhen(std::function<bool()> when) { imguiWhen_ = std::move(when); }
 
+    // Whether the window renders a frame at all (checked at the start of each
+    // frame). Null: every frame. A frame where it is false does nothing, as
+    // for a window that is throttled very low or stopped rendering; callTool()
+    // still runs the main window's afterFrame work after it.
+    void setRenderWhen(std::function<bool()> when) { renderWhen_ = std::move(when); }
+
     // One window frame, as tcxImGui runs it: imguiBegin() ... imguiEnd() +
     // render; or, in a frame where the app runs no imgui, what ImGuiManager's
     // render listener does then.
     void frame() {
+        if (renderWhen_ && !renderWhen_()) return;
         ImGui::SetCurrentContext(ctx_);
         if (imguiWhen_ && !imguiWhen_()) {
             tcx::imgui::detail::settleWithoutImGuiFrame(ctx_);
@@ -143,19 +150,21 @@ private:
     ImGuiContext* prev_ = nullptr;
     Ui ui_;
     std::function<bool()> imguiWhen_;
+    std::function<bool()> renderWhen_;
 };
 
 // Calls an MCP tool the way tc::mcp::processHttpQueue() does, on this thread.
 // A tool that defers its reply is stashed with a promise, as processHttpQueue()
 // stashes it, and frames are run by `h` until the reply is produced: after
-// each frame the main window's after-present drain runs, and a deferral aimed
-// at another target is answered when its owner drains it (up to `maxFrames`).
+// each frame the main window's afterFrame work runs (tcxImGui's settling of
+// overdue values, then the core's drain), and a deferral aimed at another
+// target is answered when its owner drains it (up to `maxFrames`).
 // Returns the tool's result (the JSON in its text content). `deferred` tells
 // whether it deferred, `frames` how many frames the reply took.
-// `beforeFrames` runs between the call and the first frame.
+// `beforeFrame(i)` runs before frame i (0 = between the call and the first).
 inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const nlohmann::json& args,
                                bool* deferred = nullptr, int* frames = nullptr, int maxFrames = 10,
-                               const std::function<void()>& beforeFrames = nullptr) {
+                               const std::function<void(int)>& beforeFrame = nullptr) {
     namespace md = tc::mcp::detail;
     tcx::imgui::registerImGuiTools();   // idempotent
     nlohmann::json req = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
@@ -182,10 +191,13 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
         ds.hasEnvelope = false;
         ds.target = nullptr;
         reply.clear();
-        if (beforeFrames) beforeFrames();
         for (int i = 0; i < maxFrames; i++) {
+            if (beforeFrame) beforeFrame(i);
             h.frame();
-            tc::mcp::drainDeferredResponses();   // the main window's afterFrame
+            // The main window's afterFrame: ImGuiManager's overdue listener
+            // (BeforeApp), then the core's drain
+            tcx::imgui::detail::settleOverdueValues(h.context());
+            tc::mcp::drainDeferredResponses();
             if (frames) *frames = i + 1;
             if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                 reply = future.get()();
