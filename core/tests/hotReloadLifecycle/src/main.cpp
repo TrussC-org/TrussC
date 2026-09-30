@@ -485,8 +485,9 @@ static int runCycles(const std::string& guestPath, int port) {
         // get a stand-in native state, never dereferenced here and cleared
         // before ~Window() would close() it.
         {
-            // Created after the guest App, so they do not become the main
-            // context's root (the "running main App" setApp() refuses).
+            // These Apps are not the main context's root (only runApp() or the
+            // host makes an App the root), so setApp() does not refuse them as
+            // the running main App.
             auto sub = std::make_shared<App>();
             auto reopened = std::make_shared<App>();
             static int nativeStandIn = 0;
