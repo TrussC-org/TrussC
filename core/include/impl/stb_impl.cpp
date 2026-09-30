@@ -25,6 +25,11 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb/stb_perlin.h"
 
+// STBTT_assert does nothing in every build type, so Debug and Release builds
+// handle font data the same way: stb's CFF buffer reads and seeks stay within
+// the buffer either way. The stb source is not changed for this.
+#define STBTT_assert(x) ((void)0)
+
 // stb_truetype allocates through STBTT_malloc. Allocations are padded with
 // TC_STBTT_ALLOC_PADDING (64) zeroed bytes after the requested size. The stb
 // source is not changed for this; see core/include/stb/README.md.

@@ -21,15 +21,16 @@
 // - loca entries that decrease,
 // - a CFF CharStrings INDEX whose count or offset array cannot be read
 //   within the CFF table (an INDEX past the table, an empty one, a count
-//   past the table; the last two run only with NDEBUG, since stb asserts on
-//   them otherwise).
+//   past the table),
+// - a CFF table of 0 to 3 bytes, a CFF INDEX with an offset size outside
+//   1..4, and an empty Top DICT INDEX or Top DICT; these, like every case
+//   here, run in Debug and Release builds alike.
 // Plus:
 // - a glyph index from the cmap past numGlyphs, or for CFF past the number
 //   of CharStrings, is treated as .notdef,
 // - a codepoint above U+10FFFF is answered as missing (.notdef),
 // - CFF data is read within the CFF table's length (a CharStrings offset
-//   past the table finds no CharStrings INDEX; runs only with NDEBUG, since
-//   stb asserts on that offset otherwise),
+//   past the table finds no CharStrings INDEX),
 // - a glyph whose last contour is a single off-curve point loads and
 //   rasterizes (with the padded STBTT_malloc). The single off-curve contour
 //   case is only meaningful under AddressSanitizer, and CI does not build
@@ -417,18 +418,24 @@ static Bytes makeCff(uint32_t charStringsAt, bool inside,
     }
     return b;
 }
+// A CFF font around the given CFF table.
+static Bytes makeCffFontWithTable(const Bytes& cffTable, int numGlyphs = kNumGlyphs,
+                                  const Bytes& cmap = makeCmap()) {
+    return buildSfnt(tagOf("OTTO"), {{"head", makeHead(0)},
+                                     {"hhea", makeHhea(2)},
+                                     {"maxp", makeMaxp(numGlyphs)},
+                                     {"cmap", cmap},
+                                     {"CFF ", cffTable},
+                                     {"hmtx", makeHmtx(numGlyphs)}});
+}
 static Bytes makeCffFont(const vector<Bytes>& charStrings = cffCharStrings(),
                          const vector<Bytes>& gsubrs = {}, int numGlyphs = kNumGlyphs,
                          const Bytes& cmap = makeCmap()) {
     // The Top DICT has a fixed size, so the CharStrings INDEX starts where
     // the table without it ends.
     const uint32_t charStringsAt = (uint32_t)makeCff(0, false, charStrings, gsubrs).size();
-    return buildSfnt(tagOf("OTTO"), {{"head", makeHead(0)},
-                                     {"hhea", makeHhea(2)},
-                                     {"maxp", makeMaxp(numGlyphs)},
-                                     {"cmap", cmap},
-                                     {"CFF ", makeCff(charStringsAt, true, charStrings, gsubrs)},
-                                     {"hmtx", makeHmtx(numGlyphs)}});
+    return makeCffFontWithTable(makeCff(charStringsAt, true, charStrings, gsubrs), numGlyphs,
+                                cmap);
 }
 
 // CharStrings offset points just past the CFF table; the next table holds a
@@ -571,9 +578,7 @@ static void checkCffCharStringsCount() {
     // No CharStrings at all: the count is 0, and the font is refused.
     expectRejected("CFF with an empty CharStrings INDEX", makeCffFont({}),
                    "CFF CharStrings INDEX cannot be read");
-#ifdef NDEBUG
-    // A count whose offset array does not fit in the CFF table. (stb's own
-    // STBTT_assert stops at this INDEX in builds without NDEBUG.)
+    // A count whose offset array does not fit in the CFF table.
     {
         Bytes f = makeCffFont();
         const Loc cff = findTable(f, "CFF ");
@@ -582,11 +587,57 @@ static void checkCffCharStringsCount() {
         expectRejected("CFF CharStrings count past the CFF table", f,
                        "CFF CharStrings INDEX cannot be read");
     }
-#else
-    printf("%-72s SKIP (stb asserts in builds without NDEBUG)\n",
-           "rejected: CFF CharStrings count past the CFF table");
-    fflush(stdout);
-#endif
+}
+
+// --- malformed CFF data ----------------------------------------------------------
+// Refused either by the checks (a warning) or by stbtt_InitFont (an error).
+static void expectNotLoaded(const string& name, const Bytes& f) {
+    internal::FontAtlasManager m;
+    const int errorsBefore = g_errors;
+    const LoadOutcome r = tryLoad(m, f);
+    const int logged = r.warnings + (g_errors - errorsBefore);
+    check("rejected: " + name, !r.ok && logged >= 1,
+          string("ok=") + (r.ok ? "true" : "false") + " logged=" + to_string(logged));
+}
+
+static void checkCffMalformed() {
+    const Bytes cff = makeCffFont();
+    const Loc table = findTable(cff, "CFF ");
+    // A CFF table shorter than its 4-byte header.
+    for (uint32_t len = 0; len <= 3; len++) {
+        Bytes f = cff;
+        set32(f, table.entry + 12, len);
+        expectNotLoaded("CFF table of length " + to_string(len), f);
+    }
+    // Offset size outside 1..4 in the Name, Top DICT and CharStrings INDEX.
+    // makeCff() lays out the header (4 bytes), then the Name INDEX (12 bytes),
+    // then the Top DICT INDEX.
+    const size_t charStringsAt = makeCff(0, false).size();
+    const struct { const char* name; size_t offSizeAt; } indexes[] = {
+        {"Name", 4 + 2}, {"Top DICT", 16 + 2}, {"CharStrings", charStringsAt + 2}};
+    for (const auto& index : indexes) {
+        for (uint8_t offSize : {uint8_t(0), uint8_t(5), uint8_t(255)}) {
+            Bytes f = cff;
+            f[table.offset + index.offSizeAt] = offSize;
+            expectNotLoaded(string("CFF ") + index.name + " INDEX with offset size " +
+                                to_string(offSize), f);
+        }
+    }
+    // An empty Top DICT INDEX, and a Top DICT INDEX whose one DICT is empty.
+    for (const bool emptyIndex : {true, false}) {
+        Bytes b = {1, 0, 4, 4};
+        const Bytes name = cffIndex({Bytes{'T'}});
+        const Bytes top = emptyIndex ? cffIndex({}) : cffIndex({Bytes{}});
+        const Bytes cs = cffIndex(cffCharStrings());
+        b.insert(b.end(), name.begin(), name.end());
+        b.insert(b.end(), top.begin(), top.end());
+        put16(b, 0);  // String INDEX
+        put16(b, 0);  // Global Subr INDEX
+        b.insert(b.end(), cs.begin(), cs.end());
+        expectNotLoaded(emptyIndex ? "CFF with an empty Top DICT INDEX"
+                                   : "CFF with an empty Top DICT",
+                        makeCffFontWithTable(b));
+    }
 }
 
 // --- codepoints above U+10FFFF -----------------------------------------------------
@@ -723,20 +774,11 @@ static void checkSinglePointContour() {
 
 // --- CFF length ----------------------------------------------------------------
 static void checkCffLength() {
-#ifndef NDEBUG
-    // stb's STBTT_assert (plain assert) stops at a CharStrings offset past
-    // the CFF table, which is what this case sets up. Builds with NDEBUG
-    // (Release, as CI) run it.
-    printf("%-72s SKIP (stb asserts in builds without NDEBUG)\n",
-           "CFF: CharStrings past the CFF table are not read");
-    fflush(stdout);
-#else
     // The skeleton is fine; the CharStrings offset is CFF data, which the
     // skeleton check does not look into. stb finds no CharStrings INDEX in
     // the CFF table, so there is no count to read and the font is refused.
     expectRejected("CFF: CharStrings past the CFF table are not read",
                    makeCffFontCharStringsOutside(), "CFF CharStrings INDEX cannot be read");
-#endif
 }
 
 // --- malformed fonts -------------------------------------------------------------
@@ -1194,6 +1236,7 @@ int main(int argc, char** argv) {
     checkGlyphIndexClamp("TrueType", makeTrueType());
     checkGlyphIndexClamp("CFF", makeCffFont());
     checkCffCharStringsCount();
+    checkCffMalformed();
     checkCodepointRange();
     checkVertexCount();
     checkSinglePointContour();

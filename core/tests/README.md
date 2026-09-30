@@ -284,16 +284,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
   hmtx or loca, an unknown loca format, a loca entry past glyf or below the
   one before it, and a CFF CharStrings INDEX whose count or offset array
-  cannot be read within the CFF table; and for
+  cannot be read within the CFF table; returns false for a CFF table of 0 to
+  3 bytes, a CFF INDEX with an offset size outside 1..4 and an empty Top
+  DICT, in Debug and Release builds alike; and for
   copies of a TrueType, a CFF and a collection font cut short in the header,
   the table directory and each table. A glyph index from the cmap past
   numGlyphs (for CFF, past the number of CharStrings) and a codepoint above
   U+10FFFF draw as .notdef. Valid fonts load, including
   `numberOfHMetrics == numGlyphs`, a cmap format 12 subtable, a table of
   length 0 and tables that share bytes. Also guards the TrussC patch in
-  `stb_truetype.h` (CFF data is read within the CFF table's length; this
-  case runs only in builds with `NDEBUG`, as CI builds, because stb asserts
-  on it otherwise), the CFF vertex-count patch (a glyph over the vertex
+  `stb_truetype.h` (CFF data is read within the CFF table's length), the CFF vertex-count patch (a glyph over the vertex
   limit, one whose closing vertex is the one over it, one far over any limit
   through nested subroutines, and one whose vertex array cannot be allocated
   come back empty; `local.cmake` builds stb_truetype with

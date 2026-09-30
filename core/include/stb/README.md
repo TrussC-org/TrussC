@@ -18,8 +18,8 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 
 The implementations are compiled in `core/include/impl/stb_impl.cpp`
 (`stb_image`, `stb_image_write`, `stb_perlin`, `stb_truetype`, with
-`STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`, and `STBTT_malloc` /
-`STBTT_free` for stb_truetype, see below) and in
+`STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`, and `STBTT_assert`,
+`STBTT_malloc` / `STBTT_free` for stb_truetype, see below) and in
 `core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`).
 No other configuration macro is set: every stb_image format is enabled.
 
@@ -87,7 +87,8 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      returns 0 vertices when `STBTT_malloc` returns NULL.
      `STBTT_MAX_VERTICES` may be predefined.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
-  file): allocations through `STBTT_malloc` are padded with 64 zeroed bytes,
+  file): `STBTT_assert` does nothing in every build type, so Debug and
+  Release builds handle font data the same way. Allocations through `STBTT_malloc` are padded with 64 zeroed bytes,
   and it returns NULL when the size cannot be allocated. With
   `TC_STBTT_TEST_LIMITS` (set only by `core/tests/fontSfntCheck/local.cmake`)
   `STBTT_MAX_VERTICES` and a cap on `STBTT_malloc` sizes become variables the
