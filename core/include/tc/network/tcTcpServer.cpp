@@ -322,45 +322,34 @@ void TcpServer::stop() {
     bool wasRunning = running_;
     running_ = false;
 
+    const bool onAcceptThread = acceptThread_.joinable() &&
+                                acceptThread_.get_id() == std::this_thread::get_id();
+
     // Wake the accept loop, wait for it, and only then close the listening
     // socket: closing it while the loop still waits on it could hand the
     // descriptor to something else first. The loop waits in slices, so it
     // notices running_ even where shutdown() does not wake the wait.
-#ifdef _WIN32
-    if (serverSocket_ != INVALID_SOCKET) {
-        shutdown(serverSocket_, SD_BOTH);
-    }
-#else
-    if (serverSocket_ >= 0) {
-        shutdown(serverSocket_, SHUT_RDWR);  // Wakes the wait at once on Linux
-    }
-#endif
+    releaseListenSocket(false);
 
-    // Called from the accept thread itself: a listener on an event that fires
-    // there (onClientConnect, onError about accepting, or onClientDisconnect
-    // for a client whose receive thread could not start). That thread cannot
-    // join itself. It sees running_ once the listener returns and leaves the
-    // loop; the listening socket (already shut down) stays open until the next
-    // stop(), start() or the destructor joins the thread and closes it.
-    const bool onAcceptThread = acceptThread_.joinable() &&
-                                acceptThread_.get_id() == std::this_thread::get_id();
-    if (!onAcceptThread) {
+    if (onAcceptThread) {
+        // Called from the accept thread itself: a listener on an event that
+        // fires there (onClientConnect, onError about accepting, or
+        // onClientDisconnect for a client whose receive thread could not
+        // start). That thread cannot join itself, but it is also the only one
+        // that uses the listening socket, and it is done with it: once the
+        // listener returns it sees running_ and leaves the loop. So the socket
+        // is closed here, before stop() returns. shutdown() alone tears a
+        // listener down on Linux only; on macOS and Windows the socket would
+        // keep listening, holding the port and completing connections that
+        // nobody accepts. The thread itself is joined by the next stop(),
+        // start() or the destructor.
+        releaseListenSocket(true);
+    } else {
         // Wait for accept thread
         if (acceptThread_.joinable()) {
             acceptThread_.join();
         }
-
-#ifdef _WIN32
-        if (serverSocket_ != INVALID_SOCKET) {
-            CLOSE_SOCKET(serverSocket_);
-            serverSocket_ = INVALID_SOCKET;
-        }
-#else
-        if (serverSocket_ >= 0) {
-            CLOSE_SOCKET(serverSocket_);
-            serverSocket_ = -1;
-        }
-#endif
+        releaseListenSocket(true);
     }
 
     // Disconnect all clients
@@ -375,6 +364,25 @@ void TcpServer::stop() {
     }
 
     if (wasRunning) logNotice() << "TCP server stopped";
+}
+
+void TcpServer::releaseListenSocket(bool andClose) {
+    // stop() can run on the accept thread and on another thread at once. The
+    // lock makes them take turns, and whoever closes the socket marks it gone
+    // under the same lock, so exactly one of them closes it and neither ever
+    // shuts down or closes a descriptor that has been handed out again.
+    std::lock_guard<std::mutex> lock(listenSocketMutex_);
+    if (serverSocket_ == INVALID_SOCKET) return;
+    if (andClose) {
+        CLOSE_SOCKET(serverSocket_);
+        serverSocket_ = INVALID_SOCKET;
+    } else {
+#ifdef _WIN32
+        shutdown(serverSocket_, SD_BOTH);
+#else
+        shutdown(serverSocket_, SHUT_RDWR);  // Wakes the wait at once on Linux
+#endif
+    }
 }
 
 bool TcpServer::isRunning() const {

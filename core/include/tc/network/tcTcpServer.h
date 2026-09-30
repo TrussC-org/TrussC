@@ -195,8 +195,10 @@ public:
     // server-level failures (accept() failing, a thread that cannot be started
     // for a new client) and onClientDisconnect for a client whose receive
     // thread could not start. An inline listener there may call stop(), but
-    // not start(). Those server-level failures reach onError at most once
-    // every 5 s for each kind while they persist; the log counts the rest.
+    // not start(). stop() from there closes the listening socket before it
+    // returns; the accept thread itself ends once the listener returns. Those
+    // server-level failures reach onError at most once every 5 s for each
+    // kind while they persist; the log counts the rest.
     // -------------------------------------------------------------------------
     Event<TcpClientConnectEventArgs> onClientConnect;       // On client connect
     Event<TcpServerReceiveEventArgs> onReceive;             // On data receive
@@ -333,11 +335,18 @@ private:
     // held until stop().
     void reapClientThreads();
 
+    // Shut down the listening socket, or (andClose) close it for good.
+    // Guarded by listenSocketMutex_; a no-op once it is closed.
+    void releaseListenSocket(bool andClose);
+
 #ifdef _WIN32
     SOCKET serverSocket_ = INVALID_SOCKET;
 #else
     int serverSocket_ = -1;
 #endif
+    // Serializes shutting down and closing serverSocket_ between a stop() on
+    // the accept thread and one on another thread
+    std::mutex listenSocketMutex_;
 
     int port_ = 0;
     int maxClients_ = 0;   // 0 = unlimited; read only by the accept thread
