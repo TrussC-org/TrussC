@@ -101,6 +101,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   hook through `cleanup()`, then its destructor neither starts during
   `audioOut()` nor sees it called afterwards (the windowed exit, hot reload
   and closing a secondary window use the same `internal::detachAppAudio()`);
+  that teardown waits for a stuck `audioOut()` past one second without
+  destroying the App (one error logged; the public barrier still gives up
+  after a second meanwhile) and goes on once it returns;
   `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
   flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
   while another thread calls `stop()` still ends up in the WAV and in

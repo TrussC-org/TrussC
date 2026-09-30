@@ -772,6 +772,16 @@ namespace internal {
     // anything opens an audio context: the engine keeps the context it
     // opened first. State lives in tcAudio_impl.cpp.
     void setNullAudioBackendForTests(bool on);
+
+    // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
+    // without its one-second limit. internal::detachAppAudio() waits here
+    // before the framework destroys an App (exit, runHeadlessApp, hot reload,
+    // closing a secondary window). A listener that never returns is an app
+    // bug; the teardown keeps waiting for it (the app hangs where it can be
+    // seen) rather than destroy what the listener may still use. After one
+    // second it logs an error, once, and goes on waiting. Returns at once on
+    // the audio thread inside a listener. tcAudio_impl.cpp.
+    void waitForCallbackIdleNoTimeout();
 }
 
 // ---------------------------------------------------------------------------
@@ -862,8 +872,10 @@ public:
     // Do it in the most-derived class (or in cleanup()), not in a base-class
     // destructor, which runs after the derived members are already gone. The
     // App's own audioOut() / audioIn() hooks are handled by the framework:
-    // they are detached after cleanup() and this barrier runs before the App
-    // is destroyed (exit, hot reload, closing a secondary window).
+    // they are detached after cleanup(), and before the App is destroyed
+    // (exit, hot reload, closing a secondary window) the framework waits the
+    // same way, but without the one-second limit below
+    // (internal::waitForCallbackIdleNoTimeout()).
     //
     //   - Returns at once when no callback is running: the device is stopped
     //     or was never started, or the audio thread is between two buffers.
@@ -873,8 +885,11 @@ public:
     //     back-to-back buffers), not for later ones. Gives up after one
     //     second, logs a warning and returns false: a listener that blocks
     //     that long is stuck (e.g. on a lock the caller holds), and waiting
-    //     forever would hang the exit. Returns true otherwise.
-    // Call it without holding a lock that a listener takes.
+    //     forever would hang the caller. Returns true otherwise. (The
+    //     framework's App teardown does wait forever, see above: there a hang
+    //     is better than destroying the App under a running listener.)
+    // It waits for every listener running at that moment, not only the
+    // caller's: call it without holding a lock that a listener takes.
     bool waitForCallbackIdle();
 
     // Fired on every successful init() — both the initial startup and any
@@ -947,6 +962,7 @@ private:
     void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
     friend void internal::flushAudioDiagnostics();
+    friend void internal::waitForCallbackIdleNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
 
     // Zero the output meters, the load window and every voice's level. Only
@@ -961,6 +977,10 @@ private:
     // from the engine must enclose that notify the same way.
     int  beginCallback();
     void endCallback(int slot);
+
+    // Both barriers (tcAudio_impl.cpp): waitForCallbackIdle() gives up after
+    // one second (giveUp), internal::waitForCallbackIdleNoTimeout() does not.
+    bool waitForCallbacks(bool giveUp);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -1215,10 +1235,11 @@ private:
     // were already running, and a callback that read the epoch just before an
     // advance is still caught. The mutex serializes barriers (the epoch
     // advances of two barriers must not interleave); the audio thread never
-    // takes it.
+    // takes it. Timed, so waitForCallbackIdle() keeps its one-second limit
+    // while a framework teardown holds it waiting for a stuck listener.
     std::atomic<uint32_t> callbackEpoch_{0};
     std::atomic<int>      callbacksInFlight_[2]{};
-    std::mutex            callbackBarrierMutex_;
+    std::timed_mutex      callbackBarrierMutex_;
 };
 
 // ---------------------------------------------------------------------------

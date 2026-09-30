@@ -26,6 +26,10 @@
 //     destructor has started. Before #256 the audio thread kept calling the
 //     derived audioOut() until ~App() disconnected it, after the derived
 //     members were already gone.
+//   - The framework teardown waits for a stuck audioOut() without a time
+//     limit: past one second the App is still not destroyed, one error is
+//     logged, and the teardown goes on once audioOut() returns. Meanwhile the
+//     public waitForCallbackIdle() still gives up after about a second.
 //   - AudioRecorder::stop() waits for the audioOut pass in flight, and a
 //     capture still in flight when stop() is called (held by a test hook
 //     after its checks, before it hands the buffer to the writer) ends up in
@@ -144,6 +148,33 @@ struct SynthApp : App {
     }
 };
 
+// --- A stuck audioOut() at teardown ------------------------------------------
+// Once armed, audioOut() blocks until the test releases it; update() asks to
+// exit while it blocks. The framework teardown must keep waiting (no
+// destruction under a running audioOut(), however long), log one error after
+// a second, and go on once audioOut() returns.
+
+static atomic<bool> g_stuckArmed{false}, g_stuckInside{false}, g_stuckRelease{false};
+static atomic<bool> g_stuckDestroyed{false};
+static bool g_stuckTimedOut = false;
+
+struct StuckApp : App {
+    int frames = 0;
+    StuckApp() { g_stuckArmed = true; }
+    ~StuckApp() override { g_stuckDestroyed = true; }
+    void update() override {
+        ++frames;
+        if (g_stuckInside) requestExit();
+        if (frames >= 2000) { g_stuckTimedOut = true; g_stuckRelease = true; requestExit(); }
+    }
+    void audioOut(AudioOutBuffer&) override {
+        if (!g_stuckArmed.exchange(false)) return;
+        g_stuckInside = true;
+        while (!g_stuckRelease) this_thread::sleep_for(chrono::milliseconds(1));
+        g_stuckInside = false;
+    }
+};
+
 // -----------------------------------------------------------------------------
 
 int main() {
@@ -160,18 +191,20 @@ int main() {
     getMainThreadId();   // this thread is the main thread
 
     mutex logMutex;
-    vector<string> warnings;
+    vector<string> warnings, errors;
     EventListener logSub = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.level != LogLevel::Warning) return;
+        if (e.level != LogLevel::Warning && e.level != LogLevel::Error) return;
         lock_guard<mutex> lock(logMutex);
-        warnings.push_back(e.message);
+        (e.level == LogLevel::Warning ? warnings : errors).push_back(e.message);
     });
-    auto countWarnings = [&](const string& needle) {
+    auto countIn = [&](const vector<string>& list, const string& needle) {
         lock_guard<mutex> lock(logMutex);
         size_t n = 0;
-        for (auto& w : warnings) if (w.find(needle) != string::npos) ++n;
+        for (auto& w : list) if (w.find(needle) != string::npos) ++n;
         return n;
     };
+    auto countWarnings = [&](const string& needle) { return countIn(warnings, needle); };
+    auto countErrors = [&](const string& needle) { return countIn(errors, needle); };
 
     auto& engine = AudioEngine::getInstance();
 
@@ -287,6 +320,44 @@ int main() {
     }
     printf("(info) audioOut() calls during App construction, outside #256: %d\n",
            g_callsDuringCtor.load());
+
+    // --- teardown waits for a stuck audioOut(), without a time limit -------------------
+    {
+        const size_t errorsBefore = countErrors("has not returned");
+        bool destroyedDuringHold = true;
+        size_t errorsDuringHold = 0;
+        atomic<bool> reached{false};
+        bool publicResult = true;
+        double publicTook = -1.0;
+        thread releaser([&] {
+            reached = waitFor([] { return g_stuckInside.load(); }, 5000);
+            // The teardown is waiting by now (it holds the barrier's mutex).
+            // The public barrier keeps its one-second limit meanwhile.
+            this_thread::sleep_for(chrono::milliseconds(300));
+            auto t1 = Clock::now();
+            publicResult = engine.waitForCallbackIdle();
+            publicTook = secondsSince(t1);
+            // Well past one second into the teardown's wait.
+            this_thread::sleep_for(chrono::milliseconds(300));
+            destroyedDuringHold = g_stuckDestroyed.load();
+            errorsDuringHold = countErrors("has not returned");
+            g_stuckRelease = true;
+        });
+        auto t0 = Clock::now();
+        runHeadlessApp<StuckApp>();
+        const double took = secondsSince(t0);
+        releaser.join();
+        check("teardown with a stuck audioOut() started", reached.load() && !g_stuckTimedOut);
+        check("the App is not destroyed while its audioOut() is stuck, past one second",
+              !destroyedDuringHold && took >= 1.5, ms(took));
+        check("... one error says why the teardown waits",
+              errorsDuringHold == errorsBefore + 1 &&
+              countErrors("has not returned") == errorsBefore + 1,
+              to_string(errorsDuringHold - errorsBefore) + " during the hold");
+        check("... and the teardown goes on once audioOut() returns", g_stuckDestroyed.load());
+        check("meanwhile the public barrier still gives up after about a second",
+              !publicResult && publicTook >= 0.9 && publicTook < 1.5, ms(publicTook));
+    }
 
     // --- AudioRecorder::stop() waits for the pass in flight ------------------------------
     {

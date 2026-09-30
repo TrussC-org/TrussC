@@ -200,7 +200,10 @@ public:
     // They stop being called after cleanup(): the framework detaches them
     // before it destroys the App (exit, hot reload, closing the App's
     // window), so the App adds nothing to the last few buffers before it
-    // goes.
+    // goes. It waits for a call already running, as long as it takes, so
+    // don't wait on the main thread or on a lock the main thread may hold in
+    // here: the teardown would hang (with an error in the log after one
+    // second).
     virtual void audioOut(AudioOutBuffer& buf) { (void)buf; }
     virtual void audioIn(const AudioInBuffer& buf) { (void)buf; }
 
@@ -276,11 +279,14 @@ namespace internal {
 // Detach the App's audioOut / audioIn hooks, then wait for a callback that is
 // already running on the audio thread (Event does not wait on disconnect).
 // Afterwards nothing on the audio thread reaches the App, so it can be
-// destroyed. Main thread; returns at once when no audio is running.
+// destroyed. The wait has no time limit: a listener that never returns hangs
+// the teardown (with an error in the log after one second) instead of
+// letting the App be destroyed under it. Main thread; returns at once when no
+// audio is running.
 inline void detachAppAudio(App& app) {
     app.audioOutListener_.disconnect();
     app.audioInListener_.disconnect();
-    AudioEngine::getInstance().waitForCallbackIdle();
+    waitForCallbackIdleNoTimeout();
 }
 }
 

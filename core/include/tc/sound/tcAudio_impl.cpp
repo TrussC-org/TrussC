@@ -1321,10 +1321,36 @@ void AudioEngine::endCallback(int slot) {
 }
 
 bool AudioEngine::waitForCallbackIdle() {
+    return waitForCallbacks(true);
+}
+
+namespace internal {
+void waitForCallbackIdleNoTimeout() {
+    AudioEngine::getInstance().waitForCallbacks(false);
+}
+} // namespace internal
+
+bool AudioEngine::waitForCallbacks(bool giveUp) {
     if (t_callbackDepth > 0) return true;   // audio thread, inside a listener
 
-    std::lock_guard<std::mutex> lock(callbackBarrierMutex_);
-    const auto deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    auto warnGaveUp = [] {
+        logWarning("AudioEngine") << "waitForCallbackIdle: an audioOut / audioIn "
+            "listener has been running for over "
+            << kCallbackIdleTimeout.count() << " s; continuing without "
+            "waiting for it. Is it waiting on this thread (a lock held here, "
+            "or work queued to it)?";
+    };
+    std::unique_lock<std::timed_mutex> lock(callbackBarrierMutex_, std::defer_lock);
+    auto deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    if (giveUp) {
+        // A framework teardown may hold the mutex while it waits for a stuck
+        // listener: the one-second limit covers this wait too.
+        if (!lock.try_lock_until(deadline)) { warnGaveUp(); return false; }
+    } else {
+        lock.lock();
+        deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    }
+    bool reported = false;
     // Advance the epoch so new callbacks count in the other slot, then wait
     // for the old slot to drain. Twice, so both slots are drained after the
     // caller's disconnect: a callback that read the epoch just before an
@@ -1332,15 +1358,22 @@ bool AudioEngine::waitForCallbackIdle() {
     for (int pass = 0; pass < 2; ++pass) {
         const int slot = (int)(callbackEpoch_.fetch_add(1) & 1u);
         while (callbacksInFlight_[slot].load() != 0) {
-            if (std::chrono::steady_clock::now() >= deadline) {
-                logWarning("AudioEngine") << "waitForCallbackIdle: an audioOut / audioIn "
-                    "listener has been running for over "
-                    << kCallbackIdleTimeout.count() << " s; continuing without "
-                    "waiting for it. Is it waiting on this thread (a lock held here, "
-                    "or work queued to it)?";
-                return false;
+            if (std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::yield();
+                continue;
             }
-            std::this_thread::yield();
+            if (giveUp) { warnGaveUp(); return false; }
+            // Framework teardown: keep waiting (a use-after-free would be
+            // worse than a hang), and say why the app is stuck, once.
+            if (!reported) {
+                reported = true;
+                logError("AudioEngine") << "an audioOut / audioIn listener has not "
+                    "returned for " << kCallbackIdleTimeout.count() << " s; the "
+                    "teardown keeps waiting for it before it destroys anything the "
+                    "listener may use. The listener is most likely waiting on the "
+                    "main thread or on a lock.";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
     return true;
