@@ -1415,8 +1415,8 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
       info->fontdicts = stbtt__new_buf(NULL, 0);
       info->fdselect = stbtt__new_buf(NULL, 0);
 
-      // TrussC patch: use the CFF table length from the table directory
-      // instead of a fixed 512MB, so the CFF reads below stay inside the table.
+      // TrussC patch: the CFF buffer takes the CFF table length from the
+      // table directory; CFF data is read within that length.
       {
          stbtt_uint32 cff_length = 0;
          stbtt_uint32 tabledir = fontstart + 12;
@@ -1922,10 +1922,8 @@ typedef struct
 
 #define STBTT__CSCTX_INIT(bounds) {bounds,0, 0,0, 0,0, 0,0,0,0, NULL, 0, 0}
 
-// TrussC patch: the counting pass of a CFF glyph stops once the vertex count
-// reaches the range stb handles: the count is an int, and the vertex array
-// size (count * sizeof(stbtt_vertex)) is computed in size_t, which is 32 bits
-// on some targets. May be predefined (lower) for tests.
+// TrussC patch: vertex counting of a CFF glyph stops within the range stb
+// handles (int count, size_t allocation). May be predefined (lower) for tests.
 #ifndef STBTT_MAX_VERTICES
 #define STBTT_MAX_VERTICES \
    ((size_t)(~0u >> 1) < (size_t)-1 / sizeof(stbtt_vertex) \

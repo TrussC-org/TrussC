@@ -251,11 +251,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
-- `fontSfntCheck/` — font data is checked before stb_truetype reads it:
+- `fontSfntCheck/` — font data is checked before it is given to stb_truetype:
   `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
   bytes, a `.ttc` header whose font count or offset points outside the data,
-  a table directory or a table past the end of the data (also when offset +
-  length wraps in 32 bits), a missing required table (a directory entry at
+  a table directory or a table past the end of the data (offset + length is
+  checked in 64 bits), a missing required table (a directory entry at
   offset 0 counts as missing, as in stb), head / hhea / maxp /
   cmap shorter than the fields stb reads, cmap encoding records or a used
   subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
@@ -268,17 +268,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   U+10FFFF draw as .notdef. Valid fonts load, including
   `numberOfHMetrics == numGlyphs`, a cmap format 12 subtable, a table of
   length 0 and tables that share bytes. Also guards the TrussC patch in
-  `stb_truetype.h` (CFF data is read with the CFF table's own length; this
-  case runs only in builds with `NDEBUG`, as CI builds, because stb's own
-  assert stops it otherwise), the CFF vertex-count patch (a glyph over the
-  vertex limit, one whose closing vertex is the one over it, one drawn 2^32
-  times through nested subroutines, and one whose vertex array cannot be
-  allocated come back empty; `local.cmake` builds stb_truetype with
+  `stb_truetype.h` (CFF data is read within the CFF table's length; this
+  case runs only in builds with `NDEBUG`, as CI builds, because stb asserts
+  on it otherwise), the CFF vertex-count patch (a glyph over the vertex
+  limit, one whose closing vertex is the one over it, one far over any limit
+  through nested subroutines, and one whose vertex array cannot be allocated
+  come back empty; `local.cmake` builds stb_truetype with
   `TC_STBTT_TEST_LIMITS` so the test can lower those limits) and the
   padded `STBTT_malloc` (a glyph whose last contour is one off-curve point).
-  That last case only shows something under AddressSanitizer, and CI does not
-  build with ASan, so run it locally after changing stb_truetype or
-  `stb_impl.cpp`. From the repository root:
+  The single off-curve contour case is only meaningful under
+  AddressSanitizer, and CI does not build with ASan, so run it locally after
+  changing stb_truetype or `stb_impl.cpp`. From the repository root:
 
   ```sh
   tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake

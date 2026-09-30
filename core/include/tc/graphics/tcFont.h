@@ -232,8 +232,7 @@ public:
             logWarning() << "FontAtlasManager: font data pointer is null";
             return false;
         }
-        // Empty data leaves fontData_ empty (data() may be null); the sfnt
-        // check in initFromFontData rejects it before anything reads it.
+        // Empty data is rejected by the sfnt check in initFromFontData.
         fontData_.assign(data, data + size);
 
         return initFromFontData(fontSize);
@@ -267,8 +266,8 @@ public:
 
 private:
     bool initFromFontData(int fontSize, int fontIndex = 0) {
-        // stb_truetype takes no length and trusts the offsets in the file, so
-        // the structure it walks is checked against the real size first.
+        // The sfnt structure is checked against the data size before the data
+        // is given to stb_truetype.
         std::string reason;
         if (!checkSfntSkeleton(fontData_.data(), fontData_.size(), fontIndex, reason)) {
             logWarning() << "FontAtlasManager: not a usable font (" << reason << ")";
@@ -291,9 +290,8 @@ private:
             return false;
         }
 
-        // Glyph indices run up to maxp numGlyphs. A CFF font's outlines come
-        // from the CharStrings INDEX, which stb indexes without comparing
-        // against its count, so there the limit is the smaller of the two.
+        // Usable glyph indices are below maxp numGlyphs, and for a CFF font
+        // also below the number of CharStrings.
         glyphLimit_ = fontInfo_.numGlyphs;
         if (!fontInfo_.glyf) {
             const int count = cffCharStringsCount(fontInfo_.charstrings);
@@ -340,11 +338,9 @@ private:
         return true;
     }
 
-    // stbtt_FindGlyphIndex returns whatever the cmap says, and stb indexes
-    // hmtx and the CFF charstrings with it unchecked. An index past numGlyphs
-    // (for CFF, past the CharStrings count too) is treated as a missing glyph
-    // (.notdef). stb takes the codepoint as int, so anything above the Unicode
-    // range is answered here as missing instead of being passed on.
+    // Glyph index for a codepoint. A glyph index from the cmap past numGlyphs
+    // (for CFF, past the CharStrings count) maps to .notdef (0), and so does a
+    // codepoint above U+10FFFF.
     int findGlyphIndex(uint32_t codepoint) const {
         if (codepoint > 0x10FFFF) return 0;
         const int glyph = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
@@ -367,13 +363,12 @@ private:
     // -------------------------------------------------------------------------
     // sfnt skeleton check (stb_truetype backend)
     //
-    // stb_truetype takes no buffer length: it follows the collection header,
-    // the table directory, the fixed fields of head / hhea / maxp / cmap, loca
-    // and hmtx wherever the file points. This checks those against the real
-    // size before stb sees the data, so they stay inside the buffer. It does
-    // not look inside cmap subtables, glyph outlines or CFF data. It belongs to
-    // the stb backend: drop it together with stb if the backend is replaced.
-    // All arithmetic is 64-bit on values of at most 32 bits, so nothing wraps.
+    // Checks the collection header, the table directory, the fixed fields of
+    // head / hhea / maxp / cmap, loca and hmtx against the data size before
+    // the data is given to stb_truetype. It does not look inside cmap
+    // subtables, glyph outlines or CFF data. It belongs to the stb backend:
+    // drop it together with stb if the backend is replaced. Offsets and
+    // lengths are added in 64 bits.
     // -------------------------------------------------------------------------
     static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
                                   std::string& reason) {
@@ -402,7 +397,7 @@ private:
             reason = "data is " + std::to_string(size) + " bytes, shorter than a font header";
             return false;
         }
-        // stb keeps offsets and sizes in int, and caps a CFF buffer at 1 GiB.
+        // The stb backend handles fonts below 1 GiB.
         if (n >= 0x40000000u) {
             reason = "the bundled font engine (stb_truetype) cannot handle fonts "
                      "larger than 1 GiB";
@@ -445,10 +440,8 @@ private:
             return false;
         }
 
-        // Table directory. stb takes the first entry with a given tag, and
-        // reads an offset of 0 as "no such table" (for maxp it then uses
-        // numGlyphs 0xffff; for glyf it takes the CFF path). The same rule
-        // applies here: an entry at offset 0 counts as missing.
+        // Table directory. As in stbtt_InitFont, the first entry with a given
+        // tag is used, and an entry at offset 0 counts as missing.
         const uint64_t numTables = u16(fontStart + 4);
         const uint64_t dirStart = fontStart + 12;
         if (dirStart + 16 * numTables > n) {
@@ -1499,9 +1492,8 @@ private:
     static void onFetchSuccess(emscripten_fetch_t* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
 
-        // numBytes is 64-bit, size_t is 32-bit on wasm32: refuse anything that
-        // would be cut short. An empty response may have a null data pointer;
-        // setupFromMemory() rejects it with a warning.
+        // A response larger than SIZE_MAX (size_t is 32-bit on wasm32) is
+        // refused. setupFromMemory() rejects an empty response with a warning.
         if (fetch->numBytes > (uint64_t)SIZE_MAX) {
             logWarning() << "Font: response too large for " << ctx->key.fontPath;
             delete ctx;

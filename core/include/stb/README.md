@@ -72,44 +72,35 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   history in the file ends at 1.26, 2021-08-28).
 - **TrussC patches** (marked `// TrussC patch:` in the file):
   1. `stbtt_InitFont_internal`: the CFF buffer is made with the `CFF ` table
-     length from the table directory, instead of upstream's fixed 512MB
-     (upstream has a `@TODO` for it). Every later CFF read (INDEX, DICT,
-     Subrs, FDSelect, CharStrings) is bounds-checked by stb against that
-     buffer, so it stays inside the table.
+     length from the table directory (upstream leaves this as a `@TODO`), so
+     CFF data (INDEX, DICT, Subrs, FDSelect, CharStrings) is read within the
+     CFF table's length.
   2. CFF glyph outlines (`stbtt__csctx`, `stbtt__csctx_v`,
      `stbtt__run_charstring`, `stbtt__GetGlyphShapeT2`): vertex counting
-     stops within the range stb handles, and the allocation result is
-     checked. stb runs a CFF charstring twice, once to count vertices (into
-     an int) and once to write them into an array of that size. The counting
-     pass now stops at `STBTT_MAX_VERTICES`, `min(INT_MAX, SIZE_MAX /
-     sizeof(stbtt_vertex))` (the count is an int, and the array size is
-     computed in `size_t`, 32 bits on wasm32): `stbtt__csctx_v` sets a new
-     `stopped` field instead of counting further, and `stbtt__run_charstring`
+     stops within the range stb handles (int count, size_t allocation), and
+     the allocation result is checked. The counting pass stops at
+     `STBTT_MAX_VERTICES`, `min(INT_MAX, SIZE_MAX / sizeof(stbtt_vertex))`:
+     `stbtt__csctx_v` sets a new `stopped` field, and `stbtt__run_charstring`
      returns 0 at the top of its loop (subroutine calls run in that loop) and
      at `endchar` once it is set. `STBTT__CSCTX_INIT` gained the matching
      initializer. The glyph then has no outline. `stbtt__GetGlyphShapeT2`
-     returns 0 vertices when `STBTT_malloc` returns NULL, without running
-     the second pass. `STBTT_MAX_VERTICES` may be predefined.
+     returns 0 vertices when `STBTT_malloc` returns NULL.
+     `STBTT_MAX_VERTICES` may be predefined.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
-  file): `STBTT_malloc` allocates 64 zeroed bytes past each requested size.
-  `stbtt_GetGlyphShape` sizes the TrueType vertex array as
-  `n + 2*numberOfContours` and reads one element past it when the last
-  point of a glyph starts a contour off-curve (a last contour that is a
-  single off-curve point); the padding keeps that read inside the block.
-  It returns NULL when the size cannot be allocated. With
+  file): allocations through `STBTT_malloc` are padded with 64 zeroed bytes,
+  and it returns NULL when the size cannot be allocated. With
   `TC_STBTT_TEST_LIMITS` (set only by `core/tests/fontSfntCheck/local.cmake`)
   `STBTT_MAX_VERTICES` and a cap on `STBTT_malloc` sizes become variables the
   test sets.
-- **Not covered by stb, checked by TrussC**: stb_truetype takes no buffer
-  length. `FontAtlasManager` (`core/include/tc/graphics/tcFont.h`) checks the
-  sfnt skeleton (collection header, table directory, table bounds, required
-  tables, the fixed fields stb reads, hmtx, and loca bounds and order)
-  against the data size before `stbtt_InitFont`, and after it that the CFF
-  CharStrings INDEX count can be read within the CFF table. It treats a
-  glyph index from the cmap past `numGlyphs` (for CFF, past the number of
-  CharStrings) and a codepoint above U+10FFFF as .notdef. Fonts of 1 GiB or
-  more are refused, since stb keeps offsets and sizes in int. cmap subtable
-  contents, glyph outlines and composite glyph nesting are not checked.
+- **Checked by TrussC**: `FontAtlasManager`
+  (`core/include/tc/graphics/tcFont.h`) checks the sfnt skeleton (collection
+  header, table directory, table bounds, required tables, the fixed fields
+  stb reads, hmtx, and loca bounds and order) against the data size before
+  `stbtt_InitFont`, and after it that the CFF CharStrings INDEX count can be
+  read within the CFF table. A glyph index from the cmap past `numGlyphs`
+  (for CFF, past the CharStrings count) and a codepoint above U+10FFFF map
+  to .notdef. Fonts of 1 GiB or more are refused. cmap subtable contents,
+  glyph outlines and composite glyph nesting are not checked.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
 ## stb_vorbis.c (in core/include/)

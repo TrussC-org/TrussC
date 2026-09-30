@@ -1,13 +1,13 @@
 // =============================================================================
-// fontSfntCheck — font data is checked before stb_truetype reads it
+// fontSfntCheck — font data is checked before it is given to stb_truetype
 //
-// stb_truetype takes no buffer length and follows the offsets in the file.
-// FontAtlasManager checks the sfnt skeleton against the real size first, and
-// setupFromMemory() returns false with a warning when it does not hold:
+// FontAtlasManager checks the sfnt skeleton against the data size before the
+// data is given to stb_truetype, and setupFromMemory() returns false with a
+// warning when it does not hold:
 // - fewer than 12 bytes (including 0 bytes with a null pointer),
 // - a .ttc header whose font count or font offset points outside the data,
 // - a table directory, or any table, that runs past the end of the data
-//   (also when offset + length wraps in 32 bits),
+//   (offset + length is checked in 64 bits),
 // - a missing cmap / head / hhea / hmtx / maxp, or loca (TrueType) / CFF,
 //   where a directory entry at offset 0 counts as missing (as in stb),
 // - head / hhea / maxp / cmap shorter than the fields stb reads, cmap
@@ -27,15 +27,13 @@
 // - a glyph index from the cmap past numGlyphs, or for CFF past the number
 //   of CharStrings, is treated as .notdef,
 // - a codepoint above U+10FFFF is answered as missing (.notdef),
-// - the CFF data is read with the CFF table's own length (a CharStrings
-//   offset past the table no longer reads the bytes that follow it; runs only
-//   with NDEBUG, since stb asserts on that offset otherwise),
+// - CFF data is read within the CFF table's length (a CharStrings offset
+//   past the table finds no CharStrings INDEX; runs only with NDEBUG, since
+//   stb asserts on that offset otherwise),
 // - a glyph whose last contour is a single off-curve point loads and
-//   rasterizes (stb reads one vertex past its array there; the padded
-//   STBTT_malloc keeps that read inside the block). This case only shows
-//   something under AddressSanitizer: a plain build passes it with or
-//   without the padding, and CI does not build with ASan. Local ASan run,
-//   from the repository root:
+//   rasterizes (with the padded STBTT_malloc). The single off-curve contour
+//   case is only meaningful under AddressSanitizer, and CI does not build
+//   with ASan. Local ASan run, from the repository root:
 //     tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
 //     cd core/tests/fontSfntCheck
 //     cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
@@ -48,7 +46,7 @@
 // - CFF vertex counting stops within the range stb handles, and a vertex
 //   array that cannot be allocated leaves the glyph empty (with the lower
 //   test limits from local.cmake): a glyph over the limit, one whose closing
-//   vertex is the one over it, one drawn 2^32 times through nested
+//   vertex is the one over it, one far over any limit through nested
 //   subroutines, and one whose array allocation fails all come back empty,
 // - valid fonts still load, with the metrics they are built with, including
 //   numberOfHMetrics == numGlyphs, a cmap format 12 subtable, a table of
@@ -328,8 +326,8 @@ static void makeGlyfLoca(int locaFormat, Bytes& glyf, Bytes& loca) {
     else put32(loca, (uint32_t)glyf.size());
 }
 
-// hmtx goes last, so a read past it is a read past the data. `extra` tables
-// go between cmap and loca.
+// hmtx goes last, so it ends where the data ends. `extra` tables go between
+// cmap and loca.
 static Bytes makeTrueType(int locaFormat = 0, int numLong = 2, const Bytes& cmap = makeCmap(),
                           const vector<Table>& extra = {}) {
     Bytes glyf, loca;
@@ -428,7 +426,7 @@ static Bytes makeCffFont(const vector<Bytes>& charStrings = cffCharStrings(),
 }
 
 // CharStrings offset points just past the CFF table; the next table holds a
-// well-formed CharStrings INDEX, which only a read beyond the CFF table sees.
+// well-formed CharStrings INDEX, outside the CFF table.
 static Bytes makeCffFontCharStringsOutside() {
     const Bytes probe = makeCff(0, false);
     const uint32_t after = (uint32_t)((probe.size() + 3) & ~size_t(3));
@@ -477,9 +475,8 @@ static LoadOutcome tryLoad(internal::FontAtlasManager& m, const Bytes& f) {
     return tryLoad(m, f.data(), f.size());
 }
 
-// setupFromMemory() copies into an exact-size heap block, so a read past the
-// end is one ASan sees. `reason` is a part of the warning to expect (the
-// guard that should catch it); empty accepts any.
+// `reason` is a part of the warning to expect (the check that should reject
+// the font); empty accepts any.
 static void expectRejected(const string& name, const Bytes& f, const string& reason = "") {
     internal::FontAtlasManager m;
     g_lastWarning.clear();
@@ -588,7 +585,7 @@ static void checkCffCharStringsCount() {
 
 // --- codepoints above U+10FFFF -----------------------------------------------------
 static void checkCodepointRange() {
-    // A format 12 cmap can map any 32-bit value; stb looks it up as given.
+    // A format 12 cmap can map any 32-bit value.
     const Bytes f = makeTrueType(0, 2, makeCmap12({{0x20, 2}, {0x41, 1}, {0x10FFFF, 1},
                                                    {0x110041, 1}, {0xFFFFFFFF, 1}}));
     checkValid("TrueType, cmap format 12", f);
@@ -635,7 +632,8 @@ static vector<Bytes> vertexCountGsubrs() {
 }
 
 // Glyphs 0-3 as in cffCharStrings() ('C' is a triangle: 4 vertices with the
-// closing line), 4 ('D'): 2^32 + 1 vertices, 5 ('E'): 2^18 + 1 vertices.
+// closing line), 4 ('D'): G3, far over any vertex limit, 5 ('E'): 2^18 + 1
+// vertices.
 static Bytes makeVertexCountFont() {
     vector<Bytes> cs = cffCharStrings();
     Bytes d;
@@ -682,7 +680,7 @@ static void checkVertexCount() {
     check("vertex count: 'E' (2^18 + 1 vertices) has an outline", n > 0,
           "vertices=" + to_string(n));
 
-    // 2^32 + 1 vertices, well past any limit.
+    // 'D' is far over any limit.
     internal::FontAtlasManager m;
     if (!tryLoad(m, f).ok) {
         check("vertex count: font loads", false);
@@ -690,7 +688,7 @@ static void checkVertexCount() {
     }
     check("vertex count: 'A' has one contour", m.getGlyphPath('A').getNumSubpaths() == 1);
     const Path pd = m.getGlyphPath('D');
-    check("vertex count: 'D' (2^32 + 1 vertices) is empty", pd.empty(),
+    check("vertex count: 'D' (far over the limit) is empty", pd.empty(),
           "vertices=" + to_string(pd.size()));
     const internal::GlyphInfo* gd = m.getOrLoadGlyph('D');
     check("vertex count: 'D' draws empty", gd && gd->isValid() && gd->getWidth() == 0);
@@ -720,9 +718,9 @@ static void checkSinglePointContour() {
 // --- CFF length ----------------------------------------------------------------
 static void checkCffLength() {
 #ifndef NDEBUG
-    // With the CFF table's own length, stb's STBTT_assert (plain assert)
-    // stops the seek to a CharStrings offset past the table, which is what
-    // this case sets up. Builds with NDEBUG (Release, as CI) run it.
+    // stb's STBTT_assert (plain assert) stops at a CharStrings offset past
+    // the CFF table, which is what this case sets up. Builds with NDEBUG
+    // (Release, as CI) run it.
     printf("%-72s SKIP (stb asserts in builds without NDEBUG)\n",
            "CFF: CharStrings past the CFF table are not read");
     fflush(stdout);
@@ -819,8 +817,8 @@ static void checkMalformed() {
         f = tt;
         Loc l = findTable(f, "glyf");
         set32(f, l.entry + 8, 0xFFFFFFF0);
-        set32(f, l.entry + 12, 0x20);  // offset + length wraps to 0x10 in 32 bits
-        expectRejected("table offset + length wraps in 32 bits", f, "table 'glyf' is outside");
+        set32(f, l.entry + 12, 0x20);  // offset + length does not fit in 32 bits
+        expectRejected("table offset + length over 32 bits", f, "table 'glyf' is outside");
         f = tt;
         l = findTable(f, "hmtx");
         set32(f, l.entry + 12, l.length + 1);
@@ -848,9 +846,8 @@ static void checkMalformed() {
         expectRejected("CFF font without 'CFF '", f, "missing required table 'CFF '");
     }
 
-    // A directory entry at offset 0 is "no table" to stb. For maxp, stb would
-    // run with numGlyphs 0xffff while the check read a count from the header
-    // bytes; for glyf, stb takes the CFF path.
+    // A directory entry at offset 0 counts as missing, as in stbtt_InitFont
+    // (without glyf, the font is taken as CFF).
     for (const char* tag : {"cmap", "head", "hhea", "hmtx", "maxp", "loca", "glyf"}) {
         Bytes f = tt;
         const Loc l = findTable(f, tag);
@@ -875,8 +872,8 @@ static void checkMalformed() {
         expectRejected("CFF font with 'CFF ' at offset 0", f, "missing required table 'CFF '");
     }
     {
-        // Two maxp entries: stb stops at the first one (offset 0) and does not
-        // look at the valid one after it.
+        // Two maxp entries: the first one (offset 0) is the one used, so the
+        // font counts as without maxp.
         Bytes glyf, loca;
         makeGlyfLoca(0, glyf, loca);
         Bytes f = buildSfnt(0x00010000, {{"head", makeHead(0)},
