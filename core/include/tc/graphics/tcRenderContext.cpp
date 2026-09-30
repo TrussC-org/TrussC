@@ -251,7 +251,8 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
 
     if (text.empty()) return true;                 // handled: nothing to draw
     ensureFontAtlasForText(text);
-    if (!internal::fontAtlasInitialized) return true;
+    const auto& atlas = internal::bitmapFontAtlas();
+    if (!atlas.atlasInitialized) return true;
 
     // 1) Current model matrix (pushMatrix/translate) -> world space (full 3D).
     Mat4 model = getMatrix();
@@ -296,7 +297,7 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
 
     internal::loadPipeline(internal::activeFill2D());
     sgl_enable_texture();
-    sgl_texture(internal::fontView, internal::fontSampler);
+    sgl_texture(atlas.view, atlas.sampler);
 
     sgl_begin_quads();
     sgl_c4f(currentR_, currentG_, currentB_, currentA_);
@@ -317,7 +318,7 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
         if (cp == 0) break;
 
         float u, vt, u2, v2;
-        bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, vt, u2, v2);
+        bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, vt, u2, v2);
         float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
         sgl_v2f_t2f(cursorX, cursorY, u, vt);
@@ -353,7 +354,8 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
 void internal::RenderContext::drawBitmapString(const std::string& text, float x, float y, bool screenFixed) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
-    if (!internal::fontAtlasInitialized) return;
+    const auto& atlas = internal::bitmapFontAtlas();
+    if (!atlas.atlasInitialized) return;
 
     // Calculate offset based on current alignment settings
     Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
@@ -379,7 +381,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 
         internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
-        sgl_texture(internal::fontView, internal::fontSampler);
+        sgl_texture(atlas.view, atlas.sampler);
 
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
@@ -400,7 +402,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
             if (cp == 0) break;
 
             float u, v, u2, v2;
-            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+            bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, v, u2, v2);
             float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v);
@@ -426,7 +428,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 
         internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
-        sgl_texture(internal::fontView, internal::fontSampler);
+        sgl_texture(atlas.view, atlas.sampler);
 
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
@@ -447,7 +449,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
             if (cp == 0) break;
 
             float u, v, u2, v2;
-            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+            bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, v, u2, v2);
             float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v);
@@ -472,7 +474,8 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 void internal::RenderContext::drawBitmapString(const std::string& text, float x, float y, float scale) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
-    if (!internal::fontAtlasInitialized) return;
+    const auto& atlas = internal::bitmapFontAtlas();
+    if (!atlas.atlasInitialized) return;
 
     // Calculate offset based on current alignment settings
     Vec2 offset = calcBitmapAlignOffset(text, textAlignH_, textAlignV_);
@@ -483,7 +486,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 
     internal::loadPipeline(internal::activeFill2D());
     sgl_enable_texture();
-    sgl_texture(internal::fontView, internal::fontSampler);
+    sgl_texture(atlas.view, atlas.sampler);
 
     sgl_begin_quads();
     sgl_c4f(currentR_, currentG_, currentB_, currentA_);
@@ -504,7 +507,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
         if (cp == 0) break;
 
         float u, v, u2, v2;
-        bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v, u2, v2);
+        bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, v, u2, v2);
         float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
         sgl_v2f_t2f(cursorX, cursorY, u, v);
@@ -529,7 +532,8 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
                                       Direction h, Direction v, bool screenFixed) {
     if (text.empty()) return;
     ensureFontAtlasForText(text);
-    if (!internal::fontAtlasInitialized) return;
+    const auto& atlas = internal::bitmapFontAtlas();
+    if (!atlas.atlasInitialized) return;
 
     Vec2 offset = calcBitmapAlignOffset(text, h, v);
 
@@ -552,7 +556,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 
         internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
-        sgl_texture(internal::fontView, internal::fontSampler);
+        sgl_texture(atlas.view, atlas.sampler);
 
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
@@ -573,7 +577,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
             if (cp == 0) break;
 
             float u, v_, u2, v2;
-            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v_, u2, v2);
+            bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, v_, u2, v2);
             float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v_);
@@ -598,7 +602,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
 
         internal::loadPipeline(internal::activeFill2D());
         sgl_enable_texture();
-        sgl_texture(internal::fontView, internal::fontSampler);
+        sgl_texture(atlas.view, atlas.sampler);
 
         sgl_begin_quads();
         sgl_c4f(currentR_, currentG_, currentB_, currentA_);
@@ -619,7 +623,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
             if (cp == 0) break;
 
             float u, v_, u2, v2;
-            bitmapfont::getCodepointTexCoord(cp, internal::fontAtlasRows, u, v_, u2, v2);
+            bitmapfont::getCodepointTexCoord(cp, atlas.rows, u, v_, u2, v2);
             float gw = (float)bitmapfont::codepointPixelWidth(cp);
 
             sgl_v2f_t2f(cursorX, cursorY, u, v_);

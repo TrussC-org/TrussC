@@ -73,13 +73,13 @@ public:
         // user code can guard raw input (isOverlayHovered/isOverlayFocused).
         // Installed once, shared by all windows: the query resolves the
         // manager of the window whose context is current when it is asked.
-        tc::internal::overlayHoveredQuery = []() {
+        tc::internal::overlayHoveredQuery() = []() {
             ImGuiManager* m = ImGuiManager::findForCurrentWindow();
             if (!m || !m->isInitialized()) return false;
             simgui_tc_set_context(m->simguiCtx_);
             return ImGui::GetIO().WantCaptureMouse;
         };
-        tc::internal::overlayFocusedQuery = []() {
+        tc::internal::overlayFocusedQuery() = []() {
             ImGuiManager* m = ImGuiManager::findForCurrentWindow();
             if (!m || !m->isInitialized()) return false;
             simgui_tc_set_context(m->simguiCtx_);
@@ -255,11 +255,11 @@ inline void imguiEnd() {
 }
 
 inline bool imguiWantsMouse() {
-    return tc::internal::overlayHoveredQuery ? tc::internal::overlayHoveredQuery() : false;
+    return tc::isOverlayHovered();
 }
 
 inline bool imguiWantsKeyboard() {
-    return tc::internal::overlayFocusedQuery ? tc::internal::overlayFocusedQuery() : false;
+    return tc::isOverlayFocused();
 }
 
 } // namespace tcx::imgui
