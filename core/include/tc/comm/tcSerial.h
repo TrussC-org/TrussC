@@ -118,9 +118,16 @@ struct SerialDisconnectEventArgs {
 // close() or setup() on the app's thread, and isConnected() stays true until
 // then, as it does on the other platforms until an I/O call finds the loss.
 //
-// Serial makes every call below with its lock held, so the backend sees one
-// app-side call at a time. The worker shares only the receive buffer (under
-// its own mutex) and the atomic state / loss flags with them.
+// Serial makes every call below with its lock held. setup(), close() and
+// destroy() hold it exclusive, so they come one at a time and never overlap
+// an I/O call. The I/O calls (available(), readBytes(), writeBytes(),
+// flushInput(), isConnected(), isLost()) hold it shared, so they may come
+// from several threads at once: the receive buffer has its own mutex, the
+// state and loss flags are atomic, the connection fields they read (fd,
+// endpoints) are written only while no I/O call runs or before the worker
+// publishes Connected, and concurrent bulk transfers on one usbfs fd are
+// each their own URB. The worker shares only the receive buffer and those
+// flags with them.
 // ---------------------------------------------------------------------------
 namespace androidserial {
     struct Impl;
