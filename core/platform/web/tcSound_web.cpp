@@ -182,7 +182,14 @@ void SoundBuffer::ensureAacLoaded() {
     const int targetSampleRate = 44100;
 
     if (srcSampleRate == targetSampleRate) {
-        // No resampling needed
+        // No resampling needed. Exception catching is off on the web, so a
+        // failed allocation would abort: check it first.
+        if (!internal::allocationFits(srcTotal * sizeof(float))) {
+            logWarning("SoundBuffer") << "Out of memory for decoded AAC (" << srcTotal
+                                      << " samples): " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
         channels = srcChannels;
         sampleRate = srcSampleRate;
         numSamples = srcNumSamples;
@@ -205,9 +212,24 @@ void SoundBuffer::ensureAacLoaded() {
             deferredAacPath_.clear();
             return;
         }
+        // Exception catching is off on the web, so a failed allocation would
+        // abort: check each one first. The resampled buffer is checked while
+        // the source one is held, as both are held at once.
+        if (!internal::allocationFits(srcTotal * sizeof(float))) {
+            logWarning("SoundBuffer") << "Out of memory for decoded AAC (" << srcTotal
+                                      << " samples): " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
+        std::vector<float> srcSamples(srcTotal);
+        if (!internal::allocationFits(newTotal * sizeof(float))) {
+            logWarning("SoundBuffer") << "Out of memory for resampled AAC (" << newTotal
+                                      << " samples): " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
 
         // First, get source data
-        std::vector<float> srcSamples(srcTotal);
         copyAacData(srcSamples.data(), (int)srcTotal);
 
         // Resample with linear interpolation
