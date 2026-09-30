@@ -10196,6 +10196,8 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
     GLXFBConfig* configs = glXGetFBConfigs(_sapp_tc.display, _sapp_tc.screen, &count);
     if (!configs || (count == 0)) {
         if (configs) XFree(configs);
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_NO_GLXFBCONFIGS, __LINE__,
+                     "", "glXGetFBConfigs() returned no GLXFBConfigs");
         return false;
     }
     const int want_samples = (_sapp_tc.app.desc.sample_count > 1) ? _sapp_tc.app.desc.sample_count : 0;
@@ -10279,6 +10281,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
         int width_pt, int height_pt, bool borderless) {
     XVisualInfo* vi = glXGetVisualFromFBConfig(_sapp_tc.display, _sapp_tc.fbconfig);
     if (!vi) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_GET_VISUAL_FROM_FBCONFIG_FAILED, __LINE__,
+                     "", "glXGetVisualFromFBConfig() failed");
         return false;
     }
     w->colormap = XCreateColormap(_sapp_tc.display, _sapp_tc.root, vi->visual, AllocNone);
@@ -10310,6 +10314,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     _sapp_tc_x11_release_error_handler();
     XFree(vi);
     if (!w->xwin) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_X11_CREATE_WINDOW_FAILED, __LINE__,
+                     "", "XCreateWindow() failed");
         return false;
     }
     Atom protocols[] = { _sapp_tc.WM_DELETE_WINDOW };
@@ -10338,6 +10344,8 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     w->glx_win = glXCreateWindow(_sapp_tc.display, _sapp_tc.fbconfig, w->xwin, NULL);
     _sapp_tc_x11_release_error_handler();
     if (!w->glx_win) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_CREATE_WINDOW_FAILED, __LINE__,
+                     "", "glXCreateWindow() failed");
         return false;
     }
     _sapp_tc_timing_reset(&w->timing);
