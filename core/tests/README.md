@@ -139,6 +139,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   while another thread calls `stop()` still ends up in the WAV and in
   `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
   a FAIL.
+- `appAudioAttach/` — an App's `audioOut()` / `audioIn()` are subscribed
+  right after its first `setup()` returns (#426), on the real `AudioEngine`
+  over miniaudio's null backend: for the main App (`runHeadlessApp`) and a
+  secondary window's App (setup on the window's first tick), whose `setup()`
+  allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
+  has returned and no hook is subscribed while it runs; afterwards there is
+  exactly one hook each, also after more ticks or a move to another window;
+  an App that is constructed but never run gets no callbacks; the App's
+  `audioOut()` still runs before the default-priority listeners its `setup()`
+  subscribed (the order the constructor subscription gave); the attach is
+  idempotent and subscribes nothing once `internal::detachAppAudio()` ended
+  the App. The hot reload generation's path is in `hotReloadLifecycle/`.
 - `mediaDecode/` — *(also on web)* the bundled decoders read every image
   format and Ogg Vorbis through the TrussC entry points:
   `Pixels::loadFromMemory()` / `load()` / `loadHDR()` for PNG (8 and 16-bit),

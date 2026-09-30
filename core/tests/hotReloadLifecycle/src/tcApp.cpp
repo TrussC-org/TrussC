@@ -10,6 +10,10 @@ using namespace tcx;
 TC_HOT_RELOAD(tcApp)
 
 void tcApp::setup() {
+    ++setupCalls;
+    audioOutHooksInSetup = (long)AudioEngine::getInstance().audioOut.listenerCount();
+    audioInHooksInSetup = (long)AudioEngine::getInstance().audioIn.listenerCount();
+    if (cycleOnly) return;
     setWindowTitle("hotReloadLifecycle");
     imguiSetup();
 }
