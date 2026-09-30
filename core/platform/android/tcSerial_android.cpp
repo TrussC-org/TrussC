@@ -777,8 +777,8 @@ internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int
 }
 
 CloseResult close(Impl* impl, std::string& lostReason) {
-    // Serial refuses close() here first; an I/O call that found a loss on a
-    // worker thread still gets here (its closeLost())
+    // Serial refuses first on a worker thread (close(), setup(), and the
+    // close of a loss an I/O call found there); this only backs that up
     if (refusedOnWorkerThread("close()")) return CloseResult::Refused;
     return closeImpl(impl, lostReason);
 }

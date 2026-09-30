@@ -134,12 +134,12 @@ namespace internal {
     }
 
     // Whether this thread is a USB worker thread of the Android backend (the
-    // only backend that has one), of any Serial. Serial::setup() and close()
-    // refuse to run there, before they take the Serial's lock: they would
-    // stop a USB worker and wait for it (this one, which cannot wait for
-    // itself, or another Serial's, which might be waiting for this one), and
-    // a close() / setup() on another thread may hold that lock while it
-    // waits for this thread. Here, not in the backend, so that the tests can
+    // only backend that has one), of any Serial. Serial::setup(), close()
+    // and the close of a loss an I/O call found refuse to run there, before
+    // they take the Serial's lock: they would stop a USB worker and wait for
+    // it (this one, which cannot wait for itself, or another Serial's, which
+    // might be waiting for this one), and a close() / setup() on another
+    // thread may hold that lock while it waits for this thread. Here, not in the backend, so that the tests can
     // check the refusal on every platform. thread_local, one per module: only
     // the Android worker sets it, and hot reload never runs on Android.
     struct SerialWorkerThread {
@@ -261,9 +261,9 @@ namespace internal {
 //   the release of a connection. It must read the atomic state only.
 // The worker shares only the receive buffer and those flags with them.
 // The worker marks its thread (internal::SerialWorkerThreadMark). Serial
-// refuses setup() and close() there before it calls in; setup() and close()
-// made on any USB worker thread anyway (close() from an I/O call that found
-// a loss there) are refused too: see Refused. destroy() on the Serial's own
+// refuses setup(), close() and the close of a loss an I/O call found there
+// before it calls in; setup() and close() made on any USB worker thread
+// anyway are refused too: see Refused. destroy() on the Serial's own
 // worker hands the connection to that worker; on another Serial's worker it
 // waits for this Serial's worker, which is fine unless that one is waiting
 // for the other in turn.
@@ -1494,6 +1494,10 @@ private:
     // after it is closed. Logs and fires with the lock released.
     void closeLost(LossFound& loss) const {
         if (!loss.found) return;
+        // Closing would wait for a USB worker, which a worker must not do
+        // (see refusedOnWorkerThread()): the port stays open and the loss
+        // recorded, for the next call made on another thread
+        if (refusedOnWorkerThread(nullptr)) return;
         PendingDisconnect lost;
         std::string port;
         {
@@ -1503,8 +1507,8 @@ private:
 #if defined(__ANDROID__)
             {
                 androidserial::HoldLogs hold(held);
-                // Refused on a USB worker thread: the loss stays
-                // recorded, for the next call made elsewhere
+                // Refused on a USB worker thread (refused above already):
+                // the loss stays recorded
                 if (androidserial::close(aimpl_, loss.reason) == androidserial::CloseResult::Refused) return;
             }
             initialized_ = false;
@@ -1532,14 +1536,22 @@ private:
     // setup() / close() on a USB worker thread of the Android backend (from a
     // Logger listener running inline there): refused on entry, before the
     // lock, since another thread's close() / setup() may hold it while it
-    // waits for this thread (see internal::onSerialWorkerThread()). Logged
-    // once per thread; the lock is not held, so the line goes out at once.
+    // waits for this thread (see internal::onSerialWorkerThread()). So is the
+    // close of a loss an I/O call found there (call = nullptr). Logged once
+    // per thread; the lock is not held, so the line goes out at once.
     static bool refusedOnWorkerThread(const char* call) {
         if (!internal::onSerialWorkerThread()) return false;
         if (internal::firstSerialWorkerRefusal()) {
-            logError() << "Serial: " << call << " cannot run on a USB worker thread, which must not wait"
-                       << " for a worker (called from a Logger listener running there?), so it does"
-                       << " nothing. Listen with Deliver::Main";
+            if (call) {
+                logError() << "Serial: " << call << " cannot run on a USB worker thread, which must not wait"
+                           << " for a worker (called from a Logger listener running there?), so it does"
+                           << " nothing. Listen with Deliver::Main";
+            } else {
+                logError() << "Serial: an I/O call found the device gone on a USB worker thread, where"
+                           << " the port cannot be closed (that waits for a worker; called from a Logger"
+                           << " listener running there?), so it stays open until a call on another thread"
+                           << " reports the loss. Listen with Deliver::Main";
+            }
         }
         return true;
     }
