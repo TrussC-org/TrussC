@@ -122,31 +122,34 @@ public:
     internal::WindowContext& context() { return ctx_; }
 
     // --- tree driving (called by the platform glue; friend access to Node) ---
+    // The root is locked once per call, so it stays alive for the whole call
+    // even if a handler detaches the window's App (setApp(nullptr)).
     void dispatchMousePressToTree(const MouseEventArgs& e) {
-        if (ctx_.rootNode) ctx_.rootNode->dispatchMousePress(e);
+        if (auto root = ctx_.rootNode.lock()) root->dispatchMousePress(e);
     }
     void dispatchMouseReleaseToTree(const MouseEventArgs& e) {
-        if (ctx_.rootNode) ctx_.rootNode->dispatchMouseRelease(e);
+        if (auto root = ctx_.rootNode.lock()) root->dispatchMouseRelease(e);
     }
     void dispatchMouseMoveToTree(const internal::MouseEventRaw& e) {
-        if (ctx_.rootNode) ctx_.rootNode->dispatchMouseMove(e);
+        if (auto root = ctx_.rootNode.lock()) root->dispatchMouseMove(e);
     }
     void dispatchMouseScrollToTree(const ScrollEventArgs& e) {
-        if (ctx_.rootNode) ctx_.rootNode->dispatchMouseScroll(e);
+        if (auto root = ctx_.rootNode.lock()) root->dispatchMouseScroll(e);
     }
     void dispatchKeyPressToTree(const KeyEventArgs& e) {
-        if (ctx_.rootNode) ctx_.rootNode->dispatchKeyPress(e);
+        if (auto root = ctx_.rootNode.lock()) root->dispatchKeyPress(e);
     }
     void dispatchKeyReleaseToTree(const KeyEventArgs& e) {
-        if (ctx_.rootNode) ctx_.rootNode->dispatchKeyRelease(e);
+        if (auto root = ctx_.rootNode.lock()) root->dispatchKeyRelease(e);
     }
     void tickTree() {
-        if (!ctx_.rootNode) return;
-        ctx_.rootNode->updateTree();
-        ctx_.rootNode->updateHoverState(ctx_.mouseX, ctx_.mouseY);
+        auto root = ctx_.rootNode.lock();
+        if (!root) return;
+        root->updateTree();
+        root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
     void drawTreeNow() {
-        if (ctx_.rootNode) ctx_.rootNode->drawTree();
+        if (auto root = ctx_.rootNode.lock()) root->drawTree();
     }
     // Size-sync convention (mirrors the main App, which is a RectNode kept in
     // sync with the window): if the root IS a RectNode it is resized to the
@@ -260,7 +263,7 @@ std::unordered_set<const App*>& attachedApps();
 inline void Window::setApp(std::shared_ptr<App> app) {
     auto& attached = internal::attachedApps();
     if (app) {
-        if (app.get() == internal::mainWindowContext().rootNode) {
+        if (app == internal::mainWindowContext().rootNode.lock()) {
             logError("Window") << "setApp(): this App is the running main App";
             return;
         }
@@ -272,7 +275,7 @@ inline void Window::setApp(std::shared_ptr<App> app) {
     if (app_) attached.erase(app_.get());
     if (app) attached.insert(app.get());
     app_ = std::move(app);
-    ctx_.rootNode = app_.get();
+    ctx_.rootNode = app_;
 }
 
 // Looked up in the open-window registry rather than cached on the App: every
@@ -300,7 +303,7 @@ inline void App::setSize(float w, float h) {
         win->setSize(width, height);
         return;
     }
-    if (this != internal::mainWindowContext().rootNode) {
+    if (this != internal::mainWindowContext().rootNode.lock().get()) {
         RectNode::setSize(w, h);   // attached to no window: nothing to resize
         return;
     }

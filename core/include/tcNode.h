@@ -374,8 +374,10 @@ public:
     void disableEvents() { eventsEnabled_ = false; }
     bool isEventsEnabled() const { return eventsEnabled_; }
 
-    // Whether mouse is over this node (auto-updated each frame, O(1))
-    bool isMouseOver() const { return internal::currentWindowContext().hoveredNode == this; }
+    // Whether mouse is over this node (auto-updated each frame, O(1)). The
+    // hovered node is held weakly, so a freed node that was hovered never
+    // matches a new node that happens to reuse its address.
+    bool isMouseOver() const { return internal::currentWindowContext().hoveredNode.lock().get() == this; }
 
     // -------------------------------------------------------------------------
     // Identity / Name
@@ -880,14 +882,19 @@ private:
             child->cleanupTree();
         }
 
-        // Clear global references to this node (prevent dangling pointers)
-        if (internal::currentWindowContext().hoveredNode == this) internal::currentWindowContext().hoveredNode = nullptr;
-        if (internal::currentWindowContext().prevHoveredNode == this) internal::currentWindowContext().prevHoveredNode = nullptr;
-        if (internal::currentWindowContext().grabbedNode == this) {
-            internal::currentWindowContext().grabbedNode = nullptr;
-            internal::currentWindowContext().grabbedButton = -1;
+        // A destroyed node leaves hover, grab and selection at once, even
+        // while the app still holds it: it gets no mouseLeave, drag or
+        // release, and is no longer selected. (The references are weak, so
+        // this is behavior, not memory safety.)
+        auto& ctx = internal::currentWindowContext();
+        auto isThis = [this](const WeakPtr& ref) { return ref.lock().get() == this; };
+        if (isThis(ctx.hoveredNode)) ctx.hoveredNode.reset();
+        if (isThis(ctx.prevHoveredNode)) ctx.prevHoveredNode.reset();
+        if (isThis(ctx.grabbedNode)) {
+            ctx.grabbedNode.reset();
+            ctx.grabbedButton = -1;
         }
-        if (internal::currentWindowContext().selectedNode == this) internal::currentWindowContext().selectedNode = nullptr;
+        if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
         cleanup();
@@ -997,26 +1004,30 @@ private:
     // press that previously died silently now reaches the ancestors instead.
     // Hover (enter/leave) is unaffected: it stays front-most-only, recomputed
     // per frame by updateHoverState().
+    //
+    // Lifetime (#255): a handler may remove its own node or an ancestor from
+    // the tree (the usual close button). Dispatch therefore walks the chain
+    // with Ptr, and uses the grabbed node through a Ptr locked from the
+    // window context, so a node removed inside its handler stays alive until
+    // the dispatch function returns, and is freed then if nothing else holds
+    // it (the same idea as destroy()).
     Ptr dispatchMousePress(const MouseEventArgs& e) {
+        auto& ctx = internal::currentWindowContext();
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
         // Selection: clicking a node selects it; clicking empty space clears it.
         // (Selection follows the front-most hit, not the consumer — it is a
         // debugger/inspector concept, independent of event consumption.)
-        internal::currentWindowContext().selectedNode = result.hit() ? result.node.get() : nullptr;
+        ctx.selectedNode = result.node;
 
-        if (result.hit()) {
-            // Bubble up from the hit node until consumed
-            Node* current = result.node.get();
-            while (current) {
-                MouseEventArgs local = current->localizeMouse(e);
-                if (current->fireMousePress(local)) {
-                    // The consumer grabs the pointer for drag tracking
-                    internal::currentWindowContext().grabbedNode = current;
-                    internal::currentWindowContext().grabbedButton = e.button;
-                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
-                }
-                current = current->getParent().get();
+        // Bubble up from the hit node until consumed
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            MouseEventArgs local = current->localizeMouse(e);
+            if (current->fireMousePress(local)) {
+                // The consumer grabs the pointer for drag tracking
+                ctx.grabbedNode = current;
+                ctx.grabbedButton = e.button;
+                return current;
             }
         }
 
@@ -1024,32 +1035,32 @@ private:
     }
 
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
-        // Send release to grabbed node if it exists
-        if (internal::currentWindowContext().grabbedNode && internal::currentWindowContext().grabbedButton == e.button) {
-            MouseEventArgs local = internal::currentWindowContext().grabbedNode->localizeMouse(e);
-            internal::currentWindowContext().grabbedNode->fireMouseRelease(local);
+        auto& ctx = internal::currentWindowContext();
 
-            Ptr result = std::dynamic_pointer_cast<Node>(
-                internal::currentWindowContext().grabbedNode->shared_from_this());
+        // Send release to the grabbed node. A grab whose node is gone (freed
+        // after it was removed) is dropped, and the release falls back to the
+        // hit node below, as after destroy().
+        if (ctx.grabbedButton == e.button) {
+            Ptr grabbed = ctx.grabbedNode.lock();
+            if (grabbed) {
+                MouseEventArgs local = grabbed->localizeMouse(e);
+                grabbed->fireMouseRelease(local);
+            }
 
             // Clear grabbed state
-            internal::currentWindowContext().grabbedNode = nullptr;
-            internal::currentWindowContext().grabbedButton = -1;
+            ctx.grabbedNode.reset();
+            ctx.grabbedButton = -1;
 
-            return result;
+            if (grabbed) return grabbed;
         }
 
         // Fallback (no grab): bubble from the hit node like press
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
-        if (result.hit()) {
-            Node* current = result.node.get();
-            while (current) {
-                MouseEventArgs local = current->localizeMouse(e);
-                if (current->fireMouseRelease(local)) {
-                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
-                }
-                current = current->getParent().get();
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            MouseEventArgs local = current->localizeMouse(e);
+            if (current->fireMouseRelease(local)) {
+                return current;
             }
         }
 
@@ -1057,25 +1068,24 @@ private:
     }
 
     Ptr dispatchMouseMove(const internal::MouseEventRaw& e) {
+        auto& ctx = internal::currentWindowContext();
+
         // Send drag event to grabbed node
-        if (internal::currentWindowContext().grabbedNode) {
-            internal::MouseEventRaw local = internal::currentWindowContext().grabbedNode->localizeMouse(e);
-            local.button = internal::currentWindowContext().grabbedButton;
-            internal::currentWindowContext().grabbedNode->fireMouseDrag(internal::toDragArgs(local));
+        Ptr grabbed = ctx.grabbedNode.lock();
+        if (grabbed) {
+            internal::MouseEventRaw local = grabbed->localizeMouse(e);
+            local.button = ctx.grabbedButton;
+            grabbed->fireMouseDrag(internal::toDragArgs(local));
         }
 
         // Also send move event, bubbling from the hit node (hover itself is
         // handled separately by updateHoverState and stays front-most-only)
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
-        if (result.hit()) {
-            Node* current = result.node.get();
-            while (current) {
-                internal::MouseEventRaw local = current->localizeMouse(e);
-                if (current->fireMouseMove(internal::toMoveArgs(local))) {
-                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
-                }
-                current = current->getParent().get();
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            internal::MouseEventRaw local = current->localizeMouse(e);
+            if (current->fireMouseMove(internal::toMoveArgs(local))) {
+                return current;
             }
         }
 
@@ -1085,19 +1095,11 @@ private:
     Ptr dispatchMouseScroll(const ScrollEventArgs& e) {
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
-        if (result.hit()) {
-            // Bubble up from hit node to ancestors until consumed
-            Node* current = result.node.get();
-            while (current) {
-                ScrollEventArgs local = current->localizeScroll(e);
-                if (current->fireMouseScroll(local)) {
-                    // Event consumed
-                    return std::dynamic_pointer_cast<Node>(
-                        current->shared_from_this());
-                }
-
-                // Bubble up to parent
-                current = current->getParent().get();
+        // Bubble up from hit node to ancestors until consumed
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            ScrollEventArgs local = current->localizeScroll(e);
+            if (current->fireMouseScroll(local)) {
+                return current;   // Event consumed
             }
         }
 
@@ -1116,28 +1118,28 @@ private:
 
     // Update hover state (call once per frame)
     void updateHoverState(float screenX, float screenY) {
-        // Save previous frame's hovered node
-        internal::currentWindowContext().prevHoveredNode = internal::currentWindowContext().hoveredNode;
+        auto& ctx = internal::currentWindowContext();
+
+        // Save previous frame's hovered node. Locked: a node freed since then
+        // gets no Leave, and a live one stays alive through its Leave handler
+        // even if that handler removes it.
+        Ptr prev = ctx.hoveredNode.lock();
+        ctx.prevHoveredNode = prev;
 
         // Search for new hovered node. When an overlay (e.g. a tcxImGui panel)
         // has the pointer, the tree hovers nothing — so a node under the panel
         // is not highlighted, and a previously-hovered node still gets its
         // Leave below (this is a per-frame recompute, so no stale hover).
-        Node* hit = nullptr;
+        Ptr hit;
         if (!isOverlayHovered()) {
-            HitResult result = findHitNodeFromScreen(screenX, screenY);
-            hit = result.hit() ? result.node.get() : nullptr;
+            hit = findHitNodeFromScreen(screenX, screenY).node;
         }
-        internal::currentWindowContext().hoveredNode = hit;
+        ctx.hoveredNode = hit;
 
         // Fire Enter/Leave events
-        if (internal::currentWindowContext().prevHoveredNode != internal::currentWindowContext().hoveredNode) {
-            if (internal::currentWindowContext().prevHoveredNode) {
-                internal::currentWindowContext().prevHoveredNode->fireMouseLeave();
-            }
-            if (internal::currentWindowContext().hoveredNode) {
-                internal::currentWindowContext().hoveredNode->fireMouseEnter();
-            }
+        if (prev != hit) {
+            if (prev) prev->fireMouseLeave();
+            if (hit) hit->fireMouseEnter();
         }
     }
 
@@ -1681,13 +1683,19 @@ inline void Mod::removeSelf() {
 
 // Selection — the last-clicked node, held by the Node system (set in
 // dispatchMousePress, cleared when the node is destroyed). A tool such as an
-// inspector can both read it and drive it via setSelectedNode().
-inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode; }
-inline void setSelectedNode(Node* n) { internal::currentWindowContext().selectedNode = n; }
+// inspector can both read it and drive it via setSelectedNode(). Held weakly:
+// once the node is freed, getSelectedNode() returns null. The pointer it
+// returns is for the current call; to keep the node, keep
+// n->weak_from_this(), not the pointer. setSelectedNode() with a node that is
+// not owned by a shared_ptr (weak_from_this() empty) clears the selection.
+inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode.lock().get(); }
+inline void setSelectedNode(Node* n) {
+    internal::currentWindowContext().selectedNode = n ? n->weak_from_this() : NodeWeakPtr();
+}
 
 // The running App as the root of the node tree (set by the framework while the
 // app is alive, null otherwise). Lets tools — e.g. the MCP node tools — walk
 // the whole tree without the app passing itself around.
-inline Node* getRootNode() { return internal::currentWindowContext().rootNode; }
+inline Node* getRootNode() { return internal::currentWindowContext().rootNode.lock().get(); }
 
 } // namespace trussc

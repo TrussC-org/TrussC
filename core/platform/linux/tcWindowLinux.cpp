@@ -294,7 +294,7 @@ void Window::close() {
         app_->cleanup();
         internal::attachedApps().erase(app_.get());
         app_.reset();
-        ctx_.rootNode = nullptr;
+        ctx_.rootNode.reset();
     }
 }
 

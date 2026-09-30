@@ -500,6 +500,24 @@ void removeLightFromAllContexts(Light* light) {
         if (w) scrub(w->context());
     }
 }
+
+// Declared in tcWindowContext.h. Every registered window, not only the open
+// ones: a closed Window the app still holds keeps its context, and with it
+// the hover / grab / selection it had when it closed.
+void resetNodeRefsForUnload() {
+    auto reset = [](WindowContext& ctx) {
+        ctx.hoveredNode.reset();
+        ctx.prevHoveredNode.reset();
+        ctx.grabbedNode.reset();
+        ctx.grabbedButton = -1;
+        ctx.selectedNode.reset();
+    };
+    reset(mainWindowContext());
+    mainWindowContext().rootNode.reset();
+    for (Window* w : windowRegistryStorage()) {
+        if (w) reset(w->context());
+    }
+}
 } // namespace internal
 
 CoreEvents& events() {

@@ -137,6 +137,8 @@ struct GuestLibrary {
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
                 if (deleter) deleter(p);
             });
+            // The main window's scene-graph root (getRootNode()), held weakly
+            internal::mainWindowContext().rootNode = app;
             return raw;
         }
         return nullptr;
@@ -152,6 +154,12 @@ struct GuestLibrary {
     }
 
     void unload() {
+        // Drop the window contexts' weak references first (hover, grab,
+        // selection, the main root; #255). Releasing the last weak reference
+        // to a make_shared node runs code of the module that created it, so
+        // none may outlive the guest. Hover, grab and selection start empty
+        // in the new generation.
+        internal::resetNodeRefsForUnload();
         destroy();
         // Intentionally NOT dlclose()d / FreeLibrary()d: the old guest's code
         // can still be referenced from host-owned state even after its App is
