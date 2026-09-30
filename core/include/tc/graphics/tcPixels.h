@@ -7,7 +7,9 @@
 
 // This file is included from TrussC.h
 
+#include <cstddef>
 #include <filesystem>
+#include <limits>
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
 #include "tc/utils/tcFileIO.h"   // internal::pathToUtf8
@@ -18,6 +20,34 @@ namespace fs = std::filesystem;
 
 // Pixel data format
 enum class PixelFormat { U8, F32 };
+
+namespace internal {
+
+// Element count of a width x height x channels buffer of elemSize-byte
+// elements, for Pixels::allocate(). False when a dimension is negative or the
+// byte count would exceed maxBytes (pass SIZE_MAX). Each product is checked
+// before it is formed, so it cannot wrap where size_t is 32-bit (wasm32).
+inline bool pixelBufferCount(int width, int height, int channels, size_t elemSize,
+                             size_t maxBytes, size_t& outCount) {
+    if (width < 0 || height < 0 || channels < 0 || elemSize == 0) return false;
+    size_t count = (size_t)width;
+    if (height != 0 && count > maxBytes / (size_t)height) return false;
+    count *= (size_t)height;
+    if (channels != 0 && count > maxBytes / (size_t)channels) return false;
+    count *= (size_t)channels;
+    if (count > maxBytes / elemSize) return false;
+    outCount = count;
+    return true;
+}
+
+// Element offset of channel 0 of pixel (x, y) in a buffer `width` pixels wide
+// with `channels` elements per pixel. Formed in size_t, so it does not
+// overflow int in buffers of more than INT_MAX elements.
+inline size_t pixelOffset(int x, int y, int width, int channels) {
+    return ((size_t)y * (size_t)width + (size_t)x) * (size_t)channels;
+}
+
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Pixels class - Manages CPU-side pixel data
@@ -46,16 +76,26 @@ public:
 
     // === Allocation/Deallocation ===
 
-    // Allocate empty pixel buffer
+    // Allocate empty pixel buffer. A negative size, or one whose byte count
+    // does not fit in size_t, logs an error and leaves the buffer empty.
     void allocate(int width, int height, int channels = 4, PixelFormat format = PixelFormat::U8) {
         clear();
+
+        const size_t elemSize = (format == PixelFormat::F32) ? sizeof(float) : 1;
+        size_t count = 0;
+        if (!internal::pixelBufferCount(width, height, channels, elemSize,
+                                        std::numeric_limits<size_t>::max(), count)) {
+            logError("Pixels") << "cannot allocate " << width << "x" << height << "x"
+                               << channels << (format == PixelFormat::F32 ? " F32" : " U8")
+                               << ": size is negative or too large for this platform";
+            return;
+        }
 
         width_ = width;
         height_ = height;
         channels_ = channels;
         format_ = format;
 
-        size_t count = (size_t)width_ * height_ * channels_;
         if (format_ == PixelFormat::F32) {
             data_ = new float[count]();
         } else {
@@ -115,7 +155,7 @@ public:
             return Color(0, 0, 0, 0);
         }
 
-        int index = (y * width_ + x) * channels_;
+        const size_t index = internal::pixelOffset(x, y, width_, channels_);
 
         if (format_ == PixelFormat::F32) {
             const float* fd = static_cast<const float*>(data_);
@@ -147,7 +187,7 @@ public:
             return;
         }
 
-        int index = (y * width_ + x) * channels_;
+        const size_t index = internal::pixelOffset(x, y, width_, channels_);
 
         if (format_ == PixelFormat::F32) {
             float* fd = static_cast<float*>(data_);
@@ -182,12 +222,14 @@ public:
     // Copy from external U8 data
     void setFromPixels(const unsigned char* srcData, int width, int height, int channels) {
         allocate(width, height, channels, PixelFormat::U8);
+        if (!allocated_) return;
         memcpy(data_, srcData, getTotalBytes());
     }
 
     // Copy from external F32 data
     void setFromFloats(const float* srcData, int width, int height, int channels) {
         allocate(width, height, channels, PixelFormat::F32);
+        if (!allocated_) return;
         memcpy(data_, srcData, getTotalBytes());
     }
 
@@ -236,7 +278,7 @@ public:
         channels_ = 4;  // Always load as RGBA
         format_ = PixelFormat::U8;
 
-        size_t size = width_ * height_ * channels_;
+        size_t size = (size_t)width_ * height_ * channels_;
         data_ = new unsigned char[size];
         memcpy(data_, loaded, size);
         stbi_image_free(loaded);
@@ -304,7 +346,7 @@ public:
         channels_ = 4;
         format_ = PixelFormat::U8;
 
-        size_t size = width_ * height_ * channels_;
+        size_t size = (size_t)width_ * height_ * channels_;
         data_ = new unsigned char[size];
         memcpy(data_, loaded, size);
         stbi_image_free(loaded);
