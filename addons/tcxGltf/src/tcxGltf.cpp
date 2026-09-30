@@ -1,9 +1,8 @@
 // cgltf is not vendored in this repo: CMakeLists.txt fetches the upstream
 // single header at tag v1.14 (github.com/jkuhlmann/cgltf), unmodified.
-// cgltf_parse_file() only parses; it does not check that the model data is
-// consistent, and cgltf's accessor readers trust the counts and offsets they
-// are given. So load() runs checkDataRanges() and then cgltf_validate() on
-// every file before any accessor, index or image data is read.
+// load() runs its own range checks (checkDataRanges()) and then
+// cgltf_validate() on every file, before any accessor, index or image data
+// is read.
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
@@ -40,20 +39,16 @@ static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
     return stride == 0 || count - 1 <= room / stride;
 }
 
-// Check that every buffer view lies inside its buffer and every accessor
-// (including sparse parts) lies inside its buffer view. cgltf_validate()
-// checks the same ranges, but its sums can wrap around for very large
-// values, and it reads index data itself, so this runs first. An accessor
-// whose component type has no size is left to cgltf_validate(), which
-// refuses it before it computes any range.
-// Every accessor, with or without a buffer view, must also have a count
-// whose float array size (count * components * sizeof(float)) fits in
-// size_t: readAccessorFloats() and cgltf's unpack functions compute it, and
-// an accessor without a buffer view has no range to bound its count. This is
-// only a check that the arithmetic does not wrap, not a limit on model size.
-// A sparse accessor may not list more values than it has elements (glTF
-// requires its indices to be strictly increasing and below the count), so
-// its values array is never larger than the accessor itself.
+// Our own range checks, run before cgltf_validate().
+//   - Every buffer view lies inside its buffer, and every accessor
+//     (including sparse parts) inside its buffer view.
+//   - Every accessor, with or without a buffer view, has a count whose float
+//     array size (count * components * sizeof(float)) can be addressed in
+//     size_t; a count that cannot is refused. This is not a limit on model
+//     size.
+//   - A sparse accessor lists no more values than it has elements.
+// An accessor or sparse index type whose component type has no size is left
+// to cgltf_validate(), which refuses it.
 static bool checkDataRanges(const cgltf_data* data) {
     for (cgltf_size i = 0; i < data->buffer_views_count; i++) {
         const cgltf_buffer_view& view = data->buffer_views[i];
@@ -99,9 +94,9 @@ static vector<float> readAccessorFloats(const cgltf_accessor* acc) {
         return out;
     }
 
-    // cgltf_accessor_unpack_floats() reads sparse values at the base
-    // accessor's stride, but glTF packs them tightly. Read the base without
-    // them, then apply the values here.
+    // glTF packs sparse values tightly, whatever the base view's byteStride.
+    // Read the base without them, then apply the values here at their packed
+    // stride.
     cgltf_accessor base = *acc;
     base.is_sparse = false;
     cgltf_accessor_unpack_floats(&base, out.data(), out.size());
@@ -133,9 +128,8 @@ static vector<float> readAccessorFloats(const cgltf_accessor* acc) {
     return out;
 }
 
-// Read accessor data as uint32 indices. checkDataRanges() has bounded
-// acc->count so its size arithmetic cannot wrap; the loop runs over the
-// array actually allocated.
+// Read accessor data as uint32 indices. checkDataRanges() has refused counts
+// too large to address; the loop runs over the array actually allocated.
 static vector<unsigned int> readAccessorIndices(const cgltf_accessor* acc) {
     vector<unsigned int> out(acc->count);
     for (size_t i = 0; i < out.size(); i++) {
@@ -145,9 +139,8 @@ static vector<unsigned int> readAccessorIndices(const cgltf_accessor* acc) {
 }
 
 // World transform of a node from its parent's world transform and its own
-// local one (both column-major, as cgltf writes them). This is the step
-// cgltf_node_transform_world() takes once per ancestor; load() takes it once
-// per node, carrying the parent's result down the hierarchy.
+// local one (both column-major, as cgltf writes them). load() takes this
+// step once per node, carrying the parent's result down the hierarchy.
 static void composeTransform(const float* parentWorld, const float* local, float* out) {
     for (int i = 0; i < 4; ++i) {
         float l0 = local[i * 4 + 0];
@@ -309,9 +302,8 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 // True when the accessor reads from a buffer view whose data is in memory.
 // glTF lets an accessor leave out its buffer view (its values are then
 // zeros, plus any sparse values), and a buffer without a uri (outside a
-// GLB's BIN chunk) has no data. The count of such an accessor is not bounded
-// by anything that was loaded, while the arrays read from it grow with the
-// count.
+// GLB's BIN chunk) has no data. Only accessors with data are read, so each
+// array's size is bounded by the data loaded for it.
 static bool accessorHasData(const cgltf_accessor* acc) {
     return acc && acc->buffer_view && cgltf_buffer_view_data(acc->buffer_view);
 }
@@ -319,9 +311,10 @@ static bool accessorHasData(const cgltf_accessor* acc) {
 // True when the primitive has a POSITION accessor with data, and its index
 // accessor (if any) has data too. glTF lets a primitive leave out POSITION.
 // Every other attribute has the POSITION count (cgltf_validate() checks
-// this), so with these two every array the loader allocates for the
-// primitive is bounded by data in memory. A primitive without them is
-// skipped by load() with a warning, and the rest of the file loads.
+// this), so with these two each array the loader allocates for the
+// primitive has a size bounded by the data loaded for it. A primitive
+// without them is skipped by load() with a warning, and the rest of the
+// file loads.
 static bool hasVertexData(const cgltf_primitive* prim) {
     if (prim->indices && !accessorHasData(prim->indices)) return false;
     for (cgltf_size a = 0; a < prim->attributes_count; a++) {
@@ -472,8 +465,8 @@ bool GltfModel::load(const string& path) {
             }
         }
 
-        // Depth-first walk with an explicit stack (a deep hierarchy must not
-        // exhaust the call stack). Each entry carries its parent's world
+        // Depth-first walk with an explicit stack, without recursion, so any
+        // depth of hierarchy loads. Each entry carries its parent's world
         // transform, so every world transform is computed once, from its
         // parent's. Nodes are visited in the same order as a recursive
         // pre-order walk.
@@ -486,10 +479,9 @@ bool GltfModel::load(const string& path) {
         for (size_t r = roots.size(); r-- > 0;) {
             stack.push_back({roots[r], {}, false});
         }
-        // cgltf_validate() refuses a node that is its own ancestor, and the
-        // parser refuses a node with two parents; a scene that lists a node
-        // twice is still possible, and glTF forbids it too. Every node must
-        // be reached at most once.
+        // glTF requires the node hierarchy to be a set of disjoint trees and
+        // a scene's nodes to be unique: every node is reached at most once,
+        // and a node reached again fails the load.
         vector<bool> visited(data->nodes_count, false);
 
         while (!stack.empty() && failure.empty()) {
@@ -552,9 +544,10 @@ bool GltfModel::load(const string& path) {
         }
     } catch (const bad_alloc&) {
         // Out of memory for a large model. No numeric cap is imposed on
-        // counts; hasVertexData() and checkDataRanges() keep every array
-        // bounded by the data in memory. Web builds do not enable exception
-        // catching, so there an allocation failure still aborts.
+        // counts; with hasVertexData() and checkDataRanges(), each array's
+        // size is bounded by the data loaded for it. Web builds do not
+        // enable exception catching, so there an allocation failure still
+        // aborts.
         failure = "not enough memory for the model data";
     } catch (const length_error&) {
         failure = "not enough memory for the model data";

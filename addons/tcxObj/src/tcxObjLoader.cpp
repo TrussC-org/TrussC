@@ -73,9 +73,7 @@ bool ObjLoader::load(const fs::path& path) {
         bool hasNormals = !attrib.normals.empty();
         bool hasTexCoords = !attrib.texcoords.empty();
 
-        // tinyobjloader accepts a face index past the end of the vertex,
-        // normal or texcoord list (it only warns), so check each index
-        // against the list it is read from.
+        // Check each face index against the list it is read from.
         const size_t numPositions = attrib.vertices.size() / 3;
         const size_t numNormals = attrib.normals.size() / 3;
         const size_t numTexCoords = attrib.texcoords.size() / 2;
@@ -125,8 +123,7 @@ bool ObjLoader::load(const fs::path& path) {
                     } else {
                         unsigned int newIdx = static_cast<unsigned int>(group.mesh.getNumVertices());
 
-                        // Index arithmetic in size_t: the indices are int and
-                        // 3 * index wraps in int above INT_MAX / 3
+                        // Offsets are computed in size_t
                         size_t vi = static_cast<size_t>(idx.vertex_index);
 
                         // Position

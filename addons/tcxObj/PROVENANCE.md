@@ -28,27 +28,22 @@ Each is marked `// TrussC patch:` in the file.
 1. `tinyobj_ff::distance` (in the embedded fast_float) is `constexpr`:
    fast_float calls it from a `FASTFLOAT_CONSTEXPR20` function, and newer
    MSVC refuses the build otherwise (#77).
-2. Triangulation compares a vertex index against the position array by
-   dividing the array size (`vi >= v.size() / 3`) instead of multiplying the
-   index (`(3 * vi + 2) >= v.size()`), so the comparison cannot wrap when
-   `size_t` is 32-bit (wasm32). Changed in the quad split, in the built-in
-   ear clipping (the axis search, the ear candidate and the overlap test),
-   and in the `TINYOBJLOADER_USE_MAPBOX_EARCUT` path (its index check and
-   `assert`), which TrussC does not compile but is kept consistent. The
-   result is the same whenever the index fits, since the position array
-   always holds whole xyz triples.
+2. Triangulation compares vertex indices against the position array by
+   division (`vi >= v.size() / 3`), a size_t-safe comparison. Changed in the
+   quad split, in the built-in ear clipping (the axis search, the ear
+   candidate and the overlap test), and in the
+   `TINYOBJLOADER_USE_MAPBOX_EARCUT` path (its index check and `assert`),
+   which TrussC does not compile but is kept consistent. Valid faces
+   triangulate as before, since the position array always holds whole xyz
+   triples.
 
 **Covered by**: `tests/`: a valid quad and a valid concave pentagon (the
 result is unchanged), and a quad and a pentagon with a vertex index one
 past the end of the positions, which reach the patched checks (a triangle
-is passed through without them). If the quad check lets that index
-through, the test fails in any build, since tinyobjloader then no longer
-warns about the face. The pentagon's vertex order reaches all three ear
-clipping checks; there a check that lets the index through reads past the
-position array, which only an AddressSanitizer build reports (the test
-harness does not otherwise see it). The 32-bit case of patch 2 cannot be
-reproduced on a 64-bit build: a face index is an `int`, so `3 * vi + 2`
-never wraps a 64-bit `size_t`.
+is passed through without them). The test checks that tinyobjloader drops
+the quad with its warning, and the pentagon's vertex order reaches all
+three ear clipping checks; run it under AddressSanitizer as well to check
+that no position past the array is read.
 
 ## Updating
 

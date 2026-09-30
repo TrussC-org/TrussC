@@ -17,8 +17,8 @@
 //     list is skipped with a warning; the other faces still load
 //   - a quad or pentagon with a vertex index one past the end: tinyobjloader
 //     drops the quad; ear clipping of the pentagon does not read the missing
-//     vertex, and ObjLoader skips the triangles that use it. Under
-//     AddressSanitizer a read of that vertex is reported
+//     vertex (AddressSanitizer builds check this), and ObjLoader skips the
+//     triangles that use it
 //   - a normal index in a file with no normals is ignored, as before
 // =============================================================================
 
@@ -100,11 +100,9 @@ static const string TRI_V =
     "v 1 0 0\n"
     "v 0 1 0\n";
 
-// Five vertices in the z = 0 plane. tinyobjloader stores the positions in a
-// vector filled by push_back, so 15 floats sit in a 16-float allocation: a
-// read of vertex 6 (floats 15..17) runs past the allocation, which
-// AddressSanitizer reports. With three vertices (9 floats in 16) the same
-// read would stay inside the allocation and go unreported.
+// Five vertices in the z = 0 plane. With five, vertex 6 lies outside the
+// position array's allocation, so an AddressSanitizer build checks that it
+// is never read.
 static const string PENTA_V =
     "v 0 0 0\n"
     "v 2 0 0\n"
@@ -245,8 +243,8 @@ int main() {
     }
 
     {
-        // With no vn lines at all the normal index was never read; the face
-        // still loads (normals are computed instead).
+        // With no vn lines, the normal index is ignored; the face still
+        // loads (normals are computed instead).
         auto r = loadObjText(TRI_V + "f 1//1 2//2 3//3\n");
         check("normal index with no normals in the file: face still loads",
               r.ok && r.mesh.getNumIndices() == 3 && r.mesh.getNumNormals() == 3 &&

@@ -10,16 +10,15 @@ embedded as a base64 data URI) to a temp directory and loads it with
   byteStride;
 - an accessor or buffer view that runs past its buffer view or buffer, or a
   reference to an accessor or buffer view that does not exist, fails to load;
-- counts large enough to wrap the size arithmetic fail to load, also on an
-  accessor without a buffer view;
+- a count too large to address fails to load, also on an accessor without a
+  buffer view;
 - a primitive whose attribute counts differ, or whose indices point past its
   vertices (checked by cgltf_validate() against the accessor count, and by the
   loader against the vertices actually read), fails to load;
 - a primitive without POSITION, or whose POSITION or index accessor has no
   data in memory (no buffer view, or a view on a buffer without data), is
   skipped with one warning per load (with the count) and the rest of the
-  model loads. No array is allocated from such an accessor's count, which
-  nothing loaded bounds (the case uses a count of 2^62 - 1 on 64-bit);
+  model loads, without allocating an array from that accessor's count;
 - a sparse accessor with more values than elements fails to load;
 - an image in a buffer without data (no uri) is skipped; the mesh loads;
 - an external image that cannot be loaded, or whose uri holds a byte that is
@@ -36,20 +35,18 @@ embedded as a base64 data URI) to a temp directory and loads it with
 - a file with no scene loads from its root nodes; a file with no scene and no
   nodes fails to load;
 - a node chain 20000 deep loads (the hierarchy is walked without recursion,
-  each world transform computed once from its parent's). A recursive walk
-  overflows the call stack well before that depth; a deeper chain only makes
-  `cgltf_validate()`'s parent-cycle check, which is O(nodes * depth), slower.
-  A node cycle is refused by cgltf_validate(), and a scene that lists a node
-  twice by the loader.
+  each world transform computed once from its parent's). A node cycle is
+  refused by cgltf_validate(), and a scene that lists a node twice by the
+  loader.
 
 Every failed load logs a warning and leaves the model empty.
 
 `load()` also catches an allocation failure (`std::bad_alloc`,
 `std::length_error`) and fails the same way. No case here reaches it, since
-every array the loader allocates is bounded by data in memory. Like the
-injected exceptions above, it applies where exceptions are caught: native
-builds. TrussC's web (Emscripten) builds
-do not enable exception catching, so there an allocation failure aborts.
+each array the loader allocates has a size bounded by the data loaded for
+it. Like the injected exceptions above, it applies where exceptions are
+caught: native builds. TrussC's web (Emscripten) builds do not enable
+exception catching, so there an allocation failure aborts.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it

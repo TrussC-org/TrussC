@@ -13,8 +13,8 @@
 //     sparse values are read tightly packed, also on a strided view
 //   - an accessor or buffer view that runs past its buffer view / buffer, or a
 //     reference to an accessor / buffer view that does not exist, fails to load
-//   - counts large enough to wrap the size arithmetic fail to load, also on
-//     an accessor without a buffer view
+//   - a count too large to address fails to load, also on an accessor
+//     without a buffer view
 //   - attribute counts that differ within a primitive fail to load
 //   - an index past the primitive's vertices fails to load (caught by
 //     cgltf_validate() or, for vertices the loader cannot read, by the loader)
@@ -29,8 +29,8 @@
 //     load test hook) fails the load and leaves the model empty
 //   - a component type glTF 2.0 does not allow fails validation
 //   - a file with no scene loads from its root nodes; with no nodes it fails
-//   - a 20000-deep node chain loads; node cycles and repeated scene nodes
-//     fail to load
+//   - a 20000-deep node chain loads without recursion; node cycles and
+//     repeated scene nodes fail to load
 // Every failed load logs a warning and leaves the model empty.
 // =============================================================================
 
@@ -229,9 +229,8 @@ int main() {
             ("tcxGltf-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
 
-    // A count whose size arithmetic wraps to a small number on 64-bit:
-    // 12 * (2^62) and 4 * (2^62) are multiples of 2^64.
-    const string WRAP_COUNT = "4611686018427387905";  // 2^62 + 1
+    // A count too large to address on 64-bit
+    const string HUGE_COUNT = "4611686018427387905";
     const bool is64 = sizeof(size_t) == 8;
 
     // ----- valid models load as before ---------------------------------------
@@ -322,41 +321,40 @@ int main() {
         loadCase("reference to a missing accessor", b, false, m);
     }
     if (is64) {
-        // POSITION count that wraps: its float array cannot be allocated
+        // POSITION count too large to address
         GltfBuilder b = triangle();
-        b.accessors[0] = accessorJson(0, FLOAT, WRAP_COUNT, "VEC3");
+        b.accessors[0] = accessorJson(0, FLOAT, HUGE_COUNT, "VEC3");
         b.primitive = R"({"attributes":{"POSITION":0}})";
         GltfModel m;
-        loadCase("position count that wraps the size arithmetic", b, false, m);
+        loadCase("position count too large to address", b, false, m);
     }
     if (is64) {
-        // Index count that wraps: every index would be read
+        // Index count too large to address
         GltfBuilder b = triangle();
         const uint32_t idx32[1] = { 0 };
         int v = b.addView(idx32, sizeof(idx32));
-        b.addAccessor(accessorJson(v, UINT, WRAP_COUNT, "SCALAR"));
+        b.addAccessor(accessorJson(v, UINT, HUGE_COUNT, "SCALAR"));
         b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
         GltfModel m;
-        loadCase("index count that wraps the size arithmetic", b, false, m);
+        loadCase("index count too large to address", b, false, m);
     }
     if (is64) {
-        // Sparse count that wraps
+        // Sparse count too large to address
         GltfBuilder b = triangle();
         const uint32_t sparseIdx[1] = { 0 };
         const float sparseVal[3] = { 5, 5, 5 };
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         int svv = b.addView(sparseVal, sizeof(sparseVal));
         b.addAccessor(accessorJson(-1, FLOAT, "3", "VEC3",
-            ",\"sparse\":{\"count\":" + WRAP_COUNT + ",\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"sparse\":{\"count\":" + HUGE_COUNT + ",\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5125},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
         GltfModel m;
-        loadCase("sparse count that wraps the size arithmetic", b, false, m);
+        loadCase("sparse count too large to address", b, false, m);
     }
     if (is64) {
-        // Sparse accessor without a buffer view whose own count wraps:
-        // 3 * 6148914691236517206 = 2^64 + 2. No buffer view bounds the
-        // count, and cgltf_validate() only checks sparse indices against it.
+        // Sparse accessor without a buffer view whose own count is too large
+        // to address: refused
         GltfBuilder b = triangle();
         const uint16_t sparseIdx[1] = { 0 };
         const float sparseVal[3] = { 5, 5, 5 };
@@ -368,14 +366,15 @@ int main() {
         b.primitive = R"({"attributes":{"POSITION":3}})";
         GltfModel m;
         string warning;
-        loadCase("accessor without a buffer view whose count wraps", b, false, m, &warning);
-        check("accessor without a buffer view whose count wraps: reported as too large",
+        loadCase("accessor without a buffer view, count too large", b, false, m, &warning);
+        check("accessor without a buffer view, count too large: reported as such",
               warning.find("too large to address") != string::npos);
     }
     {
-        // Sparse accessor on a view with byteStride 16: glTF packs the sparse
-        // values tightly (12 bytes apart), not at the base stride. A view
-        // after the values makes a read at the base stride land on other data.
+        // Sparse accessor on a view with byteStride 16: the sparse values are
+        // packed tightly (12 bytes apart), and are read that way. Other data
+        // follows the values view, so a value read from the wrong place
+        // shows up in the result.
         GltfBuilder b = triangle();
         const float strided[12] = { 0, 0, 0, 0,  1, 0, 0, 0,  0, 1, 0, 0 };
         int basev = b.addView(strided, sizeof(strided), 16);
@@ -455,9 +454,8 @@ int main() {
         loadCase("index past the vertex count", b, false, m);
     }
     {
-        // POSITION declared VEC2: cgltf_validate() bounds the indices by the
-        // accessor count (3), but only 2 whole vertices come out of 6 floats,
-        // so index 2 is caught by the loader
+        // POSITION declared VEC2 over 6 floats: 2 whole vertices are read,
+        // and the loader refuses index 2, which is past them
         GltfBuilder b = triangle();
         b.addAccessor(accessorJson(0, FLOAT, "3", "VEC2"));
         b.primitive = R"({"attributes":{"POSITION":3},"indices":1})";
@@ -513,11 +511,9 @@ int main() {
         }
     }
     {
-        // An index accessor without a buffer view has no data to bound its
-        // count: the primitive is skipped before any index array is
-        // allocated. The count does not wrap the size arithmetic, but no
-        // allocation of it could succeed (2^62 - 1 on 64-bit, about 4 GB on
-        // 32-bit)
+        // An index accessor without a buffer view, with a count far larger
+        // than memory: the primitive is skipped without allocating an array
+        // from that count, and the other one loads
         GltfBuilder b = triangle();
         b.addAccessor(accessorJson(-1, UINT, is64 ? "4611686018427387903" : "1073741823",
                                    "SCALAR"));
@@ -555,8 +551,7 @@ int main() {
         }
     }
     {
-        // Four sparse values for an accessor of three elements. The sparse
-        // indices stay below the count, so cgltf_validate() accepts them
+        // Four sparse values for an accessor of three elements: refused
         GltfBuilder b = triangle();
         const uint16_t sparseIdx[4] = { 0, 1, 2, 2 };
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
@@ -690,13 +685,9 @@ int main() {
         loadCase("no scene and no nodes", b, false, m);
     }
     {
-        // A chain 20000 nodes deep, each moved 1 along z: loads without
-        // exhausting the call stack, with the transforms accumulated.
-        // The depth is kept this low because cgltf_validate()'s parent-cycle
-        // check is O(nodes * depth), so 100000 took about 30 s. 20000 still
-        // overflows a recursive walk: one crashed at about 9000 levels in a
-        // Release build with Linux's default 8 MB stack (under 2000 with
-        // ASan), and Windows' default 1 MB stack gives out sooner still
+        // A chain 20000 nodes deep, each moved 1 along z: a deep chain loads
+        // without recursion, with the transforms accumulated. The depth is
+        // kept at 20000 so the test stays fast
         const int DEPTH = 20000;
         GltfBuilder b = triangle();
         string nodes = "[";

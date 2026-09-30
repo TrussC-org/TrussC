@@ -14,8 +14,8 @@ validated before they are read:
 - a quad or pentagon with a vertex index one past the end reaches
   tinyobjloader's own checks in triangulation: the quad is dropped with
   tinyobjloader's warning, and ear clipping of the pentagon never reads the
-  missing vertex (a read past the positions shows up under
-  AddressSanitizer); ObjLoader then skips the triangles that use it;
+  missing vertex (AddressSanitizer builds check this); ObjLoader then skips
+  the triangles that use it;
 - a normal index in a file with no normals is ignored, as before.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
