@@ -23,32 +23,22 @@
 //   within the CFF table (an INDEX past the table, an empty one, a count
 //   past the table),
 // - a CFF table of 0 to 3 bytes, a CFF INDEX with an offset size outside
-//   1..4, and an empty Top DICT INDEX or Top DICT; these, like every case
-//   here, run in Debug and Release builds alike.
+//   1..4, and an empty Top DICT INDEX or Top DICT (refused by stbtt_InitFont,
+//   with an error).
 // Plus:
 // - a glyph index from the cmap past numGlyphs, or for CFF past the number
 //   of CharStrings, is treated as .notdef,
 // - a codepoint above U+10FFFF is answered as missing (.notdef),
 // - CFF data is read within the CFF table's length (a CharStrings offset
 //   past the table finds no CharStrings INDEX),
-// - a glyph whose last contour is a single off-curve point loads and
-//   rasterizes (with the padded STBTT_malloc). The single off-curve contour
-//   case is only meaningful under AddressSanitizer, and CI does not build
-//   with ASan. Local ASan run, from the repository root:
-//     tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
-//     cd core/tests/fontSfntCheck
-//     cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
-//       -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
-//       -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
-//     cmake --build build-asan -j4
-//     ./bin/fontSfntCheck
-//   (prefix the last line with `setarch -R` where ASan fails to start
-//   because of the kernel's address randomization),
+// - a glyph with a one-point contour loads and rasterizes, plain and
+//   oversampled,
 // - CFF vertex counting stops within the range stb handles, and a vertex
 //   array that cannot be allocated leaves the glyph empty (with limits
-//   lowered through internal::setStbttLimitsForTests()): a glyph over the limit, one whose closing
-//   vertex is the one over it, one far over any limit through nested
-//   subroutines, and one whose array allocation fails all come back empty,
+//   lowered through internal::setStbttLimitsForTests()): a glyph over the
+//   limit, one whose closing vertex is the one over it, one far over any
+//   limit through nested subroutines, and one whose array allocation fails
+//   all come back empty,
 // - the flattened point count of a glyph stops within the range stb handles
 //   (with the limit lowered): a glyph with more points than the limit is not
 //   drawn, one at the limit is, and FontAtlasManager still gives it a glyph
@@ -58,6 +48,19 @@
 //   length 0 and tables that share bytes with another.
 // The fonts are built here, so the test runs the same everywhere. Installed
 // fonts found at the usual system paths are also loaded and cut short.
+//
+// Run the core tests under AddressSanitizer after changing stb_truetype or
+// core/include/impl/stb_impl.cpp; CI does not build with ASan. For this test,
+// from the repository root:
+//   tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
+//   cd core/tests/fontSfntCheck
+//   cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
+//     -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+//     -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+//   cmake --build build-asan -j4
+//   ./bin/fontSfntCheck
+// (prefix the last line with `setarch -R` where ASan fails to start because
+// of the kernel's address randomization).
 //
 // `fontSfntCheck --dump <font files>` prints the metrics of a few glyphs, to
 // compare two builds.
@@ -312,7 +315,7 @@ static Bytes simpleGlyph(const vector<vector<Pt>>& contours) {
 }
 
 // glyph 0: .notdef box, 1: 'A' with a curve, 2: space (empty),
-// 3: 'C', a triangle plus a last contour that is one off-curve point.
+// 3: 'C', a triangle plus a one-point contour (one off-curve point).
 static void makeGlyfLoca(int locaFormat, Bytes& glyf, Bytes& loca) {
     const vector<Bytes> glyphs = {
         simpleGlyph({{{50, 0, true}, {450, 0, true}, {450, 700, true}, {50, 700, true}}}),
@@ -802,25 +805,25 @@ static void checkPointCount() {
     }
 }
 
-// --- last contour is one off-curve point ---------------------------------------
-static void checkSinglePointContour() {
+// --- one-point contour -----------------------------------------------------------
+static void checkOnePointContour() {
     internal::FontAtlasManager m;
     if (!tryLoad(m, makeTrueType()).ok) {
-        check("single off-curve contour: loads", false);
+        check("one-point contour: loads", false);
         return;
     }
     const Path pc = m.getGlyphPath('C');
-    check("single off-curve contour: outline has two contours", pc.getNumSubpaths() == 2,
+    check("one-point contour: outline has two contours", pc.getNumSubpaths() == 2,
           "subpaths=" + to_string(pc.getNumSubpaths()));
     const internal::GlyphInfo* gc = m.getOrLoadGlyph('C');
-    check("single off-curve contour: rasterizes", gc && gc->isValid() && gc->getWidth() > 0);
+    check("one-point contour: rasterizes", gc && gc->isValid() && gc->getWidth() > 0);
     // Oversampled rasterization goes through the same outline.
     internal::FontAtlasManager m2;
     const Bytes f = makeTrueType();
     m2.setupFromMemory(f.data(), f.size(), kFontSize);
     m2.setOversample(2);
     const internal::GlyphInfo* gc2 = m2.getOrLoadGlyph('C');
-    check("single off-curve contour: rasterizes oversampled", gc2 && gc2->isValid());
+    check("one-point contour: rasterizes oversampled", gc2 && gc2->isValid());
 }
 
 // --- CFF length ----------------------------------------------------------------
@@ -1291,7 +1294,7 @@ int main(int argc, char** argv) {
     checkCodepointRange();
     checkVertexCount();
     checkPointCount();
-    checkSinglePointContour();
+    checkOnePointContour();
     checkCffLength();
     checkMalformed();
     checkSetupPath();

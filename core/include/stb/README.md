@@ -72,9 +72,8 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   history in the file ends at 1.26, 2021-08-28).
 - **TrussC patches** (marked `// TrussC patch:` in the file):
   1. `stbtt_InitFont_internal`: the CFF buffer is made with the `CFF ` table
-     length from the table directory (upstream leaves this as a `@TODO`), so
-     CFF data (INDEX, DICT, Subrs, FDSelect, CharStrings) is read within the
-     CFF table's length.
+     length from the table directory, so CFF data (INDEX, DICT, Subrs,
+     FDSelect, CharStrings) is read within the CFF table's length.
   2. CFF glyph outlines (`stbtt__csctx`, `stbtt__csctx_v`,
      `stbtt__run_charstring`, `stbtt__GetGlyphShapeT2`): vertex counting
      stops within the range stb handles (int count, size_t allocation), and
