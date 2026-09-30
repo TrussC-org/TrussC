@@ -1051,7 +1051,7 @@ If you start copy-pasting the same block into two nodes' `update()`, that block 
 
 ### Constructor vs setup() in a Node? (common trap)
 
-Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
+Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). The App is a Node too, with two App-specific points: in its constructor (before a `shared_ptr` owns it) `setSize()` doesn't resize the window (it changes only the App's own size and warns once) and `getRootNode()` doesn't return the App yet. Do both in `setup()`. Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
 
 ### How do I structure a whole scene?
 
@@ -1095,7 +1095,34 @@ public:
 EventListener pauseListener_;             // keep as a member (auto-disconnects on destruction)
 pauseListener_ = btn->pressed.listen([this]() { /* ... */ });
 ```
-**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, thread-safe, and safe to remove during notify. Don't call parent methods from a child.
+**Always store the `EventListener` returned by `listen()` as a member** (it disconnects the moment it goes out of scope). Safer than raw `function<>` callbacks — auto-disconnect, multiple listeners, and `listen()` / `disconnect()` work from any thread. On the thread that fires the event, a listener removed during `notify()` is not called again, even later in the same pass. Removal from another thread does not wait for a callback already running there (next section). Don't call parent methods from a child.
+
+### Removing a listener while the event fires: what does Event guarantee?
+
+1. **Same thread: a removed listener is not called again.** Once `disconnect()` returns on the thread that fires the event (or the `EventListener` is destroyed or reassigned, or `clear()` runs), that callback is not called again, also not later in a `notify()` pass that is already running. So a listener may disconnect or destroy a later one in the same pass (e.g. a vector of `Tween`s that reallocates inside an `update` listener). A listener added during a pass starts from the next `notify()`.
+2. **Across threads, `Event` does not wait.** When the event fires on another thread (audio, network, the async timer scheduler, your own `Thread`), `disconnect()` returns while the callback may still be running there, and one that was about to start may still start. Two safe patterns:
+   - Listen with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
+   - For latency-critical sources such as audio, the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier, and teardown calls it after disconnecting. For `audioOut` / `audioIn` that is `AudioEngine::getInstance().waitForCallbackIdle()`. It waits for every audio listener running at that moment, not only yours, so call it without holding a lock that an audio listener takes (that listener would block, the call would wait up to one second, and the audio drops out meanwhile). The async timers work the same way (`cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for a callback in flight, and `~Node` cancels leftovers), and so does `TcpClient::disconnect()` (it joins the receive thread).
+3. **Order: the barrier runs before the state the callback touches is destroyed.** Put it in the most-derived class's destructor or in `cleanup()`. A base-class destructor is too late: the derived members are already gone when it runs. The same goes for stopping a thread from a base-class destructor.
+
+```cpp
+class Synth : public Node {
+    vector<float> table_ = vector<float>(4096);
+    EventListener audioListener_;
+public:
+    void setup() override {
+        audioListener_ = AudioEngine::getInstance().audioOut.listen(
+            [this](AudioOutBuffer& b) { render(b); });   // audio thread, reads table_
+    }
+    ~Synth() override {
+        audioListener_.disconnect();                        // no new calls
+        AudioEngine::getInstance().waitForCallbackIdle();   // none still running
+    }                                                       // table_ is destroyed after this
+    void render(AudioOutBuffer& b);
+};
+```
+
+The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework detaches them after `cleanup()` and waits before it destroys the App (on exit, on a hot reload, and when a secondary window closes). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when its window closes (or, with #318, when it is swapped out); closing the window also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
 
 ### Bubble events up, don't broadcast?
 
@@ -1157,6 +1184,8 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
 
+Overriding `App::audioOut()` / `App::audioIn()` needs no teardown code: the framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+
 ### Output channel mapping? (setChannelMap)
 
 `Sound` can route to output channels:
@@ -1192,6 +1221,8 @@ rec.start("mono.wav", s);
 ```
 
 With no map: 1ch engine → mono file, 2ch → stereo, 3ch+ → averaged mono downmix. Several recorders can run at once (e.g. a stereo master and a mapped stem simultaneously). The engine must be initialized before `start()`.
+
+`stop()` keeps the buffer a capture was still copying, and to do that it waits on `AudioEngine::waitForCallbackIdle()`: for every `audioOut` / `audioIn` listener running at that moment, not only the recorder's (usually well under one buffer). So don't call `stop()` (or destroy the recorder) while holding a lock that one of your audio listeners takes: that listener blocks on it, `stop()` waits up to one second for it, and the audio drops out meanwhile. The same goes for calling `waitForCallbackIdle()` yourself.
 
 ### Abstract anything drawable with HasTexture?
 
@@ -1419,11 +1450,12 @@ Apps build as RelWithDebInfo by default, which includes debug symbols, so the st
 ### What usually makes a TrussC app crash? (safe patterns)
 
 Most crashes come from a handful of patterns. Write it the safe way from the start:
-- **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs.
+- **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs. The same goes for the App's `setSize()` (until a `shared_ptr` owns the App, as in its constructor, it doesn't resize the window, and warns once) and `getRootNode()` (not this App yet).
 - **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
+- **Keep a node beyond one call only as `weak_ptr` (or `Ptr` when you mean to own it), never as a raw pointer.** A `Node*` kept in a member, a global or a lambda capture dangles once the node is removed and freed. `lock()` tells you the node is gone, and the `shared_ptr` it returns keeps the node alive while you use it. The `Node*` from `getSelectedNode()` / `getRootNode()` is for the current call only.
 - **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
 - **Stop your own threads before your members go away.** A `Thread` subclass must call `waitForThread()` in its **own** destructor. The base class also stops and joins the thread, but only after your members are already destroyed, and it logs a warning when it finds the thread still running.
-- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
+- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. For an event fired on another thread (e.g. `audioOut`), also wait for a callback in flight before your members go: disconnect, then `AudioEngine::getInstance().waitForCallbackIdle()`, in your own destructor or `cleanup()`. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
 
 ### Which thread does my callback run on?
 
@@ -1447,7 +1479,7 @@ Rules for callbacks that are not on the main thread:
    ```
    `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
-3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener, and do it before the members the callback uses are destroyed.
+3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener and wait for a callback in flight (`AudioEngine::getInstance().waitForCallbackIdle()` for audio), and do it before the members the callback uses are destroyed. Dropping the listener alone does not wait for a callback already running on the other thread (see "Removing a listener while the event fires" above).
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
@@ -1519,7 +1551,7 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 
 ## Logging
 
-Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`.
+Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
 
 ### How do I write logs to a file? (getLogger + setLogFile)
 
@@ -1540,6 +1572,7 @@ EventListener logTap_ = getLogger().onLog.listen([](LogEventArgs& e) {
     // e.timestamp / e.level / e.message — e.g. forward to the network
 });
 ```
+The listener runs on whichever thread logged (pass `Deliver::Main` to `listen` before touching nodes or the GPU), outside the logger's own lock, so it may log too.
 
 ## Window & fullscreen
 
@@ -2162,9 +2195,9 @@ Color colorFromOKLCH(float L, float C, float H, float a = 1.0) ⚠️deprecated 
 ### Scene Graph
 
 ```cpp
-Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around.
-Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none). A tool such as an inspector can read it and drive it via setSelectedNode().
-void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection.
+Node * getRootNode()  // Get the running App as the root of the node tree (set by the framework while the app is alive, null otherwise). Lets tools walk the whole tree without the app passing itself around. Not yet the App inside its own constructor: use it from setup() on.
+Node * getSelectedNode()  // Get the currently selected node (the last-clicked node, held by the Node system; null if none or once the node is freed). A tool such as an inspector can read it and drive it via setSelectedNode(). The pointer is for the current call; to keep the node, keep its weak_from_this().
+void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr to clear the selection; a node no shared_ptr owns also clears it.
 ```
 
 ### 3D Setup
@@ -2329,8 +2362,8 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio)
+void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup() for good, like audioOut; the same rule applies: don't wait on the main thread or on its locks in here.
+void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
 Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
@@ -2343,7 +2376,7 @@ void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
 void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size
+void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()
 void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
 void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
 void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
@@ -2377,6 +2410,7 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available 
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
 void AudioEngine::shutdown()  // Stop and close the audio device.
+bool AudioEngine::waitForCallbackIdle()  // Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile.
 ```
 
 ### AudioInBuffer — Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here.
@@ -2402,7 +2436,7 @@ fs::path AudioRecorder::getPath() const  // Resolved path of the file being writ
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
 bool AudioRecorder::isRecording() const  // True while recording
 bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes). Safe to call when not recording; also runs automatically on destruction
+void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -2627,13 +2661,13 @@ void Environment::release()  // Release GPU resources
 void Event::clear()  // Remove all listeners
 EventListener Event::listen(Callback callback, int priority = App) [+5]  // Register a listener callback and return an EventListener token; lower priority runs first, and Deliver::Main runs the callback on the main thread
 size_t Event::listenerCount() const  // Number of currently registered listeners
-void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed
+void Event::notify(T & arg)  // Fire the event, calling all listeners in priority order (no argument for Event<void>); stops early if a listener marks an input arg consumed. A listener removed during the pass on this thread is not called; one added during the pass starts from the next notify()
 ```
 
 ### EventListener — RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only
 
 ```cpp
-void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction)
+void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForCallbackIdle()
 bool EventListener::isConnected() const  // True while the listener is still connected to its event
 ```
 
@@ -3022,7 +3056,7 @@ LoadResult LoadResult::success()  // Make a success result (static)
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-const std::string & Logger::getLogFilePath() const  // Get the path of the current log file
+std::string Logger::getLogFilePath() const  // Get the path of the current log file
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
@@ -3626,22 +3660,23 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes available to read
-void Serial::close()  // Disconnect and release resources
+int Serial::available() const  // Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
+void Serial::close()  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
 void Serial::drain()  // Wait until output transmission completes
 void Serial::flush()  // Clear both input and output buffers
 void Serial::flushInput()  // Clear the input buffer
 void Serial::flushOutput()  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
-const std::string & Serial::getDevicePath() const  // Current device path
-bool Serial::isInitialized() const  // Whether currently connected
+std::string Serial::getDevicePath() const  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
+bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
+bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices
 void Serial::printDevices()  // Log all available serial devices
-int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error
-int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error
+int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)
+int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)
 bool Serial::setup(const std::string & portName, int baudRate) [+1]  // Connect to a port by path or by index from listDevices()
 bool Serial::writeByte(unsigned char byte)  // Write a single byte; true on success
-int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error
+int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)
 ```
 
 ### SerialDeviceInfo — Info for one serial device (from Serial::listDevices)
@@ -3650,6 +3685,11 @@ int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; re
 int SerialDeviceInfo::getDeviceID() const  // Device index
 const std::string & SerialDeviceInfo::getDeviceName() const  // Device name
 const std::string & SerialDeviceInfo::getDevicePath() const  // Device path
+```
+
+### SerialDisconnectEventArgs — Event args for Serial::onDisconnect
+
+```cpp
 ```
 
 ### Shader — GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing
@@ -3739,7 +3779,7 @@ LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file in
 LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
 LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
 LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
-LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths.
+LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold.
 LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
 LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
 void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed.
@@ -4300,7 +4340,7 @@ const std::string & Window::getTitle() const  // Last title set for this window 
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
 bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
 bool Window::isOpen() const  // Whether the native window is still open
-void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window
+void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open (both log an error and leave the window as it is)
 void Window::setClearColor(const Color & c)  // Background clear color for this window
 void Window::setFps(float fps)  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
 void Window::setFullscreen(bool full)  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
@@ -4676,7 +4716,7 @@ EventListener synthListener;
 synthListener = AudioEngine::getInstance().audioOut.listen(
     [](AudioOutBuffer& buf) { /* ... */ });
 ```
-`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in).
+`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in). The App override is detached for you after `cleanup()`; a listener that captures `this` elsewhere is disconnected, then `AudioEngine::getInstance().waitForCallbackIdle()` runs, in the owner's own destructor, before its members go.
 
 ### audioDeviceChanged — Device / Rate Change Event
 Fires on every successful `init()` (initial AND re-init):
@@ -4737,7 +4777,7 @@ Sound sfx = bundle.build();
 9. **GPU classes are main-thread only.** `Image` / `Texture` / `Fbo` / `Font` call into sokol; using them on a background thread crashes (no framework assert catches it). Load `Pixels` on the background thread, create the `Image`/`Texture` on the main thread.
 10. **`Pixels` / `Image` / `Texture` are non-copyable** (deleted copy ctor). Use `std::move()`, or `Pixels::clone()` for a deep copy.
 11. **Create nodes with `make_shared<>()`.** `addChild()` asserts if the node isn't owned by a `shared_ptr`.
-12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override.
+12. **Never `addChild()` in a constructor** — `weak_from_this()` isn't valid until the `shared_ptr` exists (debug builds assert with "move to setup()"). Do it in the node's `setup()` override. In the App's constructor, `setSize()` doesn't resize the window either (no `shared_ptr` owns the App yet: it changes only the App's own size and warns once), and `getRootNode()` doesn't return the App yet: call both in `setup()`.
 13. **Event-driven draw needs `redraw()`.** With `setIndependentFps(updateFps, EVENT_DRIVEN)`, draw runs only when `redraw()` was called — forgetting it looks like a frozen screen.
 14. **Prefer `Event<T>` + `EventListener` over raw `function<>` callbacks.** `EventListener` is RAII: it auto-disconnects on destruction, so no dangling-callback crashes.
 15. **`LayoutMod` never auto-relayouts.** Call `updateLayout()` after adding/removing/resizing children (property setters like `setSpacing()` do trigger it).

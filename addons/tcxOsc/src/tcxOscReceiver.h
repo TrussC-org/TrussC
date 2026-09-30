@@ -18,7 +18,12 @@ class OscReceiver {
 public:
     // Events
     tc::Event<OscMessage> onMessageReceived;   // Message received
-    tc::Event<OscBundle> onBundleReceived;     // Bundle received
+    // Bundle received. The OscBundle& is the parsed bundle itself (not a
+    // copy) and is valid only during that call. A listener may edit that
+    // bundle, but must not keep a reference to an enclosing bundle (from an
+    // earlier call for the same packet) and modify it (e.g. addMessage() /
+    // clear()) while a nested bundle of that packet is being dispatched.
+    tc::Event<OscBundle> onBundleReceived;
     tc::Event<std::string> onParseError;       // Parse error (for robustness)
 
     OscReceiver() = default;
@@ -170,9 +175,13 @@ private:
         }
     }
 
-    // Recursively dispatch messages inside bundle
-    void dispatchBundle(OscBundle bundle) {
-        onBundleReceived.notify(bundle);
+    // Recursively dispatch messages inside bundle. Walks the parsed tree in
+    // place (no per-level copy); fromBytes() bounds the depth.
+    void dispatchBundle(const OscBundle& bundle) {
+        // Event<T>::notify() takes T&, and listeners could always edit the
+        // bundle before its elements are dispatched. Every node belongs to
+        // the non-const bundle parsePacket() owns, so the cast is well-defined.
+        onBundleReceived.notify(const_cast<OscBundle&>(bundle));
 
         for (size_t i = 0; i < bundle.getElementCount(); ++i) {
             if (bundle.isMessage(i)) {
@@ -187,8 +196,8 @@ private:
                 }
                 onMessageReceived.notify(msg);
             }
-            else if (bundle.isBundle(i)) {
-                dispatchBundle(bundle.getBundleAt(i));
+            else if (const OscBundle* child = bundle.bundleAt(i)) {
+                dispatchBundle(*child);
             }
         }
     }

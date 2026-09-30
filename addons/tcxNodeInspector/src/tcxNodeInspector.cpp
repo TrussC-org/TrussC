@@ -42,6 +42,19 @@ struct StyleScope {
     }
 };
 
+// A weak reference to a node: empty for null (and for a node no shared_ptr
+// owns). The inspector keeps nodes between frames only this way (#255).
+weak_ptr<Node> weakOf(Node* n) {
+    return n ? n->weak_from_this() : weak_ptr<Node>();
+}
+
+// Same node, compared by ownership: a reference to a node that has been freed
+// never matches a new node that reuses its address, and still differs from
+// "no node".
+bool sameNode(const weak_ptr<Node>& a, const weak_ptr<Node>& b) {
+    return !a.owner_before(b) && !b.owner_before(a);
+}
+
 // The member's current value in the tc_get_node_tree encoding (null if the
 // path no longer resolves). "name" without a mod is the node's name field.
 Json memberValue(Node* node, Mod* mod, const string& member) {
@@ -143,10 +156,11 @@ void NodeInspector::reconcileSelection() {
                                [](const weak_ptr<Node>& w) { return w.expired(); }),
                      selection_.end());
     Node* primary = getSelectedNode();
-    if (primary != lastPrimary_) {
+    weak_ptr<Node> primaryRef = weakOf(primary);
+    if (!sameNode(primaryRef, lastPrimary_)) {
         selection_.clear();
-        if (primary) selection_.push_back(primary->weak_from_this());
-        lastPrimary_ = primary;
+        if (primary) selection_.push_back(primaryRef);
+        lastPrimary_ = primaryRef;
     }
 }
 
@@ -171,7 +185,7 @@ void NodeInspector::select(Node* n) {
     selection_.clear();
     if (n) selection_.push_back(n->weak_from_this());
     setSelectedNode(n);
-    lastPrimary_ = n;
+    lastPrimary_ = weakOf(n);
 }
 
 void NodeInspector::toggleInSelection(Node* n) {
@@ -185,19 +199,19 @@ void NodeInspector::toggleInSelection(Node* n) {
         if (getSelectedNode() == n) {
             Node* next = selection_.empty() ? nullptr : selection_.back().lock().get();
             setSelectedNode(next);
-            lastPrimary_ = next;
+            lastPrimary_ = weakOf(next);
         }
     } else {
         selection_.push_back(n->weak_from_this());
         setSelectedNode(n);
-        lastPrimary_ = n;
+        lastPrimary_ = weakOf(n);
     }
 }
 
 void NodeInspector::clearSelection() {
     selection_.clear();
     setSelectedNode(nullptr);
-    lastPrimary_ = nullptr;
+    lastPrimary_.reset();
 }
 
 void NodeInspector::draw(Node& root) {
@@ -657,13 +671,13 @@ bool NodeInspector::gizmoPressHandler(const MouseEventArgs& e) {
 
     dragAxis_ = axis;
     dragMode_ = mode;
-    dragNode_ = node;
+    dragNode_ = node->weak_from_this();
     dragWorldStart_ = g.origin;
     dragAxisDir_ = g.axis[axis].dir;
     if (mode == GizmoMode::Translate) {
         if (!axisParamForMouse(node->getCameraContext(), m, dragS0_)) {
             dragAxis_ = -1;          // axis at its vanishing point: refuse the grab
-            dragNode_ = nullptr;
+            dragNode_.reset();
             return false;
         }
         // World position of every selected node at press — the drag applies
@@ -673,7 +687,7 @@ bool NodeInspector::gizmoPressHandler(const MouseEventArgs& e) {
     } else {
         if (!ringAngleForMouse(node->getCameraContext(), m, dragV0_)) {
             dragAxis_ = -1;          // ring edge-on: cannot rotate meaningfully
-            dragNode_ = nullptr;
+            dragNode_.reset();
             return false;
         }
         dragVPrev_ = dragV0_;
@@ -686,9 +700,9 @@ bool NodeInspector::gizmoPressHandler(const MouseEventArgs& e) {
 void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
     if (dragAxis_ < 0) return;
     Node* node = getSelectedNode();
-    if (!node || node != dragNode_) {            // selection died mid-drag: cancel
+    if (!node || node != dragNode_.lock().get()) {   // selection died mid-drag: cancel
         dragAxis_ = -1;
-        dragNode_ = nullptr;
+        dragNode_.reset();
         return;
     }
 
@@ -746,7 +760,7 @@ void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
 void NodeInspector::gizmoReleaseHandler(MouseEventArgs& e) {
     if (dragAxis_ < 0) return;
     dragAxis_ = -1;
-    dragNode_ = nullptr;
+    dragNode_.reset();
     dragStarts_.clear();
     e.consumed = true;   // the gesture was ours, release included
 }
@@ -867,14 +881,16 @@ void NodeInspector::drawGizmo() {
 
 NodeInspector& NodeInspector::attach() {
     NodeInspector& s = instance();
-    s.attachRoot_ = nullptr;
+    s.attachRoot_.reset();
+    s.attachParent_.reset();
     s.doAttach();
     return s;
 }
 
 NodeInspector& NodeInspector::attach(Node& root) {
     NodeInspector& s = instance();
-    s.attachRoot_ = &root;
+    s.attachRoot_ = root.weak_from_this();
+    s.attachParent_ = root.getParent();
     s.doAttach();
     return s;
 }
@@ -923,7 +939,14 @@ void NodeInspector::doAttach() {
     // Building the frame at the default priority lands it in the same pass, on
     // top of the scene. Re-attaching just replaces the previous listener.
     autoDraw_ = events().onRender.listen([this] {
-        Node* r = attachRoot_ ? attachRoot_ : getRootNode();
+        // A root passed to attach(root) is held weakly: once it is freed the
+        // inspector shows the parent it was last seen under (tracked here
+        // every frame, so adding or reparenting it after attach() counts),
+        // and once that is gone too, the running App's tree.
+        Node::Ptr attached = attachRoot_.lock();
+        if (attached) attachParent_ = attached->getParent();
+        else attached = attachParent_.lock();
+        Node* r = attached ? attached.get() : getRootNode();
         if (!r) return;
         imguiBegin();
         draw(*r);

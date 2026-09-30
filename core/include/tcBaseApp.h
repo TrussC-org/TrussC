@@ -23,6 +23,17 @@
 namespace trussc {
 
 class Window;
+class App;
+
+namespace internal {
+// Teardown steps 2 and 3 wherever the framework lets an App go (exit, hot
+// reload, closing a secondary window; #256): after app.cleanup(), before the
+// App is destroyed. Defined below the App class.
+inline void detachAppAudio(App& app);
+// True once the framework has run the App's cleanup() (#256): Window::setApp()
+// refuses such an App. Defined below the App class.
+inline bool appRanCleanup(const App& app);
+}
 
 // =============================================================================
 // App - Application base class
@@ -36,24 +47,21 @@ public:
     App() {
         // Auto-subscribe the virtual audio hooks. Subclasses just override
         // audioOut() / audioIn() — no need to write the listener boilerplate.
-        // EventListener members RAII out when App is destroyed.
+        // The framework detaches them after cleanup() and waits for a
+        // callback already running on the audio thread before the App is
+        // destroyed (internal::detachAppAudio()); ~App() would be too late,
+        // the derived members that audioOut() uses are gone by then.
         audioOutListener_ = AudioEngine::getInstance().audioOut.listen(
             [this](AudioOutBuffer& b) { audioOut(b); });
         audioInListener_  = AudioEngine::getInstance().audioIn.listen(
             [this](AudioInBuffer& b) { audioIn(b); });
 
-        // The FIRST App becomes the scene-graph root of the active window
-        // (normally the main App created by runApp) — exposed via
-        // getRootNode() so tools (e.g. the MCP node tools) can walk the tree.
-        // Later App instances don't clobber it: they are secondary-window
-        // content, registered explicitly by Window::setApp().
-        if (internal::currentWindowContext().rootNode == nullptr) {
-            internal::currentWindowContext().rootNode = this;
-        }
-    }
-
-    virtual ~App() {
-        if (internal::currentWindowContext().rootNode == this) internal::currentWindowContext().rootNode = nullptr;
+        // Not registered as a window's scene-graph root here: the root is
+        // held weakly (getRootNode()), and weak_from_this() is empty until
+        // the constructor returns. Whoever creates the App through a
+        // shared_ptr registers it: runApp(), runHeadlessApp() and the hot
+        // reload host for the main window, Window::setApp() for a secondary
+        // window.
     }
 
     // -------------------------------------------------------------------------
@@ -65,6 +73,9 @@ public:
     // which window's callback makes the call. Same units as setWindowSize().
     // An App attached to no window resizes no window: only its RectNode size
     // changes. The actual size update happens in the windowResized callback.
+    // An App no shared_ptr owns yet (e.g. inside its constructor, or one made
+    // on the stack) is run by no window: it resizes no window, only its own
+    // size, and warns once per App (call it in setup()).
     // Defined in tc/app/tcWindow.h (needs the complete Window).
     void setSize(float w, float h) override;
 
@@ -93,6 +104,7 @@ public:
 
 private:
     bool exitRequested_ = false;
+    bool unownedSetSizeWarned_ = false;   // setSize() warned once: no shared_ptr owns this App
 
 public:
 
@@ -186,12 +198,30 @@ public:
     // For multiple independent listeners (e.g. a Node-based synth tree),
     // use `AudioEngine::getInstance().audioOut.listen(...)` directly
     // alongside the App override.
+    // They stop being called after cleanup(): the framework detaches them
+    // before it destroys the App (exit, hot reload, closing the App's
+    // window), so the App adds nothing to the last few buffers before it
+    // goes. It waits for a call already running, as long as it takes, so
+    // don't wait on the main thread or on a lock the main thread may hold in
+    // here: the teardown would hang (with an error in the log after one
+    // second). An App runs once: setup() when first attached, exit() /
+    // cleanup() when its window closes (or, with #318, when it is swapped
+    // out). To show it again, create a new App.
     virtual void audioOut(AudioOutBuffer& buf) { (void)buf; }
     virtual void audioIn(const AudioInBuffer& buf) { (void)buf; }
 
 private:
     EventListener audioOutListener_;
     EventListener audioInListener_;
+
+    // Framework lifecycle, next to Node's setupCalled_: true once the
+    // framework has run cleanup() and let the App go
+    // (internal::detachAppAudio()). An App runs once, so Window::setApp()
+    // refuses it from then on (internal::appRanCleanup()).
+    bool cleanupCalled_ = false;
+
+    friend void internal::detachAppAudio(App& app);
+    friend bool internal::appRanCleanup(const App& app);
 public:
 
     // -------------------------------------------------------------------------
@@ -255,5 +285,30 @@ public:
         drawTree();
     }
 };
+
+namespace internal {
+// Detach the App's audioOut / audioIn hooks, then wait for a callback that is
+// already running on the audio thread (Event does not wait on disconnect).
+// Afterwards nothing on the audio thread reaches the App, so it can be
+// destroyed. The wait has no time limit: a listener that never returns hangs
+// the teardown (with an error in the log after one second) instead of
+// letting the App be destroyed under it. Main thread; returns at once when no
+// audio is running.
+//
+// Every framework path calls it right after cleanup() (a hot reload, which
+// runs no cleanup(), destroys the App right after), so it also records that
+// the App's lifecycle ended: Window::setApp() refuses it from then on, and
+// its hooks are never subscribed again.
+inline void detachAppAudio(App& app) {
+    app.audioOutListener_.disconnect();
+    app.audioInListener_.disconnect();
+    app.cleanupCalled_ = true;
+    waitForCallbackIdleNoTimeout();
+}
+
+inline bool appRanCleanup(const App& app) {
+    return app.cleanupCalled_;
+}
+}
 
 } // namespace trussc

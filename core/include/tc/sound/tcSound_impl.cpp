@@ -160,7 +160,8 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     int error = 0;
     stb_vorbis* vorbis = stb_vorbis_open_file(f, 1, &error, nullptr);
     if (!vorbis) {
-        fclose(f);
+        // No fclose(f) here: with close_on_free=1, stb_vorbis owns f and has
+        // already closed it when the open failed.
         logError("SoundBuffer") << "failed to open " << pathStr << " (stb_vorbis error="
                                 << error << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
@@ -169,11 +170,19 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     }
 
     stb_vorbis_info info = stb_vorbis_get_info(vorbis);
+    const unsigned int frames = stb_vorbis_stream_length_in_samples(vorbis);
+    size_t sampleCount = 0;
+    if (!internal::interleavedSampleCount(frames, info.channels, samples.max_size(), sampleCount)) {
+        stb_vorbis_close(vorbis);
+        logError("SoundBuffer") << "OGG stream too large to load: " << pathStr << " ("
+                                << info.channels << " ch, " << frames << " samples)";
+        return LoadResult::fail(LoadError::DecodeFailed, "OGG stream too large to load: " + pathStr);
+    }
     channels = info.channels;
     sampleRate = info.sample_rate;
-    numSamples = stb_vorbis_stream_length_in_samples(vorbis);
+    numSamples = frames;
 
-    samples.resize(numSamples * channels);
+    samples.resize(sampleCount);
 
     int decoded = stb_vorbis_get_samples_float_interleaved(
         vorbis, channels, samples.data(), static_cast<int>(samples.size()));
@@ -275,11 +284,19 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
     }
 
     stb_vorbis_info info = stb_vorbis_get_info(vorbis);
+    const unsigned int frames = stb_vorbis_stream_length_in_samples(vorbis);
+    size_t sampleCount = 0;
+    if (!internal::interleavedSampleCount(frames, info.channels, samples.max_size(), sampleCount)) {
+        stb_vorbis_close(vorbis);
+        logError("SoundBuffer") << "OGG stream in memory too large to load (" << info.channels
+                                << " ch, " << frames << " samples)";
+        return LoadResult::fail(LoadError::DecodeFailed, "OGG stream in memory too large to load");
+    }
     channels = info.channels;
     sampleRate = info.sample_rate;
-    numSamples = stb_vorbis_stream_length_in_samples(vorbis);
+    numSamples = frames;
 
-    samples.resize(numSamples * channels);
+    samples.resize(sampleCount);
     int decoded = stb_vorbis_get_samples_float_interleaved(
         vorbis, channels, samples.data(), static_cast<int>(samples.size()));
 

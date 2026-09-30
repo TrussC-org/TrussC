@@ -73,6 +73,22 @@ protected:
 };
 
 
+namespace internal {
+
+// Interleaved sample count of `frames` frames of `channels` channels, for
+// sizing SoundBuffer::samples. False when channels < 1 or when the count
+// exceeds maxCount (pass samples.max_size()). The product is checked before
+// it is formed, so it cannot wrap where size_t is 32-bit (wasm32).
+inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCount,
+                                   size_t& outCount) {
+    if (channels < 1) return false;
+    if (frames > maxCount / (size_t)channels) return false;
+    outCount = (size_t)frames * (size_t)channels;
+    return true;
+}
+
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Sound Buffer (decoded data)
 // ---------------------------------------------------------------------------
@@ -158,7 +174,10 @@ public:
     std::string deferredAacPath_;  // Path for deferred AAC loading (Web only)
 #endif
 
-    // Load raw PCM data (16-bit signed, little-endian)
+    // Load raw interleaved PCM: 16-bit signed integer or 32-bit float,
+    // little-endian unless bigEndian is set. dataSize must be a whole number
+    // of frames (bitsPerSample / 8 * numChannels bytes each); anything else
+    // fails without touching the buffer.
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
@@ -167,15 +186,38 @@ public:
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "unsupported bits per sample: " + std::to_string(bitsPerSample));
         }
+        if (numChannels < 1) {
+            logError("SoundBuffer") << "invalid PCM channel count: " << numChannels;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "invalid PCM channel count: " + std::to_string(numChannels));
+        }
+        // Frame size in 64 bits: bytes * channels can exceed a 32-bit size_t.
+        const size_t bytesPerSample = (size_t)bitsPerSample / 8;
+        const uint64_t frameBytes = (uint64_t)bytesPerSample * (uint64_t)numChannels;
+        if ((uint64_t)dataSize % frameBytes != 0) {
+            logError("SoundBuffer") << "PCM data size " << dataSize
+                                    << " is not a whole number of " << frameBytes << "-byte frames";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data size " + std::to_string(dataSize) +
+                                    " is not a whole number of " + std::to_string(frameBytes) +
+                                    "-byte frames");
+        }
+        const uint64_t frameCount = (uint64_t)dataSize / frameBytes;
+        size_t sampleCount = 0;
+        if (!internal::interleavedSampleCount(frameCount, numChannels, samples.max_size(),
+                                              sampleCount)) {
+            logError("SoundBuffer") << "PCM data too large: " << dataSize << " bytes";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data too large: " + std::to_string(dataSize) + " bytes");
+        }
 
         path_.clear();
         channels = numChannels;
         sampleRate = rate;
+        numSamples = (size_t)frameCount;
 
         if (bitsPerSample == 16) {
             // 16-bit signed integer -> float
-            size_t sampleCount = dataSize / 2;
-            numSamples = sampleCount / channels;
             samples.resize(sampleCount);
 
             const int16_t* src = static_cast<const int16_t*>(data);
@@ -188,13 +230,20 @@ public:
                 samples[i] = s / 32768.0f;
             }
         } else {
-            // 32-bit float
-            size_t sampleCount = dataSize / 4;
-            numSamples = sampleCount / channels;
+            // 32-bit float: dataSize == sampleCount * sizeof(float) here
             samples.resize(sampleCount);
-
-            const float* src = static_cast<const float*>(data);
-            std::memcpy(samples.data(), src, dataSize);
+            const size_t copyBytes = sampleCount * sizeof(float);
+            std::memcpy(samples.data(), data, copyBytes);
+            if (bigEndian) {
+                // Reverse the bytes of each sample
+                for (size_t i = 0; i < sampleCount; i++) {
+                    uint32_t u;
+                    std::memcpy(&u, &samples[i], sizeof(u));
+                    u = (u >> 24) | ((u >> 8) & 0x0000FF00u) |
+                        ((u << 8) & 0x00FF0000u) | (u << 24);
+                    std::memcpy(&samples[i], &u, sizeof(u));
+                }
+            }
         }
 
         logVerbose("SoundBuffer") << "loaded PCM from memory (" << channels << " ch, "
@@ -772,6 +821,25 @@ namespace internal {
     // anything opens an audio context: the engine keeps the context it
     // opened first. State lives in tcAudio_impl.cpp.
     void setNullAudioBackendForTests(bool on);
+
+    // Test hook, not a user setting: AudioRecorder's audio-thread capture
+    // calls `hook` with the frame count of every buffer it takes, after
+    // copying it into the ring and before handing it to the writer, so a
+    // headless test can hold a capture in flight
+    // (core/tests/audioListenerTeardown). nullptr, the default, turns it off.
+    // State lives in tcAudio_impl.cpp.
+    void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+    void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+
+    // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
+    // without its one-second limit. internal::detachAppAudio() waits here
+    // before the framework destroys an App (exit, runHeadlessApp, hot reload,
+    // closing a secondary window). A listener that never returns is an app
+    // bug; the teardown keeps waiting for it (the app hangs where it can be
+    // seen) rather than destroy what the listener may still use. After one
+    // second it logs an error, once, and goes on waiting. Returns at once on
+    // the audio thread inside a listener. tcAudio_impl.cpp.
+    void waitForCallbackIdleNoTimeout();
 }
 
 // ---------------------------------------------------------------------------
@@ -849,6 +917,39 @@ public:
     Event<AudioOutBuffer> audioOut;
     Event<AudioInBuffer>  audioIn;
 
+    // Teardown barrier for audioOut / audioIn listeners (#256). Returns once
+    // every audioOut / audioIn notify that was running when it was called has
+    // finished. Event does not wait: when disconnect() returns, the callback
+    // may still be running on the audio thread. So an object whose listener
+    // touches its members disconnects, then waits here, then lets the members
+    // go:
+    //
+    //   ~Synth() { listener_.disconnect();
+    //              AudioEngine::getInstance().waitForCallbackIdle(); }
+    //
+    // Do it in the most-derived class (or in cleanup()), not in a base-class
+    // destructor, which runs after the derived members are already gone. The
+    // App's own audioOut() / audioIn() hooks are handled by the framework:
+    // they are detached after cleanup(), and before the App is destroyed
+    // (exit, hot reload, closing a secondary window) the framework waits the
+    // same way, but without the one-second limit below
+    // (internal::waitForCallbackIdleNoTimeout()).
+    //
+    //   - Returns at once when no callback is running: the device is stopped
+    //     or was never started, or the audio thread is between two buffers.
+    //   - Returns at once when called from inside an audioOut / audioIn
+    //     listener (the audio thread): waiting there would wait for itself.
+    //   - Otherwise waits only for callbacks already running (at most two
+    //     back-to-back buffers), not for later ones. Gives up after one
+    //     second, logs a warning and returns false: a listener that blocks
+    //     that long is stuck (e.g. on a lock the caller holds), and waiting
+    //     forever would hang the caller. Returns true otherwise. (The
+    //     framework's App teardown does wait forever, see above: there a hang
+    //     is better than destroying the App under a running listener.)
+    // It waits for every listener running at that moment, not only the
+    // caller's: call it without holding a lock that a listener takes.
+    bool waitForCallbackIdle();
+
     // Fired on every successful init() — both the initial startup and any
     // subsequent live re-init. The args carry the new device's real name
     // (never empty), whether it's the system default, and the current
@@ -919,12 +1020,25 @@ private:
     void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
     friend void internal::flushAudioDiagnostics();
+    friend void internal::waitForCallbackIdleNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
 
     // Zero the output meters, the load window and every voice's level. Only
     // while no device is running (init(), shutdown()), so the audio thread
     // cannot race it.
     void resetMeters();
+
+    // Mark an audioOut / audioIn notify in flight for waitForCallbackIdle()
+    // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
+    // add each, no lock. beginCallback() returns the slot to pass to
+    // endCallback(). audioIn has no engine-side source yet: whatever fires it
+    // from the engine must enclose that notify the same way.
+    int  beginCallback();
+    void endCallback(int slot);
+
+    // Both barriers (tcAudio_impl.cpp): waitForCallbackIdle() gives up after
+    // one second (giveUp), internal::waitForCallbackIdleNoTimeout() does not.
+    bool waitForCallbacks(bool giveUp);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -1106,7 +1220,11 @@ private:
             ob.channels      = num_channels;
             ob.sampleRate    = sampleRate_;
             ob.framePosition = framePosition_;
+            // In flight for waitForCallbackIdle(). Must enclose the notify:
+            // it is what loads the listener snapshot.
+            const int slot = beginCallback();
             audioOut.notify(ob);
+            endCallback(slot);
         }
         framePosition_ += (uint64_t)num_frames;
 
@@ -1167,6 +1285,19 @@ private:
     // Drop counters, output meters, audio-thread load and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
     std::unique_ptr<internal::AudioDiagnostics> diag_;
+
+    // Callbacks in flight (beginCallback / endCallback), counted in one of two
+    // slots picked by the epoch's low bit. waitForCallbackIdle() advances the
+    // epoch so new callbacks count in the other slot, then waits for the old
+    // slot to drain, twice (once per slot): it waits only for callbacks that
+    // were already running, and a callback that read the epoch just before an
+    // advance is still caught. The mutex serializes barriers (the epoch
+    // advances of two barriers must not interleave); the audio thread never
+    // takes it. Timed, so waitForCallbackIdle() keeps its one-second limit
+    // while a framework teardown holds it waiting for a stuck listener.
+    std::atomic<uint32_t> callbackEpoch_{0};
+    std::atomic<int>      callbacksInFlight_[2]{};
+    std::timed_mutex      callbackBarrierMutex_;
 };
 
 // ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@
 #include "tcxDepthTypes.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 
 namespace tcx::depthcamera {
@@ -59,14 +60,18 @@ inline void colorToImage(const Pixels& c, Image& out) {
 
 // Depth (uint16 * depthScale, meters) -> grayscale. near = bright, invalid (0)
 // = black. With view.repeat the near..far band repeats (each band fades bright
-// ->dark again), which reads like depth contours.
+// ->dark again), which reads like depth contours. Draws nothing unless the
+// frame holds a full w*h depth plane.
 inline void depthToImage(const DepthFrame& f, Image& out, const DepthImageView& view = {}) {
-    if (f.w <= 0 || f.h <= 0 || f.depth.empty()) return;
+    if (f.w <= 0 || f.h <= 0) return;
+    // In 64 bits, so the product can't wrap where size_t is 32 bits.
+    const std::uint64_t pixels = static_cast<std::uint64_t>(f.w) * static_cast<std::uint64_t>(f.h);
+    if (f.depth.size() < pixels) return;
     tcd_detail::ensureRGBA(out, f.w, f.h);
     unsigned char* d = out.getPixelsData();
     const float span = (view.farM > view.nearM) ? (view.farM - view.nearM) : 1.0f;
-    const int n = f.w * f.h;
-    for (int i = 0; i < n; ++i) {
+    const size_t n = static_cast<size_t>(pixels);
+    for (size_t i = 0; i < n; ++i) {
         unsigned char g = 0;
         if (f.depth[i] != 0) {
             float rel = f.depth[i] * f.depthScale - view.nearM;

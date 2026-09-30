@@ -168,11 +168,15 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     auto& ctx = internal::mainWindowContext();
     internal::sampleFrameTime(ctx);
 
-    // Create app instance
-    AppClass app;
+    // Create app instance. Owned by a shared_ptr, as runApp() owns the
+    // windowed App: it is the main window's scene-graph root (getRootNode(),
+    // held weakly) while it runs, and weak_from_this() works, so setup() can
+    // addChild().
+    auto app = std::make_shared<AppClass>();
+    ctx.rootNode = app;
 
     // Call setup
-    app.setup();
+    app->setup();
 
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main
@@ -188,7 +192,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     auto lastTime = std::chrono::steady_clock::now();
     internal::HeadlessSleeper sleeper;
 
-    while (headless::running && !app.isExitRequested()) {
+    while (headless::running && !app->isExitRequested()) {
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - lastTime).count();
         lastTime = now;
@@ -209,7 +213,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         }
         for (int i = 0; i < adv.steps; ++i) {
             ctx.updateDeltaTime = targetDelta;
-            app.update();
+            app->update();
             headless::frameCount++;
         }
         // Measured rate: the time the steps consumed, in (fractional) steps,
@@ -226,8 +230,13 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     }
 
     // Call exit and cleanup
-    app.exit();
-    app.cleanup();
+    app->exit();
+    app->cleanup();
+
+    // The audio device keeps running: detach the App's audio hooks and wait
+    // for a callback in flight before the App goes out of scope (#256).
+    internal::detachAppAudio(*app);
+    ctx.rootNode.reset();   // no longer the running App
 
     // Headless apps leave the audio device running (no shutdownAudio() on
     // this path), so log the drops the rate limit still holds back here.
