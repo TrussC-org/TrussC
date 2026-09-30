@@ -916,8 +916,8 @@ public:
     int writeBytes(const void* buffer, int length) {
         LossFound loss;
 #if defined(_WIN32)
-        bool timedOut = false;
-        std::string port;  // for the timeout warning, read under the lock
+        bool warnTimeout = false;  // decided under the lock, logged after it
+        std::string port;
 #elif defined(__ANDROID__)
         int writeError = 0;
 #endif
@@ -935,18 +935,14 @@ public:
                 DWORD error = GetLastError();
                 // A driver may report the write timeout as a failure too
                 if (error == ERROR_SEM_TIMEOUT || error == ERROR_TIMEOUT) {
-                    timedOut = true;
-                    port = devicePath_;
+                    warnTimeout = firstWriteTimeout(port);
                     return (int)bytesWritten;
                 }
                 markLost(loss, "WriteFile", error);
                 return -1;
             }
             // The write timeout ends the call with part of the data written
-            if ((int)bytesWritten < length) {
-                timedOut = true;
-                port = devicePath_;
-            }
+            if ((int)bytesWritten < length) warnTimeout = firstWriteTimeout(port);
             return (int)bytesWritten;
 #elif defined(__ANDROID__)
             return androidserial::writeBytes(aimpl_, buffer, length, writeError);
@@ -963,7 +959,7 @@ public:
         // Logged here, with the lock released: a Logger listener may use
         // this Serial
 #if defined(_WIN32)
-        if (timedOut && !writeTimeoutWarned_.exchange(true)) {
+        if (warnTimeout) {
             logWarning() << "Serial: a write to " << port << " timed out (" << n << " of "
                          << length << " bytes sent); writeBytes() returns what was sent. Write"
                          << " from a thread of its own if the device takes data slowly";
@@ -1063,8 +1059,18 @@ private:
     // on one connection never closes the next one (see closeLost())
     std::uint64_t generation_ = 0;
 #if defined(_WIN32)
-    // Set once a write of this connection timed out (see writeBytes())
+    // Set once a write of this connection timed out (see writeBytes()).
+    // Tested and set with the lock shared (several writers may time out at
+    // once), reset by setup() and the moves with it exclusive.
     std::atomic<bool> writeTimeoutWarned_{false};
+
+    // With the lock shared: whether this is the connection's first write
+    // timeout, the one writeBytes() warns about. Sets port for the warning.
+    bool firstWriteTimeout(std::string& port) {
+        if (writeTimeoutWarned_.exchange(true)) return false;
+        port = devicePath_;
+        return true;
+    }
 #endif
 
     // A reader-writer lock that lets a waiting writer in first: once lock()
