@@ -1199,7 +1199,7 @@ Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed o
 - **Generator** (oscillators / synths) adds audio into the buffer,
 - **Effect** (reverb / filter / EQ) reads + writes to process it,
 - **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
-Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority. Within one priority, listeners run in the order they subscribed. The App's own `audioOut()` / `audioIn()` overrides run just before the Generator priority, so ahead of every default-priority listener, including one you subscribe in `setup()` (before the framework subscribes the App's hooks); a listener that must see what `App::audioOut()` wrote uses `Effect` or `Monitor`.
+Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority. Within one priority, listeners run in the order they subscribed. The App's own `audioOut()` / `audioIn()` overrides run just before the Generator priority, so ahead of every default-priority listener, including one you subscribe in `setup()` (before the framework subscribes the App's hooks); a listener that must see what `App::audioOut()` wrote uses `Effect` or `Monitor`. A default-priority listener subscribed before the App was constructed (a static object, or in `main()` before `runApp()`) used to run before `App::audioOut()` and now runs after it.
 
 ### How do I record the audio the app is playing? (AudioRecorder)
 

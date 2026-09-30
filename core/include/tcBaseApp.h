@@ -39,8 +39,12 @@ inline void detachAppAudio(App& app);
 inline bool appRanCleanup(const App& app);
 // Priority of the App's audioOut / audioIn hooks: just before Generator (the
 // default), so App::audioOut() runs before every default-priority listener,
-// also one subscribed in setup() before the hooks are (#426). That keeps the
-// order apps had when the App constructor subscribed them.
+// whenever that listener subscribed, also one subscribed in setup() before
+// the hooks are (#426). For a listener subscribed after the App was
+// constructed (setup() included) that is the order it had when the App
+// constructor subscribed the hooks. A default-priority listener subscribed
+// before the App existed (a static object, or main() before runApp()) used
+// to run before App::audioOut() and now runs after it.
 constexpr int appAudioPriority = audio::priority::Generator - 1;
 }
 
@@ -204,7 +208,10 @@ public:
     // alongside the App override. The App's hooks run before every listener
     // at the default priority (audio::priority::Generator), whenever that
     // listener subscribed, setup() included; pass Effect / Monitor for one
-    // that must see what audioOut() wrote, or a lower value to run before it.
+    // that must see what audioOut() wrote. A value below
+    // audio::priority::Generator - 1 runs before the App's hooks; exactly
+    // Generator - 1 shares their priority and runs in subscription order
+    // relative to them (after them if subscribed once setup() returned).
     // They are first called right after setup() returns (the framework
     // subscribes them then, not when the App is constructed), so state that
     // setup() prepares is ready in here. An App that is never run gets no
