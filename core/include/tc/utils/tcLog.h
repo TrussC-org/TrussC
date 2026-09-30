@@ -204,9 +204,11 @@ private:
         // Android: logcat via __android_log_write
         int prio;
         switch (e.level) {
-            case LogLevel::Error:   prio = ANDROID_LOG_ERROR; break;
+            case LogLevel::Verbose: prio = ANDROID_LOG_VERBOSE; break;
             case LogLevel::Warning: prio = ANDROID_LOG_WARN; break;
-            default:                prio = ANDROID_LOG_INFO; break;
+            case LogLevel::Error:   prio = ANDROID_LOG_ERROR; break;
+            case LogLevel::Fatal:   prio = ANDROID_LOG_FATAL; break;
+            default:                prio = ANDROID_LOG_INFO; break;   // Notice
         }
         __android_log_write(prio, "TrussC", e.message.c_str());
 #else
