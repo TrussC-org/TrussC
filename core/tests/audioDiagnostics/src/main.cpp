@@ -30,6 +30,12 @@
 //   logged), and the file is closed once: stb_vorbis closes it on the failed
 //   open, SoundBuffer does not close it again (counted by fcloseProbe.cpp on
 //   Linux).
+// - SoundBuffer::loadPcmFromMemory() validates the format before it touches
+//   the buffer: a channel count below 1, or a byte size that is not a whole
+//   number of frames, fails (and is logged); a valid load leaves numSamples *
+//   channels == samples.size(); 32-bit big-endian samples are byte-swapped.
+//   The sample count products the loaders size buffers with don't wrap where
+//   size_t is 32-bit (checked here against a 32-bit limit).
 // =============================================================================
 
 #include <TrussC.h>
@@ -37,8 +43,10 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -154,6 +162,119 @@ static atomic<bool> g_pumpSeen{false};
 static void playCopyOffMain() {
     thread worker([] { g_copy->play(); });
     worker.join();
+}
+
+// --- SoundBuffer::loadPcmFromMemory: format and size validation ---------------
+// A load either fills the buffer so that numSamples * channels ==
+// samples.size() (what the mixer indexes by), or fails and leaves the buffer
+// as it was.
+static bool pcmConsistent(const SoundBuffer& b) {
+    return b.channels > 0 && b.numSamples * (size_t)b.channels == b.samples.size();
+}
+
+static void checkPcmLoading() {
+    const size_t kSizeMax = numeric_limits<size_t>::max();
+
+    // Sample count products: checked before they are formed. maxCount =
+    // UINT32_MAX stands in for a 32-bit size_t, so the 32-bit case runs here too.
+    {
+        size_t n = 0;
+        check("pcm: sample count of 0 channels is refused",
+              !internal::interleavedSampleCount(10, 0, kSizeMax, n));
+        check("pcm: sample count of negative channels is refused",
+              !internal::interleavedSampleCount(10, -2, kSizeMax, n));
+        check("pcm: sample count at a 32-bit size_t's limit is accepted",
+              internal::interleavedSampleCount(0x3FFFFFFFull, 4, 0xFFFFFFFFu, n) && n == 0xFFFFFFFCu,
+              to_string(n));
+        check("pcm: sample count past a 32-bit size_t is refused (no wrap)",
+              !internal::interleavedSampleCount(0x40000001ull, 4, 0xFFFFFFFFu, n));
+        check("pcm: longest OGG length x 16 channels is refused on a 32-bit size_t",
+              !internal::interleavedSampleCount(0xFFFFFFFFull, 16, 0xFFFFFFFFu, n));
+        check("pcm: sample count exactly at maxCount is accepted",
+              internal::interleavedSampleCount(333, 3, 999, n) && n == 999);
+        check("pcm: sample count one frame past maxCount is refused",
+              !internal::interleavedSampleCount(334, 3, 1001, n));
+        // On this platform's own size_t and vector limit (refused on 32-bit)
+        const vector<float> v;
+        const bool fits = internal::interleavedSampleCount(0xFFFFFFFFull, 16, v.max_size(), n);
+        check("pcm: longest OGG length x 16 channels fits only with a 64-bit size_t",
+              fits == (sizeof(size_t) >= 8), to_string(sizeof(size_t) * 8) + "-bit size_t");
+    }
+
+    SoundBuffer buf;
+    const int16_t stereo16[6] = {32767, -32768, 0, 1, -1, 16384};
+    check("pcm: 16-bit stereo loads",
+          (bool)buf.loadPcmFromMemory(stereo16, sizeof(stereo16), 2, 48000) &&
+          buf.numSamples == 3 && pcmConsistent(buf),
+          to_string(buf.numSamples) + " frames");
+    check("pcm: 16-bit extremes convert to [-1, 1)",
+          buf.samples.size() == 6 && buf.samples[0] == 32767 / 32768.0f && buf.samples[1] == -1.0f &&
+          buf.samples[2] == 0.0f && buf.samples[3] == 1 / 32768.0f && buf.samples[5] == 0.5f);
+
+    // Invalid channel counts fail and leave the buffer as it was
+    const size_t errorsBefore = countLogs(LogLevel::Error, "invalid PCM channel count");
+    for (int ch : {0, -1, numeric_limits<int>::min()}) {
+        const LoadResult r = buf.loadPcmFromMemory(stereo16, sizeof(stereo16), ch, 48000);
+        check("pcm: " + to_string(ch) + " channels fails with UnsupportedFormat",
+              !r && r.error == LoadError::UnsupportedFormat, loadErrorName(r.error));
+    }
+    check("pcm: each invalid channel count is logged",
+          countLogs(LogLevel::Error, "invalid PCM channel count") == errorsBefore + 3,
+          lastLog(LogLevel::Error));
+    check("pcm: a failed load leaves the buffer as it was",
+          buf.channels == 2 && buf.numSamples == 3 && pcmConsistent(buf));
+
+    // A byte size that is not a whole number of frames
+    auto sizeFails = [&](const string& name, const void* data, size_t size, int ch, int bits) {
+        const LoadResult r = buf.loadPcmFromMemory(data, size, ch, 48000, bits);
+        check("pcm: " + name + " fails with DecodeFailed",
+              !r && r.error == LoadError::DecodeFailed, loadErrorName(r.error));
+        check("pcm: " + name + " leaves the buffer as it was",
+              buf.channels == 2 && buf.numSamples == 3 && pcmConsistent(buf));
+    };
+    const float floats[8] = {0.25f, -0.25f, 1.0f, -1.0f, 0.5f, -0.5f, 0.125f, -0.125f};
+    sizeFails("16-bit mono, odd byte count", stereo16, 3, 1, 16);
+    sizeFails("16-bit stereo, half a frame over", stereo16, 6, 2, 16);
+    sizeFails("32-bit mono, 4k+2 bytes", floats, 10, 1, 32);
+    sizeFails("32-bit mono, 4k+3 bytes", floats, 11, 1, 32);
+    sizeFails("32-bit stereo, 3 samples", floats, 12, 2, 32);
+    // The frame size itself is past 32 bits (4 * 2^30 bytes wraps to 0 in a
+    // 32-bit size_t); nothing is read.
+    sizeFails("32-bit frame of 2^30 channels", floats, 8, 1 << 30, 32);
+    sizeFails("16-bit frame of INT_MAX channels", floats, 8, numeric_limits<int>::max(), 16);
+    // Whole frames, but more samples than a vector can hold; nothing is read.
+    sizeFails("16-bit mono, more samples than a buffer holds", stereo16, kSizeMax - 1, 1, 16);
+
+    // 32-bit float: copied exactly, sized by the sample count
+    check("pcm: 32-bit stereo loads",
+          (bool)buf.loadPcmFromMemory(floats, sizeof(floats), 2, 44100, 32) && buf.numSamples == 4 &&
+          pcmConsistent(buf) && memcmp(buf.samples.data(), floats, sizeof(floats)) == 0);
+    check("pcm: 32-bit mono loads with one sample",
+          (bool)buf.loadPcmFromMemory(floats, 4, 1, 44100, 32) && buf.numSamples == 1 &&
+          pcmConsistent(buf) && buf.samples[0] == 0.25f);
+    // Big-endian float: bytes of 1.0f, -0.5f, 0.25f in network order
+    const uint8_t beFloats[12] = {0x3F, 0x80, 0x00, 0x00, 0xBF, 0x00, 0x00, 0x00,
+                                  0x3E, 0x80, 0x00, 0x00};
+    check("pcm: 32-bit big-endian samples are byte-swapped",
+          (bool)buf.loadPcmFromMemory(beFloats, sizeof(beFloats), 1, 44100, 32, true) &&
+          buf.numSamples == 3 && pcmConsistent(buf) && buf.samples[0] == 1.0f &&
+          buf.samples[1] == -0.5f && buf.samples[2] == 0.25f,
+          buf.samples.empty() ? "" : to_string(buf.samples[0]));
+
+    // Many channels, one frame each
+    vector<float> wide(4096, 0.75f);
+    check("pcm: one 4096-channel float frame loads",
+          (bool)buf.loadPcmFromMemory(wide.data(), wide.size() * sizeof(float), 4096, 48000, 32) &&
+          buf.numSamples == 1 && buf.channels == 4096 && pcmConsistent(buf) && buf.samples[4095] == 0.75f);
+    vector<int16_t> wide16(4096 * 2, -16384);
+    check("pcm: two 4096-channel 16-bit frames load",
+          (bool)buf.loadPcmFromMemory(wide16.data(), wide16.size() * sizeof(int16_t), 4096, 48000) &&
+          buf.numSamples == 2 && pcmConsistent(buf) && buf.samples.back() == -0.5f);
+
+    // No data is zero frames, as before
+    check("pcm: zero bytes load as an empty buffer",
+          (bool)buf.loadPcmFromMemory(stereo16, 0, 2, 48000) && buf.numSamples == 0 &&
+          buf.samples.empty() && buf.channels == 2);
 }
 
 struct PumpApp : App {
@@ -323,6 +444,8 @@ int main() {
         reused.generateSineWave(440.0f, 0.1f);
         check("path: a generated wave clears it", reused.getPath().empty());
     }
+
+    checkPcmLoading();
 
     // A file named .ogg that is not Ogg Vorbis: the load fails and is
     // reported, and the file is closed once (stb_vorbis closes it on the
