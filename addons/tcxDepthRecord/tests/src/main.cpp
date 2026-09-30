@@ -11,10 +11,12 @@
 //   2. Block sizes: copies of a valid recording with one field of the middle
 //      frame changed (depth sample count / byte size / compressed size, color
 //      width / height / channels / byte size / compressed size, a block
-//      length, an index offset, data that doesn't decode, the stream manifest
-//      count, the header magic) are skipped or refused with the expected
-//      message, and the other frames still play.
-//   3. depthToImage() draws nothing for a depth plane shorter than w*h.
+//      length, an index offset, data that doesn't decode or decodes short,
+//      the stream manifest count, the header magic) are skipped or refused
+//      with the expected message, and the other frames still play.
+//   3. Reopening one object warns about a skipped block again, and a failed
+//      reopen leaves the manifest empty.
+//   4. depthToImage() draws nothing for a depth plane shorter than w*h.
 //
 // Pass a name fragment as the first argument to run only the matching cases.
 // =============================================================================
@@ -332,6 +334,30 @@ static void writeAll(const filesystem::path& p, const vector<uint8_t>& b) {
 // Cases with one size field changed
 // -----------------------------------------------------------------------------
 
+constexpr uint8_t FILLER_TYPE = BLOCK_CUSTOM_BASE + 2;  // ProbePlayback ignores it
+
+// Replaces the depth data of frame 1 with a valid LZ4 stream that decodes to 2
+// bytes less than the byte size, and keeps the sizes consistent with it. The
+// bytes it frees become a filler block, so the blocks after it stay in place.
+static void depthDataShort(vector<uint8_t>& b, const vector<vector<BlockAt>>& L) {
+    const BlockAt& k = blockOf(L, 1, BLOCK_DEPTH);
+    const uint32_t oldComp = get32(b, k.payload() + D_COMP);
+    const vector<uint8_t> shorter(get32(b, k.payload() + D_RAW) - 2, 0);
+    vector<uint8_t> comp;
+    if (!compress(shorter.data(), shorter.size(), comp, Codec::LZ4) ||
+        comp.size() + 5 > oldComp) {
+        printf("depthDataShort: no room for the filler block\n");
+        exit(1);
+    }
+    const uint32_t newComp = static_cast<uint32_t>(comp.size());
+    put32(b, k.at + 1, static_cast<uint32_t>(D_DATA) + newComp);
+    put32(b, k.payload() + D_COMP, newComp);
+    memcpy(b.data() + k.payload() + D_DATA, comp.data(), comp.size());
+    const size_t filler = k.payload() + D_DATA + newComp;
+    b[filler] = FILLER_TYPE;
+    put32(b, filler + 1, oldComp - newComp - 5);
+}
+
 // What frame 1 (the changed one) should give for each stream.
 enum class S {
     Read,     // fresh and equal to what was recorded (custom block: handed over intact)
@@ -461,6 +487,11 @@ static vector<Mutation> mutations() {
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 const size_t n = get32(b, k.payload() + D_COMP);
                                 memset(b.data() + k.payload() + D_DATA, 0xFF, n); }},
+        // A valid LZ4 stream for a plane 2 bytes short, all sizes consistent.
+        {"depthDataDecodesShort", D::LZ4, lz4, X, R, R, "didn't decode to the byte size",
+         depthDataShort},
+        {"depthDataDecodesShortHilo", hilo, lz4, X, R, R, "didn't decode to the byte size",
+         depthDataShort},
         {"depthLenBelowFields", hilo, lz4, X, X, X, "shorter than its size fields",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 put32(b, k.at + 1, 4); }},
@@ -563,6 +594,59 @@ static vector<Mutation> mutations() {
 }
 
 // -----------------------------------------------------------------------------
+// Reopening one object
+// -----------------------------------------------------------------------------
+
+// Each open warns about its first skipped block again, and an open that fails
+// leaves no manifest from the file opened before.
+static void runReopen(const filesystem::path& dir) {
+    const string base = "reopen";
+    if (!selected(base)) return;
+    const filesystem::path path = dir / "reopen.tcdc";
+    if (!writeRecording(path, Dims{}, DepthCodecId::HiloLZ4, ColorCodecId::LZ4)) {
+        check(base + ": write source recording", false);
+        return;
+    }
+    vector<uint8_t> bytes = readAll(path);
+    const BlockAt k = blockOf(layoutOf(bytes), 1, BLOCK_DEPTH);
+    put32(bytes, k.payload() + D_RAW, get32(bytes, k.payload() + D_RAW) + 2);
+    writeAll(path, bytes);
+
+    LogCapture cap;
+    ProbePlayback p(path.string());
+    p.enableDepth();
+    p.enableColor();
+    p.setLoop(false);
+    auto playAll = [&p] {
+        for (int i = 0; i < FRAMES; ++i) p.update();
+    };
+    auto warnings = [&cap] {
+        int n = 0;
+        for (const string& line : cap.lines) {
+            if (line.find("byte size doesn't match the sample count") != string::npos) ++n;
+        }
+        return n;
+    };
+
+    const bool first = p.setup();
+    playAll();
+    p.close();
+    const int afterFirst = warnings();
+    const bool second = p.setup();
+    playAll();
+    p.close();
+    check(base + ": each open warns once", first && second && afterFirst == 1 &&
+                                           warnings() == 2 && cap.lines.size() == 2);
+
+    const bool hadManifest = !p.getBlockTypes().empty();
+    filesystem::remove(path);
+    const bool third = p.setup();
+    check(base + ": failed reopen leaves the manifest empty",
+          hadManifest && !third && p.getBlockTypes().empty() && !p.hasUnknownBlocks() &&
+          !p.hasBlockType(BLOCK_DEPTH));
+}
+
+// -----------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
     if (argc > 1) g_only = argv[1];
@@ -615,7 +699,10 @@ int main(int argc, char** argv) {
     // ----- 2. block sizes -----------------------------------------------------
     for (const Mutation& m : mutations()) runMutation(m, dir, Dims{});
 
-    // ----- 3. depthToImage ----------------------------------------------------
+    // ----- 3. reopen ----------------------------------------------------------
+    runReopen(dir);
+
+    // ----- 4. depthToImage ----------------------------------------------------
     if (selected("depthToImageShortPlane")) {
         DepthFrame f;
         f.w = 64; f.h = 48;
