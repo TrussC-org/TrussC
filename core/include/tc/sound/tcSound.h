@@ -664,9 +664,9 @@ struct PlayingSound {
 // call to override the engine defaults (sample rate, channel count,
 // device, polyphony).
 //
-// Once init() succeeds, the engine is locked in — calling init() again
-// with different settings is currently a no-op + warning (avoiding the
-// disruption of tearing down a running device while sounds are playing).
+// Calling init(settings) again on a running engine re-initializes it live:
+// the device is reopened with the new settings and playing voices carry on
+// from their position (expect a short audible gap while the device is down).
 //
 // Empty `deviceName` selects the system default playback device.
 // Use AudioEngine::listDevices() to enumerate available device names.
@@ -850,12 +850,13 @@ public:
     // FFT analysis buffer is internal-only and unaffected by AudioSettings.
     static constexpr int ANALYSIS_BUFFER_SIZE = 4096;
 
-    // Default values used when init() is called without an explicit
-    // AudioSettings, and as initial values for the runtime fields. 48 kHz
-    // is the de-facto pro/video/web standard (DAWs, Web Audio, modern OS
-    // mixers, game engines all default to 48k), and avoids extra resampling
-    // on the way out of the engine. Use init({.sampleRate = 96000}) to opt
-    // into a higher rate when needed.
+    // Initial values of the runtime fields: init() with no arguments uses
+    // them only until init(settings) is first called (after that it reuses
+    // the last settings), and init(settings) picks them for a field given
+    // as 0 or less. 48 kHz is the de-facto pro/video/web standard (DAWs,
+    // Web Audio, modern OS mixers, game engines all default to 48k), and
+    // avoids extra resampling on the way out of the engine. Use
+    // init({.sampleRate = 96000}) to opt into a higher rate when needed.
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;
     static constexpr int DEFAULT_CHANNELS = 2;
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
@@ -868,10 +869,31 @@ public:
 
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //
-    // init() with no arguments uses the defaults (DEFAULT_SAMPLE_RATE etc.).
-    // init(settings) writes the runtime config from `settings`. If the
-    // engine is already running, init returns true immediately with a
-    // warning (silent re-init would tear down playing voices).
+    // init(settings) stores sampleRate, channels, bufferSize and maxPolyphony
+    // from `settings` (0 or less picks DEFAULT_*) before it opens the device,
+    // so they are kept even when the open fails. init() with no arguments
+    // reuses the settings of the last init(settings) call, failed or not
+    // (the DEFAULT_* values if there was none), but always opens the system
+    // default device: deviceName is not kept. On a running
+    // engine it re-initializes live: the device is reopened with the new
+    // settings and playing voices move over, keeping their position.
+    //
+    // With no usable audio backend, miniaudio falls back to its Null
+    // backend: init() succeeds on a silent device and logs a warning.
+    // Returns false when no output device can be opened (none present, or
+    // the requested one refused); the failure is logged
+    // through logError("AudioEngine"), naming the requested device, and the
+    // engine is left uninitialized. That holds for a re-init too: the
+    // running device is closed before the new one is tried, so a failed
+    // switch leaves the engine stopped, not on the previous device. init()
+    // may be called again later (a device switched on after the app
+    // started, or other settings). Each failed try opens the device again
+    // and logs again, so retry on a timer (about once a second) or on a
+    // user action, not every frame. Sound::load*() also calls init() while
+    // the engine is not initialized; play() does not. After a failed
+    // init(settings), that implicit init() opens the system default device
+    // with those settings, so call init(settings) again before loading
+    // sounds if you want the requested device.
     bool init();
     bool init(const AudioSettings& settings);
     void shutdown();
@@ -882,10 +904,11 @@ public:
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values
-    // passed to init(AudioSettings) — or the defaults if init() was called
-    // without an argument. They return the default even before init() is
-    // called, so video / audio code that needs the rate up front can rely
-    // on the value being sensible.
+    // stored by the last init(AudioSettings) call, whether it succeeded or
+    // failed (a zero-arg init() reuses them), or the DEFAULT_* values if
+    // init(settings) was never called. They are valid even before init(),
+    // so video / audio code that needs the rate up front can rely on the
+    // value being sensible.
     int getSampleRate()   const { return sampleRate_; }
     int getChannels()     const { return channels_; }
     int getMaxPolyphony() const { return (int)playingSounds_.size(); }
@@ -1262,8 +1285,9 @@ private:
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
     std::mutex mutex_;
 
-    // Runtime engine configuration. Initialized to defaults; replaced when
-    // init(AudioSettings) succeeds. Reading these before init() returns the
+    // Runtime engine configuration. Initialized to defaults; overwritten by
+    // every init(AudioSettings) call, success or failure, and reused by a
+    // zero-arg init(). Reading these before init() returns the
     // defaults (intentional — code that needs the rate up front, e.g. video
     // resampler setup in tcVideoPlayer_*, can pull the value without first
     // forcing engine startup).

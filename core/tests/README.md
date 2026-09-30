@@ -111,6 +111,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  An `AudioEngine::init()` that can't open the output device (forced with
+  more channels than miniaudio accepts) returns false, logs one error through
+  the logger that names the requested device, and a later `init()` succeeds
+  (#279). An `init()` on the null backend the test requested logs no
+  "no usable audio backend" warning (that warning is for a fallback to it).
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
@@ -139,6 +144,22 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   while another thread calls `stop()` still ends up in the WAV and in
   `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
   a FAIL.
+- `audioRecorderWav/` — the WAV header `AudioRecorder` writes never wraps past
+  4 GiB of samples (#336). Every file reserves a 36-byte `JUNK` chunk after
+  `WAVE` (samples start at byte 80 for S16, 92 for F32; the data chunk
+  header is at 72 / 84). The header sizes are 64-bit:
+  a take stays plain RIFF up to the last frame whose RIFF size fits 32 bits
+  and is RF64 from the next frame on, including the gap where only the RIFF
+  size overflows; the RF64 patch turns `JUNK` into `ds64` with the 64-bit
+  sizes and sets the 32-bit fields to `0xFFFFFFFF`. Checked on the header
+  alone (`internal::wavSizeFields()` / `writeWavHeader()` /
+  `patchWavHeader()` on a memory stream), so no 4 GiB file is written. A
+  short S16 and F32 take on the null backend is plain RIFF with the `JUNK`
+  chunk and loads through `SoundBuffer` with `numSamples` equal to
+  `getRecordedSeconds()` times the sample rate. On Linux, a take whose file
+  writes fail (recorded into `/dev/full`) makes `stop()` log one error and
+  neither the RF64 notice nor the "stopped" notice. Not covered: `stop()`'s
+  RF64 notice and the seek of a real file past 4 GiB (they need a 4 GiB take).
 - `appAudioAttach/` — an App's `audioOut()` / `audioIn()` are subscribed
   right after its first `setup()` returns (#426), on the real `AudioEngine`
   over miniaudio's null backend: for the main App (`runHeadlessApp`) and a

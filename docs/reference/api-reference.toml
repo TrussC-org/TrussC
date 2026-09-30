@@ -288,9 +288,9 @@ related = ["AudioVoiceInfo", "AudioEngine::getStats"]
 ["AudioEngine::init"]
 category = "audioengine"
 keywords = ["initialize", "start", "open", "device", "setup"]
-description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success."
-description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true を返す"
-description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true 반환"
+description.en = "Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device."
+description.ja = "エンジンを初期化する、または AudioSettings の上書きで再初期化する。init(settings) はサンプルレート、チャンネル、バッファサイズ、ポリフォニーを失敗しても保持し、引数なしの init() は直前のそれらを再利用する (init(settings) を一度も呼んでいなければデフォルト) が、デバイスは常にシステム既定を開く。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。使えるオーディオバックエンドがないと miniaudio は無音の Null デバイスにフォールバックし、init() は成功して警告をログに出す。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること。Sound::load*() はエンジンが未初期化なら init() を呼ぶので、init(settings) が失敗した後はその設定でシステム既定のデバイスが開かれる。要求したデバイスを使いたいならサウンドを読み込む前に init(settings) を呼び直すこと"
+description.ko = "엔진을 초기화하거나 AudioSettings 오버라이드로 재초기화. init(settings) 는 샘플레이트, 채널, 버퍼 크기, 폴리포니를 실패해도 유지하고, 인수 없는 init() 은 마지막 값을 재사용하지만 (init(settings) 를 호출한 적이 없으면 기본값) 디바이스는 항상 시스템 기본 디바이스를 연다. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 사용할 수 있는 오디오 백엔드가 없으면 miniaudio 는 무음의 Null 디바이스로 폴백하고, init() 은 성공하며 경고를 로그에 남긴다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것. Sound::load*() 는 엔진이 초기화되지 않았으면 init() 을 호출하므로, init(settings) 가 실패한 뒤에는 그 설정으로 시스템 기본 디바이스가 열린다. 요청한 디바이스를 쓰려면 사운드를 로드하기 전에 init(settings) 를 다시 호출할 것"
 related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]
@@ -427,9 +427,9 @@ related = ["Sound"]
 ["AudioRecorder"]
 category = "sound"
 keywords = ["record", "wav", "capture", "master", "mix", "tap", "bounce"]
-description.en = "Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks"
-description.ja = "エンジンのマスター出力（Sound再生もaudioOut合成も含む、スピーカーに出る音そのもの）をWAVファイルに録音する。audioOutをMonitor優先度でタップし、ファイルIOはバックグラウンドスレッドで行う（オーディオスレッドはブロックしない）"
-description.ko = "엔진의 마스터 출력(스피커로 나가는 소리 그대로, Sound 재생과 audioOut 합성 포함)을 WAV 파일로 녹음. audioOut을 Monitor 우선순위로 탭하고 파일 IO는 백그라운드 스레드에서 수행(오디오 스레드는 블록되지 않음)"
+description.en = "Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it"
+description.ja = "エンジンのマスター出力（Sound再生もaudioOut合成も含む、スピーカーに出る音そのもの）をWAVファイルに録音する。audioOutをMonitor優先度でタップし、ファイルIOはバックグラウンドスレッドで行う（オーディオスレッドはブロックしない）。どのファイルも RIFF ヘッダの後に 36 バイトの JUNK チャンクを持つので、サンプルは 80 バイト目 (S16) か 92 バイト目 (F32) から始まる。サンプルが 4 GiB を超えるテイク (48 kHz ステレオ F32 で約 3.1 時間) は RF64 (EBU Tech 3306) で書かれ、RF64 に対応していない古いリーダーでは開けない"
+description.ko = "엔진의 마스터 출력(스피커로 나가는 소리 그대로, Sound 재생과 audioOut 합성 포함)을 WAV 파일로 녹음. audioOut을 Monitor 우선순위로 탭하고 파일 IO는 백그라운드 스레드에서 수행(오디오 스레드는 블록되지 않음). 모든 파일은 RIFF 헤더 뒤에 36바이트 JUNK 청크를 가지므로 샘플은 80바이트째(S16) 또는 92바이트째(F32)부터 시작한다. 샘플이 4 GiB를 넘는 테이크(48 kHz 스테레오 F32로 약 3.1시간)는 RF64(EBU Tech 3306)로 기록되며, RF64를 지원하지 않는 오래된 리더에서는 열 수 없다"
 related = ["AudioRecordSettings", "AudioEngine", "ScreenRecorder"]
 
 ["AudioRecorder::start"]
@@ -442,9 +442,9 @@ description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getD
 ["AudioRecorder::stop"]
 category = "sound"
 keywords = ["end", "finalize", "close"]
-description.en = "Stop and finalize the file (patches the WAV header sizes); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
-description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForCallbackIdle() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
-description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForCallbackIdle() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
+description.en = "Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
+description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す。サンプルが 4 GiB を超えたテイクは RF64 にして notice ログを出す。ディスクが一杯などでファイル書き込みが失敗していたら、代わりに error ログを出す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForCallbackIdle() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
+description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록. 샘플이 4 GiB를 넘은 테이크는 RF64로 만들고 notice 로그를 남긴다. 디스크가 가득 차는 등으로 파일 쓰기가 실패했다면 대신 error 로그를 남긴다). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForCallbackIdle() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
 
 ["AudioRecorder::isRecording"]
 category = "sound"
@@ -14873,9 +14873,9 @@ description.ko = "in-place 역 FFT. 데이터 크기는 2의 거듭제곱이어�
 ["initAudio"]
 category = "audioengine"
 keywords = ["initialize", "start", "engine", "setup", "open"]
-description.en = "Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
-description.ja = "グローバルなAudioEngineを初期化。Sound::load() / play()から自動的に呼ばれるため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
-description.ko = "전역 AudioEngine을 초기화. Sound::load() / play()에서 자동 호출되므로, 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
+description.en = "Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
+description.ja = "グローバルなAudioEngineを初期化。エンジンが未初期化なら Sound::load() / loadStream() / loadTestTone() / loadFromBuffer() が自動的に初期化する (play() はしない) ため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
+description.ko = "전역 AudioEngine을 초기화. 엔진이 초기화되지 않았으면 Sound::load() / loadStream() / loadTestTone() / loadFromBuffer() 가 자동으로 초기화하므로 (play() 는 하지 않음), 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
 related = ["AudioEngine::getInstance", "shutdownAudio"]
 
 ["intersectRect"]
