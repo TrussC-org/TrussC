@@ -104,6 +104,12 @@ static vector<BadInput> badInputs() {
     // Hull of 3 points, area ~1.1e-7 m^2 < FLT_EPSILON at 30 px/m.
     v.push_back({"3 nearly collinear points (area < b2_epsilon)", {{0, 0}, {20, 0}, {10, 0.00001f}}});
     v.push_back({"9 points", circlePoints(9, 40)});
+    // Tiny next to their distance from the local origin: a dynamic body's
+    // inertia about its centroid rounds to <= 0 (Box2D assert in Debug, NaN
+    // motion in Release).
+    v.push_back({"0.5 px triangle at (600, 600)", {{600, 600}, {600.5f, 600}, {600, 600.5f}}});
+    v.push_back({"0.25 px triangle at (800, 800)", {{800, 800}, {800.25f, 800}, {800, 800.25f}}});
+    v.push_back({"0.5 px triangle at (1600, 1600)", {{1600, 1600}, {1600.5f, 1600}, {1600, 1600.5f}}});
     return v;
 }
 
@@ -115,6 +121,15 @@ static void testPolyShapeRefuses(box2d::World& world) {
         check(string("PolyShape::setup ") + in.name + ": no body", !poly.isCreated());
         check(string("PolyShape::setup ") + in.name + ": one warning", w.count == 1);
         check(string("PolyShape::setup ") + in.name + ": no vertices", poly.getVertices().empty());
+    }
+
+    // A tiny polygon far from the origin: the warning says why.
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, {{600, 600}, {600.5f, 600}, {600, 600.5f}}, 0, 0);
+        check("PolyShape::setup tiny far triangle: warning says too small",
+              w.lastContains("too small for its distance"));
     }
 
     // More than 8 points: the warning points to setupConvex().
@@ -175,11 +190,59 @@ static void testPolyShapeValid(box2d::World& world) {
         check("PolyShape::setup notched: no warning", w.count == 0);
     }
 
-    // setupRegular() still works.
+    // setupRegular() still works, and its first vertex is still the top one.
     {
         box2d::PolyShape poly;
         poly.setupRegular(world, 400, 300, 30, 6);
         check("PolyShape::setupRegular 6 sides: created", poly.isCreated());
+    }
+    {
+        box2d::PolyShape poly;
+        poly.setupRegular(world, 400, 300, 30, 3);
+        const auto& v = poly.getVertices();
+        check("PolyShape::setupRegular 3 sides: getVertices()[0] is the top",
+              v.size() == 3 && abs(v[0].x) < 1e-3f && abs(v[0].y + 30) < 1e-3f);
+    }
+
+    // Convex input comes back as given, in its order (Box2D itself starts at
+    // the rightmost point and flips the winding of this square).
+    {
+        vector<Vec2> square = {{-20, -20}, {-20, 20}, {20, 20}, {20, -20}};
+        box2d::PolyShape poly;
+        poly.setup(world, square, 400, 300);
+        check("PolyShape::setup convex square: getVertices() keeps the input order",
+              poly.isCreated() && poly.getVertices() == square);
+    }
+
+    // A collinear middle point is not concave: the square is built, and the
+    // hull (without that point) is what getVertices() returns.
+    {
+        vector<Vec2> pts = {{-20, -20}, {0, -20}, {20, -20}, {20, 20}, {-20, 20}};
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, pts, 400, 300);
+        check("PolyShape::setup collinear middle point: 4-point square",
+              poly.isCreated() && poly.getNumVertices() == 4 && !hasPoint(poly.getVertices(), 0, -20) &&
+              w.count == 0);
+    }
+
+    // The same tiny triangle at the origin is fine.
+    {
+        box2d::PolyShape poly;
+        poly.setup(world, {{0, 0}, {0.5f, 0}, {0, 0.5f}}, 400, 300);
+        check("PolyShape::setup 0.5 px triangle at the origin: created", poly.isCreated());
+    }
+
+    // A normal-sized polygon far from its origin is fine: it is created and
+    // steps without NaN.
+    {
+        box2d::PolyShape poly;
+        poly.setup(world, {{600, 600}, {640, 600}, {600, 640}}, 0, 0);
+        poly.getBody()->SetAngularVelocity(1.0f);
+        for (int i = 0; i < 60; ++i) world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        check("PolyShape::setup 40 px triangle at (600, 600): created and finite",
+              poly.isCreated() && isfinite(poly.getBody()->GetPosition().x) &&
+              isfinite(poly.getBody()->GetAngle()));
     }
 }
 
@@ -203,8 +266,9 @@ static void testSetupConvex(box2d::World& world) {
         check("setupConvex 20-point circle (" + tag + "): no warning", w.count == 0);
     }
 
-    // The reduction keeps the extreme points: a long thin diamond with many
-    // points along its edges keeps its 4 tips.
+    // Sharp tips cost the most area to drop: a long thin diamond with many
+    // points along its edges keeps its 4 tips. (Blunt tips are not kept on
+    // purpose.)
     {
         vector<Vec2> pts;
         Vec2 tips[4] = {{-100, 0}, {0, -10}, {100, 0}, {0, 10}};
@@ -287,6 +351,13 @@ static void testRigidBody2D(box2d::World& world) {
         check("RigidBody2D polygon notched: shape() is the 4-point hull",
               rb->getBody() && v.size() == 4 && !hasPoint(v, 0, 0) &&
               polygonVertexCount(rb->getBody()) == 4);
+    }
+    {
+        vector<Vec2> square = {{-20, -20}, {-20, 20}, {20, 20}, {20, -20}};
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(square));
+        check("RigidBody2D polygon convex square: shape() keeps the input order",
+              rb->getBody() && rb->shape().verts == square);
     }
     {
         WarningCapture w;
