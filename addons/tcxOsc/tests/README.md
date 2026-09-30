@@ -30,7 +30,10 @@ And the polling queue:
   and counted in `getDroppedMessages()`;
 - the drop is logged from the polling call (not the receive thread), a second
   overflow within 2 s is not logged yet, and the next report after 2 s gives
-  the drops summed since the last one.
+  the drops summed since the last one;
+- shrinking a filled queue with `setBufferSize(40)` keeps the newest 40, counts
+  the 110 discarded in `getDroppedMessages()` and reports them in the next
+  poll's warning, so received + dropped == sent over the whole section.
 
 > Note: it does *not* assert that a non-member socket on a *different port* gets
 > nothing while another socket on the host has joined the group — IPv4 membership
