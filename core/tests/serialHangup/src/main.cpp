@@ -18,7 +18,12 @@
 // port (wasClean = true), never from the destructor or a move assignment.
 // The port is closed before listeners run, so a listener may call setup()
 // to reconnect, and the call that found the loss must leave the new
-// connection alone (sections 6 - 8).
+// connection alone (sections 6 - 8). Only the I/O calls find a loss: close()
+// or setup() after an unplug nobody noticed is a plain close (section 9).
+//
+// Every call holds the Serial's lock, so several threads may use one Serial:
+// an unplug found by one of them closes the fd exactly once, and no other
+// thread reads, writes or closes that fd number afterwards (section 10).
 //
 // A pseudo-terminal stands in for the USB-serial adapter: Serial opens the
 // slave, the test plays the device on the master, and closing the master
@@ -47,10 +52,13 @@ int main() {
 #include <poll.h>
 #include <cstdlib>
 #include <cstring>
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -441,6 +449,133 @@ int main() {
             check("8. the outer port carries data", second.send("s") &&
                   waitFor(1000, [&] { return serial.readByte() == 's'; }));
         }
+    }
+
+    // --- 9. an unplug no I/O call noticed, then close() / setup() -----------
+    // Only available() / readBytes() / readByte() / writeBytes() find a loss,
+    // so close() and setup() just close the port: one notification, wasClean,
+    // "closed by close()". (On Android the worker thread may have found the
+    // loss already; the reason then says so, still with wasClean.)
+    {
+        const int fdsBefore = countOpenFds();
+        const int warningsBefore = g_lostWarnings;
+        {
+            Pty pty;
+            Serial serial;
+            Recorder rec;
+            rec.attach(serial);
+            if (connect(pty, serial, "9. setup() connects")) {
+                pty.unplug();
+                serial.close();
+                check("9. close() after an unnoticed unplug fires once", rec.count == 1);
+                check("9. ... wasClean, \"closed by close()\", this port",
+                      rec.first.wasClean && rec.first.reason == "closed by close()" &&
+                      rec.first.portName == pty.slavePath && rec.first.baudRate == 115200);
+                check("9. ... after the port was closed", !rec.sawOpenPort && !serial.isConnected());
+            }
+
+            Pty lostPty, nextPty;
+            Serial other;
+            Recorder otherRec;
+            otherRec.attach(other);
+            if (connect(lostPty, other, "9. setup() connects another Serial") && nextPty.open()) {
+                lostPty.unplug();
+                bool ok = other.setup(nextPty.slavePath, 115200);
+                check("9. setup() elsewhere after an unnoticed unplug fires once",
+                      otherRec.count == 1);
+                check("9. ... wasClean, \"closed by close()\", the unplugged port",
+                      otherRec.first.wasClean && otherRec.first.reason == "closed by close()" &&
+                      otherRec.first.portName == lostPty.slavePath);
+                check("9. ... after the port was closed", !otherRec.sawOpenPort);
+                check("9. ... and connects to the new port",
+                      ok && other.isConnected() && other.getDevicePath() == nextPty.slavePath);
+            }
+        }
+        check("9. no loss warning", g_lostWarnings == warningsBefore);
+        check("9. no descriptor left open", countOpenFds() == fdsBefore);
+    }
+
+    // --- 10. several threads use one Serial while the device goes away ------
+    // Three threads call available() (through a const Serial&), readBytes(),
+    // readByte() and writeBytes() in a loop while the device talks, then goes
+    // away. Every call holds the Serial's lock, so the fd is closed exactly
+    // once, and no thread touches that number again: the numbers the kernel
+    // hands out right after (here to pipes, standing in for any file the app
+    // opens) get no stray byte from a late write and are not closed by a
+    // second close().
+    {
+        const int fdsBefore = countOpenFds();
+        const int warningsBefore = g_lostWarnings;
+        vector<array<int, 2>> pipes;
+        {
+            Pty pty;
+            Serial serial;
+            const Serial& cs = serial;
+            atomic<int> events{0};
+            atomic<bool> stop{false};
+            EventListener sub = serial.onDisconnect.listen([&](SerialDisconnectEventArgs&) { ++events; });
+            if (connect(pty, serial, "10. setup() connects")) {
+                fcntl(pty.master, F_SETFL, fcntl(pty.master, F_GETFL) | O_NONBLOCK);
+                vector<thread> threads;
+                threads.emplace_back([&] {
+                    char b[64];
+                    while (!stop) {
+                        cs.available();
+                        serial.readBytes(b, sizeof(b));
+                    }
+                });
+                threads.emplace_back([&] {
+                    while (!stop) {
+                        cs.available();
+                        serial.readByte();
+                    }
+                });
+                threads.emplace_back([&] {
+                    while (!stop) serial.writeBytes(string("x"));
+                });
+
+                // The device talks both ways for a while, then goes away
+                char sink[256];
+                auto until = chrono::steady_clock::now() + chrono::milliseconds(100);
+                while (chrono::steady_clock::now() < until) {
+                    pty.send("abc");
+                    while (::read(pty.master, sink, sizeof(sink)) > 0) {}
+                    this_thread::sleep_for(chrono::milliseconds(1));
+                }
+                pty.unplug();
+
+                // Take the numbers the kernel frees from now on
+                until = chrono::steady_clock::now() + chrono::milliseconds(200);
+                while (chrono::steady_clock::now() < until && pipes.size() < 64) {
+                    int p[2];
+                    if (pipe(p) == 0) {
+                        fcntl(p[0], F_SETFL, O_NONBLOCK);
+                        pipes.push_back({p[0], p[1]});
+                    }
+                    this_thread::sleep_for(chrono::milliseconds(2));
+                }
+                stop = true;
+                for (auto& t : threads) t.join();
+
+                check("10. the loss is found and reported once",
+                      events == 1 && g_lostWarnings == warningsBefore + 1);
+                check("10. the port is closed", !serial.isConnected());
+                bool stillOpen = true;
+                bool noStrayByte = true;
+                for (const auto& p : pipes) {
+                    if (fcntl(p[0], F_GETFD) == -1 || fcntl(p[1], F_GETFD) == -1) stillOpen = false;
+                    char c;
+                    if (::read(p[0], &c, 1) > 0) noStrayByte = false;
+                }
+                check("10. no later descriptor is closed by a second close()", stillOpen);
+                check("10. no later descriptor gets a late write", noStrayByte);
+            }
+        }
+        for (const auto& p : pipes) {
+            ::close(p[0]);
+            ::close(p[1]);
+        }
+        check("10. no descriptor left open", countOpenFds() == fdsBefore);
     }
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
