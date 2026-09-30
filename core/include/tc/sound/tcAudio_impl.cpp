@@ -348,9 +348,12 @@ std::vector<AudioVoiceInfo> AudioEngine::getVoices() {
         info.path     = internal::pathToUtf8(p.lexically_normal());
         info.paused   = v->paused;
         info.loop     = v->loop;
-        // positionF counts source frames for eager voices and engine-rate
-        // frames for streams (their decoder outputs at the engine rate).
-        const int rate = info.streaming ? sampleRate_ : src.sampleRate;
+        // positionF counts source frames for eager voices and, for streams,
+        // frames at the voice's own position rate (the engine rate its
+        // decoder outputs at, which a voice the re-init migration did not
+        // rebuild keeps from before). Same rate as Sound::positionRate().
+        const int rate = info.streaming ? v->positionRateHz_.load(std::memory_order_relaxed)
+                                        : src.sampleRate;
         info.position = rate > 0 ? (float)(v->positionF / (double)rate) : 0.0f;
         info.duration = src.getDuration();
         info.volume   = v->volume;
