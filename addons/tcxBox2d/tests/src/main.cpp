@@ -37,7 +37,8 @@
 //   - Stay listeners may destroy bodies of the next pair or of their own
 //     (the other pairs still get their Stay);
 //   - listeners of a deferred Exit / Ended or of Stay may free the other body
-//     of their pair (it hears nothing more), and a body destroyed between
+//     of their pair (a RigidBody2D's hears nothing more; a classic Body
+//     destroyed from Stay gets its Exit at once), and a body destroyed between
 //     Step() and update() gets no Exit / Ended, its partner one with no
 //     other, and a new body at its address none;
 //   - the offset/inertia check runs once on the whole body: a rounded

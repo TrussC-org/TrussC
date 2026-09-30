@@ -115,7 +115,10 @@ many fixtures touch.
   `WorldContact::a` / `b`). Bodies freed with a raw `b2World::DestroyBody()`
   are not tracked: call `update()` first.
 - Stay listeners and the deferred Exit listeners may destroy bodies,
-  including the other body of their own pair, which then hears nothing more.
+  including the other body of their own pair. With `RigidBody2D` the
+  destroyed side hears nothing more. Destroying a classic `Body` from Stay
+  ends that still-touching pair at once, and both sides get their Exit right
+  away; only a held (deferred) Exit is not delivered to a destroyed side.
 
 ## Tests
 
