@@ -5,6 +5,7 @@
 #include "tcxBox2dPolygonCheck.h"
 #include "tcxBox2dWorld.h"
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <limits>
 
@@ -86,10 +87,35 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
     if (!(area > b2_epsilon)) return PolygonError::Degenerate;
 
     // Same input as the checks above, so Set() takes the same path.
-    shape.Set(input.data(), static_cast<int32>(count));
+    b2PolygonShape built;
+    built.Set(input.data(), static_cast<int32>(count));
+
+    // A dynamic body's b2Body::ResetMassData() takes the polygon's inertia
+    // about the body origin and subtracts mass * |centroid|^2. For a polygon
+    // that is tiny next to its distance from the origin the two nearly cancel
+    // in float, and the result can be <= 0: an assert (Debug) or NaN motion
+    // (Release). Mirror that step at density 1 and demand a margin of
+    // 16 float epsilons of the subtracted term, so the result stays positive
+    // at any density (fuzzed at densities 0.001 to 1000).
+    b2MassData md;
+    built.ComputeMass(&md, 1.0f);
+    b2Vec2 center = b2Vec2_zero;
+    center += md.mass * md.center;
+    center *= 1.0f / md.mass;
+    const float shift = md.mass * b2Dot(center, center);
+    const float centered = md.I - shift;
+    if (!(centered > 16.0f * FLT_EPSILON * shift)) return PolygonError::TooSmallForOffset;
+
+    shape = built;
     hull.clear();
-    hull.reserve(shape.m_count);
-    for (int32 i = 0; i < shape.m_count; ++i) hull.push_back(World::toPixels(shape.m_vertices[i]));
+    if (static_cast<size_t>(shape.m_count) == count) {
+        // Box2D kept every point: hand them back as given, in the caller's
+        // order (Set() starts at the rightmost point and may flip the winding).
+        hull = points;
+    } else {
+        hull.reserve(shape.m_count);
+        for (int32 i = 0; i < shape.m_count; ++i) hull.push_back(World::toPixels(shape.m_vertices[i]));
+    }
     return PolygonError::None;
 }
 
@@ -101,6 +127,9 @@ std::string describePolygonError(PolygonError err) {
         case PolygonError::MergedPoints:  return "fewer than 3 points are left after merging points closer than "
                                                  + tc::toString(World::toPixels(0.5f * b2_linearSlop), 3) + " px";
         case PolygonError::Degenerate:    return "the points are collinear or enclose almost no area";
+        case PolygonError::TooSmallForOffset:
+            return "the polygon is too small for its distance from the body origin (its rotational inertia "
+                   "is lost to float rounding); give points relative to the body position instead";
     }
     return "";
 }

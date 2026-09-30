@@ -21,16 +21,22 @@ enum class PolygonError {
     TooManyPoints,  // more than b2_maxPolygonVertices (8)
     MergedPoints,   // fewer than 3 left after Box2D merges near-coincident points
     Degenerate,     // collinear, or the hull encloses (almost) no area
+    TooSmallForOffset,  // so small next to its distance from the body origin
+                        // that a dynamic body's inertia rounds to <= 0
 };
 
 // Check `points` (local pixel coordinates) against everything
-// b2PolygonShape::Set() and b2PolygonShape::ComputeMass() assert on, and build
-// the shape. Box2D's own steps are mirrored (point merging at
-// 0.5 * b2_linearSlop, gift-wrap hull, area > b2_epsilon), so a list that
-// passes never reaches Box2D's assert (Debug) or its SetAsBox(1, 1) fallback
-// (Release). On success `shape` is set and `hull` receives the convex hull
-// Box2D built, in pixels: concave input comes back as its hull. On failure
-// neither is touched.
+// b2PolygonShape::Set(), b2PolygonShape::ComputeMass() and a dynamic body's
+// b2Body::ResetMassData() (inertia > 0) assert on, and build the shape.
+// Box2D's own steps are mirrored (point merging at 0.5 * b2_linearSlop,
+// gift-wrap hull, area > b2_epsilon); the inertia check keeps a margin so it
+// holds at any density. A list that passes never reaches those asserts
+// (Debug), the SetAsBox(1, 1) fallback or NaN inertia (Release).
+// On success `shape` is set and `hull` receives the polygon Box2D built, in
+// pixels. When Box2D kept every point, that is `points` unchanged, in the
+// caller's order; otherwise (concave input, collinear middle points, merged
+// points) it is Box2D's hull in Box2D's order, starting at the rightmost
+// point. On failure neither is touched.
 PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
                               b2PolygonShape& shape,
                               std::vector<tc::Vec2>& hull);
@@ -39,8 +45,9 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
 std::string describePolygonError(PolygonError err);
 
 // Convex hull of any number of points (pixels), reduced to at most `maxPoints`
-// by repeatedly dropping the vertex whose removal loses the least area. The
-// extreme points survive; the shape is an approximation. Collinear and
+// by repeatedly dropping the vertex whose removal loses the least area (ties:
+// the lowest index). No point is guaranteed to survive: tips and extents can
+// shrink, and a symmetric outline can come back lopsided. Collinear and
 // duplicate points are dropped, so fewer than 3 points come back for
 // degenerate input.
 std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points,
