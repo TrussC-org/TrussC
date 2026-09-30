@@ -134,8 +134,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
-- `tcpServerClients/` — `TcpServer` client bookkeeping: the receive thread of
-  a client that leaves (closes or resets) is joined while the server runs,
+- `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
+  client that leaves (closes or resets) are joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200
   clients; an unjoined thread leaves `/proc/self/task` but keeps its stack
   mapped), and joined by an idle server too, with no later connection to
@@ -148,12 +148,22 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   port refuses connections; on Linux, where `shutdown()` alone already does
   that, the socket's descriptor must be gone too), where `start()` is
   refused, and after which the accept thread disconnects the client once the
-  listener returns. `stop()` on several threads at once returns on all of
+  listener returns. A listener's teardown waits for none of the server's
+  threads, and the server's destruction waits for all of them: `stop()` in
+  `onError` after a send timed out mid-payload (the receive thread removes
+  the client meanwhile) returns and a later `start()` works;
+  `disconnectClient()` of its own client, or `stop()`, in `onSendComplete`,
+  with the server destroyed while that listener still runs (the destruction
+  waits for the writer); two `onReceive` listeners disconnecting each
+  other's client both return; and `disconnectAllClients()` on another
+  thread, while a client connects, returns and leaves that client
+  connected. `stop()` on several threads at once returns on all of
   them: from `onClientConnect` on the accept thread while another client's
   thread is parked in `onReceive` or `onSendComplete` and calls it too
   (either one first); from two clients' `onReceive`, or two `onSendComplete`;
-  from a plain thread together with `onSendComplete` (the plain one returns
-  only once that listener is done); and from two plain threads while the
+  from a plain thread together with `onSendComplete` (the listener calls it
+  while the stop hook holds the plain one after its accept-thread join, and
+  the plain one returns only once that listener is done); and from two plain threads while the
   accept thread is held in a listener (neither throws). Every client ends up
   disconnected. `start()` while another thread's `stop()` is still waiting
   for the accept thread waits for it too, and the restarted server accepts
@@ -170,7 +180,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `onError` instead of ending the process — the writer under `RLIMIT_NPROC`,
   the receive thread through a `pthread_create` wrapper in the test binary
   that fails one chosen call (the client is announced, then disconnected, and
-  that is reported even right after a different failure); and when the
+  that is reported even right after a different failure; the accept thread
+  does not wait for that client's writer, whose listener waits for the
+  disconnect); and when the
   accept thread cannot start, `start()` returns false, reports it once and
   leaves nothing listening, and a later `start()` on that port works. Each
   server binds a port the OS just handed out, not a fixed one.
