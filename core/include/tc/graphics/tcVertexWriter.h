@@ -253,6 +253,9 @@ inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
 // Vertex writers (shared scratch — stateless singletons) and the per-window
 // shader-stack / layer-counter / deferred-draw accessors.
 // ---------------------------------------------------------------------------
+    // A per-module copy is harmless: SglWriter has no state, and ShaderWriter's
+    // vertices are scratch that one draw call fills and flushes (begin() to
+    // end()) inside a single function.
     inline SglWriter sglWriter;
     inline ShaderWriter shaderWriter;
 

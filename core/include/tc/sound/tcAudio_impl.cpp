@@ -926,6 +926,19 @@ static void playbackDataCallback(ma_device* pDevice, void* pOutput, const void* 
 // AudioEngine implementation
 // ---------------------------------------------------------------------------
 
+AudioEngine& AudioEngine::getInstance() {
+    // Intentionally leaked. A plain function-local static registers its
+    // destructor against the __dso_handle of the image whose code runs the
+    // first call — under hot reload that used to be the guest dylib (when this
+    // was header-inline), so dlclose() of an old guest destroyed the engine the
+    // host was still using (the next listen() then died on the destroyed Event
+    // mutex). The heap instance has no exit-time destructor; the framework
+    // cleanup path calls shutdown() explicitly for a clean device stop on
+    // normal exit.
+    static AudioEngine* instance = new AudioEngine();
+    return *instance;
+}
+
 bool AudioEngine::init() {
     // Zero-arg path: use whatever's currently in the runtime fields
     // (defaults unless someone wrote to them first via init(settings)).

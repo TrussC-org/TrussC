@@ -40,8 +40,8 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 class Lut3D {
 public:
-    Lut3D() { internal::textureCount++; }
-    ~Lut3D() { clear(); internal::textureCount--; }
+    Lut3D() { internal::textureCount()++; }
+    ~Lut3D() { clear(); internal::textureCount()--; }
 
     // Copy prohibited
     Lut3D(const Lut3D&) = delete;
