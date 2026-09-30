@@ -146,3 +146,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
   `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
   run ends.
+- `pixelsIndex/` — `Pixels` indexes with `size_t`, so images past `INT_MAX`
+  bytes work: the offset of the far corner of a 23171x23171 RGBA image, and
+  an `allocate()` byte count that is checked before it can wrap (against a
+  32-bit limit too, standing in for wasm32). A size that would wrap, or a
+  negative one, logs an error and leaves the buffer empty, and `crop()` /
+  `Image::allocate()` stop there. With 64-bit `size_t` and at least 4 GiB of
+  memory available, it also allocates real buffers just past 2 GiB and checks
+  `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
+  past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
