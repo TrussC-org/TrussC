@@ -3633,7 +3633,7 @@ void Serial::flush()  // Clear both input and output buffers
 void Serial::flushInput()  // Clear the input buffer
 void Serial::flushOutput()  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
-const std::string & Serial::getDevicePath() const  // Current device path
+std::string Serial::getDevicePath() const  // Current device path; a copy, since another thread's setup() may change it
 bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
 bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices

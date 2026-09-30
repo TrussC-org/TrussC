@@ -7709,9 +7709,9 @@ description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
 ["Serial::getDevicePath"]
-description.en = "Current device path"
-description.ja = "現在のデバイスパス"
-description.ko = "현재 장치 경로"
+description.en = "Current device path; a copy, since another thread's setup() may change it"
+description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す"
+description.ko = "현재 장치 경로. 다른 스레드의 setup()이 바꿀 수 있으므로 복사본을 반환"
 
 ["Serial::isConnected"]
 keywords = ["unplug", "disconnect", "reconnect", "device lost", "connected"]

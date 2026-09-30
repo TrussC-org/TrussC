@@ -736,8 +736,10 @@ public:
         return isConnected();
     }
 
-    // Get current device path
-    const std::string& getDevicePath() const {
+    // Get current device path. A copy, taken under the lock: another thread's
+    // setup() may change it.
+    std::string getDevicePath() const {
+        Shared lock(lock_);
         return devicePath_;
     }
 
