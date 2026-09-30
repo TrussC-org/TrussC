@@ -12,6 +12,7 @@ embedded as a base64 data URI) to a temp directory and loads it with
   reference to an accessor or buffer view that does not exist, fails to load;
 - a count too large to address fails to load, also on an accessor without a
   buffer view;
+- a buffer view byteStride smaller than the accessor's element fails to load;
 - a primitive whose attribute counts differ, or whose indices point past its
   vertices (checked by cgltf_validate() against the accessor count, and by the
   loader against the vertices actually read), fails to load;

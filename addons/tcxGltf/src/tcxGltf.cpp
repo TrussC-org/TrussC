@@ -66,6 +66,8 @@ static cgltf_size readSparseIndex(const uint8_t* data, cgltf_component_type type
 //     array size (count * components * sizeof(float)) can be addressed in
 //     size_t; a count that cannot is refused. This is not a limit on model
 //     size.
+//   - An accessor on a buffer view with a byteStride has a stride at least
+//     its element size, as glTF requires.
 //   - A sparse accessor's indices are strictly increasing and below its
 //     count, as glTF requires (checked when its index data is in memory), so
 //     it never lists more values than it has elements.
@@ -86,9 +88,14 @@ static const char* checkDataRanges(const cgltf_data* data) {
         if (acc.count > SIZE_MAX / (sizeof(float) * numComp)) return outOfRange;
         cgltf_size elemSize = cgltf_calc_size(acc.type, acc.component_type);
         if (elemSize == 0) continue;
-        if (acc.buffer_view &&
-            !rangeFits(acc.buffer_view->size, acc.offset, acc.stride, elemSize, acc.count)) {
-            return outOfRange;
+        if (acc.buffer_view) {
+            // acc.stride is the view's byteStride, or elemSize without one
+            if (acc.stride < elemSize) {
+                return "an accessor's buffer view has a byteStride smaller than its element";
+            }
+            if (!rangeFits(acc.buffer_view->size, acc.offset, acc.stride, elemSize, acc.count)) {
+                return outOfRange;
+            }
         }
         if (acc.is_sparse) {
             const cgltf_accessor_sparse& sp = acc.sparse;

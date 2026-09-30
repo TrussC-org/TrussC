@@ -15,6 +15,8 @@
 //     reference to an accessor / buffer view that does not exist, fails to load
 //   - a count too large to address fails to load, also on an accessor
 //     without a buffer view
+//   - a buffer view byteStride smaller than the accessor's element fails to
+//     load
 //   - attribute counts that differ within a primitive fail to load
 //   - an index past the primitive's vertices fails to load (caught by
 //     cgltf_validate() or, for vertices the loader cannot read, by the loader)
@@ -409,6 +411,17 @@ int main() {
         b.primitive = R"({"attributes":{"POSITION":3}})";
         GltfModel m;
         loadCase("sparse values past their buffer view", b, false, m);
+    }
+    {
+        // POSITION on a view with byteStride 4, smaller than its 12-byte
+        // VEC3 element: refused
+        GltfBuilder b = triangle();
+        b.views[0] = "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36,\"byteStride\":4}";
+        GltfModel m;
+        string warning;
+        loadCase("byteStride smaller than the element", b, false, m, &warning);
+        check("byteStride smaller than the element: reported as such",
+              warning.find("byteStride smaller") != string::npos);
     }
     {
         // A component type glTF 2.0 does not allow is reported as a
