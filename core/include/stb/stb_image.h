@@ -5570,7 +5570,8 @@ static void *stbi__bmp_load(stbi__context *s, int *x, int *y, int *comp, int req
 {
    stbi_uc *out;
    unsigned int mr=0,mg=0,mb=0,ma=0, all_a;
-   stbi_uc pal[256][4];
+   // TrussC patch: zero the palette so indices past the stored entries read as black
+   stbi_uc pal[256][4] = {{0}};
    int psize=0,i,j,width;
    int flip_vertically, pad, target;
    stbi__bmp_data info;
