@@ -23,6 +23,26 @@ namespace trussc {
 namespace internal {
 void pumpAudioDiagnostics();
 void flushAudioDiagnostics();
+
+#ifdef _WIN32
+// runHeadlessApp()'s console output code page: UTF-8 for the guard's
+// lifetime, as the windowed app gets from sapp_desc.win32.console_utf8 (log
+// text is UTF-8). runHeadlessApp() declares it before the app, so the code
+// page comes back after the app's destructor, and when an exception leaves
+// the function. Without a console the set fails and nothing is restored.
+struct HeadlessConsoleUtf8 {
+    HeadlessConsoleUtf8()
+        : original(GetConsoleOutputCP()), set(SetConsoleOutputCP(CP_UTF8) != 0) {}
+    ~HeadlessConsoleUtf8() {
+        if (set) SetConsoleOutputCP(original);
+    }
+    HeadlessConsoleUtf8(const HeadlessConsoleUtf8&) = delete;
+    HeadlessConsoleUtf8& operator=(const HeadlessConsoleUtf8&) = delete;
+
+    UINT original;
+    bool set;
+};
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -104,11 +124,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     headless::installSignalHandlers();
 
 #ifdef _WIN32
-    // Console output code page UTF-8 while the app runs, as the windowed app
-    // gets from sapp_desc.win32.console_utf8: log text is UTF-8. Without a
-    // console the call fails and nothing changes.
-    const UINT origConsoleOutputCP = GetConsoleOutputCP();
-    const bool consoleOutputCPSet = SetConsoleOutputCP(CP_UTF8) != 0;
+    // Console output code page UTF-8 until the app is destroyed (see
+    // internal::HeadlessConsoleUtf8)
+    internal::HeadlessConsoleUtf8 consoleUtf8;
 #endif
 
     // Record the main thread id (this runner owns the app/update loop), so
@@ -164,9 +182,6 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::flushAudioDiagnostics();
 
     headless::active = false;
-#ifdef _WIN32
-    if (consoleOutputCPSet) SetConsoleOutputCP(origConsoleOutputCP);
-#endif
     return 0;
 }
 
