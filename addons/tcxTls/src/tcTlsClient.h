@@ -101,6 +101,18 @@ private:
     // client") if the client was connected. The destructor passes false.
     void disconnectImpl(bool notify);
 
+    // Clear the connection flags, close the socket and reset the SSL
+    // context, leaving tlsReceiveThread_ alone. The receive thread calls it
+    // on itself when a handshake fails: the thread stays owned (joinable),
+    // so disconnect() and the destructor still join it while it notifies.
+    void teardown();
+
+    // Shut down and close the socket, if there is one
+    void closeSocket();
+
+    // Free and re-initialise the SSL context and config
+    void resetSslContext();
+
     // Perform TLS handshake
     bool performHandshake();
 

@@ -35,6 +35,8 @@
 //   - A plain onError listener that reconnects after a failed handshake ends
 //     up connected. The failed connection used to be torn down after the
 //     listener returned, taking the new connection with it.
+//   - Destroying a client while its onError listener runs for a failed
+//     handshake waits for that listener: the receive thread stays owned.
 //
 // The scenario runs on a worker with a deadline, so a hang reports FAIL
 // instead of eating the CI job timeout.
@@ -732,6 +734,39 @@ static void scenario() {
     check("handshake failure: the client receives the peer's data",
           peerToClient(peer, "welcome"));
     if (g_fail) bail();
+
+    // --- destroying a client while it reports a failed handshake -------------
+    // onError runs on the receive thread. That thread used to detach itself
+    // (through disconnect()) before notifying, so the destructor did not wait
+    // for it and freed the client under the listener. The listener here does
+    // not reconnect; it only takes a while, and the client is destroyed
+    // meanwhile. The destructor has to wait for it.
+    auto victim = make_unique<TlsClient>();
+    victim->setVerifyNone();
+    atomic<bool> inError{false}, errorListenerDone{false};
+    EventListener victimErr = victim->onError.listen([&](TcpErrorEventArgs&) {
+        inError = true;
+        this_thread::sleep_for(chrono::milliseconds(300));
+        errorListenerDone = true;
+    });
+    check("destroyed mid-onError: connect() to the plain peer",
+          victim->connect("127.0.0.1", plainPort));
+    rawsocket_t victimPeer = acceptWithin(plainListener, 2000);
+    check("destroyed mid-onError: the plain peer accepted", victimPeer != kNoSocket);
+    if (victimPeer != kNoSocket) TC_CLOSE(victimPeer);   // the handshake fails
+    check("destroyed mid-onError: onError runs",
+          waitFor(3000, [&] { return inError.load(); }));
+    if (g_fail) bail();
+    bool doneWhenDestroyed = false;
+    check("destroyed mid-onError: the destructor finishes in 5 s",
+          completesWithin(5000, [&] {
+              victim.reset();
+              doneWhenDestroyed = errorListenerDone.load();
+          }));
+    check("destroyed mid-onError: the destructor waited for onError",
+          doneWhenDestroyed);
+    if (g_fail) bail();
+    // victimErr outlives its Event: disconnecting it is a no-op
 
     // --- teardown ---------------------------------------------------------
     client.disconnect();

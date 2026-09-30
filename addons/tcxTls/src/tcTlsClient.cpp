@@ -314,19 +314,7 @@ bool TlsClient::connect(const std::string& host, int port) {
     connectPending_ = false;
     handshakePending_ = false;
     updateListener_.disconnect();
-#ifdef _WIN32
-    if (socket_ != INVALID_SOCKET) {
-        shutdown(socket_, SD_BOTH);
-        closesocket(socket_);
-        socket_ = INVALID_SOCKET;
-    }
-#else
-    if (socket_ >= 0) {
-        shutdown(socket_, SHUT_RDWR);
-        close(socket_);
-        socket_ = -1;
-    }
-#endif
+    closeSocket();
 
     // Ensure the previous receive thread has finished. A listener on that
     // thread (onDisconnect, say) that reconnects cannot join it: detach
@@ -345,12 +333,7 @@ bool TlsClient::connect(const std::string& host, int port) {
     }
 
     // Reset SSL context (clear previous connection state)
-    if (ctx_) {
-        mbedtls_ssl_free(&ctx_->ssl);
-        mbedtls_ssl_config_free(&ctx_->conf);
-        mbedtls_ssl_init(&ctx_->ssl);
-        mbedtls_ssl_config_init(&ctx_->conf);
-    }
+    resetSslContext();
 
     // Create socket
     socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -520,10 +503,15 @@ bool TlsClient::performHandshake() {
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
 
-        // Terminate the connection before telling anyone. A listener that
-        // reconnects from onError or onConnect runs inline, and a disconnect()
-        // after it returned would tear its new connection down.
-        disconnect();
+        // Tear the connection down before telling anyone: a listener that
+        // reconnects from onError or onConnect runs inline, and a teardown
+        // after it returned would take its new connection down. Not
+        // disconnect(), which on this thread detaches it: the thread would
+        // then run the listeners below with no owner, and destroying the
+        // client meanwhile would free it under them. teardown() leaves the
+        // thread joinable, so disconnect() and the destructor still wait for
+        // it; only a listener's own connect() lets go of it.
+        teardown();
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
 
         tc::TcpConnectEventArgs args;
@@ -575,7 +563,7 @@ void TlsClient::processNetwork() {
             args.message = "TLS Connected";
             onConnect.notify(args);
         } else {
-            return; // Still handshaking or failed (disconnect called inside)
+            return; // Still handshaking, or failed (torn down inside)
         }
     }
 
@@ -651,20 +639,7 @@ void TlsClient::disconnectImpl(bool notify) {
         mbedtls_ssl_close_notify(&ctx_->ssl);
     }
 
-    // Close socket
-#ifdef _WIN32
-    if (socket_ != INVALID_SOCKET) {
-        shutdown(socket_, SD_BOTH);
-        closesocket(socket_);
-        socket_ = INVALID_SOCKET;
-    }
-#else
-    if (socket_ >= 0) {
-        shutdown(socket_, SHUT_RDWR);
-        close(socket_);
-        socket_ = -1;
-    }
-#endif
+    closeSocket();
 
     // Wait for receive thread to finish
     if (tlsReceiveThread_.joinable()) {
@@ -679,14 +654,7 @@ void TlsClient::disconnectImpl(bool notify) {
     // notification below: a listener that reconnects from it starts a new
     // handshake on this context, which a reset afterwards would free under
     // the new receive thread.
-    if (ctx_) {
-        mbedtls_ssl_free(&ctx_->ssl);
-        mbedtls_ssl_config_free(&ctx_->conf);
-
-        // Reinitialize
-        mbedtls_ssl_init(&ctx_->ssl);
-        mbedtls_ssl_config_init(&ctx_->conf);
-    }
+    resetSslContext();
 
     // Last: nothing above may run after a listener's reconnect. The receive
     // thread reports only a close it ran into itself (running_ still set).
@@ -698,6 +666,44 @@ void TlsClient::disconnectImpl(bool notify) {
         args.wasClean = true;
         onDisconnect.notify(args);
     }
+}
+
+// Shut down and close the socket, if there is one
+void TlsClient::closeSocket() {
+#ifdef _WIN32
+    if (socket_ != INVALID_SOCKET) {
+        shutdown(socket_, SD_BOTH);
+        closesocket(socket_);
+        socket_ = INVALID_SOCKET;
+    }
+#else
+    if (socket_ >= 0) {
+        shutdown(socket_, SHUT_RDWR);
+        close(socket_);
+        socket_ = -1;
+    }
+#endif
+}
+
+// Free and re-initialise the SSL context and config (for the next connection)
+void TlsClient::resetSslContext() {
+    if (ctx_) {
+        mbedtls_ssl_free(&ctx_->ssl);
+        mbedtls_ssl_config_free(&ctx_->conf);
+        mbedtls_ssl_init(&ctx_->ssl);
+        mbedtls_ssl_config_init(&ctx_->conf);
+    }
+}
+
+// Clear the connection flags, close the socket and reset the SSL context.
+// tlsReceiveThread_ is left alone (see the header).
+void TlsClient::teardown() {
+    running_ = false;
+    connectPending_ = false;
+    handshakePending_ = false;
+    updateListener_.disconnect();
+    closeSocket();
+    resetSslContext();
 }
 
 // =============================================================================
