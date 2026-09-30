@@ -10,8 +10,10 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <utility>
+#include <vector>
 
 // stb_vorbis - OGG Vorbis decoder
 //
@@ -42,10 +44,38 @@ namespace trussc {
 
 namespace {
 
+// Frames decoded per step. Samples are appended as they decode, so the
+// stated stream length never decides how much is written anywhere.
+constexpr int kDecodeChunkFrames = 4096;
+
+// Reserve the first `count` samples of a decode buffer. Only a hint: when the
+// reservation cannot be made, the buffer still grows as data decodes.
+void reserveDecodeBuffer(std::vector<float>& buf, size_t count) {
+    try {
+        buf.reserve(count);
+    } catch (const std::exception&) {
+    }
+}
+
+// Drop the unused capacity of a finished decode buffer (a stated length above
+// what decoded, or growth past the reservation). Also only a hint.
+void trimDecodeBuffer(std::vector<float>& buf) {
+    if (buf.capacity() == buf.size()) return;
+    try {
+        buf.shrink_to_fit();
+    } catch (const std::exception&) {
+    }
+}
+
 // Decode the entire stream of an initialized ma_decoder into a SoundBuffer.
-// On success, fills samples / channels / sampleRate / numSamples and uninits
-// the decoder. On failure, uninits the decoder and returns false.
-bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel) {
+// The stream's stated length only sizes the first reservation
+// (internal::decodeReserveSamples, capped by inputBytes of encoded input);
+// the buffer grows as frames actually decode. On success, fills samples /
+// channels / sampleRate / numSamples and uninits the decoder. On failure
+// (including running out of memory), uninits the decoder, logs, leaves `out`
+// as it was and returns false.
+bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel,
+                  uint64_t inputBytes) {
     ma_uint64 frameCount = 0;
     ma_result result = ma_decoder_get_length_in_pcm_frames(&decoder, &frameCount);
     if (result != MA_SUCCESS || frameCount == 0) {
@@ -57,30 +87,100 @@ bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel
 
     const int ch = (int)decoder.outputChannels;
     const int sr = (int)decoder.outputSampleRate;
+    if (ch < 1) {
+        logError("SoundBuffer") << "invalid channel count " << ch << " in " << sourceLabel;
+        ma_decoder_uninit(&decoder);
+        return false;
+    }
 
-    std::vector<float> buf((size_t)frameCount * (size_t)ch);
-    ma_uint64 framesRead = 0;
-    result = ma_decoder_read_pcm_frames(&decoder, buf.data(), frameCount, &framesRead);
+    std::vector<float> buf;
+    reserveDecodeBuffer(buf, internal::decodeReserveSamples(frameCount, ch, inputBytes,
+                                                            buf.max_size()));
+    uint64_t framesRead = 0;
+    try {
+        std::vector<float> chunk((size_t)kDecodeChunkFrames * (size_t)ch);
+        for (;;) {
+            ma_uint64 got = 0;
+            result = ma_decoder_read_pcm_frames(&decoder, chunk.data(), kDecodeChunkFrames, &got);
+            if (got > 0) {
+                buf.insert(buf.end(), chunk.begin(), chunk.begin() + (size_t)got * (size_t)ch);
+                framesRead += got;
+            }
+            if (result != MA_SUCCESS || got == 0) break;
+        }
+    } catch (const std::exception&) {
+        ma_decoder_uninit(&decoder);
+        logError("SoundBuffer") << "not enough memory to decode " << sourceLabel << " ("
+                                << (unsigned long long)framesRead << " frames of " << ch
+                                << " ch decoded)";
+        return false;
+    }
     ma_decoder_uninit(&decoder);
 
-    if (result != MA_SUCCESS || framesRead == 0) {
+    if ((result != MA_SUCCESS && result != MA_AT_END) || framesRead == 0) {
         logError("SoundBuffer") << "failed to decode " << sourceLabel << " (result="
                                 << (int)result << ", framesRead=" << (unsigned long long)framesRead
                                 << ")";
         return false;
     }
-
-    if (framesRead != frameCount) {
-        // Trim to actually-decoded length (rare, but possible with streams
-        // whose declared length differs from what the decoder yields).
-        buf.resize((size_t)framesRead * (size_t)ch);
-    }
+    trimDecodeBuffer(buf);
 
     out.channels = ch;
     out.sampleRate = sr;
     out.numSamples = (size_t)framesRead;
     out.samples = std::move(buf);
     return true;
+}
+
+// Decode the entire stream of an open stb_vorbis into `out`, the same way as
+// drainDecoder: the stream's stated length (the last page's granule) only
+// sizes the first reservation, and samples are appended as they decode.
+// Closes `vorbis`. On failure, logs, leaves `out` as it was and returns the
+// error.
+LoadResult drainVorbis(stb_vorbis* vorbis, uint64_t inputBytes, const std::string& label,
+                       SoundBuffer& out) {
+    const stb_vorbis_info info = stb_vorbis_get_info(vorbis);
+    const int ch = info.channels;
+    if (ch < 1) {
+        stb_vorbis_close(vorbis);
+        logError("SoundBuffer") << "invalid channel count " << ch << " in " << label;
+        return LoadResult::fail(LoadError::DecodeFailed, "invalid channel count in " + label);
+    }
+    const unsigned int statedFrames = stb_vorbis_stream_length_in_samples(vorbis);
+
+    std::vector<float> buf;
+    reserveDecodeBuffer(buf, internal::decodeReserveSamples(statedFrames, ch, inputBytes,
+                                                            buf.max_size()));
+    uint64_t framesRead = 0;
+    try {
+        std::vector<float> chunk((size_t)kDecodeChunkFrames * (size_t)ch);
+        for (;;) {
+            const int got = stb_vorbis_get_samples_float_interleaved(
+                vorbis, ch, chunk.data(), kDecodeChunkFrames * ch);
+            if (got <= 0) break;
+            buf.insert(buf.end(), chunk.begin(), chunk.begin() + (size_t)got * (size_t)ch);
+            framesRead += (uint64_t)got;
+        }
+    } catch (const std::exception&) {
+        stb_vorbis_close(vorbis);
+        logError("SoundBuffer") << "not enough memory to decode " << label << " ("
+                                << (unsigned long long)framesRead << " frames of " << ch
+                                << " ch decoded)";
+        return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to decode " + label);
+    }
+    stb_vorbis_close(vorbis);
+
+    if (framesRead == 0) {
+        logError("SoundBuffer") << "no samples decoded from " << label;
+        return LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
+    }
+    trimDecodeBuffer(buf);
+
+    out.channels = ch;
+    out.sampleRate = (int)info.sample_rate;
+    out.numSamples = (size_t)framesRead;
+    out.samples = std::move(buf);
+    return LoadResult::success();
 }
 
 // Build a ma_decoder_config that asks miniaudio for float32 output, keeping
@@ -115,7 +215,11 @@ bool decodeFileWithMiniaudio(const fs::path& path,
                                 << " (result=" << (int)result << ")";
         return false;
     }
-    if (!drainDecoder(decoder, out, pathStr.c_str())) return false;
+    std::error_code sizeEc;
+    const uintmax_t fileBytes = fs::file_size(path, sizeEc);
+    if (!drainDecoder(decoder, out, pathStr.c_str(), sizeEc ? 0 : (uint64_t)fileBytes)) {
+        return false;
+    }
     logVerbose("SoundBuffer") << "loaded " << label << " " << pathStr << " (" << out.channels
                               << " ch, " << out.sampleRate << " Hz, " << out.numSamples
                               << " samples)";
@@ -134,7 +238,7 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
                                 << (int)result << ")";
         return false;
     }
-    if (!drainDecoder(decoder, out, "memory")) return false;
+    if (!drainDecoder(decoder, out, "memory", (uint64_t)dataSize)) return false;
     logVerbose("SoundBuffer") << "decoded " << label << " from memory (" << out.channels
                               << " ch, " << out.sampleRate << " Hz, " << out.numSamples
                               << " samples)";
@@ -169,30 +273,10 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
                                 " (error=" + std::to_string(error) + ")");
     }
 
-    stb_vorbis_info info = stb_vorbis_get_info(vorbis);
-    const unsigned int frames = stb_vorbis_stream_length_in_samples(vorbis);
-    size_t sampleCount = 0;
-    if (!internal::interleavedSampleCount(frames, info.channels, samples.max_size(), sampleCount)) {
-        stb_vorbis_close(vorbis);
-        logError("SoundBuffer") << "OGG stream too large to load: " << pathStr << " ("
-                                << info.channels << " ch, " << frames << " samples)";
-        return LoadResult::fail(LoadError::DecodeFailed, "OGG stream too large to load: " + pathStr);
-    }
-    channels = info.channels;
-    sampleRate = info.sample_rate;
-    numSamples = frames;
-
-    samples.resize(sampleCount);
-
-    int decoded = stb_vorbis_get_samples_float_interleaved(
-        vorbis, channels, samples.data(), static_cast<int>(samples.size()));
-
-    stb_vorbis_close(vorbis);
-
-    if (decoded <= 0) {
-        logError("SoundBuffer") << "no samples decoded from " << pathStr;
-        return LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
-    }
+    std::error_code sizeEc;
+    const uintmax_t fileBytes = fs::file_size(path, sizeEc);
+    LoadResult r = drainVorbis(vorbis, sizeEc ? 0 : (uint64_t)fileBytes, pathStr, *this);
+    if (!r) return r;
     path_ = path;
     logVerbose("SoundBuffer") << "loaded " << pathStr << " (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";
@@ -283,28 +367,8 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
                                 std::to_string(error) + ")");
     }
 
-    stb_vorbis_info info = stb_vorbis_get_info(vorbis);
-    const unsigned int frames = stb_vorbis_stream_length_in_samples(vorbis);
-    size_t sampleCount = 0;
-    if (!internal::interleavedSampleCount(frames, info.channels, samples.max_size(), sampleCount)) {
-        stb_vorbis_close(vorbis);
-        logError("SoundBuffer") << "OGG stream in memory too large to load (" << info.channels
-                                << " ch, " << frames << " samples)";
-        return LoadResult::fail(LoadError::DecodeFailed, "OGG stream in memory too large to load");
-    }
-    channels = info.channels;
-    sampleRate = info.sample_rate;
-    numSamples = frames;
-
-    samples.resize(sampleCount);
-    int decoded = stb_vorbis_get_samples_float_interleaved(
-        vorbis, channels, samples.data(), static_cast<int>(samples.size()));
-
-    stb_vorbis_close(vorbis);
-    if (decoded <= 0) {
-        logError("SoundBuffer") << "no samples decoded from OGG in memory";
-        return LoadResult::fail(LoadError::DecodeFailed, "no samples decoded");
-    }
+    LoadResult r = drainVorbis(vorbis, (uint64_t)dataSize, "OGG in memory", *this);
+    if (!r) return r;
     logVerbose("SoundBuffer") << "decoded OGG from memory (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";
     return LoadResult::success();

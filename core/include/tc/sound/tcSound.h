@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <algorithm>
+#include <new>
 #include <cstdint>
 #include <mutex>
 #include <atomic>
@@ -85,6 +87,27 @@ inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCoun
     if (frames > maxCount / (size_t)channels) return false;
     outCount = (size_t)frames * (size_t)channels;
     return true;
+}
+
+// Interleaved samples to reserve before decoding a stream whose header states
+// `headerFrames` frames of `channels` channels, read from `inputBytes` bytes
+// of encoded input (0 when unknown). The stated length is only a hint: the
+// reservation is capped by what that much input plausibly decodes to
+// (kDecodedSamplesPerInputByte per byte: 48 kHz stereo down to 48 kbit/s)
+// and by maxCount. Decoders append what actually decodes and grow the buffer
+// past the reservation when a stream holds more.
+inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t inputBytes,
+                                   size_t maxCount) {
+    constexpr uint64_t kDecodedSamplesPerInputByte = 16;
+    constexpr uint64_t kMax = ~(uint64_t)0;
+    if (channels < 1) return 0;
+    const uint64_t ch = (uint64_t)channels;
+    const uint64_t fromHeader = headerFrames > kMax / ch ? kMax : headerFrames * ch;
+    const uint64_t fromInput = inputBytes > kMax / kDecodedSamplesPerInputByte
+                                   ? kMax : inputBytes * kDecodedSamplesPerInputByte;
+    uint64_t n = fromHeader < fromInput ? fromHeader : fromInput;
+    if (n > (uint64_t)maxCount) n = (uint64_t)maxCount;
+    return (size_t)n;
 }
 
 } // namespace internal
@@ -416,19 +439,50 @@ public:
     // -------------------------------------------------------------------------
     // Mixing
     // -------------------------------------------------------------------------
+    // Adds `other` into this buffer, scaled by volume, starting offsetSamples
+    // samples per channel in (the unit of numSamples: frames, not interleaved
+    // samples). Grows this buffer when `other` runs past its end. Both buffers
+    // must have the same channel count; a mismatch, or an end past what a
+    // buffer can hold (or what memory allows), is logged and nothing is mixed.
     void mixFrom(const SoundBuffer& other, size_t offsetSamples, float volume = 1.0f) {
         if (other.samples.empty()) return;
-
-        // Ensure we have enough space
-        size_t requiredSize = offsetSamples + other.numSamples;
-        if (samples.size() < requiredSize) {
-            samples.resize(requiredSize, 0.0f);
-            numSamples = requiredSize;
+        if (channels < 1 || other.channels != channels) {
+            logError("SoundBuffer") << "mixFrom: channel counts differ (" << other.channels
+                                    << " into " << channels << "), nothing mixed";
+            return;
         }
+        const size_t ch = (size_t)channels;
+        // Whole frames `other` actually holds
+        const size_t otherFrames = std::min(other.numSamples, other.samples.size() / ch);
+        if (otherFrames == 0) return;
 
-        // Mix (add) samples
-        for (size_t i = 0; i < other.numSamples && i < other.samples.size(); i++) {
-            samples[offsetSamples + i] += other.samples[i] * volume;
+        // End frame and the interleaved size it needs, checked before they are formed
+        size_t needed = 0;
+        if (offsetSamples > SIZE_MAX - otherFrames ||
+            !internal::interleavedSampleCount((uint64_t)(offsetSamples + otherFrames), channels,
+                                              samples.max_size(), needed)) {
+            logError("SoundBuffer") << "mixFrom: offset " << offsetSamples << " + "
+                                    << otherFrames << " frames is past what a buffer holds";
+            return;
+        }
+        const size_t endFrame = offsetSamples + otherFrames;
+        if (samples.size() < needed) {
+            try {
+                samples.resize(needed, 0.0f);
+            } catch (const std::bad_alloc&) {
+                logError("SoundBuffer") << "mixFrom: out of memory growing to " << endFrame
+                                        << " frames, nothing mixed";
+                return;
+            }
+        }
+        if (numSamples < endFrame) numSamples = endFrame;
+
+        // Mix (add) samples, frame by frame with the channel stride
+        float* dst = samples.data() + offsetSamples * ch;
+        const float* src = other.samples.data();
+        const size_t count = otherFrames * ch;
+        for (size_t i = 0; i < count; i++) {
+            dst[i] += src[i] * volume;
         }
     }
 
@@ -1063,6 +1117,18 @@ private:
     // of a negative double is UB).
     static void mixEagerVoice(PlayingSound& sound, const SoundBuffer& src,
                               float* buffer, int num_frames, int num_channels) {
+        // A buffer with no frames, or with fewer samples than numSamples *
+        // channels, has nothing to index: stop the voice (a looping voice
+        // would otherwise wrap its position modulo a length of 0).
+        size_t srcCount = 0;
+        if (src.numSamples == 0 ||
+            !internal::interleavedSampleCount(src.numSamples, src.channels, src.samples.size(),
+                                              srcCount)) {
+            sound.playing = false;
+            sound.level.store(0.0f, std::memory_order_relaxed);
+            return;
+        }
+
         double posF = sound.positionF;
         float vol = sound.volume;
         float pan = sound.pan;
@@ -1663,7 +1729,10 @@ public:
         // (decoder seek happens lazily in the stream mixer).
         if (buffer_->kind() == SoundSource::Eager) {
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
-            if (pos >= (double)eager->numSamples) pos = (double)eager->numSamples - 1;
+            // An empty buffer clamps to 0, not to -1.
+            if (pos >= (double)eager->numSamples) {
+                pos = eager->numSamples > 0 ? (double)eager->numSamples - 1 : 0.0;
+            }
         } else {
             double maxPos = (double)buffer_->getDuration() * buffer_->sampleRate;
             if (pos >= maxPos) pos = maxPos - 1;
