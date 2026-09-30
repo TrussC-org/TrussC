@@ -64,7 +64,9 @@ public:
     // (position, decoration). To control this window from elsewhere, use this
     // Window handle (from inside the App, App::getWindow() returns it).
     // Note: the App's setup() runs once on the window's first tree update
-    // (standard Node lifecycle), i.e. on the window's first tick. An App runs
+    // (standard Node lifecycle), i.e. on the window's first tick; its
+    // audioOut() / audioIn() are subscribed right after that setup() returns,
+    // not at setApp(). An App runs
     // once: setup() when first attached, exit() / cleanup() when its window
     // closes (or, with #318, when it is swapped out); closing the window also
     // detaches its audioOut() / audioIn() for good. To show it again, create

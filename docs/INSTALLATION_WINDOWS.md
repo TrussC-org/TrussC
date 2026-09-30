@@ -75,7 +75,7 @@ A Task Scheduler task with an empty "Start in" runs with the working directory a
 
 - Set "Start in" to the exe folder in the task or shortcut.
 - Load assets with paths under `bin/data`, the way the examples do. `getDataPath("file")` gives the absolute path.
-- Give the log file an absolute path, e.g. `getLogger().setLogFile(getDataPath("logs/app.log"))`, or an absolute `TRUSSC_LOG_FILE`.
+- Log file names resolve against `bin/data` too: `getLogger().setLogFile("logs/app.log")` writes `bin/data/logs/app.log` and creates `logs` if it is missing. A relative `TRUSSC_LOG_FILE` resolves the same way. Check the return value: on failure `setLogFile()` returns false and logs why.
 
 ## 7. GPU on dual-GPU machines
 
