@@ -39,6 +39,8 @@
 //   limit before the product is formed: a product that would wrap 64 bits is
 //   refused, and a 32-bit limit stands in for a 32-bit size_t. (The 64-bit
 //   frame size in loadPcmFromMemory only matters on a 32-bit build.)
+//   The loaders' 32-bit arithmetic is covered by the helper checks with
+//   maxCount = 0xFFFFFFFF, not by a 32-bit build of this test.
 // =============================================================================
 
 #include <TrussC.h>
@@ -241,9 +243,12 @@ static void checkPcmLoading() {
 
     // A byte size that is not a whole number of frames
     auto sizeFails = [&](const string& name, const void* data, size_t size, int ch, int bits) {
+        const size_t logsBefore = countLogs(LogLevel::Error, "PCM data ");
         const LoadResult r = buf.loadPcmFromMemory(data, size, ch, 22050, bits);
         check("pcm: " + name + " fails with DecodeFailed",
               !r && r.error == LoadError::DecodeFailed, loadErrorName(r.error));
+        check("pcm: " + name + " is logged once",
+              countLogs(LogLevel::Error, "PCM data ") == logsBefore + 1, lastLog(LogLevel::Error));
         check("pcm: " + name + " leaves the buffer as it was", unchanged(),
               to_string(buf.sampleRate) + " Hz");
     };
