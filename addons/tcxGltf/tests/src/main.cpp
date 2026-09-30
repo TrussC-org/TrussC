@@ -9,12 +9,15 @@
 // graphics context.
 //
 // It checks that GltfModel validates model data before reading it:
-//   - valid models (indexed, non-indexed, node hierarchy, sparse) load as before
+//   - valid models (indexed, non-indexed, node hierarchy, sparse) load as before;
+//     sparse values are read tightly packed, also on a strided view
 //   - an accessor or buffer view that runs past its buffer view / buffer, or a
 //     reference to an accessor / buffer view that does not exist, fails to load
 //   - counts large enough to wrap the size arithmetic fail to load
 //   - attribute counts that differ within a primitive fail to load
-//   - an index past the primitive's vertices fails to load
+//   - an index past the primitive's vertices fails to load; a primitive
+//     without POSITION is skipped
+//   - a component type glTF 2.0 does not allow fails validation
 //   - a file with no scene fails to load
 // Every failed load logs a warning and leaves the model empty.
 // =============================================================================
@@ -44,10 +47,14 @@ static void check(const string& name, bool ok) {
 // Counts warnings (and worse) logged while it is alive.
 struct WarningCounter {
     int count = 0;
+    string last;  // text of the last warning
     EventListener listener;
     WarningCounter() {
         listener = getLogger().onLog.listen([this](LogEventArgs& e) {
-            if (e.level >= LogLevel::Warning) count++;
+            if (e.level >= LogLevel::Warning) {
+                count++;
+                last = e.message;
+            }
         });
     }
 };
@@ -132,6 +139,7 @@ static string accessorJson(int view, int componentType, const string& count,
 }
 
 static const int FLOAT = 5126, USHORT = 5123, UINT = 5125;
+static const int INT = 5124;  // not a glTF 2.0 component type
 
 // The three vertices of the test triangle, its indices, and one normal each.
 static const float POSITIONS[9] = { 0, 0, 0,  1, 0, 0,  0, 1, 0 };
@@ -163,7 +171,9 @@ static fs::path writeGltf(const GltfBuilder& b) {
 
 // Load `b` and check the result. When the load should fail, also check that
 // it logged a warning and left the model empty.
-static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, GltfModel& model) {
+// `lastWarning` (when given) receives the text of the last warning logged.
+static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, GltfModel& model,
+                     string* lastWarning = nullptr) {
     fs::path p = writeGltf(b);
     WarningCounter warnings;
     bool ok = model.load(p.string());
@@ -173,6 +183,7 @@ static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, Gl
         check(name + ": rejected", !ok && !model.isLoaded() && model.getNodeCount() == 0);
         check(name + ": warning logged", warnings.count > 0);
     }
+    if (lastWarning) *lastWarning = warnings.last;
     return ok;
 }
 
@@ -310,22 +321,69 @@ int main() {
         loadCase("sparse count that wraps the size arithmetic", b, false, m);
     }
     {
-        // Sparse values are read with the base view's stride (16 here), so two
-        // of them need 28 bytes; the values view at the end of the buffer
-        // holds 24.
+        // Sparse accessor on a view with byteStride 16: glTF packs the sparse
+        // values tightly (12 bytes apart), not at the base stride. A view
+        // after the values makes a read at the base stride land on other data.
         GltfBuilder b = triangle();
-        const float strided[8] = { 0, 0, 0, 0,  1, 0, 0, 0 };
+        const float strided[12] = { 0, 0, 0, 0,  1, 0, 0, 0,  0, 1, 0, 0 };
         int basev = b.addView(strided, sizeof(strided), 16);
-        const uint16_t sparseIdx[2] = { 0, 1 };
+        const uint16_t sparseIdx[2] = { 0, 2 };
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
-        const float sparseVal[6] = { 5, 5, 5,  6, 6, 6 };
+        const float sparseVal[6] = { 5, 5, 5,  6, 7, 8 };
         int svv = b.addView(sparseVal, sizeof(sparseVal));
-        b.addAccessor(accessorJson(basev, FLOAT, "2", "VEC3",
+        const float after[4] = { 9, 9, 9, 9 };
+        b.addView(after, sizeof(after));
+        b.addAccessor(accessorJson(basev, FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
         GltfModel m;
-        loadCase("sparse values past their buffer view at the base stride", b, false, m);
+        if (loadCase("valid sparse accessor on a strided view", b, true, m)) {
+            const auto& v = m.getNode(0).mesh.getVertices();
+            check("valid sparse accessor on a strided view: values read tightly packed",
+                  v.size() == 3 && vecNear(v[0], 5, 5, 5) && vecNear(v[1], 1, 0, 0) && vecNear(v[2], 6, 7, 8));
+        }
+    }
+    {
+        // Two VEC3 sparse values need 24 bytes; the values view holds 20
+        GltfBuilder b = triangle();
+        const uint16_t sparseIdx[2] = { 0, 1 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        const float sparseVal[6] = { 5, 5, 5,  6, 6, 6 };
+        int svv = b.addView(sparseVal, 20);
+        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+            ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        b.primitive = R"({"attributes":{"POSITION":3}})";
+        GltfModel m;
+        loadCase("sparse values past their buffer view", b, false, m);
+    }
+    {
+        // A component type glTF 2.0 does not allow is reported as a
+        // validation failure, not as a range problem
+        GltfBuilder b = triangle();
+        b.addAccessor(accessorJson(2, INT, "3", "VEC3"));
+        GltfModel m;
+        string warning;
+        loadCase("unsupported component type", b, false, m, &warning);
+        check("unsupported component type: reported by validation",
+              warning.find("failed validation") != string::npos);
+    }
+    {
+        // Same for a sparse indices component type
+        GltfBuilder b = triangle();
+        const uint16_t sparseIdx[1] = { 1 };
+        int siv = b.addView(sparseIdx, sizeof(sparseIdx));
+        const float sparseVal[3] = { 5, 5, 5 };
+        int svv = b.addView(sparseVal, sizeof(sparseVal));
+        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+            ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(siv) +
+            ",\"componentType\":5124},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
+        GltfModel m;
+        string warning;
+        loadCase("unsupported sparse index type", b, false, m, &warning);
+        check("unsupported sparse index type: reported by validation",
+              warning.find("failed validation") != string::npos);
     }
 
     // ----- mesh consistency ---------------------------------------------------
@@ -345,11 +403,16 @@ int main() {
         loadCase("index past the vertex count", b, false, m);
     }
     {
-        // Indices but no POSITION: every index points past the (zero) vertices
+        // A primitive without POSITION is skipped; the rest of the mesh loads
         GltfBuilder b = triangle();
-        b.primitive = R"({"attributes":{"NORMAL":2},"indices":1})";
+        b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1},)"
+                      R"({"attributes":{"NORMAL":2},"indices":1})";
         GltfModel m;
-        loadCase("indices without positions", b, false, m);
+        if (loadCase("primitive without positions", b, true, m)) {
+            check("primitive without positions: skipped, the other one loaded",
+                  m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3 &&
+                  m.getNode(0).mesh.getNumIndices() == 3);
+        }
     }
     {
         GltfBuilder b = triangle();

@@ -3,6 +3,7 @@
 
 #include "tcxGltf.h"
 
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 
@@ -30,7 +31,9 @@ static bool rangeFits(cgltf_size size, cgltf_size offset, cgltf_size stride,
 // Check that every buffer view lies inside its buffer and every accessor
 // (including sparse parts) lies inside its buffer view. cgltf_validate()
 // checks the same ranges, but its sums can wrap around for very large
-// values, and it reads index data itself, so this runs first.
+// values, and it reads index data itself, so this runs first. An accessor
+// whose component type has no size is left to cgltf_validate(), which
+// refuses it before it computes any range.
 static bool checkDataRanges(const cgltf_data* data) {
     for (cgltf_size i = 0; i < data->buffer_views_count; i++) {
         const cgltf_buffer_view& view = data->buffer_views[i];
@@ -41,7 +44,7 @@ static bool checkDataRanges(const cgltf_data* data) {
     for (cgltf_size i = 0; i < data->accessors_count; i++) {
         const cgltf_accessor& acc = data->accessors[i];
         cgltf_size elemSize = cgltf_calc_size(acc.type, acc.component_type);
-        if (elemSize == 0) return false;
+        if (elemSize == 0) continue;
         if (acc.buffer_view &&
             !rangeFits(acc.buffer_view->size, acc.offset, acc.stride, elemSize, acc.count)) {
             return false;
@@ -49,14 +52,14 @@ static bool checkDataRanges(const cgltf_data* data) {
         if (acc.is_sparse) {
             const cgltf_accessor_sparse& sp = acc.sparse;
             cgltf_size indexSize = cgltf_component_size(sp.indices_component_type);
-            if (indexSize == 0) return false;
+            if (indexSize == 0) continue;
             if (!rangeFits(sp.indices_buffer_view->size, sp.indices_byte_offset,
                            indexSize, indexSize, sp.count)) {
                 return false;
             }
-            // Sparse values are read acc.stride bytes apart
+            // Sparse values are tightly packed (see readAccessorFloats)
             if (!rangeFits(sp.values_buffer_view->size, sp.values_byte_offset,
-                           acc.stride, elemSize, sp.count)) {
+                           elemSize, elemSize, sp.count)) {
                 return false;
             }
         }
@@ -66,8 +69,42 @@ static bool checkDataRanges(const cgltf_data* data) {
 
 // Read accessor data as float array (handles all component types)
 static vector<float> readAccessorFloats(const cgltf_accessor* acc) {
-    vector<float> out(acc->count * cgltf_num_components(acc->type));
-    cgltf_accessor_unpack_floats(acc, out.data(), out.size());
+    cgltf_size numComp = cgltf_num_components(acc->type);
+    vector<float> out(acc->count * numComp);
+    if (!acc->is_sparse) {
+        cgltf_accessor_unpack_floats(acc, out.data(), out.size());
+        return out;
+    }
+
+    // cgltf_accessor_unpack_floats() reads sparse values at the base
+    // accessor's stride, but glTF packs them tightly. Read the base without
+    // them, then apply the values here.
+    cgltf_accessor base = *acc;
+    base.is_sparse = false;
+    cgltf_accessor_unpack_floats(&base, out.data(), out.size());
+
+    const cgltf_accessor_sparse& sp = acc->sparse;
+    cgltf_accessor values = base;
+    values.buffer_view = sp.values_buffer_view;
+    values.offset = sp.values_byte_offset;
+    values.stride = cgltf_calc_size(acc->type, acc->component_type);
+    values.count = sp.count;
+    vector<float> vals(sp.count * numComp);
+    cgltf_accessor_unpack_floats(&values, vals.data(), vals.size());
+
+    cgltf_accessor indices = {};
+    indices.type = cgltf_type_scalar;
+    indices.component_type = sp.indices_component_type;
+    indices.buffer_view = sp.indices_buffer_view;
+    indices.offset = sp.indices_byte_offset;
+    indices.stride = cgltf_component_size(sp.indices_component_type);
+    indices.count = sp.count;
+    for (cgltf_size i = 0; i < sp.count; i++) {
+        cgltf_size idx = cgltf_accessor_read_index(&indices, i);
+        if (idx >= acc->count) continue;  // cgltf_validate() refuses these
+        copy(vals.begin() + i * numComp, vals.begin() + (i + 1) * numComp,
+             out.begin() + idx * numComp);
+    }
     return out;
 }
 
@@ -195,6 +232,13 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 // ---------------------------------------------------------------------------
 // Mesh loading
 // ---------------------------------------------------------------------------
+
+static bool hasPositions(const cgltf_primitive* prim) {
+    for (cgltf_size a = 0; a < prim->attributes_count; a++) {
+        if (prim->attributes[a].type == cgltf_attribute_type_position) return true;
+    }
+    return false;
+}
 
 // Returns false when an index points past the primitive's vertices.
 static bool loadGltfPrimitive(const cgltf_primitive* prim, Mesh& mesh) {
@@ -330,6 +374,9 @@ bool GltfModel::load(const string& path) {
             for (cgltf_size p = 0; p < node->mesh->primitives_count; p++) {
                 const cgltf_primitive* prim = &node->mesh->primitives[p];
                 if (prim->type != cgltf_primitive_type_triangles) continue;
+                // glTF lets a primitive leave out POSITION; such a primitive
+                // is not drawn
+                if (!hasPositions(prim)) continue;
 
                 Node entry;
                 if (!loadGltfPrimitive(prim, entry.mesh)) {

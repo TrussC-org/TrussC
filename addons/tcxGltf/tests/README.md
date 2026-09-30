@@ -5,12 +5,16 @@ embedded as a base64 data URI) to a temp directory and loads it with
 `GltfModel`, checking that model data is validated before it is read:
 
 - valid models (indexed, non-indexed, a node hierarchy, a sparse accessor) load
-  with the same vertex and index data as before;
+  with the same vertex and index data as before, and sparse values are read
+  tightly packed, as glTF lays them out, also when the base view has a
+  byteStride;
 - an accessor or buffer view that runs past its buffer view or buffer, or a
   reference to an accessor or buffer view that does not exist, fails to load;
 - counts large enough to wrap the size arithmetic fail to load;
 - a primitive whose attribute counts differ, or whose indices point past its
-  vertices, fails to load;
+  vertices, fails to load; a primitive without POSITION is skipped and the
+  rest of the model loads;
+- a component type glTF 2.0 does not allow fails validation;
 - a file with no scene fails to load.
 
 Every failed load logs a warning and leaves the model empty.
