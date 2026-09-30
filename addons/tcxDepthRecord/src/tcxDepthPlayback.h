@@ -16,16 +16,19 @@
 // hasUnknownBlocks(). Addons subclass and override readExtraBlock() to consume
 // their own block types.
 //
-// Block sizes are checked before anything is allocated or decoded: every block
-// must end within its frame, and depth/color sizes must match the frame
-// dimensions. A block that fails a check is skipped (its stream is not marked
-// new for that frame) and the first one is reported with a warning.
+// A header whose frame size is negative or too large for an RGBA image is
+// refused at open. Block sizes are checked before anything is allocated or
+// decoded: every block must end within its frame, and depth/color sizes must
+// match the frame dimensions. A block that fails a check is skipped (its stream
+// is left empty and not marked new for that frame) and the first one is
+// reported with a warning.
 //
 // =============================================================================
 
 #include "tcxDepthRecordFormat.h"
 
 #include <algorithm>
+#include <climits>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -94,6 +97,19 @@ protected:
                 << "PlaybackDepthCamera: the stream manifest lists "
                 << static_cast<int>(header_.streamTypeCount) << " block types, more than the "
                 << TCDC_MAX_STREAM_TYPES << " it can hold: " << resolved;
+            header_ = TcdcHeader{};
+            return false;
+        }
+        // Every depth plane has width x height samples, drawn as an RGBA image
+        // with int sizes and indices. DepthRecorder copies the first frame's
+        // size, and a DepthFrame starts at 0x0, so a 0x0 header is kept (the
+        // file plays without depth).
+        const std::int64_t rgbaBytes = static_cast<std::int64_t>(header_.width) *
+                                       static_cast<std::int64_t>(header_.height) * 4;
+        if (header_.width < 0 || header_.height < 0 || rgbaBytes > INT_MAX) {
+            logError("tcxDepthRecord")
+                << "PlaybackDepthCamera: the frame size " << header_.width << "x"
+                << header_.height << " is out of range: " << resolved;
             header_ = TcdcHeader{};
             return false;
         }
