@@ -201,6 +201,8 @@ public:
     // from an onRender listener — after the scene is drawn, so the gizmo's camera
     // projection is current-frame, and before tcxImGui's render. Root defaults to
     // getRootNode() (the running App); pass one to inspect a subtree instead.
+    // That root is held weakly (like every node the inspector keeps between
+    // frames): once it is freed, the inspector falls back to getRootNode().
     // Each returns the singleton, so a call chains into the instance API
     // (e.g. NodeInspector::attach(KEY_F1).setAccent(...)).
     //
@@ -274,7 +276,7 @@ private:
     void ensureToggleKeyListener();
     void ensureExitGuard();                   // drop listeners at exit (before teardown)
     ::tc::EventListener autoDraw_;             // onRender frame driver (attach)
-    ::tc::Node*         attachRoot_ = nullptr; // null => getRootNode() each frame
+    std::weak_ptr<::tc::Node> attachRoot_;     // empty or gone => getRootNode() each frame
     std::vector<int>    toggleKeys_;
     ::tc::EventListener toggleKeyListener_;    // installed once, then lives on
     ::tc::EventListener exitListener_;         // clears the above while events() is alive
@@ -318,7 +320,7 @@ private:
     int        hoverAxis_ = -1;       // visual feedback (computed in drawGizmo)
     int        dragAxis_  = -1;       // claimed at press; -1 = not dragging
     GizmoMode  dragMode_  = GizmoMode::Translate;   // locked for the whole gesture
-    ::tc::Node* dragNode_ = nullptr;  // primary at press (cancel if selection dies)
+    std::weak_ptr<::tc::Node> dragNode_;   // primary at press (cancel if selection dies)
     ::tc::Vec3 dragWorldStart_;       // gizmo origin at press (node / centroid)
     ::tc::Vec3 dragAxisDir_;          // world unit axis (move dir / rotation normal)
     float      dragS0_ = 0.0f;        // translate: axis parameter of the grab point
@@ -333,7 +335,7 @@ private:
 
     // --- multi-selection -------------------------------------------------------
     std::vector<std::weak_ptr<::tc::Node>> selection_;
-    ::tc::Node* lastPrimary_ = nullptr;   // last core selectedNode we synced with
+    std::weak_ptr<::tc::Node> lastPrimary_;   // last core selectedNode we synced with
     void reconcileSelection();            // prune dead + collapse on external change
 
     // --- touched ---------------------------------------------------------------
