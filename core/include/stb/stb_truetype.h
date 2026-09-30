@@ -1923,11 +1923,13 @@ typedef struct
 #define STBTT__CSCTX_INIT(bounds) {bounds,0, 0,0, 0,0, 0,0,0,0, NULL, 0, 0}
 
 // TrussC patch: vertex counting of a CFF glyph stops within the range stb
-// handles (int count, size_t allocation). May be predefined (lower) for tests.
-#ifndef STBTT_MAX_VERTICES
-#define STBTT_MAX_VERTICES \
+// handles (int count, size_t allocation). STBTT_DEFAULT_MAX_VERTICES is that
+// range; STBTT_MAX_VERTICES may be predefined (lower, or read at run time).
+#define STBTT_DEFAULT_MAX_VERTICES \
    ((size_t)(~0u >> 1) < (size_t)-1 / sizeof(stbtt_vertex) \
       ? (int)(~0u >> 1) : (int)((size_t)-1 / sizeof(stbtt_vertex)))
+#ifndef STBTT_MAX_VERTICES
+#define STBTT_MAX_VERTICES STBTT_DEFAULT_MAX_VERTICES
 #endif
 
 static void stbtt__track_vertex(stbtt__csctx *c, stbtt_int32 x, stbtt_int32 y)

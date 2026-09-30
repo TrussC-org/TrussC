@@ -296,8 +296,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `stb_truetype.h` (CFF data is read within the CFF table's length), the CFF vertex-count patch (a glyph over the vertex
   limit, one whose closing vertex is the one over it, one far over any limit
   through nested subroutines, and one whose vertex array cannot be allocated
-  come back empty; `local.cmake` builds stb_truetype with
-  `TC_STBTT_TEST_LIMITS` so the test can lower those limits) and the
+  come back empty; the test lowers those limits through
+  `internal::setStbttLimitsForTests()`) and the
   padded `STBTT_malloc` (a glyph whose last contour is one off-curve point).
   The single off-curve contour case is only meaningful under
   AddressSanitizer, and CI does not build with ASan, so run it locally after

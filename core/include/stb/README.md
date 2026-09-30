@@ -79,20 +79,25 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      `stbtt__run_charstring`, `stbtt__GetGlyphShapeT2`): vertex counting
      stops within the range stb handles (int count, size_t allocation), and
      the allocation result is checked. The counting pass stops at
-     `STBTT_MAX_VERTICES`, `min(INT_MAX, SIZE_MAX / sizeof(stbtt_vertex))`:
-     `stbtt__csctx_v` sets a new `stopped` field, and `stbtt__run_charstring`
-     returns 0 at the top of its loop (subroutine calls run in that loop) and
-     at `endchar` once it is set. `STBTT__CSCTX_INIT` gained the matching
+     `STBTT_MAX_VERTICES`, by default
+     `min(INT_MAX, SIZE_MAX / sizeof(stbtt_vertex))`: `stbtt__csctx_v` sets
+     a new `stopped` field, and `stbtt__run_charstring` returns 0 at the top
+     of its loop (subroutine calls run in that loop) and at `endchar` once it
+     is set. `STBTT__CSCTX_INIT` gained the matching
      initializer. The glyph then has no outline. `stbtt__GetGlyphShapeT2`
      returns 0 vertices when `STBTT_malloc` returns NULL.
-     `STBTT_MAX_VERTICES` may be predefined.
+     `STBTT_DEFAULT_MAX_VERTICES` is that limit; `STBTT_MAX_VERTICES`
+     defaults to it and may be predefined.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
-  Release builds handle font data the same way. Allocations through `STBTT_malloc` are padded with 64 zeroed bytes,
-  and it returns NULL when the size cannot be allocated. With
-  `TC_STBTT_TEST_LIMITS` (set only by `core/tests/fontSfntCheck/local.cmake`)
-  `STBTT_MAX_VERTICES` and a cap on `STBTT_malloc` sizes become variables the
-  test sets.
+  Release builds handle font data the same way. Allocations through
+  `STBTT_malloc` are padded with 64 zeroed bytes, and it returns NULL when
+  the size cannot be allocated.
+  `STBTT_MAX_VERTICES` reads a variable that defaults to
+  `STBTT_DEFAULT_MAX_VERTICES`; the test hook
+  `internal::setStbttLimitsForTests()` (declared in
+  `core/include/tc/graphics/tcFont.h`) lowers it and caps `STBTT_malloc`
+  sizes, and `internal::resetStbttLimitsForTests()` restores the defaults.
 - **Checked by TrussC**: `FontAtlasManager`
   (`core/include/tc/graphics/tcFont.h`) checks the sfnt skeleton (collection
   header, table directory, table bounds, required tables, the fixed fields

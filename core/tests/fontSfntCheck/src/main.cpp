@@ -45,8 +45,8 @@
 //   (prefix the last line with `setarch -R` where ASan fails to start
 //   because of the kernel's address randomization),
 // - CFF vertex counting stops within the range stb handles, and a vertex
-//   array that cannot be allocated leaves the glyph empty (with the lower
-//   test limits from local.cmake): a glyph over the limit, one whose closing
+//   array that cannot be allocated leaves the glyph empty (with limits
+//   lowered through internal::setStbttLimitsForTests()): a glyph over the limit, one whose closing
 //   vertex is the one over it, one far over any limit through nested
 //   subroutines, and one whose array allocation fails all come back empty,
 // - valid fonts still load, with the metrics they are built with, including
@@ -82,12 +82,6 @@ static void check(const string& name, bool ok, const string& detail = "") {
     fflush(stdout);
     if (!ok) ++g_fail;
 }
-
-// Set in core/include/impl/stb_impl.cpp when it is built with
-// TC_STBTT_TEST_LIMITS, which this test's local.cmake defines: the vertex
-// limit of the CFF counting pass, and the largest size STBTT_malloc allocates.
-extern int tcStbttTestMaxVertices;
-extern size_t tcStbttTestMallocMax;
 
 static int g_warnings = 0;
 static string g_lastWarning;
@@ -710,15 +704,14 @@ static Bytes makeVertexCountFont() {
 
 static void checkVertexCount() {
     const Bytes f = makeVertexCountFont();
-    const int defaultMaxVertices = tcStbttTestMaxVertices;
+    // A vertex limit well above 'E' and within the default on every platform.
+    const int highMaxVertices = 1 << 20;
     auto outlineSize = [&](uint32_t cp, int maxVertices, size_t mallocMax) {
-        tcStbttTestMaxVertices = maxVertices;
-        tcStbttTestMallocMax = mallocMax;
+        internal::setStbttLimitsForTests(maxVertices, mallocMax);
         internal::FontAtlasManager m;
         int n = -1;
         if (tryLoad(m, f).ok) n = m.getGlyphPath(cp).size();
-        tcStbttTestMaxVertices = defaultMaxVertices;
-        tcStbttTestMallocMax = SIZE_MAX;
+        internal::resetStbttLimitsForTests();
         return n;
     };
     int n = outlineSize('C', 4, SIZE_MAX);
@@ -730,10 +723,10 @@ static void checkVertexCount() {
     n = outlineSize('E', 1 << 10, SIZE_MAX);
     check("vertex count: 'E' (2^18 + 1 vertices) with a limit of 2^10 is empty", n == 0,
           "vertices=" + to_string(n));
-    n = outlineSize('E', defaultMaxVertices, 1024);
+    n = outlineSize('E', highMaxVertices, 1024);
     check("vertex count: 'E' is empty when its vertex array cannot be allocated", n == 0,
           "vertices=" + to_string(n));
-    n = outlineSize('E', defaultMaxVertices, SIZE_MAX);
+    n = outlineSize('E', highMaxVertices, SIZE_MAX);
     check("vertex count: 'E' (2^18 + 1 vertices) has an outline", n > 0,
           "vertices=" + to_string(n));
 
