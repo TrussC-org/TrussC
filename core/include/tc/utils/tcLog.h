@@ -134,7 +134,8 @@ public:
     // Open a log file (append mode). A relative path resolves against the
     // data folder (getDataPath), and a missing parent folder is created. On
     // failure it logs the reason and returns false, and the current log file
-    // (if any) stays open. getLogFilePath() returns the resolved path.
+    // (if any) stays open. After a successful call, getLogFilePath()
+    // returns the resolved path.
     // In tcGlobal.cpp: getDataPath (tcUtils.h) cannot be included here.
     bool setLogFile(const fs::path& path);
 
