@@ -17,14 +17,17 @@ Units are pixels (30 px = 1 m by default, `World::scale`) and radians.
 ## Polygon shapes
 
 A Box2D polygon is **one convex shape of 3 to 8 points**
-(`b2_maxPolygonVertices`). tcxBox2d offers two ways to build one:
+(`b2_maxPolygonVertices`). tcxBox2d offers three ways to build a polygon body:
 
 | Classic | Mod | Takes | Result |
 | --- | --- | --- | --- |
 | `PolyShape::setup(world, points, x, y)` | `Shape2D::polygon(points)` | 3 to 8 points | One polygon. Concave input becomes its convex hull. |
 | `PolyShape::setupConvex(world, points, x, y)` | `Shape2D::convex(points)` | any number of points | One polygon of at most 8 points approximating the convex hull. |
+| `PolyShape::setupCompound(world, path, x, y)` | `Shape2D::compound(path)` | any outline | The exact shape, one fixture per triangle. |
 
-Both classic calls also take a `tc::Path`; every point of every subpath is used.
+All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
+`setup()` and `setupConvex()` use every point of every subpath together;
+`setupCompound()` uses the path as an outline (a vector is one closed outline).
 
 - **Concave input** to `setup()` / `polygon()` silently becomes its convex
   hull, as Box2D itself does. `PolyShape::getVertices()` and
@@ -34,6 +37,25 @@ Both classic calls also take a `tc::Path`; every point of every subpath is used.
   the vertices whose removal loses the least area until 8 remain. The extreme
   points survive, but concave parts and holes are filled and curves become
   coarser.
+- **`setupCompound()` / `compound()`** keep any outline exactly: concave parts,
+  holes and any number of points. `Path::buildFillTriangles()` triangulates it,
+  the same fill `Path::drawFill()` draws (non-zero winding: a subpath wound
+  opposite to its enclosing one is a hole; self-intersections are split), and
+  each triangle becomes one fixture on the one body. Box2D sums mass and
+  centroid over the fixtures. A path that is one convex ring of at most 8
+  points becomes one ordinary polygon fixture instead. Triangles too thin for
+  Box2D are skipped with one warning.
+  - `getVertices()` returns the outline points (every subpath, in order);
+    `draw()` outlines each subpath and `drawFill()` fills like
+    `Path::drawFill()`. `ColliderRenderer2D` does the same.
+  - The body's `Collider2D` stands for all its fixtures: its filter setters
+    change every fixture, as `Body::setSensor()` and
+    `RigidBody2D::setTrigger()` do.
+  - Collision events are per touching **body pair**, not per fixture: Enter
+    (`onCollisionEnter`, `onCollisionBegan`) fires on the first contact, Stay
+    once per update, and Exit when the last contact ends, however many
+    fixtures touch.
+  - The fixture count grows with the outline's detail.
 - **Refused input** logs a warning and creates **no body**, the same in Debug
   and Release:
   - fewer than 3 points, or more than 8 for `setup()` / `polygon()`;
