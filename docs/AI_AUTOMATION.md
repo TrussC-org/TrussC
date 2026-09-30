@@ -365,8 +365,10 @@ Configure your MCP client with the HTTP URL:
 
 By default the MCP server binds to **localhost only** and sends no CORS headers,
 so it is reachable only by native MCP clients on the same machine (a wildcard
-CORS origin would otherwise let any web page in your browser drive it). For
-remote access, SSH tunnelling is the simplest safe option.
+CORS origin would otherwise let any web page in your browser drive it). The
+server is for native MCP clients: a web page cannot call it, neither directly
+nor through a dev-server proxy that forwards the page's `Origin`. For remote
+access, SSH tunnelling is the simplest safe option.
 
 A web page can still *send* requests to a loopback server without CORS, so
 every request is also checked before anything runs (as the MCP HTTP transport
@@ -375,18 +377,8 @@ spec requires):
 | Check | Refused with |
 |-------|--------------|
 | When bound to loopback, `Host` must be `localhost`, `127.0.0.1` or `[::1]` (any port) — a DNS-rebinding page arrives under its own name | 403 |
-| An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) or one added with `mcp::allowOrigin(...)`. Native MCP clients send none | 403 |
+| An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) — a browser page on any other origin, including another localhost port, is refused. Native MCP clients send none | 403 |
 | `POST /mcp` must be `Content-Type: application/json` (parameters such as `; charset=utf-8` are fine) | 415 |
-
-To call the server from your own web page (a debug UI served by a dev server,
-for example), allow its origin in code:
-
-```cpp
-mcp::allowOrigin("http://localhost:5173");
-```
-
-There is deliberately no environment variable for this: environment variables
-can narrow what the MCP server exposes, never widen it.
 
 To expose it directly instead, set both:
 
