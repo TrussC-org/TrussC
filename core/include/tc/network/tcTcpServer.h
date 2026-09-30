@@ -214,8 +214,15 @@ public:
     // Server management
     // -------------------------------------------------------------------------
 
-    // Start server (listen on specified port)
-    bool start(int port, int maxClients = 10);
+    // Start server (listen on specified port).
+    //
+    // maxClients caps how many clients can be connected at once (0 =
+    // unlimited, the default). A connection that arrives while the server is
+    // full is closed right away and a warning is logged, at most once every few
+    // seconds however many arrive. A slot frees up as soon as a client
+    // disconnects. The listen backlog is a fixed value, independent of
+    // maxClients.
+    bool start(int port, int maxClients = 0);
 
     // Stop server
     void stop();
@@ -311,7 +318,13 @@ private:
     void clientThreadFunc(int clientId);
     void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
     void notifyError(const std::string& msg, int code = 0, int clientId = -1);
-    void removeClient(int clientId);
+    bool removeClient(int clientId);   // false if the client was already gone
+
+    // Join the receive threads that have returned on their own (their client
+    // closed, failed or was dropped). Called from the accept loop, which wakes
+    // in short slices, so a finished thread is reclaimed promptly rather than
+    // held until stop().
+    void reapClientThreads();
 
 #ifdef _WIN32
     SOCKET serverSocket_ = INVALID_SOCKET;
@@ -320,7 +333,7 @@ private:
 #endif
 
     int port_ = 0;
-    int maxClients_ = 10;
+    int maxClients_ = 0;   // 0 = unlimited; read only by the accept thread
 
     std::thread acceptThread_;
     std::atomic<bool> running_{false};
@@ -328,6 +341,10 @@ private:
     std::unordered_map<int, TcpServerClient> clients_;
     std::unordered_map<int, std::thread> clientThreads_;
     std::unordered_map<int, std::thread> clientWriters_;
+
+    // Ids of receive threads that have returned and still need joining.
+    // Guarded by clientsMutex_; drained by reapClientThreads().
+    std::vector<int> finishedClientThreads_;
 
     // Shared: every send() looks a channel up through here, and so does every
     // getClientCount() a draw loop makes. Those are reads, and readers of a

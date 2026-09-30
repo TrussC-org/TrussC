@@ -134,6 +134,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `tcpServerClients/` — `TcpServer` client bookkeeping: the receive thread of
+  a client that leaves (closes or resets) is joined while the server runs,
+  not held until `stop()` (on Linux the address space stays flat over 200
+  clients; an unjoined thread leaves `/proc/self/task` but keeps its stack
+  mapped); `start(port, N)` closes connections beyond N, logs one warning per
+  burst and hands a freed slot to the next client; `start(port)` has no limit.
+  Linux only, in forked children: failing `accept()` calls (descriptors
+  exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning and log
+  once, and a thread that cannot start (`RLIMIT_NPROC`) closes that connection
+  and reports it through `onError` instead of ending the process. Each server
+  binds a port the OS just handed out, not a fixed one.
 - `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
   reference, so the App can't register itself from its constructor, and the
   code that creates it through a `shared_ptr` does. `runApp()`'s setup
