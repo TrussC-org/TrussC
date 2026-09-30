@@ -31,7 +31,10 @@ void tcApp::setup() {
 // update - Update Processing
 // =============================================================================
 void tcApp::update() {
-    if (serial.isInitialized()) {
+    // isConnected() also turns false when the device is unplugged: the
+    // read/write calls below notice it and close the port, and the else
+    // branch then reconnects once the device is back.
+    if (serial.isConnected()) {
         // Send message
         if (bSendSerialMessage && !messageToSend.empty()) {
             serial.writeBytes(messageToSend);
@@ -45,10 +48,14 @@ void tcApp::update() {
             numBytesToRead = 512;
         }
 
+        std::string buffer;
+        int numBytesRead = 0;
         if (numBytesToRead > 0) {
-            std::string buffer;
-            serial.readBytes(buffer, numBytesToRead);
+            // -1: the device was lost and the port is closed now
+            numBytesRead = serial.readBytes(buffer, numBytesToRead);
+        }
 
+        if (numBytesRead > 0) {
             // Process received data (split by newline, otherwise add to buffer)
             for (char c : buffer) {
                 if (c == '\n' || c == '\r') {
@@ -70,7 +77,8 @@ void tcApp::update() {
             readTime = getElapsedTime();
         }
     } else {
-        // If not connected, retry every 10 seconds
+        // If not connected, retry every 10 seconds. Reconnecting re-asserts
+        // DTR, which resets auto-reset boards such as most Arduinos.
         float now = getElapsedTime();
         if (now - timeLastTryConnect > 10.0f) {
             deviceList = serial.listDevices();
@@ -102,8 +110,8 @@ void tcApp::draw() {
 
     // Connection status
     std::string connStr = "Serial connected: ";
-    connStr += serial.isInitialized() ? "true" : "false";
-    if (serial.isInitialized()) {
+    connStr += serial.isConnected() ? "true" : "false";
+    if (serial.isConnected()) {
         connStr += " (" + serial.getDevicePath() + ")";
     }
     drawBitmapString(connStr, 50, 40);

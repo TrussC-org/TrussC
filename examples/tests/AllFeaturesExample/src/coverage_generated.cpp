@@ -2437,11 +2437,13 @@ struct Cover_Serial : af::Scope<Serial> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)Serial();
 #endif
+        (void)af::val<Serial>().onDisconnect;
         (void)af::val<Serial>().printDevices();
         (void)af::val<Serial>().listDevices();
         (void)af::val<Serial>().setup(af::val<const std::string>(), af::val<int>());
         (void)af::val<Serial>().setup(af::val<int>(), af::val<int>());
         (void)af::val<Serial>().close();
+        (void)af::val<Serial>().isConnected();
         (void)af::val<Serial>().isInitialized();
         (void)af::val<Serial>().getDevicePath();
         (void)af::val<Serial>().available();
@@ -2466,6 +2468,15 @@ struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
         (void)af::val<SerialDeviceInfo>().getDeviceID();
         (void)af::val<SerialDeviceInfo>().getDevicePath();
         (void)af::val<SerialDeviceInfo>().getDeviceName();
+    }
+};
+
+struct Cover_SerialDisconnectEventArgs : af::Scope<SerialDisconnectEventArgs> {
+    static void run() {
+        (void)af::val<SerialDisconnectEventArgs>().portName;
+        (void)af::val<SerialDisconnectEventArgs>().baudRate;
+        (void)af::val<SerialDisconnectEventArgs>().reason;
+        (void)af::val<SerialDisconnectEventArgs>().wasClean;
     }
 };
 
@@ -3489,6 +3500,7 @@ void af::coverGenerated() {
     af_generated::Cover_SendResult::run();
     af_generated::Cover_Serial::run();
     af_generated::Cover_SerialDeviceInfo::run();
+    af_generated::Cover_SerialDisconnectEventArgs::run();
     af_generated::Cover_Shader::run();
     af_generated::Cover_ShaderVertex::run();
     af_generated::Cover_Sound::run();

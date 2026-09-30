@@ -30,10 +30,21 @@ When enabled:
 
 ### Related: `TRUSSC_LOG_FILE`
 
-Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes the app
-call `setLogFile()` before `setup()` runs, so every log line — including
-setup-time output — is appended to that file with zero app code. This is how a
-supervisor process (e.g. `anchorbolt start`) captures logs from an unmodified app.
+Independent of MCP mode, setting `TRUSSC_LOG_FILE=/path/to/app.log` makes a
+native app call `setLogFile()` before the window and graphics start
+(`runApp()`, before `sapp_run()`), so every log line — including setup-time
+output — is appended to that file with zero app code. (Web builds don't read
+`TRUSSC_LOG_FILE`.) sokol's own errors, warnings and panics go through the
+logger too, and lines logged from worker threads land whole. A window or GPU
+setup failure reaches the file where sokol reports it as text: on Linux (no X
+display; GLX setup, framebuffer config, GL context or window creation; EGL
+setup in GLES3 builds) and on iOS (Metal swapchain textures). On the web,
+WebGPU instance, adapter and device request failures reach the logger (the
+browser console and `onLog`), not a file. On Android sokol's app messages
+(lifecycle, the app thread's startup) reach the logger too, but an EGL setup
+failure is not logged; on Windows and macOS a window or GPU setup failure is
+not logged yet. This is how a supervisor process (e.g. `anchorbolt start`)
+captures logs from an unmodified app.
 
 The audio engine reports through the logger too, so the file also receives
 the plays it had to drop (`Sound::play()` returned false: every voice busy, a

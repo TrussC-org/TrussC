@@ -1551,7 +1551,7 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 
 ## Logging
 
-Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`.
+Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
 
 ### How do I write logs to a file? (getLogger + setLogFile)
 
@@ -1572,6 +1572,7 @@ EventListener logTap_ = getLogger().onLog.listen([](LogEventArgs& e) {
     // e.timestamp / e.level / e.message — e.g. forward to the network
 });
 ```
+The listener runs on whichever thread logged (pass `Deliver::Main` to `listen` before touching nodes or the GPU), outside the logger's own lock, so it may log too.
 
 ## Window & fullscreen
 
@@ -3055,7 +3056,7 @@ LoadResult LoadResult::success()  // Make a success result (static)
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-const std::string & Logger::getLogFilePath() const  // Get the path of the current log file
+std::string Logger::getLogFilePath() const  // Get the path of the current log file
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
@@ -3659,22 +3660,23 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes available to read
-void Serial::close()  // Disconnect and release resources
+int Serial::available() const  // Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
+void Serial::close()  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
 void Serial::drain()  // Wait until output transmission completes
 void Serial::flush()  // Clear both input and output buffers
 void Serial::flushInput()  // Clear the input buffer
 void Serial::flushOutput()  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
-const std::string & Serial::getDevicePath() const  // Current device path
-bool Serial::isInitialized() const  // Whether currently connected
+std::string Serial::getDevicePath() const  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
+bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
+bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices
 void Serial::printDevices()  // Log all available serial devices
-int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error
-int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error
+int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)
+int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)
 bool Serial::setup(const std::string & portName, int baudRate) [+1]  // Connect to a port by path or by index from listDevices()
 bool Serial::writeByte(unsigned char byte)  // Write a single byte; true on success
-int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error
+int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)
 ```
 
 ### SerialDeviceInfo — Info for one serial device (from Serial::listDevices)
@@ -3683,6 +3685,11 @@ int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; re
 int SerialDeviceInfo::getDeviceID() const  // Device index
 const std::string & SerialDeviceInfo::getDeviceName() const  // Device name
 const std::string & SerialDeviceInfo::getDevicePath() const  // Device path
+```
+
+### SerialDisconnectEventArgs — Event args for Serial::onDisconnect
+
+```cpp
 ```
 
 ### Shader — GPU shader program (vertex + fragment) with a begin/end/setUniform API for custom-shaded drawing
