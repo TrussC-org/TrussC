@@ -7709,9 +7709,9 @@ description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
 ["Serial::getDevicePath"]
-description.en = "Current device path; a copy, since another thread's setup() may change it"
-description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す"
-description.ko = "현재 장치 경로. 다른 스레드의 setup()이 바꿀 수 있으므로 복사본을 반환"
+description.en = "Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call"
+description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す。setup()、close()、I/O 呼び出しを待たない"
+description.ko = "현재 장치 경로. 다른 스레드의 setup()이 바꿀 수 있으므로 복사본을 반환. setup(), close(), I/O 호출을 기다리지 않음"
 
 ["Serial::isConnected"]
 keywords = ["unplug", "disconnect", "reconnect", "device lost", "connected"]
@@ -7739,19 +7739,28 @@ stays true until one of those calls reports the loss (the USB worker thread
 that finds it only records it).
 
 One `Serial` may be used from several threads. Its I/O calls (`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, `isConnected()`, the flush calls,
-`drain()`) never wait for each other. Opening and closing (`setup()`,
-`close()`, closing a lost port, the destructor, the moves) wait until the I/O
-calls in progress have returned, so no call ever uses a closed port, and new
-I/O calls wait behind them. Which thread reads or writes what, and in which
-order, is still up to the app. So a long `writeBytes()` (Windows, Android; see
-[`writeBytes()`](#Serial::writeBytes)) or `drain()` delays a `setup()` /
-`close()` on another thread, not the other I/O calls. On Android `close()`,
-the destructor and a move assignment also wait for the USB worker thread to
-stop (up to about 250 ms once connected). On Windows the system itself runs
-the calls on one port handle one at a time (it is not opened for overlapped
-I/O), so there `available()` and the reads still wait for a `writeBytes()` in
-progress; `isConnected()` does not.
+`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) never
+wait for each other. Opening and closing (`setup()`, `close()`, closing a lost
+port, the destructor, the moves) wait until the I/O calls in progress have
+returned, so no call ever uses a closed port, and new I/O calls wait behind
+them. `isConnected()` and [`getDevicePath()`](#Serial::getDevicePath) wait
+for neither: they answer with the state at that moment. Which thread reads or
+writes what, and in which order, is still up to the app. So a long
+`writeBytes()` (Windows, Android; see [`writeBytes()`](#Serial::writeBytes))
+or `drain()` delays a `setup()` / `close()` on another thread, not the other
+I/O calls. On Android `close()`, the destructor and a move assignment also
+wait for the USB worker thread to stop (up to about 250 ms once connected).
+On Windows the system itself runs the calls on one port handle one at a time
+(it is not opened for overlapped I/O), so there `available()`, the reads and
+the flush calls still wait for a `writeBytes()` in progress.
+
+A [Logger](#Logger) listener that runs inline may call this `Serial`. One
+exception, on Android: the USB worker thread logs too (permission timeout,
+connected, lost connection, RX overflow, open errors), and `close()`,
+`setup()`, the destructor and a move wait for that thread with the lock held.
+A listener running inline on the worker thread that calls an I/O call,
+`setup()` or `close()` may then deadlock; `isConnected()` and
+`getDevicePath()` are safe. Listen with `Deliver::Main` to be safe.
 '''
 details.ja = '''
 USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
@@ -7772,18 +7781,27 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
 
 1つの `Serial` を複数のスレッドから使ってよい。I/O の呼び出し（`available()`、
-`readBytes()`、`readByte()`、`writeBytes()`、`isConnected()`、flush 系、`drain()`）
-どうしは互いを待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、
-デストラクタ、ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを
-触るので、閉じたポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで
-待つ。どのスレッドが何をどの順に読み書きするかは、アプリ側で決める必要がある。
-つまり時間のかかる `writeBytes()`（Windows、Android。
+`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）どうしは互いを
+待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
+ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを触るので、閉じた
+ポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで待つ。
+`isConnected()` と [`getDevicePath()`](#Serial::getDevicePath) はどちらも待たず、
+その時点の状態を返す。どのスレッドが何をどの順に読み書きするかは、アプリ側で
+決める必要がある。つまり時間のかかる `writeBytes()`（Windows、Android。
 [`writeBytes()`](#Serial::writeBytes) 参照）や `drain()` が遅らせるのは、別スレッドの
 `setup()` / `close()` で、ほかの I/O 呼び出しではない。Android の `close()`、
 デストラクタ、ムーブ代入は、USB ワーカースレッドが止まるのも待つ（接続後なら最大で
 約 250 ms）。Windows では、システム自体が1つのポートハンドルへの呼び出しを1つずつ
 実行する（オーバーラップ I/O で開いていないため）。そのため Windows では
-`available()` と読み込みは実行中の `writeBytes()` を待つ。`isConnected()` は待たない。
+`available()`、読み込み、flush 系は実行中の `writeBytes()` を待つ。
+
+インラインで動く [Logger](#Logger) のリスナーから、この `Serial` を呼んでよい。
+例外は Android で、USB ワーカースレッドもログを出す（許可のタイムアウト、接続、
+接続の喪失、受信バッファのあふれ、オープンのエラー）。`close()`、`setup()`、
+デストラクタ、ムーブは、ロックを持ったままそのスレッドの終了を待つ。そのため
+ワーカースレッド上でインラインに動くリスナーが I/O 呼び出し、`setup()`、`close()` を
+呼ぶとデッドロックしうる。`isConnected()` と `getDevicePath()` は安全。確実にするには
+`Deliver::Main` で listen する。
 '''
 details.ko = '''
 USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
@@ -7804,18 +7822,25 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
 
 하나의 `Serial`을 여러 스레드에서 사용해도 된다. I/O 호출(`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, `isConnected()`, flush 계열, `drain()`)끼리는
-서로를 기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리,
-소멸자, 이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로,
-닫힌 포트를 쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. 어느
-스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다. 즉 오래 걸리는
-`writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes) 참조)나
-`drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O 호출이
-아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
+`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)끼리는 서로를
+기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
+이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로, 닫힌 포트를
+쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. `isConnected()`와
+[`getDevicePath()`](#Serial::getDevicePath)는 어느 쪽도 기다리지 않고 그 시점의
+상태를 반환한다. 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다.
+즉 오래 걸리는 `writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes)
+참조)나 `drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O
+호출이 아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
 기다린다(연결 후라면 최대 약 250 ms). Windows에서는 시스템 자체가 하나의 포트
 핸들에 대한 호출을 하나씩 실행한다(오버랩 I/O로 열지 않았기 때문). 그래서
-Windows에서는 `available()`과 읽기가 진행 중인 `writeBytes()`를 기다린다.
-`isConnected()`는 기다리지 않는다.
+Windows에서는 `available()`, 읽기, flush 계열이 진행 중인 `writeBytes()`를 기다린다.
+
+인라인으로 실행되는 [Logger](#Logger) 리스너에서 이 `Serial`을 호출해도 된다. 예외는
+Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연결, 연결 소실, 수신
+버퍼 넘침, 열기 오류). `close()`, `setup()`, 소멸자, 이동은 락을 잡은 채 그 스레드가
+멈추기를 기다린다. 그래서 워커 스레드에서 인라인으로 실행되는 리스너가 I/O 호출,
+`setup()`, `close()`를 호출하면 교착될 수 있다. `isConnected()`와
+`getDevicePath()`는 안전하다. 확실히 하려면 `Deliver::Main`으로 listen한다.
 '''
 
 ["Serial::isInitialized"]
