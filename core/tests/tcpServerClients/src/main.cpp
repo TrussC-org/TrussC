@@ -1493,15 +1493,16 @@ static void receiveThreadFailureChild() {
     TcpServer server;
     atomic<int> connects{0}, disconnects{0}, connectId{-1}, disconnectId{-1};
     atomic<int> errors{0}, lastErrorClientId{-2};
-    // The client whose receive thread fails gets a byte queued as it is
-    // announced. Its writer's onSendComplete listener then waits for the
-    // disconnect the accept thread reports: that thread must not wait for the
-    // writer in between.
+    // The client whose receive thread fails gets an empty payload queued as
+    // it is announced (empty, so no write can fail and add an onError). Its
+    // writer's onSendComplete listener then waits for the disconnect the
+    // accept thread reports: that thread must not wait for the writer in
+    // between.
     atomic<bool> probeNext{false}, writerProbeDone{false}, writerSawDisconnect{false};
     EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs& e) {
         connectId = e.clientId;
         ++connects;
-        if (probeNext.exchange(false)) server.sendAsync(e.clientId, string("x"));
+        if (probeNext.exchange(false)) server.sendAsync(e.clientId, string());
     });
     EventListener onSent = server.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
         if (e.clientId != connectId.load()) return;
@@ -1535,7 +1536,7 @@ static void receiveThreadFailureChild() {
     g_threadStartsBeforeFailure = 1;
     rawsocket_t b = connectTo(port);
     check("receive thread: the connection is closed",
-          b != kBadSocket && closedAfterData(b, 3000));
+          b != kBadSocket && closedByServer(b, 3000));
     check("receive thread: the client is announced, then disconnected",
           waitUntil(1000, [&] { return connects.load() == 1 && disconnects.load() == 1; }) &&
           connectId.load() == disconnectId.load());
