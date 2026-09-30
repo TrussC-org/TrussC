@@ -36,8 +36,9 @@
 //     onReceive, or two onSendComplete; from a plain thread together with
 //     onSendComplete (the plain one waits for that listener to finish), or
 //     with onClientConnect once the plain one has taken the accept thread
-//     (the listening socket is still closed before the listener's stop()
-//     returns); and from two plain threads. The stop hook orders the plain thread and the
+//     (the accept-taken hook orders them; the listening socket is still
+//     closed before the listener's stop() returns); and from two plain
+//     threads. The stop hook orders the plain thread and the
 //     writer. Every client ends up disconnected. start()
 //     while another thread's stop() still waits for the accept thread waits
 //     for it too, and so does start() while that stop() has joined the accept
@@ -1147,16 +1148,18 @@ static void stopOnAcceptThreadAfterAnotherTookIt() {
     TcpServer* srv = server.get();
     atomic<int> connects{0}, oldPort{0};
     atomic<bool> plainIn{false}, listenerStopped{false}, refusedAfterStop{false};
+    atomic<bool> plainTook{false}, sawPlainTook{false};
 #ifdef __linux__
     atomic<unsigned long> listenInode{0};
     atomic<bool> socketClosed{false};
 #endif
     EventListener onCon = srv->onClientConnect.listen([&, srv](TcpClientConnectEventArgs&) {
         if (connects++ != 0) return;
-        // The plain thread's stop() has cleared isRunning(); give it time to
-        // take the accept thread and start waiting for it
-        waitUntil(3000, [&] { return plainIn.load() && !srv->isRunning(); });
-        this_thread::sleep_for(chrono::milliseconds(200));
+        // The plain thread's stop() has taken the accept thread out of the
+        // server and is about to wait for it (the accept-taken hook). Without
+        // that, this stop() could come first and the case would not cover
+        // what it is for
+        sawPlainTook = waitUntil(3000, [&] { return plainTook.load(); });
         srv->stop();
         // Nothing may be listening on the old port any more
         rawsocket_t probe = connectTo(oldPort.load());
@@ -1181,6 +1184,11 @@ static void stopOnAcceptThreadAfterAnotherTookIt() {
     rawsocket_t c = connectTo(port);
     const bool inListener = c != kBadSocket && waitUntil(3000, [&] { return connects.load() == 1; });
 
+    // On the plain thread, once its stop() has taken the accept thread and
+    // before it waits for it
+    internal::setTcpServerAcceptTakenHookForTests([&] {
+        if (plainIn.load()) plainTook = true;
+    });
     atomic<bool> plainReturned{false}, stoppedAtReturn{false};
     thread plain([&, srv] {
         if (!inListener) return;
@@ -1190,7 +1198,10 @@ static void stopOnAcceptThreadAfterAnotherTookIt() {
         plainReturned = true;
     });
     const bool returned = inListener && waitUntil(5000, [&] { return plainReturned.load(); });
+    internal::setTcpServerAcceptTakenHookForTests(nullptr);
 
+    check((string(prefix) + ": the plain stop() takes the accept thread first").c_str(),
+          sawPlainTook.load());
     check((string(prefix) + ": the listener's stop() returns").c_str(), listenerStopped.load());
     check((string(prefix) + ": the other stop() returns once the listener is done").c_str(),
           returned && stoppedAtReturn.load());

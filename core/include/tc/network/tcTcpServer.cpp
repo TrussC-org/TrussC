@@ -213,18 +213,23 @@ bool isServerThread(const TcpServer* server) {
     return tlAcceptThreadOf == server || tlClientThreadOf == server;
 }
 
-// Set by internal::setTcpServerStopHookForTests(), empty otherwise
+// Set by internal::setTcpServerStopHookForTests() and
+// internal::setTcpServerAcceptTakenHookForTests(), empty otherwise
 std::mutex g_stopHookMutex;
 std::function<void()> g_stopHook;
+std::function<void()> g_acceptTakenHook;
 
-void runStopHookForTests() {
+void runHookForTests(const std::function<void()>& slot) {
     std::function<void()> hook;
     {
         std::lock_guard<std::mutex> lock(g_stopHookMutex);
-        hook = g_stopHook;
+        hook = slot;
     }
     if (hook) hook();
 }
+
+void runStopHookForTests() { runHookForTests(g_stopHook); }
+void runAcceptTakenHookForTests() { runHookForTests(g_acceptTakenHook); }
 
 } // namespace
 
@@ -233,6 +238,11 @@ namespace internal {
 void setTcpServerStopHookForTests(std::function<void()> fn) {
     std::lock_guard<std::mutex> lock(g_stopHookMutex);
     g_stopHook = std::move(fn);
+}
+
+void setTcpServerAcceptTakenHookForTests(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(g_stopHookMutex);
+    g_acceptTakenHook = std::move(fn);
 }
 
 } // namespace internal
@@ -460,6 +470,7 @@ void TcpServer::stop() {
     StopInProgress counted(this, &accept);
 
     if (accept.joinable()) {
+        runAcceptTakenHookForTests();
         accept.join();
         runStopHookForTests();
     }

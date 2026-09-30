@@ -118,6 +118,13 @@ struct TcpSendChannel {
 // empty fn (the default) removes it. State lives in tcTcpServer.cpp.
 void setTcpServerStopHookForTests(std::function<void()> fn);
 
+// Test hook, not a user setting: stop(), on a thread that has just taken the
+// accept thread out of the server, calls fn before it waits for that thread
+// to end, so a test can tell that another stop() arrives only after that.
+// Applies to every TcpServer; an empty fn (the default) removes it. State
+// lives in tcTcpServer.cpp.
+void setTcpServerAcceptTakenHookForTests(std::function<void()> fn);
+
 } // namespace internal
 
 // =============================================================================
