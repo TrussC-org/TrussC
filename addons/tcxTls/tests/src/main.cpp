@@ -1,8 +1,11 @@
 // =============================================================================
 // tcxTls tests - headless behavioral test for TlsClient (no window).
 //
-// Built and run by CI on every push/PR across macOS / Windows / Linux via
-// examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
+// Built and run by the daily CI workflow (daily.yml) on macOS / Windows /
+// Linux, via examples/build_all.py --addon-tests-only --include-daily (exit
+// 0 = pass, non-zero = fail). It is not part of the per-PR lane: the
+// daily-only marker in this directory keeps it out, since it builds mbedTLS.
+// Locally: examples/build_all.py --addon-tests-only --include-daily.
 //
 // The TLS peer is this process's own: an mbedTLS server on 127.0.0.1 with a
 // key and a self-signed certificate made at startup, so nothing leaves the
