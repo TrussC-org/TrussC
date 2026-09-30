@@ -8215,9 +8215,9 @@ description.ja = "メモリバッファからWAVデータをデコード"
 description.ko = "메모리 버퍼에서 WAV 데이터를 디코딩"
 
 ["SoundBuffer::mixFrom"]
-description.en = "Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed."
-description.ja = "別のバッファをoffsetSamplesから加算ミックスし、必要ならこのバッファを拡張する"
-description.ko = "다른 버퍼를 offsetSamples부터 가산 믹스하고, 필요하면 이 버퍼를 확장"
+description.en = "Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged."
+description.ja = "別のバッファをoffsetSamplesから加算ミックスし、必要ならこのバッファを拡張する。offsetSamplesはフレーム単位(numSamplesと同じチャンネルあたりのサンプル数)。両バッファのチャンネル数が同じである必要があり、異なる場合は何もミックスせずエラーをログに出す"
+description.ko = "다른 버퍼를 offsetSamples부터 가산 믹스하고, 필요하면 이 버퍼를 확장. offsetSamples는 프레임 단위(numSamples와 같은 채널당 샘플 수). 두 버퍼의 채널 수가 같아야 하며, 다르면 아무것도 믹스하지 않고 에러를 로그에 남김"
 
 ["SoundBuffer::numSamples"]
 description.en = "Number of samples per channel (frame count)"
