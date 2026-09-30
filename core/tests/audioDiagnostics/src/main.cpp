@@ -45,6 +45,8 @@
 //   leaves the engine uninitialized and logs one error through the logger,
 //   naming the requested device (also one that was not found and fell back
 //   to the default); a later init() succeeds (#279).
+// - An init() on the null backend the test requested logs no "no usable
+//   audio backend" warning (that warning is for a fallback to it).
 // =============================================================================
 
 #include <TrussC.h>
@@ -663,6 +665,14 @@ int main() {
         check("init() called again later succeeds", engine.init(settings) && engine.isInitialized());
         engine.shutdown();
     }
+
+    // --- the requested null backend is not a fallback ----------------------------
+    // Every init() above ran on the null backend the test asked for, so none
+    // may log the "no usable audio backend" warning. (Landing on it by
+    // fallback, with no real backend present, can't be forced here.)
+    check("the requested null backend logs no fallback warning",
+          countLogs(LogLevel::Warning, "no usable audio backend") == 0,
+          lastLog(LogLevel::Warning));
 
     fs::remove(wav, ec);
     logSub.disconnect();

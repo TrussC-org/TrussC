@@ -56,6 +56,11 @@ ma_result maDecoderInitPathA(const fs::path& path,
 // enumeration and MicInput open miniaudio's null backend only.
 std::atomic<bool> g_nullBackendForTests{false};
 
+// Whether the engine's persistent context was opened with the null backend
+// on request (the test hook above), so landing on it is not a fallback.
+// Main thread only: written and read in AudioEngine::init().
+bool g_engineNullBackendRequested = false;
+
 // Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
 std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
 const ma_backend kNullBackend = ma_backend_null;
@@ -1035,6 +1040,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
             return false;
         }
         context_ = ctx;
+        g_engineNullBackendRequested = g_nullBackendForTests.load(std::memory_order_relaxed);
     }
     ma_context* ctxArg = static_cast<ma_context*>(context_);
 
@@ -1107,6 +1113,12 @@ bool AudioEngine::init(const AudioSettings& settings) {
                              << playingSounds_.size() << " voices, "
                              << ma_get_backend_name(ctxArg->backend) << ": "
                              << device->playback.name << ")";
+
+    // miniaudio's default backend order ends with the null backend, so with
+    // no usable real backend init() still succeeds on a silent device.
+    if (ctxArg->backend == ma_backend_null && !g_engineNullBackendRequested) {
+        logWarning("AudioEngine") << "no usable audio backend; output is silent (miniaudio Null device)";
+    }
 
     // Fire audioDeviceChanged with the resolved device's real info.
     // ma_device's playback.name is populated by ma_device_init even when

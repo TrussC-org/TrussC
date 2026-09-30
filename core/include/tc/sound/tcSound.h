@@ -877,8 +877,10 @@ public:
     // engine it re-initializes live: the device is reopened with the new
     // settings and playing voices move over, keeping their position.
     //
-    // Returns false when no output device can be opened (none present, the
-    // requested one refused, or no audio backend); the failure is logged
+    // With no usable audio backend, miniaudio falls back to its Null
+    // backend: init() succeeds on a silent device and logs a warning.
+    // Returns false when no output device can be opened (none present, or
+    // the requested one refused); the failure is logged
     // through logError("AudioEngine"), naming the requested device, and the
     // engine is left uninitialized. That holds for a re-init too: the
     // running device is closed before the new one is tried, so a failed

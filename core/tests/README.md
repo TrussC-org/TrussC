@@ -88,7 +88,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   An `AudioEngine::init()` that can't open the output device (forced with
   more channels than miniaudio accepts) returns false, logs one error through
   the logger that names the requested device, and a later `init()` succeeds
-  (#279).
+  (#279). An `init()` on the null backend the test requested logs no
+  "no usable audio backend" warning (that warning is for a fallback to it).
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
