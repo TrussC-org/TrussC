@@ -34,8 +34,11 @@
 //   the buffer: a channel count below 1, or a byte size that is not a whole
 //   number of frames, fails (and is logged); a valid load leaves numSamples *
 //   channels == samples.size(); 32-bit big-endian samples are byte-swapped.
-//   The sample count products the loaders size buffers with don't wrap where
-//   size_t is 32-bit (checked here against a 32-bit limit).
+//   A failed load keeps channels, sampleRate, numSamples and the path.
+//   The sample count the loaders size buffers with is checked against the
+//   limit before the product is formed: a product that would wrap 64 bits is
+//   refused, and a 32-bit limit stands in for a 32-bit size_t. (The 64-bit
+//   frame size in loadPcmFromMemory only matters on a 32-bit build.)
 // =============================================================================
 
 #include <TrussC.h>
@@ -176,17 +179,22 @@ static void checkPcmLoading() {
     const size_t kSizeMax = numeric_limits<size_t>::max();
 
     // Sample count products: checked before they are formed. maxCount =
-    // UINT32_MAX stands in for a 32-bit size_t, so the 32-bit case runs here too.
+    // UINT32_MAX stands in for a 32-bit size_t's limit.
     {
         size_t n = 0;
+        // Zero frames: only the channel check refuses these (the limit check
+        // alone would accept them).
         check("pcm: sample count of 0 channels is refused",
-              !internal::interleavedSampleCount(10, 0, kSizeMax, n));
+              !internal::interleavedSampleCount(0, 0, kSizeMax, n));
         check("pcm: sample count of negative channels is refused",
-              !internal::interleavedSampleCount(10, -2, kSizeMax, n));
+              !internal::interleavedSampleCount(0, -2, kSizeMax, n));
+        // Formed first, this product wraps a 64-bit size_t to 4.
+        check("pcm: sample count wrapping 64 bits is refused",
+              !internal::interleavedSampleCount(0x4000000000000001ull, 4, kSizeMax, n));
         check("pcm: sample count at a 32-bit size_t's limit is accepted",
               internal::interleavedSampleCount(0x3FFFFFFFull, 4, 0xFFFFFFFFu, n) && n == 0xFFFFFFFCu,
               to_string(n));
-        check("pcm: sample count past a 32-bit size_t is refused (no wrap)",
+        check("pcm: sample count past a 32-bit limit is refused",
               !internal::interleavedSampleCount(0x40000001ull, 4, 0xFFFFFFFFu, n));
         check("pcm: longest OGG length x 16 channels is refused on a 32-bit size_t",
               !internal::interleavedSampleCount(0xFFFFFFFFull, 16, 0xFFFFFFFFu, n));
@@ -211,26 +219,33 @@ static void checkPcmLoading() {
           buf.samples.size() == 6 && buf.samples[0] == 32767 / 32768.0f && buf.samples[1] == -1.0f &&
           buf.samples[2] == 0.0f && buf.samples[3] == 1 / 32768.0f && buf.samples[5] == 0.5f);
 
+    // A failed load keeps the buffer's format; every failing call below passes
+    // a different rate, so an early sampleRate assignment shows.
+    auto unchanged = [&] {
+        return buf.channels == 2 && buf.sampleRate == 48000 && buf.numSamples == 3 &&
+               pcmConsistent(buf);
+    };
+
     // Invalid channel counts fail and leave the buffer as it was
     const size_t errorsBefore = countLogs(LogLevel::Error, "invalid PCM channel count");
     for (int ch : {0, -1, numeric_limits<int>::min()}) {
-        const LoadResult r = buf.loadPcmFromMemory(stereo16, sizeof(stereo16), ch, 48000);
+        const LoadResult r = buf.loadPcmFromMemory(stereo16, sizeof(stereo16), ch, 22050);
         check("pcm: " + to_string(ch) + " channels fails with UnsupportedFormat",
               !r && r.error == LoadError::UnsupportedFormat, loadErrorName(r.error));
     }
     check("pcm: each invalid channel count is logged",
           countLogs(LogLevel::Error, "invalid PCM channel count") == errorsBefore + 3,
           lastLog(LogLevel::Error));
-    check("pcm: a failed load leaves the buffer as it was",
-          buf.channels == 2 && buf.numSamples == 3 && pcmConsistent(buf));
+    check("pcm: a failed load leaves the buffer as it was", unchanged(),
+          to_string(buf.sampleRate) + " Hz");
 
     // A byte size that is not a whole number of frames
     auto sizeFails = [&](const string& name, const void* data, size_t size, int ch, int bits) {
-        const LoadResult r = buf.loadPcmFromMemory(data, size, ch, 48000, bits);
+        const LoadResult r = buf.loadPcmFromMemory(data, size, ch, 22050, bits);
         check("pcm: " + name + " fails with DecodeFailed",
               !r && r.error == LoadError::DecodeFailed, loadErrorName(r.error));
-        check("pcm: " + name + " leaves the buffer as it was",
-              buf.channels == 2 && buf.numSamples == 3 && pcmConsistent(buf));
+        check("pcm: " + name + " leaves the buffer as it was", unchanged(),
+              to_string(buf.sampleRate) + " Hz");
     };
     const float floats[8] = {0.25f, -0.25f, 1.0f, -1.0f, 0.5f, -0.5f, 0.125f, -0.125f};
     sizeFails("16-bit mono, odd byte count", stereo16, 3, 1, 16);
@@ -438,6 +453,10 @@ int main() {
               internal::pathToUtf8(reused.getPath()));
         check("path: load() of the file records it again", (bool)reused.load(wav) && reused.getPath() == wav);
         const int16_t pcm[64] = {};
+        check("path: a failed PCM load keeps it",
+              !reused.loadPcmFromMemory(pcm, 3, 1, 48000) && reused.getPath() == wav &&
+              !reused.loadPcmFromMemory(pcm, sizeof(pcm), 0, 48000) && reused.getPath() == wav,
+              internal::pathToUtf8(reused.getPath()));
         check("path: PCM from memory clears it",
               (bool)reused.loadPcmFromMemory(pcm, sizeof(pcm), 1, 48000) && reused.getPath().empty());
         reused.loadWav(wav);
