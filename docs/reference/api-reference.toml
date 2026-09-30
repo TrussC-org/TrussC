@@ -8191,9 +8191,9 @@ description.ja = "メモリバッファからOGG Vorbisデータをデコード"
 description.ko = "메모리 버퍼에서 OGG Vorbis 데이터를 디코딩"
 
 ["SoundBuffer::loadPcmFromMemory"]
-description.en = "Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths."
-description.ja = "形式を明示してメモリから生のinterleaved PCM(16-bit signedまたは32-bit float)を読み込む。非対応のビット深度ではfalseを返す"
-description.ko = "형식을 명시해 메모리에서 raw interleaved PCM(16-bit signed 또는 32-bit float)을 로드. 미지원 비트 심도에서는 false 반환"
+description.en = "Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold."
+description.ja = "形式を明示してメモリから生のinterleaved PCM(16-bit signedまたは32-bit float)を読み込む。非対応のビット深度、1未満のチャンネル数、フレーム単位で割り切れないデータサイズ、バッファに収まらないサンプル数ではfalseを返す"
+description.ko = "형식을 명시해 메모리에서 raw interleaved PCM(16-bit signed 또는 32-bit float)을 로드. 미지원 비트 심도, 1 미만의 채널 수, 프레임 단위로 나누어떨어지지 않는 데이터 크기, 버퍼에 담을 수 없는 샘플 수에서는 false 반환"
 
 ["SoundBuffer::loadWav"]
 description.en = "Decode a WAV file into PCM."

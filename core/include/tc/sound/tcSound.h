@@ -73,6 +73,22 @@ protected:
 };
 
 
+namespace internal {
+
+// Interleaved sample count of `frames` frames of `channels` channels, for
+// sizing SoundBuffer::samples. False when channels < 1 or when the count
+// exceeds maxCount (pass samples.max_size()). The product is checked before
+// it is formed, so it cannot wrap where size_t is 32-bit (wasm32).
+inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCount,
+                                   size_t& outCount) {
+    if (channels < 1) return false;
+    if (frames > maxCount / (size_t)channels) return false;
+    outCount = (size_t)frames * (size_t)channels;
+    return true;
+}
+
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Sound Buffer (decoded data)
 // ---------------------------------------------------------------------------
@@ -158,7 +174,10 @@ public:
     std::string deferredAacPath_;  // Path for deferred AAC loading (Web only)
 #endif
 
-    // Load raw PCM data (16-bit signed, little-endian)
+    // Load raw interleaved PCM: 16-bit signed integer or 32-bit float,
+    // little-endian unless bigEndian is set. dataSize must be a whole number
+    // of frames (bitsPerSample / 8 * numChannels bytes each); anything else
+    // fails without touching the buffer.
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
@@ -167,15 +186,38 @@ public:
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "unsupported bits per sample: " + std::to_string(bitsPerSample));
         }
+        if (numChannels < 1) {
+            logError("SoundBuffer") << "invalid PCM channel count: " << numChannels;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "invalid PCM channel count: " + std::to_string(numChannels));
+        }
+        // Frame size in 64 bits: bytes * channels can exceed a 32-bit size_t.
+        const size_t bytesPerSample = (size_t)bitsPerSample / 8;
+        const uint64_t frameBytes = (uint64_t)bytesPerSample * (uint64_t)numChannels;
+        if ((uint64_t)dataSize % frameBytes != 0) {
+            logError("SoundBuffer") << "PCM data size " << dataSize
+                                    << " is not a whole number of " << frameBytes << "-byte frames";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data size " + std::to_string(dataSize) +
+                                    " is not a whole number of " + std::to_string(frameBytes) +
+                                    "-byte frames");
+        }
+        const uint64_t frameCount = (uint64_t)dataSize / frameBytes;
+        size_t sampleCount = 0;
+        if (!internal::interleavedSampleCount(frameCount, numChannels, samples.max_size(),
+                                              sampleCount)) {
+            logError("SoundBuffer") << "PCM data too large: " << dataSize << " bytes";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data too large: " + std::to_string(dataSize) + " bytes");
+        }
 
         path_.clear();
         channels = numChannels;
         sampleRate = rate;
+        numSamples = (size_t)frameCount;
 
         if (bitsPerSample == 16) {
             // 16-bit signed integer -> float
-            size_t sampleCount = dataSize / 2;
-            numSamples = sampleCount / channels;
             samples.resize(sampleCount);
 
             const int16_t* src = static_cast<const int16_t*>(data);
@@ -188,13 +230,20 @@ public:
                 samples[i] = s / 32768.0f;
             }
         } else {
-            // 32-bit float
-            size_t sampleCount = dataSize / 4;
-            numSamples = sampleCount / channels;
+            // 32-bit float: dataSize == sampleCount * sizeof(float) here
             samples.resize(sampleCount);
-
-            const float* src = static_cast<const float*>(data);
-            std::memcpy(samples.data(), src, dataSize);
+            const size_t copyBytes = sampleCount * sizeof(float);
+            std::memcpy(samples.data(), data, copyBytes);
+            if (bigEndian) {
+                // Reverse the bytes of each sample
+                for (size_t i = 0; i < sampleCount; i++) {
+                    uint32_t u;
+                    std::memcpy(&u, &samples[i], sizeof(u));
+                    u = (u >> 24) | ((u >> 8) & 0x0000FF00u) |
+                        ((u << 8) & 0x00FF0000u) | (u << 24);
+                    std::memcpy(&samples[i], &u, sizeof(u));
+                }
+            }
         }
 
         logVerbose("SoundBuffer") << "loaded PCM from memory (" << channels << " ch, "
