@@ -30,6 +30,8 @@ namespace trussc { namespace internal {
 // runtime guard against the "wrong pipeline for this target" bug class that this
 // whole RenderTarget refactor exists to prevent (every recent FBO glitch was one).
 inline std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
+    // Debug bookkeeping, harmless per module: a module only checks the
+    // pipelines it built itself.
     static std::unordered_map<uint32_t, uint32_t> m;
     return m;
 }

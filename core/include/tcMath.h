@@ -1080,7 +1080,8 @@ inline float angleDifferenceDeg(float deg1, float deg2) {
 // =============================================================================
 
 namespace internal {
-    // Thread-local random number generator
+    // Thread-local random number generator. Per module on a Windows hot reload
+    // guest, which is harmless: app code seeds and draws from the same copy.
     inline std::mt19937& getRandomEngine() {
         static thread_local std::mt19937 engine(std::random_device{}());
         return engine;

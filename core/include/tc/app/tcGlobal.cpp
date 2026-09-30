@@ -16,8 +16,10 @@
 //      logs in guest, ...). Moving the definition into this .cpp keeps
 //      one canonical instance shared via the host's exported symbols.
 //
-// When adding a new global singleton accessor, prefer defining it here
-// (or in a sibling .cpp) rather than inline in a header.
+// When adding a new global singleton accessor, define it here (or in a
+// sibling .cpp) rather than inline in a header. tools/check_header_state.py
+// (run in CI) fails on new header-inline state; docs/ARCHITECTURE.md, "One
+// instance per process", has the rule and the reasons.
 // =============================================================================
 
 #include <TrussC.h>
@@ -68,8 +70,8 @@ void setup() {
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
     sgldesc.pipeline_pool_size = 256;
-    sgldesc.max_vertices = internal::sglMaxVertices;
-    sgldesc.max_commands = internal::sglMaxCommands;
+    sgldesc.max_vertices = internal::sglBudget().maxVertices;
+    sgldesc.max_commands = internal::sglBudget().maxCommands;
     sgldesc.allocator.alloc_fn = smemtrack_alloc;
     sgldesc.allocator.free_fn = smemtrack_free;
     sgl_setup(&sgldesc);
@@ -83,16 +85,17 @@ void setup() {
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
     // TrussC.h) and grown tier-by-tier as new codepoint ranges are used.
     // Headless apps that never call drawBitmapString pay 0 KB for the atlas.
-    if (!internal::fontInitialized) {
+    auto& fontAtlas = internal::bitmapFontAtlas();
+    if (!fontAtlas.initialized) {
         // Sampler (nearest neighbor, pixel perfect)
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_NEAREST;
         smp_desc.mag_filter = SG_FILTER_NEAREST;
         smp_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         smp_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        internal::fontSampler = sg_make_sampler(&smp_desc);
+        fontAtlas.sampler = sg_make_sampler(&smp_desc);
 
-        internal::fontInitialized = true;
+        fontAtlas.initialized = true;
     }
 
     // The 3D / blend-mode / premultiplied / clear pipelines are no longer created
@@ -123,15 +126,16 @@ void cleanup() {
     // to release individually here.
 
     // Release font resources
-    if (internal::fontInitialized) {
-        sg_destroy_sampler(internal::fontSampler);
-        if (internal::fontAtlasInitialized) {
-            sg_destroy_view(internal::fontView);
-            sg_destroy_image(internal::fontTexture);
-            internal::fontAtlasInitialized = false;
-            internal::fontAtlasRows = 0;
+    auto& fontAtlas = internal::bitmapFontAtlas();
+    if (fontAtlas.initialized) {
+        sg_destroy_sampler(fontAtlas.sampler);
+        if (fontAtlas.atlasInitialized) {
+            sg_destroy_view(fontAtlas.view);
+            sg_destroy_image(fontAtlas.texture);
+            fontAtlas.atlasInitialized = false;
+            fontAtlas.rows = 0;
         }
-        internal::fontInitialized = false;
+        fontAtlas.initialized = false;
     }
     sgl_shutdown();
     sg_shutdown();
@@ -160,8 +164,9 @@ sg_shader sglPremultShader() {
 }
 
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
-    logNotice("sokol_gl") << "Resizing: vertices " << sglMaxVertices
-        << " -> " << newMaxVertices << ", commands " << sglMaxCommands
+    auto& budget = sglBudget();
+    logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
+        << " -> " << newMaxVertices << ", commands " << budget.maxCommands
         << " -> " << newMaxCommands;
 
     // 1. Shutdown and re-init sokol_gl with larger buffers. sgl_shutdown()
@@ -170,8 +175,8 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     //    Font texture/sampler/view are sg resources — they survive sgl_shutdown.
     sgl_shutdown();
 
-    sglMaxVertices = newMaxVertices;
-    sglMaxCommands = newMaxCommands;
+    budget.maxVertices = newMaxVertices;
+    budget.maxCommands = newMaxCommands;
 
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = slog_func;
@@ -206,7 +211,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     // by sgl_shutdown but is NOT rebuilt here — FBOs surviving an sgl buffer resize
     // is a pre-existing limitation, out of scope for this refactor.
 
-    sglPendingResize = 0;
+    budget.pendingResize = 0;
 }
 } // namespace internal
 
@@ -394,12 +399,13 @@ void present() {
         }
     }
     if (err.vertices_full || err.commands_full) {
-        int newVerts = internal::sglMaxVertices * 4;
-        if (newVerts > internal::sglPendingResize) {
-            internal::sglPendingResize = newVerts;
+        auto& budget = internal::sglBudget();
+        int newVerts = budget.maxVertices * 4;
+        if (newVerts > budget.pendingResize) {
+            budget.pendingResize = newVerts;
             logNotice("sokol_gl") << "Vertex buffer overflow detected ("
-                << internal::sglMaxVertices << " vertices, "
-                << internal::sglMaxCommands << " commands). "
+                << budget.maxVertices << " vertices, "
+                << budget.maxCommands << " commands). "
                 << "Will resize to " << newVerts << " next frame.";
         }
     }
@@ -580,5 +586,323 @@ Logger& getLogger() {
     static Logger logger;
     return logger;
 }
+
+// ---------------------------------------------------------------------------
+// More one-per-process state (#249). Each of these used to be a function-local
+// static or an inline variable in its header, which a Windows hot reload guest
+// DLL duplicated: its recordings, beeps, console switch, main-thread queue,
+// GPU releases, ... went into a copy the host's frame loop never looked at.
+// ---------------------------------------------------------------------------
+
+std::thread::id Thread::getMainThreadId() {
+    static std::thread::id mainThreadId = std::this_thread::get_id();
+    return mainThreadId;
+}
+
+namespace console {
+namespace detail {
+ThreadChannel<ConsoleEventArgs>& getChannel() {
+    static ThreadChannel<ConsoleEventArgs> channel;
+    return channel;
+}
+std::atomic<bool>& isRunning() {
+    static std::atomic<bool> running{false};
+    return running;
+}
+std::unique_ptr<std::thread>& getThread() {
+    static std::unique_ptr<std::thread> t;
+    return t;
+}
+} // namespace detail
+} // namespace console
+
+namespace internal {
+
+#if !defined(__EMSCRIPTEN__)
+ThreadChannel<std::function<void()>>& mainThreadQueue() {
+    static ThreadChannel<std::function<void()>> q;
+    return q;
+}
+#endif
+
+AsyncScheduler& AsyncScheduler::get() {
+    static AsyncScheduler instance;
+    return instance;
+}
+
+uint64_t AsyncScheduler::newOwner() {
+    static std::atomic<uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Deferred GPU destroys (tcGpuDestroyQueue.h)
+namespace {
+struct PendingGpuDestroys {
+    std::vector<sg_buffer>   buffers;
+    std::vector<sg_image>    images;
+    std::vector<sg_view>     views;
+    std::vector<sg_sampler>  samplers;
+    std::vector<sg_pipeline> pipelines;
+    std::vector<sg_shader>   shaders;
+};
+// Leaked on purpose: resources held by statics (user globals, caches) release
+// their handles from exit-time destructors, possibly after a function-local
+// static queue would already be gone. Never destroying the queue keeps
+// deferGpuDestroy() safe until the very end, as the inline vectors it replaces
+// were (constant-initialized, so destroyed after everything built later).
+PendingGpuDestroys& pendingGpuDestroys() {
+    static PendingGpuDestroys* q = new PendingGpuDestroys();
+    return *q;
+}
+} // anonymous namespace
+
+void deferGpuDestroy(sg_buffer buf) {
+    if (buf.id != 0) pendingGpuDestroys().buffers.push_back(buf);
+}
+void deferGpuDestroy(sg_image img) {
+    if (img.id != 0) pendingGpuDestroys().images.push_back(img);
+}
+void deferGpuDestroy(sg_view view) {
+    if (view.id != 0) pendingGpuDestroys().views.push_back(view);
+}
+void deferGpuDestroy(sg_sampler smp) {
+    if (smp.id != 0) pendingGpuDestroys().samplers.push_back(smp);
+}
+void deferGpuDestroy(sg_pipeline pip) {
+    if (pip.id != 0) pendingGpuDestroys().pipelines.push_back(pip);
+}
+void deferGpuDestroy(sg_shader shd) {
+    if (shd.id != 0) pendingGpuDestroys().shaders.push_back(shd);
+}
+
+void drainPendingGpuDestroys() {
+    auto& q = pendingGpuDestroys();
+    if (sg_isvalid()) {
+        for (sg_buffer buf : q.buffers)   sg_destroy_buffer(buf);
+        for (sg_view view : q.views)      sg_destroy_view(view);
+        for (sg_image img : q.images)     sg_destroy_image(img);
+        for (sg_sampler smp : q.samplers) sg_destroy_sampler(smp);
+        // Pipelines before shaders: a pipeline references its shader.
+        for (sg_pipeline pip : q.pipelines) sg_destroy_pipeline(pip);
+        for (sg_shader shd : q.shaders)     sg_destroy_shader(shd);
+    }
+    q.buffers.clear();
+    q.images.clear();
+    q.views.clear();
+    q.samplers.clear();
+    q.pipelines.clear();
+    q.shaders.clear();
+}
+
+BeepManager& getManager() {
+    static BeepManager manager;
+    return manager;
+}
+
+ScreenRecorder& globalScreenRecorder() {
+    static ScreenRecorder rec;
+    return rec;
+}
+
+PbrPipeline& getPbrPipeline() {
+    static PbrPipeline instance;
+    return instance;
+}
+
+PointPipeline& getPointPipeline() {
+    static PointPipeline instance;
+    return instance;
+}
+
+// GPU caches whose contents nothing destroys (sokol_gl contexts, shaders,
+// pipelines, samplers, font atlases). With a copy per module, every hot reload
+// guest generation built and kept a new set in the host's sokol pools: FBO
+// drawing stopped once sokol_gl's 4 context slots ran out, IBL bakes once the
+// 32 shader slots did, and old generations' font atlases stayed resident.
+std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap() {
+    static std::unordered_map<uint64_t, FboSharedResources> map;
+    return map;
+}
+
+std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap() {
+    static std::unordered_map<uint64_t, FboSharedMipResources> map;
+    return map;
+}
+
+IblBakeResources& iblBakeResources() {
+    static IblBakeResources resources;
+    return resources;
+}
+
+SharedFontCache& SharedFontCache::getInstance() {
+    static SharedFontCache instance;
+    return instance;
+}
+
+FontSamplers& fontSamplers() {
+    static FontSamplers samplers;
+    return samplers;
+}
+
+} // namespace internal
+
+// ---------------------------------------------------------------------------
+// Settings and registries that app code and host code share (#249): the main
+// loop's rate and redraw requests, the projection defaults, the sokol_gl
+// budget, touch-as-mouse, the data path root, the bitmap font atlas and its
+// glyph registry, the overlay queries, the node and timer id sources, the
+// debug counters, the current window context and the Apps attached to
+// secondary windows. Each used to be an inline variable in its header, so a
+// Windows hot reload guest's setFps(), redraw(), setDataPathRoot(),
+// registerGlyph(), ... wrote a copy the host never read, the guest never saw
+// what the host set, and an App whose window the host's close() released
+// stayed attached in the guest's copy.
+//
+// Plain data (trivially destructible, constant-initialized) is a function-local
+// static. Objects with a destructor are leaked on purpose: code running in
+// exit-time destructors (an App saving its settings under getDataPath(), say)
+// may reach them after a function-local static would already be destroyed,
+// which the inline variables they replace, built before any app global, never
+// were.
+// ---------------------------------------------------------------------------
+namespace internal {
+
+MainLoopState& mainLoop() {
+    static MainLoopState state;
+    return state;
+}
+
+SglBudget& sglBudget() {
+    static SglBudget budget;
+    return budget;
+}
+
+BitmapFontAtlas& bitmapFontAtlas() {
+    static BitmapFontAtlas atlas;
+    return atlas;
+}
+
+bool& pixelPerfectMode() {
+    static bool mode = false;
+    return mode;
+}
+
+float& defaultScreenFov() {
+    static float fovDeg = 45.0f;
+    return fovDeg;
+}
+
+float& nearClipOverride() {
+    static float dist = 0.0f;
+    return dist;
+}
+
+float& farClipOverride() {
+    static float dist = 0.0f;
+    return dist;
+}
+
+bool& touchAsMouse() {
+    static bool enabled = true;
+    return enabled;
+}
+
+DataPathState& dataPathState() {
+    static DataPathState* state = [] {
+        auto* s = new DataPathState();
+#ifdef __APPLE__
+        s->root = "../../../data";
+#else
+        s->root = "data";
+#endif
+        return s;
+    }();
+    return *state;
+}
+
+std::function<bool()>& overlayHoveredQuery() {
+    static auto* query = new std::function<bool()>();
+    return *query;
+}
+
+std::function<bool()>& overlayFocusedQuery() {
+    static auto* query = new std::function<bool()>();
+    return *query;
+}
+
+uint64_t nextNodeInstanceId() {
+    static std::atomic<uint64_t> next{0};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Node::callAfter() / callEvery() ids. As an inline static member, host code
+// and a Windows hot reload guest each counted from 1 (and every reloaded guest
+// again), so one node could hold two timers with the same id, and
+// cancelTimer(id), which removes every timer with that id, cancelled both.
+uint64_t nextNodeTimerId() {
+    static std::atomic<uint64_t> next{1};
+    return next.fetch_add(1, std::memory_order_relaxed);
+}
+
+// The debug counters behind getNodeCount() / getTextureCount() /
+// getFboCount(). As inline variables, a Windows hot reload guest counted only
+// the objects its own code created, and the host never saw them.
+std::atomic<size_t>& nodeCount() {
+    static std::atomic<size_t> count{0};
+    return count;
+}
+
+std::atomic<size_t>& textureCount() {
+    static std::atomic<size_t> count{0};
+    return count;
+}
+
+std::atomic<size_t>& fboCount() {
+    static std::atomic<size_t> count{0};
+    return count;
+}
+
+namespace {
+WindowContext* currentWindowCtxStorage = nullptr;
+} // anonymous namespace
+
+WindowContext*& currentWindowCtx() {
+    return currentWindowCtxStorage;
+}
+
+WindowContext& currentWindowContext() {
+    return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+}
+
+// Window::setApp() (app code) adds to it and the platform close() (host code)
+// removes from it. Leaked like the ones above: ~Window() calls close(), and a
+// Window an app keeps in a global is destroyed at exit.
+std::unordered_set<const App*>& attachedApps() {
+    static auto* apps = new std::unordered_set<const App*>();
+    return *apps;
+}
+
+} // namespace internal
+
+namespace bitmapfont {
+namespace internal {
+
+std::vector<StoredGlyph>& registry() {
+    static auto* glyphs = new std::vector<StoredGlyph>();
+    return *glyphs;
+}
+
+uint16_t& nextFreeCell() {
+    static uint16_t cell = FIRST_REGISTERED_CELL;
+    return cell;
+}
+
+uint64_t& registryVersion() {
+    static uint64_t version = 0;
+    return version;
+}
+
+} // namespace internal
+} // namespace bitmapfont
 
 } // namespace trussc

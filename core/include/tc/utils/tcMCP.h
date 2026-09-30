@@ -70,6 +70,14 @@ struct DeferredResponse {
     const void* target = nullptr;                        // window to run in (null = main)
     std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
     std::function<std::string()> timeoutReply;           // targeted: reply when given up
+    // Registration owner of the code the producer runs (DeferralState::owner):
+    // a hot reload guest generation, or null for host code. When that owner
+    // is removed, removeRegistrationsOwnedBy() answers the entry with
+    // errorReply instead of running its producer, which may reach the App
+    // about to be deleted (a guest tool capturing `this`, a status-image
+    // getter). A host tool's deferral is not affected.
+    const void* owner = nullptr;
+    std::function<std::string(const std::string&)> errorReply;  // tool error with this message
 };
 
 // A targeted deferral whose window renders no frame in this time (minimized,
@@ -86,20 +94,28 @@ struct DeferralState {
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
     std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
+    std::function<std::string(const std::string&)> errorReply;  // deferral cancelled (unload)
+    // Registration owner of the code the deferred producer runs: the called
+    // tool's owner, set by handleToolsCall(); a host tool that runs code
+    // someone else registered (tc_get_status_image a status-image getter)
+    // names that code's owner with setDeferralOwner().
+    const void* owner = nullptr;
 };
-inline DeferralState& deferralState() { static DeferralState s; return s; }
+// The MCP state below is one per process, so it is defined non-inline in
+// tcMCP.cpp: a hot reload guest on Windows would otherwise get its own copy of
+// each, and a tool handler it runs would defer into a DeferralState the host
+// never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
+DeferralState& deferralState();
 
-inline std::vector<DeferredResponse>& deferredResponses() {
-    static std::vector<DeferredResponse> v;
-    return v;
-}
+// Call after deferring, in a tool handler whose deferred producer runs code
+// registered under another owner (see DeferralState::owner).
+inline void setDeferralOwner(const void* owner) { deferralState().owner = owner; }
+
+std::vector<DeferredResponse>& deferredResponses();
 
 // Set by registerControlTools() (which is web-available), so this flag must
 // live outside the server-only #ifndef block below.
-inline std::atomic<bool>& isDebuggerEnabled() {
-    static std::atomic<bool> enabled{false};
-    return enabled;
-}
+std::atomic<bool>& isDebuggerEnabled();
 
 } // namespace detail
 
@@ -182,17 +198,13 @@ inline bool hasDeferredResponses() { return !detail::deferredResponses().empty()
 // The hot reload host sets one per guest generation, so a reload drops what
 // the old guest registered — handlers that capture the old App — before that
 // App is deleted. Plain apps never set one (tag null = permanent).
+// Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
+// registers under it, so they must see the same one on every platform.
 namespace detail {
-inline const void*& registrationOwner() {
-    static const void* owner = nullptr;
-    return owner;
-}
-// Registries defined elsewhere (status entries in tcStandardTools.h) hook
-// their own cleanup in here the first time they are used.
-inline std::vector<std::function<void(const void*)>>& ownerCleanupHooks() {
-    static std::vector<std::function<void(const void*)>> hooks;
-    return hooks;
-}
+const void*& registrationOwner();
+// Registries defined elsewhere (the status registries of tcStandardTools.h,
+// in tcMCP.cpp) hook their own cleanup in here the first time they are used.
+std::vector<std::function<void(const void*)>>& ownerCleanupHooks();
 inline void setRegistrationOwner(const void* owner) { registrationOwner() = owner; }
 inline void removeRegistrationsOwnedBy(const void* owner);   // after Server
 } // namespace detail
@@ -248,10 +260,9 @@ public:
 
 class Server {
 public:
-    static Server& instance() {
-        static Server server;
-        return server;
-    }
+    // The one registry every tool / resource goes into. Defined in tcMCP.cpp,
+    // so a hot reload guest registers into the host's server (#249).
+    static Server& instance();
 
     // --- Registration API ---
 
@@ -391,12 +402,18 @@ private:
             auto& ds = detail::deferralState();
             ds.requested = false;
             ds.twoStageRequested = false;
+            ds.owner = tools_[name].owner;   // the handler may name another (setDeferralOwner)
 
             // Execute tool handler (may call deferToolResultUntilAfterFrame()
             // or deferToolResultTwoStage())
             json content = tools_[name].handler(args);
 
             // Handler asked to produce its result after the next present().
+            if (ds.requested || ds.twoStageRequested) {
+                ds.errorReply = [formatResult](const std::string& message) -> std::string {
+                    return formatResult(json{{"status", "error"}, {"message", message}});
+                };
+            }
             if (ds.target) {
                 ds.timeoutReply = [formatResult]() -> std::string {
                     return formatResult(json{{"status", "error"},
@@ -518,48 +535,29 @@ struct McpRequest {
 
 namespace detail {
 
-inline ThreadChannel<McpRequest>& getHttpChannel() {
-    static ThreadChannel<McpRequest> channel;
-    return channel;
-}
-
-inline std::unique_ptr<httplib::Server>& getHttpServer() {
-    static std::unique_ptr<httplib::Server> svr;
-    return svr;
-}
-
-inline std::unique_ptr<std::thread>& getHttpThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
-}
-
-inline std::atomic<int>& getHttpPort() {
-    static std::atomic<int> port{0};
-    return port;
-}
+// HTTP server state, one per process (defined in tcMCP.cpp, see above).
+ThreadChannel<McpRequest>& getHttpChannel();
+std::unique_ptr<httplib::Server>& getHttpServer();
+std::unique_ptr<std::thread>& getHttpThread();
+std::atomic<int>& getHttpPort();
 
 // Bearer token required on /mcp requests. Empty = no auth (localhost default).
-inline std::string& mcpAuthToken() {
-    static std::string token;
-    return token;
-}
+std::string& mcpAuthToken();
 
 // Whether the server is bound to a loopback address (the Host check applies).
-inline std::atomic<bool>& mcpLoopbackOnly() {
-    static std::atomic<bool> loopback{true};
-    return loopback;
-}
+std::atomic<bool>& mcpLoopbackOnly();
 
 // Browser origins allowed besides the server's own (mcp::allowOrigin()).
-// Read on HTTP worker threads, written from app code: guarded.
-inline std::vector<std::string>& allowedOrigins() {
-    static std::vector<std::string> origins;
-    return origins;
-}
-inline std::mutex& allowedOriginsMutex() {
-    static std::mutex m;
-    return m;
-}
+// Read on HTTP worker threads, written from app code: guarded. Each entry
+// carries its registrationOwner(), so a hot reload guest's origins go with
+// its other registrations (removeRegistrationsOwnedBy()); the same origin
+// allowed by two owners is two entries.
+struct AllowedOrigin {
+    std::string origin;
+    const void* owner = nullptr;
+};
+std::vector<AllowedOrigin>& allowedOrigins();
+std::mutex& allowedOriginsMutex();
 
 inline std::string asciiLower(std::string s) {
     for (auto& c : s) c = (char)std::tolower((unsigned char)c);
@@ -598,7 +596,7 @@ inline bool isAllowedOrigin(const std::string& origin, int port) {
     }
     std::lock_guard<std::mutex> lock(allowedOriginsMutex());
     for (const auto& a : allowedOrigins()) {
-        if (o == a) return true;
+        if (o == a.origin) return true;
     }
     return false;
 }
@@ -656,11 +654,12 @@ inline void allowOrigin(const std::string& origin) {
     std::string o = detail::asciiLower(detail::trimSpaces(origin));
     while (!o.empty() && o.back() == '/') o.pop_back();
     if (o.empty()) return;
+    const void* owner = detail::registrationOwner();
     std::lock_guard<std::mutex> lock(detail::allowedOriginsMutex());
     for (const auto& a : detail::allowedOrigins()) {
-        if (a == o) return;
+        if (a.origin == o && a.owner == owner) return;
     }
-    detail::allowedOrigins().push_back(o);
+    detail::allowedOrigins().push_back({o, owner});
 }
 
 // Start HTTP server.
@@ -776,9 +775,10 @@ inline void stopHttpServer() {
     {
         auto& list = detail::deferredResponses();
         for (auto& d : list) {
-            d.response->set_value([]() -> std::string {
-                return "{\"error\":\"server shutting down\"}";
-            });
+            const std::string message = "the MCP server shut down before the reply was produced";
+            std::string reply = d.errorReply ? d.errorReply(message)
+                                             : "{\"error\":\"" + message + "\"}";
+            d.response->set_value([reply]() { return reply; });
         }
         list.clear();
     }
@@ -806,6 +806,8 @@ inline void processHttpQueue() {
         ds.hasEnvelope = false;
         ds.target = nullptr;
         ds.timeoutReply = nullptr;
+        ds.errorReply = nullptr;
+        ds.owner = nullptr;
         std::string result = Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
@@ -817,6 +819,8 @@ inline void processHttpQueue() {
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
             d.timeoutReply = std::move(ds.timeoutReply);
+            d.owner = ds.owner;
+            d.errorReply = std::move(ds.errorReply);
             detail::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
             ds.target = nullptr;
@@ -850,6 +854,38 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
     Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
+#ifndef __EMSCRIPTEN__
+    {
+        // Browser origins this owner allowed (mcp::allowOrigin())
+        std::lock_guard<std::mutex> lock(allowedOriginsMutex());
+        auto& origins = allowedOrigins();
+        std::vector<AllowedOrigin> kept;
+        for (auto& a : origins) {
+            if (a.owner != owner) kept.push_back(std::move(a));
+        }
+        origins.swap(kept);
+    }
+#endif
+    // Deferred replies whose producers run this owner's code: answer them
+    // now, with an error, instead of running them at the next drain, after
+    // the App they may reach has been deleted (a reload runs between
+    // processHttpQueue() and drainDeferredResponses() in one frame). At exit
+    // stopHttpServer() runs before the guest is unloaded and has already
+    // answered every pending reply. Host tools' deferrals stay pending.
+    auto& pending = deferredResponses();
+    std::vector<DeferredResponse> keep;
+    for (auto& d : pending) {
+        if (d.owner != owner) {
+            keep.push_back(std::move(d));
+            continue;
+        }
+        const std::string message = "the app code behind this reply was unloaded by a hot reload "
+                                    "before the reply was produced";
+        std::string reply = d.errorReply ? d.errorReply(message)
+                                         : "{\"error\":\"" + message + "\"}";
+        d.response->set_value([reply]() { return reply; });
+    }
+    pending.swap(keep);
 }
 } // namespace detail
 

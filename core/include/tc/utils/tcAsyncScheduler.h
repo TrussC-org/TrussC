@@ -38,16 +38,13 @@ public:
     using Clock    = std::chrono::steady_clock;
     using Callback = std::function<void()>;
 
-    static AsyncScheduler& get() {
-        static AsyncScheduler instance;
-        return instance;
-    }
+    // The one scheduler thread per process. Defined in tcGlobal.cpp, with
+    // newOwner(): header-inline, each Windows hot reload guest started its own
+    // scheduler thread and numbered owners on its own (#249).
+    static AsyncScheduler& get();
 
     // A unique, non-zero owner token so a Node can group + cancel its timers.
-    static uint64_t newOwner() {
-        static std::atomic<uint64_t> next{1};
-        return next.fetch_add(1, std::memory_order_relaxed);
-    }
+    static uint64_t newOwner();
 
     // Fire `cb` once after `seconds`. Returns a task id (for cancel()).
     uint64_t after(uint64_t owner, double seconds, Callback cb) {

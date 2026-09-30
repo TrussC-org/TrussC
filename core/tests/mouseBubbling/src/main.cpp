@@ -60,12 +60,12 @@ public:
 class Driver {
 public:
     Driver() {
-        prev_ = tc::internal::currentWindowCtx;
-        tc::internal::currentWindowCtx = &win_.context();   // grab state lands here
+        prev_ = tc::internal::currentWindowCtx();
+        tc::internal::currentWindowCtx() = &win_.context();   // grab state lands here
     }
     ~Driver() {
         win_.context().rootNode = nullptr;
-        tc::internal::currentWindowCtx = prev_;
+        tc::internal::currentWindowCtx() = prev_;
     }
     void setRoot(Node* root) { win_.context().rootNode = root; }
     tc::internal::WindowContext& ctx() { return win_.context(); }

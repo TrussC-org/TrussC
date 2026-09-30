@@ -27,8 +27,10 @@
 // To disable: comment out TC_HOT_RELOAD → next cmake configure reverts to
 // static single-binary mode.
 //
-// Supported: macOS (.dylib), Linux (.so). Not supported: Windows, Wasm, iOS,
-// Android (falls back to static mode).
+// Supported: macOS (.dylib), Linux (.so), Windows (.dll). Not supported: Wasm,
+// iOS, Android (falls back to static mode). Framework state the guest shares
+// with the host must be non-inline (docs/ARCHITECTURE.md, "One instance per
+// process"): a Windows guest DLL has its own copy of header-inline state.
 // =============================================================================
 
 // Note: this header is included BY TrussC.h (after all core types are defined),

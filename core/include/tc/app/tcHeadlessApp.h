@@ -29,6 +29,9 @@ void flushAudioDiagnostics();
 // Headless mode internal state (extends tcHeadlessState.h)
 // ---------------------------------------------------------------------------
 namespace headless {
+    // Headless-only state: hot reload is windowed and never runs this loop, so
+    // a per-module copy is fine (tools/header_state_allowlist.txt).
+
     // Running flag (set to false by signal handler)
     inline std::atomic<bool> running{true};
 
