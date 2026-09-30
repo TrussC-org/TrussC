@@ -15,14 +15,19 @@
 // never go through the code page, and checks the UTF-8 strings going into and
 // coming out of fs::path against them. What it catches in CI:
 //   - Windows: a missing UTF-8 activeCodePage manifest (the GetACP() check),
-//     and a listDirectory that stops at an entry it cannot convert (a name
-//     holding an unpaired UTF-16 surrogate).
+//     a listDirectory that stops at an entry it cannot convert (a name
+//     holding an unpaired UTF-16 surrogate), and `log << path` or the
+//     loadJson / tcFile / Xml::load error paths throwing for such a name
+//     (log text must use pathToDisplayUtf8, not pathToUtf8).
 //   - every platform: `log << path` falling back to the std::ostream
-//     inserter, which quotes the path.
+//     inserter, which quotes the path, and the UTF-16 -> UTF-8 conversion
+//     behind pathToDisplayUtf8 (checked on UTF-16 strings).
 // What it does not catch anywhere: the path helpers, VideoPlayer::load or
 // AudioRecorder going back from pathToUtf8() to path::string(). With the
 // manifest, the Windows process code page is UTF-8, and on POSIX
 // path::string() already is UTF-8, so both return the same bytes there.
+// Nor AudioRecorder's log lines going back to pathToUtf8(): this test does
+// not start the audio engine.
 // =============================================================================
 
 #include <TrussC.h>
@@ -359,6 +364,115 @@ int main() {
                 });
             }
         }
+
+        // Log and error text goes through internal::pathToDisplayUtf8, which
+        // never throws for a name: a UTF-16 unit with no UTF-8 form (an
+        // unpaired surrogate) comes out as U+FFFD, where pathToUtf8 throws.
+        // The conversion is checked here on every platform, on UTF-16
+        // strings; names that need it only exist on Windows (below).
+        {
+            const string R = utf8(u8"�");
+            auto lossy = [](const u16string& s) {
+                return internal::utf16ToUtf8Lossy(u16string_view(s));
+            };
+            checkNoThrow("utf16ToUtf8Lossy: valid 1-4 byte text is exact", [&] {
+                return lossy(u"a.txt") == "a.txt" &&
+                       lossy(u"Café 日本 \U0001F3AC") ==
+                           utf8(u8"Café 日本 \U0001F3AC");
+            });
+            checkNoThrow("utf16ToUtf8Lossy: unpaired surrogates become U+FFFD", [&] {
+                const u16string high = u"b" + u16string(1, char16_t(0xD800)) + u".txt";
+                const u16string low = u"b" + u16string(1, char16_t(0xDC00)) + u".txt";
+                const u16string atEnd = u"z" + u16string(1, char16_t(0xD83D));
+                const u16string beforePair = u16string(1, char16_t(0xD800)) + u"\U0001F3AC";
+                const u16string reversed = u16string{char16_t(0xDC00), char16_t(0xD800)};
+                return lossy(high) == "b" + R + ".txt" &&
+                       lossy(low) == "b" + R + ".txt" &&
+                       lossy(atEnd) == "z" + R &&
+                       lossy(beforePair) == R + utf8(u8"\U0001F3AC") &&
+                       lossy(reversed) == R + R;
+            });
+            // On Windows this compares the lossy converter with u8string()
+            checkNoThrow("pathToDisplayUtf8 == pathToUtf8 for valid names", [&] {
+                bool ok = true;
+                for (const auto& n : names) {
+                    const fs::path p = getDataPath("") / fs::path(n.name);
+                    ok = ok && internal::pathToDisplayUtf8(p) == pathToUtf8(p);
+                }
+                return ok;
+            });
+        }
+#ifdef _WIN32
+        // Names holding an unpaired surrogate go through `log << path` and
+        // the error paths of loadJson, the tcFile helpers and Xml::load
+        // without an exception (the log calls in catch blocks included), and
+        // the log text carries U+FFFD in place of the surrogate.
+        {
+            const string R = utf8(u8"�");
+            const fs::path dir = sandbox / "surrogate-log";
+            auto bad = [&](const wchar_t* stem, const wchar_t* ext) {
+                std::wstring n = stem;
+                n += wchar_t(0xD800);
+                n += ext;
+                return dir / fs::path(n);
+            };
+            const fs::path goodJson = bad(L"c", L".json");   // parses
+            const fs::path brokenJson = bad(L"d", L".json"); // parse error
+            const fs::path missing = bad(L"e", L".txt");     // never created
+            const fs::path fullDir = bad(L"f", L"");         // a non-empty directory
+            fs::create_directories(fullDir);
+            { std::ofstream out(goodJson, std::ios::binary); out << "{\"v\":2}"; }
+            { std::ofstream out(brokenJson, std::ios::binary); out << "{"; }
+            { std::ofstream out(fullDir / "x.txt", std::ios::binary); out << "x"; }
+
+            vector<string> seen;
+            EventListener sub = getLogger().onLog.listen([&](LogEventArgs& e) {
+                seen.push_back(e.message);
+            });
+            // A line that starts with `prefix` and names the file by `tail`
+            auto logged = [&](const string& prefix, const string& tail) {
+                for (const auto& m : seen) {
+                    if (m.rfind(prefix, 0) == 0 && m.find(tail) != string::npos) return true;
+                }
+                return false;
+            };
+            checkNoThrow("logNotice() << path: unpaired surrogate as U+FFFD", [&] {
+                seen.clear();
+                logNotice() << "path: " << missing;
+                return logged("path: ", "e" + R + ".txt");
+            });
+            checkNoThrow("loadJson(unpaired-surrogate name): v == 2 after its log", [&] {
+                Json j = loadJson(goodJson);
+                return j.is_object() && j.value("v", 0) == 2;
+            });
+            checkNoThrow("loadJson(unpaired-surrogate name): parse error logged", [&] {
+                seen.clear();
+                Json j = loadJson(brokenJson);
+                return j.is_null() && logged("JSON parse error: ", "d" + R + ".json");
+            });
+            checkNoThrow("loadTextFile(missing unpaired-surrogate name): logged", [&] {
+                seen.clear();
+                return loadTextFile(missing).empty() &&
+                       logged("Cannot open file: ", "e" + R + ".txt");
+            });
+            checkNoThrow("removeFile(non-empty dir, unpaired surrogate): catch logs", [&] {
+                seen.clear();
+                return !removeFile(fullDir) &&
+                       logged("Failed to remove file: ", "f" + R);
+            });
+            checkNoThrow("FileReader::open(missing unpaired-surrogate name): logged", [&] {
+                seen.clear();
+                FileReader r;
+                return !r.open(missing) &&
+                       logged("FileReader: Cannot open file: ", "e" + R + ".txt");
+            });
+            checkNoThrow("Xml::load(missing unpaired-surrogate name): logged", [&] {
+                seen.clear();
+                Xml xml;
+                return !xml.load(missing) && logged("XML load error: ", "e" + R + ".txt");
+            });
+        }
+#endif
 
         // VideoPlayer::load checks the path for a URL scheme before touching
         // the file: a missing file is FileNotFound, not an exception
