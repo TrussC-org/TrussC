@@ -50,7 +50,11 @@
 //   (internal::decodeReserveSamples), and a FLAC whose STREAMINFO states
 //   more samples than it holds loads the frames it has without any
 //   allocation of the stated size (allocProbe.cpp records the largest
-//   operator new request of the load).
+//   operator new request of the load). Past the reservation the buffer
+//   grows geometrically but lands on a correctly stated length, so a FLAC
+//   that decodes to more than its reservation still ends with one buffer
+//   of exactly its length. The same holds for Ogg Vorbis (vorbisTone.cpp),
+//   whose stated length (the last page's granule) may also be unknown.
 // - A voice on a buffer with no frames, or with fewer samples than
 //   numSamples * channels, stops at its first mix (looping or not), and
 //   setPosition() on an empty buffer lands on 0.
@@ -129,6 +133,9 @@ int fcloseProbeRepeats();
 void allocProbeArm();
 void allocProbeDisarm();
 size_t allocProbeLargest();
+
+// vorbisTone.cpp: 10000 frames of 8 kHz stereo Ogg Vorbis
+vector<char> vorbisToneBytes();
 
 // 16-bit mono PCM WAV with a 440 Hz tone.
 static bool writeWav(const fs::path& path, float seconds, int rate) {
@@ -435,26 +442,68 @@ static vector<char> flacBytes(int blocks, uint64_t statedSamples) {
 }
 
 static void checkDecodeSizing(const fs::path& dir, const string& tag) {
-    // The reservation: the stated length, capped by 16 samples per input
-    // byte and by the limit. UINT32_MAX stands in for a 32-bit size_t.
+    // The reservation: the stated length, capped by the format's samples per
+    // input byte and by the limit. UINT32_MAX stands in for a 32-bit size_t.
     {
         using internal::decodeReserveSamples;
         const size_t kSizeMax = numeric_limits<size_t>::max();
+        const uint64_t k16 = internal::kReserveSamplesPerInputByte;
         check("decode: a stated length below the input's cap is reserved as stated",
-              decodeReserveSamples(1000, 2, 1000, kSizeMax) == 2000);
+              decodeReserveSamples(1000, 2, 1000, k16, kSizeMax) == 2000);
         check("decode: a stated length above the input's cap is capped by the input",
-              decodeReserveSamples(0xFFFFFFFFull, 2, 1000, kSizeMax) == 16000);
+              decodeReserveSamples(0xFFFFFFFFull, 2, 1000, k16, kSizeMax) == 16000);
+        check("decode: the MP3 cap is 48 samples per input byte",
+              decodeReserveSamples(0xFFFFFFFFull, 2, 1000,
+                                   internal::kReserveSamplesPerInputByteMp3, kSizeMax) == 48000);
+        check("decode: the Vorbis cap is 32 samples per input byte",
+              decodeReserveSamples(0xFFFFFFFFull, 2, 1000,
+                                   internal::kReserveSamplesPerInputByteVorbis, kSizeMax) == 32000);
+        // A 60-minute 44.1 kHz stereo MP3 at 32 kbit/s (14.4 MB): the stated
+        // length is below the MP3 cap, so it is reserved in full
+        check("decode: a low-bitrate MP3's stated length is reserved in full",
+              decodeReserveSamples(3600ull * 44100, 2, 3600ull * 4000,
+                                   internal::kReserveSamplesPerInputByteMp3, kSizeMax) ==
+                  3600ull * 44100 * 2);
         check("decode: an unknown input size reserves nothing",
-              decodeReserveSamples(0xFFFFFFFFull, 2, 0, kSizeMax) == 0);
+              decodeReserveSamples(0xFFFFFFFFull, 2, 0, k16, kSizeMax) == 0);
         check("decode: stated frames x channels saturates instead of wrapping",
-              decodeReserveSamples(0x8000000000000001ull, 4, 1000, kSizeMax) == 16000);
-        check("decode: input bytes x 16 saturates instead of wrapping",
-              decodeReserveSamples(1000, 2, 0x1000000000000001ull, kSizeMax) == 2000);
+              decodeReserveSamples(0x8000000000000001ull, 4, 1000, k16, kSizeMax) == 16000);
+        check("decode: input bytes x the rate saturates instead of wrapping",
+              decodeReserveSamples(1000, 2, 0x1000000000000001ull, k16, kSizeMax) == 2000);
         check("decode: the reservation stops at a 32-bit limit",
-              decodeReserveSamples(0xFFFFFFFFull, 16, 0xFFFFFFFFull, 0xFFFFFFFFu) == 0xFFFFFFFFu);
+              decodeReserveSamples(0xFFFFFFFFull, 16, 0xFFFFFFFFull, k16, 0xFFFFFFFFu) == 0xFFFFFFFFu);
         check("decode: a longest 36-bit length stops at a 32-bit limit",
-              decodeReserveSamples(0xFFFFFFFFFull, 8, 0xFFFFFFFFFull, 0xFFFFFFFFu) == 0xFFFFFFFFu);
-        check("decode: no channels reserve nothing", decodeReserveSamples(1000, 0, 1000, kSizeMax) == 0);
+              decodeReserveSamples(0xFFFFFFFFFull, 8, 0xFFFFFFFFFull, k16, 0xFFFFFFFFu) == 0xFFFFFFFFu);
+        check("decode: no channels reserve nothing",
+              decodeReserveSamples(1000, 0, 1000, k16, kSizeMax) == 0);
+    }
+
+    // Growth past the reservation: double the capacity, land on the stated
+    // length when it lies in between, never below what is needed
+    {
+        using internal::growSampleBuffer;
+        vector<float> v;
+        v.reserve(1000);
+        check("grow: doubles the capacity", growSampleBuffer(v, 1001) && v.capacity() == 2000,
+              to_string(v.capacity()));
+        v = vector<float>();
+        v.reserve(1000);
+        check("grow: lands on a stated length below double",
+              growSampleBuffer(v, 1001, 1500) && v.capacity() == 1500, to_string(v.capacity()));
+        v = vector<float>();
+        v.reserve(1000);
+        check("grow: never follows a stated length past double",
+              growSampleBuffer(v, 1001, 1u << 30) && v.capacity() == 2000, to_string(v.capacity()));
+        v = vector<float>();
+        v.reserve(1000);
+        check("grow: ignores a stated length below what is needed",
+              growSampleBuffer(v, 1001, 500) && v.capacity() == 2000, to_string(v.capacity()));
+        v = vector<float>();
+        v.reserve(1000);
+        check("grow: takes at least what is needed",
+              growSampleBuffer(v, 5000, 3000) && v.capacity() == 5000, to_string(v.capacity()));
+        check("grow: refuses past max_size()", !growSampleBuffer(v, v.max_size() + 1) &&
+                                                   v.capacity() == 5000);
     }
 
     // A FLAC whose STREAMINFO states far more samples than its frames hold
@@ -464,8 +513,10 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
     // input byte) plus 1 MiB for the decode step and the decoder's own state.
     const vector<char> flac = flacBytes(2, (uint64_t)1 << 27);
     const size_t capBytes = flac.size() * 16 * sizeof(float) + (1u << 20);
-    auto flacIntact = [](const SoundBuffer& buf) {
-        if (buf.numSamples != 2 * 4096 || buf.channels != 1 || !pcmConsistent(buf)) return false;
+    auto flacIntact = [](const SoundBuffer& buf, int blocks) {
+        if (buf.numSamples != (size_t)blocks * 4096 || buf.channels != 1 || !pcmConsistent(buf)) {
+            return false;
+        }
         for (float v : buf.samples) if (v != 1000 / 32768.0f) return false;
         return true;
     };
@@ -474,11 +525,12 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
     const bool memOk = (bool)m.loadFlacFromMemory(flac.data(), flac.size());
     allocProbeDisarm();
     check("decode: a FLAC stating more samples than it holds loads from memory",
-          memOk && flacIntact(m), to_string(m.numSamples) + " frames");
+          memOk && flacIntact(m, 2), to_string(m.numSamples) + " frames");
     check("decode: no allocation of the load is sized from the stated length",
           allocProbeLargest() <= capBytes, to_string(allocProbeLargest()) + " bytes requested");
     check("decode: the buffer keeps no capacity from the stated length",
-          m.samples.capacity() <= 2 * m.samples.size(), to_string(m.samples.capacity()));
+          m.samples.capacity() <= m.samples.size() + m.samples.size() / 8,
+          to_string(m.samples.capacity()));
     const fs::path flacPath = dir / ("tc_audio_diag_" + tag + "_stated.flac");
     {
         ofstream out(flacPath, ios::binary);
@@ -488,12 +540,32 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
     allocProbeArm();
     const bool fileOk = (bool)f.loadFlac(flacPath);
     allocProbeDisarm();
-    check("decode: the same FLAC loads from a file", fileOk && flacIntact(f),
+    check("decode: the same FLAC loads from a file", fileOk && flacIntact(f, 2),
           to_string(f.numSamples) + " frames");
     check("decode: no allocation of the file load is sized from the stated length",
           allocProbeLargest() <= capBytes, to_string(allocProbeLargest()) + " bytes requested");
     std::error_code ec;
     fs::remove(flacPath, ec);
+
+    // A FLAC of silence-like CONSTANT frames decodes to far more than its
+    // reservation (16 samples per byte) while stating its length correctly:
+    // it grows geometrically, lands on the stated length, and at no point
+    // asks for more than that one buffer (about 2 MiB of floats here; 127
+    // blocks keep the frame number in one byte).
+    const int longBlocks = 127;
+    const uint64_t longFrames = (uint64_t)longBlocks * 4096;
+    const vector<char> longFlac = flacBytes(longBlocks, longFrames);
+    SoundBuffer lf;
+    allocProbeArm();
+    const bool longOk = (bool)lf.loadFlacFromMemory(longFlac.data(), longFlac.size());
+    allocProbeDisarm();
+    check("decode: a FLAC outgrowing its reservation loads every frame",
+          longOk && flacIntact(lf, longBlocks), to_string(lf.numSamples) + " frames");
+    check("decode: its growth lands on the stated length",
+          lf.samples.capacity() == lf.samples.size(), to_string(lf.samples.capacity()));
+    check("decode: no allocation of it goes past the stated length",
+          allocProbeLargest() <= longFrames * sizeof(float),
+          to_string(allocProbeLargest()) + " bytes requested");
 
     // A WAV decodes in steps to exactly its frames
     const uint32_t frames = 10000;   // two full steps and a partial one
@@ -505,6 +577,118 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
         same = w.samples[i] == (float)(int16_t)(8000.0f * sin(TAU * 440.0f * (float)i / 48000.0f)) / 32768.0f;
     }
     check("decode: a WAV loads every frame intact", same, to_string(w.numSamples) + " frames");
+}
+
+// --- Ogg Vorbis sizing ----------------------------------------------------------
+// `ogg` with the granule position of its last page set to `granule` (the
+// length stb_vorbis reports; all ones reads as unknown, 0) and the page's
+// CRC recomputed
+static vector<char> withLastGranule(vector<char> ogg, uint64_t granule) {
+    size_t page = string::npos;
+    for (size_t i = 0; i + 27 <= ogg.size(); ++i) {
+        if (memcmp(&ogg[i], "OggS", 4) == 0) page = i;
+    }
+    if (page == string::npos) return {};
+    const uint8_t segments = (uint8_t)ogg[page + 26];
+    size_t length = 27 + segments;
+    for (size_t k = 0; k < segments; ++k) length += (uint8_t)ogg[page + 27 + k];
+    if (page + length > ogg.size()) return {};
+    for (int k = 0; k < 8; ++k) ogg[page + 6 + k] = (char)(granule >> (8 * k));
+    for (int k = 0; k < 4; ++k) ogg[page + 22 + k] = 0;
+    uint32_t crc = 0;
+    for (size_t i = 0; i < length; ++i) {
+        crc ^= (uint32_t)(uint8_t)ogg[page + i] << 24;
+        for (int b = 0; b < 8; ++b) crc = (crc & 0x80000000u) ? (crc << 1) ^ 0x04C11DB7u : crc << 1;
+    }
+    for (int k = 0; k < 4; ++k) ogg[page + 22 + k] = (char)(crc >> (8 * k));
+    return ogg;
+}
+
+// Ogg Vorbis goes through drainVorbis: samples are appended as they decode,
+// numSamples is the decoded frame count, the stated length (the last page's
+// granule) only sizes the reservation (at most 32 samples per input byte),
+// and a stream whose length is unknown loads what decodes.
+static void checkVorbisSizing(const fs::path& dir, const string& tag) {
+    const vector<char> ogg = vorbisToneBytes();
+    const size_t capBytes = ogg.size() * 32 * sizeof(float) + (1u << 20);
+    check("vorbis: the embedded stream is intact", ogg.size() == 4036 &&
+                                                   memcmp(ogg.data(), "OggS", 4) == 0,
+          to_string(ogg.size()) + " bytes");
+
+    SoundBuffer ref;
+    allocProbeArm();
+    const bool refOk = (bool)ref.loadOggFromMemory(ogg.data(), ogg.size());
+    allocProbeDisarm();
+    check("vorbis: a stream loads from memory with its frame count",
+          refOk && ref.numSamples == 10000 && ref.channels == 2 && ref.sampleRate == 8000 &&
+          pcmConsistent(ref),
+          to_string(ref.numSamples) + " frames, " + to_string(ref.channels) + " ch");
+    check("vorbis: a correctly stated length is reserved exactly",
+          ref.samples.capacity() == ref.samples.size(), to_string(ref.samples.capacity()));
+    // Left 440 Hz at 0.5, right 660 Hz at 0.25: the channels keep their order
+    float peakL = 0, peakR = 0;
+    for (size_t i = 0; refOk && i < ref.numSamples; ++i) {
+        peakL = max(peakL, fabs(ref.samples[i * 2]));
+        peakR = max(peakR, fabs(ref.samples[i * 2 + 1]));
+    }
+    check("vorbis: the channels decode in order",
+          peakL > 0.4f && peakL < 0.6f && peakR > 0.15f && peakR < 0.35f,
+          to_string(peakL) + " / " + to_string(peakR));
+    check("vorbis: the load stays within the reservation bound",
+          allocProbeLargest() <= capBytes, to_string(allocProbeLargest()) + " bytes requested");
+
+    const fs::path oggPath = dir / ("tc_audio_diag_" + tag + "_tone.ogg");
+    {
+        ofstream out(oggPath, ios::binary);
+        out.write(ogg.data(), (streamsize)ogg.size());
+    }
+    SoundBuffer file;
+    check("vorbis: the same stream loads from a file",
+          (bool)file.loadOgg(oggPath) && file.numSamples == ref.numSamples &&
+              file.samples == ref.samples,
+          to_string(file.numSamples) + " frames");
+    std::error_code ec;
+    fs::remove(oggPath, ec);
+
+    // Stating a little more than decodes (10300 frames; the last packet then
+    // decodes untrimmed to 10240): the small spare capacity is kept rather
+    // than copying the whole buffer to drop it.
+    {
+        const vector<char> patched = withLastGranule(ogg, 10300);
+        SoundBuffer b;
+        const bool ok = !patched.empty() && (bool)b.loadOggFromMemory(patched.data(), patched.size());
+        check("vorbis: a slightly overstated stream loads what decodes",
+              ok && b.numSamples == 10240 && pcmConsistent(b), to_string(b.numSamples) + " frames");
+        check("vorbis: its small spare capacity is not trimmed by a copy",
+              b.samples.capacity() == 10300 * 2, to_string(b.samples.capacity()));
+    }
+
+    // The same stream stating 2^31 frames (16 GiB as stereo floats), and
+    // stating no length at all: both load what decodes (the last packet
+    // untrimmed, so a few frames more), without an allocation sized from
+    // the stated length.
+    const struct { const char* name; uint64_t granule; } variants[] = {
+        {"a stream stating 2^31 frames", (uint64_t)1 << 31},
+        {"a stream of unknown length", ~(uint64_t)0},
+    };
+    for (const auto& variant : variants) {
+        const vector<char> patched = withLastGranule(ogg, variant.granule);
+        SoundBuffer b;
+        allocProbeArm();
+        const bool ok = !patched.empty() && (bool)b.loadOggFromMemory(patched.data(), patched.size());
+        allocProbeDisarm();
+        const string name = string("vorbis: ") + variant.name;
+        check(name + " loads what decodes",
+              ok && b.numSamples >= ref.numSamples && b.numSamples < ref.numSamples + 4096 &&
+                  pcmConsistent(b) &&
+                  equal(ref.samples.begin(), ref.samples.end(), b.samples.begin()),
+              to_string(b.numSamples) + " frames");
+        check(name + " stays within the reservation bound", allocProbeLargest() <= capBytes,
+              to_string(allocProbeLargest()) + " bytes requested");
+        check(name + " keeps no capacity from the stated length",
+              b.samples.capacity() <= b.samples.size() + b.samples.size() / 8,
+              to_string(b.samples.capacity()));
+    }
 }
 
 // --- Voices on buffers with nothing to play ------------------------------------
@@ -725,6 +909,7 @@ int main() {
     checkPcmLoading();
     checkMixFrom();
     checkDecodeSizing(fs::temp_directory_path(), tag);
+    checkVorbisSizing(fs::temp_directory_path(), tag);
     checkEmptyVoices();
 
     // A file named .ogg that is not Ogg Vorbis: the load fails and is
