@@ -43,7 +43,11 @@
 //     rectangle, an off-center 128-gon and a 4096-gon keep every triangle
 //     with no warning; a tiny outline far from the origin is refused as a
 //     whole, and a tiny convex ring as one polygon; bodies just inside the
-//     limit keep a positive inertia at densities 0.001 to 1000.
+//     limit keep a positive inertia at densities 0.001 to 1000;
+//   - every fixture of a polygon or compound body has the requested density
+//     (PolyShape and RigidBody2D), and setDensity() / setBodyType() (or
+//     setStatic() / setDynamic()) afterwards give exactly the mass data of a
+//     body created that way.
 // =============================================================================
 
 #include <tcxBox2d.h>
@@ -1797,6 +1801,185 @@ static void testCompoundOffset(box2d::World& world) {
 }
 
 // ---------------------------------------------------------------------------
+// Density and body type after creation (#427). Polygon and compound fixtures
+// are added at density 0 and get their density once all are in: every
+// fixture must end up with it, and changing the density or the body type
+// later must give the mass data of a body made that way directly.
+// ---------------------------------------------------------------------------
+
+// True when `body` has fixtures and every one of them has density `d`.
+static bool everyFixtureDensity(const b2Body* body, float d) {
+    if (!body || !body->GetFixtureList()) return false;
+    for (const b2Fixture* f = body->GetFixtureList(); f; f = f->GetNext()) {
+        if (f->GetDensity() != d) return false;
+    }
+    return true;
+}
+
+struct MassProps {
+    float mass = 0.0f;
+    float inertia = 0.0f;   // about the body origin
+    b2Vec2 center = b2Vec2_zero;
+};
+
+static MassProps massProps(const b2Body* body) {
+    MassProps m;
+    if (!body) return m;
+    m.mass = body->GetMass();
+    m.inertia = body->GetInertia();
+    m.center = body->GetLocalCenter();
+    return m;
+}
+
+// The same fixtures at the same density go through the same float sums in
+// the same order, so the mass data must match exactly.
+static bool sameMass(const MassProps& got, const MassProps& want) {
+    return want.mass > 0.0f && got.mass == want.mass && got.inertia == want.inertia && got.center == want.center;
+}
+
+// `pts` moved `dist` px from the origin along (0.6, 0.8).
+static vector<Vec2> offsetBy(const vector<Vec2>& pts, double dist) {
+    return shifted(pts, float(dist * 0.6), float(dist * 0.8));
+}
+
+// The largest distance (bisected) at which `accepted` still takes `pts`.
+static double acceptLimit(const vector<Vec2>& pts, const function<bool(const vector<Vec2>&)>& accepted) {
+    double lo = 0.0, hi = 1.0;
+    while (hi < 1e9 && accepted(offsetBy(pts, hi))) hi *= 2.0;
+    for (int i = 0; i < 40; ++i) {
+        double mid = (lo + hi) * 0.5;
+        (accepted(offsetBy(pts, mid)) ? lo : hi) = mid;
+    }
+    return lo;
+}
+
+static void testDensityAndType(box2d::World& world) {
+    // Outlines just inside the offset limit: a mass reset over only some of
+    // the fixtures, or at a density the check did not cover, would lose the
+    // inertia there (a Box2D assert in Debug).
+    const vector<Vec2> gon = circlePoints(128, 40);
+    const vector<Vec2> hex = circlePoints(6, 2);
+    const double gonLimit = acceptLimit(gon, [](const vector<Vec2>& p) {
+        Path path(p);
+        path.close();
+        box2d::detail::CompoundShapes out;
+        return box2d::detail::makeCompoundShapes(path, out);
+    });
+    const double hexLimit = acceptLimit(hex, [](const vector<Vec2>& p) {
+        b2PolygonShape shape;
+        vector<Vec2> hull;
+        return box2d::detail::makePolygonShape(p, shape, hull) == box2d::detail::PolygonError::None;
+    });
+
+    struct Kind {
+        string name;
+        vector<Vec2> pts;
+        bool compound;
+    };
+    const vector<Kind> kinds = {
+        {"compound 128-gon near the offset limit", offsetBy(gon, gonLimit), true},
+        {"polygon hexagon near the offset limit", offsetBy(hex, hexLimit), false},
+    };
+    auto modBody = [&](const Kind& k, shared_ptr<Node>& node, box2d::BodyType type, float d) {
+        node = make_shared<Node>();
+        node->setPos(400, 300);
+        auto shape = k.compound ? box2d::Shape2D::compound(k.pts) : box2d::Shape2D::polygon(k.pts);
+        return node->addMod<box2d::RigidBody2D>(world, shape, type, d);
+    };
+    auto classicBody = [&](const Kind& k, box2d::PolyShape& poly) {
+        if (k.compound) poly.setupCompound(world, k.pts, 400, 300);
+        else poly.setup(world, k.pts, 400, 300);
+    };
+    const vector<float> densities = {0.001f, 2.5f, 1000.0f};
+
+    for (const auto& k : kinds) {
+        // (a) Every fixture has the requested density once the body exists.
+        {
+            WarningCapture w;
+            box2d::PolyShape poly;
+            classicBody(k, poly);
+            const int want = k.compound ? 126 : 1;
+            check("PolyShape " + k.name + ": created, no warning, " + to_string(want) + " fixture(s)",
+                  poly.isCreated() && w.count == 0 && fixtureCount(poly.getBody()) == want);
+            check("PolyShape " + k.name + ": every fixture density 1",
+                  everyFixtureDensity(poly.getBody(), 1.0f));
+        }
+        {
+            shared_ptr<Node> node;
+            auto* rb = modBody(k, node, box2d::BodyType::Dynamic, 1.0f);
+            check("RigidBody2D " + k.name + ": every fixture density 1 (default)",
+                  everyFixtureDensity(rb->getBody(), 1.0f));
+            shared_ptr<Node> node2;
+            auto* rb2 = modBody(k, node2, box2d::BodyType::Dynamic, 2.5f);
+            check("RigidBody2D " + k.name + ": every fixture density 2.5 (dynamic)",
+                  everyFixtureDensity(rb2->getBody(), 2.5f));
+            shared_ptr<Node> node3;
+            auto* rb3 = modBody(k, node3, box2d::BodyType::Static, 2.5f);
+            check("RigidBody2D " + k.name + ": every fixture density 2.5 (static)",
+                  everyFixtureDensity(rb3->getBody(), 2.5f));
+        }
+
+        // (b) Density and body type changed afterwards give the mass data of
+        // a body created that way.
+        bool staticThenDynamic = true, densityLater = true, bothLater = true;
+        bool classicDensity = true, classicStaticDensityDynamic = true;
+        for (float d : densities) {
+            shared_ptr<Node> directNode;
+            const MassProps direct = massProps(modBody(k, directNode, box2d::BodyType::Dynamic, d)->getBody());
+            {
+                // Created static at d, then made dynamic.
+                shared_ptr<Node> node;
+                auto* rb = modBody(k, node, box2d::BodyType::Static, d);
+                const bool wasStatic = rb->getBody() && rb->getBody()->GetMass() == 0.0f;
+                rb->setBodyType(box2d::BodyType::Dynamic);
+                if (!wasStatic || !sameMass(massProps(rb->getBody()), direct)) staticThenDynamic = false;
+            }
+            {
+                // Created dynamic at density 1, then given d.
+                shared_ptr<Node> node;
+                auto* rb = modBody(k, node, box2d::BodyType::Dynamic, 1.0f);
+                rb->setDensity(d);
+                if (!everyFixtureDensity(rb->getBody(), d) || !sameMass(massProps(rb->getBody()), direct)) {
+                    densityLater = false;
+                }
+            }
+            {
+                // Created static at density 1, given d, then made dynamic.
+                shared_ptr<Node> node;
+                auto* rb = modBody(k, node, box2d::BodyType::Static, 1.0f);
+                rb->setDensity(d);
+                rb->setBodyType(box2d::BodyType::Dynamic);
+                if (!sameMass(massProps(rb->getBody()), direct)) bothLater = false;
+            }
+            {
+                box2d::PolyShape poly;
+                classicBody(k, poly);
+                poly.setDensity(d);
+                if (!everyFixtureDensity(poly.getBody(), d) || !sameMass(massProps(poly.getBody()), direct)) {
+                    classicDensity = false;
+                }
+            }
+            {
+                box2d::PolyShape poly;
+                classicBody(k, poly);
+                poly.setStatic();
+                poly.setDensity(d);
+                poly.setDynamic();
+                if (!sameMass(massProps(poly.getBody()), direct)) classicStaticDensityDynamic = false;
+            }
+        }
+        check("RigidBody2D " + k.name + ": static, then setBodyType(Dynamic) = created dynamic",
+              staticThenDynamic);
+        check("RigidBody2D " + k.name + ": setDensity() later = created at that density", densityLater);
+        check("RigidBody2D " + k.name + ": static, setDensity(), setBodyType(Dynamic) = created so",
+              bothLater);
+        check("PolyShape " + k.name + ": setDensity() = RigidBody2D created at that density", classicDensity);
+        check("PolyShape " + k.name + ": setStatic(), setDensity(), setDynamic() = created so",
+              classicStaticDensityDynamic);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // reducedConvexHull(): heap-based reduction vs the O(h^2) scan it replaced
 // ---------------------------------------------------------------------------
 
@@ -1957,6 +2140,7 @@ int main() {
     testModEventLifetimes();
     testWorldEventLifetimes();
     testCompoundOffset(world);
+    testDensityAndType(world);
     testReducedConvexHull();
 
     if (g_fail) {

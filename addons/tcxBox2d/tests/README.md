@@ -52,7 +52,13 @@ outline exactly, one fixture per triangle:
   as one polygon, with the "too small for its distance" warning; bodies just
   inside the limit, built through `setupCompound()` and `RigidBody2D`, keep a
   positive inertia at densities 0.001 to 1000 (Debug: no Box2D assert while
-  the fixtures are added).
+  the fixtures are added);
+- on a compound 128-gon and a hexagon just inside that limit, every fixture
+  has the requested density after creation (`PolyShape` at 1, `RigidBody2D`
+  at its density, dynamic or static), and `setDensity()` /
+  `setBodyType(Dynamic)` (classic: `setStatic()`, `setDensity()`,
+  `setDynamic()`) afterwards give exactly the mass, inertia and center of a
+  body created that way, at densities 0.001 to 1000 (Debug: no Box2D assert).
 
 Event lifetimes (#427). Listeners of a deferred Exit / Ended or of Stay may
 free the other body of their pair, and bodies may be destroyed between
