@@ -85,6 +85,20 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+- `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
+  read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
+  measured on `audioOut` with files of DC levels: `setPosition()` moves the
+  audio (the level ~200 ms later is the target's), `getPosition()` reports
+  the target from the call on and never the old position, a paused stream
+  reports the target at once while the voice itself does not move, and
+  resumes from it, and of several seeks the last wins (also while paused);
+  eager sounds seek at once. `loadStream()` rejects a file with no frames
+  (`DecodeFailed`). A looping stream whose file was emptied after loading
+  ends with one warning while another stream keeps being refilled; a decoder
+  read error, a failed loop seek and a failed seek request each end the
+  stream with one warning (`internal::setStreamFaultForTests()`), and after a
+  failed seek request the voice ends. A watchdog turns a StreamWorker that
+  never comes back into a FAIL.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
