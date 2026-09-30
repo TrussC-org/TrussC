@@ -1336,29 +1336,11 @@ public:
         if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 
         // Decode into a SoundBuffer, then store as the polymorphic source.
+        // SoundBuffer::load() picks the decoder from the extension, ignoring
+        // its case (the path itself is used as given), records the file for
+        // getPath() and logs a failure with the file name.
         auto buf = std::make_shared<SoundBuffer>();
-
-        // Determine format by extension
-        std::string ext = path.extension().string();
-        if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-        LoadResult result = LoadResult::fail(LoadError::UnsupportedFormat,
-                                             "unsupported extension '." + ext + "'");
-
-        if (ext == "ogg" || ext == "OGG") {
-            result = buf->loadOgg(path);
-        } else if (ext == "wav" || ext == "WAV") {
-            result = buf->loadWav(path);
-        } else if (ext == "mp3" || ext == "MP3") {
-            result = buf->loadMp3(path);
-        } else if (ext == "flac" || ext == "FLAC") {
-            result = buf->loadFlac(path);
-        } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
-            // Through SoundBuffer::load(): the per-platform loadAac() does
-            // not record the file for getPath(), load() does.
-            result = buf->load(path);
-        } else {
-            logError("Sound") << "unsupported format: " << ext;
-        }
+        LoadResult result = buf->load(path);
 
         if (!result) {
             buffer_.reset();
