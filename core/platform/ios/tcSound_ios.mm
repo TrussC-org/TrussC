@@ -142,10 +142,19 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
         ExtAudioFileDispose(extAudioFile);
         return LoadResult::fail(LoadError::DecodeFailed, "AAC stream too large to load");
     }
+    // The members change only once the buffer is allocated
+    try {
+        samples.resize(sampleCount);
+    } catch (const std::bad_alloc&) {
+        logError("SoundBuffer") << "not enough memory to load AAC ("
+                                << dstFormat.mChannelsPerFrame << " ch, "
+                                << static_cast<long long>(totalFrames) << " frames)";
+        ExtAudioFileDispose(extAudioFile);
+        return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
+    }
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
-    samples.resize(sampleCount);
 
     // Read all frames
     AudioBufferList bufferList;
@@ -312,10 +321,20 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
         AudioFileClose(audioFile);
         return LoadResult::fail(LoadError::DecodeFailed, "AAC stream too large to load");
     }
+    // The members change only once the buffer is allocated
+    try {
+        samples.resize(sampleCount);
+    } catch (const std::bad_alloc&) {
+        logError("SoundBuffer") << "not enough memory to load AAC ("
+                                << dstFormat.mChannelsPerFrame << " ch, "
+                                << static_cast<long long>(totalFrames) << " frames)";
+        ExtAudioFileDispose(extAudioFile);
+        AudioFileClose(audioFile);
+        return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
+    }
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
-    samples.resize(sampleCount);
 
     // Read all frames
     AudioBufferList bufferList;
