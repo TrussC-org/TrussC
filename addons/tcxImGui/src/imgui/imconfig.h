@@ -89,7 +89,8 @@ enum ImGuiTcValueKind_
     ImGuiTcValueKind_Bool,          // Checkbox, MenuItem(bool*), Selectable(bool*): Data = bool* (NULL: nothing is reported),
                                     //   Flags = ImGuiItemFlags the widget adds for itself (Disabled: MenuItem enabled = false,
                                     //   ImGuiSelectableFlags_Disabled)
-    ImGuiTcValueKind_Radio,         // RadioButton(int*): Data = int* the variable the button group sets
+    ImGuiTcValueKind_Radio,         // RadioButton(int*): Data = int* the variable the button group sets,
+                                    //   Flags = v_button, the value pressing this button sets
     ImGuiTcValueKind_ListBox,       // ListBox: Data = int* current item
     ImGuiTcValueKind_ListBoxBegin,  // BeginListBox: no data (a pick inside its child window is an edit of the list box)
 };

@@ -132,7 +132,7 @@ is modified.
 | `ColorEdit4` (`ColorEdit3` calls it) | `g.NextItemData.ClearFlags();` | 0 | Color | `col`, 3 or 4 |
 | `ColorPicker4` (`ColorPicker3` calls it) | `const bool is_readonly = ...;` (before `g.NextItemData.ClearFlags();`) | 0 | Color | `col`, 3 or 4 |
 | `Checkbox` | `const bool is_visible = ItemAdd(total_bb, id);` (before the clip return) | `id` | Bool | `v` |
-| `RadioButton` (`int*` form) | the opening `{` | 0 | Radio | `v` |
+| `RadioButton` (`int*` form) | the opening `{` | 0 | Radio | `v`; Flags `v_button` (the button's own value) |
 | `Selectable` (`bool*` form) | the opening `{` | 0 | Bool | `p_selected`; Flags `ImGuiItemFlags_Disabled` with `ImGuiSelectableFlags_Disabled` |
 | `BeginListBox` | the `IsRectVisible()` early return | `id` | ListBoxBegin | none (`NULL`) |
 | `ListBox` (getter form; the array form calls it) | `ImGuiContext& g = *GImGui;` | 0 | ListBox | `current_item` |
@@ -209,8 +209,14 @@ How the hooks behave (in `tcImGuiHooks.h`):
   that the widget is not disabled (`ImGuiItemFlags_Disabled` in the current
   or next-item flags, or a Bool hook's Flags) or read-only
   (`ImGuiItemFlags_ReadOnly`, `ImGuiSliderFlags_ReadOnly`,
-  `ImGuiInputTextFlags_ReadOnly` on an InputScalar); it keeps the variable's
-  old bytes and sets `Injected`, so the widget returns true that frame. The
+  `ImGuiInputTextFlags_ReadOnly` on an InputScalar), and, for a `RadioButton`,
+  that the value is the button's own `v_button` (its Flags; in ImGui `true`
+  from a radio button means the variable holds that button's value). It keeps
+  the variable's old bytes and sets `Injected`, so the widget returns true that
+  frame, unless the variable already held the value (nothing changed: a toggle
+  handler must not run); a mixed-state check box (`ImGuiItemFlags_MixedValue`,
+  `CheckboxFlags` with only some of its bits set) holds neither value and gets
+  `Injected` for `false` too. The
   return hook of that same call reads the variable back, and the entry hook of
   the widget's next frame checks, before any new write, what the variable
   holds: the value (applied), the old value (a copy that ignores the return
@@ -219,7 +225,10 @@ How the hooks behave (in `tcImGuiHooks.h`):
   applied, with a note). The outcome is handed to the tool at the end of the
   frame it is known (`swapFrames()`), or, in a window frame where the app runs
   no imgui for that context, from tcxImGui's render listener
-  (`settleWithoutImGuiFrame()`). The write sets no Edited flag, so it is not
+  (`settleWithoutImGuiFrame()`). A value whose next-frame check has not come
+  by its check deadline (the window renders no frame) is settled on its
+  read-back at return from the main window's afterFrame
+  (`settleOverdueValues()`). The write sets no Edited flag, so it is not
   recorded as touched. Text (buffer size unknown) and the openers (`BeginCombo`,
   `BeginListBox`: no variable) are never written. `ColorPicker3` and
   `CheckboxFlags` need no hook of their own: the inner `ColorPicker4` /

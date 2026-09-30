@@ -28,9 +28,11 @@
 // Values queued by the MCP tools (tcx_imgui_input on a value widget) are
 // written into the widget's variable by the value hook at the widget's entry,
 // before the widget reads it; the widget returns true in that frame
-// (IMGUI_TC_RETURN). The variable is read back at its return, and checked again
-// at the widget's entry in the next frame. Such a write sets no Edited flag, so
-// it is not recorded as touched.
+// (IMGUI_TC_RETURN) unless the variable already held the value. The variable is
+// read back at its return, and checked again at the widget's entry in the next
+// frame (or settled on the read-back at return, when that frame does not come
+// in time: settleOverdueValues()). Such a write sets no Edited flag, so it is
+// not recorded as touched.
 // =============================================================================
 
 #include "imgui/imgui.h"
@@ -60,6 +62,7 @@ struct WidgetValue {
     bool hsv = false;                  // Color: the variable holds HSV (ImGuiColorEditFlags_InputHSV)
     bool password = false;             // Text: password field, the string is withheld
     bool truncated = false;            // Text: longer than kMaxTextBytes
+    int buttonValue = 0;               // Radio: this button's value (v_button), what pressing it sets
 
     static constexpr size_t kMaxTextBytes = 64 * 1024;
 };
@@ -112,6 +115,7 @@ struct PendingValue {
         Expired,        // the widget ran only after the value's lifetime: not written
         ShapeChanged,   // the widget now reports another kind / type / component count
         Superseded,     // a later value was queued for the same widget before this one was written
+        OtherButton,    // a RadioButton(int*) whose own value (v_button) is not the value: not written
     };
     ImGuiID id = 0;
     int kind = 0;                        // ImGuiTcValueKind_ the widget reported
@@ -119,7 +123,9 @@ struct PendingValue {
     int components = 0;
     std::vector<unsigned char> bytes;    // components * sizeof(dataType)
     std::vector<unsigned char> before;   // the variable just before the write
-    std::chrono::steady_clock::time_point deadline;   // not written after this
+    std::chrono::steady_clock::time_point deadline;        // not written after this
+    std::chrono::steady_clock::time_point checkDeadline;   // Verify: settled on the read-back at return
+                                                           //   after this (settleOverdueValues())
     int queuedFrame = 0;                 // ctx->FrameCount when queued
     int writtenFrame = 0;                // ctx->FrameCount of the write
     State state = State::Queued;
@@ -177,8 +183,13 @@ inline std::vector<TouchedWidget>& touched() {
 // Whether collection is active
 inline bool collecting = false;
 
-// Values the value hook has written so far, in every context. See
-// injectedValueCount().
+// The clock the queued values' deadlines follow: steady_clock, plus an offset
+// the tests advance to emulate a slow window without sleeping.
+inline std::chrono::steady_clock::duration clockSkew{};
+inline std::chrono::steady_clock::time_point now() { return std::chrono::steady_clock::now() + clockSkew; }
+
+// Values the value hook has written so far that made their widget return
+// true, in every context. See injectedValueCount().
 inline unsigned int injectedCount = 0;
 
 // > 0 while a TouchedExclusionScope is open: edits are not recorded as touched
@@ -234,6 +245,7 @@ inline void captureValue(WidgetValue& out, const ImGuiTcItemValue& item, ImGuiCo
         size_t size = ImGui::DataTypeGetInfo(item.DataType)->Size * (size_t)item.Components;
         out.bytes.resize(size);
         std::memcpy(out.bytes.data(), item.Data, size);
+        if (item.Kind == ImGuiTcValueKind_Radio) out.buttonValue = item.Flags;   // v_button
         if (item.Kind == ImGuiTcValueKind_Color) {
             // Like ColorEdit4 itself: the IO default applies when the widget
             // flags don't pick an input format.
@@ -282,12 +294,15 @@ inline bool isWritableKind(int kind) {
 
 // Queue `bytes` for the widget `id` of `ctx`, which reported `kind`,
 // `dataType` and `components`. The value hook writes it the next time the
-// widget runs, within `lifetime`. A value still queued for the same widget is
-// superseded. `onDone` runs once the outcome is known (see finishPendingValues()).
+// widget runs, within `lifetime`; its check in the widget's next frame is
+// waited for until `checkWithin` after now (see settleOverdueValues()). A value
+// still queued for the same widget is superseded. `onDone` runs once the
+// outcome is known (see finishPendingValues()).
 inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, int kind,
                                                 ImGuiDataType dataType, int components,
                                                 std::vector<unsigned char> bytes,
                                                 std::chrono::steady_clock::duration lifetime,
+                                                std::chrono::steady_clock::duration checkWithin,
                                                 std::function<void()> onDone) {
     auto& pending = contexts()[ctx].pendingValues;
     for (auto& q : pending) {
@@ -301,7 +316,9 @@ inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, i
     p->dataType = dataType;
     p->components = components;
     p->bytes = std::move(bytes);
-    p->deadline = std::chrono::steady_clock::now() + lifetime;
+    const auto t = now();
+    p->deadline = t + lifetime;
+    p->checkDeadline = t + checkWithin;
     p->queuedFrame = ctx->FrameCount;
     p->onDone = std::move(onDone);
     pending.push_back(p);
@@ -313,12 +330,19 @@ inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, i
 // ImGuiSelectableFlags_Disabled: a Bool hook's Flags), or read-only (the
 // ReadOnly item flag, ImGuiSliderFlags_ReadOnly, ImGuiInputTextFlags_ReadOnly
 // on an InputScalar).
-inline PendingValue::State refusalFor(const ImGuiTcItemValue& item) {
+// The item flags in force for a value widget at its entry: those in force now,
+// plus those set for the next item, which its ItemAdd() will apply
+// (ColorPicker4 reads its ReadOnly from there too), plus its own once its
+// ItemAdd() ran.
+inline ImGuiItemFlags itemFlagsAtEntry(const ImGuiTcItemValue& item) {
     ImGuiContext* g = item.Ctx;
-    // The item flags in force now, plus those set for the next item, which its
-    // ItemAdd() will apply (ColorPicker4 reads its ReadOnly from there too)
     ImGuiItemFlags f = g->CurrentItemFlags | g->NextItemData.ItemFlagsSet;
     if (item.Id && g->LastItemData.ID == item.Id) f |= g->LastItemData.ItemFlags;   // after its ItemAdd()
+    return f;
+}
+
+inline PendingValue::State refusalFor(const ImGuiTcItemValue& item) {
+    ImGuiItemFlags f = itemFlagsAtEntry(item);
     if (item.Kind == ImGuiTcValueKind_Bool) f |= item.Flags;   // the flags the widget adds for itself
     if (f & ImGuiItemFlags_Disabled) return PendingValue::State::Disabled;
     bool readOnly = (f & ImGuiItemFlags_ReadOnly) != 0;
@@ -344,7 +368,7 @@ inline void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
     ImGuiWindow* window = static_cast<ImGuiWindow*>(item.Window);
     if (!window || window->SkipItems || !item.Data || !item.Label || !item.Label[0]) return;
     if (!isWritableKind(item.Kind) || insideColorWidget(item.Ctx)) return;
-    const auto now = std::chrono::steady_clock::now();
+    const auto t = now();
     const int frame = item.Ctx->FrameCount;
     const ImGuiID id = item.Id ? item.Id : window->GetID(item.Label);
     // Same ID and kind: SliderAngle's inner SliderFloat and Combo's BeginCombo
@@ -368,7 +392,7 @@ inline void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
     for (auto& pp : cs.pendingValues) {
         PendingValue& p = *pp;
         if (p.state != PendingValue::State::Queued || !matches(p)) continue;
-        if (now >= p.deadline) {
+        if (t >= p.deadline) {
             p.state = PendingValue::State::Expired;   // too late to be checked within the reply's time
             continue;
         }
@@ -380,14 +404,36 @@ inline void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
             p.state = refused;
             return;
         }
+        // A RadioButton(int*) sets its variable to its own value only (it
+        // returns true when that is the value): another value belongs to the
+        // button of the group whose value it is.
+        if (item.Kind == ImGuiTcValueKind_Radio) {
+            int wanted = 0;
+            std::memcpy(&wanted, p.bytes.data(), sizeof(wanted));
+            if (wanted != item.Flags) {
+                captureValue(p.readBack, item, item.Ctx);   // for the reply: this button's value
+                p.state = PendingValue::State::OtherButton;
+                return;
+            }
+        }
         p.before.assign(static_cast<const unsigned char*>(item.Data),
                         static_cast<const unsigned char*>(item.Data) + size);
         std::memcpy(const_cast<void*>(item.Data), p.bytes.data(), size);
-        ++injectedCount;
         p.state = PendingValue::State::Written;
         p.writtenBy = &item;
         p.writtenFrame = frame;
-        item.Injected = true;   // IMGUI_TC_RETURN: the widget returns true this frame
+        // IMGUI_TC_RETURN: the widget returns true this frame, as for a change
+        // by hand; not when the variable already held the value (nothing
+        // changed: a toggle handler must not run). A mixed-state check box
+        // (CheckboxFlags with only some of its bits set: ImGuiItemFlags_MixedValue,
+        // its variable false) holds neither value, so false still returns true
+        // and CheckboxFlags clears the bits.
+        const bool mixed = item.Kind == ImGuiTcValueKind_Bool &&
+                           (itemFlagsAtEntry(item) & ImGuiItemFlags_MixedValue) != 0;
+        if (mixed || p.before != p.bytes) {
+            ++injectedCount;
+            item.Injected = true;
+        }
         return;
     }
 }
@@ -446,11 +492,34 @@ inline void settleWithoutImGuiFrame(ImGuiContext* ctx) {
     finishPendingValues(it->second, ctx->FrameCount, true);
 }
 
-// Values written by the value hook so far (every context). Code that acts on
-// a widget's return value can compare it before and after the widget call: a
-// change means the widget returned true for a value the MCP tools wrote
-// (IMGUI_TC_RETURN), not for an edit by hand. (tcxNodeInspector: its own
-// touched record.)
+// Call regularly from a window that keeps rendering (tcxImGui: the main
+// window's afterFrame, before tc::mcp's timeout drain): a value written into
+// one of ctx's widgets whose check in the widget's next frame has not come by
+// its checkDeadline (the window renders no frame: very slow, or it stopped
+// rendering) is settled as applied on its read-back at return, as for a widget
+// not drawn again, and handed to its onDone.
+inline void settleOverdueValues(ImGuiContext* ctx) {
+    if (!ctx) return;
+    auto it = contexts().find(ctx);
+    if (it == contexts().end() || it->second.pendingValues.empty()) return;
+    const auto t = now();
+    bool any = false;
+    for (auto& p : it->second.pendingValues) {
+        if (p->state == PendingValue::State::Verify && t >= p->checkDeadline) {
+            p->state = PendingValue::State::Applied;
+            any = true;
+        }
+    }
+    // Outside any imgui frame of ctx: FrameCount is its last frame, which
+    // settles nothing else
+    if (any) finishPendingValues(it->second, ctx->FrameCount);
+}
+
+// Values written by the value hook so far that made their widget return true
+// (every context). Code that acts on a widget's return value can compare it
+// before and after the widget call: a change means the widget returned true
+// for a value the MCP tools wrote (IMGUI_TC_RETURN), not for an edit by hand.
+// (tcxNodeInspector: its own touched record.)
 inline unsigned int injectedValueCount() { return injectedCount; }
 
 } // namespace detail
