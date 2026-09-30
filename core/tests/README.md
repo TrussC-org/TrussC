@@ -101,4 +101,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `onDisconnect` listener leaves exactly one receive thread (both counted on
   Linux), that reconnecting through `connectAsync()` works, and that refused
   attempts release the old socket (counted on Linux) before a later
-  `connect()` succeeds.
+  `connect()` succeeds. With an auto-reconnect `onDisconnect` listener
+  attached, `disconnect()` from another thread reports exactly one
+  "Disconnected by client" and leaves no connection, and destroying the
+  client neither hangs nor reconnects: the receive thread used to report
+  the EOF of `disconnect()`'s own shutdown as a remote close, and the
+  listener reconnected while `disconnect()` was joining that thread.

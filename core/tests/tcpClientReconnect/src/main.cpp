@@ -20,6 +20,13 @@
 //   - A reconnect the peer refuses (its device still rebooting) returns false
 //     and still releases the old socket (checked on Linux), and the next
 //     connect() succeeds.
+//   - With an auto-reconnect onDisconnect listener attached (reconnect unless
+//     the reason is "Disconnected by client"), disconnect() from another
+//     thread reports exactly one onDisconnect, "Disconnected by client", and
+//     leaves no connection. Destroying such a client neither hangs nor
+//     reconnects. The receive thread used to report the EOF of disconnect()'s
+//     own shutdown() as a remote close, and the listener reconnected from it
+//     while disconnect() was joining that thread.
 //
 // The pre-fix build aborts on the first reconnect. The scenario runs on a
 // worker with a deadline, so a hang reports FAIL instead of eating the CI
@@ -32,9 +39,11 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -375,9 +384,94 @@ static void scenario() {
           peerToClient(peer, "welcome back"));
     if (g_fail) bail();
 
+    // --- disconnect() with an auto-reconnect listener attached ---------------
+    // The usual auto-reconnect: an inline onDisconnect listener that reconnects
+    // unless the app itself disconnected. disconnect()'s shutdown() wakes the
+    // receive thread with EOF. When that thread reported it as a remote close,
+    // the listener reconnected from it while disconnect() was still joining it
+    // (the thread detached itself under the join), and disconnect() then saw
+    // the new connection and reported a second disconnect.
+    mutex reasonsMutex;
+    vector<string> reasons;
+    atomic<int> autoReconnects{0};
+    auto autoReconnect = [&](TcpClient* c) {
+        return c->onDisconnect.listen([&, c](TcpDisconnectEventArgs& e) {
+            {
+                lock_guard<mutex> lock(reasonsMutex);
+                reasons.push_back(e.reason);
+            }
+            if (e.reason != "Disconnected by client") {
+                ++autoReconnects;
+                c->connect("127.0.0.1", port);
+            }
+        });
+    };
+    // A connection the client should not have made. Waiting for it is also
+    // the grace period for a late onDisconnect from a stray receive thread.
+    auto strayConnection = [&] {
+        rawsocket_t stray = acceptWithin(listener, 300);
+        if (stray == kNoSocket) return false;
+        TC_CLOSE(stray);
+        return true;
+    };
+
+    EventListener autoSub = autoReconnect(&client);
+    thread([&] { client.disconnect(); }).join();   // not the receive thread
+    const bool strayAfterDisconnect = strayConnection();
+    {
+        lock_guard<mutex> lock(reasonsMutex);
+        check("auto-reconnect: disconnect() reports one onDisconnect",
+              reasons.size() == 1);
+        check("auto-reconnect: it says \"Disconnected by client\"",
+              reasons.size() == 1 && reasons[0] == "Disconnected by client");
+    }
+    check("auto-reconnect: disconnect() does not reconnect",
+          autoReconnects == 0 && !strayAfterDisconnect);
+    check("auto-reconnect: the client is left disconnected", !client.isConnected());
+    autoSub.disconnect();
+    TC_CLOSE(peer);
+    if (g_fail) bail();
+
+    // --- destroying a client with the auto-reconnect listener attached ------
+    // The destructor calls disconnect(): the same EOF, on a client about to go.
+    auto doomed = make_unique<TcpClient>();
+    check("destroyed client: connect()", doomed->connect("127.0.0.1", port));
+    peer = acceptWithin(listener, 2000);
+    check("destroyed client: peer accepted the connection", peer != kNoSocket);
+    if (g_fail) bail();
+    // Data from the peer puts the receive thread in its receive loop, blocked
+    // in recv() by the time the destructor runs, as it is in a live app
+    atomic<bool> doomedReceived{false};
+    EventListener doomedRx = doomed->onReceive.listen([&](TcpReceiveEventArgs&) {
+        doomedReceived = true;
+    });
+    ::send(peer, "hi", 2, 0);
+    check("destroyed client: the client receives the peer's data",
+          waitFor(3000, [&] { return doomedReceived.load(); }));
+    if (g_fail) bail();
+    {
+        lock_guard<mutex> lock(reasonsMutex);
+        reasons.clear();
+    }
+    autoReconnects = 0;
+    EventListener doomedSub = autoReconnect(doomed.get());
+    check("destroyed client: the destructor finishes within 5 s",
+          completesWithin(5000, [&] { doomed.reset(); }));
+    if (g_fail) bail();
+    const bool strayAfterDestroy = strayConnection();
+    check("destroyed client: no reconnect after destruction",
+          autoReconnects == 0 && !strayAfterDestroy);
+    {
+        lock_guard<mutex> lock(reasonsMutex);
+        bool onlyByClient = true;
+        for (const string& r : reasons) {
+            if (r != "Disconnected by client") onlyByClient = false;
+        }
+        check("destroyed client: no disconnect reported as a remote close", onlyByClient);
+    }
+    // doomedSub outlives its Event: disconnecting it now is a no-op
+
     // --- teardown ---------------------------------------------------------
-    client.disconnect();
-    check("disconnect() leaves the client disconnected", !client.isConnected());
     TC_CLOSE(peer);
     TC_CLOSE(refusedSock);
     TC_CLOSE(listener);

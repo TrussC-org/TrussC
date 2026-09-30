@@ -477,6 +477,11 @@ bool TlsClient::performHandshake() {
     } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
         return false; // In progress
     } else {
+        // A local disconnect() on another thread shut the socket down under
+        // the handshake. It cleared running_ first and tears the connection
+        // down itself: only a failure this thread ran into is handled here.
+        if (!running_.exchange(false)) return false;
+
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
@@ -553,20 +558,25 @@ void TlsClient::processNetwork() {
             onReceive.notify(args);
             if (!useThread_) break;
         } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
-            // Connection closed
-            running_ = false;
-            connected_ = false;
-            tc::TcpDisconnectEventArgs args;
-            args.reason = "Connection closed by remote";
-            args.wasClean = true;
-            onDisconnect.notify(args);
+            // Connection closed. Report it only if this thread is the one
+            // ending the connection. A local disconnect() clears running_
+            // before its shutdown() wakes this read with EOF, and reports the
+            // disconnect itself once it has joined this thread; reporting it
+            // here as a remote close would let a reconnecting listener start
+            // over while disconnect() is still joining this thread.
+            if (running_.exchange(false)) {
+                connected_ = false;
+                tc::TcpDisconnectEventArgs args;
+                args.reason = "Connection closed by remote";
+                args.wasClean = true;
+                onDisconnect.notify(args);
+            }
             break;
         } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
             break;
         } else {
-            // Error
-            if (running_) {
-                running_ = false;
+            // Error. As above: one caused by a local disconnect() is its to report
+            if (running_.exchange(false)) {
                 connected_ = false;
                 char errBuf[256];
                 mbedtls_strerror(ret, errBuf, sizeof(errBuf));
@@ -615,8 +625,10 @@ void TlsClient::disconnect() {
         }
     }
 
-    if (connected_) {
-        connected_ = false;
+    // The receive thread reports only a close it ran into itself (running_
+    // still set). The EOF that the shutdown() above wakes it with is this
+    // call's own, and is reported here, once, after the join.
+    if (connected_.exchange(false)) {
         tc::TcpDisconnectEventArgs args;
         args.reason = "Disconnected by client";
         args.wasClean = true;

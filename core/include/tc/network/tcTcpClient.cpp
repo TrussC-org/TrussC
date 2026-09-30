@@ -212,8 +212,10 @@ void TcpClient::disconnect() {
         }
     }
 
-    if (connected_) {
-        connected_ = false;
+    // The receive thread reports only a close it ran into itself (running_
+    // still set). The EOF that the shutdown() above wakes it with is this
+    // call's own, and is reported here, once, after the join.
+    if (connected_.exchange(false)) {
         TcpDisconnectEventArgs args;
         args.reason = "Disconnected by client";
         args.wasClean = true;
@@ -386,21 +388,27 @@ void TcpClient::processNetwork() {
             // If not, we should return to let the app run.
             if (!useThread_) break; 
         } else if (received == 0) {
-            // Connection closed
-            running_ = false;
-            connected_ = false;
-            TcpDisconnectEventArgs args;
-            args.reason = "Connection closed by remote";
-            args.wasClean = true;
-            onDisconnect.notify(args);
+            // Connection closed. Report it only if this thread is the one
+            // ending the connection. A local disconnect() clears running_
+            // before its shutdown() wakes this recv() with EOF, and reports
+            // the disconnect itself once it has joined this thread; reporting
+            // it here as a remote close would let a reconnecting listener
+            // start over while disconnect() is still joining this thread.
+            if (running_.exchange(false)) {
+                connected_ = false;
+                TcpDisconnectEventArgs args;
+                args.reason = "Connection closed by remote";
+                args.wasClean = true;
+                onDisconnect.notify(args);
+            }
             break;
         } else {
             // Error
             int err = SOCKET_ERROR_CODE;
             if (err == WOULD_BLOCK_ERROR) break;
             
-            if (running_) {
-                running_ = false;
+            // As above: an error caused by a local disconnect() is its to report
+            if (running_.exchange(false)) {
                 connected_ = false;
                 TcpDisconnectEventArgs args;
                 args.reason = "Connection error";
