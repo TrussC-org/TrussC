@@ -16,8 +16,10 @@
 //   - parseTargetFlag(): --no-web / --no-android / --no-ios, and --web with
 //     --no-web is an error.
 //   - Saved settings that cannot be used are reported, not dropped silently:
-//     an unparsable file, wrongly typed entries, an unknown IDE id, and an IDE
-//     this OS cannot generate (xcode off macOS, vs off Windows).
+//     an unparsable file, wrongly typed entries, an unknown IDE id, an IDE
+//     this OS cannot generate (xcode off macOS, vs off Windows), and an ios
+//     target off macOS (left out of the summary too; --ios off macOS keeps
+//     its old, silent behavior).
 //   - TC_WEB_BACKEND is read the way CMake builds it ("WGPU" or unset is
 //     WebGPU, anything else GLES3, warned unless "GLES3"), as a string or in
 //     the {"type": ..., "value": ...} form.
@@ -570,6 +572,39 @@ static void testPrepareRegeneration() {
         check("regenerate: backend and IDE problems are warned",
               setup.warnings.size() == 2 && setup.settings.webBackend == 1 &&
               setup.summary.find("the IDE is the default") != string::npos);
+    }
+    {
+        // A saved ios target: kept on macOS; elsewhere writeCMakePresets()
+        // would drop it from the rewritten file, so it is dropped with a warning
+        fs::path project = makeProject("regenerate-ios");
+        writeFile(project / "CMakePresets.json", R"({
+            "configurePresets": [{"name": "web"}, {"name": "ios"}, {"name": "ios"}],
+            "vendor": {"trussc": {"ide": "cmake"}}
+        })");
+        RegenerationSetup setup = prepareRegeneration(project.string(), g_root.string(),
+                                                      {}, {}, GenerationFlags());
+#ifdef __APPLE__
+        check("regenerate: saved ios kept on macOS, named in the summary",
+              setup.settings.generateIosBuild && setup.settings.iosKept &&
+              setup.warnings.empty() && setup.summary.find(", ios") != string::npos);
+#else
+        check("regenerate: saved ios dropped off macOS, warned once",
+              !setup.settings.generateIosBuild && !setup.settings.iosKept &&
+              setup.settings.generateWebBuild && setup.warnings.size() == 1 &&
+              setup.warnings[0].find("ios") != string::npos &&
+              setup.warnings[0].find("macOS") != string::npos);
+        check("regenerate: dropped ios is not in the summary",
+              !setup.summary.empty() && setup.summary.find("ios") == string::npos);
+        // --ios off macOS behaves as before the summary existed: the setting
+        // is taken (and writeCMakePresets() writes no ios preset), unannounced
+        GenerationFlags f;
+        f.ios = true;
+        RegenerationSetup flagged = prepareRegeneration(project.string(), g_root.string(),
+                                                        {}, {}, f);
+        check("regenerate: --ios off macOS is taken but not in the summary",
+              flagged.settings.generateIosBuild && !flagged.settings.iosKept &&
+              flagged.summary.find("ios") == string::npos);
+#endif
     }
 }
 

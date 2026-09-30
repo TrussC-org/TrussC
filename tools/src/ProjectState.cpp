@@ -86,6 +86,7 @@ PresetState parsePresetState(const string& jsonText) {
                                  "array; its targets are ignored");
     }
     if (presets != data.end() && presets->is_array()) {
+        [[maybe_unused]] bool droppedIos = false;
         for (const auto& p : *presets) {
             if (!p.is_object()) continue;
             auto name = p.find("name");
@@ -104,7 +105,19 @@ PresetState parsePresetState(const string& jsonText) {
                 state.android = true;
                 readToolchainFile(p, n, state.androidToolchainFile, state);
             }
-            else if (n == "ios")     state.ios = true;
+            else if (n == "ios") {
+#ifdef __APPLE__
+                state.ios = true;
+#else
+                // writeCMakePresets() writes the ios preset on macOS only, so
+                // a kept one would vanish from the rewritten file unnoticed
+                if (!droppedIos) {
+                    state.warnings.push_back("the ios target in CMakePresets.json is "
+                                             "macOS only; dropped on this OS");
+                    droppedIos = true;
+                }
+#endif
+            }
         }
     }
 
@@ -250,6 +263,9 @@ string describeGenerationOptions(const ProjectSettings& settings) {
         out += settings.webBackend == 1 ? ", web (WebGL)" : ", web (WebGPU)";
     }
     if (settings.generateAndroidBuild) out += ", android";
+#ifdef __APPLE__
+    // Written and configured on macOS only (writeCMakePresets())
     if (settings.generateIosBuild) out += ", ios";
+#endif
     return out;
 }

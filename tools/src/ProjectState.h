@@ -16,8 +16,9 @@
 // with the ids of IdeHelper::getIdeId().
 //
 // Whatever cannot be used is left out and reported, never guessed: a file
-// that does not parse, wrongly typed entries, an unknown IDE id, and an IDE
-// this OS cannot generate (xcode off macOS, vs off Windows, as in the GUI).
+// that does not parse, wrongly typed entries, an unknown IDE id, an IDE this
+// OS cannot generate (xcode off macOS, vs off Windows, as in the GUI), and an
+// ios target off macOS (writeCMakePresets() writes it on macOS only).
 // A TC_WEB_BACKEND other than "WGPU" / "GLES3" is read the way CMake builds
 // it (GLES3) and reported too.
 //
@@ -37,7 +38,8 @@ struct PresetState {
     bool found = false;     // the file exists and parses as a JSON object
     bool web = false;       // a "web" configure preset exists
     bool android = false;   // an "android" configure preset exists
-    bool ios = false;       // an "ios" configure preset exists
+    bool ios = false;       // an "ios" configure preset exists (macOS only;
+                            // elsewhere it is dropped with a warning)
     // TC_WEB_BACKEND of the web preset, as CMake builds it: 0 = WGPU (unset or
     // exactly "WGPU"), 1 = GLES3 (any other value; not "GLES3" is warned).
     // Read from a string or from the {"type": ..., "value": ...} form.
@@ -55,8 +57,9 @@ struct PresetState {
     std::string ideWarning;
     // Other problems with an existing file: the whole file when it does not
     // parse as a JSON object (found stays false), a wrongly typed
-    // configurePresets or toolchainFile (ignored), and a TC_WEB_BACKEND that
-    // is unusable (ignored: WGPU) or neither "WGPU" nor "GLES3" (GLES3).
+    // configurePresets or toolchainFile (ignored), a TC_WEB_BACKEND that is
+    // unusable (ignored: WGPU) or neither "WGPU" nor "GLES3" (GLES3), and an
+    // ios preset off macOS (dropped).
     std::vector<std::string> warnings;
 };
 
@@ -114,5 +117,6 @@ RegenerationSetup prepareRegeneration(const std::string& projectPath,
                                       const GenerationFlags& flags);
 
 // One line naming the IDE and the targets of `settings`, for the log, e.g.
-// "IDE cursor, targets: native, web (WebGPU)".
+// "IDE cursor, targets: native, web (WebGPU)". ios is named on macOS only,
+// the only host that writes its preset.
 std::string describeGenerationOptions(const ProjectSettings& settings);
