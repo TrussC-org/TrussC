@@ -65,6 +65,8 @@ free the other body of their pair, and bodies may be destroyed between
 - `Step()`, destroy the ball, add a new one (Box2D hands out the freed
   `b2Body` again), then `update()`: the platform's Exit / Ended names no
   other body, and neither the freed ball nor the new one hears anything;
+  `createBounds()` (new walls at the freed address) and `clear()` there
+  leave the world-level Ended naming no freed body;
 - a `RigidBody2D` Stay listener that drops the other node of the pair being
   dispatched, and one that also adds a new ball at the freed address: the
   dropped side gets no Stay, the new ball nothing.

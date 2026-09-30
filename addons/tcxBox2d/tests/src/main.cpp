@@ -1533,6 +1533,75 @@ static void testModEventLifetimes() {
     }
 }
 
+// The World's own DestroyBody calls: createBounds() replacing the walls
+// (the new walls get the freed b2Body's address) and clear(). The world-level
+// Ended deferred from the step must not name the freed walls or bodies.
+static void testWorldEventLifetimes() {
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+        world.createBounds(0, 0, 800, 600);
+
+        box2d::CircleBody ball;
+        ball.setup(world, 400, 600 - 10 + 3, 10);   // 3 px into the floor
+        ball.setSensor(true);
+        step(world, 1);
+
+        int ended = 0;
+        box2d::WorldContact last;
+        EventListener l = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact& c) {
+            ++ended;
+            last = c;
+        });
+        ball.setPhysicsPosition(400, 300);
+        stepOnly(world);
+        const b2Body* oldWalls = nullptr;
+        for (b2Body* b = world.getWorld()->GetBodyList(); b; b = b->GetNext()) {
+            if (b != ball.getBody()) oldWalls = b;
+        }
+        world.createBounds(0, 0, 800, 600);
+        bool reused = false;
+        for (b2Body* b = world.getWorld()->GetBodyList(); b; b = b->GetNext()) {
+            if (b == oldWalls) reused = true;
+        }
+        world.getCollisionManager()->update();
+        const bool ballAndNull = (last.a == ball.getBody() && !last.b) || (last.b == ball.getBody() && !last.a);
+        check("createBounds() between Step() and update(): one Ended, naming the ball and no walls",
+              reused && ended == 1 && ballAndNull);
+    }
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        auto addDisc = [&](float x, float y) {
+            b2BodyDef bd;
+            bd.type = b2_dynamicBody;
+            bd.position = box2d::World::toBox2d(x, y);
+            b2Body* body = world.getWorld()->CreateBody(&bd);
+            b2CircleShape c;
+            c.m_radius = box2d::World::toBox2d(10);
+            b2FixtureDef fd;
+            fd.shape = &c;
+            fd.isSensor = true;
+            body->CreateFixture(&fd);
+            return body;
+        };
+        b2Body* a = addDisc(400, 300);
+        addDisc(415, 300);
+        step(world, 1);
+
+        int ended = 0;
+        EventListener l = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) { ++ended; });
+        a->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        stepOnly(world);
+        world.clear();
+        world.getCollisionManager()->update();
+        check("clear() between Step() and update(): no Ended for the freed bodies", ended == 0);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Compound bodies: the inertia check runs once on the whole body (#427)
 // ---------------------------------------------------------------------------
@@ -1886,6 +1955,7 @@ int main() {
     testStayListenerDestroys();
     testClassicEventLifetimes();
     testModEventLifetimes();
+    testWorldEventLifetimes();
     testCompoundOffset(world);
     testReducedConvexHull();
 
