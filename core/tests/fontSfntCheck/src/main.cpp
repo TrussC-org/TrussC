@@ -49,6 +49,10 @@
 //   lowered through internal::setStbttLimitsForTests()): a glyph over the limit, one whose closing
 //   vertex is the one over it, one far over any limit through nested
 //   subroutines, and one whose array allocation fails all come back empty,
+// - the flattened point count of a glyph stops within the range stb handles
+//   (with the limit lowered): a glyph with more points than the limit is not
+//   drawn, one at the limit is, and FontAtlasManager still gives it a glyph
+//   entry,
 // - valid fonts still load, with the metrics they are built with, including
 //   numberOfHMetrics == numGlyphs, a cmap format 12 subtable, a table of
 //   length 0 and tables that share bytes with another.
@@ -61,6 +65,7 @@
 
 #include <TrussC.h>
 
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -704,10 +709,10 @@ static Bytes makeVertexCountFont() {
 
 static void checkVertexCount() {
     const Bytes f = makeVertexCountFont();
-    // A vertex limit well above 'E' and within the default on every platform.
-    const int highMaxVertices = 1 << 20;
+    // INT_MAX is clamped to the default limit.
+    const int defaultMaxVertices = INT_MAX;
     auto outlineSize = [&](uint32_t cp, int maxVertices, size_t mallocMax) {
-        internal::setStbttLimitsForTests(maxVertices, mallocMax);
+        internal::setStbttLimitsForTests(maxVertices, INT_MAX, mallocMax);
         internal::FontAtlasManager m;
         int n = -1;
         if (tryLoad(m, f).ok) n = m.getGlyphPath(cp).size();
@@ -723,10 +728,10 @@ static void checkVertexCount() {
     n = outlineSize('E', 1 << 10, SIZE_MAX);
     check("vertex count: 'E' (2^18 + 1 vertices) with a limit of 2^10 is empty", n == 0,
           "vertices=" + to_string(n));
-    n = outlineSize('E', highMaxVertices, 1024);
+    n = outlineSize('E', defaultMaxVertices, 1024);
     check("vertex count: 'E' is empty when its vertex array cannot be allocated", n == 0,
           "vertices=" + to_string(n));
-    n = outlineSize('E', highMaxVertices, SIZE_MAX);
+    n = outlineSize('E', defaultMaxVertices, SIZE_MAX);
     check("vertex count: 'E' (2^18 + 1 vertices) has an outline", n > 0,
           "vertices=" + to_string(n));
 
@@ -742,6 +747,59 @@ static void checkVertexCount() {
           "vertices=" + to_string(pd.size()));
     const internal::GlyphInfo* gd = m.getOrLoadGlyph('D');
     check("vertex count: 'D' draws empty", gd && gd->isValid() && gd->getWidth() == 0);
+}
+
+// --- flattened point count ----------------------------------------------------------
+// Coverage of a glyph rasterized by stb_truetype into a zeroed bitmap, with
+// the flattened point limit at maxPoints (INT_MAX: the default); -1 when the
+// font does not load or the glyph box is empty.
+static long rasterCoverage(const Bytes& f, int glyph, float scale, int maxPoints) {
+    stbtt_fontinfo info;
+    if (!stbtt_InitFont(&info, f.data(), 0)) return -1;
+    int x0, y0, x1, y1;
+    stbtt_GetGlyphBitmapBox(&info, glyph, scale, scale, &x0, &y0, &x1, &y1);
+    const int w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return -1;
+    vector<uint8_t> pixels((size_t)w * h, 0);
+    internal::setStbttLimitsForTests(INT_MAX, maxPoints, SIZE_MAX);
+    stbtt_MakeGlyphBitmap(&info, pixels.data(), w, h, w, scale, scale, glyph);
+    internal::resetStbttLimitsForTests();
+    long sum = 0;
+    for (uint8_t v : pixels) sum += v;
+    return sum;
+}
+
+static void checkPointCount() {
+    const Bytes f = makeTrueType();
+    // Glyph 0 is a box: 5 points (the move, three lines and the closing line).
+    long c = rasterCoverage(f, 0, 0.1f, 5);
+    check("point count: box (5 points) with a limit of 5 is drawn", c > 0,
+          "coverage=" + to_string(c));
+    c = rasterCoverage(f, 0, 0.1f, 4);
+    check("point count: box (5 points) with a limit of 4 is not drawn", c == 0,
+          "coverage=" + to_string(c));
+    // Glyph 1 ('A') has a curve, which is split into many points at scale 1.
+    c = rasterCoverage(f, 1, 1.0f, INT_MAX);
+    check("point count: 'A' (a curve) is drawn", c > 0, "coverage=" + to_string(c));
+    c = rasterCoverage(f, 1, 1.0f, 8);
+    check("point count: 'A' (a curve) with a limit of 8 is not drawn", c == 0,
+          "coverage=" + to_string(c));
+
+    // Through FontAtlasManager, plain and oversampled.
+    for (int os : {1, 2}) {
+        internal::FontAtlasManager m;
+        if (!tryLoad(m, f).ok) {
+            check("point count: font loads", false);
+            return;
+        }
+        m.setOversample(os);
+        internal::setStbttLimitsForTests(INT_MAX, 4, SIZE_MAX);
+        const internal::GlyphInfo* ga = m.getOrLoadGlyph('A');
+        internal::resetStbttLimitsForTests();
+        check("point count: 'A' over the limit gets a glyph entry (oversample " +
+                  to_string(os) + ")",
+              ga && ga->isValid() && closeTo(ga->getAdvance(), 60.0f));
+    }
 }
 
 // --- last contour is one off-curve point ---------------------------------------
@@ -1232,6 +1290,7 @@ int main(int argc, char** argv) {
     checkCffMalformed();
     checkCodepointRange();
     checkVertexCount();
+    checkPointCount();
     checkSinglePointContour();
     checkCffLength();
     checkMalformed();

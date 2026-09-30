@@ -10,7 +10,7 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 | `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 2 |
 | `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
-| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 2 |
+| `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 3 |
 | `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | none |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
@@ -88,15 +88,28 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      returns 0 vertices when `STBTT_malloc` returns NULL.
      `STBTT_DEFAULT_MAX_VERTICES` is that limit; `STBTT_MAX_VERTICES`
      defaults to it and may be predefined.
+  3. Glyph rasterization (`stbtt_FlattenCurves`, `stbtt__rasterize`): the
+     flattened point count and the edge allocation (one edge per point plus
+     a sentinel) stay within the range stb handles (int count, size_t
+     allocation). `STBTT__MAX_EDGES` is
+     `min(INT_MAX, SIZE_MAX / sizeof(stbtt__edge))`. One vertex adds at most
+     `STBTT__MAX_POINTS_PER_VERTEX` (2^16) points, since a curve is split at
+     most 16 levels deep, so `STBTT_DEFAULT_MAX_POINTS` is
+     `STBTT__MAX_EDGES - 1 - 2^16`. The counting pass of
+     `stbtt_FlattenCurves` stops after the vertex that takes the count past
+     `STBTT_MAX_POINTS` (which defaults to `STBTT_DEFAULT_MAX_POINTS` and may
+     be predefined); the glyph then gets no points and is not drawn.
+     `stbtt__rasterize` draws nothing when the point counts add up past
+     `STBTT__MAX_EDGES - 1`.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
   Release builds handle font data the same way. Allocations through
   `STBTT_malloc` are padded with 64 zeroed bytes, and it returns NULL when
   the size cannot be allocated.
-  `STBTT_MAX_VERTICES` reads a variable that defaults to
-  `STBTT_DEFAULT_MAX_VERTICES`; the test hook
-  `internal::setStbttLimitsForTests()` (declared in
-  `core/include/tc/graphics/tcFont.h`) lowers it and caps `STBTT_malloc`
+  `STBTT_MAX_VERTICES` and `STBTT_MAX_POINTS` read variables that default
+  to `STBTT_DEFAULT_MAX_VERTICES` and `STBTT_DEFAULT_MAX_POINTS`; the test
+  hook `internal::setStbttLimitsForTests()` (declared in
+  `core/include/tc/graphics/tcFont.h`) lowers them and caps `STBTT_malloc`
   sizes, and `internal::resetStbttLimitsForTests()` restores the defaults.
 - **Checked by TrussC**: `FontAtlasManager`
   (`core/include/tc/graphics/tcFont.h`) checks the sfnt skeleton (collection

@@ -292,16 +292,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   numGlyphs (for CFF, past the number of CharStrings) and a codepoint above
   U+10FFFF draw as .notdef. Valid fonts load, including
   `numberOfHMetrics == numGlyphs`, a cmap format 12 subtable, a table of
-  length 0 and tables that share bytes. Also guards the TrussC patch in
-  `stb_truetype.h` (CFF data is read within the CFF table's length), the CFF vertex-count patch (a glyph over the vertex
-  limit, one whose closing vertex is the one over it, one far over any limit
-  through nested subroutines, and one whose vertex array cannot be allocated
-  come back empty; the test lowers those limits through
-  `internal::setStbttLimitsForTests()`) and the
-  padded `STBTT_malloc` (a glyph whose last contour is one off-curve point).
-  The single off-curve contour case is only meaningful under
-  AddressSanitizer, and CI does not build with ASan, so run it locally after
-  changing stb_truetype or `stb_impl.cpp`. From the repository root:
+  length 0 and tables that share bytes. Also guards the TrussC patches in
+  `stb_truetype.h`: CFF data is read within the CFF table's length; CFF
+  vertex counting (a glyph over the vertex limit, one whose closing vertex
+  is the one over it, one far over any limit through nested subroutines,
+  and one whose vertex array cannot be allocated come back empty); and the
+  flattened point count (a glyph with more points than the limit is not
+  drawn, one at the limit is). The test lowers these limits through
+  `internal::setStbttLimitsForTests()`. A glyph with a one-point contour
+  loads and rasterizes. Run the core tests under AddressSanitizer after
+  changing stb_truetype or `stb_impl.cpp`; CI does not build with ASan.
+  For this test, from the repository root:
 
   ```sh
   tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake

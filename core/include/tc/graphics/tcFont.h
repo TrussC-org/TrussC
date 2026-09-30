@@ -97,11 +97,12 @@ namespace trussc {
 namespace internal {
 
 // Test hooks, not user settings (core/tests/fontSfntCheck): lower the vertex
-// limit of stb_truetype's CFF counting pass and cap the size STBTT_malloc
-// allocates, so a test reaches both limits with small fonts. The reset
-// restores the defaults (stb's vertex limit, no size cap). State lives in
-// core/include/impl/stb_impl.cpp.
-void setStbttLimitsForTests(int maxVertices, size_t mallocMax);
+// limit of stb_truetype's CFF counting pass and its flattened point limit,
+// and cap the size STBTT_malloc allocates, so a test reaches these limits
+// with small fonts. Values above the defaults are clamped to them. The reset
+// restores the defaults (stb's vertex and point limits, no size cap). State
+// lives in core/include/impl/stb_impl.cpp.
+void setStbttLimitsForTests(int maxVertices, int maxPoints, size_t mallocMax);
 void resetStbttLimitsForTests();
 
 // ---------------------------------------------------------------------------

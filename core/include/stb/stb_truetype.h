@@ -3524,6 +3524,25 @@ typedef struct
    float x,y;
 } stbtt__point;
 
+// TrussC patch: flattened point counting (stbtt_FlattenCurves) and the edge
+// allocation (stbtt__rasterize: one edge per point plus a sentinel) stay
+// within the range stb handles (int count, size_t allocation).
+// STBTT__MAX_EDGES is that range. One vertex adds at most
+// STBTT__MAX_POINTS_PER_VERTEX points (a curve is split at most 16 levels
+// deep), and STBTT_DEFAULT_MAX_POINTS leaves that much room below the range.
+// STBTT_MAX_POINTS defaults to it and may be predefined (lower, or read at
+// run time). A glyph with more points than STBTT_MAX_POINTS gets no points
+// and is not drawn.
+#define STBTT__MAX_EDGES \
+   ((size_t)(~0u >> 1) < (size_t)-1 / sizeof(stbtt__edge) \
+      ? (int)(~0u >> 1) : (int)((size_t)-1 / sizeof(stbtt__edge)))
+#define STBTT__MAX_POINTS_PER_VERTEX (1 << 16)
+#define STBTT_DEFAULT_MAX_POINTS \
+   (STBTT__MAX_EDGES - 1 - STBTT__MAX_POINTS_PER_VERTEX)
+#ifndef STBTT_MAX_POINTS
+#define STBTT_MAX_POINTS STBTT_DEFAULT_MAX_POINTS
+#endif
+
 static void stbtt__rasterize(stbtt__bitmap *result, stbtt__point *pts, int *wcount, int windings, float scale_x, float scale_y, float shift_x, float shift_y, int off_x, int off_y, int invert, void *userdata)
 {
    float y_scale_inv = invert ? -scale_y : scale_y;
@@ -3540,8 +3559,12 @@ static void stbtt__rasterize(stbtt__bitmap *result, stbtt__point *pts, int *wcou
 
    // now we have to blow out the windings into explicit edge lists
    n = 0;
-   for (i=0; i < windings; ++i)
+   for (i=0; i < windings; ++i) {
+      // TrussC patch: the edge count, with the sentinel, stays within
+      // STBTT__MAX_EDGES (see there); nothing is drawn otherwise.
+      if (wcount[i] < 0 || wcount[i] > STBTT__MAX_EDGES - 1 - n) return;
       n += wcount[i];
+   }
 
    e = (stbtt__edge *) STBTT_malloc(sizeof(*e) * (n+1), userdata); // add an extra one as a sentinel
    if (e == 0) return;
@@ -3716,6 +3739,9 @@ static stbtt__point *stbtt_FlattenCurves(stbtt_vertex *vertices, int num_verts, 
                x = vertices[i].x, y = vertices[i].y;
                break;
          }
+         // TrussC patch: counting stops once the glyph has more than
+         // STBTT_MAX_POINTS points (see there); it then gets no points.
+         if (pass == 0 && num_points > STBTT_MAX_POINTS) goto error;
       }
       (*contour_lengths)[n] = num_points - start;
    }

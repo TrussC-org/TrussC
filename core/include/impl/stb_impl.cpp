@@ -33,6 +33,7 @@
 // stb_truetype allocates through STBTT_malloc. Allocations are padded with
 // TC_STBTT_ALLOC_PADDING (64) zeroed bytes after the requested size. The stb
 // source is not changed for this; see core/include/stb/README.md.
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -41,11 +42,14 @@
 #define TC_STBTT_ALLOC_PADDING 64
 
 // Limits that internal::setStbttLimitsForTests() lowers: the vertex limit of
-// stb_truetype's CFF counting pass (stb's default, set after the include
-// below) and the largest size STBTT_malloc allocates (no cap by default).
+// stb_truetype's CFF counting pass and its flattened point limit (stb's
+// defaults, set after the include below), and the largest size STBTT_malloc
+// allocates (no cap by default).
 static std::atomic<size_t> tcStbttMallocMax{SIZE_MAX};
 static int tcStbttMaxVertices();
+static int tcStbttMaxPoints();
 #define STBTT_MAX_VERTICES tcStbttMaxVertices()
+#define STBTT_MAX_POINTS   tcStbttMaxPoints()
 
 // Returns nullptr when the size cannot be allocated; stb checks for that.
 static void* tcStbttMalloc(size_t size) {
@@ -65,19 +69,27 @@ static_assert(TC_STBTT_ALLOC_PADDING >= 2 * sizeof(stbtt_vertex),
               "STBTT_malloc padding must cover at least two stbtt_vertex");
 
 static std::atomic<int> tcStbttMaxVerticesValue{STBTT_DEFAULT_MAX_VERTICES};
+static std::atomic<int> tcStbttMaxPointsValue{STBTT_DEFAULT_MAX_POINTS};
 static int tcStbttMaxVertices() {
     return tcStbttMaxVerticesValue.load(std::memory_order_relaxed);
+}
+static int tcStbttMaxPoints() {
+    return tcStbttMaxPointsValue.load(std::memory_order_relaxed);
 }
 
 // Test hooks, declared in tc/graphics/tcFont.h.
 namespace trussc {
 namespace internal {
-void setStbttLimitsForTests(int maxVertices, size_t mallocMax) {
-    tcStbttMaxVerticesValue.store(maxVertices, std::memory_order_relaxed);
+// Limits above the defaults are clamped to them.
+void setStbttLimitsForTests(int maxVertices, int maxPoints, size_t mallocMax) {
+    tcStbttMaxVerticesValue.store(std::min(maxVertices, (int)STBTT_DEFAULT_MAX_VERTICES),
+                                  std::memory_order_relaxed);
+    tcStbttMaxPointsValue.store(std::min(maxPoints, (int)STBTT_DEFAULT_MAX_POINTS),
+                                std::memory_order_relaxed);
     tcStbttMallocMax.store(mallocMax, std::memory_order_relaxed);
 }
 void resetStbttLimitsForTests() {
-    setStbttLimitsForTests(STBTT_DEFAULT_MAX_VERTICES, SIZE_MAX);
+    setStbttLimitsForTests(STBTT_DEFAULT_MAX_VERTICES, STBTT_DEFAULT_MAX_POINTS, SIZE_MAX);
 }
 } // namespace internal
 } // namespace trussc
