@@ -502,9 +502,13 @@ bool TlsClient::performHandshake() {
 
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
+
+        // Terminate the connection before telling anyone. A listener that
+        // reconnects from onError or onConnect runs inline, and a disconnect()
+        // after it returned would tear its new connection down.
+        disconnect();
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
-        disconnect(); // Terminate connection on error
-        
+
         tc::TcpConnectEventArgs args;
         args.success = false;
         args.message = std::string("TLS Handshake failed: ") + errBuf;
