@@ -36,7 +36,11 @@ Cases (`src/main.cpp`):
   variable is checked; wrong shapes and types, a widget not drawn in the next
   frame and a same-frame hand edit are errors; injected values stay out of the
   touched record; `tcx_imgui_click` on a composite is an error; text fields are
-  still typed into.
+  still typed into. The widget returns true in the write frame: a getter/setter
+  copy, `CheckboxFlags` and `ColorPicker3` take the value, `if (DragFloat(...))
+  ++count;` counts once and `IsItemEdited()` stays false; a clipped `Checkbox`
+  is written; a copy that ignores the return value gets the verify error;
+  disabled and read-only widgets and an action `MenuItem` are refused.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it

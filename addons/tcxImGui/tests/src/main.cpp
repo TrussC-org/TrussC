@@ -30,6 +30,10 @@
 //     edit that changes the value in the same frame are errors
 //   - injected values are not recorded as touched
 //   - tcx_imgui_click on a composite widget is an error; text fields still type
+//   - the widget returns true in the write frame, so getter/setter copies,
+//     CheckboxFlags and ColorPicker3 take the value (once, without Edited); a
+//     clipped Checkbox is written; a copy that ignores the return value gets
+//     the verify error; disabled and read-only widgets are refused
 // =============================================================================
 
 #include "imguiHarness.h"
@@ -322,8 +326,10 @@ static void testValueInput() {
     }
 
     bool deferred = false;
-    nlohmann::json r = input(h, "##v2", "[5, 6.5]", &deferred);
-    check("input: DragFloat2 set, reply waits for the frame", isOk(r) && deferred && v2[0] == 5 && v2[1] == 6.5f);
+    int frames = 0;
+    nlohmann::json r = callTool(h, "tcx_imgui_input", {{"label", "##v2"}, {"text", "[5, 6.5]"}}, &deferred, &frames);
+    check("input: DragFloat2 set, reply after the write frame and the check frame",
+          isOk(r) && deferred && frames == 2 && v2[0] == 5 && v2[1] == 6.5f);
     check("input: reply carries the value read back", r.is_object() && r.contains("value") && r["value"] == nlohmann::json({5, 6.5}));
 
     r = input(h, "position", "[0.5, -1, 2.25]");
@@ -429,11 +435,104 @@ static void testValueInput() {
     check("text: typed, answered at once", isOk(r) && !deferred && std::strcmp(name, "hello") == 0);
 }
 
+// ---------------------------------------------------------------------------
+// The widget returns true in the frame a value is written (#321 decision),
+// the next frame checks the variable kept it, and disabled / read-only widgets
+// are refused.
+// ---------------------------------------------------------------------------
+struct FakeNode {
+    float x = 0;
+    float getX() const { return x; }
+    void setX(float v) { x = v; }
+};
+
+static void testValueInputReturnsTrue() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+
+    FakeNode node;
+    unsigned int bits = 0;
+    float pick[3] = {1, 1, 1};
+    float counted = 0;
+    int count = 0;
+    bool editedSeen = false, far = false;
+    float model = 2;              // copied into `ignored` every frame, the return value ignored
+    float disabledV = 1, readOnlyV = 1;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(600, 740));
+        ImGui::Begin("Copies");
+        float x = node.getX();
+        if (ImGui::DragFloat("node x", &x)) node.setX(x);
+        ImGui::CheckboxFlags("bit 2", &bits, 4u);
+        ImGui::ColorPicker3("picker", pick);
+        if (ImGui::DragFloat("counted", &counted)) {
+            ++count;
+            editedSeen |= ImGui::IsItemEdited();
+        }
+        float ignored = model;
+        ImGui::DragFloat("ignored", &ignored);
+        ImGui::BeginDisabled();
+        ImGui::DragFloat("disabled", &disabledV);
+        ImGui::EndDisabled();
+        ImGui::InputFloat("read only", &readOnlyV, 0, 0, "%.3f", ImGuiInputTextFlags_ReadOnly);
+        ImGui::MenuItem("action");
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(620, 10));
+        ImGui::SetNextWindowSize(ImVec2(300, 200));
+        ImGui::Begin("Far");
+        ImGui::Dummy(ImVec2(10, 1000));
+        ImGui::Checkbox("far", &far);   // below the window's bottom edge: clipped
+        ImGui::End();
+    });
+    h.frames(3);
+
+    nlohmann::json r = input(h, "node x", "3.5");
+    check("returns true: getter/setter copy takes the value", isOk(r) && node.x == 3.5f);
+
+    r = input(h, "bit 2", "true");
+    check("returns true: CheckboxFlags sets the bit", isOk(r) && bits == 4u);
+
+    r = input(h, "picker", "[0.25, 0.5, 0.75]");
+    check("returns true: ColorPicker3 set", isOk(r) && pick[0] == 0.25f && pick[1] == 0.5f && pick[2] == 0.75f);
+
+    r = input(h, "counted", "7");
+    h.frames(3);
+    check("returns true: exactly once per injection", isOk(r) && counted == 7 && count == 1);
+    check("returns true: IsItemEdited() not set", !editedSeen);
+
+    const tcx::imgui::WidgetInfo* w = h.find("far");
+    check("clipped checkbox: listed with a bool value", w && w->value.kind == ImGuiTcValueKind_Bool);
+    r = input(h, "far", "true");
+    check("clipped checkbox: written", isOk(r) && far);
+
+    r = input(h, "ignored", "5");
+    check("verify: a copy that ignores the return value is an error",
+          isError(r) && r.value("message", "").find("cannot be set from MCP") != std::string::npos);
+    check("verify: the error carries the value the variable went back to",
+          r.is_object() && r.contains("value") && r["value"] == 2);
+
+    r = input(h, "disabled", "5");
+    check("refused: widget inside BeginDisabled()",
+          isError(r) && disabledV == 1 && r.value("message", "").find("disabled") != std::string::npos);
+    r = input(h, "read only", "5");
+    check("refused: read-only InputFloat",
+          isError(r) && readOnlyV == 1 && r.value("message", "").find("read-only") != std::string::npos);
+
+    r = input(h, "action", "true");
+    check("no variable: an action MenuItem is an error, not typed into", isError(r));
+
+    h.frame();
+    check("returns true: injected values not recorded as touched", tcx::imgui::getTouched().empty());
+}
+
 int main() {
     testMenus();
     testPanel();
     testClippedCheckbox();
     testListBoxInCombo();
     testValueInput();
+    testValueInputReturnsTrue();
     return harness::summary();
 }

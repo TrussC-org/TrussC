@@ -18,6 +18,7 @@
 
 #include <cstdio>
 #include <functional>
+#include <future>
 #include <string>
 
 namespace harness {
@@ -133,26 +134,50 @@ private:
 };
 
 // Calls an MCP tool the way tc::mcp::processHttpQueue() does, on this thread.
-// A tool that defers its reply to after the next frame
-// (deferToolResultUntilAfterFrame) gets that frame, run by `h`, and its reply
-// is then built as drainDeferredResponses() builds it. Returns the tool's
-// result (the JSON in its text content). `deferred` tells whether it deferred.
+// A tool that defers its reply is stashed with a promise, as processHttpQueue()
+// stashes it, and frames are run by `h` until the reply is produced: after
+// each frame the main window's after-present drain runs, and a deferral aimed
+// at another target is answered when its owner drains it (up to `maxFrames`).
+// Returns the tool's result (the JSON in its text content). `deferred` tells
+// whether it deferred, `frames` how many frames the reply took.
 inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const nlohmann::json& args,
-                               bool* deferred = nullptr) {
+                               bool* deferred = nullptr, int* frames = nullptr, int maxFrames = 10) {
+    namespace md = tc::mcp::detail;
     tcx::imgui::registerImGuiTools();   // idempotent
     nlohmann::json req = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
                           {"params", {{"name", name}, {"arguments", args}}}};
-    auto& ds = tc::mcp::detail::deferralState();
+    auto& ds = md::deferralState();
     ds.hasEnvelope = false;
     ds.target = nullptr;
+    ds.timeoutReply = nullptr;
+    ds.errorReply = nullptr;
+    ds.owner = nullptr;
     std::string reply = tc::mcp::Server::instance().processMessage(req.dump());
     if (deferred) *deferred = ds.hasEnvelope;
+    if (frames) *frames = 0;
     if (ds.hasEnvelope) {
-        auto envelope = std::move(ds.envelope);
+        md::DeferredResponse d;
+        d.response = std::make_shared<std::promise<md::ReplyThunk>>();
+        auto future = d.response->get_future();
+        d.makeEnvelope = std::move(ds.envelope);
+        d.target = ds.target;
+        d.deadline = std::chrono::steady_clock::now() + md::kTargetedDeferralTimeout;
+        d.timeoutReply = std::move(ds.timeoutReply);
+        d.errorReply = std::move(ds.errorReply);
+        md::deferredResponses().push_back(std::move(d));
         ds.hasEnvelope = false;
         ds.target = nullptr;
-        h.frame();                // the frame after the call
-        reply = envelope()();     // main stage after present(), then the worker thunk
+        reply.clear();
+        for (int i = 0; i < maxFrames; i++) {
+            h.frame();
+            tc::mcp::drainDeferredResponses();   // the main window's afterFrame
+            if (frames) *frames = i + 1;
+            if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                reply = future.get()();
+                break;
+            }
+        }
+        if (reply.empty()) return {{"rpcReply", "no reply within the frames run"}};
     }
     nlohmann::json r = nlohmann::json::parse(reply, nullptr, false);
     if (r.is_discarded() || !r.contains("result")) return {{"rpcReply", reply}};
