@@ -530,9 +530,10 @@ int main() {
         uint32_t dataBytes = 0;
         uintmax_t fileBytes = 0;
         {
+            // S16 header with the JUNK chunk (#336): the data chunk is at byte 72.
             ifstream f(wav, ios::binary);
             char tag[4] = {};
-            f.seekg(36);
+            f.seekg(72);
             f.read(tag, 4);
             f.read(reinterpret_cast<char*>(&dataBytes), 4);
             if (string(tag, 4) != "data") dataBytes = 0;
@@ -543,7 +544,7 @@ int main() {
         check("AudioRecorder records and a capture is held in flight", recording && some && held);
         check("the held capture's buffer is counted by getRecordedSeconds()", counted == want,
               to_string(counted) + " of " + to_string(want) + " frames");
-        check("... and written to the WAV", inFile == want && fileBytes == 44u + dataBytes,
+        check("... and written to the WAV", inFile == want && fileBytes == 80u + dataBytes,
               to_string(inFile) + " of " + to_string(want) + " frames, " + to_string(fileBytes) + " bytes");
         std::error_code ec;
         fs::remove(wav, ec);

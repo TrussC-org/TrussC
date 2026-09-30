@@ -3320,6 +3320,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().getTitle();
         (void)af::val<Window>().getWidth();
         (void)af::val<Window>().getHeight();
+        (void)af::val<Window>().isOccluded();
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
         (void)af::val<Window>().isFullscreen();

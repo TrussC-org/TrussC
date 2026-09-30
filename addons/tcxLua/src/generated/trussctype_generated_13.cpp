@@ -47,6 +47,7 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["getTitle"] = &trussc::Window::getTitle;
         t["getWidth"] = &trussc::Window::getWidth;
         t["getHeight"] = &trussc::Window::getHeight;
+        t["isOccluded"] = &trussc::Window::isOccluded;
         t["setSize"] = &trussc::Window::setSize;
         t["setFullscreen"] = &trussc::Window::setFullscreen;
         t["isFullscreen"] = &trussc::Window::isFullscreen;

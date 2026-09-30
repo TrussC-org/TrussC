@@ -111,6 +111,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  An `AudioEngine::init()` that can't open the output device (forced with
+  more channels than miniaudio accepts) returns false, logs one error through
+  the logger that names the requested device, and a later `init()` succeeds
+  (#279). An `init()` on the null backend the test requested logs no
+  "no usable audio backend" warning (that warning is for a fallback to it).
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
@@ -139,6 +144,22 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   while another thread calls `stop()` still ends up in the WAV and in
   `getRecordedSeconds()`. A watchdog turns a barrier that never returns into
   a FAIL.
+- `audioRecorderWav/` — the WAV header `AudioRecorder` writes never wraps past
+  4 GiB of samples (#336). Every file reserves a 36-byte `JUNK` chunk after
+  `WAVE` (samples start at byte 80 for S16, 92 for F32; the data chunk
+  header is at 72 / 84). The header sizes are 64-bit:
+  a take stays plain RIFF up to the last frame whose RIFF size fits 32 bits
+  and is RF64 from the next frame on, including the gap where only the RIFF
+  size overflows; the RF64 patch turns `JUNK` into `ds64` with the 64-bit
+  sizes and sets the 32-bit fields to `0xFFFFFFFF`. Checked on the header
+  alone (`internal::wavSizeFields()` / `writeWavHeader()` /
+  `patchWavHeader()` on a memory stream), so no 4 GiB file is written. A
+  short S16 and F32 take on the null backend is plain RIFF with the `JUNK`
+  chunk and loads through `SoundBuffer` with `numSamples` equal to
+  `getRecordedSeconds()` times the sample rate. On Linux, a take whose file
+  writes fail (recorded into `/dev/full`) makes `stop()` log one error and
+  neither the RF64 notice nor the "stopped" notice. Not covered: `stop()`'s
+  RF64 notice and the seek of a real file past 4 GiB (they need a 4 GiB take).
 - `appAudioAttach/` — an App's `audioOut()` / `audioIn()` are subscribed
   right after its first `setup()` returns (#426), on the real `AudioEngine`
   over miniaudio's null backend: for the main App (`runHeadlessApp`) and a
@@ -176,6 +197,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
+  windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
+  `occluded` on each secondary entry (none on the main one), and
+  `tc_get_screenshot` / `tc_save_screenshot` fail at once with a specific
+  error for a window whose flag is set, instead of waiting 5 s for a frame
+  it will not render. A window whose flag is not set is unchanged: the
+  request is deferred to its tick and, with no tick, answered by the 5 s
+  timeout. Headless: the flag is driven through the test seam
+  `internal::windowOccludedHookForTests()`; the native flags (macOS
+  occlusionState, Win32 `WM_SIZE` / `DXGI_STATUS_OCCLUDED`, X11 `WM_STATE` /
+  `VisibilityNotify`) are checked by hand.
 - `serialHangup/` — a lost serial device is reported (#260): when the device
   behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
   `writeBytes()` each notice it on their own, close the port, log one warning,
@@ -319,6 +351,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `extensionCase/` — loaders and savers match the file extension
+  case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
+  its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
+  `SoundBuffer::load()` and `loadStream()` do (garbage under such a name
+  reaches the decoder instead of failing as an unsupported extension), and
+  `Pixels::save()` writes JPEG / BMP / PNG for `.Jpg` / `.jPeG` / `.Bmp` /
+  `.PnG` (checked by magic bytes) under exactly the name given. On a
+  case-sensitive file system `a.wav` and `a.WAV` load as two files; otherwise
+  that part prints SKIP. The hot reload watcher's side is in
+  `hotReloadLifecycle/`; the per-platform screenshot savers are not covered
+  (they need a framebuffer).
 - `trusscliPresets/` — trusscli's project files (#350): `update`, `addon add`
   and `addon remove` keep the project's IDE, web / android / ios targets and
   web backend. Its `local.cmake` compiles trusscli's own sources
