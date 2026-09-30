@@ -47,8 +47,9 @@ std::string describePolygonError(PolygonError err);
 
 // Reason for fewer than 3 points left after reducedConvexHull(), which drops
 // duplicate and collinear points; `caller` names the call that did it
-// (e.g. "setupConvex()").
-std::string describeCollapsedHull(const std::string& caller);
+// (e.g. "setupConvex()"). `mayHave` words it as a possibility, for callers
+// that can't tell whether `caller` ran at all.
+std::string describeCollapsedHull(const std::string& caller, bool mayHave = false);
 
 // Convex hull of any number of points (pixels), reduced to at most `maxPoints`
 // by repeatedly dropping the vertex whose removal loses the least area (ties:

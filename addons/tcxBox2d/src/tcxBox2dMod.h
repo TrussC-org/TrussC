@@ -277,8 +277,9 @@ protected:
                 log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: ";
                 if (err == detail::PolygonError::TooFewPoints) {
                     // Shape2D::convex() may have reduced many points to these
-                    // few, so "needs at least 3 points" would mislead.
-                    log << detail::describeCollapsedHull("Shape2D::convex()") << ".";
+                    // few, so "needs at least 3 points" would mislead. Shape2D
+                    // doesn't record which factory made it, so say "may".
+                    log << detail::describeCollapsedHull("Shape2D::convex()", true) << ".";
                 } else {
                     log << detail::describePolygonError(err) << ".";
                 }
