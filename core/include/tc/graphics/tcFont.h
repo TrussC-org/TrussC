@@ -223,8 +223,13 @@ public:
     bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
         cleanup();
 
-        fontData_.resize(size);
-        std::memcpy(fontData_.data(), data, size);
+        if (!data && size > 0) {
+            logWarning() << "FontAtlasManager: font data pointer is null";
+            return false;
+        }
+        // Empty data leaves fontData_ empty (data() may be null); the sfnt
+        // check in initFromFontData rejects it before anything reads it.
+        fontData_.assign(data, data + size);
 
         return initFromFontData(fontSize);
     }
@@ -257,6 +262,15 @@ public:
 
 private:
     bool initFromFontData(int fontSize, int fontIndex = 0) {
+        // stb_truetype takes no length and trusts the offsets in the file, so
+        // the structure it walks is checked against the real size first.
+        std::string reason;
+        if (!checkSfntSkeleton(fontData_.data(), fontData_.size(), fontIndex, reason)) {
+            logWarning() << "FontAtlasManager: not a usable font (" << reason << ")";
+            fontData_.clear();
+            return false;
+        }
+
         // Get font offset (required for .ttc files with multiple fonts)
         int offset = stbtt_GetFontOffsetForIndex(fontData_.data(), fontIndex);
         if (offset < 0) {
@@ -288,7 +302,7 @@ private:
         // baseline against the live transform. See Font::fitY().
 
         // Get space advance
-        int spaceIndex = stbtt_FindGlyphIndex(&fontInfo_, ' ');
+        int spaceIndex = findGlyphIndex(' ');
         int advanceWidth, leftSideBearing;
         stbtt_GetGlyphHMetrics(&fontInfo_, spaceIndex, &advanceWidth, &leftSideBearing);
         spaceAdvance_ = advanceWidth * scale_;
@@ -303,6 +317,198 @@ private:
         createNewAtlas();
 
         loaded_ = true;
+        return true;
+    }
+
+    // stbtt_FindGlyphIndex returns whatever the cmap says, and stb indexes
+    // hmtx and the CFF charstrings with it unchecked. An index past numGlyphs
+    // is treated as a missing glyph (.notdef).
+    int findGlyphIndex(uint32_t codepoint) const {
+        const int glyph = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        if (glyph < 0 || glyph >= fontInfo_.numGlyphs) return 0;
+        return glyph;
+    }
+
+    // -------------------------------------------------------------------------
+    // sfnt skeleton check (stb_truetype backend)
+    //
+    // stb_truetype takes no buffer length: it follows the collection header,
+    // the table directory, the fixed fields of head / hhea / maxp / cmap, loca
+    // and hmtx wherever the file points. This checks those against the real
+    // size before stb sees the data, so they stay inside the buffer. It does
+    // not look inside cmap subtables, glyph outlines or CFF data. It belongs to
+    // the stb backend: drop it together with stb if the backend is replaced.
+    // All arithmetic is 64-bit on values of at most 32 bits, so nothing wraps.
+    // -------------------------------------------------------------------------
+    static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
+                                  std::string& reason) {
+        auto u16 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 8) | data[o + 1];
+        };
+        auto u32 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 24) | ((uint64_t)data[o + 1] << 16) |
+                   ((uint64_t)data[o + 2] << 8) | data[o + 3];
+        };
+        auto tag = [](const char* t) -> uint64_t {
+            return ((uint64_t)(uint8_t)t[0] << 24) | ((uint64_t)(uint8_t)t[1] << 16) |
+                   ((uint64_t)(uint8_t)t[2] << 8) | (uint8_t)t[3];
+        };
+        auto tagName = [](uint64_t t) {
+            std::string s(4, ' ');
+            for (int i = 0; i < 4; i++) {
+                const char c = (char)((t >> (24 - 8 * i)) & 0xff);
+                s[i] = (c >= 0x20 && c < 0x7f) ? c : '?';
+            }
+            return s;
+        };
+
+        const uint64_t n = size;
+        if (n < 12) {
+            reason = "data is " + std::to_string(size) + " bytes, shorter than a font header";
+            return false;
+        }
+        // stb keeps offsets and sizes in int, and caps a CFF buffer at 1 GiB.
+        if (n >= 0x40000000u) {
+            reason = "data is larger than 1 GiB";
+            return false;
+        }
+
+        // Font collection (.ttc): pick the font at fontIndex.
+        uint64_t fontStart = 0;
+        if (u32(0) == tag("ttcf")) {
+            const uint64_t version = u32(4);
+            if (version != 0x00010000u && version != 0x00020000u) {
+                reason = "unsupported font collection version";
+                return false;
+            }
+            const uint64_t numFonts = u32(8);
+            if (numFonts == 0 || 12 + 4 * numFonts > n) {
+                reason = "font collection header is truncated";
+                return false;
+            }
+            if (fontIndex < 0 || (uint64_t)fontIndex >= numFonts) {
+                reason = "font index " + std::to_string(fontIndex) + " is out of range";
+                return false;
+            }
+            fontStart = u32(12 + 4 * (uint64_t)fontIndex);
+            if (fontStart + 12 > n) {
+                reason = "font offset in the collection is outside the data";
+                return false;
+            }
+        } else if (fontIndex != 0) {
+            reason = "font index " + std::to_string(fontIndex) + " is out of range";
+            return false;
+        }
+
+        // The sfnt versions stb_truetype accepts.
+        const uint64_t sfntVersion = u32(fontStart);
+        if (sfntVersion != 0x00010000u && sfntVersion != tag("1\0\0\0") &&
+            sfntVersion != tag("true") && sfntVersion != tag("typ1") &&
+            sfntVersion != tag("OTTO")) {
+            reason = "not a TrueType / OpenType font";
+            return false;
+        }
+
+        // Table directory. stb takes the first entry with a given tag.
+        const uint64_t numTables = u16(fontStart + 4);
+        const uint64_t dirStart = fontStart + 12;
+        if (dirStart + 16 * numTables > n) {
+            reason = "table directory is truncated";
+            return false;
+        }
+        struct Table { uint64_t offset = 0, length = 0; bool found = false; };
+        Table cmap, head, hhea, hmtx, maxp, glyf, loca, cff;
+        const std::pair<uint64_t, Table*> wanted[] = {
+            {tag("cmap"), &cmap}, {tag("head"), &head}, {tag("hhea"), &hhea},
+            {tag("hmtx"), &hmtx}, {tag("maxp"), &maxp}, {tag("glyf"), &glyf},
+            {tag("loca"), &loca}, {tag("CFF "), &cff},
+        };
+        for (uint64_t i = 0; i < numTables; i++) {
+            const uint64_t rec = dirStart + 16 * i;
+            const uint64_t t = u32(rec);
+            const uint64_t offset = u32(rec + 8);
+            const uint64_t length = u32(rec + 12);
+            if (offset + length > n) {
+                reason = "table '" + tagName(t) + "' is outside the data";
+                return false;
+            }
+            for (const auto& w : wanted) {
+                if (w.first == t && !w.second->found) {
+                    *w.second = Table{offset, length, true};
+                }
+            }
+        }
+
+        // Required tables, and the fixed fields stb reads from them.
+        const bool trueType = glyf.found;  // same rule as stbtt_InitFont
+        const std::pair<const char*, const Table*> required[] = {
+            {"cmap", &cmap}, {"head", &head}, {"hhea", &hhea}, {"hmtx", &hmtx},
+            {"maxp", &maxp}, {trueType ? "loca" : "CFF ", trueType ? &loca : &cff},
+        };
+        for (const auto& r : required) {
+            if (!r.second->found) {
+                reason = std::string("missing required table '") + r.first + "'";
+                return false;
+            }
+        }
+        if (head.length < 54 || hhea.length < 36 || maxp.length < 6 || cmap.length < 4) {
+            reason = "head / hhea / maxp / cmap table is too short";
+            return false;
+        }
+
+        // cmap encoding records, and the offsets of the subtables stb may pick
+        // (Microsoft Unicode BMP / full, or any Unicode platform record).
+        const uint64_t numSubtables = u16(cmap.offset + 2);
+        if (4 + 8 * numSubtables > cmap.length) {
+            reason = "cmap encoding records are truncated";
+            return false;
+        }
+        for (uint64_t i = 0; i < numSubtables; i++) {
+            const uint64_t rec = cmap.offset + 4 + 8 * i;
+            const uint64_t platform = u16(rec);
+            const uint64_t encoding = u16(rec + 2);
+            if (platform == 0 || (platform == 3 && (encoding == 1 || encoding == 10))) {
+                if (u32(rec + 4) + 2 > cmap.length) {
+                    reason = "cmap subtable offset is outside the cmap table";
+                    return false;
+                }
+            }
+        }
+
+        // hmtx: numberOfHMetrics long entries, then one short entry per
+        // remaining glyph.
+        const uint64_t numGlyphs = u16(maxp.offset + 4);
+        const uint64_t numLong = u16(hhea.offset + 34);
+        if (numLong < 1 || numLong > numGlyphs) {
+            reason = "hhea numberOfHMetrics is out of range";
+            return false;
+        }
+        if (4 * numLong + 2 * (numGlyphs - numLong) > hmtx.length) {
+            reason = "hmtx table is too short";
+            return false;
+        }
+
+        // loca: numGlyphs + 1 entries, each within glyf.
+        if (trueType) {
+            const uint64_t locaFormat = u16(head.offset + 50);
+            if (locaFormat > 1) {
+                reason = "unsupported loca format";
+                return false;
+            }
+            const uint64_t entrySize = (locaFormat == 0) ? 2 : 4;
+            if ((numGlyphs + 1) * entrySize > loca.length) {
+                reason = "loca table is too short";
+                return false;
+            }
+            for (uint64_t i = 0; i <= numGlyphs; i++) {
+                const uint64_t at = loca.offset + i * entrySize;
+                const uint64_t glyphOffset = (locaFormat == 0) ? u16(at) * 2 : u32(at);
+                if (glyphOffset > glyf.length) {
+                    reason = "loca entry points past the end of glyf";
+                    return false;
+                }
+            }
+        }
         return true;
     }
 
@@ -361,7 +567,7 @@ public:
     // a CJK Compatibility Forms variant (U+FE10–FE4F) is usable.
     bool fontHasGlyph(uint32_t codepoint) const {
         if (!loaded_) return false;
-        return stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint) != 0;
+        return findGlyphIndex(codepoint) != 0;
     }
 
     // -------------------------------------------------------------------------
@@ -380,7 +586,7 @@ public:
         Path result;
         if (!loaded_) return result;
 
-        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        int glyphIndex = findGlyphIndex(codepoint);
         if (glyphIndex == 0) {
             logWarning() << "FontAtlasManager: no glyph for U+" << std::hex
                          << codepoint << std::dec;
@@ -441,7 +647,7 @@ public:
     // Em-normalized horizontal advance for this codepoint (1.0 = em).
     float getGlyphAdvanceEm(uint32_t codepoint) const {
         if (!loaded_) return 0.f;
-        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, (int)codepoint);
+        int glyphIndex = findGlyphIndex(codepoint);
         if (glyphIndex == 0) return 0.f;
         int advanceWidth = 0, lsb = 0;
         stbtt_GetGlyphHMetrics(&fontInfo_, glyphIndex, &advanceWidth, &lsb);
@@ -633,7 +839,7 @@ private:
 
     bool addGlyphToAtlas(uint32_t codepoint, GlyphInfo& outInfo) {
         // Render glyph
-        int glyphIndex = stbtt_FindGlyphIndex(&fontInfo_, codepoint);
+        int glyphIndex = findGlyphIndex(codepoint);
 
         // Get glyph metrics
         int advanceWidth, leftSideBearing;
@@ -1245,10 +1451,20 @@ private:
     static void onFetchSuccess(emscripten_fetch_t* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
 
+        // numBytes is 64-bit, size_t is 32-bit on wasm32: refuse anything that
+        // would be cut short. An empty response may have a null data pointer;
+        // setupFromMemory() rejects it with a warning.
+        if (fetch->numBytes > (uint64_t)SIZE_MAX) {
+            logWarning() << "Font: response too large for " << ctx->key.fontPath;
+            delete ctx;
+            emscripten_fetch_close(fetch);
+            return;
+        }
+
         ctx->font->atlasManager_ = internal::SharedFontCache::getInstance().getOrCreateFromMemory(
             ctx->key,
             reinterpret_cast<const uint8_t*>(fetch->data),
-            fetch->numBytes
+            (size_t)fetch->numBytes
         );
 
         if (ctx->font->atlasManager_) {
