@@ -88,6 +88,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Logger's lock does not wait for it (the line goes to stderr); and on
   Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
   `XOpenDisplay()` failure lands in that file.
+- `dataPathWrites/` — the core file writers share one path rule (#356):
+  `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
+  `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
+  relative path against `getDataPath()` (not the working directory, which the
+  test moves elsewhere), use an absolute path as given, create a missing
+  parent folder, and log an Error and return false when that folder cannot be
+  created (a regular file in the way; on POSIX, unless root, a read-only
+  folder). UTF-8 folder and file names land on disk by their real names. For
+  `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
+  call (folder or open failure) keeps the current log file open, with the
+  error line and later lines in it.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -149,6 +160,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   writes fail (recorded into `/dev/full`) makes `stop()` log one error and
   neither the RF64 notice nor the "stopped" notice. Not covered: `stop()`'s
   RF64 notice and the seek of a real file past 4 GiB (they need a 4 GiB take).
+- `appAudioAttach/` — an App's `audioOut()` / `audioIn()` are subscribed
+  right after its first `setup()` returns (#426), on the real `AudioEngine`
+  over miniaudio's null backend: for the main App (`runHeadlessApp`) and a
+  secondary window's App (setup on the window's first tick), whose `setup()`
+  allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
+  has returned and no hook is subscribed while it runs; afterwards there is
+  exactly one hook each, also after more ticks or a move to another window;
+  an App that is constructed but never run gets no callbacks; the App's
+  `audioOut()` still runs before the default-priority listeners its `setup()`
+  subscribed (the order the constructor subscription gave); the attach is
+  idempotent and subscribes nothing once `internal::detachAppAudio()` ended
+  the App. The hot reload generation's path is in `hotReloadLifecycle/`.
 - `mediaDecode/` — *(also on web)* the bundled decoders read every image
   format and Ogg Vorbis through the TrussC entry points:
   `Pixels::loadFromMemory()` / `load()` / `loadHDR()` for PNG (8 and 16-bit),
@@ -272,3 +295,40 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `trusscliPresets/` — trusscli's project files (#350): `update`, `addon add`
+  and `addon remove` keep the project's IDE, web / android / ios targets and
+  web backend. Its `local.cmake` compiles trusscli's own sources
+  (`tools/src`, without trusscli's `main.cpp` and GUI) into the test. The IDE
+  written by `ProjectGenerator` as `"vendor": {"trussc": {"ide": ...}}` reads
+  back for every IDE, and so do the targets and the web backend; the presets
+  fill the settings and explicit flags win (`--ide`, `--no-web` /
+  `--no-android` / `--no-ios`, `--web` with `--no-web` is an error); without a
+  `CMakePresets.json` the old defaults stay (vscode, native only, WebGPU).
+  Saved settings that cannot be used are reported as warnings: a file that
+  does not parse or cannot be read, wrongly typed entries, an unknown IDE id,
+  and an IDE this OS cannot generate (xcode off macOS, vs off Windows).
+  `TC_WEB_BACKEND` is read the way CMake builds it, as a string or as
+  `{"type": ..., "value": ...}`: `"WGPU"` (or unset / null) is WebGPU, every
+  other value GLES3, with a warning unless it is `"GLES3"`.
+  `prepareRegeneration()`, the settings setup that `update`, `addon add` and
+  `addon remove` all call, is checked directly (presets kept, flags win,
+  defaults without a file, warnings and summary line). The toolchainFile of a
+  kept web / android preset survives a regeneration from a shell without
+  emsdk / the NDK when the saved file still exists (the test sets `EMSDK`,
+  `PATH`, `ANDROID_NDK_HOME` / `ANDROID_HOME` per case), and a kept target
+  whose configure fails (a toolchain that fails on purpose; needs `cmake` in
+  `PATH`) is a warning naming `trusscli update --no-android`, while the same
+  target passed as a flag fails the update.
+  For `trusscli build` / `clean` (#357): one preset-to-build-folder mapping
+  (`ios` -> `xcode-ios`) that the written presets, `build` and `clean` follow;
+  a build folder without a CMake cache, or with only the cache of a failed
+  configure, is configured first with one message, and a cache that already
+  holds what was asked for is not; a Visual Studio update that removed a
+  pinned MSVC / Windows SDK / ninja path is found (fake filesystem, and on
+  Windows through the real writer), only a native Windows build refreshes the
+  presets, and the refresh replaces only the `windows` preset's pins (the
+  no-VS fallback entry pins nothing).
+  Not covered: the argument parsing and output of the commands in
+  `tools/src/main.cpp` (including the ones that call the build / clean
+  helpers), the IDE files, the native CMake configure, and Visual Studio
+  detection on a real toolchain change (manual Windows check).

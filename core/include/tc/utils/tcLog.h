@@ -93,7 +93,10 @@ bool isLogNonBlocking();
 // The console and file sinks write under one mutex, so every line lands
 // whole, and closeFile() / setLogFile() wait for a write in progress. The
 // other onLog listeners (yours) run outside that mutex, so a listener may
-// log again without deadlocking.
+// log again without deadlocking. One exception: setLogFile() with a relative
+// path resolves it through getDataPath(), which reads the data path state
+// without a lock, so it must not race setDataPathRoot() or the first
+// getDataPath() call. An absolute path does not touch that state.
 // ---------------------------------------------------------------------------
 class Logger {
 public:
@@ -131,24 +134,13 @@ public:
 
     // === File settings ===
 
-    bool setLogFile(const fs::path& path) {
-        const std::string pathUtf8 = internal::pathToUtf8(path);
-        bool opened;
-        {
-            // Close and reopen under the lock: every line goes whole to the
-            // old file or to the new one.
-            TC_LOCK_GUARD(mutex_);
-            closeFileLocked();
-            fileStream_.open(path, std::ios::app);
-            opened = fileStream_.is_open();
-            if (opened) filePath_ = pathUtf8;
-        }
-        if (!opened) {
-            // Outside the lock: log() runs the onLog listeners.
-            log(LogLevel::Error, "Failed to open log file: " + pathUtf8);
-        }
-        return opened;
-    }
+    // Open a log file (append mode). A relative path resolves against the
+    // data folder (getDataPath), and a missing parent folder is created. On
+    // failure it logs the reason and returns false, and the current log file
+    // (if any) stays open. After a successful call, getLogFilePath()
+    // returns the resolved path.
+    // In tcGlobal.cpp: getDataPath (tcUtils.h) cannot be included here.
+    bool setLogFile(const fs::path& path);
 
     void closeFile() {
         TC_LOCK_GUARD(mutex_);

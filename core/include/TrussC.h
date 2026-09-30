@@ -2993,7 +2993,8 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         // The main window's scene-graph root (getRootNode()), held weakly
         internal::mainWindowContext().rootNode = app;
         // Note: Size is set in _setup_cb after this callback
-        // setup() is called automatically in updateTree() via setupCalled_ flag
+        // setup() is called automatically in updateTree() via setupCalled_ flag,
+        // and the App's audioOut() / audioIn() are subscribed right after it
     };
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count

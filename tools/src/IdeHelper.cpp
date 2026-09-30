@@ -184,3 +184,24 @@ const char* IdeHelper::getIdeName(IdeType type) {
     }
     return "Unknown";
 }
+
+const char* IdeHelper::getIdeId(IdeType type) {
+    switch (type) {
+        case IdeType::CMakeOnly: return "cmake";
+        case IdeType::VSCode: return "vscode";
+        case IdeType::Cursor: return "cursor";
+        case IdeType::Xcode: return "xcode";
+        case IdeType::VisualStudio: return "vs";
+    }
+    return "vscode";
+}
+
+bool IdeHelper::parseIdeId(const string& id, IdeType& out) {
+    if      (id == "vscode") out = IdeType::VSCode;
+    else if (id == "cursor") out = IdeType::Cursor;
+    else if (id == "xcode")  out = IdeType::Xcode;
+    else if (id == "vs")     out = IdeType::VisualStudio;
+    else if (id == "cmake")  out = IdeType::CMakeOnly;
+    else return false;
+    return true;
+}

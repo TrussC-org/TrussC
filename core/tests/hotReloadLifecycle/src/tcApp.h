@@ -33,9 +33,13 @@ using namespace tc;
 // is the guest's) for the window contexts' weak references the host must
 // drop before it unloads the guest (#255).
 //
-// setup/draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
-// lifecycle cycles never call them. They use tcxImGui so the guest target is
-// checked for addon include directories and for linking the addon archive.
+// draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
+// lifecycle cycles never call them. setup() runs in both: the cycles set
+// cycleOnly and run it through the App's first update, to check its audio
+// hooks are subscribed right after it (#426); it then only records the audio
+// listeners it sees and skips the window work. They use tcxImGui so the guest
+// target is checked for addon include directories and for linking the addon
+// archive.
 // =============================================================================
 
 // What guest code sees of state the host set (readSharedState).
@@ -111,6 +115,13 @@ public:
     virtual bool seesAttached(const App* app);
     // A node made with make_shared in guest code, added as this App's child.
     virtual std::shared_ptr<Node> addGuestChild();
+
+    // Set by the lifecycle cycles before the first update: setup() records
+    // what it sees and skips the window / ImGui work (no window there).
+    bool cycleOnly = false;
+    int setupCalls = 0;
+    long audioOutHooksInSetup = -1;   // AudioEngine audioOut listeners in setup()
+    long audioInHooksInSetup = -1;
 
 private:
     EventListener updateListener_;

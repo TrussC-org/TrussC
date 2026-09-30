@@ -373,8 +373,14 @@ static void testReentrantListener() {
                 sawError = !lg.isFileOpen();
             }
         });
-        const bool opened = lg.setLogFile(fs::temp_directory_path() / "tc_no_such_dir_265" / "x.log");
+        // A regular file where the folder should be: setLogFile() creates a
+        // missing folder (#356), but cannot make one out of a file.
+        const fs::path notDir = tempFile("not_a_dir_265");
+        { ofstream out(notDir); out << "x"; }
+        const bool opened = lg.setLogFile(notDir / "x.log");
         check("setLogFile: a failed open returns false and logs an Error", !opened && sawError && !lg.isFileOpen());
+        error_code ec;
+        fs::remove(notDir, ec);
     }, 5000);
     error_code ec;
     fs::remove(d, ec);
@@ -501,8 +507,8 @@ static void testPanicForwards() {
     fs::remove(err, ec);
 }
 
-// Another thread holds the Logger's lock (setLogFile() on a FIFO no one
-// reads blocks in open() under it): the panic must not wait.
+// Another thread holds the Logger's lock (its file sink blocks writing a
+// line to a FIFO whose reader never reads): the panic must not wait.
 static void testPanicDoesNotWaitForLock() {
     const fs::path fifo = tempFile("panic.fifo");
     const fs::path err = tempFile("panic_locked.err");
@@ -512,10 +518,17 @@ static void testPanicDoesNotWaitForLock() {
     }
     const int status = runChild([&] {
         redirectStderr(err);
+        // A reader that never reads, so the FIFO opens for writing without
+        // blocking (setLogFile() opens outside the lock since #356).
+        const int reader = open(fifo.c_str(), O_RDONLY | O_NONBLOCK);
+        if (reader < 0 || !getLogger().setLogFile(fifo)) _exit(3);
+        getLogger().setConsoleLogLevel(LogLevel::Warning);   // keep the big line off stdout
         atomic<bool> holding{false};
         thread holder([&] {
             holding = true;
-            getLogger().setLogFile(fifo);   // blocks in open(), holding the lock
+            // More than the pipe buffer: the file sink blocks in write(),
+            // holding the lock
+            logNotice() << string(1 << 20, 'x');
         });
         holder.detach();
         while (!holding) this_thread::yield();

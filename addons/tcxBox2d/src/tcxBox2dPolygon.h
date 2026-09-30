@@ -12,7 +12,17 @@ namespace tcx::box2d {
 // =============================================================================
 // Polygon Body
 // =============================================================================
-// Represents convex polygons (Box2D limitation: convex only, max 8 vertices)
+// One body made of one convex Box2D polygon (Box2D limitation: convex, 3 to 8
+// points).
+//   - setup():       3 to 8 points. Concave input silently becomes its convex
+//                    hull, as Box2D does; draw(), drawFill() and getVertices()
+//                    show that hull, so what you see is what collides.
+//   - setupConvex(): any number of points, approximated by a convex hull of at
+//                    most 8 points.
+// Input that can't make a polygon (fewer than 3 or more than 8 points for
+// setup(), collinear points, points that nearly coincide, a polygon tiny next
+// to its distance from the local origin) logs a warning and creates no body,
+// in Debug and Release alike. Check isCreated() afterwards.
 // =============================================================================
 class PolyShape : public Body {
 public:
@@ -27,13 +37,32 @@ public:
     // Creation
     // -------------------------------------------------------------------------
 
-    // Create polygon from vertex list
+    // Create a convex polygon from 3 to 8 points
     // vertices: vertex coordinates (local coordinates, center-based)
     // x, y: center coordinates (world coordinates, pixels)
+    // Concave input becomes its convex hull (getVertices() returns the hull).
+    // More than 8 points, or degenerate points (collinear, nearly coincident,
+    // tiny next to their distance from the local origin), log a warning and
+    // create no body: check isCreated(). For more points use setupConvex()
+    // (convex approximation).
     void setup(World& world, const std::vector<tc::Vec2>& vertices, float x, float y);
 
-    // Create polygon from Polyline
+    // Same as above with every point of the path (all subpaths together), so
+    // the path must have 3 to 8 points in total. Concave paths become their
+    // convex hull.
     void setup(World& world, const tc::Path& polyline, float x, float y);
+
+    // Create a convex polygon from any number of points (3 or more): the convex
+    // hull of the points, reduced to at most 8 points by dropping the vertices
+    // that lose the least area. The shape is an approximation (concave parts
+    // and holes are filled, tips and extents can shrink); getVertices()
+    // returns the points actually used.
+    // Degenerate input (collinear or coincident points) logs a warning and
+    // creates no body: check isCreated().
+    void setupConvex(World& world, const std::vector<tc::Vec2>& points, float x, float y);
+
+    // Same as above with every point of the path (all subpaths together).
+    void setupConvex(World& world, const tc::Path& path, float x, float y);
 
     // Create regular polygon
     // sides: number of sides (3-8)
@@ -43,6 +72,13 @@ public:
     // -------------------------------------------------------------------------
     // Properties
     // -------------------------------------------------------------------------
+    // The polygon Box2D built (local pixels): the convex hull of the setup()
+    // points, or the reduced hull of setupConvex(). When every setup() point
+    // is a hull vertex and they already go around the outline in order
+    // (either winding, any start), they come back as given; otherwise (points
+    // dropped, or listed in a crossing order) the order is Box2D's (from the
+    // rightmost point).
+    // Empty without a body.
     const std::vector<tc::Vec2>& getVertices() const { return vertices_; }
     int getNumVertices() const { return static_cast<int>(vertices_.size()); }
 
@@ -59,6 +95,10 @@ public:
     void draw(const tc::Color& color);
 
 private:
+    // Create the body with one fixture from a checked shape and its hull.
+    void createBody(World& world, const b2PolygonShape& polygon,
+                    const std::vector<tc::Vec2>& hull, float cx, float cy);
+
     std::vector<tc::Vec2> vertices_;
 };
 

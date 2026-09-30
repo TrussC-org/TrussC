@@ -825,6 +825,54 @@ Logger& getLogger() {
     return logger;
 }
 
+// Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
+// (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
+bool Logger::setLogFile(const fs::path& path) {
+    // Relative paths resolve against the data folder, like every other writer.
+    // An absolute path skips getDataPath(), so it never reads the data path
+    // state (unlocked, and written by the first call on Apple).
+    const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
+    const std::string pathUtf8 = internal::pathToUtf8(resolved);
+
+    // "" or "logs/": fail before creating any folder (the current log stays
+    // open, as with the failures below).
+    if (resolved.filename().empty()) {
+        log(LogLevel::Error, "Failed to open log file: " + pathUtf8 + " (no file name in path)");
+        return false;
+    }
+
+    // Create a missing parent folder, like saveScreenshot().
+    std::error_code ec;
+    const fs::path parent = resolved.parent_path();
+    if (!parent.empty()) {
+        fs::create_directories(parent, ec);
+        if (ec) {
+            log(LogLevel::Error, "Failed to open log file: " + pathUtf8
+                + " (cannot create its folder: " + ec.message() + ")");
+            return false;
+        }
+    }
+
+    // Open into a local stream first: a failed call leaves the current log
+    // open, so the error line below still lands in it.
+    std::ofstream stream(resolved, std::ios::app);
+    if (!stream.is_open()) {
+        log(LogLevel::Error, "Failed to open log file: " + pathUtf8);
+        return false;
+    }
+
+    {
+        // Swap under the lock: every line goes whole to the old file or to
+        // the new one. Errors above are logged outside it (log() runs the
+        // onLog listeners).
+        TC_LOCK_GUARD(mutex_);
+        closeFileLocked();
+        fileStream_ = std::move(stream);
+        filePath_ = pathUtf8;
+    }
+    return true;
+}
+
 namespace internal {
 // Declared in tcThread.h, which is included before tcLog.h and cannot log.
 void logThreadNotWaited() {
