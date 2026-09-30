@@ -65,9 +65,9 @@ your own tools:
 ### Inspection Tools (always available in MCP mode)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236) |
-| `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main) |
-| `tc_list_windows` | (none) | List open windows: index 0 = main, then secondary windows (title, size). Use the index as the `window` arg above |
+| `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236). A secondary window is captured inside its own frame, so it must be visible: see [Hidden secondary windows](#hidden-secondary-windows) |
+| `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main). A secondary window must be visible, as for `tc_get_screenshot` |
+| `tc_list_windows` | (none) | List open windows: `{windows: [{index, main, title, width, height, occluded}]}`. Index 0 = main (no `title`, no `occluded`), then the secondary windows. `occluded` is `true` while the OS reports that window hidden (`Window::isOccluded()`). Use the index as the `window` arg above |
 | `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `voices` `[{slot, file (normalized path), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the voice's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, voiceLimit, streamLimit, decoderError, notRunning}` (plays refused since startup); `thread` `{load, loadMax}` (audio-thread time / audio time over ~0.5 s of audio); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getVoices()` |
 | `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
@@ -75,6 +75,26 @@ your own tools:
 | `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
 | `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
+
+#### Hidden secondary windows
+
+A secondary window renders only while it is visible, and the screenshot tools
+capture it inside its own frame. So:
+
+- While the OS reports the window hidden, `tc_list_windows` shows
+  `"occluded": true` for it, and `tc_get_screenshot` / `tc_save_screenshot`
+  fail at once with `window N is not visible (minimized or fully covered):
+  bring it to the front`. The signals are the ones that pause the window:
+  macOS: minimized, fully covered or on another Space; Windows: minimized, or
+  DXGI reports the window occluded; Linux (X11): minimized, or fully obscured
+  (only reported without a compositing manager).
+- Otherwise the request waits for the window's next frame. If none comes
+  within 5 s (the window became hidden after the check, the platform has no
+  signal for how it is hidden, or `Window::setFps()` throttles it very low),
+  it fails with `the window rendered no frame within 5 s (minimized, hidden
+  or closed?)`.
+- The main window (index 0) keeps running while hidden, so none of this
+  applies to it.
 
 ### Recording Tools (always available in MCP mode)
 
