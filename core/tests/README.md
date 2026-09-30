@@ -89,15 +89,23 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `reason`) and for `close()` of an open port, but not from the destructor or
   a move assignment. A listener may call `setup()` from inside the
   notification, and the call that found the loss must leave that new
-  connection alone. A pseudo-terminal plays the device, and closing its master
-  stands in for the USB unplug. POSIX only (SKIP on Windows).
+  connection alone. Only the I/O calls find a loss: `close()` or `setup()`
+  after an unplug nobody noticed fire once as a clean close and leak no
+  descriptor. Several threads may share one `Serial` (it has its own lock):
+  when they race an unplug, the loss is reported once, the fd is closed once,
+  and the descriptors the kernel hands out right after (recognized by inode)
+  are neither closed nor written to. A pseudo-terminal plays the device, and
+  closing its master stands in for the USB unplug. POSIX only (SKIP on
+  Windows).
 - `serialBaudRate/` — `Serial::setup()` does not report success after opening
   at a speed other than the one asked for (#260): rates without a termios
   B-constant used to open at 9600 and report success. Linux must apply any rate
   exactly (termios2); on macOS a pty rejects `IOSSIOSPEED`, so there such rates
   must fail cleanly. A real Linux driver that cannot generate a rate writes
   another one back instead of failing, B-constant rates included, and
-  `setup()` must then fail rather than report the requested rate. A pty never
-  does that, so on Linux the test defines its own `ioctl()` that makes
-  `TCGETS2` report such a swap (`src/fakeDriver.cpp`). POSIX only (SKIP on
-  Windows).
+  `setup()` must then fail rather than report the requested rate, also when
+  the rate it writes back is the one the tty had. A driver that applies no
+  rate at all (a USB gadget's `/dev/ttyGS*`) keeps its old rate whatever is
+  asked, and there `setup()` must succeed with a warning. A pty does neither,
+  so on Linux the test defines its own `ioctl()` that makes `TCGETS2` report
+  both (`src/fakeDriver.cpp`). POSIX only (SKIP on Windows).

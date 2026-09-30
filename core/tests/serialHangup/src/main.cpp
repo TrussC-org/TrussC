@@ -50,12 +50,14 @@ int main() {
 #include <fcntl.h>
 #include <unistd.h>
 #include <poll.h>
+#include <sys/stat.h>
 #include <cstdlib>
 #include <cstring>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -502,11 +504,22 @@ int main() {
     // once, and no thread touches that number again: the numbers the kernel
     // hands out right after (here to pipes, standing in for any file the app
     // opens) get no stray byte from a late write and are not closed by a
-    // second close().
+    // second close(). A number closed under us would go to the next pipe()
+    // at once, so each pipe end is recognized by its inode, not its number.
     {
         const int fdsBefore = countOpenFds();
         const int warningsBefore = g_lostWarnings;
-        vector<array<int, 2>> pipes;
+        struct PipeEnd {
+            int fd;
+            dev_t dev;
+            ino_t ino;
+        };
+        vector<array<PipeEnd, 2>> pipes;
+        // Still this pipe end: the number is open and names the same pipe
+        auto isSame = [](const PipeEnd& end) {
+            struct stat st;
+            return fstat(end.fd, &st) == 0 && st.st_dev == end.dev && st.st_ino == end.ino;
+        };
         {
             Pty pty;
             Serial serial;
@@ -550,7 +563,11 @@ int main() {
                     int p[2];
                     if (pipe(p) == 0) {
                         fcntl(p[0], F_SETFL, O_NONBLOCK);
-                        pipes.push_back({p[0], p[1]});
+                        struct stat r, w;
+                        fstat(p[0], &r);
+                        fstat(p[1], &w);
+                        pipes.push_back({PipeEnd{p[0], r.st_dev, r.st_ino},
+                                         PipeEnd{p[1], w.st_dev, w.st_ino}});
                     }
                     this_thread::sleep_for(chrono::milliseconds(2));
                 }
@@ -560,21 +577,29 @@ int main() {
                 check("10. the loss is found and reported once",
                       events == 1 && g_lostWarnings == warningsBefore + 1);
                 check("10. the port is closed", !serial.isConnected());
+                // While every pipe stays open the kernel never hands a number
+                // out twice, so a repeated number means one was closed under us
                 bool stillOpen = true;
                 bool noStrayByte = true;
+                set<int> numbers;
                 for (const auto& p : pipes) {
-                    if (fcntl(p[0], F_GETFD) == -1 || fcntl(p[1], F_GETFD) == -1) stillOpen = false;
+                    for (const auto& end : p) {
+                        if (!numbers.insert(end.fd).second || !isSame(end)) stillOpen = false;
+                    }
                     char c;
-                    if (::read(p[0], &c, 1) > 0) noStrayByte = false;
+                    if (isSame(p[0]) && ::read(p[0].fd, &c, 1) > 0) noStrayByte = false;
                 }
                 check("10. no later descriptor is closed by a second close()", stillOpen);
                 check("10. no later descriptor gets a late write", noStrayByte);
             }
         }
+        // Close each number once, whatever happened to it
+        set<int> toClose;
         for (const auto& p : pipes) {
-            ::close(p[0]);
-            ::close(p[1]);
+            toClose.insert(p[0].fd);
+            toClose.insert(p[1].fd);
         }
+        for (int fd : toClose) ::close(fd);
         check("10. no descriptor left open", countOpenFds() == fdsBefore);
     }
 
