@@ -3721,7 +3721,7 @@ std::shared_ptr<const std::vector<std::vector<int>>> Sound::getChannelMap() cons
 float Sound::getDuration() const  // Get total duration in seconds
 MixMode Sound::getMixMode() const  // Current channel mix policy (Auto / DownmixMono). Overridden when a non-empty channel map is set.
 float Sound::getPan() const  // Get current panning
-float Sound::getPosition() const  // Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (~10 ms), this is the requested position.
+float Sound::getPosition() const  // Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (usually ~10 ms), this is the requested position.
 float Sound::getSpeed() const  // Get current playback speed
 float Sound::getVolume() const  // Get current volume
 bool Sound::isLoaded() const  // Check if loaded
@@ -3741,7 +3741,7 @@ void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Per-output-chan
 void Sound::setLoop(bool loop)  // Set loop mode
 void Sound::setMixMode(MixMode m)  // Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch.
 void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
-void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence; getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there.
+void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
 void Sound::stop()  // Stop audio
@@ -3785,10 +3785,10 @@ float SoundSource::getDuration() const  // Duration in seconds. numSamples/sampl
 Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream for SoundStream). Lets the mixer dispatch without a virtual call per frame.
 ```
 
-### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer.
+### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer.
 
 ```cpp
-float SoundStream::getDuration() const  // Decoded file duration in seconds.
+float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
 fs::path SoundStream::getPath() const  // Path the stream was opened from.
 LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed).
