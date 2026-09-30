@@ -8832,6 +8832,7 @@ description.ko = "클라이언트 연결 해제 시 발생"
 description.en = "Fired on a server or per-client error"
 description.ja = "サーバまたはクライアント単位のエラー時に発火"
 description.ko = "서버 또는 클라이언트별 오류 시 발생"
+details = "Server-level failures (accept() failing, a thread that cannot be started for a new client) fire on the accept thread, at most once every 5 seconds for each kind while they persist; the log counts the ones in between. An inline listener there may call stop() but not start(); listen with Deliver::Main when the listener touches app state."
 
 ["TcpServer::onReceive"]
 description.en = "Fired when data is received from a client"

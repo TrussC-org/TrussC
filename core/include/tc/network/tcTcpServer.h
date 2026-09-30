@@ -190,6 +190,13 @@ public:
     // Deliver::Main copies the payload and runs the listener at the start of
     // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
     // firing thread — fastest, but you handle the synchronization.
+    //
+    // onClientConnect fires on the accept thread, and so do onError for
+    // server-level failures (accept() failing, a thread that cannot be started
+    // for a new client) and onClientDisconnect for a client whose receive
+    // thread could not start. An inline listener there may call stop(), but
+    // not start(). Those server-level failures reach onError at most once
+    // every 5 s for each kind while they persist; the log counts the rest.
     // -------------------------------------------------------------------------
     Event<TcpClientConnectEventArgs> onClientConnect;       // On client connect
     Event<TcpServerReceiveEventArgs> onReceive;             // On data receive
