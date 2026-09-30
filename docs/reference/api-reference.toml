@@ -14810,9 +14810,9 @@ related = ["Xml", "loadXml"]
 ["pathToUtf8"]
 category = "file"
 keywords = ["utf-8", "encoding", "unicode", "string", "japanese", "windows", "code page"]
-description.en = "Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it."
-description.ja = "パスを UTF-8 の std::string に変換する（全プラットフォームで同じ）。path.string() の代わりに使う。path.string() は Windows ではプロセスのコードページに変換し、そこにない文字で例外を投げることがある"
-description.ko = "경로를 UTF-8 std::string으로 변환 (모든 플랫폼에서 동일). path.string() 대신 사용한다. path.string()은 Windows에서 프로세스 코드 페이지로 변환하며, 거기에 없는 문자에서 예외를 던질 수 있다"
+description.en = "Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw."
+description.ja = "パスを UTF-8 の std::string に変換する（全プラットフォームで同じ）。path.string() の代わりに使う。path.string() は Windows ではプロセスのコードページに変換し、そこにない文字で例外を投げることがある。Windows では、不正な UTF-16 の名前（対になっていないサロゲート）でこの関数も例外を投げうる。ログに出すなら log << path を使う（こちらは投げない）"
+description.ko = "경로를 UTF-8 std::string으로 변환 (모든 플랫폼에서 동일). path.string() 대신 사용한다. path.string()은 Windows에서 프로세스 코드 페이지로 변환하며, 거기에 없는 문자에서 예외를 던질 수 있다. Windows에서는 올바르지 않은 UTF-16 이름(짝이 없는 서로게이트)에서 이 함수도 예외를 던질 수 있다. 로그에 경로를 출력할 때는 log << path를 사용한다 (이쪽은 예외를 던지지 않는다)"
 related = ["utf8ToPath", "getFileName", "joinPath"]
 
 ["popMatrix"]
