@@ -27,6 +27,9 @@
 //      count, header frame size) doesn't keep the file open, and the same
 //      object then opens a valid file; setup() twice opens again.
 //   6. depthToImage() draws nothing for a depth plane shorter than w*h.
+//   7. depthToImage() / colorToImage() / irToImage() give the expected pixels
+//      for normal frames, into a new Image, one of another size and one of the
+//      same size.
 //
 // Pass a name fragment as the first argument to run only the matching cases.
 // =============================================================================
@@ -951,6 +954,108 @@ static void runReopenAfterRefusal(const filesystem::path& dir) {
 }
 
 // -----------------------------------------------------------------------------
+// Image converters (tcxDepthCamera's depthToImage / colorToImage / irToImage)
+// -----------------------------------------------------------------------------
+
+// Pixel i of an RGBA Image is (g, g, g, 255).
+static bool grayAt(Image& img, size_t i, unsigned char g) {
+    const unsigned char* d = img.getPixelsData();
+    return d[i * 4 + 0] == g && d[i * 4 + 1] == g && d[i * 4 + 2] == g && d[i * 4 + 3] == 255;
+}
+
+static bool grayPixels(Image& img, int w, int h, const vector<unsigned char>& want) {
+    if (!img.isAllocated() || img.getWidth() != w || img.getHeight() != h ||
+        img.getChannels() != 4) {
+        return false;
+    }
+    for (size_t i = 0; i < want.size(); ++i) {
+        if (!grayAt(img, i, want[i])) return false;
+    }
+    return true;
+}
+
+// Normal frames convert to the expected pixels: into a new Image, into one of
+// another size (reallocated) and into one of the same size (reused).
+static void runImageConverters() {
+    namespace dc = tcx::depthcamera;
+    const string base = "imageConverters";
+
+    if (selected(base + "/depth")) {
+        LogCapture cap;
+        DepthFrame f;
+        f.w = 3; f.h = 2; f.depthScale = 0.001f;
+        // invalid, nearer than nearM, beyond farM, 1/2, 1/4 and 3/4 of the way
+        f.depth = {0, 100, 9000, 2150, 1225, 3075};
+        const vector<unsigned char> want = {0, 255, 0, 127, 191, 63};
+        Image fresh, other, same;
+        other.allocate(5, 7, 4);
+        same.allocate(3, 2, 4);
+        dc::depthToImage(f, fresh);
+        dc::depthToImage(f, other);
+        dc::depthToImage(f, same);
+        check(base + "/depth: new Image", grayPixels(fresh, 3, 2, want));
+        check(base + "/depth: Image of another size", grayPixels(other, 3, 2, want));
+        check(base + "/depth: Image of the same size", grayPixels(same, 3, 2, want));
+        check(base + "/depth: nothing logged", cap.lines.empty());
+        for (const string& line : cap.lines) printf("  logged: %s\n", line.c_str());
+    }
+
+    if (selected(base + "/color")) {
+        LogCapture cap;
+        Pixels c;
+        c.allocate(3, 2, 4);
+        const size_t bytes = static_cast<size_t>(3) * 2 * 4;
+        for (size_t i = 0; i < bytes; ++i) c.getData()[i] = static_cast<unsigned char>(i * 37 + 1);
+        Image fresh, other, same;
+        other.allocate(5, 7, 4);
+        same.allocate(3, 2, 4);
+        dc::colorToImage(c, fresh);
+        dc::colorToImage(c, other);
+        dc::colorToImage(c, same);
+        auto copied = [&](Image& img) {
+            return img.isAllocated() && img.getWidth() == 3 && img.getHeight() == 2 &&
+                   img.getChannels() == 4 &&
+                   memcmp(img.getPixelsData(), c.getData(), bytes) == 0;
+        };
+        check(base + "/color: new Image", copied(fresh));
+        check(base + "/color: Image of another size", copied(other));
+        check(base + "/color: Image of the same size", copied(same));
+        check(base + "/color: nothing logged", cap.lines.empty());
+        for (const string& line : cap.lines) printf("  logged: %s\n", line.c_str());
+    }
+
+    if (selected(base + "/ir")) {
+        LogCapture cap;
+        Pixels ir;
+        ir.allocate(3, 2, 1, PixelFormat::F32);
+        // Normalized by the max (4): 0, 1/4, 1, below 0, 9/16, 1/8; then sqrt.
+        const float src[] = {0.0f, 1.0f, 4.0f, -1.0f, 2.25f, 0.5f};
+        memcpy(ir.getDataF32(), src, sizeof(src));
+        const vector<unsigned char> want = {0, 127, 255, 0, 191, 90};
+        Image fresh, other, same;
+        other.allocate(5, 7, 4);
+        same.allocate(3, 2, 4);
+        dc::irToImage(ir, fresh);
+        dc::irToImage(ir, other);
+        dc::irToImage(ir, same);
+        check(base + "/ir: new Image", grayPixels(fresh, 3, 2, want));
+        check(base + "/ir: Image of another size", grayPixels(other, 3, 2, want));
+        check(base + "/ir: Image of the same size", grayPixels(same, 3, 2, want));
+
+        // A frame whose max is below 1 is scaled by 1, not stretched.
+        Pixels dim;
+        dim.allocate(2, 1, 1, PixelFormat::F32);
+        dim.getDataF32()[0] = 0.25f;
+        dim.getDataF32()[1] = 0.0f;
+        Image dimImg;
+        dc::irToImage(dim, dimImg);
+        check(base + "/ir: max below 1 is not stretched", grayPixels(dimImg, 2, 1, {127, 0}));
+        check(base + "/ir: nothing logged", cap.lines.empty());
+        for (const string& line : cap.lines) printf("  logged: %s\n", line.c_str());
+    }
+}
+
+// -----------------------------------------------------------------------------
 
 int main(int argc, char** argv) {
     if (argc > 1) g_only = argv[1];
@@ -1048,6 +1153,9 @@ int main(int argc, char** argv) {
         tcx::depthcamera::depthToImage(f, img);
         check("depthToImageShortPlane: short depth plane draws nothing", !img.isAllocated());
     }
+
+    // ----- 7. image converters ------------------------------------------------
+    runImageConverters();
 
     error_code ec;
     filesystem::remove_all(dir, ec);
