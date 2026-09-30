@@ -49,4 +49,30 @@ std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points,
 // Every point of every subpath of `path` (z dropped).
 std::vector<tc::Vec2> pathPoints(const tc::Path& path);
 
+// If `path` holds exactly one ring of 3 or more points (the rings
+// Path::buildFillTriangles() uses) and that ring is convex with at most
+// b2_maxPolygonVertices points, put it in `ring` and return true. Consecutive
+// duplicates and a closing point equal to the first are dropped; collinear
+// points are allowed.
+bool convexRing(const tc::Path& path, std::vector<tc::Vec2>& ring);
+
+// The fixtures for an outline of any shape (setupCompound() / Shape2D::compound()).
+struct CompoundShapes {
+    std::vector<b2PolygonShape> shapes;  // one fixture each
+    size_t triangles = 0;                // from the triangulation (0: one convex polygon)
+    size_t skipped = 0;                  // of those, slivers makePolygonShape() refused
+};
+
+// A path that convexRing() accepts, and makePolygonShape() too, gives one
+// polygon. Anything else is triangulated with Path::buildFillTriangles()
+// (non-zero winding, holes, self-intersections split), and every triangle
+// that passes makePolygonShape() becomes one shape; the others are counted in
+// `skipped`. Returns false when no shape could be made.
+bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out);
+
+// Outline every subpath of `path` as a closed loop (a compound body's outline;
+// Path::draw() would also fan-fill each subpath, which is wrong for concave
+// shapes).
+void drawPathOutline(const tc::Path& path);
+
 } // namespace tcx::box2d::detail

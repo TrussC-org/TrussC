@@ -42,11 +42,12 @@ namespace tcx::box2d {
 // Shape2D - what a RigidBody2D is made of (pixel units, local/centered).
 // =============================================================================
 struct Shape2D {
-    enum Kind { Circle, Box, Polygon };
+    enum Kind { Circle, Box, Polygon, Compound };
     Kind kind = Circle;
     float radius = 30.0f;                 // circle
     tc::Vec2 size{60.0f, 60.0f};          // box: full width/height
     std::vector<tc::Vec2> verts;          // polygon: local verts (centered), convex, 3..8
+    tc::Path path;                        // compound: local outline (centered), any shape
 
     static Shape2D circle(float r) {
         Shape2D s; s.kind = Circle; s.radius = r; return s;
@@ -60,7 +61,7 @@ struct Shape2D {
     // ColliderRenderer2D) holds that hull. More than 8 points, or degenerate
     // points (collinear, nearly coincident), log a warning when the RigidBody2D
     // is attached and create no body: getBody() stays null. For more points
-    // use convex() (convex approximation).
+    // use convex() (convex approximation) or compound() (exact shape).
     static Shape2D polygon(const std::vector<tc::Vec2>& v) {
         Shape2D s; s.kind = Polygon; s.verts = v; return s;
     }
@@ -74,6 +75,22 @@ struct Shape2D {
     // Same as above with every point of the path (all subpaths together).
     static Shape2D convex(const tc::Path& path) {
         return convex(detail::pathPoints(path));
+    }
+    // Any outline, kept exactly: concave, with holes (a subpath wound opposite
+    // to its enclosing one), any number of points. It is triangulated like
+    // Path::drawFill() and each triangle becomes one fixture of the one body
+    // (a single convex ring of at most 8 points stays one polygon fixture).
+    // Slivers Box2D can't use are skipped with one warning; if nothing is
+    // left, a warning and no body. Collision events come once per touching
+    // body pair, however many fixtures touch.
+    static Shape2D compound(const tc::Path& outline) {
+        Shape2D s; s.kind = Compound; s.path = outline; return s;
+    }
+    // Same as above with the points as one closed outline.
+    static Shape2D compound(const std::vector<tc::Vec2>& points) {
+        tc::Path p(points);
+        p.close();
+        return compound(p);
     }
     static Shape2D regularPolygon(float radius, int sides) {
         Shape2D s; s.kind = Polygon;
@@ -245,8 +262,9 @@ protected:
         // Check polygon points before creating anything (the same check as
         // PolyShape::setup()). Box2D would assert (Debug) or build a 2x2 m box
         // or a hull of the first 8 points (Release) for points it can't use.
-        b2PolygonShape poly;
+        std::vector<b2PolygonShape> polys;
         if (shape_.kind == Shape2D::Polygon) {
+            b2PolygonShape poly;
             std::vector<tc::Vec2> hull;
             detail::PolygonError err = detail::makePolygonShape(shape_.verts, poly, hull);
             if (err != detail::PolygonError::None) {
@@ -254,12 +272,27 @@ protected:
                 log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: "
                     << detail::describePolygonError(err) << ".";
                 if (err == detail::PolygonError::TooManyPoints) {
-                    log << " Use Shape2D::convex() for a convex approximation.";
+                    log << " Use Shape2D::convex() for a convex approximation or"
+                        << " Shape2D::compound() for the exact shape.";
                 }
                 log << " Body not created.";
                 return;
             }
             shape_.verts = hull;   // draw what collides
+            polys.push_back(poly);
+        } else if (shape_.kind == Shape2D::Compound) {
+            detail::CompoundShapes shapes;
+            if (!detail::makeCompoundShapes(shape_.path, shapes)) {
+                tc::logWarning() << "tcxBox2d: RigidBody2D compound has " << shape_.path.size()
+                                 << " points with no area Box2D can use (" << shapes.triangles
+                                 << " triangles, none usable). Body not created.";
+                return;
+            }
+            if (shapes.skipped > 0) {
+                tc::logWarning() << "tcxBox2d: RigidBody2D compound skipped " << shapes.skipped
+                                 << " of " << shapes.triangles << " triangles too thin for Box2D.";
+            }
+            polys = std::move(shapes.shapes);
         }
 
         // Physics is world-space — create the body at the node's global pose.
@@ -278,7 +311,7 @@ protected:
         // raw b2Body* instead.
         body_->GetUserData().pointer = 0;
 
-        createFixtures(poly);
+        createFixtures(polys);
         if (trigger_) forFixtures([](b2Fixture* f) { f->SetSensor(true); });
 
         // Register for contact routing; the first body on this world hooks the
@@ -367,8 +400,9 @@ private:
         }
     }
 
-    // poly: the checked polygon, used when shape_ is a Polygon.
-    void createFixtures(const b2PolygonShape& poly) {
+    // polys: the checked polygons, one fixture each, used when shape_ is a
+    // Polygon or a Compound.
+    void createFixtures(const std::vector<b2PolygonShape>& polys) {
         b2FixtureDef fd;
         fd.density     = density_;
         fd.friction    = (friction_    >= 0.0f) ? friction_    : 0.3f;
@@ -389,9 +423,12 @@ private:
                 body_->CreateFixture(&fd);
                 break;
             }
-            case Shape2D::Polygon: {
-                fd.shape = &poly;
-                body_->CreateFixture(&fd);
+            case Shape2D::Polygon:
+            case Shape2D::Compound: {
+                for (const auto& poly : polys) {
+                    fd.shape = &poly;
+                    body_->CreateFixture(&fd);
+                }
                 break;
             }
         }
@@ -477,6 +514,10 @@ protected:
                 break;
             case Shape2D::Polygon:
                 drawPolygon(s.verts);
+                break;
+            case Shape2D::Compound:
+                // The fill is the triangulation the fixtures were made from.
+                filled_ ? s.path.drawFill() : detail::drawPathOutline(s.path);
                 break;
         }
     }

@@ -160,4 +160,90 @@ std::vector<tc::Vec2> pathPoints(const tc::Path& path) {
     return out;
 }
 
+bool convexRing(const tc::Path& path, std::vector<tc::Vec2>& ring) {
+    // Collect the rings the way buildFillTriangles() does.
+    std::vector<tc::Vec2> found;
+    int rings = 0;
+    const auto& verts = path.getVertices();
+    for (size_t si = 0; si < path.getNumSubpaths(); ++si) {
+        auto [s, e] = path.getSubpathRange(si);
+        if (e - s < 3) continue;
+        std::vector<tc::Vec2> r;
+        for (size_t k = s; k < e; ++k) {
+            tc::Vec2 p(verts[k].x, verts[k].y);
+            if (!r.empty() && r.back().x == p.x && r.back().y == p.y) continue;
+            r.push_back(p);
+        }
+        while (r.size() >= 2 && r.front().x == r.back().x && r.front().y == r.back().y) r.pop_back();
+        if (r.size() < 3) continue;
+        if (++rings > 1) return false;
+        found = std::move(r);
+    }
+    if (rings != 1 || found.size() > b2_maxPolygonVertices) return false;
+
+    // Convex: every turn goes the same way (collinear allowed), and the edges
+    // turn once around in total (a star has same-sign turns too, but turns
+    // twice or more).
+    const size_t n = found.size();
+    bool left = false, right = false;
+    double turning = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const tc::Vec2& a = found[i];
+        const tc::Vec2& b = found[(i + 1) % n];
+        const tc::Vec2& c = found[(i + 2) % n];
+        double e1x = double(b.x) - a.x, e1y = double(b.y) - a.y;
+        double e2x = double(c.x) - b.x, e2y = double(c.y) - b.y;
+        double cr = e1x * e2y - e1y * e2x;
+        if (cr > 0.0) left = true;
+        if (cr < 0.0) right = true;
+        turning += std::atan2(cr, e1x * e2x + e1y * e2y);
+    }
+    if ((left && right) || (!left && !right)) return false;
+    if (std::abs(turning) > 1.5 * tc::TAU) return false;
+    ring = std::move(found);
+    return true;
+}
+
+void drawPathOutline(const tc::Path& path) {
+    const auto& verts = path.getVertices();
+    for (size_t si = 0; si < path.getNumSubpaths(); ++si) {
+        auto [s, e] = path.getSubpathRange(si);
+        if (e - s < 2) continue;
+        for (size_t k = s; k < e; ++k) {
+            const tc::Vec3& a = verts[k];
+            const tc::Vec3& b = verts[(k + 1 < e) ? k + 1 : s];
+            tc::drawLine(a.x, a.y, b.x, b.y);
+        }
+    }
+}
+
+bool makeCompoundShapes(const tc::Path& path, CompoundShapes& out) {
+    out = CompoundShapes();
+
+    std::vector<tc::Vec2> ring;
+    if (convexRing(path, ring)) {
+        b2PolygonShape shape;
+        std::vector<tc::Vec2> hull;
+        if (makePolygonShape(ring, shape, hull) == PolygonError::None) {
+            out.shapes.push_back(shape);
+            return true;
+        }
+    }
+
+    const std::vector<std::array<float, 2>> tris = path.buildFillTriangles();
+    out.triangles = tris.size() / 3;
+    std::vector<tc::Vec2> tri(3);
+    for (size_t t = 0; t < out.triangles; ++t) {
+        for (size_t k = 0; k < 3; ++k) tri[k] = tc::Vec2(tris[t * 3 + k][0], tris[t * 3 + k][1]);
+        b2PolygonShape shape;
+        std::vector<tc::Vec2> hull;
+        if (makePolygonShape(tri, shape, hull) == PolygonError::None) {
+            out.shapes.push_back(shape);
+        } else {
+            ++out.skipped;
+        }
+    }
+    return !out.shapes.empty();
+}
+
 } // namespace tcx::box2d::detail
