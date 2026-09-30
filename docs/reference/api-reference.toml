@@ -6603,9 +6603,9 @@ description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom �
 ["Pixels::save"]
 category = "graphics_pixels"
 keywords = ["write", "export", "file", "png", "store"]
-description.en = "Save image to file"
-description.ja = "ファイルに画像を保存"
-description.ko = "이미지를 파일로 저장"
+description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG). The path is used as given."
+description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。パスは指定どおりに使う"
+description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 경로는 지정한 그대로 사용"
 
 ["Pixels::setColor"]
 category = "graphics_pixels"
@@ -8462,9 +8462,9 @@ description.ko = "loadStream()으로 로드되었으면 true"
 ["Sound::load"]
 category = "sound"
 keywords = ["open", "read", "file"]
-description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a"
-description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a"
-description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a"
+description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the path is used as given)"
+description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。パスは指定どおりに使う）"
+description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 경로는 지정한 그대로 사용)"
 
 ["Sound::loadFromBuffer"]
 description.en = "Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr."
@@ -14245,9 +14245,9 @@ related = ["getTextureCount", "getNodeCount"]
 category = "file"
 keywords = ["ext", "suffix", "type", "format"]
 of = ["ofFilePath::getFileExt"]
-description.en = "Get file extension without dot"
-description.ja = "拡張子を取得（ドットなし）"
-description.ko = "파일 확장자를 얻음 (점 제외)"
+description.en = "Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do."
+description.ja = "拡張子を取得（ドットなし、書かれたとおりの大文字小文字）。大文字小文字を区別せずに比べるには、TrussCのローダーと同じく toLower(getFileExtension(path)) を比べる"
+description.ko = "파일 확장자를 얻음 (점 제외, 쓰인 그대로의 대소문자). 대소문자 무시로 비교하려면 TrussC 로더처럼 toLower(getFileExtension(path))를 비교"
 related = ["getBaseName", "getFileName"]
 
 ["getFileName"]
@@ -15736,9 +15736,9 @@ related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 ["saveScreenshot"]
 category = "window_system"
 keywords = ["capture", "png", "export", "save image"]
-description.en = "Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
-description.ja = "描画済みフレームのスクショを保存（png/jpg/bmp）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
-description.ko = "렌더링된 프레임의 스크린샷 저장(png/jpg/bmp). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
+description.en = "Save a screenshot of the rendered frame (png/jpg/bmp, picked from the extension, case-insensitive). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
+description.ja = "描画済みフレームのスクショを保存（png/jpg/bmp、拡張子で判別し大文字小文字は区別しない）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
+description.ko = "렌더링된 프레임의 스크린샷 저장(png/jpg/bmp, 확장자로 판별하며 대소문자 무시). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
 related = ["grabScreen", "startRecording", "captureWindow"]
 platform_note.en = "Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
 platform_note.ja = "Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
