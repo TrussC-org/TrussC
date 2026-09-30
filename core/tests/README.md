@@ -138,13 +138,22 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   a client that leaves (closes or resets) is joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200
   clients; an unjoined thread leaves `/proc/self/task` but keeps its stack
-  mapped); `start(port, N)` closes connections beyond N, logs one warning per
+  mapped), and joined by an idle server too, with no later connection to
+  prompt it; `start(port, N)` closes connections beyond N, logs one warning per
   burst and hands a freed slot to the next client; `start(port)` has no limit.
+  Listeners that tear down from their own thread: `disconnectClient()` of its
+  own client in `onReceive` (destroying the server then waits for that
+  thread), `stop()` in `onReceive`, and `stop()` in `onClientConnect` on the
+  accept thread, where `start()` is refused.
   Linux only, in forked children: failing `accept()` calls (descriptors
-  exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning and log
-  once, and a thread that cannot start (`RLIMIT_NPROC`) closes that connection
-  and reports it through `onError` instead of ending the process. Each server
-  binds a port the OS just handed out, not a fixed one.
+  exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning, log
+  once and reach `onError` again after the 5 s interval if they persist; a
+  thread that cannot start closes that connection and reports it through
+  `onError` instead of ending the process — the writer under `RLIMIT_NPROC`,
+  the receive thread through a `pthread_create` wrapper in the test binary
+  that fails one chosen call (the client is announced, then disconnected, and
+  that is reported even right after a different failure). Each server binds a
+  port the OS just handed out, not a fixed one.
 - `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
   reference, so the App can't register itself from its constructor, and the
   code that creates it through a `shared_ptr` does. `runApp()`'s setup

@@ -12,11 +12,17 @@
 //     is closed at once, a burst of them logs one warning, and a slot that
 //     frees up can be taken again.
 //   - start(port) with no limit accepts any number of clients.
+//   - Listeners may tear down from the thread they run on: disconnectClient()
+//     of its own client in onReceive (the server's destruction then waits for
+//     that thread instead of leaving it behind), stop() in onReceive, and
+//     stop() in onClientConnect, which runs on the accept thread.
 //   - Linux only, each in a forked child so a failure cannot take the rest of
 //     the run with it: accept() errors (here: out of descriptors) back off
-//     instead of spinning and are logged once per burst, and a thread that
-//     cannot be started for a new client closes that connection instead of
-//     ending the process.
+//     instead of spinning, are logged once per burst and reported again after
+//     the throttle interval if they persist; a thread that cannot be started
+//     for a new client closes that connection instead of ending the process,
+//     both for the writer (RLIMIT_NPROC) and for the receive thread (a
+//     pthread_create wrapper in this binary that fails one chosen call).
 //
 // Ports: TcpServer::getPort() returns the port that was passed to start(), so
 // start(0) cannot report where it landed. Each server therefore takes a port
@@ -51,7 +57,9 @@
 
 #ifdef __linux__
     #include <dirent.h>
+    #include <dlfcn.h>
     #include <fcntl.h>
+    #include <pthread.h>
     #include <signal.h>
     #include <sys/resource.h>
     #include <sys/wait.h>
@@ -60,6 +68,30 @@
 
 using namespace std;
 using namespace tc;
+
+#ifdef __linux__
+// How many thread creations to let through before the next one fails with
+// EAGAIN, as if the process were out of resources; -1 = never. Disarms itself
+// after that one failure.
+static atomic<int> g_threadStartsBeforeFailure{-1};
+
+// This definition takes precedence over libc's for every thread the process
+// creates, std::thread included, and forwards to the real one.
+extern "C" int pthread_create(pthread_t* thread, const pthread_attr_t* attr,
+                              void* (*start)(void*), void* arg) {
+    using Fn = int (*)(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+    static const Fn real = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "pthread_create"));
+    int left = g_threadStartsBeforeFailure.load();
+    while (left >= 0) {
+        const int next = left == 0 ? -1 : left - 1;
+        if (g_threadStartsBeforeFailure.compare_exchange_weak(left, next)) {
+            if (left == 0) return EAGAIN;
+            break;
+        }
+    }
+    return real(thread, attr, start, arg);
+}
+#endif
 
 static const rawsocket_t kBadSocket = static_cast<rawsocket_t>(-1);
 
@@ -302,8 +334,42 @@ static void testReclaim() {
     // well over a gigabyte. Joined ones go back to a small shared cache.
     check("reclaim: finished threads are joined (no stacks left mapped)",
           vmBefore > 0 && vmAfter > 0 && growthMb < 256);
+
+    // The same without a later connection. A server that reaped only when the
+    // next client arrived would pass the check above (it holds just the last
+    // batch) and would start every measurement here with a batch held, so
+    // first one probe client, whose accept is where such a server would reap.
+    const int kIdleBatch = 40;
+    size_t stackBytes = 0;
+    pthread_attr_t attr;
+    if (pthread_getattr_default_np(&attr) == 0) {
+        pthread_attr_getstacksize(&attr, &stackBytes);
+        pthread_attr_destroy(&attr);
+    }
+    const long stackMb = static_cast<long>(stackBytes / (1024 * 1024));
+    if (stackMb >= 4) {
+        // Warm up at this batch size too: more threads at once than before
+        // can make the allocator map further arenas, which stay mapped
+        const bool warm = churn(2, kIdleBatch);
+        const bool probed = warm && churn(1, 1);
+        this_thread::sleep_for(chrono::milliseconds(300));
+        const long vmIdle = vmSizeKb();
+        const bool left = churn(1, kIdleBatch);
+        // No further connection: only the accept loop's own slices can reap
+        this_thread::sleep_for(chrono::milliseconds(500));
+        const long heldMb = (vmSizeKb() - vmIdle) / 1024;
+        printf("  (%d clients left an idle server: address space %+ld MB, %ld MB per stack)\n",
+               kIdleBatch, heldMb, stackMb);
+        // Held, their receive stacks alone would be kIdleBatch * stackMb
+        check("reclaim: an idle server joins them without a new connection",
+              probed && left && vmIdle > 0 && heldMb < kIdleBatch * stackMb / 2);
+    } else {
+        skip("reclaim: an idle server joins them without a new connection",
+             "default thread stack under 4 MB");
+    }
 #else
     skip("reclaim: thread count returns to baseline", "Linux only");
+    skip("reclaim: an idle server joins them without a new connection", "Linux only");
 #endif
 
     server.stop();
@@ -389,6 +455,88 @@ static void testDefaultUnlimited() {
     server.stop();
 }
 
+// -----------------------------------------------------------------------------
+// Listeners that tear down from the thread they run on
+// -----------------------------------------------------------------------------
+static void testListenerTeardown() {
+    // disconnectClient() of its own client in onReceive, then the server is
+    // destroyed while that listener is still running. The receive thread still
+    // touches the server on its way out, so the destruction has to wait for it.
+    {
+        auto server = make_unique<TcpServer>();
+        TcpServer* srv = server.get();
+        atomic<bool> listenerDone{false};
+        EventListener sub = server->onReceive.listen([&, srv](TcpServerReceiveEventArgs& e) {
+            srv->disconnectClient(e.clientId);
+            this_thread::sleep_for(chrono::milliseconds(300));
+            listenerDone = true;
+        });
+        const int port = startOnFreePort(*server, -1);
+        check("teardown: server started", port != 0);
+        rawsocket_t c = port ? connectTo(port) : kBadSocket;
+        const bool joined = c != kBadSocket &&
+                            waitUntil(3000, [&] { return srv->getClientCount() == 1; });
+        if (joined) ::send(c, "x", 1, 0);
+        check("teardown: onReceive disconnects its own client",
+              joined && waitUntil(3000, [&] { return srv->getClientCount() == 0; }));
+        server.reset();
+        check("teardown: destroying the server waits for that receive thread",
+              listenerDone.load());
+        if (!listenerDone) this_thread::sleep_for(chrono::milliseconds(500));
+        if (c != kBadSocket) TC_CLOSE(c);
+    }
+
+    // stop() in onReceive: every receive thread is joined but the caller's own
+    {
+        TcpServer server;
+        atomic<bool> stopped{false};
+        EventListener sub = server.onReceive.listen([&](TcpServerReceiveEventArgs&) {
+            server.stop();
+            stopped = true;
+        });
+        const int port = startOnFreePort(server, -1);
+        rawsocket_t other = port ? connectTo(port) : kBadSocket;
+        rawsocket_t c = port ? connectTo(port) : kBadSocket;
+        waitUntil(3000, [&] { return server.getClientCount() == 2; });
+        if (c != kBadSocket) ::send(c, "x", 1, 0);
+        check("teardown: stop() from onReceive returns",
+              waitUntil(3000, [&] { return stopped.load(); }) && !server.isRunning());
+        check("teardown: and it disconnected everyone", server.getClientCount() == 0);
+        const int again = startOnFreePort(server, -1);
+        check("teardown: the server starts again afterwards", again != 0);
+        server.stop();
+        if (c != kBadSocket) TC_CLOSE(c);
+        if (other != kBadSocket) TC_CLOSE(other);
+    }
+
+    // stop() in onClientConnect, which fires on the accept thread: it cannot
+    // join itself. start() from there is refused rather than attempted.
+    {
+        TcpServer server;
+        atomic<int> connects{0};
+        atomic<bool> restartRefused{false};
+        EventListener sub = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
+            if (connects++ != 0) return;
+            server.stop();
+            restartRefused = !server.start(freePort());
+        });
+        const int port = startOnFreePort(server, -1);
+        rawsocket_t c = port ? connectTo(port) : kBadSocket;
+        check("teardown: stop() from onClientConnect (accept thread) returns",
+              waitUntil(3000, [&] { return connects.load() == 1; }) &&
+              waitUntil(3000, [&] { return !server.isRunning(); }));
+        check("teardown: start() from the accept thread is refused", restartRefused.load());
+        const int again = startOnFreePort(server, -1);
+        check("teardown: the server starts again from another thread", again != 0);
+        rawsocket_t d = again ? connectTo(again) : kBadSocket;
+        check("teardown: and accepts a client",
+              waitUntil(3000, [&] { return server.getClientCount() == 1; }));
+        server.stop();
+        if (c != kBadSocket) TC_CLOSE(c);
+        if (d != kBadSocket) TC_CLOSE(d);
+    }
+}
+
 #ifdef __linux__
 // -----------------------------------------------------------------------------
 // accept() errors back off (runs in a forked child: it exhausts descriptors)
@@ -432,6 +580,12 @@ static void acceptBackoffChild() {
     check("accept errors: nothing was accepted", server.getClientCount() == 0);
     check("accept errors: logged exactly once for the burst", warnings.acceptFailed.load() == 1);
     check("accept errors: reported through onError", errors.load() >= 1);
+
+    // Still failing once the throttle interval (5 s) is over: reported again,
+    // not only counted
+    check("accept errors: reported again while the condition lasts",
+          waitUntil(6000, [&] { return errors.load() >= 2; }));
+    printf("  (%d onError call(s) by now)\n", errors.load());
 
     // Recovery: the queued connection is taken once descriptors are free again
     for (int fd : fillers) ::close(fd);
@@ -483,6 +637,65 @@ static void threadStartFailureChild() {
 
     server.stop();
 }
+
+// -----------------------------------------------------------------------------
+// A receive thread that cannot be started disconnects the client it was for
+// (runs in a forked child: it replaces pthread_create for the whole process)
+// -----------------------------------------------------------------------------
+static void receiveThreadFailureChild() {
+    WarningCounter warnings;
+    TcpServer server;
+    atomic<int> connects{0}, disconnects{0}, connectId{-1}, disconnectId{-1};
+    atomic<int> errors{0}, lastErrorClientId{-2};
+    EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs& e) {
+        connectId = e.clientId;
+        ++connects;
+    });
+    EventListener onDis = server.onClientDisconnect.listen([&](TcpClientDisconnectEventArgs& e) {
+        disconnectId = e.clientId;
+        ++disconnects;
+    });
+    EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs& e) {
+        lastErrorClientId = e.clientId;
+        ++errors;
+    });
+    const int port = startOnFreePort(server, -1);
+    check("receive thread: server started", port != 0);
+    if (!port) return;
+
+    // First the writer thread fails (the next creation), which is reported...
+    g_threadStartsBeforeFailure = 0;
+    rawsocket_t a = connectTo(port);
+    check("receive thread: a failed writer closes the connection",
+          a != kBadSocket && closedByServer(a, 3000));
+    check("receive thread: the writer failure is reported",
+          waitUntil(1000, [&] { return errors.load() == 1; }) && lastErrorClientId.load() == -1);
+    if (a != kBadSocket) TC_CLOSE(a);
+
+    // ...then, well within the throttle interval, the receive thread fails
+    // (the writer's creation goes through, the next one does not)
+    g_threadStartsBeforeFailure = 1;
+    rawsocket_t b = connectTo(port);
+    check("receive thread: the connection is closed",
+          b != kBadSocket && closedByServer(b, 3000));
+    check("receive thread: the client is announced, then disconnected",
+          waitUntil(1000, [&] { return connects.load() == 1 && disconnects.load() == 1; }) &&
+          connectId.load() == disconnectId.load());
+    check("receive thread: no client is left registered", server.getClientCount() == 0);
+    check("receive thread: reported through onError for that client, "
+          "though another failure was just reported",
+          waitUntil(1000, [&] { return errors.load() == 2; }) &&
+          lastErrorClientId.load() == connectId.load());
+    if (b != kBadSocket) TC_CLOSE(b);
+
+    // Recovery
+    rawsocket_t c = connectTo(port);
+    check("receive thread: a client is accepted once threads can start",
+          waitUntil(3000, [&] { return server.getClientCount() == 1; }));
+    if (c != kBadSocket) TC_CLOSE(c);
+
+    server.stop();
+}
 #endif
 
 int main() {
@@ -495,14 +708,17 @@ int main() {
     } else {
         inChild("a failed thread start closes the connection (child)", threadStartFailureChild);
     }
+    inChild("a failed receive thread disconnects its client (child)", receiveThreadFailureChild);
 #else
     skip("accept errors back off", "Linux only (fork + RLIMIT_NOFILE)");
     skip("a failed thread start closes the connection", "Linux only (fork + RLIMIT_NPROC)");
+    skip("a failed receive thread disconnects its client", "Linux only (fork + pthread_create)");
 #endif
 
     testReclaim();
     testLimit();
     testDefaultUnlimited();
+    testListenerTeardown();
 
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
     return g_fail ? 1 : 0;
