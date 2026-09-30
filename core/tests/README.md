@@ -116,3 +116,20 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
   `ScreenRecorder` reads) stays exact after long uptime and, like the
   `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.
+- `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
+  holds the hovered / grabbed / selected node weakly and dispatch holds a
+  strong reference while handlers run, so a node freed by `removeChild()` /
+  `removeAllChildren()` is never touched by the next hover update, drag or
+  release and `getSelectedNode()` returns null; a handler or `Event` listener
+  that removes its own node or an ancestor (grab release and drag, the
+  press / release / move / scroll bubbling, mouseEnter / mouseLeave) runs on
+  a live node, its mods still get the event (checked for the grab release),
+  and the node is freed when dispatch returns;
+  `isMouseOver()` / `getSelectedNode()` never match a new node at a freed
+  node's address, and `setSelectedNode()` with a node no `shared_ptr` owns
+  clears the selection. Working code is unchanged: a removed node the app
+  still holds gets its Leave, reparenting fires no extra Enter / Leave,
+  `destroy()` drops hover / grab / selection at once. Runs in a secondary
+  window's context and in the main one. A freed probe's memory holds a
+  sentinel node that counts any call reaching it, so a stale pointer fails
+  the test instead of depending on heap reuse.
