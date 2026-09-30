@@ -15,15 +15,29 @@
 //     win, and without a CMakePresets.json the old defaults stay.
 //   - parseTargetFlag(): --no-web / --no-android / --no-ios, and --web with
 //     --no-web is an error.
+//
+// Guards (#357): `trusscli build` and `trusscli clean`.
+//   - ProjectGenerator::buildDirForPreset() is the one preset -> build folder
+//     mapping (ios -> xcode-ios), and the written presets' binaryDir follow it.
+//   - planConfigure(): a build folder without a CMake cache is configured
+//     first (one message, the build-type pin folded in), a cache that holds
+//     what was asked for stays configure-free.
+//   - checkPresetToolchain() / shouldRefreshPresets(): a Visual Studio
+//     update that removed a pinned MSVC / SDK / ninja path is found (fake
+//     filesystem), and only a native Windows build refreshes the presets.
+//     On Windows, also through the real writer and filesystem.
 // Not covered: the commands themselves (tools/src/main.cpp), which call these
-// functions; the IDE files and CMake configure that `update` runs.
+// functions; the IDE files and CMake configure that `update` runs; the
+// Visual Studio detection and the refresh on a real Windows toolchain change.
 // =============================================================================
 
 #include <TrussC.h>
 
+#include "BuildSetup.h"
 #include "ProjectGenerator.h"
 #include "ProjectState.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -342,6 +356,316 @@ static void testTargetFlags() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// 6. One preset -> build folder mapping, used by the writer too
+// -----------------------------------------------------------------------------
+static void testBuildDirMapping() {
+    check("build dir: macos -> build-macos",
+          ProjectGenerator::buildDirForPreset("macos") == "build-macos");
+    check("build dir: linux -> build-linux",
+          ProjectGenerator::buildDirForPreset("linux") == "build-linux");
+    check("build dir: windows -> build-windows",
+          ProjectGenerator::buildDirForPreset("windows") == "build-windows");
+    check("build dir: web -> build-web",
+          ProjectGenerator::buildDirForPreset("web") == "build-web");
+    check("build dir: android -> build-android",
+          ProjectGenerator::buildDirForPreset("android") == "build-android");
+    check("build dir: ios -> xcode-ios",
+          ProjectGenerator::buildDirForPreset("ios") == "xcode-ios");
+
+    const auto& all = ProjectGenerator::allPresetNames();
+    bool hasIos = find(all.begin(), all.end(), "ios") != all.end();
+    check("all preset names include ios (clean --all removes xcode-ios)",
+          all.size() == 6 && hasIos);
+
+    // Every preset the writer emits puts its build folder where the helper says
+    fs::path project = makeProject("binary-dirs");
+    ProjectSettings s = baseSettings(project);
+    s.generateWebBuild = true;
+    s.generateAndroidBuild = true;
+    s.generateIosBuild = true;
+    bool written = writePresets(s, project);
+    Json j = Json::parse(readFile(project / "CMakePresets.json"), nullptr, false);
+    int presets = 0, matching = 0;
+    if (j.is_object() && j.contains("configurePresets")) {
+        for (const auto& p : j["configurePresets"]) {
+            ++presets;
+            string expected = "${sourceDir}/" +
+                ProjectGenerator::buildDirForPreset(p.value("name", ""));
+            if (p.value("binaryDir", "") == expected) ++matching;
+        }
+    }
+    check("written presets' binaryDir match the helper",
+          written && presets >= 3 && matching == presets);
+}
+
+// -----------------------------------------------------------------------------
+// 7. `trusscli build`: when to configure first
+// -----------------------------------------------------------------------------
+static bool hasDefine(const ConfigurePlan& p, const string& d) {
+    return find(p.defines.begin(), p.defines.end(), d) != p.defines.end();
+}
+static bool firstMessageHas(const ConfigurePlan& p, const string& text) {
+    return !p.messages.empty() && p.messages[0].find(text) != string::npos;
+}
+
+static void testConfigurePlan() {
+    ConfigureInputs native;
+    native.buildDir = "build-linux";
+    native.isNative = true;
+
+    {
+        // `trusscli clean` then a plain `trusscli build`
+        ConfigurePlan p = planConfigure(native);
+        check("no cache, no flag: configure, no -D, one message",
+              p.configure && p.defines.empty() && p.messages.size() == 1 &&
+              firstMessageHas(p, "No CMake cache in build-linux"));
+    }
+    {
+        ConfigureInputs in = native;
+        in.requestedBuildType = "Release";
+        ConfigurePlan p = planConfigure(in);
+        check("no cache, --release: one configure with the type, one message",
+              p.configure && p.defines.size() == 1 &&
+              hasDefine(p, "-DCMAKE_BUILD_TYPE=Release") && p.messages.size() == 1 &&
+              firstMessageHas(p, "No CMake cache in build-linux") &&
+              firstMessageHas(p, "CMAKE_BUILD_TYPE=Release"));
+    }
+    {
+        ConfigureInputs in = native;
+        in.hasCache = true;
+        in.cachedBuildType = "RelWithDebInfo";
+        ConfigurePlan p = planConfigure(in);
+        check("cache holds the default, no flag: no configure (steady state)",
+              !p.configure && p.defines.empty() && p.messages.empty());
+    }
+    {
+        ConfigureInputs in = native;
+        in.hasCache = true;
+        in.cachedBuildType = "Release";
+        in.requestedBuildType = "Release";
+        ConfigurePlan p = planConfigure(in);
+        check("cache holds the requested type: no configure", !p.configure);
+    }
+    {
+        ConfigureInputs in = native;
+        in.hasCache = true;
+        in.cachedBuildType = "Debug";
+        ConfigurePlan p = planConfigure(in);
+        check("cache Debug, no flag: switch back to RelWithDebInfo",
+              p.configure && hasDefine(p, "-DCMAKE_BUILD_TYPE=RelWithDebInfo") &&
+              firstMessageHas(p, "Switching build type: Debug -> RelWithDebInfo"));
+    }
+    {
+        ConfigureInputs in = native;
+        in.hasCache = true;
+        in.cachedBuildType = "RelWithDebInfo";
+        in.warnings = true;
+        ConfigurePlan p = planConfigure(in);
+        check("--warnings with a cache: configure with TRUSSC_WARNINGS only",
+              p.configure && p.defines.size() == 1 && hasDefine(p, "-DTRUSSC_WARNINGS=ON"));
+    }
+    {
+        ConfigureInputs in;
+        in.buildDir = "build-web";
+        in.requestedBuildType = "Release";
+        ConfigurePlan p = planConfigure(in);
+        check("web, no cache: configure, keeps the preset's build type",
+              p.configure && p.defines.empty() && p.messages.size() == 1 &&
+              firstMessageHas(p, "No CMake cache in build-web"));
+    }
+    {
+        ConfigureInputs in;
+        in.buildDir = "build-web";
+        in.hasCache = true;
+        in.cachedBuildType = "MinSizeRel";
+        in.requestedBuildType = "Debug";
+        ConfigurePlan p = planConfigure(in);
+        check("web with a cache: no configure, no build-type pin", !p.configure);
+    }
+    {
+        ConfigureInputs in;
+        in.buildDir = "xcode-ios";
+        ConfigurePlan p = planConfigure(in);
+        check("ios, no cache: configure xcode-ios",
+              p.configure && p.defines.empty() && firstMessageHas(p, "xcode-ios"));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 8. Stale Visual Studio toolchain pinned in the windows preset
+// -----------------------------------------------------------------------------
+static const char* kVs = "C:/Program Files/Microsoft Visual Studio/2022/Community";
+static const char* kKits = "C:/Program Files (x86)/Windows Kits/10";
+
+// A windows preset in the shape writeCMakePresets() writes it.
+static string windowsPresets(const string& msvc, const string& sdk, bool withEnv = true,
+                             bool withNinja = true) {
+    string vs = kVs, kits = kKits;
+    Json p;
+    p["name"] = "windows";
+    p["binaryDir"] = "${sourceDir}/build-windows";
+    if (withNinja) {
+        p["cacheVariables"]["CMAKE_MAKE_PROGRAM"] =
+            vs + "/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe";
+    }
+    if (withEnv) {
+        p["environment"]["INCLUDE"] = vs + "/VC/Tools/MSVC/" + msvc + "/include;" +
+            kits + "/Include/" + sdk + "/ucrt;" + kits + "/Include/" + sdk + "/um";
+        p["environment"]["LIB"] = vs + "/VC/Tools/MSVC/" + msvc + "/lib/x64;" +
+            kits + "/Lib/" + sdk + "/um/x64";
+        p["environment"]["PATH"] = vs + "/VC/Tools/MSVC/" + msvc + "/bin/Hostx64/x64;" +
+            kits + "/bin/" + sdk + "/x64;$penv{PATH}";
+    }
+    Json j;
+    j["version"] = 6;
+    j["configurePresets"] = Json::array({p});
+    return j.dump(2);
+}
+
+static void testToolchainCheck() {
+    // The machine after an update: MSVC 14.44 and SDK 26100 are installed
+    auto installed = [](const string& path) {
+        if (path.find('$') != string::npos) return false;   // a macro is never a path
+        return path.find("/MSVC/14.43.") == string::npos &&
+               path.find("/10.0.22621.0/") == string::npos &&
+               path.find("/2019/") == string::npos;
+    };
+
+    {
+        ToolchainCheck c = checkPresetToolchain(windowsPresets("14.44.35207", "10.0.26100.0"), installed);
+        check("toolchain: all pinned paths exist -> not stale",
+              c.pinned && c.missing.empty() && !c.stale());
+    }
+    {
+        ToolchainCheck c = checkPresetToolchain(windowsPresets("14.43.34808", "10.0.26100.0"), installed);
+        bool allMsvc = !c.missing.empty();
+        for (const auto& m : c.missing) allMsvc = allMsvc && m.find("/MSVC/14.43.") != string::npos;
+        check("toolchain: MSVC folder replaced -> stale, lists include/lib/bin",
+              c.stale() && c.missing.size() == 3 && allMsvc);
+    }
+    {
+        ToolchainCheck c = checkPresetToolchain(windowsPresets("14.44.35207", "10.0.22621.0"), installed);
+        check("toolchain: Windows SDK removed -> stale", c.stale() && c.missing.size() == 4);
+    }
+    {
+        // VS 2019 -> 2022 move: ninja lives under the old install too
+        string text = windowsPresets("14.44.35207", "10.0.26100.0");
+        string from = "/2022/";
+        size_t pos = text.find(from);
+        text.replace(pos, from.size(), "/2019/");   // only the ninja path (first occurrence)
+        ToolchainCheck c = checkPresetToolchain(text, installed);
+        check("toolchain: ninja under a removed VS -> stale, only ninja listed",
+              c.stale() && c.missing.size() == 1 &&
+              c.missing[0].find("ninja.exe") != string::npos);
+    }
+    {
+        ToolchainCheck c = checkPresetToolchain(
+            windowsPresets("14.43.34808", "10.0.26100.0", /*withEnv=*/false, /*withNinja=*/false),
+            installed);
+        check("toolchain: no environment, no ninja (VS not found) -> nothing pinned",
+              !c.pinned && !c.stale());
+    }
+    {
+        ToolchainCheck c = checkPresetToolchain(
+            windowsPresets("14.43.34808", "10.0.26100.0", /*withEnv=*/false, /*withNinja=*/true),
+            installed);
+        check("toolchain: ninja only, present -> pinned, not stale", c.pinned && !c.stale());
+    }
+    {
+        int macroCalls = 0;
+        auto counting = [&](const string& path) {
+            if (path.find('$') != string::npos) ++macroCalls;
+            return true;
+        };
+        checkPresetToolchain(windowsPresets("14.44.35207", "10.0.26100.0"), counting);
+        check("toolchain: $penv{PATH} is not checked as a path", macroCalls == 0);
+    }
+    {
+        // Same stale path twice (hand-edited PATH) is listed once
+        Json j = Json::parse(windowsPresets("14.43.34808", "10.0.26100.0"));
+        string bin = string(kVs) + "/VC/Tools/MSVC/14.43.34808/bin/Hostx64/x64";
+        j["configurePresets"][0]["environment"]["PATH"] = bin + ";" + bin + ";$penv{PATH}";
+        ToolchainCheck c = checkPresetToolchain(j.dump(), installed);
+        int binCount = 0;
+        for (const auto& m : c.missing) if (m == bin) ++binCount;
+        check("toolchain: a missing path is listed once", c.stale() && binCount == 1);
+    }
+    {
+        // CMAKE_MAKE_PROGRAM in the {"type", "value"} form
+        Json j = Json::parse(windowsPresets("14.44.35207", "10.0.26100.0", false, false));
+        j["configurePresets"][0]["cacheVariables"]["CMAKE_MAKE_PROGRAM"] =
+            Json{{"type", "FILEPATH"}, {"value", "C:/Program Files/Microsoft Visual Studio/2019/ninja.exe"}};
+        ToolchainCheck c = checkPresetToolchain(j.dump(), installed);
+        check("toolchain: CMAKE_MAKE_PROGRAM object form is checked",
+              c.stale() && c.missing.size() == 1);
+    }
+    {
+        auto none = [](const string&) { return false; };
+        ToolchainCheck other = checkPresetToolchain(
+            R"({"configurePresets": [{"name": "linux", "cacheVariables": {"CMAKE_MAKE_PROGRAM": "/nope/make"}}]})",
+            none);
+        ToolchainCheck broken = checkPresetToolchain("{ nope", none);
+        check("toolchain: other presets and broken text are not checked",
+              !other.pinned && !broken.pinned);
+    }
+
+    // The refresh keeps the project's TRUSSC_DIR from the old presets
+    {
+        const char* text = R"({"configurePresets": [
+            {"name": "windows", "cacheVariables": {"TRUSSC_DIR": "D:/TrussC/core"}},
+            {"name": "web", "cacheVariables": {"TRUSSC_DIR": {"type": "PATH", "value": "E:/x/core"}}}
+        ]})";
+        check("preset cache variable: string and object forms, missing ones empty",
+              presetCacheVariable(text, "windows", "TRUSSC_DIR") == "D:/TrussC/core" &&
+              presetCacheVariable(text, "web", "TRUSSC_DIR") == "E:/x/core" &&
+              presetCacheVariable(text, "linux", "TRUSSC_DIR").empty() &&
+              presetCacheVariable(text, "windows", "CMAKE_MAKE_PROGRAM").empty() &&
+              presetCacheVariable("{ nope", "windows", "TRUSSC_DIR").empty());
+    }
+
+    // What `trusscli build` does with the result
+    ToolchainCheck stale;
+    stale.pinned = true;
+    stale.missing = {"C:/old/ninja.exe"};
+    ToolchainCheck fine;
+    fine.pinned = true;
+    check("refresh: native windows build with a stale toolchain",
+          shouldRefreshPresets("windows", "windows", stale));
+    check("refresh: not for a web / android build on Windows",
+          !shouldRefreshPresets("windows", "web", stale) &&
+          !shouldRefreshPresets("windows", "android", stale));
+    check("refresh: not on macOS / Linux",
+          !shouldRefreshPresets("linux", "linux", stale) &&
+          !shouldRefreshPresets("macos", "macos", stale));
+    check("refresh: not when the toolchain is current",
+          !shouldRefreshPresets("windows", "windows", fine) &&
+          !shouldRefreshPresets("windows", "windows", ToolchainCheck()));
+
+#ifdef _WIN32
+    // Through the real writer on Windows: a preset pinned to a Visual Studio
+    // that is not installed is stale on the real filesystem.
+    {
+        fs::path project = makeProject("stale-vs");
+        ProjectSettings s = baseSettings(project);
+        VsVersionInfo vs;
+        vs.version = 17;
+        vs.installPath = "C:/NoSuchVisualStudio/2022";
+        vs.ninjaPath = "C:/NoSuchVisualStudio/2022/ninja.exe";
+        vs.vcToolsVersion = "14.99.99999";
+        vs.windowsSdkVersion = "10.0.99999.0";
+        s.installedVsVersions = {vs};
+        bool written = writePresets(s, project);
+        ToolchainCheck c = checkPresetToolchain(
+            readFile(project / "CMakePresets.json"),
+            [](const string& p) { std::error_code ec; return fs::exists(p, ec); });
+        bool ninjaListed = find(c.missing.begin(), c.missing.end(),
+                                "C:/NoSuchVisualStudio/2022/ninja.exe") != c.missing.end();
+        check("toolchain (Windows): writer's pinned paths are checked", written && c.stale() && ninjaListed);
+    }
+#endif
+}
+
 int main() {
     g_root = fs::temp_directory_path() /
              ("trusscliPresets-" + to_string(chrono::steady_clock::now()
@@ -353,6 +677,9 @@ int main() {
     testParseEdgeCases();
     testPrecedence();
     testTargetFlags();
+    testBuildDirMapping();
+    testConfigurePlan();
+    testToolchainCheck();
 
     std::error_code ec;
     fs::remove_all(g_root, ec);

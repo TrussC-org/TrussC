@@ -193,5 +193,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   fill the settings and explicit flags win (`--ide`, `--no-web` /
   `--no-android` / `--no-ios`, `--web` with `--no-web` is an error); without a
   `CMakePresets.json` the old defaults stay (vscode, native only, WebGPU).
-  Not covered: the commands in `tools/src/main.cpp` that call these, and the
-  IDE files and CMake configure that `update` runs.
+  For `trusscli build` / `clean` (#357): one preset-to-build-folder mapping
+  (`ios` -> `xcode-ios`) that the written presets follow; a build folder
+  without a CMake cache is configured first with one message, and a cache
+  that already holds what was asked for is not; a Visual Studio update that
+  removed a pinned MSVC / Windows SDK / ninja path is found (fake filesystem,
+  and on Windows through the real writer), and only a native Windows build
+  refreshes the presets.
+  Not covered: the commands in `tools/src/main.cpp` that call these, the
+  IDE files and CMake configure that `update` runs, and Visual Studio
+  detection on a real toolchain change (manual Windows check).
