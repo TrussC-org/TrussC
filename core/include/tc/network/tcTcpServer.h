@@ -108,8 +108,7 @@ struct TcpSendChannel {
     std::atomic<bool> open{true};
 
     // The send path gave up on this client (a timeout truncated a payload).
-    // The receive thread does the removal: the writer must never tear down the
-    // client it is running for, or it would end up joining itself.
+    // The receive thread does the removal.
     std::atomic<bool> dropped{false};
 };
 
@@ -357,22 +356,28 @@ private:
     void clientThreadFunc(int clientId);
     void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
     void notifyError(const std::string& msg, int code = 0, int clientId = -1);
-    bool removeClient(int clientId);   // false if the client was already gone
+    // Unregister the client and shut its channel, joining nothing (the
+    // server's own threads use it). False if the client was already gone.
+    bool removeClient(int clientId);
 
-    // Join the receive threads that have returned on their own (their client
-    // closed, failed or was dropped). Called from the accept loop, which wakes
-    // in short slices, so a finished thread is reclaimed promptly rather than
-    // held until stop().
+    // Join the client threads (receive and writer) that have ended. Called
+    // from the accept loop, which wakes in short slices, so a finished thread
+    // is reclaimed promptly rather than held until stop(). The only join on
+    // one of the server's own threads: a finished thread waits for nothing.
     void reapClientThreads();
+
+    // Join every client thread whose client is no longer registered. Never
+    // called on one of the server's own threads.
+    void joinClientThreads();
 
     // Shut down the listening socket, or (andClose) close it for good.
     // Guarded by listenSocketMutex_; a no-op once it is closed.
     void releaseListenSocket(bool andClose);
 
     // Disconnect every client without joining any of its threads; they stay
-    // registered for disconnectAllClients() to join. The accept thread does
-    // this on its way out, and so does stop() on a client thread while another
-    // stop() has taken the accept thread.
+    // registered for whoever joins them. The accept thread does this on its
+    // way out, and so do stop() and disconnectAllClients() on the server's own
+    // threads.
     void shutAllClients();
 
 #ifdef _WIN32
@@ -392,9 +397,10 @@ private:
     // both join it. Held only to move the thread in or out, never to join.
     std::mutex acceptThreadMutex_;
     // How many stop() calls are tearing the server down (joining an accept
-    // thread they moved out, then disconnecting the clients and joining their
-    // threads), and the signal that one of them has finished; start() waits
-    // until none is left. Both guarded by acceptThreadMutex_.
+    // thread they moved out, disconnecting the clients and joining their
+    // threads, or on a client thread only disconnecting them), and the signal
+    // that one of them has finished; start() waits until none is left. Both
+    // guarded by acceptThreadMutex_.
     int stopsInProgress_ = 0;
     std::condition_variable stopsDone_;
     std::atomic<bool> running_{false};
@@ -403,9 +409,10 @@ private:
     std::unordered_map<int, std::thread> clientThreads_;
     std::unordered_map<int, std::thread> clientWriters_;
 
-    // Ids of receive threads that have returned and still need joining.
-    // Guarded by clientsMutex_; drained by reapClientThreads().
+    // Ids of receive threads and writers that have returned and still need
+    // joining. Guarded by clientsMutex_; drained by reapClientThreads().
     std::vector<int> finishedClientThreads_;
+    std::vector<int> finishedWriters_;
 
     // Shared: every send() looks a channel up through here, and so does every
     // getClientCount() a draw loop makes. Those are reads, and readers of a
@@ -437,12 +444,10 @@ private:
                       const internal::TcpSendItem& item, SendError error, size_t bytesSent);
 
     // Refuse further sends, wake everything waiting on the channel and shut
-    // the socket down. False if the channel was already closed (or null).
+    // the socket down. The writer drains the queue and closes the descriptor
+    // itself, on its way out. False if the channel was already closed (or
+    // null).
     bool shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
-
-    // shutChannel(), then join the writer. The writer closes the descriptor
-    // itself, on its way out.
-    void closeChannel(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch);
 
     static std::atomic<int> instanceCount_;
     static void initWinsock();
