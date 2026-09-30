@@ -180,7 +180,8 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
 // of the destination, and decoding must produce exactly the expected number of
 // bytes. If a check fails the parser returns false with `why` set and leaves
 // that stream empty in dst; the caller skips the block. Blocks written by
-// DepthRecorder always pass.
+// DepthRecorder pass as long as the header's width x height (taken from the
+// first recorded frame) matches the depth plane.
 
 // Whether `compSize` bytes can decode to `rawBytes`: Codec::None is a plain
 // copy, and LZ4 turns each input byte into at most 255 output bytes. This caps
