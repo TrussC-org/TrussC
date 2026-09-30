@@ -773,6 +773,15 @@ namespace internal {
     // opened first. State lives in tcAudio_impl.cpp.
     void setNullAudioBackendForTests(bool on);
 
+    // Test hook, not a user setting: AudioRecorder's audio-thread capture
+    // calls `hook` with the frame count of every buffer it takes, after
+    // copying it into the ring and before handing it to the writer, so a
+    // headless test can hold a capture in flight
+    // (core/tests/audioListenerTeardown). nullptr, the default, turns it off.
+    // State lives in tcAudio_impl.cpp.
+    void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+    void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+
     // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
     // without its one-second limit. internal::detachAppAudio() waits here
     // before the framework destroys an App (exit, runHeadlessApp, hot reload,

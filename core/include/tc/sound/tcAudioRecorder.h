@@ -33,16 +33,6 @@
 
 namespace trussc {
 
-namespace internal {
-// Test hook, not a user setting: the audio-thread capture calls `hook` with
-// the frame count of every buffer it takes, after copying it into the ring
-// and before handing it to the writer, so a headless test can hold a capture
-// in flight (core/tests/audioListenerTeardown). nullptr, the default, turns
-// it off. State lives in tcAudio_impl.cpp.
-void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
-void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
-}
-
 // -----------------------------------------------------------------------------
 // AudioRecordSettings
 // -----------------------------------------------------------------------------

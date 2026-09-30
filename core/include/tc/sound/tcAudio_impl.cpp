@@ -25,7 +25,6 @@
 #include "miniaudio.h"
 
 #include "tc/sound/tcSound.h"
-#include "tc/sound/tcAudioRecorder.h"   // the capture test hook declared there
 
 #include <algorithm>
 #include <atomic>
