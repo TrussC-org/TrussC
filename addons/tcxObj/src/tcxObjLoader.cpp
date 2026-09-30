@@ -125,33 +125,39 @@ bool ObjLoader::load(const fs::path& path) {
                     } else {
                         unsigned int newIdx = static_cast<unsigned int>(group.mesh.getNumVertices());
 
+                        // Index arithmetic in size_t: the indices are int and
+                        // 3 * index wraps in int above INT_MAX / 3
+                        size_t vi = static_cast<size_t>(idx.vertex_index);
+
                         // Position
-                        float vx = attrib.vertices[3 * idx.vertex_index + 0];
-                        float vy = attrib.vertices[3 * idx.vertex_index + 1];
-                        float vz = attrib.vertices[3 * idx.vertex_index + 2];
+                        float vx = attrib.vertices[3 * vi + 0];
+                        float vy = attrib.vertices[3 * vi + 1];
+                        float vz = attrib.vertices[3 * vi + 2];
                         group.mesh.addVertex(vx, vy, vz);
 
                         // Normal
                         if (hasNormals && idx.normal_index >= 0) {
-                            float nx = attrib.normals[3 * idx.normal_index + 0];
-                            float ny = attrib.normals[3 * idx.normal_index + 1];
-                            float nz = attrib.normals[3 * idx.normal_index + 2];
+                            size_t ni = static_cast<size_t>(idx.normal_index);
+                            float nx = attrib.normals[3 * ni + 0];
+                            float ny = attrib.normals[3 * ni + 1];
+                            float nz = attrib.normals[3 * ni + 2];
                             group.mesh.addNormal(nx, ny, nz);
                         }
 
                         // Texture coordinate
                         if (hasTexCoords && idx.texcoord_index >= 0) {
-                            float u = attrib.texcoords[2 * idx.texcoord_index + 0];
-                            float v_coord = attrib.texcoords[2 * idx.texcoord_index + 1];
+                            size_t ti = static_cast<size_t>(idx.texcoord_index);
+                            float u = attrib.texcoords[2 * ti + 0];
+                            float v_coord = attrib.texcoords[2 * ti + 1];
                             // OBJ V=0 is bottom, TrussC V=0 is top
                             group.mesh.addTexCoord(u, 1.0f - v_coord);
                         }
 
                         // Vertex color (if present in OBJ)
-                        if (attrib.colors.size() > 3 * static_cast<size_t>(idx.vertex_index) + 2) {
-                            float cr = attrib.colors[3 * idx.vertex_index + 0];
-                            float cg = attrib.colors[3 * idx.vertex_index + 1];
-                            float cb = attrib.colors[3 * idx.vertex_index + 2];
+                        if (attrib.colors.size() > 3 * vi + 2) {
+                            float cr = attrib.colors[3 * vi + 0];
+                            float cg = attrib.colors[3 * vi + 1];
+                            float cb = attrib.colors[3 * vi + 2];
                             group.mesh.addColor(cr, cg, cb, 1.0f);
                         }
 
