@@ -43,8 +43,8 @@ outline exactly, one fixture per triangle:
   contact before it begins the new one in one of the two directions);
 - a Stay listener may destroy a body: of the next pair in the list (the
   survivor still gets its Stay, the destroyed box its Exit and no Stay), of
-  the pair being dispatched (no Stay after it), or drop a `RigidBody2D`
-  node;
+  the pair being dispatched (no Stay after it, and the next pair still gets
+  its Stay), or drop a `RigidBody2D` node;
 - the offset/inertia check runs once on the whole body: a 600x40 rounded
   rectangle with 4 px corners, a 128-gon 1000 px off the origin and a
   4096-gon keep every triangle with no warning and the analytic mass; a 1 px

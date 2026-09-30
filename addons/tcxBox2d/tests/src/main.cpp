@@ -33,7 +33,8 @@
 //     one Enter / Began, one Stay per update, and one Exit / Ended;
 //   - a sensor box moved across the seam between two fixtures gets no Exit /
 //     Ended, whichever contact Box2D updates first;
-//   - Stay listeners may destroy bodies of the next pair or of their own;
+//   - Stay listeners may destroy bodies of the next pair or of their own
+//     (the other pairs still get their Stay);
 //   - the offset/inertia check runs once on the whole body: a rounded
 //     rectangle, an off-center 128-gon and a 4096-gon keep every triangle
 //     with no warning; a tiny outline far from the origin is refused as a
@@ -1126,8 +1127,9 @@ static void testStayListenerDestroys() {
         check("Stay destroys the next pair's body: later updates go on", barStay == 2);
     }
 
-    // Classic API: the bar's Stay destroys the box it is about (the pair
-    // being dispatched). The box hears no Stay after that.
+    // Classic API: the bar's first Stay destroys the box it is about (the
+    // pair being dispatched). That box hears no Stay after it, and the other
+    // pair, next in the list, still gets its Stay.
     {
         box2d::World world;
         world.setup(0, 0);
@@ -1136,26 +1138,38 @@ static void testStayListenerDestroys() {
         box2d::PolyShape bar;
         bar.setupCompound(world, kNotchedBar, 400, 300);
         bar.setStatic();
-        box2d::RectBody box;
-        box.setup(world, 330, 283, 10, 10);
-        box.setSensor(true);
+        box2d::RectBody box1, box2;
+        box1.setup(world, 330, 283, 10, 10);
+        box2.setup(world, 470, 283, 10, 10);
+        box1.setSensor(true);
+        box2.setSensor(true);
         step(world, 1);
 
-        bool destroyed = false;
-        int staysAfter = 0, boxExit = 0;
-        EventListener l1 = bar.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+        box2d::RectBody* destroyed = nullptr;
+        int barStay = 0, staysAfter = 0, stay1 = 0, stay2 = 0, exit1 = 0, exit2 = 0;
+        EventListener l1 = bar.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent& e) {
+            ++barStay;
             if (destroyed) return;
-            destroyed = true;
-            box.destroy();
+            destroyed = (e.other == &box1) ? &box1 : &box2;
+            destroyed->destroy();
         });
-        EventListener l2 = box.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
-            if (destroyed) ++staysAfter;
+        EventListener l2 = box1.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+            ++stay1;
+            if (destroyed == &box1) ++staysAfter;
         });
-        EventListener l3 = box.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++boxExit; });
+        EventListener l3 = box2.getCollider()->onCollisionStay.listen([&](box2d::CollisionEvent&) {
+            ++stay2;
+            if (destroyed == &box2) ++staysAfter;
+        });
+        EventListener l4 = box1.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit1; });
+        EventListener l5 = box2.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit2; });
 
         world.getCollisionManager()->update();
+        const bool gone1 = destroyed == &box1;
         check("Stay destroys its own pair's body: no Stay after it, one Exit",
-              destroyed && staysAfter == 0 && boxExit == 1);
+              destroyed && staysAfter == 0 && (gone1 ? exit1 : exit2) == 1);
+        check("Stay destroys its own pair's body: the next pair still gets its Stay",
+              barStay == 2 && (gone1 ? stay2 : stay1) == 1 && (gone1 ? exit2 : exit1) == 0);
     }
 
     // Mod API: the bar's first Stay drops the other box's node (its
