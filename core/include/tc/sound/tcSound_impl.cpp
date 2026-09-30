@@ -51,31 +51,54 @@ constexpr int kDecodeChunkFrames = 4096;
 // Reserve the first `count` samples of a decode buffer. Only a hint: when the
 // reservation cannot be made, the buffer still grows as data decodes.
 void reserveDecodeBuffer(std::vector<float>& buf, size_t count) {
+    if (count == 0 || !internal::allocationFits(count * sizeof(float))) return;
     try {
         buf.reserve(count);
     } catch (const std::exception&) {
     }
 }
 
+// Append `n` decoded samples to a decode buffer, growing it by
+// internal::growSampleBuffer (towards `statedSamples`, the stream's stated
+// length, when that is ahead). False when the buffer cannot grow; on the web
+// this is checked before the allocation, elsewhere std::bad_alloc is thrown.
+bool appendDecoded(std::vector<float>& buf, const float* data, size_t n, size_t statedSamples) {
+    if (n > buf.max_size() - buf.size()) return false;
+    if (!internal::growSampleBuffer(buf, buf.size() + n, statedSamples)) return false;
+    buf.insert(buf.end(), data, data + n);
+    return true;
+}
+
 // Drop the unused capacity of a finished decode buffer (a stated length above
-// what decoded, or growth past the reservation). Also only a hint.
+// what decoded, or growth past the reservation). Also only a hint, and skipped
+// for spare capacity up to an eighth of the samples, where the copy it takes
+// would cost more than it frees.
 void trimDecodeBuffer(std::vector<float>& buf) {
-    if (buf.capacity() == buf.size()) return;
+    if (buf.capacity() - buf.size() <= buf.size() / 8) return;
+    if (!internal::allocationFits(buf.size() * sizeof(float))) return;
     try {
         buf.shrink_to_fit();
     } catch (const std::exception&) {
     }
 }
 
+// Decoded samples per input byte the first reservation is capped at, for a
+// ma_decoder format (see internal::kReserveSamplesPerInputByte*)
+uint64_t reserveSamplesPerInputByte(ma_encoding_format format) {
+    return format == ma_encoding_format_mp3 ? internal::kReserveSamplesPerInputByteMp3
+                                            : internal::kReserveSamplesPerInputByte;
+}
+
 // Decode the entire stream of an initialized ma_decoder into a SoundBuffer.
 // The stream's stated length only sizes the first reservation
-// (internal::decodeReserveSamples, capped by inputBytes of encoded input);
-// the buffer grows as frames actually decode. On success, fills samples /
-// channels / sampleRate / numSamples and uninits the decoder. On failure
-// (including running out of memory), uninits the decoder, logs, leaves `out`
-// as it was and returns false.
+// (internal::decodeReserveSamples, capped by inputBytes of encoded input at
+// samplesPerInputByte) and steers growth past it; the buffer grows as frames
+// actually decode. On success, fills samples / channels / sampleRate /
+// numSamples and uninits the decoder. On failure (including running out of
+// memory), uninits the decoder, logs, leaves `out` as it was and returns
+// false.
 bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel,
-                  uint64_t inputBytes) {
+                  uint64_t inputBytes, uint64_t samplesPerInputByte) {
     ma_uint64 frameCount = 0;
     ma_result result = ma_decoder_get_length_in_pcm_frames(&decoder, &frameCount);
     if (result != MA_SUCCESS || frameCount == 0) {
@@ -94,28 +117,37 @@ bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel
     }
 
     std::vector<float> buf;
+    size_t statedSamples = 0;   // stays 0 (no growth target) past max_size()
+    internal::interleavedSampleCount(frameCount, ch, buf.max_size(), statedSamples);
     reserveDecodeBuffer(buf, internal::decodeReserveSamples(frameCount, ch, inputBytes,
+                                                            samplesPerInputByte,
                                                             buf.max_size()));
     uint64_t framesRead = 0;
+    bool outOfMemory = false;
     try {
         std::vector<float> chunk((size_t)kDecodeChunkFrames * (size_t)ch);
         for (;;) {
             ma_uint64 got = 0;
             result = ma_decoder_read_pcm_frames(&decoder, chunk.data(), kDecodeChunkFrames, &got);
             if (got > 0) {
-                buf.insert(buf.end(), chunk.begin(), chunk.begin() + (size_t)got * (size_t)ch);
+                if (!appendDecoded(buf, chunk.data(), (size_t)got * (size_t)ch, statedSamples)) {
+                    outOfMemory = true;
+                    break;
+                }
                 framesRead += got;
             }
             if (result != MA_SUCCESS || got == 0) break;
         }
     } catch (const std::exception&) {
-        ma_decoder_uninit(&decoder);
+        outOfMemory = true;
+    }
+    ma_decoder_uninit(&decoder);
+    if (outOfMemory) {
         logError("SoundBuffer") << "not enough memory to decode " << sourceLabel << " ("
                                 << (unsigned long long)framesRead << " frames of " << ch
                                 << " ch decoded)";
         return false;
     }
-    ma_decoder_uninit(&decoder);
 
     if ((result != MA_SUCCESS && result != MA_AT_END) || framesRead == 0) {
         logError("SoundBuffer") << "failed to decode " << sourceLabel << " (result="
@@ -134,7 +166,8 @@ bool drainDecoder(ma_decoder& decoder, SoundBuffer& out, const char* sourceLabel
 
 // Decode the entire stream of an open stb_vorbis into `out`, the same way as
 // drainDecoder: the stream's stated length (the last page's granule) only
-// sizes the first reservation, and samples are appended as they decode.
+// sizes the first reservation and steers growth, and samples are appended as
+// they decode. A stream whose length is unknown (0) loads what decodes.
 // Closes `vorbis`. On failure, logs, leaves `out` as it was and returns the
 // error.
 LoadResult drainVorbis(stb_vorbis* vorbis, uint64_t inputBytes, const std::string& label,
@@ -149,26 +182,35 @@ LoadResult drainVorbis(stb_vorbis* vorbis, uint64_t inputBytes, const std::strin
     const unsigned int statedFrames = stb_vorbis_stream_length_in_samples(vorbis);
 
     std::vector<float> buf;
-    reserveDecodeBuffer(buf, internal::decodeReserveSamples(statedFrames, ch, inputBytes,
-                                                            buf.max_size()));
+    size_t statedSamples = 0;   // stays 0 (no growth target) past max_size()
+    internal::interleavedSampleCount(statedFrames, ch, buf.max_size(), statedSamples);
+    reserveDecodeBuffer(buf, internal::decodeReserveSamples(
+                                 statedFrames, ch, inputBytes,
+                                 internal::kReserveSamplesPerInputByteVorbis, buf.max_size()));
     uint64_t framesRead = 0;
+    bool outOfMemory = false;
     try {
         std::vector<float> chunk((size_t)kDecodeChunkFrames * (size_t)ch);
         for (;;) {
             const int got = stb_vorbis_get_samples_float_interleaved(
                 vorbis, ch, chunk.data(), kDecodeChunkFrames * ch);
             if (got <= 0) break;
-            buf.insert(buf.end(), chunk.begin(), chunk.begin() + (size_t)got * (size_t)ch);
+            if (!appendDecoded(buf, chunk.data(), (size_t)got * (size_t)ch, statedSamples)) {
+                outOfMemory = true;
+                break;
+            }
             framesRead += (uint64_t)got;
         }
     } catch (const std::exception&) {
-        stb_vorbis_close(vorbis);
+        outOfMemory = true;
+    }
+    stb_vorbis_close(vorbis);
+    if (outOfMemory) {
         logError("SoundBuffer") << "not enough memory to decode " << label << " ("
                                 << (unsigned long long)framesRead << " frames of " << ch
                                 << " ch decoded)";
         return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to decode " + label);
     }
-    stb_vorbis_close(vorbis);
 
     if (framesRead == 0) {
         logError("SoundBuffer") << "no samples decoded from " << label;
@@ -217,7 +259,8 @@ bool decodeFileWithMiniaudio(const fs::path& path,
     }
     std::error_code sizeEc;
     const uintmax_t fileBytes = fs::file_size(path, sizeEc);
-    if (!drainDecoder(decoder, out, pathStr.c_str(), sizeEc ? 0 : (uint64_t)fileBytes)) {
+    if (!drainDecoder(decoder, out, pathStr.c_str(), sizeEc ? 0 : (uint64_t)fileBytes,
+                      reserveSamplesPerInputByte(hint))) {
         return false;
     }
     logVerbose("SoundBuffer") << "loaded " << label << " " << pathStr << " (" << out.channels
@@ -238,7 +281,10 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
                                 << (int)result << ")";
         return false;
     }
-    if (!drainDecoder(decoder, out, "memory", (uint64_t)dataSize)) return false;
+    if (!drainDecoder(decoder, out, "memory", (uint64_t)dataSize,
+                      reserveSamplesPerInputByte(hint))) {
+        return false;
+    }
     logVerbose("SoundBuffer") << "decoded " << label << " from memory (" << out.channels
                               << " ch, " << out.sampleRate << " Hz, " << out.numSamples
                               << " samples)";

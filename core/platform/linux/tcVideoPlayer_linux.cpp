@@ -938,7 +938,8 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         const uintmax_t fileBytes = fs::file_size(filePath_, sizeEc);
         try {
             samples.reserve(internal::decodeReserveSamples(
-                frames, 2, sizeEc ? 0 : (uint64_t)fileBytes, samples.max_size()));
+                frames, 2, sizeEc ? 0 : (uint64_t)fileBytes,
+                internal::kReserveSamplesPerInputByte, samples.max_size()));
         } catch (const std::exception&) {
         }
     }

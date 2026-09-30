@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <new>
 #include <cstdint>
+#include <cstdlib>
 #include <mutex>
 #include <atomic>
 #include <cstring>
@@ -89,25 +90,77 @@ inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCoun
     return true;
 }
 
+// Most decoded samples per byte of encoded input that decodeReserveSamples
+// reserves for. The general rate, 16, is 48 kHz stereo down to 48 kbit/s.
+// MP3 frames run at 8 kbit/s or more (MPEG-2 / 2.5; MPEG-1 at 32 kbit/s or
+// more), so an MP3 decodes to at most 48 samples per byte (24 kHz stereo at
+// 8 kbit/s). Vorbis has no such floor; 32 covers its lowest common quality
+// settings (about 32 kbit/s for 44.1 kHz stereo). Streams that decode to
+// more still load: the buffer grows past the reservation.
+constexpr uint64_t kReserveSamplesPerInputByte = 16;
+constexpr uint64_t kReserveSamplesPerInputByteMp3 = 48;
+constexpr uint64_t kReserveSamplesPerInputByteVorbis = 32;
+
 // Interleaved samples to reserve before decoding a stream whose header states
 // `headerFrames` frames of `channels` channels, read from `inputBytes` bytes
 // of encoded input (0 when unknown). The stated length is only a hint: the
 // reservation is capped by what that much input plausibly decodes to
-// (kDecodedSamplesPerInputByte per byte: 48 kHz stereo down to 48 kbit/s)
-// and by maxCount. Decoders append what actually decodes and grow the buffer
-// past the reservation when a stream holds more.
+// (samplesPerInputByte per byte, one of the kReserveSamplesPerInputByte*
+// rates) and by maxCount. Decoders append what actually decodes and grow the
+// buffer past the reservation when a stream holds more.
 inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t inputBytes,
-                                   size_t maxCount) {
-    constexpr uint64_t kDecodedSamplesPerInputByte = 16;
+                                   uint64_t samplesPerInputByte, size_t maxCount) {
     constexpr uint64_t kMax = ~(uint64_t)0;
     if (channels < 1) return 0;
     const uint64_t ch = (uint64_t)channels;
     const uint64_t fromHeader = headerFrames > kMax / ch ? kMax : headerFrames * ch;
-    const uint64_t fromInput = inputBytes > kMax / kDecodedSamplesPerInputByte
-                                   ? kMax : inputBytes * kDecodedSamplesPerInputByte;
+    const uint64_t fromInput =
+        samplesPerInputByte != 0 && inputBytes > kMax / samplesPerInputByte
+            ? kMax : inputBytes * samplesPerInputByte;
     uint64_t n = fromHeader < fromInput ? fromHeader : fromInput;
     if (n > (uint64_t)maxCount) n = (uint64_t)maxCount;
     return (size_t)n;
+}
+
+// Whether one allocation of `bytes` can be made right now. Web (wasm) builds
+// have exception catching off, so there a failed operator new aborts the page
+// instead of throwing std::bad_alloc; malloc, which returns null on failure
+// under ALLOW_MEMORY_GROWTH, is tried and released first. Elsewhere a failed
+// allocation throws and the callers catch it, so this is always true.
+inline bool allocationFits(size_t bytes) {
+#ifdef __EMSCRIPTEN__
+    // Held in a volatile: the compiler may otherwise drop an unused
+    // malloc / free pair and assume the allocation succeeded.
+    void* volatile p = std::malloc(bytes);
+    if (!p) return false;
+    std::free(p);
+#else
+    (void)bytes;
+#endif
+    return true;
+}
+
+// Grow the capacity of `buf` to hold at least `needed` samples. The new
+// capacity is twice the current one (geometric growth), or `preferred` when
+// it lies between `needed` and that (a decoder's stated length, so a stream
+// whose length is stated correctly ends without spare capacity), or only
+// `needed` when the larger size cannot be allocated (allocationFits). Never
+// more than twice the current capacity, so the growth follows what was
+// actually written. False, with `buf` unchanged, when even `needed` cannot
+// be allocated; elsewhere than on the web a failed allocation throws
+// std::bad_alloc instead.
+inline bool growSampleBuffer(std::vector<float>& buf, size_t needed, size_t preferred = 0) {
+    if (needed <= buf.capacity()) return true;
+    if (needed > buf.max_size()) return false;
+    size_t target = buf.capacity() > buf.max_size() / 2 ? buf.max_size() : buf.capacity() * 2;
+    if (preferred >= needed && preferred < target) target = preferred;
+    if (target < needed) target = needed;
+    if (!allocationFits(target * sizeof(float))) {
+        if (target == needed || !allocationFits(needed * sizeof(float))) return false;
+        target = needed;
+    }
+    buf.reserve(target);
+    return true;
 }
 
 } // namespace internal
@@ -467,9 +520,16 @@ public:
         }
         const size_t endFrame = offsetSamples + otherFrames;
         if (samples.size() < needed) {
+            // growSampleBuffer checks the allocation first on the web, where
+            // a failed one aborts instead of throwing
+            bool grown = false;
             try {
-                samples.resize(needed, 0.0f);
+                grown = internal::growSampleBuffer(samples, needed);
+                if (grown) samples.resize(needed, 0.0f);
             } catch (const std::bad_alloc&) {
+                grown = false;
+            }
+            if (!grown) {
                 logError("SoundBuffer") << "mixFrom: out of memory growing to " << endFrame
                                         << " frames, nothing mixed";
                 return;
