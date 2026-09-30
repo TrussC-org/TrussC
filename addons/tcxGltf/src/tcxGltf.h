@@ -23,6 +23,10 @@
 //   - Multiple scenes (loads the default scene or scene 0; a file without
 //     scenes loads every root node)
 //   - Cameras, lights (KHR_lights_punctual)
+//   - Primitives whose POSITION or index accessor has no data in memory (no
+//     buffer view, or a buffer without data), including the valid glTF case
+//     of an index accessor that is all zeros plus sparse values: such a
+//     primitive is skipped with a warning, and the rest of the model loads
 //
 // =============================================================================
 
