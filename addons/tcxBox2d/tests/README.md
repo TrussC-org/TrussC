@@ -54,6 +54,24 @@ outline exactly, one fixture per triangle:
   positive inertia at densities 0.001 to 1000 (Debug: no Box2D assert while
   the fixtures are added).
 
+Event lifetimes (#427). Listeners of a deferred Exit / Ended or of Stay may
+free the other body of their pair, and bodies may be destroyed between
+`Step()` and `update()`:
+
+- an Exit / Ended listener that frees the other body (classic `Body` or a
+  `RigidBody2D`'s node) leaves it unnotified; when two balls leave a
+  platform in one step and the first one's listener frees the platform, the
+  second ball still gets its Exit / Ended, with no other body;
+- `Step()`, destroy the ball, add a new one (Box2D hands out the freed
+  `b2Body` again), then `update()`: the platform's Exit / Ended names no
+  other body, and neither the freed ball nor the new one hears anything;
+- a `RigidBody2D` Stay listener that drops the other node of the pair being
+  dispatched, and one that also adds a new ball at the freed address: the
+  dropped side gets no Stay, the new ball nothing.
+
+Without the guards these are use-after-frees that a plain build may not
+report; run them under AddressSanitizer after touching the event code.
+
 CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the
 default build type, or Release). Adding the fixtures at density 0 (and
 setting the density once all are in) is guarded only by a Debug build:

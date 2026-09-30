@@ -35,6 +35,10 @@
 //     Ended, whichever contact Box2D updates first;
 //   - Stay listeners may destroy bodies of the next pair or of their own
 //     (the other pairs still get their Stay);
+//   - listeners of a deferred Exit / Ended or of Stay may free the other body
+//     of their pair (it hears nothing more), and a body destroyed between
+//     Step() and update() gets no Exit / Ended, its partner one with no
+//     other, and a new body at its address none;
 //   - the offset/inertia check runs once on the whole body: a rounded
 //     rectangle, an off-center 128-gon and a 4096-gon keep every triangle
 //     with no warning; a tiny outline far from the origin is refused as a
@@ -48,6 +52,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <random>
@@ -1215,6 +1220,320 @@ static void testStayListenerDestroys() {
 }
 
 // ---------------------------------------------------------------------------
+// Event lifetimes: listeners that free bodies, and bodies destroyed before a
+// deferred Exit / Ended fires (#427). Run under ASan too: without the guards
+// these are use-after-frees, which a plain build may not notice.
+// ---------------------------------------------------------------------------
+
+// One step that ends the contacts, with the Exits left pending (no update()).
+static void stepOnly(box2d::World& world) {
+    world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+}
+
+// A static 200 x 20 platform at (400, 300), and balls of radius 10 sunk 3 px
+// into its top at the given x. Balls are sensors, so nothing pushes them out.
+static const float kBallY = 300 - 10 - 10 + 3;
+
+static void testClassicEventLifetimes() {
+    // An Exit listener frees the other body: the pair's second notify must
+    // not reach it.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        auto platform = make_unique<box2d::RectBody>();
+        platform->setup(world, 400, 300, 200, 20);
+        platform->setStatic();
+        auto ball = make_unique<box2d::CircleBody>();
+        ball->setup(world, 400, kBallY, 10);
+        ball->setSensor(true);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball->getBody()) > 0;
+
+        int platformExit = 0, ballExit = 0;
+        EventListener l1 = platform->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++platformExit;
+            ball.reset();
+        });
+        EventListener l2 = ball->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++ballExit;
+            platform.reset();
+        });
+
+        ball->setPhysicsPosition(400, -1000);
+        step(world, 1);
+        check("Exit listener frees the other body: the first side gets its Exit, the freed one none",
+              touching && platformExit + ballExit == 1 && (!platform || !ball));
+    }
+
+    // Two balls leave in the same step; the first ball's Exit listener
+    // frees the platform. The second ball still gets its Exit, with no other.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        auto platform = make_unique<box2d::RectBody>();
+        platform->setup(world, 400, 300, 200, 20);
+        platform->setStatic();
+        box2d::CircleBody ball1, ball2;
+        ball1.setup(world, 340, kBallY, 10);
+        ball2.setup(world, 460, kBallY, 10);
+        ball1.setSensor(true);
+        ball2.setSensor(true);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball1.getBody()) > 0 &&
+                              touchingContacts(world, platform->getBody(), ball2.getBody()) > 0;
+
+        int platformExit = 0, exit1 = 0, exit2 = 0, secondOtherNull = 0;
+        EventListener l1 = platform->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++platformExit;
+        });
+        auto onExit = [&](int& count) {
+            return [&count, &platform, &secondOtherNull](box2d::CollisionEvent& e) {
+                ++count;
+                if (platform) platform.reset();
+                else if (e.other == nullptr) ++secondOtherNull;
+            };
+        };
+        EventListener l2 = ball1.getCollider()->onCollisionExit.listen(onExit(exit1));
+        EventListener l3 = ball2.getCollider()->onCollisionExit.listen(onExit(exit2));
+
+        ball1.setPhysicsPosition(340, -1000);
+        ball2.setPhysicsPosition(460, -1000);
+        step(world, 1);
+        check("two balls leave, the first frees the platform: one Exit each, the second with no other",
+              touching && !platform && exit1 == 1 && exit2 == 1 && secondOtherNull == 1);
+        check("two balls leave, the first frees the platform: at most one platform Exit",
+              platformExit <= 1);
+    }
+
+    // Manual stepping: Step(), destroy the ball, make a new one (Box2D's
+    // allocator hands out the freed body again), then update(). The platform
+    // gets its Exit with no other; nothing reaches the freed ball or the new one.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::RectBody platform;
+        platform.setup(world, 400, 300, 200, 20);
+        platform.setStatic();
+        auto ball = make_unique<box2d::CircleBody>();
+        ball->setup(world, 400, kBallY, 10);
+        ball->setSensor(true);
+        step(world, 1);
+
+        int platformExit = 0, platformOtherNull = 0, oldBallExit = 0, newBallExit = 0;
+        EventListener l1 = platform.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
+            ++platformExit;
+            if (e.other == nullptr) ++platformOtherNull;
+        });
+        EventListener l2 = ball->getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++oldBallExit;
+        });
+
+        ball->setPhysicsPosition(400, -1000);
+        stepOnly(world);
+        const b2Body* oldBody = ball->getBody();
+        ball.reset();
+        box2d::CircleBody newBall;
+        newBall.setup(world, 100, -1000, 10);
+        EventListener l3 = newBall.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
+            ++newBallExit;
+        });
+        printf("  (classic manual step: new body %s the freed one's address)\n",
+               newBall.getBody() == oldBody ? "reuses" : "does not reuse");
+        world.getCollisionManager()->update();
+        check("manual Step, destroy, update(): the platform's Exit has no other",
+              platformExit == 1 && platformOtherNull == 1);
+        check("manual Step, destroy, update(): nothing reaches the freed ball or a new one",
+              oldBallExit == 0 && newBallExit == 0);
+    }
+}
+
+// Counts a RigidBody2D's events, collision and trigger alike (a side whose
+// other body is gone can't tell it was a trigger). `hook` runs after the
+// count, with the phase (0 began, 1 stay, 2 ended).
+struct ModCounts {
+    int began = 0, stay = 0, ended = 0, otherNull = 0;
+};
+
+static vector<EventListener> countEvents(box2d::RigidBody2D* rb, ModCounts& n,
+                                         function<void(int, box2d::Contact2D&)> hook = nullptr) {
+    auto on = [&n, hook](int phase) {
+        return [&n, hook, phase](box2d::Contact2D& c) {
+            (phase == 0 ? n.began : phase == 1 ? n.stay : n.ended)++;
+            if (!c.other) ++n.otherNull;
+            if (hook) hook(phase, c);
+        };
+    };
+    vector<EventListener> ls;
+    ls.push_back(rb->onCollisionBegan.listen(on(0)));
+    ls.push_back(rb->onCollisionStay.listen(on(1)));
+    ls.push_back(rb->onCollisionEnded.listen(on(2)));
+    ls.push_back(rb->onTriggerBegan.listen(on(0)));
+    ls.push_back(rb->onTriggerStay.listen(on(1)));
+    ls.push_back(rb->onTriggerEnded.listen(on(2)));
+    return ls;
+}
+
+static box2d::RigidBody2D* addModBody(box2d::World& world, shared_ptr<Node>& node, float x, float y,
+                                      const box2d::Shape2D& shape) {
+    node = make_shared<Node>();
+    node->setPos(x, y);
+    return node->addMod<box2d::RigidBody2D>(world, shape);
+}
+
+static box2d::RigidBody2D* addPlatform(box2d::World& world, shared_ptr<Node>& node) {
+    auto* rb = addModBody(world, node, 400, 300, box2d::Shape2D::box(200, 20));
+    rb->setBodyType(box2d::BodyType::Static);
+    return rb;
+}
+
+static box2d::RigidBody2D* addBall(box2d::World& world, shared_ptr<Node>& node, float x) {
+    auto* rb = addModBody(world, node, x, kBallY, box2d::Shape2D::circle(10));
+    rb->setTrigger(true);
+    return rb;
+}
+
+// Each Mod case gets its own world: the contact router is kept per World*.
+static void testModEventLifetimes() {
+    // A deferred Ended listener drops the other node: the second side must
+    // not be notified.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, ballNode;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball = addBall(world, ballNode, 400);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball->getBody()) > 0;
+
+        ModCounts p, b;
+        b2Body* ballBody = ball->getBody();
+        auto l1 = countEvents(platform, p, [&](int phase, box2d::Contact2D&) {
+            if (phase == 2) ballNode.reset();
+        });
+        auto l2 = countEvents(ball, b, [&](int phase, box2d::Contact2D&) {
+            if (phase == 2) platformNode.reset();
+        });
+
+        ballBody->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        step(world, 1);
+        check("RigidBody2D Ended listener drops the other node: one Ended, the dropped side none",
+              touching && p.ended + b.ended == 1 && (!platformNode || !ballNode));
+    }
+
+    // Two balls leave in the same step; the first ball's Ended listener
+    // drops the platform. The second ball still gets its Ended, with no other.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, node1, node2;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball1 = addBall(world, node1, 340);
+        auto* ball2 = addBall(world, node2, 460);
+        step(world, 1);
+        const bool touching = touchingContacts(world, platform->getBody(), ball1->getBody()) > 0 &&
+                              touchingContacts(world, platform->getBody(), ball2->getBody()) > 0;
+
+        ModCounts p, b1, b2;
+        auto l1 = countEvents(platform, p);
+        auto drop = [&](int phase, box2d::Contact2D&) {
+            if (phase == 2 && platformNode) platformNode.reset();
+        };
+        auto l2 = countEvents(ball1, b1, drop);
+        auto l3 = countEvents(ball2, b2, drop);
+
+        ball1->getBody()->SetTransform(box2d::World::toBox2d(340, -1000), 0);
+        ball2->getBody()->SetTransform(box2d::World::toBox2d(460, -1000), 0);
+        step(world, 1);
+        check("RigidBody2D two balls leave, the first drops the platform: one Ended each, the second with no other",
+              touching && !platformNode && b1.ended == 1 && b2.ended == 1 &&
+              b1.otherNull + b2.otherNull == 1);
+        check("RigidBody2D two balls leave, the first drops the platform: at most one platform Ended",
+              p.ended <= 1);
+    }
+
+    // Manual stepping: Step(), drop the ball's node, add a new ball (it gets
+    // the freed b2Body's address), then update(). The platform's Ended has
+    // no other; the new ball hears nothing.
+    {
+        static box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, ballNode, newNode;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball = addBall(world, ballNode, 400);
+        step(world, 1);
+
+        ModCounts p, fresh;
+        auto l1 = countEvents(platform, p);
+        ball->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        stepOnly(world);
+        const b2Body* oldBody = ball->getBody();
+        ballNode.reset();
+        auto* newBall = addModBody(world, newNode, 100, -1000, box2d::Shape2D::circle(10));
+        auto l2 = countEvents(newBall, fresh);
+        const bool reused = newBall->getBody() == oldBody;
+        printf("  (Mod manual step: new body %s the freed one's address)\n", reused ? "reuses" : "does not reuse");
+        world.getCollisionManager()->update();
+        check("RigidBody2D manual Step, drop, update(): the platform's Ended has no other",
+              p.ended == 1 && p.otherNull == 1);
+        check("RigidBody2D manual Step, drop, update(): the new body at the freed address hears nothing",
+              reused && fresh.began + fresh.stay + fresh.ended == 0);
+    }
+
+    // A Stay listener drops the other node of the pair being dispatched; a
+    // second run also adds a new ball in its place (same b2Body address).
+    for (bool replace : {false, true}) {
+        static box2d::World worlds[2];
+        box2d::World& world = worlds[replace ? 1 : 0];
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> platformNode, ballNode, newNode;
+        auto* platform = addPlatform(world, platformNode);
+        auto* ball = addBall(world, ballNode, 400);
+        step(world, 1);
+
+        ModCounts p, b, fresh;
+        vector<EventListener> freshL;
+        bool reused = false;
+        auto dropOther = [&](shared_ptr<Node>* other) {
+            return [&, other](int phase, box2d::Contact2D&) {
+                if (phase != 1 || !platformNode || !ballNode) return;
+                const b2Body* gone = (other == &ballNode) ? ball->getBody() : platform->getBody();
+                other->reset();
+                if (!replace) return;
+                auto* rb = addModBody(world, newNode, 400, kBallY, box2d::Shape2D::circle(10));
+                rb->setTrigger(true);
+                reused = rb->getBody() == gone;
+                freshL = countEvents(rb, fresh);
+            };
+        };
+        auto l1 = countEvents(platform, p, dropOther(&ballNode));
+        auto l2 = countEvents(ball, b, dropOther(&platformNode));
+
+        world.getCollisionManager()->update();
+        const string tag = replace ? " (and adds a new ball there)" : "";
+        check("RigidBody2D Stay drops the other node of its pair" + tag + ": one Stay, the dropped side none",
+              p.stay + b.stay == 1 && (!platformNode || !ballNode));
+        if (replace) {
+            check("RigidBody2D Stay drops the other node of its pair" + tag + ": the new ball hears nothing",
+                  reused && fresh.began + fresh.stay + fresh.ended == 0);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Compound bodies: the inertia check runs once on the whole body (#427)
 // ---------------------------------------------------------------------------
 
@@ -1565,6 +1884,8 @@ int main() {
     testCompoundEvents();
     testCompoundHandover();
     testStayListenerDestroys();
+    testClassicEventLifetimes();
+    testModEventLifetimes();
     testCompoundOffset(world);
     testReducedConvexHull();
 
