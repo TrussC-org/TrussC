@@ -39,11 +39,16 @@
 // decided under the lock, the line goes out after it), so a Logger listener
 // that runs inline may call this Serial. One exception, on Android: the USB
 // worker thread logs too (permission timeout, connected, lost connection,
-// RX overflow, open errors), and close(), setup(), the destructor and a move
-// wait for that thread to stop while they hold the lock. A listener running
-// inline on the worker thread that then calls an I/O call, setup() or
-// close() on this Serial may deadlock with them. isConnected() and
-// getDevicePath() are safe there. Listen with Deliver::Main to be safe.
+// RX overflow, open errors). A listener running inline on that thread must
+// not call an I/O call, setup() or close() on the Serial, nor destroy it:
+// - setup(), close(), the destructor and a move stop the worker and wait for
+//   it, which the worker cannot do for itself. setup() / close() there are
+//   refused with an error log and do nothing; destroying the Serial there
+//   leaves the connection to the worker, which releases it when it stops.
+// - An I/O call may deadlock with a close() / setup() on another thread,
+//   which holds the lock while it waits for the worker.
+// isConnected() and getDevicePath() are safe there. Listen with
+// Deliver::Main to run on the main thread instead.
 // =============================================================================
 
 #include <string>
@@ -184,16 +189,21 @@ namespace internal {
 // close() or setup() on the app's thread, and isConnected() stays true until
 // then, as it does on the other platforms until an I/O call finds the loss.
 //
-// Serial makes every call below with its lock held. setup(), close() and
-// destroy() hold it exclusive, so they come one at a time and never overlap
-// an I/O call. The I/O calls (available(), readBytes(), writeBytes(),
-// flushInput(), isConnected(), isLost()) hold it shared, so they may come
-// from several threads at once: the receive buffer has its own mutex, the
-// state and loss flags are atomic, the connection fields they read (fd,
-// endpoints) are written only while no I/O call runs or before the worker
-// publishes Connected, and concurrent bulk transfers on one usbfs fd are
-// each their own URB. The worker shares only the receive buffer and those
-// flags with them.
+// How Serial calls it:
+// - setup(), close() and destroy() with its lock held exclusive, so they
+//   come one at a time and never overlap an I/O call.
+// - The I/O calls (available(), readBytes(), writeBytes(), flushInput(),
+//   isLost()) with it held shared, so they may come from several threads at
+//   once: the receive buffer has its own mutex, the state and loss flags
+//   are atomic, the connection fields they read (fd, endpoints) are written
+//   only while no I/O call runs or before the worker publishes Connected,
+//   and concurrent bulk transfers on one usbfs fd are each their own URB.
+// - isConnected() without that lock (only Serial's infoMutex_, which keeps
+//   the Impl alive), so it may run at the same time as setup(), close() or
+//   the release of a connection. It must read the atomic state only.
+// The worker shares only the receive buffer and those flags with them.
+// setup(), close() and destroy() made on the worker thread itself (from a
+// Logger listener running inline there) cannot wait for it: see Refused.
 // ---------------------------------------------------------------------------
 namespace androidserial {
     struct Impl;
@@ -211,7 +221,8 @@ namespace androidserial {
     // Stop the worker and release the connection. Lost: the worker had found
     // the device gone, and lostReason is the text it logged.
     CloseResult close(Impl* impl, std::string& lostReason);
-    // Connected, or lost with the loss not reported yet (see isLost())
+    // Connected, or lost with the loss not reported yet (see isLost()).
+    // Reads atomics only: it runs without Serial's port lock.
     bool isConnected(const Impl* impl);
     // The worker found the device gone and close() has not collected it yet
     bool isLost(const Impl* impl);

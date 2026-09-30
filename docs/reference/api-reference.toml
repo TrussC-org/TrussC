@@ -7756,11 +7756,16 @@ the flush calls still wait for a `writeBytes()` in progress.
 
 A [Logger](#Logger) listener that runs inline may call this `Serial`. One
 exception, on Android: the USB worker thread logs too (permission timeout,
-connected, lost connection, RX overflow, open errors), and `close()`,
-`setup()`, the destructor and a move wait for that thread with the lock held.
-A listener running inline on the worker thread that calls an I/O call,
-`setup()` or `close()` may then deadlock; `isConnected()` and
-`getDevicePath()` are safe. Listen with `Deliver::Main` to be safe.
+connected, lost connection, RX overflow, open errors). A listener running
+inline on that thread must not call an I/O call, `setup()` or `close()` on
+the `Serial`, nor destroy it. `setup()`, `close()`, the destructor and a move
+stop the worker and wait for it, which the worker cannot do for itself:
+`setup()` / `close()` there are refused with an error log and do nothing, and
+destroying the `Serial` there leaves the connection to the worker, which
+releases it when it stops. An I/O call may deadlock with a `close()` /
+`setup()` on another thread, which holds the lock while it waits for the
+worker. `isConnected()` and `getDevicePath()` are safe there. Listen with
+`Deliver::Main` to run on the main thread instead.
 '''
 details.ja = '''
 USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
@@ -7797,11 +7802,15 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 
 インラインで動く [Logger](#Logger) のリスナーから、この `Serial` を呼んでよい。
 例外は Android で、USB ワーカースレッドもログを出す（許可のタイムアウト、接続、
-接続の喪失、受信バッファのあふれ、オープンのエラー）。`close()`、`setup()`、
-デストラクタ、ムーブは、ロックを持ったままそのスレッドの終了を待つ。そのため
-ワーカースレッド上でインラインに動くリスナーが I/O 呼び出し、`setup()`、`close()` を
-呼ぶとデッドロックしうる。`isConnected()` と `getDevicePath()` は安全。確実にするには
-`Deliver::Main` で listen する。
+接続の喪失、受信バッファのあふれ、オープンのエラー）。そのスレッド上でインラインに
+動くリスナーから、`Serial` の I/O 呼び出し、`setup()`、`close()` を呼んだり、
+`Serial` を破棄したりしてはいけない。`setup()`、`close()`、デストラクタ、ムーブは
+ワーカーを止めてその終了を待つが、ワーカーは自分自身を待てない。そこでの
+`setup()` / `close()` はエラーをログに出して何もしない。そこで `Serial` を破棄すると、
+接続の後始末はワーカーに任され、ワーカーが止まるときに解放される。I/O 呼び出しは、
+別スレッドの `close()` / `setup()`（ロックを持ったままワーカーを待つ）とデッドロック
+しうる。`isConnected()` と `getDevicePath()` はそこでも安全。メインスレッドで動かす
+には `Deliver::Main` で listen する。
 '''
 details.ko = '''
 USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
@@ -7837,10 +7846,14 @@ Windows에서는 `available()`, 읽기, flush 계열이 진행 중인 `writeByte
 
 인라인으로 실행되는 [Logger](#Logger) 리스너에서 이 `Serial`을 호출해도 된다. 예외는
 Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연결, 연결 소실, 수신
-버퍼 넘침, 열기 오류). `close()`, `setup()`, 소멸자, 이동은 락을 잡은 채 그 스레드가
-멈추기를 기다린다. 그래서 워커 스레드에서 인라인으로 실행되는 리스너가 I/O 호출,
-`setup()`, `close()`를 호출하면 교착될 수 있다. `isConnected()`와
-`getDevicePath()`는 안전하다. 확실히 하려면 `Deliver::Main`으로 listen한다.
+버퍼 넘침, 열기 오류). 그 스레드에서 인라인으로 실행되는 리스너는 `Serial`의 I/O
+호출, `setup()`, `close()`를 호출하거나 `Serial`을 파괴해서는 안 된다. `setup()`,
+`close()`, 소멸자, 이동은 워커를 멈추고 끝나기를 기다리는데, 워커는 자기 자신을
+기다릴 수 없다. 거기서의 `setup()` / `close()`는 오류를 로그로 남기고 아무것도 하지
+않으며, 거기서 `Serial`을 파괴하면 연결의 정리는 워커에 맡겨져 워커가 멈출 때
+해제된다. I/O 호출은 다른 스레드의 `close()` / `setup()`(락을 잡은 채 워커를 기다림)과
+교착될 수 있다. `isConnected()`와 `getDevicePath()`는 거기서도 안전하다. 메인
+스레드에서 실행하려면 `Deliver::Main`으로 listen한다.
 '''
 
 ["Serial::isInitialized"]
