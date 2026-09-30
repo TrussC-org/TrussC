@@ -68,7 +68,10 @@
 // any return path, so the hook sees the final value of this frame (after drag,
 // slider and text-input edits). At entry, before the widget reads the variable,
 // it calls ImGuiTcHook_ItemEntry(), which may write a value the MCP tools queued
-// for this widget through Data. Active only while TestEngineHookItems is set.
+// for this widget through Data. In that frame every return after the
+// declaration returns true (IMGUI_TC_RETURN), so code that applies a copy only
+// when the widget returns true takes the value; Edited is not set.
+// Active only while TestEngineHookItems is set.
 // Implemented by tcxImGui (tcImGuiHooks.h). See TRUSSC_MODIFICATIONS.md; every
 // patched line in imgui_widgets.cpp carries a "[TrussC]" comment.
 struct ImGuiContext;
@@ -104,11 +107,14 @@ struct ImGuiTcItemValue
     int             Components;
     int             Flags;
     unsigned int    EditCountAtEntry;   // an edit of a part (a component, ##X in ColorEdit) counts as an edit of the whole
+    bool            Injected;       // ImGuiTcHook_ItemEntry wrote a queued value this frame: the widget returns true
     ~ImGuiTcItemValue() { if (Ctx) ImGuiTcHook_ItemValue(this); }
 };
 #define IMGUI_TC_ITEM_VALUE(_ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, _FLAGS) \
-    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), 0u }; \
+    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), 0u, false }; \
     if (imgui_tc_item_value.Ctx) imgui_tc_item_value.EditCountAtEntry = ImGuiTcHook_ItemEntry(&imgui_tc_item_value)
+// Wraps every return after IMGUI_TC_ITEM_VALUE() in a widget whose value can be set: true in the frame a value was written
+#define IMGUI_TC_RETURN(_RET)   ((_RET) || imgui_tc_item_value.Injected)
 // [TrussC] end
 
 //---- Include imgui_user.h at the end of imgui.h as a convenience

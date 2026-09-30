@@ -464,22 +464,15 @@ inline bool valueToBytes(const WidgetValue& w, const nlohmann::json& v,
     return true;
 }
 
-// The deferral target for a context: its OS window, or null for the main one
-// (tc::mcp drains the main window's deferrals under null).
-inline const void* deferralTargetFor(ImGuiContext* ctx) {
-    auto it = contexts().find(ctx);
-    if (it == contexts().end()) return nullptr;
-    const void* owner = it->second.owner;
-    return owner == static_cast<const void*>(&tc::internal::mainWindowContext()) ? nullptr : owner;
-}
-
 // A queued value is dropped when it could not be written this long after the
 // call, so it never lands after the tool has answered. Shorter than tc::mcp's
-// timeout for a window that renders no frame (kTargetedDeferralTimeout).
+// timeout for a deferred reply that is never produced (kTargetedDeferralTimeout).
 inline constexpr std::chrono::seconds kPendingValueLifetime{4};
 
 // The reply of tcx_imgui_input for a value written through the value hook,
-// once the frame after the call has run.
+// once its outcome is known: after the frame after the call (not drawn, a
+// same-frame change, a refusal), or after the frame after the write, which
+// checks that the variable still holds the value.
 inline nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<PendingValue>& p,
                                       const std::string& label, const std::string& window) {
     using State = PendingValue::State;
@@ -494,19 +487,28 @@ inline nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<P
     switch (p->state) {
     case State::Applied:
         r["status"] = "ok";
-        addValueFields(r, p->readBack);   // read back from the variable at the widget's return
+        addValueFields(r, p->readBack);   // read back from the variable
         return r;
     case State::Changed:
         addValueFields(r, p->readBack);
         return error("The value was written, but '" + label + "' changed it again in the same frame "
                      "(a hand edit at the same time?). value = what the variable holds now");
+    case State::Reverted:
+        addValueFields(r, p->readBack);
+        return error("The value was written and '" + label + "' returned true, but in the next frame "
+                     "its variable held another value again (value = that value). The app ignores the "
+                     "widget's return value and copies its own value into the variable every frame, so "
+                     "this widget cannot be set from MCP; change the value in the app instead");
+    case State::Disabled:
+        return error("'" + label + "' is disabled (inside BeginDisabled()). Nothing was written");
+    case State::ReadOnly:
+        return error("'" + label + "' is read-only. Nothing was written");
     case State::ShapeChanged:
         return error("'" + label + "' no longer takes this kind of value (it changed since it was listed). "
                      "Read tcx_imgui_get_widgets again. Nothing was written");
     case State::Superseded:
         return error("Superseded by a later tcx_imgui_input on '" + label + "'. Nothing was written");
     default:
-        cancelValue(ctx, p);
         return error("'" + label + "' was not drawn in the frame after the call (collapsed header, "
                      "closed or hidden window?). Nothing was written");
     }
@@ -638,7 +640,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_input — set the value of a widget: value widgets through the
     // value hook, text fields by typing
-    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget. Value widgets (slider, drag, number input, SliderAngle, color, checkbox, combo, radio, list box, MenuItem/Selectable with a bool*; composites such as DragFloat3 and ColorEdit4 included): text is the value as JSON, in the units tcx_imgui_get_widgets reports — a number; an array for a composite ([x, y, z]; colors [r, g, b(, a)] as floats 0-1, raw HSV with colorSpace hsv); true/false for a bool; the item index for Combo/ListBox; the variable's integer for RadioButton; radians for SliderAngle. It is written into the app's variable on the widget's next frame and read back: status ok (with the value read back) means the variable holds it. Errors: wrong shape or type (component count, not a number, out of the type's range), or the widget not drawn in the next frame (collapsed, closed or hidden). Limits: the widget returns false in the frame the value is written, so code that acts only on its return value (if (ImGui::DragFloat3(...)) recompute();) does not run for it — apps that read the variable every frame see it at once; no clamping to the widget's min/max. Not recorded in tcx_imgui_get_touched. Text fields (InputText): text replaces the text, typed as keystrokes")
+    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget. Value widgets (slider, drag, number input, SliderAngle, color, checkbox, combo, radio, list box, MenuItem/Selectable with a bool*; composites such as DragFloat3 and ColorEdit4 included): text is the value as JSON, in the units tcx_imgui_get_widgets reports — a number; an array for a composite ([x, y, z]; colors [r, g, b(, a)] as floats 0-1, raw HSV with colorSpace hsv); true/false for a bool; the item index for Combo/ListBox; the variable's integer for RadioButton; radians for SliderAngle. It is written into the app's variable on the widget's next frame, and the widget returns true in that frame (so if (ImGui::DragFloat(\"x\", &x)) node->setX(x); and recompute-on-change code run once; the Edited flag is not set). status ok (with the value read back) means the variable held it at the widget's return and still held it in the next frame. Errors (nothing written): wrong shape or type (component count, not a number, out of the type's range), the widget not drawn in the frame after the call (collapsed, closed or hidden), disabled (BeginDisabled) or read-only, no variable (an action MenuItem). Errors after the write: a hand edit in the same frame; app code that ignores the return value and copies its own value in every frame (the value is gone in the next frame: such a widget cannot be set from MCP). No clamping to the widget's min/max. Not recorded in tcx_imgui_get_touched. Text fields (InputText): text replaces the text, typed as keystrokes")
         .arg<std::string>("label", "Widget label")
         .arg<std::string>("text", "Value widgets: the value as JSON (5, 0.25, [1, 2, 3], true, an index). Text fields: the replacement text")
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)
@@ -669,14 +671,28 @@ inline void registerImGuiTools() {
                                             detail::expectedValue(w.value) + " as JSON; got " +
                                             (value.is_discarded() ? arg.dump() : error) + ". Nothing was written"}};
                 }
+                // The reply is produced when the hooks know the outcome (the
+                // end of the frame after the call, or of the one after the
+                // write). The pending value itself is the deferral's target:
+                // no window drains it; its onDone does.
                 ImGuiContext* ctx = ref.ctx;
                 auto pending = detail::queueValue(ctx, w.id, w.value.kind, w.value.dataType, w.value.components,
-                                                  std::move(bytes), detail::kPendingValueLifetime);
+                                                  std::move(bytes), detail::kPendingValueLifetime, nullptr);
+                const void* token = pending.get();
+                pending->onDone = [token]() { tc::mcp::drainDeferredResponses(token); };
                 std::string panel = w.windowName;
                 tc::mcp::deferToolResultUntilAfterFrame([ctx, pending, label, panel]() -> json {
                     return detail::injectionResult(ctx, pending, label, panel);
-                }, detail::deferralTargetFor(ctx));
+                }, token);
                 return json::object();   // the deferred result replaces this
+            }
+            // A check box, radio button or menu item without a variable (an
+            // action MenuItem, MenuItem(label, shortcut, bool selected)):
+            // nothing to write, and typing into it would do nothing.
+            if (w.value.kind == 0 && (w.statusFlags & ImGuiItemStatusFlags_Checkable)) {
+                return json{{"status", "error"},
+                            {"message", "'" + label + "' reports no variable (a MenuItem without a bool*, or a "
+                                        "check box that was not drawn): nothing can be written. Use tcx_imgui_click"}};
             }
             // A custom BeginCombo / BeginListBox reports no variable to write.
             if (w.value.kind == ImGuiTcValueKind_ComboPreview || w.value.kind == ImGuiTcValueKind_ListBoxBegin) {

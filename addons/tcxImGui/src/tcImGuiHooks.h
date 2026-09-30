@@ -27,8 +27,10 @@
 //
 // Values queued by the MCP tools (tcx_imgui_input on a value widget) are
 // written into the widget's variable by the value hook at the widget's entry,
-// before the widget reads it, and read back at its return. Such a write is not
-// an edit through the widget, so it is not recorded as touched.
+// before the widget reads it; the widget returns true in that frame
+// (IMGUI_TC_RETURN). The variable is read back at its return, and checked again
+// at the widget's entry in the next frame. Such a write sets no Edited flag, so
+// it is not recorded as touched.
 // =============================================================================
 
 #include "imgui/imgui.h"
@@ -37,6 +39,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <vector>
 #include <string>
@@ -87,13 +90,22 @@ namespace detail {
 
 // A value queued for one widget by the MCP tools (see queueValue()). The value
 // hook writes it through the widget's Data pointer when the widget is next
-// entered, and reads the variable back when it returns.
+// entered (the widget then returns true in that frame: IMGUI_TC_RETURN), reads
+// the variable back when it returns, and checks at the widget's entry in the
+// following frame that the variable still holds it.
 struct PendingValue {
     enum class State {
         Queued,         // waiting for the widget to run
         Written,        // written at entry; the widget is running
-        Applied,        // read back at return: the variable holds the value
+        Verify,         // read back at return: waiting for the next frame's entry
+        Applied,        // the variable still held the value at the next entry (or the widget
+                        //   was not drawn again, and the read-back at return is all there is)
         Changed,        // read back at return: the widget changed it in the same frame
+        Reverted,       // at the next entry the variable held another value again: the app
+                        //   ignores the return value and copies its own value in every frame
+        Disabled,       // inside BeginDisabled(): not written
+        ReadOnly,       // a read-only widget: not written
+        NotDrawn,       // the widget did not run in the frame after the call: not written
         ShapeChanged,   // the widget now reports another kind / type / component count
         Superseded,     // a later value was queued for the same widget before this one was written
     };
@@ -103,9 +115,15 @@ struct PendingValue {
     int components = 0;
     std::vector<unsigned char> bytes;    // components * sizeof(dataType)
     std::chrono::steady_clock::time_point deadline;   // not written after this
+    int queuedFrame = 0;                 // ctx->FrameCount when queued
+    int writtenFrame = 0;                // ctx->FrameCount of the write
     State state = State::Queued;
     const ImGuiTcItemValue* writtenBy = nullptr;       // the hook scope that wrote it, until it returns
-    WidgetValue readBack;                // the variable at the widget's return (Applied / Changed)
+    WidgetValue readBack;                // the variable at the widget's return / next entry
+    std::function<void()> onDone;        // called once, at the end of the frame the outcome is known
+    bool done() const {
+        return state != State::Queued && state != State::Written && state != State::Verify;
+    }
 };
 
 // Per ImGui context (each window running imgui has its own)
@@ -256,18 +274,16 @@ inline bool isWritableKind(int kind) {
 // Queue `bytes` for the widget `id` of `ctx`, which reported `kind`,
 // `dataType` and `components`. The value hook writes it the next time the
 // widget runs, within `lifetime`. A value still queued for the same widget is
-// superseded. The caller keeps the returned handle to read the outcome.
+// superseded. `onDone` runs once the outcome is known (see finishPendingValues()).
 inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, int kind,
                                                 ImGuiDataType dataType, int components,
                                                 std::vector<unsigned char> bytes,
-                                                std::chrono::steady_clock::duration lifetime) {
+                                                std::chrono::steady_clock::duration lifetime,
+                                                std::function<void()> onDone) {
     auto& pending = contexts()[ctx].pendingValues;
-    for (auto it = pending.begin(); it != pending.end();) {
-        if ((*it)->id == id && (*it)->state == PendingValue::State::Queued) {
-            (*it)->state = PendingValue::State::Superseded;
-            it = pending.erase(it);
-        } else {
-            ++it;
+    for (auto& q : pending) {
+        if (q->id == id && q->state == PendingValue::State::Queued) {
+            q->state = PendingValue::State::Superseded;   // answered at the end of the next frame
         }
     }
     auto p = std::make_shared<PendingValue>();
@@ -277,50 +293,77 @@ inline std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, i
     p->components = components;
     p->bytes = std::move(bytes);
     p->deadline = std::chrono::steady_clock::now() + lifetime;
+    p->queuedFrame = ctx->FrameCount;
+    p->onDone = std::move(onDone);
     pending.push_back(p);
     return p;
 }
 
-// Drop a queued value that was not written (its widget was not drawn).
-inline void cancelValue(ImGuiContext* ctx, const std::shared_ptr<PendingValue>& p) {
-    auto it = contexts().find(ctx);
-    if (it == contexts().end()) return;
-    auto& pending = it->second.pendingValues;
-    for (auto pit = pending.begin(); pit != pending.end(); ++pit) {
-        if (*pit == p) { pending.erase(pit); return; }
+// Whether a value widget refuses a written value: inside BeginDisabled(), or
+// read-only (the ReadOnly item flag, ImGuiSliderFlags_ReadOnly,
+// ImGuiInputTextFlags_ReadOnly on an InputScalar).
+inline PendingValue::State refusalFor(const ImGuiTcItemValue& item) {
+    ImGuiContext* g = item.Ctx;
+    ImGuiItemFlags f = g->CurrentItemFlags;
+    if (item.Id && g->LastItemData.ID == item.Id) f |= g->LastItemData.ItemFlags;   // after its ItemAdd()
+    if (f & ImGuiItemFlags_Disabled) return PendingValue::State::Disabled;
+    bool readOnly = (f & ImGuiItemFlags_ReadOnly) != 0;
+    switch (item.Kind) {
+    case ImGuiTcValueKind_Drag:
+    case ImGuiTcValueKind_Slider:
+    case ImGuiTcValueKind_SliderAngle:
+        readOnly |= (item.Flags & ImGuiSliderFlags_ReadOnly) != 0;
+        break;
+    case ImGuiTcValueKind_Input:
+        readOnly |= (item.Flags & ImGuiInputTextFlags_ReadOnly) != 0;
+        break;
+    default:
+        break;
     }
+    return readOnly ? PendingValue::State::ReadOnly : PendingValue::State::Queued;
 }
 
-// At a value widget's entry: write the value queued for it, if any, through
-// Data, before the widget reads its variable.
+// At a value widget's entry: first check a value written in an earlier frame
+// (does the variable still hold it?), then write the value queued for it, if
+// any, through Data, before the widget reads its variable.
 inline void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
     ImGuiWindow* window = static_cast<ImGuiWindow*>(item.Window);
     if (!window || window->SkipItems || !item.Data || !item.Label || !item.Label[0]) return;
     if (!isWritableKind(item.Kind) || insideColorWidget(item.Ctx)) return;
     const auto now = std::chrono::steady_clock::now();
+    const int frame = item.Ctx->FrameCount;
     const ImGuiID id = item.Id ? item.Id : window->GetID(item.Label);
-    auto& pending = cs.pendingValues;
-    for (auto it = pending.begin(); it != pending.end();) {
-        PendingValue& p = **it;
-        if (p.state == PendingValue::State::Queued && now >= p.deadline) {
-            it = pending.erase(it);   // the tool has answered (or given up) by now
+    // Same ID and kind: SliderAngle's inner SliderFloat and Combo's BeginCombo
+    // share the ID but not the kind, and never see a value.
+    auto matches = [&](const PendingValue& p) { return p.id == id && p.kind == item.Kind; };
+    const size_t size = ImGui::DataTypeGetInfo(item.DataType)->Size * (size_t)item.Components;
+    for (auto& pp : cs.pendingValues) {
+        PendingValue& p = *pp;
+        if (p.state != PendingValue::State::Verify || !matches(p) || frame <= p.writtenFrame) continue;
+        captureValue(p.readBack, item, item.Ctx);
+        p.state = (p.bytes.size() == size && std::memcmp(item.Data, p.bytes.data(), size) == 0)
+                ? PendingValue::State::Applied : PendingValue::State::Reverted;
+    }
+    for (auto& pp : cs.pendingValues) {
+        PendingValue& p = *pp;
+        if (p.state != PendingValue::State::Queued || !matches(p)) continue;
+        if (now >= p.deadline) {
+            p.state = PendingValue::State::NotDrawn;   // the tool has answered (or given up) by now
             continue;
         }
-        // Same ID and kind: SliderAngle's inner SliderFloat and Combo's
-        // BeginCombo share the ID but not the kind, and never see it.
-        if (p.state != PendingValue::State::Queued || p.id != id || p.kind != item.Kind) {
-            ++it;
-            continue;
-        }
-        if (p.dataType != item.DataType || p.components != item.Components ||
-            p.bytes.size() != ImGui::DataTypeGetInfo(item.DataType)->Size * (size_t)item.Components) {
+        if (p.dataType != item.DataType || p.components != item.Components || p.bytes.size() != size) {
             p.state = PendingValue::State::ShapeChanged;
-            pending.erase(it);
             return;
         }
-        std::memcpy(const_cast<void*>(item.Data), p.bytes.data(), p.bytes.size());
+        if (PendingValue::State refused = refusalFor(item); refused != PendingValue::State::Queued) {
+            p.state = refused;
+            return;
+        }
+        std::memcpy(const_cast<void*>(item.Data), p.bytes.data(), size);
         p.state = PendingValue::State::Written;
         p.writtenBy = &item;
+        p.writtenFrame = frame;
+        item.Injected = true;   // IMGUI_TC_RETURN: the widget returns true this frame
         return;
     }
 }
@@ -328,16 +371,39 @@ inline void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
 // At a value widget's return: read back the variable a value was written into
 // at its entry.
 inline void readBackPendingValue(ContextState& cs, const ImGuiTcItemValue& item) {
-    auto& pending = cs.pendingValues;
-    for (auto it = pending.begin(); it != pending.end(); ++it) {
-        PendingValue& p = **it;
+    for (auto& pp : cs.pendingValues) {
+        PendingValue& p = *pp;
         if (p.writtenBy != &item) continue;
         p.writtenBy = nullptr;
         captureValue(p.readBack, item, item.Ctx);
-        p.state = p.readBack.bytes == p.bytes ? PendingValue::State::Applied
+        p.state = p.readBack.bytes == p.bytes ? PendingValue::State::Verify
                                               : PendingValue::State::Changed;
-        pending.erase(it);
         return;
+    }
+}
+
+// At the end of a context's frame: settle what this frame decided and hand
+// each finished value to its onDone. A value still queued after a whole frame
+// was not drawn; a value still waiting for its check a frame after the write
+// was not drawn again, and its read-back at return stands.
+inline void finishPendingValues(ContextState& cs, int frame, bool contextGone = false) {
+    std::vector<std::shared_ptr<PendingValue>> finished;
+    for (auto it = cs.pendingValues.begin(); it != cs.pendingValues.end();) {
+        PendingValue& p = **it;
+        if (p.state == PendingValue::State::Queued && (contextGone || frame > p.queuedFrame)) {
+            p.state = PendingValue::State::NotDrawn;
+        } else if (p.state == PendingValue::State::Verify && (contextGone || frame > p.writtenFrame)) {
+            p.state = PendingValue::State::Applied;   // not entered in the frame after the write
+        }
+        if (p.done()) {
+            finished.push_back(*it);
+            it = cs.pendingValues.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    for (auto& p : finished) {
+        if (p->onDone) p->onDone();
     }
 }
 
@@ -365,6 +431,7 @@ inline void swapFrames() {
     auto& cs = detail::contexts()[ctx];
     cs.lastFrame.swap(cs.currentFrame);
     cs.lastIdMap.swap(cs.currentIdMap);
+    if (!cs.pendingValues.empty()) detail::finishPendingValues(cs, ctx->FrameCount);
 }
 
 // Enable/disable collection
@@ -388,7 +455,14 @@ inline void setContextOwner(ImGuiContext* ctx, const void* owner) {
 // touched widgets stay listed (last known value) but no longer update.
 inline void forgetContext(ImGuiContext* ctx) {
     if (!ctx) return;
-    detail::contexts().erase(ctx);
+    auto it = detail::contexts().find(ctx);
+    if (it != detail::contexts().end()) {
+        // Values queued for its widgets are answered now (not drawn / as read back)
+        detail::ContextState gone;
+        gone.pendingValues = std::move(it->second.pendingValues);
+        detail::contexts().erase(it);
+        detail::finishPendingValues(gone, 0, true);
+    }
     for (auto& t : detail::touched()) {
         if (t.ctx == ctx) t.ctx = nullptr;
     }

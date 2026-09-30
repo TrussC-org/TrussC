@@ -16,7 +16,7 @@ Search for `[TrussC]` to find all modified sections.
 addons/tcxImGui/src/
 ├── imgui/
 │   ├── imconfig.h            # Modified (test engine hooks on + value hook)
-│   ├── imgui_widgets.cpp     # Modified (19 value-hook call sites, one line each)
+│   ├── imgui_widgets.cpp     # Modified (19 value-hook call sites + 24 wrapped returns, one line each)
 │   ├── imgui.cpp             # Untouched
 │   ├── imgui.h               # Untouched
 │   ├── imgui_internal.h      # Untouched
@@ -89,6 +89,15 @@ value pointer, hence this patch.
   for this widget through `Data` (the only write through `Data`). Inactive (a
   null context, no entry call, a no-op destructor) unless
   `GImGui->TestEngineHookItems` is set.
+- `Injected` and `IMGUI_TC_RETURN(ret)` — the entry hook sets `Injected` when
+  it writes a value, and `IMGUI_TC_RETURN(ret)` is `(ret) || Injected`: in
+  that frame the widget returns `true`, so code that works on a copy and
+  applies it only when the widget returns true (`float x = n->getX(); if
+  (ImGui::DragFloat("x", &x)) n->setX(x);`, and inside imgui `CheckboxFlags`
+  and `ColorPicker3`) takes the value. Only the return value changes: no
+  Edited flag, no `MarkItemEdited()`, so `IsItemEdited()` /
+  `IsItemDeactivatedAfterEdit()` do not fire for an injected value and it
+  stays out of the touched record.
 - `ImGuiTcHook_ItemValue()` and `ImGuiTcHook_ItemEntry()` are declared here
   and implemented in `tcImGuiHooks.h`. (`ImGuiTcHook_ItemEntry()` replaced
   `ImGuiTcHook_EditCount(ctx)` with #321; it takes the whole object, so it
@@ -103,7 +112,8 @@ value pointer, hence this patch.
 **Purpose:** Declare `IMGUI_TC_ITEM_VALUE(...)` once in each value widget,
 where the pointer to the caller's variable and its type are in hand.
 
-**Changes:** 19 inserted lines, each ending in `// [TrussC]`. No upstream line
+**Changes:** 19 inserted lines, and 24 upstream `return` lines wrapped in
+`IMGUI_TC_RETURN(...)`, each ending in `// [TrussC]`. No other upstream line
 is modified.
 
 | Function | Placed after | Id | Kind | Data |
@@ -153,6 +163,32 @@ Placement rules:
   `buf` itself: a resize callback (`std::string` inputs) repoints `buf` to the
   new allocation (`buf = callback_data.Buf`).
 
+Return rule: in every function whose hook can take a value (all the rows
+above except `BeginCombo`, `BeginListBox` and `InputTextEx`), **every
+`return` after the `IMGUI_TC_ITEM_VALUE` line** becomes
+`return IMGUI_TC_RETURN(<expr>); // [TrussC]`, early returns (a clipped
+`Checkbox`, `if (!BeginCombo(...)) return false;`) and `return true;`
+included, so the rule has no exceptions. The 24 lines:
+
+| Function | Wrapped returns |
+|---|---|
+| `Checkbox` | the clipped `return false;`, `return pressed;` |
+| `RadioButton` (`int*` form) | `return pressed;` |
+| `Combo` (getter form) | `if (!BeginCombo(...)) return false;`, `return value_changed;` |
+| `DragScalar` | `return TempInputScalar(...);`, `return value_changed;` |
+| `DragScalarN` | `return value_changed;` |
+| `SliderScalar` | `return TempInputScalar(...);`, `return value_changed;` |
+| `SliderScalarN` | `return value_changed;` |
+| `SliderAngle` | `return value_changed;` |
+| `VSliderScalar` | `return value_changed;` |
+| `InputScalar` | `return ret;` (EnterReturnsTrue), `return value_changed;` |
+| `InputScalarN` | `return value_changed;` |
+| `ColorEdit4` | `return value_changed;` |
+| `ColorPicker4` | `return value_changed;` |
+| `Selectable` (`bool*` form) | `return true;`, `return false;` |
+| `ListBox` (getter form) | `if (!BeginListBox(...)) return false;`, `return value_changed;` |
+| `MenuItem` (`bool*` form) | `return true;`, `return false;` |
+
 How the hooks behave (in `tcImGuiHooks.h`):
 - Parts of a ColorEdit/ColorPicker (`##X`, `##Text`, the `##picker` popup)
   report nothing, since they edit temporaries. The whole widget reports,
@@ -163,11 +199,20 @@ How the hooks behave (in `tcImGuiHooks.h`):
   the bytes for the widget's ID and the kind it reported. The entry hook of the
   next widget with that ID and kind (`SliderAngle`'s inner `SliderFloat` and
   `Combo`'s `BeginCombo` share the ID, not the kind) writes them through
-  `Data`, checking that the data type and component count still match; the
-  return hook of that same call reads the variable back. The write sets no
-  Edited flag, so it is not recorded as touched. Text (buffer size unknown)
-  and the openers (`BeginCombo`, `BeginListBox`: no variable) are never
-  written.
+  `Data`, checking that the data type and component count still match and
+  that the widget is not disabled (`ImGuiItemFlags_Disabled`) or read-only
+  (`ImGuiItemFlags_ReadOnly`, `ImGuiSliderFlags_ReadOnly`,
+  `ImGuiInputTextFlags_ReadOnly` on an InputScalar); it sets `Injected`, so
+  the widget returns true that frame. The return hook of that same call reads
+  the variable back, and the entry hook of the widget's next frame checks,
+  before any new write, that the variable still holds the value (a copy that
+  ignores the return value and is re-filled every frame fails here). The
+  outcome is handed to the tool at the end of the frame it is known
+  (`swapFrames()`). The write sets no Edited flag, so it is not recorded as
+  touched. Text (buffer size unknown) and the openers (`BeginCombo`,
+  `BeginListBox`: no variable) are never written. `ColorPicker3` and
+  `CheckboxFlags` need no hook of their own: the inner `ColorPicker4` /
+  `Checkbox` is written and returns true, and they copy the value out.
 - Only the value hook creates "touched" entries, plus the routing in
   `ItemInfo`: a pick inside a list box's child window (its `ChildId` is the
   list box ID, recorded by the `BeginListBox` hook) or inside a combo popup
@@ -235,7 +280,7 @@ Expected counts (lines containing the marker; this file excluded):
 | File | Lines |
 |---|---|
 | `imgui/imconfig.h` | 4 (the hooks-on line, `begin`, a comment, `end`) |
-| `imgui/imgui_widgets.cpp` | 19 (one per call site) |
+| `imgui/imgui_widgets.cpp` | 43 (19 call sites + 24 wrapped returns) |
 | `sokol_imgui.h` | 5 |
 
 ---
@@ -282,6 +327,10 @@ done
   same thing. A single widget must still declare the hook after `ItemAdd()`
   succeeded. A composite widget must declare it before `BeginGroup()` /
   `PushID(label)`.
+- Every `return` after a settable widget's hook is still wrapped (return rule
+  above): `grep -c "IMGUI_TC_RETURN" addons/tcxImGui/src/imgui/imgui_widgets.cpp`
+  = 24, and no plain `return` was added after those hooks by the new version
+  (a new early return must be wrapped too).
 - The test engine hook signatures in `imgui_internal.h`
   (`IMGUI_TEST_ENGINE_ITEM_ADD` / `_ITEM_INFO` and the `extern` declarations)
   still match `tcImGuiHooks.h`.
