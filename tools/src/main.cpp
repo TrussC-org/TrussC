@@ -632,6 +632,7 @@ static int regenerateProject(const string& projectPath, const string& tcRoot,
                                                   addonSelected, flags);
     for (const string& w : setup.warnings) cerr << "Warning: " << w << "\n";
     if (!setup.summary.empty()) cout << setup.summary << "\n";
+    if (!setup.leftoverNotice.empty()) cout << setup.leftoverNotice << "\n";
 
     if (int rc = runProjectUpdate(setup.settings, projectPath)) return rc;
     cout << "Project updated: " << projectPath << "\n";
@@ -1197,6 +1198,8 @@ static void printUpdateHelp() {
          << "fails, that is a warning (fix the toolchain, or drop the target with\n"
          << "--no-web / --no-android / --no-ios). A target passed as a flag must\n"
          << "configure, or update fails.\n"
+         << "A dropped target's build folder and build script stay in place;\n"
+         << "'trusscli clean --all' removes them.\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -3141,10 +3144,11 @@ static void printCleanHelp() {
          << "\n"
          << "Delete build directories for the TrussC project in the current directory.\n"
          << "By default deletes the native platform build directory. Use --all to\n"
-         << "delete all build directories (web, android, xcode-ios, etc.).\n"
+         << "delete all build directories (web, android, xcode-ios, etc.) and the\n"
+         << "build scripts trusscli generated (build-web.sh / .command / .bat).\n"
          << "\n"
          << "Options:\n"
-         << "      --all                  Delete all build directories\n"
+         << "      --all                  Delete all build directories and generated build scripts\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
 }
@@ -3185,11 +3189,31 @@ static int cmdClean(const vector<string>& args) {
             removed++;
         }
     }
+    // With --all, also the build scripts trusscli generated (build-web.sh
+    // etc.); only those exact names, and only regular files
+    int removedScripts = 0;
+    for (const string& script : buildScriptsToClean(cleanAll)) {
+        error_code ec;
+        const fs::path fullPath = fs::path(projectPath) / script;
+        if (fs::is_regular_file(fullPath, ec)) {
+            cout << "  Removing " << script << "\n";
+            fs::remove(fullPath, ec);
+            removedScripts++;
+        }
+    }
 
-    if (removed == 0) {
+    if (removed == 0 && removedScripts == 0) {
         cout << "Nothing to clean.\n";
     } else {
-        cout << "Cleaned " << removed << " build director" << (removed == 1 ? "y" : "ies") << ".\n";
+        string what;
+        if (removed > 0) {
+            what = to_string(removed) + " build director" + (removed == 1 ? "y" : "ies");
+        }
+        if (removedScripts > 0) {
+            if (!what.empty()) what += " and ";
+            what += to_string(removedScripts) + " build script" + (removedScripts == 1 ? "" : "s");
+        }
+        cout << "Cleaned " << what << ".\n";
     }
     return 0;
 }

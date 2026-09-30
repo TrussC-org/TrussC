@@ -126,6 +126,17 @@ vector<string> buildFoldersToClean(const string& nativePreset, bool all) {
     return dirs;
 }
 
+vector<string> buildScriptsToClean(bool all) {
+    vector<string> files;
+    if (!all) return files;
+    for (const string& preset : ProjectGenerator::allPresetNames()) {
+        for (const string& script : ProjectGenerator::buildScriptsForPreset(preset)) {
+            files.push_back(script);
+        }
+    }
+    return files;
+}
+
 // Split a ';'-separated environment value into its entries.
 static vector<string> splitPathList(const string& value) {
     vector<string> out;

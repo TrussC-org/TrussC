@@ -982,14 +982,14 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios)
+trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
 trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
 Common options: `-p, --path <path>`, `--tc-root <path>`, `-h, --help` (per-command help).
 Examples: `trusscli new myApp -a tcxOsc -a tcxIME` / `trusscli new ./apps/myApp --web` / `trusscli update -p ./apps/myApp`.
-`update`, `addon add` and `addon remove` keep the project's IDE (`--ide`) and its `--web` / `--android` / `--ios` targets, read back from its `CMakePresets.json`, so a plain `trusscli update -p ./apps/myApp` keeps the web target. Pass `--ide <type>` to switch the IDE, and `--no-web` / `--no-android` / `--no-ios` to drop a target. After a fresh clone (`CMakePresets.json` is gitignored) the defaults apply: `vscode`, native only.
+`update`, `addon add` and `addon remove` keep the project's IDE (`--ide`) and its `--web` / `--android` / `--ios` targets, read back from its `CMakePresets.json`, so a plain `trusscli update -p ./apps/myApp` keeps the web target. Pass `--ide <type>` to switch the IDE, and `--no-web` / `--no-android` / `--no-ios` to drop a target (its build folder and `build-web.*` script stay; `trusscli clean --all` removes them). After a fresh clone (`CMakePresets.json` is gitignored) the defaults apply: `vscode`, native only.
 
 ### VSCode / Cursor won't build (no preset selected)
 

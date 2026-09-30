@@ -254,7 +254,37 @@ RegenerationSetup prepareRegeneration(const string& projectPath,
         if (!state.hasIde && !flags.ide) setup.summary += "; the IDE is the default";
         setup.summary += ")";
     }
+    vector<string> leftovers = leftoversOfDroppedTargets(projectPath, flags);
+    if (!leftovers.empty()) {
+        const bool one = leftovers.size() == 1;
+        string names;
+        for (size_t i = 0; i < leftovers.size(); ++i) {
+            if (i > 0) names += (i + 1 == leftovers.size()) ? " and " : ", ";
+            names += leftovers[i];
+        }
+        setup.leftoverNotice = names + (one ? " is" : " are") + " left in place; "
+                               "'trusscli clean --all' removes " + (one ? "it" : "them") +
+                               " if not needed.";
+    }
     return setup;
+}
+
+vector<string> leftoversOfDroppedTargets(const string& projectPath,
+                                         const GenerationFlags& flags) {
+    const pair<const char*, const optional<bool>*> targets[] = {
+        {"web", &flags.web}, {"android", &flags.android}, {"ios", &flags.ios},
+    };
+    vector<string> out;
+    error_code ec;
+    for (const auto& [preset, flag] : targets) {
+        if (!flag->has_value() || **flag) continue;
+        const string dir = ProjectGenerator::buildDirForPreset(preset);
+        if (fs::exists(fs::path(projectPath) / dir, ec)) out.push_back(dir + "/");
+        for (const string& script : ProjectGenerator::buildScriptsForPreset(preset)) {
+            if (fs::exists(fs::path(projectPath) / script, ec)) out.push_back(script);
+        }
+    }
+    return out;
 }
 
 string describeGenerationOptions(const ProjectSettings& settings) {

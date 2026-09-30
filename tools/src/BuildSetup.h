@@ -54,6 +54,11 @@ ConfigureInputs inspectBuildFolder(const std::string& projectDir,
 // (xcode-ios for ios) and "build".
 std::vector<std::string> buildFoldersToClean(const std::string& nativePreset, bool all);
 
+// The generated build scripts `trusscli clean --all` removes as well (when
+// they exist): every preset's ProjectGenerator::buildScriptsForPreset().
+// None without --all.
+std::vector<std::string> buildScriptsToClean(bool all);
+
 // Pinned toolchain paths in a CMakePresets.json.
 struct ToolchainCheck {
     bool pinned = false;                 // the "windows" preset pins at least one path

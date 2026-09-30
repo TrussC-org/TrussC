@@ -230,6 +230,15 @@ string ProjectGenerator::buildDirForPreset(const string& preset) {
     return "build-" + preset;
 }
 
+const vector<string>& ProjectGenerator::buildScriptsForPreset(const string& preset) {
+    // The names generateWebBuildFiles() writes on Windows / macOS / Linux
+    static const vector<string> web = {
+        "build-web.bat", "build-web.command", "build-web.sh",
+    };
+    static const vector<string> none;
+    return preset == "web" ? web : none;
+}
+
 const vector<string>& ProjectGenerator::allPresetNames() {
     static const vector<string> names = {
         "macos", "linux", "windows", "web", "android", "ios",

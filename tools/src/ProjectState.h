@@ -104,6 +104,10 @@ struct RegenerationSetup {
     // "Project settings: ..." naming what is kept (for stdout); empty when
     // the project has no usable CMakePresets.json.
     std::string summary;
+    // One line (for stdout) naming the build folders and scripts of targets
+    // this run turns off (--no-web etc.) that are still in the project: the
+    // regeneration leaves them in place. Empty when there are none.
+    std::string leftoverNotice;
 };
 
 // The shared setup of `trusscli update`, `addon add` and `addon remove`:
@@ -115,6 +119,13 @@ RegenerationSetup prepareRegeneration(const std::string& projectPath,
                                       const std::vector<std::string>& addons,
                                       const std::vector<int>& addonSelected,
                                       const GenerationFlags& flags);
+
+// The build folder (with a trailing '/') and the generated build scripts of
+// each target `flags` turns off (--no-web / --no-android / --no-ios) that
+// exist in <projectPath>, e.g. {"build-web/", "build-web.sh"}. Nothing is
+// removed: `trusscli clean --all` does that.
+std::vector<std::string> leftoversOfDroppedTargets(const std::string& projectPath,
+                                                   const GenerationFlags& flags);
 
 // One line naming the IDE and the targets of `settings`, for the log, e.g.
 // "IDE cursor, targets: native, web (WebGPU)". ios is named on macOS only,

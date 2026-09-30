@@ -90,6 +90,12 @@ public:
     // `trusscli clean`.
     static std::string buildDirForPreset(const std::string& preset);
 
+    // Build scripts trusscli writes next to the project for a configure
+    // preset, relative to the project: for "web" the one of each host OS
+    // (build-web.bat / build-web.command / build-web.sh, see
+    // generateWebBuildFiles()), none for the other presets.
+    static const std::vector<std::string>& buildScriptsForPreset(const std::string& preset);
+
     // Every configure preset trusscli can write:
     // macos, linux, windows, web, android, ios
     static const std::vector<std::string>& allPresetNames();

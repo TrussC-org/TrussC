@@ -24,7 +24,9 @@
 //     WebGPU, anything else GLES3, warned unless "GLES3"), as a string or in
 //     the {"type": ..., "value": ...} form.
 //   - prepareRegeneration(): the settings setup that update / addon add /
-//     addon remove share (tools/src/main.cpp calls it for all three).
+//     addon remove share (tools/src/main.cpp calls it for all three). A
+//     target dropped with --no-<target> whose build folder or generated
+//     build script is still there gets a one-line notice (nothing removed).
 //   - The toolchainFile of a kept web / android preset survives a
 //     regeneration from a shell without emsdk / the NDK (chooseToolchainFile,
 //     and through the real writer with EMSDK / PATH / ANDROID_* set per case);
@@ -42,7 +44,8 @@
 //     configure-free.
 //   - inspectBuildFolder() / buildFoldersToClean(): the folder `build` looks
 //     at (ios -> xcode-ios) and what it finds there on a real filesystem,
-//     and the folders `clean` / `clean --all` remove.
+//     and the folders `clean` / `clean --all` remove; buildScriptsToClean():
+//     the generated build-web.* scripts `clean --all` removes too.
 //   - checkPresetToolchain() / shouldRefreshPresets(): a Visual Studio
 //     update that removed a pinned MSVC / SDK / ninja path is found (fake
 //     filesystem), and only a native Windows build refreshes the presets.
@@ -574,6 +577,52 @@ static void testPrepareRegeneration() {
               setup.summary.find("the IDE is the default") != string::npos);
     }
     {
+        // A target dropped by a flag leaves its build folder and generated
+        // build script behind: named once, nothing removed
+        fs::path project = makeProject("regenerate-leftovers");
+        writeFile(project / "CMakePresets.json",
+                  R"({"configurePresets": [{"name": "web"}, {"name": "android"}]})");
+        fs::create_directories(project / "build-web");
+        fs::create_directories(project / "build-android");
+        fs::create_directories(project / "xcode-ios");
+        writeFile(project / "build-web.sh", "#!/bin/bash\n");
+        writeFile(project / "build-web.bat", "@echo off\n");
+        writeFile(project / "build-web.sh.bak", "not generated\n");
+        auto setupWith = [&](const GenerationFlags& f) {
+            return prepareRegeneration(project.string(), g_root.string(), {}, {}, f);
+        };
+        GenerationFlags noWeb;
+        noWeb.web = false;
+        RegenerationSetup dropped = setupWith(noWeb);
+        check("--no-web: build-web/ and its scripts are named, left in place",
+              leftoversOfDroppedTargets(project.string(), noWeb) ==
+                  vector<string>({"build-web/", "build-web.bat", "build-web.sh"}) &&
+              dropped.leftoverNotice ==
+                  "build-web/, build-web.bat and build-web.sh are left in place; "
+                  "'trusscli clean --all' removes them if not needed." &&
+              fs::is_directory(project / "build-web") &&
+              fs::is_regular_file(project / "build-web.sh"));
+        GenerationFlags noAndroid;
+        noAndroid.android = false;
+        check("--no-android: build-android/ is named alone",
+              setupWith(noAndroid).leftoverNotice ==
+                  "build-android/ is left in place; "
+                  "'trusscli clean --all' removes it if not needed.");
+        GenerationFlags noIos;
+        noIos.ios = false;
+        check("--no-ios: its folder is xcode-ios/",
+              setupWith(noIos).leftoverNotice.rfind("xcode-ios/ is left", 0) == 0);
+        GenerationFlags web;
+        web.web = true;
+        check("no notice without a --no-<target> flag",
+              setupWith(GenerationFlags()).leftoverNotice.empty() &&
+              setupWith(web).leftoverNotice.empty());
+        fs::path clean = makeProject("regenerate-no-leftovers");
+        check("--no-web with nothing left behind: no notice",
+              prepareRegeneration(clean.string(), g_root.string(), {}, {}, noWeb)
+                  .leftoverNotice.empty());
+    }
+    {
         // A saved ios target: kept on macOS; elsewhere writeCMakePresets()
         // would drop it from the rewritten file, so it is dropped with a warning
         fs::path project = makeProject("regenerate-ios");
@@ -1040,6 +1089,10 @@ static void testBuildFolders() {
           native == vector<string>({"build-linux", "build"}));
     check("clean: no native preset -> build only",
           buildFoldersToClean("", false) == vector<string>({"build"}));
+    check("clean --all: the generated build-web scripts of every OS, nothing else",
+          buildScriptsToClean(true) ==
+              vector<string>({"build-web.bat", "build-web.command", "build-web.sh"}));
+    check("clean: no build scripts without --all", buildScriptsToClean(false).empty());
 }
 
 // -----------------------------------------------------------------------------
