@@ -156,11 +156,21 @@ inline std::string loadTextFile(const fs::path& path) {
     return content;
 }
 
-// Save string to text file
+// Save string to text file. Relative paths resolve via getDataPath, and a
+// missing parent folder is created.
 // (binary mode: what you pass is what lands on disk on every platform;
 // Windows text mode would expand \n to \r\n, changing the file size)
 inline bool saveTextFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
+    std::error_code ec;
+    fs::path parent = fullPath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError() << "Cannot create folder: " << parent << " (" << ec.message() << ")";
+            return false;
+        }
+    }
     std::ofstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot create file: " << path;
@@ -171,9 +181,19 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
     return true;
 }
 
-// Append string to text file
+// Append string to text file. Relative paths resolve via getDataPath, and a
+// missing parent folder is created.
 inline bool appendToFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
+    std::error_code ec;
+    fs::path parent = fullPath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError() << "Cannot create folder: " << parent << " (" << ec.message() << ")";
+            return false;
+        }
+    }
     std::ofstream file(fullPath, std::ios::app | std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot open file for append: " << path;
@@ -210,10 +230,21 @@ public:
         return *this;
     }
 
-    // Open file (append = true to append to existing file)
+    // Open file (append = true to append to existing file). Relative paths
+    // resolve via getDataPath, and a missing parent folder is created.
     bool open(const fs::path& path, bool append = false) {
         close();
         fs::path fullPath = getDataPath(path);
+        std::error_code ec;
+        fs::path parent = fullPath.parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent, ec);
+            if (ec) {
+                logError() << "FileWriter: Cannot create folder: " << parent
+                           << " (" << ec.message() << ")";
+                return false;
+            }
+        }
         auto mode = std::ios::out | std::ios::binary;
         if (append) mode |= std::ios::app;
 

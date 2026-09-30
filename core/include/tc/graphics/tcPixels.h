@@ -364,7 +364,9 @@ public:
         return LoadResult::success();
     }
 
-    // Save to file (implemented in tcPixels.cpp for dataPath support)
+    // Save to file (implemented in tcPixels.cpp for dataPath support).
+    // Relative paths resolve via getDataPath, and a missing parent folder is
+    // created.
     bool save(const fs::path& path) const;
 
     // === Image operations ===

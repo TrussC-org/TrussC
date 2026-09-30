@@ -188,7 +188,7 @@ int main() {
         Json j;
         j["名前"] = "トラス";
         j["value"] = 42;
-        createDirectory("設定");   // save helpers don't create parent dirs
+        createDirectory("設定");   // the save helpers create it too (#356)
         check("saveJson: Japanese path", saveJson(j, "設定/データ.json"));
         Json k = loadJson("設定/データ.json");
         check("loadJson: values round-trip",

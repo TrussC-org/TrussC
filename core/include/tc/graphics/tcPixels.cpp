@@ -15,6 +15,18 @@ bool Pixels::save(const fs::path& path) const {
         savePath = getDataPath(path);
     }
 
+    // Create a missing parent folder, like saveScreenshot()
+    std::error_code ec;
+    fs::path parent = savePath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError("Pixels") << "Cannot create folder: " << parent
+                               << " (" << ec.message() << ")";
+            return false;
+        }
+    }
+
     auto ext = savePath.extension().string();
     // UTF-8 for stb (STBIW_WINDOWS_UTF8 makes stb wide-open it on Windows)
     auto pathStr = internal::pathToUtf8(savePath);

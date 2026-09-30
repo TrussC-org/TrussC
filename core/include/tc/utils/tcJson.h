@@ -40,10 +40,21 @@ inline Json loadJson(const fs::path& path) {
 
 // ---------------------------------------------------------------------------
 // JSON file writing
-// Relative paths are resolved via getDataPath (like oF)
+// Relative paths are resolved via getDataPath (like oF), and a missing
+// parent folder is created
 // ---------------------------------------------------------------------------
 inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
     fs::path fullPath = getDataPath(path);
+    std::error_code ec;
+    fs::path parent = fullPath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError() << "Cannot create folder for JSON file: " << parent
+                       << " (" << ec.message() << ")";
+            return false;
+        }
+    }
     std::ofstream file(fullPath);
     if (!file.is_open()) {
         logError() << "Cannot create JSON file: " << path;
