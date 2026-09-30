@@ -1422,7 +1422,7 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 - **Nodes: create with `make_shared`, build the tree in `setup()`.** Create every node with `make_shared<T>()`. Call `addChild()` / `addMod()` / `callEvery()` in `setup()`, not in the constructor: `weak_from_this()` isn't ready while the constructor runs.
 - **Remove with `destroy()` while things are in flight.** From inside an event handler, a timer callback, or while walking the tree, remove nodes with `destroy()`. The removal is deferred to a safe point.
 - **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
-- **Stop your own threads before your members go away.** A `Thread` subclass should call `waitForThread()` in its **own** destructor. The base class stops the thread only after your members are already destroyed.
+- **Stop your own threads before your members go away.** A `Thread` subclass must call `waitForThread()` in its **own** destructor. The base class also stops and joins the thread, but only after your members are already destroyed, and it logs a warning when it finds the thread still running.
 - **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
 
 ### Which thread does my callback run on?
@@ -3918,7 +3918,7 @@ void Texture::uploadCubemapFace(int face, int mipLevel, const void * data, size_
 void Texture::uploadCubemapMip(int mipLevel, const void * data, size_t dataSize)  // Upload pixel data for all six faces of one cubemap mip level
 ```
 
-### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data.
+### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread).
 
 ```cpp
 std::thread::id Thread::getMainThreadId()  // Get the main thread ID, recording the current thread's ID on the first call.
@@ -3929,7 +3929,7 @@ void Thread::sleep(unsigned long milliseconds)  // Pause the current thread for 
 void Thread::startThread()  // Start the background thread (runs threadedFunction). No-op if already running.
 void Thread::stopThread()  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
 void Thread::threadedFunction()  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
-void Thread::waitForThread(bool callStopThread = true)  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first.
+void Thread::waitForThread(bool callStopThread = true)  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first. A subclass must call it in its own destructor. Never call it on the thread itself (e.g. from a destructor that runs inside threadedFunction()): joining itself throws std::system_error.
 void Thread::yield()  // Yield execution to other threads.
 ```
 

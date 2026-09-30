@@ -582,10 +582,37 @@ ElapsedTimeClock& getElapsedClock() {
 }
 } // namespace internal
 
+namespace {
+// Set during static destruction, right before getLogger()'s Logger is
+// destroyed. Constant-initialized and trivially destructible, so it can be
+// read at any point of static destruction.
+std::atomic<bool> loggerDestroyed{false};
+
+struct LoggerLifetimeMark {
+    ~LoggerLifetimeMark() { loggerDestroyed.store(true); }
+};
+} // namespace
+
 Logger& getLogger() {
     static Logger logger;
+    // Constructed after logger, so destroyed right before it.
+    static LoggerLifetimeMark lifetimeMark;
+    (void)lifetimeMark;
     return logger;
 }
+
+namespace internal {
+// Declared in tcThread.h, which is included before tcLog.h and cannot log.
+void logThreadNotWaited() {
+    // A global or static Thread still running at exit can be destroyed after
+    // the Logger: skip the warning rather than log through a destroyed Logger.
+    if (loggerDestroyed.load()) return;
+    logWarning("Thread") << "destroyed while its thread was still running. "
+                            "Call waitForThread() in the subclass destructor: the base "
+                            "Thread destructor joins only after the subclass members "
+                            "are destroyed";
+}
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // More one-per-process state (#249). Each of these used to be a function-local
