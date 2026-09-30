@@ -14,6 +14,17 @@
 //     getVertices() / shape().verts hold that hull, so what draws collides;
 //   - setupConvex() / Shape2D::convex() take any number of points and make one
 //     fixture of at most 8 points whose mass is close to the outline's.
+//
+// Compound bodies (#427). setupCompound() / Shape2D::compound() keep any
+// outline exactly, one fixture per triangle of Path::buildFillTriangles():
+//   - a 20-point circle gives many fixtures and the 20-gon's mass; a convex
+//     outline of at most 8 points gives exactly one fixture;
+//   - concave notches and holes stay empty: a ball in the hole falls to the
+//     hole's floor, a ball above the solid part lands on it;
+//   - slivers are skipped with one warning; nothing usable gives no body;
+//   - Collider2D filter and trigger settings reach every fixture;
+//   - a compound touching a box with several fixtures at once gives exactly
+//     one Enter / Began, one Stay per update, and one Exit / Ended.
 // =============================================================================
 
 #include <tcxBox2d.h>
@@ -317,6 +328,333 @@ static void testRigidBody2D(box2d::World& world) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Compound bodies (#427)
+// ---------------------------------------------------------------------------
+static float polygonArea(const vector<Vec2>& pts) {
+    double a = 0;
+    for (size_t i = 0; i < pts.size(); ++i) {
+        const Vec2& p = pts[i];
+        const Vec2& q = pts[(i + 1) % pts.size()];
+        a += double(p.x) * q.y - double(q.x) * p.y;
+    }
+    return float(abs(a) * 0.5);
+}
+
+// Mass of an area in px^2 at density 1.
+static float areaMass(float areaPx) {
+    return areaPx / (box2d::World::scale * box2d::World::scale);
+}
+
+static void step(box2d::World& world, int n) {
+    for (int i = 0; i < n; ++i) {
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        world.getCollisionManager()->update();
+    }
+}
+
+// Touching contacts between two bodies (one per touching fixture pair).
+static int touchingContacts(box2d::World& world, const b2Body* a, const b2Body* b) {
+    int n = 0;
+    for (b2Contact* c = world.getWorld()->GetContactList(); c; c = c->GetNext()) {
+        const b2Body* ba = c->GetFixtureA()->GetBody();
+        const b2Body* bb = c->GetFixtureB()->GetBody();
+        if (c->IsTouching() && ((ba == a && bb == b) || (ba == b && bb == a))) ++n;
+    }
+    return n;
+}
+
+// A square ring: outer square with a square hole wound the other way.
+static Path squareRing(float outer, float inner) {
+    Path p;
+    float o = outer * 0.5f, i = inner * 0.5f;
+    p.moveTo(-o, -o); p.lineTo(o, -o); p.lineTo(o, o); p.lineTo(-o, o); p.close();
+    p.moveTo(-i, -i); p.lineTo(-i, i); p.lineTo(i, i); p.lineTo(i, -i); p.close();
+    return p;
+}
+
+static void testCompoundShapes(box2d::World& world) {
+    // 20-point circle: many fixtures, the mass of the 20-gon.
+    {
+        vector<Vec2> pts = circlePoints(20, 50);
+        Path path(pts);
+        path.close();
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, path, 400, 300);
+        check("setupCompound 20-point circle: created", poly.isCreated());
+        check("setupCompound 20-point circle: one fixture per triangle (18)",
+              fixtureCount(poly.getBody()) == 18);
+        float ratio = poly.getMass() / areaMass(polygonArea(pts));
+        check("setupCompound 20-point circle: mass = area x density (1%)", abs(ratio - 1.0f) < 0.01f);
+        check("setupCompound 20-point circle: getVertices() is the outline", poly.getNumVertices() == 20);
+        check("setupCompound 20-point circle: no warning", w.count == 0);
+    }
+
+    // Convex outlines of at most 8 points: exactly one ordinary fixture.
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, circlePoints(5, 40), 400, 300);
+        check("setupCompound convex 5 points: one fixture", fixtureCount(poly.getBody()) == 1);
+        check("setupCompound convex 5 points: a 5-point polygon", polygonVertexCount(poly.getBody()) == 5);
+        check("setupCompound convex 5 points: no warning", w.count == 0);
+    }
+    {
+        vector<Vec2> pts = circlePoints(8, 40);
+        pts.push_back(pts[0]);   // closing point, as drawn paths often have
+        box2d::PolyShape poly;
+        poly.setupCompound(world, Path(pts), 400, 300);
+        check("setupCompound convex 8 points + closing point: one fixture", fixtureCount(poly.getBody()) == 1);
+    }
+    {
+        // A pentagram turns the same way at every corner but is not convex.
+        vector<Vec2> star;
+        for (int i = 0; i < 5; ++i) {
+            float a = TAU * (i * 2 % 5) / 5;
+            star.push_back(Vec2(cos(a) * 40, sin(a) * 40));
+        }
+        box2d::PolyShape poly;
+        poly.setupCompound(world, star, 400, 300);
+        check("setupCompound pentagram: triangulated, not one polygon", fixtureCount(poly.getBody()) > 1);
+    }
+
+    // The notched 5-point polygon keeps its notch.
+    {
+        vector<Vec2> notched = {{-20, -20}, {20, -20}, {0, 0}, {20, 20}, {-20, 20}};
+        box2d::PolyShape poly;
+        poly.setupCompound(world, notched, 400, 300);
+        check("setupCompound notched: several fixtures", fixtureCount(poly.getBody()) > 1);
+        check("setupCompound notched: the notch is empty", !poly.containsPoint(415, 300));
+        check("setupCompound notched: the body is solid", poly.containsPoint(390, 300));
+        check("setupCompound notched: mass = area x density",
+              abs(poly.getMass() / areaMass(polygonArea(notched)) - 1.0f) < 0.01f);
+    }
+
+    // A ring: the hole is empty.
+    {
+        box2d::PolyShape poly;
+        poly.setupCompound(world, squareRing(200, 80), 400, 300);
+        check("setupCompound ring: created", poly.isCreated());
+        check("setupCompound ring: the hole is empty", !poly.containsPoint(400, 300));
+        check("setupCompound ring: the ring is solid", poly.containsPoint(400, 230));
+        check("setupCompound ring: mass = (outer - hole) x density",
+              abs(poly.getMass() / areaMass(200 * 200 - 80 * 80) - 1.0f) < 0.01f);
+        check("setupCompound ring: getVertices() has both subpaths", poly.getNumVertices() == 8);
+    }
+
+    // A sliver (a spike whose base points nearly coincide) is skipped with one
+    // warning; the rest of the body is built.
+    {
+        vector<Vec2> spiked = {{-50, -50}, {50, -50}, {50, 50}, {0.001f, 50},
+                               {0, 150}, {-0.001f, 50}, {-50, 50}};
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, spiked, 400, 300);
+        check("setupCompound sliver: created", poly.isCreated());
+        check("setupCompound sliver: one warning", w.count == 1 && w.lastContains("skipped"));
+    }
+
+    // Nothing usable: no body, one warning.
+    {
+        vector<Vec2> line;
+        for (int i = 0; i < 12; ++i) line.push_back(Vec2(i * 5.0f, 0));
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setupCompound(world, line, 400, 300);
+        check("setupCompound collinear: no body", !poly.isCreated());
+        check("setupCompound collinear: one warning", w.count == 1);
+    }
+
+    // setup() with more than 8 points now also points to setupCompound().
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, circlePoints(9, 40), 400, 300);
+        check("PolyShape::setup 9 points: warning names setupCompound()", w.lastContains("setupCompound()"));
+    }
+
+    // Mod API
+    {
+        vector<Vec2> pts = circlePoints(20, 50);
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(pts));
+        check("RigidBody2D compound 20 points: 18 fixtures", fixtureCount(rb->getBody()) == 18);
+        float mass = rb->getBody() ? rb->getBody()->GetMass() : 0.0f;
+        check("RigidBody2D compound 20 points: mass = area x density",
+              abs(mass / areaMass(polygonArea(pts)) - 1.0f) < 0.01f);
+        check("RigidBody2D compound 20 points: no warning", w.count == 0);
+    }
+    {
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(circlePoints(5, 40)));
+        check("RigidBody2D compound convex 5 points: one fixture", fixtureCount(rb->getBody()) == 1);
+    }
+    {
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(squareRing(200, 80)));
+        bool holeEmpty = true, ringSolid = false;
+        if (rb->getBody()) {
+            for (b2Fixture* f = rb->getBody()->GetFixtureList(); f; f = f->GetNext()) {
+                if (f->TestPoint(box2d::World::toBox2d(400, 300))) holeEmpty = false;
+                if (f->TestPoint(box2d::World::toBox2d(400, 230))) ringSolid = true;
+            }
+        }
+        check("RigidBody2D compound ring: the hole is empty", rb->getBody() && holeEmpty && ringSolid);
+    }
+    {
+        vector<Vec2> line;
+        for (int i = 0; i < 12; ++i) line.push_back(Vec2(i * 5.0f, 0));
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::compound(line));
+        check("RigidBody2D compound collinear: no body", rb->getBody() == nullptr);
+        check("RigidBody2D compound collinear: one warning", w.count == 1);
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        attach(world, node, box2d::Shape2D::polygon(circlePoints(9, 40)));
+        check("RigidBody2D polygon 9 points: warning names Shape2D::compound()",
+              w.lastContains("Shape2D::compound()"));
+    }
+}
+
+// Balls in and above a ring's hole, under gravity.
+static void testCompoundHole() {
+    box2d::World world;
+    world.setup(0, 300);   // 10 m/s^2 at 30 px/m
+    world.setAutoUpdate(false);
+
+    box2d::PolyShape ring;
+    ring.setupCompound(world, squareRing(200, 80), 400, 300);   // hole: y 260..340
+    ring.setStatic();
+
+    box2d::CircleBody inHole, onTop;
+    inHole.setup(world, 400, 275, 10);   // inside the hole
+    onTop.setup(world, 400, 150, 10);    // above the solid top (y 200)
+    step(world, 180);
+
+    float yHole = inHole.getPhysicsPosition().y;
+    float yTop = onTop.getPhysicsPosition().y;
+    check("ring: a ball in the hole falls to the hole's floor (y 330)", abs(yHole - 330) < 1.5f);
+    check("ring: a ball above the solid part lands on it (y 190)", abs(yTop - 190) < 1.5f);
+}
+
+static void testCompoundFilters(box2d::World& world) {
+    box2d::PolyShape poly;
+    poly.setupCompound(world, squareRing(200, 80), 400, 300);
+    auto* collider = poly.getCollider();
+    bool allLinked = true;
+    for (b2Fixture* f = poly.getBody()->GetFixtureList(); f; f = f->GetNext()) {
+        if (f->GetUserData().pointer != reinterpret_cast<uintptr_t>(collider)) allLinked = false;
+    }
+    check("compound collider: every fixture points to the collider", collider && allLinked);
+
+    collider->setCategoryBits(0x0004);
+    collider->setMaskBits(0x0003);
+    collider->setGroupIndex(-2);
+    poly.setSensor(true);
+    bool filters = true, sensors = true;
+    for (b2Fixture* f = poly.getBody()->GetFixtureList(); f; f = f->GetNext()) {
+        const b2Filter& fd = f->GetFilterData();
+        if (fd.categoryBits != 0x0004 || fd.maskBits != 0x0003 || fd.groupIndex != -2) filters = false;
+        if (!f->IsSensor()) sensors = false;
+    }
+    check("compound collider: filter setters reach every fixture", filters);
+    check("compound: setSensor reaches every fixture", sensors);
+
+    shared_ptr<Node> node;
+    auto* rb = attach(world, node, box2d::Shape2D::compound(squareRing(200, 80)));
+    rb->setTrigger(true);
+    bool triggers = rb->getBody() != nullptr;
+    if (rb->getBody()) {
+        for (b2Fixture* f = rb->getBody()->GetFixtureList(); f; f = f->GetNext()) {
+            if (!f->IsSensor()) triggers = false;
+        }
+    }
+    check("RigidBody2D compound: setTrigger reaches every fixture", triggers);
+}
+
+// A bar 200 x 40 with a notch in its bottom (concave, several triangles), and
+// a box 220 x 20 pressed 5 px into its top across the whole width.
+static const vector<Vec2> kNotchedBar = {{-100, -20}, {100, -20}, {100, 20}, {10, 20},
+                                         {0, 5}, {-10, 20}, {-100, 20}};
+
+static void testCompoundEvents() {
+    // Classic API: Collider2D events.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        box2d::PolyShape bar;
+        bar.setupCompound(world, kNotchedBar, 400, 300);
+        bar.setStatic();
+        box2d::RectBody box;
+        box.setup(world, 400, 300 - 20 - 10 + 5, 220, 20);
+
+        int barEnter = 0, barStay = 0, barExit = 0, boxEnter = 0, boxExit = 0;
+        auto* bc = bar.getCollider();
+        auto* xc = box.getCollider();
+        EventListener l1 = bc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++barEnter; });
+        EventListener l2 = bc->onCollisionStay.listen([&](box2d::CollisionEvent&) { ++barStay; });
+        EventListener l3 = bc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++barExit; });
+        EventListener l4 = xc->onCollisionEnter.listen([&](box2d::CollisionEvent&) { ++boxEnter; });
+        EventListener l5 = xc->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++boxExit; });
+
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        int touching = touchingContacts(world, bar.getBody(), box.getBody());
+        printf("  (classic: %d fixtures, %d touching contacts)\n", fixtureCount(bar.getBody()), touching);
+        check("Collider2D: the box touches several of the bar's fixtures", touching >= 2);
+        check("Collider2D: one Enter on each side", barEnter == 1 && boxEnter == 1);
+        world.getCollisionManager()->update();
+        world.getCollisionManager()->update();
+        check("Collider2D: one Stay per update", barStay == 2);
+
+        box.setPhysicsPosition(400, -1000);
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        check("Collider2D: separated", touchingContacts(world, bar.getBody(), box.getBody()) == 0);
+        check("Collider2D: one Exit on each side", barExit == 1 && boxExit == 1);
+    }
+
+    // Mod API: RigidBody2D events.
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+
+        shared_ptr<Node> barNode, boxNode;
+        auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
+        bar->setBodyType(box2d::BodyType::Static);
+        boxNode = make_shared<Node>();
+        boxNode->setPos(400, 300 - 20 - 10 + 5);
+        auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(220, 20));
+
+        int began = 0, stay = 0, ended = 0, boxBegan = 0, boxEnded = 0;
+        EventListener l1 = bar->onCollisionBegan.listen([&](box2d::Contact2D&) { ++began; });
+        EventListener l2 = bar->onCollisionStay.listen([&](box2d::Contact2D&) { ++stay; });
+        EventListener l3 = bar->onCollisionEnded.listen([&](box2d::Contact2D&) { ++ended; });
+        EventListener l4 = box->onCollisionBegan.listen([&](box2d::Contact2D&) { ++boxBegan; });
+        EventListener l5 = box->onCollisionEnded.listen([&](box2d::Contact2D&) { ++boxEnded; });
+
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        int touching = touchingContacts(world, bar->getBody(), box->getBody());
+        printf("  (Mod: %d fixtures, %d touching contacts)\n", fixtureCount(bar->getBody()), touching);
+        check("RigidBody2D: the box touches several of the bar's fixtures", touching >= 2);
+        check("RigidBody2D: one Began on each side", began == 1 && boxBegan == 1);
+        world.getCollisionManager()->update();
+        world.getCollisionManager()->update();
+        check("RigidBody2D: one Stay per update", stay == 2);
+
+        box->getBody()->SetTransform(box2d::World::toBox2d(400, -1000), 0);
+        world.getWorld()->Step(1.0f / 60.0f, 8, 3);
+        check("RigidBody2D: separated", touchingContacts(world, bar->getBody(), box->getBody()) == 0);
+        check("RigidBody2D: one Ended on each side", ended == 1 && boxEnded == 1);
+    }
+}
+
 int main() {
     box2d::World world;
     world.setup(0, 0);
@@ -326,6 +664,10 @@ int main() {
     testPolyShapeValid(world);
     testSetupConvex(world);
     testRigidBody2D(world);
+    testCompoundShapes(world);
+    testCompoundFilters(world);
+    testCompoundHole();
+    testCompoundEvents();
 
     if (g_fail) {
         printf("\n%d check(s) FAILED\n", g_fail);
