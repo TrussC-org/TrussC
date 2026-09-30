@@ -171,6 +171,20 @@ namespace internal {
         SerialWorkerThreadMark& operator=(const SerialWorkerThreadMark&) = delete;
     };
 
+    // What the Android backend's setup() did. Pending: it asked for the USB
+    // permission and started the worker that finishes the connection, or such
+    // a request for the same device was pending already. The worker may have
+    // connected by the time setup() returns, so Serial::setup() goes by this
+    // result, never by the state it reads back afterwards.
+    enum class SerialSetupResult { Failed, Pending, Connected };
+
+    // Whether that setup() started a connection to the new port (connected,
+    // or connecting once the permission comes through): Serial::setup() then
+    // keeps the new port's path and rate, else the previous port's.
+    inline bool serialSetupStarted(SerialSetupResult result) {
+        return result != SerialSetupResult::Failed;
+    }
+
     // Log lines Serial makes while it holds its port lock, sent once it has
     // released it: a Logger listener that runs inline may call the same
     // Serial, and no thread may take that lock twice. Declare it before the
@@ -263,10 +277,12 @@ namespace androidserial {
     Impl* create();
     void destroy(Impl* impl);
     std::vector<SerialDeviceInfo> listDevices();
-    // ended: how a connection that setup() had to close itself had ended
-    // (NotOpen when Serial had closed it already), lostReason as for close()
-    bool setup(Impl* impl, const std::string& devicePath, int baudRate,
-               CloseResult& ended, std::string& lostReason);
+    // Connected, Pending (the worker connects once the user grants the
+    // permission, and may have by the time this returns) or Failed. ended:
+    // how a connection that setup() had to close itself had ended (NotOpen
+    // when Serial had closed it already), lostReason as for close()
+    internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int baudRate,
+                                      CloseResult& ended, std::string& lostReason);
     // Stop the worker and release the connection. Lost: the worker had found
     // the device gone, and lostReason is the text it logged.
     CloseResult close(Impl* impl, std::string& lostReason);
@@ -669,9 +685,13 @@ public:
             }
             androidserial::CloseResult ended = androidserial::CloseResult::NotOpen;
             std::string lostReason;
-            initialized_ = androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
+            const internal::SerialSetupResult result =
+                androidserial::setup(aimpl_, portName, baudRate, ended, lostReason);
+            initialized_ = result == internal::SerialSetupResult::Connected;
             if (!listenerReopened) raced = closeArgs(ended, lostReason, previousPath, previousRate);
-            if (initialized_ || androidserial::isPendingFor(aimpl_, portName)) {
+            // By the result, not by the state read back now: the worker of a
+            // Pending setup() may have connected already
+            if (internal::serialSetupStarted(result)) {
                 // The rate the backend opens at: a setup() again while the
                 // permission for this device is pending keeps the first rate
                 baudRate_ = androidserial::baudRate(aimpl_);

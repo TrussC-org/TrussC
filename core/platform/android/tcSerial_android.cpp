@@ -712,16 +712,18 @@ std::vector<SerialDeviceInfo> listDevices() {
     return devices;
 }
 
-bool setup(Impl* impl, const std::string& devicePath, int baudRate,
-           CloseResult& ended, std::string& lostReason) {
+internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int baudRate,
+                                  CloseResult& ended, std::string& lostReason) {
+    using Result = internal::SerialSetupResult;
     ended = CloseResult::NotOpen;
     // It would have to stop and replace a worker (Serial refuses first)
-    if (refusedOnWorkerThread("setup()")) return false;
+    if (refusedOnWorkerThread("setup()")) return Result::Failed;
     // Reconnect-loop guard: while the permission dialog for this device is
-    // still pending, repeated setup() calls must not re-trigger it.
+    // still pending, repeated setup() calls must not re-trigger it. The
+    // connection that request starts is still under way.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {
         blog(LogLevel::Verbose) << "Serial: USB permission still pending for " << devicePath;
-        return false;
+        return Result::Pending;
     }
 
     // Serial::setup() has closed the previous connection already, unless the
@@ -733,28 +735,28 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
     JniScope jni;
     if (!jni) {
         blog(LogLevel::Error) << "Serial: JNI unavailable";
-        return false;
+        return Result::Failed;
     }
     jobject usbManager = jni.getSystemService("usb");
     if (!usbManager) {
         blog(LogLevel::Error) << "Serial: UsbManager unavailable";
-        return false;
+        return Result::Failed;
     }
     jobject device = findDeviceByPath(jni.env, usbManager, devicePath);
     if (!device) {
         blog(LogLevel::Error) << "Serial: device not found: " << devicePath;
         jni.env->DeleteLocalRef(usbManager);
-        return false;
+        return Result::Failed;
     }
 
     if (hasPermission(jni.env, usbManager, device)) {
         jni.env->DeleteLocalRef(device);
         jni.env->DeleteLocalRef(usbManager);
-        if (!openAndClaim(impl, jni)) return false;
+        if (!openAndClaim(impl, jni)) return Result::Failed;
         impl->state = (int)State::Connected;
         impl->worker = std::thread(workerMain, impl);
         blog(LogLevel::Notice) << "Serial: connected to " << devicePath << " at " << baudRate << " baud";
-        return true;
+        return Result::Connected;
     }
 
     // No permission yet: show the dialog and finish connecting asynchronously
@@ -763,13 +765,15 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate,
     jni.env->DeleteLocalRef(usbManager);
     if (!requested) {
         blog(LogLevel::Error) << "Serial: USB permission request failed for " << devicePath;
-        return false;
+        return Result::Failed;
     }
     impl->state = (int)State::Pending;
     impl->worker = std::thread(workerMain, impl);
     blog(LogLevel::Notice) << "Serial: requesting USB permission for " << devicePath
                 << " (isInitialized() becomes true once granted)";
-    return false;
+    // The worker checks the permission at once, so with one granted in the
+    // meantime it may be Connected already: the caller goes by this result
+    return Result::Pending;
 }
 
 CloseResult close(Impl* impl, std::string& lostReason) {
