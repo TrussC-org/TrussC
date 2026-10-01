@@ -118,6 +118,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `fileSave/` — the save helpers report write errors (#274): `saveJson`
+  serializes before it opens the file, so a string that is not valid UTF-8
+  returns false, logs an error and leaves the saved `{"a":1}` loadable, and it
+  writes `dump()`'s bytes as they are (no CR). On Linux, `saveTextFile`,
+  `appendToFile`, `saveJson` and `Pixels::save` to `/dev/full` return false
+  and log an error; the normal saves (PNG / JPEG / BMP included) still return
+  true with the expected bytes.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
