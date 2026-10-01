@@ -26,6 +26,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -56,6 +57,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 static atomic<int> g_fail{0};
@@ -250,7 +253,9 @@ static void scenario() {
     TC_CLOSE(listener);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
         bail();
