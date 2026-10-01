@@ -615,9 +615,9 @@ static void cover_utility() {
     (void)toJsonString(af::val<const Json>(), af::val<int>());
     (void)parseXml(af::val<const std::string>());
     (void)getVersion();
-    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
+    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)nodeToJson(af::val<Node>(), af::val<int>());
 }
 
@@ -796,7 +796,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().getPlayingSounds();
         (void)af::val<AudioEngine>().audioOut;
         (void)af::val<AudioEngine>().audioIn;
-        (void)af::val<AudioEngine>().waitForCallbackIdle();
+        (void)af::val<AudioEngine>().waitForAudioCallbacks();
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().getAnalysisBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
