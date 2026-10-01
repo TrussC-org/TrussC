@@ -108,6 +108,8 @@ void World::update() {
     int n = 0;
     while (accumulator_ >= timeStep_ && n < MAX_SUBSTEPS) {
         world_->Step(timeStep_, velocityIterations_, positionIterations_);
+        // Contacts that ended inside the step and did not begin again
+        if (collisionManager_) collisionManager_->flushPendingExits();
         accumulator_ -= timeStep_;
         ++n;
     }
@@ -177,6 +179,7 @@ void World::createBounds(float x, float y, float width, float height) {
 
     // Remove existing bounds
     if (groundBody_) {
+        if (collisionManager_) collisionManager_->forget(groundBody_);
         world_->DestroyBody(groundBody_);
         groundBody_ = nullptr;
     }
@@ -223,6 +226,7 @@ void World::createGround(float y, float width) {
     if (!world_) return;
 
     if (groundBody_) {
+        if (collisionManager_) collisionManager_->forget(groundBody_);
         world_->DestroyBody(groundBody_);
         groundBody_ = nullptr;
     }
@@ -253,6 +257,7 @@ void World::clear() {
         b2Body* body = world_->GetBodyList();
         while (body) {
             b2Body* next = body->GetNext();
+            if (collisionManager_) collisionManager_->forget(body);
             world_->DestroyBody(body);
             body = next;
         }

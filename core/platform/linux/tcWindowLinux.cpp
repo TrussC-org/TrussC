@@ -367,6 +367,12 @@ int Window::getHeight() const {
     return st ? sapp_window_height(st->win) : 0;
 }
 
+bool Window::isOccluded() const {
+    if (auto hook = internal::windowOccludedHookForTests()) return hook(*this);
+    auto* st = static_cast<AdapterState*>(native_);
+    return st ? sapp_window_occluded(st->win) : false;
+}
+
 std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
     if (headless::isActive()) {
         logError("Window") << "createWindow(): not available in headless mode";

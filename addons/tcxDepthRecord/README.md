@@ -47,6 +47,10 @@ an addon adds).
   parses the types it knows (depth/color) and *skips any it doesn't* by length.
   Addons can add block types (`>= 0x80`, e.g. body / hand tracking) and an
   official player still plays depth/color, ignoring them — forward-compatible.
+  A block's length is its whole payload. Files recorded before this was fixed
+  state a color block's length 4 bytes short (13 + compressed size instead of
+  17 + compressed size); the official player reads both, and a reader that
+  uses a color block's length should accept exactly that older value too.
 - **Stream manifest** in the header lists every block type present, so a reader
   knows what's inside up front: `hasBlockType()`, `getBlockTypes()`,
   `hasUnknownBlocks()` ("playable, but contains streams this build can't decode").

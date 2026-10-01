@@ -97,7 +97,7 @@ void tcApp::setup() {
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | List the widgets drawn in the last frame — in every window running imgui — with labels, types, positions and, for value widgets, their current values |
-| `tcx_imgui_get_touched` | — | The values the user changed by hand since startup (or the last reset), with their current value. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector |
+| `tcx_imgui_get_touched` | — | The value widgets the user changed by hand since startup (or the last reset), with the current value of their variable. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector. Items that change no variable (buttons, menu headers, action menu items) are not listed — see [Touched](#touched-what-the-user-changed-by-hand) |
 | `tcx_imgui_reset_touched` | — | Clear that record. No value is changed |
 | `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label |
 | `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: replaces text in input widgets, and enters numeric values directly into slider/drag widgets (Ctrl+Click temp input) |
@@ -130,7 +130,15 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 | `Combo` | `combo` | The selected index. `item` is the text shown |
 | `BeginCombo` (a custom combo) | `combo` | Only `item`, the text shown |
 | `InputText`, `InputTextMultiline` | `text` | The string. A password field reports `"password": true` and never its text |
-| `Checkbox` | `checkbox` | `true` / `false` (also in `checked`) |
+| `Checkbox`, `MenuItem(label, shortcut, bool* p_selected)`, `Selectable(label, bool* p_selected)` | `checkbox` | `true` / `false`, the variable after the click (a `Checkbox` or toggle `MenuItem` also has `checked`) |
+| `RadioButton(label, int* v, int v_button)` | `radio` | The variable the button group sets (`valueType` `int`), under the label of each button in the group |
+| `ListBox` | `listbox` | The selected index, under the list box's own label |
+| `BeginListBox` (a custom list box) | `listbox` | No value, only the label |
+
+Items that set no variable of yours carry no value: buttons, menu headers,
+action menu items (`MenuItem("Save")`), `MenuItem(label, shortcut, bool
+selected)` (the variable is yours, the widget never sees it), plain
+`Selectable`s and `RadioButton(label, bool active)`.
 
 The parts of a composite widget (the `##X` / `##Y` fields of a `ColorEdit`, the
 `-` / `+` buttons of `InputInt`) are still listed, so you can click or type
@@ -153,12 +161,27 @@ the code, and calls `tcx_imgui_reset_touched`.
  "inspector": []}
 ```
 
-- A widget is recorded when its value is changed through the widget: dragging,
-  typing, clicking — including input sent by the `tcx_imgui_*` tools. A value
-  assigned from code is never recorded; a recorded widget's value does follow
-  later changes from code.
+- A value widget (every row of the table above) is recorded when its value is
+  changed through the widget: dragging, typing, clicking — including input sent
+  by the `tcx_imgui_*` tools. A value assigned from code is never recorded; a
+  recorded widget's value does follow later changes from code.
+- Only value widgets are recorded, each with the value of its variable. A click
+  that sets no variable of yours is not: buttons, menu headers, action menu
+  items, `MenuItem(label, shortcut, bool selected)` — even when your code uses
+  it as a toggle, since the widget never sees your variable (use the `bool*`
+  form to have it recorded) — plain `Selectable`s and `RadioButton(label, bool
+  active)`.
 - Changing a part (one component of a `DragFloat3`, the R field of a
-  `ColorEdit`) records the whole widget under its label.
+  `ColorEdit`) records the whole widget under its label. Likewise a pick in a
+  `Combo` or a `ListBox` records the combo / list box under its own label, not
+  the item picked. A custom list (`BeginListBox` + `Selectable`s) is recorded
+  under the list box label with no value, like a custom `BeginCombo`. A value
+  widget inside a custom list box or combo (a `Selectable(label, bool*)`, a
+  `Checkbox`) is recorded under its own label too, with its value.
+- A toggle `MenuItem` / `Selectable` with a `bool*` reports the state after the
+  click, even when the click closed its menu.
+- Each `RadioButton(label, int* v, v_button)` the user pressed gets its own
+  entry, and all of them show the same variable's current value.
 - A widget that is not drawn right now (collapsed header, closed window) keeps
   its last known value and reports `"visible": false`.
 - The record starts when the MCP tools are registered (`TRUSSC_MCP=1`) and is

@@ -1,4 +1,5 @@
 #include "ProjectGenerator.h"
+#include "BuildSetup.h"
 #include "TrussC.h"
 #include <fstream>
 #include <sstream>
@@ -108,7 +109,26 @@ static pair<int, string> executeCommand(const string& cmd) {
 #endif
 }
 
-// Helper to find Emscripten toolchain
+// Toolchain files CMake resolves from the environment at configure time,
+// written when this shell has no toolchain to point at.
+static const char* kEmscriptenEnvToolchain =
+    "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+static const char* kAndroidEnvToolchain =
+    "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake";
+
+string chooseToolchainFile(const string& detected, const string& saved,
+                           const string& envFallback) {
+    if (!detected.empty()) return detected;
+    // Only a real file: not a $env{...} / ${...} form, not a relative path
+    error_code ec;
+    if (!saved.empty() && fs::path(saved).is_absolute() &&
+        fs::is_regular_file(saved, ec)) {
+        return saved;
+    }
+    return envFallback;
+}
+
+// Helper to find Emscripten toolchain. Empty when this shell has none.
 static string detectEmscriptenToolchain() {
     // 1. Check EMSDK environment variable (Official installer)
     const char* envEmsdk = std::getenv("EMSDK");
@@ -161,8 +181,36 @@ static string detectEmscriptenToolchain() {
         }
     }
     
-    // Fallback: Default EMSDK pattern (will be evaluated by CMake if EMSDK env var is set later)
-    return "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake";
+    // Not found (the caller falls back to the saved path or kEmscriptenEnvToolchain)
+    return "";
+}
+
+// Helper to find the Android NDK toolchain. Empty when this shell has none,
+// or when its NDK has no toolchain file (a stale ANDROID_NDK_HOME), so that a
+// saved toolchain that still exists wins over it.
+static string detectAndroidToolchain() {
+    string ndkHome;
+    if (getenv("ANDROID_NDK_HOME")) {
+        ndkHome = getenv("ANDROID_NDK_HOME");
+    } else if (getenv("ANDROID_HOME")) {
+        // Scan $ANDROID_HOME/ndk/ for latest version
+        string ndkDir = string(getenv("ANDROID_HOME")) + "/ndk";
+        if (fs::exists(ndkDir)) {
+            string latest;
+            for (auto& entry : fs::directory_iterator(ndkDir)) {
+                if (entry.is_directory()) {
+                    string name = entry.path().filename().string();
+                    if (name > latest) latest = name;
+                }
+            }
+            if (!latest.empty()) ndkHome = ndkDir + "/" + latest;
+        }
+    }
+    if (ndkHome.empty()) return "";
+    string toolchain = ndkHome + "/build/cmake/android.toolchain.cmake";
+    error_code ec;
+    if (!fs::is_regular_file(toolchain, ec)) return "";
+    return toolchain;
 }
 
 ProjectGenerator::ProjectGenerator(const ProjectSettings& settings)
@@ -174,6 +222,28 @@ void ProjectGenerator::log(const string& msg) {
     if (logCallback_) {
         logCallback_(msg);
     }
+}
+
+string ProjectGenerator::buildDirForPreset(const string& preset) {
+    // iOS uses the Xcode generator; its folder is named after it
+    if (preset == "ios") return "xcode-ios";
+    return "build-" + preset;
+}
+
+const vector<string>& ProjectGenerator::buildScriptsForPreset(const string& preset) {
+    // The names generateWebBuildFiles() writes on Windows / macOS / Linux
+    static const vector<string> web = {
+        "build-web.bat", "build-web.command", "build-web.sh",
+    };
+    static const vector<string> none;
+    return preset == "web" ? web : none;
+}
+
+const vector<string>& ProjectGenerator::allPresetNames() {
+    static const vector<string> names = {
+        "macos", "linux", "windows", "web", "android", "ios",
+    };
+    return names;
 }
 
 string ProjectGenerator::getDestPath() const {
@@ -245,16 +315,16 @@ void ProjectGenerator::cleanBuildDirectories(const string& path) {
 
     // Add platform-specific build directory
 #ifdef __APPLE__
-    dirsToClean.push_back("build-macos");
+    dirsToClean.push_back(buildDirForPreset("macos"));
 #elif defined(_WIN32)
-    dirsToClean.push_back("build-windows");
+    dirsToClean.push_back(buildDirForPreset("windows"));
 #else
-    dirsToClean.push_back("build-linux");
+    dirsToClean.push_back(buildDirForPreset("linux"));
 #endif
 
     // Add web build directory if web build is enabled
     if (settings_.generateWebBuild) {
-        dirsToClean.push_back("build-web");
+        dirsToClean.push_back(buildDirForPreset("web"));
     }
 
     // Remove existing build directories
@@ -291,7 +361,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json macosPreset;
     macosPreset["name"] = "macos";
     macosPreset["displayName"] = "macOS";
-    macosPreset["binaryDir"] = "${sourceDir}/build-macos";
+    macosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("macos");
     macosPreset["generator"] = "Unix Makefiles";
     macosPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     macosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "14.0";
@@ -319,7 +389,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json windowsPreset;
     windowsPreset["name"] = "windows";
     windowsPreset["displayName"] = "Windows";
-    windowsPreset["binaryDir"] = "${sourceDir}/build-windows";
+    windowsPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("windows");
     windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
@@ -332,46 +402,16 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
         const auto& vsInfo = settings_.installedVsVersions[settings_.selectedVsIndex];
 
-        // Convert path to forward slashes for JSON
-        auto toForwardSlash = [](string path) {
-            for (char& c : path) {
-                if (c == '\\') c = '/';
-            }
-            return path;
-        };
-
-        if (!vsInfo.ninjaPath.empty()) {
-            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = toForwardSlash(vsInfo.ninjaPath);
+        // CMAKE_MAKE_PROGRAM and the INCLUDE / LIB / PATH environment
+        // (`trusscli build` re-pins the same values after a VS change)
+        const WindowsToolchainPins pins = windowsToolchainPins(vsInfo);
+        if (!pins.makeProgram.empty()) {
+            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
         }
-
-        // Add environment for INCLUDE, LIB, PATH
-        if (!vsInfo.vcToolsVersion.empty() && !vsInfo.windowsSdkVersion.empty()) {
-            string vsPath = toForwardSlash(vsInfo.installPath);
-            string vcToolsVer = vsInfo.vcToolsVersion;
-            string sdkVer = vsInfo.windowsSdkVersion;
-
-            // INCLUDE paths
-            string includePath =
-                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/include;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/ucrt;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/shared;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/um;" +
-                "C:/Program Files (x86)/Windows Kits/10/Include/" + sdkVer + "/winrt";
-
-            // LIB paths
-            string libPath =
-                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/lib/x64;" +
-                "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/ucrt/x64;" +
-                "C:/Program Files (x86)/Windows Kits/10/Lib/" + sdkVer + "/um/x64";
-
-            // PATH additions
-            string pathAddition =
-                vsPath + "/VC/Tools/MSVC/" + vcToolsVer + "/bin/Hostx64/x64;" +
-                "C:/Program Files (x86)/Windows Kits/10/bin/" + sdkVer + "/x64;$penv{PATH}";
-
-            windowsPreset["environment"]["INCLUDE"] = includePath;
-            windowsPreset["environment"]["LIB"] = libPath;
-            windowsPreset["environment"]["PATH"] = pathAddition;
+        if (!pins.include.empty()) {
+            windowsPreset["environment"]["INCLUDE"] = pins.include;
+            windowsPreset["environment"]["LIB"] = pins.lib;
+            windowsPreset["environment"]["PATH"] = pins.path;
         }
     }
     presets["configurePresets"].push_back(windowsPreset);
@@ -386,7 +426,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     Json linuxPreset;
     linuxPreset["name"] = "linux";
     linuxPreset["displayName"] = "Linux";
-    linuxPreset["binaryDir"] = "${sourceDir}/build-linux";
+    linuxPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("linux");
     linuxPreset["generator"] = "Unix Makefiles";
     linuxPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
@@ -407,37 +447,25 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json androidPreset;
         androidPreset["name"] = "android";
         androidPreset["displayName"] = "Android (ARM64)";
-        androidPreset["binaryDir"] = "${sourceDir}/build-android";
+        androidPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("android");
         androidPreset["generator"] = "Unix Makefiles";
         androidPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "Release";
         androidPreset["cacheVariables"]["ANDROID_ABI"] = "arm64-v8a";
         androidPreset["cacheVariables"]["ANDROID_PLATFORM"] = "android-26";
 
-        // NDK toolchain: try to resolve at generation time, fallback to $env{}
-        string ndkHome;
-        if (getenv("ANDROID_NDK_HOME")) {
-            ndkHome = getenv("ANDROID_NDK_HOME");
-        } else if (getenv("ANDROID_HOME")) {
-            // Scan $ANDROID_HOME/ndk/ for latest version
-            string ndkDir = string(getenv("ANDROID_HOME")) + "/ndk";
-            if (fs::exists(ndkDir)) {
-                string latest;
-                for (auto& entry : fs::directory_iterator(ndkDir)) {
-                    if (entry.is_directory()) {
-                        string name = entry.path().filename().string();
-                        if (name > latest) latest = name;
-                    }
-                }
-                if (!latest.empty()) ndkHome = ndkDir + "/" + latest;
-            }
-        }
-        if (!ndkHome.empty()) {
-            androidPreset["toolchainFile"] = ndkHome + "/build/cmake/android.toolchain.cmake";
-            log("Android NDK: " + ndkHome);
+        // NDK toolchain: try to resolve at generation time. Otherwise keep the
+        // saved one if it still exists (update run from a shell without the
+        // NDK variables), else fall back to $env{} (resolved at build time;
+        // works when ANDROID_NDK_HOME is set in the terminal but not in GUI app)
+        string ndkDetected = detectAndroidToolchain();
+        string ndkToolchain = chooseToolchainFile(
+            ndkDetected, settings_.savedAndroidToolchainFile, kAndroidEnvToolchain);
+        androidPreset["toolchainFile"] = ndkToolchain;
+        if (!ndkDetected.empty()) {
+            log("Android NDK toolchain: " + ndkToolchain);
+        } else if (ndkToolchain != kAndroidEnvToolchain) {
+            log("Android NDK not found in this shell. Keeping the saved toolchain: " + ndkToolchain);
         } else {
-            // Use CMake env expansion — resolved at build time, not generation time
-            // Works when ANDROID_NDK_HOME is set in the terminal but not in GUI app
-            androidPreset["toolchainFile"] = "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake";
             log("Android NDK not found at generation time. Using $env{ANDROID_NDK_HOME} (resolved at build time).");
         }
 
@@ -459,7 +487,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json iosPreset;
         iosPreset["name"] = "ios";
         iosPreset["displayName"] = "iOS";
-        iosPreset["binaryDir"] = "${sourceDir}/xcode-ios";
+        iosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("ios");
         iosPreset["generator"] = "Xcode";
         iosPreset["cacheVariables"]["CMAKE_SYSTEM_NAME"] = "iOS";
         iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "15.0";
@@ -480,9 +508,17 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         Json webPreset;
         webPreset["name"] = "web";
         webPreset["displayName"] = "Web (Emscripten)";
-        webPreset["binaryDir"] = "${sourceDir}/build-web";
+        webPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("web");
         webPreset["generator"] = "Unix Makefiles";
-        webPreset["toolchainFile"] = detectEmscriptenToolchain();
+        // Emscripten toolchain found in this shell, else the saved one if it
+        // still exists (update run without emsdk_env), else $env{EMSDK}
+        string emDetected = detectEmscriptenToolchain();
+        string emToolchain = chooseToolchainFile(
+            emDetected, settings_.savedWebToolchainFile, kEmscriptenEnvToolchain);
+        if (emDetected.empty() && emToolchain != kEmscriptenEnvToolchain) {
+            log("Emscripten not found in this shell. Keeping the saved toolchain: " + emToolchain);
+        }
+        webPreset["toolchainFile"] = emToolchain;
         webPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "MinSizeRel";
         webPreset["cacheVariables"]["TC_WEB_BACKEND"] = (settings_.webBackend == 0) ? "WGPU" : "GLES3";
         webPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
@@ -499,10 +535,24 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         presets["buildPresets"].push_back(webBuildPreset);
     }
 
+    // Remember the IDE (CMake and CMake Tools ignore vendor data). Targets and
+    // the web backend need no entry: they are the presets above.
+    presets["vendor"]["trussc"]["ide"] = IdeHelper::getIdeId(settings_.ideType);
+
     saveJson(presets, destPath + "/CMakePresets.json");
 }
 
+string ProjectGenerator::writePresets(const string& projectPath) {
+    try {
+        writeCMakePresets(fs::absolute(projectPath).string());
+        return "";
+    } catch (const exception& e) {
+        return string("Error: ") + e.what();
+    }
+}
+
 string ProjectGenerator::generate() {
+    warnings_.clear();
     // Validation
     if (settings_.projectName.empty()) {
         return "Project name is required";
@@ -592,6 +642,7 @@ string ProjectGenerator::generate() {
 }
 
 string ProjectGenerator::update(const string& projectPath_) {
+    warnings_.clear();
     // Resolve to absolute path so saveJson (which uses getDataPath) works correctly
     string projectPath = fs::absolute(projectPath_).string();
     try {
@@ -1003,19 +1054,12 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
     // configures correctly without needing `emcmake`.
     if (settings_.generateWebBuild) presets.push_back("web");
 
-    // Map preset name to build directory
-    auto getBuildDir = [](const string& preset) -> string {
-        if (preset == "ios") return "xcode-ios";
-        if (preset == "android") return "build-android";
-        return "build-" + preset;
-    };
-
     bool ok = true;
     for (auto& preset : presets) {
         // Clean existing build directory to avoid stale cache
-        string buildDir = path + "/" + getBuildDir(preset);
+        string buildDir = path + "/" + buildDirForPreset(preset);
         if (fs::exists(buildDir)) {
-            log("Cleaning " + getBuildDir(preset) + "...");
+            log("Cleaning " + buildDirForPreset(preset) + "...");
             fs::remove_all(buildDir);
         }
 
@@ -1024,8 +1068,22 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
         auto [result, output] = executeCommand(cmd);
         if (!output.empty()) log(output);
         if (result != 0) {
-            log("ERROR: cmake --preset " + preset + " failed");
-            ok = false;
+            const bool kept = (preset == "web" && settings_.webKept) ||
+                              (preset == "android" && settings_.androidKept) ||
+                              (preset == "ios" && settings_.iosKept);
+            if (kept) {
+                // Kept from the saved presets, not asked for on this run:
+                // the rest of the regeneration (e.g. an addon change) stands.
+                log("cmake --preset " + preset + " failed (target kept from CMakePresets.json)");
+                warnings_.push_back(
+                    "cmake --preset " + preset + " failed, so " + buildDirForPreset(preset) +
+                    " is not configured. The " + preset + " target was kept from "
+                    "CMakePresets.json; set up its toolchain and run 'trusscli update' "
+                    "again, or drop the target with 'trusscli update --no-" + preset + "'");
+            } else {
+                log("ERROR: cmake --preset " + preset + " failed");
+                ok = false;
+            }
         }
     }
     return ok;

@@ -18,6 +18,10 @@
 // the block types it knows (depth/color/ir) and SKIPS any it doesn't by `length`
 // - so addons can add their own block types (>= BLOCK_CUSTOM_BASE, e.g. body /
 // hand tracking) and an official player still plays depth/color, ignoring them.
+// Files written before the color length was fixed have a color block length 4
+// bytes short (13 + compressed size instead of 17 + compressed size); a reader
+// that uses a color block's length accepts that value too (see
+// LEGACY_COLOR_BLOCK_FIELDS).
 //
 // The header manifest lists every block type present in the file, so a reader
 // can tell at a glance what's inside (depth-only? has IR? contains unknown
@@ -123,6 +127,27 @@ inline void applyHeader(const TcdcHeader& h, DepthFrame& f) {
     for (int i=0;i<16;++i) f.depthToColor.m[i]=h.depthToColor[i];
 }
 
+// --- block layout ------------------------------------------------------------
+//
+// Bytes of size fields in front of a block's compressed data, summed from the
+// fields the writers below put there. A block's length is these plus the
+// compressed size.
+constexpr std::uint32_t DEPTH_BLOCK_FIELDS =
+    sizeof(std::uint32_t)        // sample count
+    + sizeof(std::uint32_t)      // byte size
+    + sizeof(std::uint32_t);     // compressed size
+constexpr std::uint32_t COLOR_BLOCK_FIELDS =
+    sizeof(std::int32_t) * 2     // width, height
+    + sizeof(std::uint8_t)       // channels
+    + sizeof(std::uint32_t)      // byte size
+    + sizeof(std::uint32_t);     // compressed size
+static_assert(DEPTH_BLOCK_FIELDS == 12 && COLOR_BLOCK_FIELDS == 17,
+              "the .tcdc block layout changed");
+
+// DepthRecorder used to write a color block's length as 13 + compressed size,
+// one 4-byte field short. Readers accept exactly that length as well.
+constexpr std::uint32_t LEGACY_COLOR_BLOCK_FIELDS = 13;
+
 // --- block writers (each writes one TLV block) -------------------------------
 
 inline void writeDepthBlock(std::ostream& o, const DepthFrame& f, DepthCodecId dc,
@@ -142,7 +167,7 @@ inline void writeDepthBlock(std::ostream& o, const DepthFrame& f, DepthCodecId d
         codec=(dc==DepthCodecId::LZ4)?Codec::LZ4:Codec::None;
     }
     compress(src, srcBytes, comp, codec);
-    const std::uint32_t payloadLen = 12 + static_cast<std::uint32_t>(comp.size());
+    const std::uint32_t payloadLen = DEPTH_BLOCK_FIELDS + static_cast<std::uint32_t>(comp.size());
     wr<std::uint8_t>(o, BLOCK_DEPTH);
     wr<std::uint32_t>(o, payloadLen);
     wr<std::uint32_t>(o, n);
@@ -158,7 +183,7 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
     const std::uint8_t chn=static_cast<std::uint8_t>(c.getChannels());
     const std::size_t rawBytes=static_cast<std::size_t>(cw)*ch*chn;
     compress(c.getData(), rawBytes, comp, (cc==ColorCodecId::LZ4)?Codec::LZ4:Codec::None);
-    const std::uint32_t payloadLen = 13 + static_cast<std::uint32_t>(comp.size());
+    const std::uint32_t payloadLen = COLOR_BLOCK_FIELDS + static_cast<std::uint32_t>(comp.size());
     wr<std::uint8_t>(o, BLOCK_COLOR);
     wr<std::uint32_t>(o, payloadLen);
     wr<std::int32_t>(o, cw); wr<std::int32_t>(o, ch); wr<std::uint8_t>(o, chn);
@@ -171,10 +196,11 @@ inline void writeColorBlock(std::ostream& o, const DepthFrame& f, ColorCodecId c
 //
 // `len` is the block's stated length and `room` the bytes left in the frame
 // after the block header. A depth/color payload ends where its own size fields
-// say, as it always has: DepthRecorder writes a color block's length as 13 +
-// compressed size, though the fields take 17 bytes. `used` returns the bytes
-// the payload takes, or 0 when that isn't known to lie within the block and the
-// frame; the caller then can't tell where the next block starts.
+// say, as it always has: files written before the color length was fixed state
+// a color block's length as 13 + compressed size, though the fields take 17
+// bytes. `used` returns the bytes the payload takes, or 0 when that isn't known
+// to lie within the block and the frame; the caller then can't tell where the
+// next block starts.
 //
 // The size fields are checked against the block, the frame dimensions, each
 // other and the largest size decompress() can produce BEFORE anything is
@@ -212,11 +238,13 @@ inline bool parseDepthPayload(std::istream& in, const TcdcHeader& h, std::uint32
     auto fail = [&](const char* reason) { dst.depth.clear(); why = reason; return false; };
     used = 0;
     std::uint32_t n=0, rawBytes=0, compSize=0;
-    if (len < 12 || room < 12) return fail("block is shorter than its size fields");
+    if (len < DEPTH_BLOCK_FIELDS || room < DEPTH_BLOCK_FIELDS)
+        return fail("block is shorter than its size fields");
     if (!rd(in,n) || !rd(in,rawBytes) || !rd(in,compSize)) return fail("block is cut off");
-    if (compSize > len - 12 || 12 + static_cast<std::uint64_t>(compSize) > room)
+    const std::uint64_t payloadBytes = DEPTH_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
+    if (payloadBytes > len || payloadBytes > room)
         return fail("compressed size runs past the block");
-    used = 12 + static_cast<std::uint64_t>(compSize);
+    used = payloadBytes;
     const bool hilo = h.depthCodec == static_cast<std::uint8_t>(DepthCodecId::HiloLZ4);
     const Codec codec = (hilo || h.depthCodec == static_cast<std::uint8_t>(DepthCodecId::LZ4))
                             ? Codec::LZ4 : Codec::None;
@@ -259,13 +287,17 @@ inline bool parseColorPayload(std::istream& in, const TcdcHeader& h, std::uint32
     };
     used = 0;
     std::int32_t cw=0, ch=0; std::uint8_t chn=0; std::uint32_t rawBytes=0, compSize=0;
-    if (len < 13 || room < 17) return fail("block is shorter than its size fields");
+    if (len < LEGACY_COLOR_BLOCK_FIELDS || room < COLOR_BLOCK_FIELDS)
+        return fail("block is shorter than its size fields");
     if (!rd(in,cw) || !rd(in,ch) || !rd(in,chn) || !rd(in,rawBytes) || !rd(in,compSize))
         return fail("block is cut off");
-    // The length counts 13 bytes of fields (as DepthRecorder writes it) or all 17.
-    if (compSize > len - 13 || 17 + static_cast<std::uint64_t>(compSize) > room)
+    // The length counts all 17 bytes of fields, or exactly 13 + compressed size
+    // in a file written before the color length was fixed.
+    const std::uint64_t payloadBytes = COLOR_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
+    const bool legacyLen = len == LEGACY_COLOR_BLOCK_FIELDS + static_cast<std::uint64_t>(compSize);
+    if ((!legacyLen && payloadBytes > len) || payloadBytes > room)
         return fail("compressed size runs past the block");
-    used = 17 + static_cast<std::uint64_t>(compSize);
+    used = payloadBytes;
     const Codec codec=(h.colorCodec==static_cast<std::uint8_t>(ColorCodecId::LZ4))?Codec::LZ4:Codec::None;
     if (cw <= 0 || ch <= 0) return fail("width and height must be positive");
     if (chn != 1 && chn != 3 && chn != 4) return fail("channel count must be 1, 3 or 4");

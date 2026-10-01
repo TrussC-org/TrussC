@@ -36,8 +36,10 @@ void tcApp::update() {
     // ---------------------------------------------------------------------------
     // Get OSC messages by polling
     // ---------------------------------------------------------------------------
-    // Calling hasNewMessage() enables buffering
+    // The first hasNewMessage() or getNextMessage() call enables buffering
     // getNextMessage() retrieves one message at a time from the queue
+    // (up to getBufferSize() = 1024 queued; if more pile up, the oldest are
+    // dropped, counted in getDroppedMessages() and logged)
     // ---------------------------------------------------------------------------
     while (receiver_.hasNewMessage()) {
         OscMessage msg;

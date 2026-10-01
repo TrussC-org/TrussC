@@ -397,15 +397,16 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     // ファイル拡張子から形式を判定
-    std::string ext = path.extension().string();
+    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    std::string ext = toLower(getFileExtension(path));
     NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
-    if (ext == ".jpg" || ext == ".jpeg") {
+    if (ext == "jpg" || ext == "jpeg") {
         fileType = NSBitmapImageFileTypeJPEG;
-    } else if (ext == ".tiff" || ext == ".tif") {
+    } else if (ext == "tiff" || ext == "tif") {
         fileType = NSBitmapImageFileTypeTIFF;
-    } else if (ext == ".bmp") {
+    } else if (ext == "bmp") {
         fileType = NSBitmapImageFileTypeBMP;
-    } else if (ext == ".gif") {
+    } else if (ext == "gif") {
         fileType = NSBitmapImageFileTypeGIF;
     }
 

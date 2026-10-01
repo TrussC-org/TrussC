@@ -664,6 +664,16 @@ font.load("myfont.ttf", 24);   // Loads bin/data/myfont.ttf
 
 When building, `bin/` is the working directory. No need for absolute paths.
 
+File extensions are matched case-insensitively; file names keep their case as written.
+Wherever TrussC picks a format from the extension (`Sound::load`, `Pixels::save`,
+`saveScreenshot`, the hot reload watcher, ...), `photo.JPG`, `loop.Wav` and
+`shot.Png` pick the same decoder or encoder as lower case. The file opened or
+written is exactly the one named (except `saveScreenshot` on Windows, which
+appends `.png` to an unknown extension; see #455): on a case-sensitive file
+system `a.wav` and `a.WAV` stay two files. `getFileExtension()` returns the
+extension as written; compare `toLower(getFileExtension(path))` to do the same
+in app code.
+
 ## 3D
 
 TrussC defaults to 2D (orthographic). For 3D, use `EasyCam`:
@@ -982,13 +992,14 @@ trusscli upgrade               Upgrade TrussC (git pull + rebuild trusscli)
 trusscli addon add|remove <a>  Add / remove addons (also clone / list / search / pull — see `trusscli addon --help`)
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
-trusscli clean                 Delete build directories
-trusscli build                 Build (auto-selects native)
+trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache)
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
 Common options: `-p, --path <path>`, `--tc-root <path>`, `-h, --help` (per-command help).
 Examples: `trusscli new myApp -a tcxOsc -a tcxIME` / `trusscli new ./apps/myApp --web` / `trusscli update -p ./apps/myApp`.
+`update`, `addon add` and `addon remove` keep the project's IDE (`--ide`) and its `--web` / `--android` / `--ios` targets, read back from its `CMakePresets.json`, so a plain `trusscli update -p ./apps/myApp` keeps the web target. Pass `--ide <type>` to switch the IDE, and `--no-web` / `--no-android` / `--no-ios` to drop a target (its build folder and `build-web.*` script stay; `trusscli clean --all` removes them). After a fresh clone (`CMakePresets.json` is gitignored) the defaults apply: `vscode`, native only.
 
 ### VSCode / Cursor won't build (no preset selected)
 
@@ -1122,7 +1133,7 @@ public:
 };
 ```
 
-The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework detaches them after `cleanup()` and waits before it destroys the App (on exit, on a hot reload, and when a secondary window closes). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when its window closes (or, with #318, when it is swapped out); closing the window also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
+The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework subscribes them right after the App's first `setup()` returns, not when the App is constructed (so what `setup()` prepares is ready in them, and an App that is never run gets no callbacks). It detaches them after `cleanup()` and waits before it destroys the App (on exit, on a hot reload, and when a secondary window closes). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when its window closes (or, with #318, when it is swapped out); closing the window also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
 
 ### Bubble events up, don't broadcast?
 
@@ -1184,7 +1195,7 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
 
-Overriding `App::audioOut()` / `App::audioIn()` needs no teardown code: the framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
 ### Output channel mapping? (setChannelMap)
 
@@ -1199,7 +1210,7 @@ Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed o
 - **Generator** (oscillators / synths) adds audio into the buffer,
 - **Effect** (reverb / filter / EQ) reads + writes to process it,
 - **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
-Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority.
+Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority. Within one priority, listeners run in the order they subscribed. The App's own `audioOut()` / `audioIn()` overrides run just before the Generator priority, so ahead of every default-priority listener, including one you subscribe in `setup()` (before the framework subscribes the App's hooks); a listener that must see what `App::audioOut()` wrote uses `Effect` or `Monitor`. A default-priority listener subscribed before the App was constructed (a static object, or in `main()` before `runApp()`) used to run before `App::audioOut()` and now runs after it.
 
 ### How do I record the audio the app is playing? (AudioRecorder)
 
@@ -1483,7 +1494,11 @@ Rules for callbacks that are not on the main thread:
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
-The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. Delete the app's build folder (`build-windows`, or whichever `build-*` folder the preset uses) and build again. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. The project's `CMakePresets.json` pins the same old MSVC, Windows SDK and ninja paths. `trusscli build` handles this: when a pinned path is gone, it detects Visual Studio again, replaces only those paths in the `windows` preset of `CMakePresets.json`, removes `build-windows` and configures again, and prints what it did. A project whose presets pin no Visual Studio path is not touched: delete `build-windows` and run `trusscli build`. `trusscli doctor` reports the missing path. A `--ide vs` project also has a `vs/` solution whose `CMakeCache.txt` still points at the old compiler: run `trusscli update` to regenerate it. With plain CMake, run `trusscli update` (or `trusscli build` once) first. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+
+### Build error: "... is not a directory", "could not load cache", or a missing Makefile / build.ninja
+
+The build folder is missing or empty, e.g. after `trusscli clean` or deleting it by hand. After a configure that failed, the folder has a `CMakeCache.txt` but no build files, and the build stops with "No rule to make target 'Makefile'" or "loading 'build.ninja': No such file or directory". `cmake --build --preset <x>` does not configure by itself. `trusscli build` does: it runs `cmake --preset <x>` first and prints `[build] No CMake cache in <folder>, configuring...`, or after a failed configure `[build] No build files in <folder> (an earlier configure did not finish), configuring...`. With plain CMake, run `cmake --preset <x>` before `cmake --build --preset <x>`.
 
 ### Build error: "hot reload state changed -- reconfigure required"
 
@@ -1562,6 +1577,8 @@ logger.setLogFile("app-" + getTimestampString() + ".log");   // unique per run
 logger.setFileLogLevel(LogLevel::Notice);                    // drop Verbose to shrink the file
 logNotice("App") << "started";
 ```
+A relative name lands in the data folder (`getDataPath()`), and a missing folder is created, so `setLogFile("logs/app.log")` works on a fresh install. If the file cannot be opened, `setLogFile` logs why, returns false and keeps the current log file open.
+
 **Watch the volume:** logging every frame (or any hot loop) can grow the file to gigabytes per day and fill the disk. Filter with `setFileLogLevel` and don't log in tight loops.
 
 ### How do I hook every log line? (onLog event)
@@ -1637,6 +1654,8 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 
 All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too.
 
+The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`, `Xml::save`, `Pixels::save` / `Image::save`, `setLogFile`) resolve a relative path against `getDataPath()`, use an absolute path as given, and create a missing parent folder (as `saveScreenshot()` and the recorders do). When the folder cannot be created or the file cannot be opened, they return false. All of them log the reason, except that `Pixels::save` / `Image::save` log only when the path has no file name or the folder cannot be created (a failed image write just returns false).
+
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
 
 For the other direction, path → string (display, `Font`, JSON, a string compare), use `pathToUtf8(path)`, not `path.string()`: it returns UTF-8 on every platform, while `path.string()` on Windows follows the process code page, and throws for characters outside it when that is not UTF-8. On Windows `pathToUtf8()` can still throw for a name that is not valid UTF-16 (an unpaired surrogate, which NTFS allows); to log a path, use `logNotice() << path`, which does not throw. The path helpers (`getFileName()`, `getBaseName()`, `getFileExtension()`, `getParentDirectory()`, `joinPath()`, `getAbsolutePath()`, `listDirectory()`) already return UTF-8 (without the manifest, turn a result back into a path with `utf8ToPath()` before passing it to `load()` / `save()`, not with `fs::path(str)`), and `logNotice() << path` writes the path as UTF-8 (without the quotes `std::ostream` adds). In a Windows console, `runApp()` and `runHeadlessApp()` switch the output code page to UTF-8 while the app runs, so non-ASCII log text prints correctly.
@@ -1662,7 +1681,7 @@ Every TrussC app can become an **MCP server.** Launch with `TRUSSC_MCP=1` and th
 
 ### How does an AI tune/verify a running app over MCP?
 
-A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. Mouse/key injection is opt-in via `mcp::registerControlTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. `tcx_imgui_get_widgets` also returns each value widget's current value (full-precision floats, `DragFloat3` as one array, colors 0-1 as the variable holds them, `SliderAngle` in radians). When the user says "make it like this" after tweaking sliders or the NodeInspector by hand, call `tcx_imgui_get_touched`: it lists exactly what they changed since startup, with current values (ImGui widgets + per-node inspector edits); write those into the code, then `tcx_imgui_reset_touched`. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
+A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. Mouse/key injection is opt-in via `mcp::registerControlTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. `tcx_imgui_get_widgets` also returns each value widget's current value (full-precision floats, `DragFloat3` as one array, colors 0-1 as the variable holds them, `SliderAngle` in radians). When the user says "make it like this" after tweaking sliders or the NodeInspector by hand, call `tcx_imgui_get_touched`: it lists exactly what they changed since startup, with current values (ImGui value widgets — including `Checkbox`, `MenuItem`/`Selectable` with a `bool*`, `RadioButton` with an `int*` and `ListBox` — + per-node inspector edits; buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` toggles, plain `Selectable`s and `RadioButton(label, bool)` change no variable and are not listed); write those into the code, then `tcx_imgui_reset_touched`. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
 
 ## Community & support
 
@@ -2034,7 +2053,7 @@ int recordingFrameCount()  // Number of frames captured so far in the current re
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
+bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
@@ -2084,7 +2103,7 @@ Json reflectToJson(T & obj)  // Return all reflected (TC_REFLECT) members of obj
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-bool setLogFile(const fs::path & path)  // Open a file to receive log output
+bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
@@ -2121,7 +2140,7 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file
+bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened
 bool createDirectory(const fs::path & path)  // Create directory (and parents)
 bool directoryExists(const fs::path & path)  // Check if directory exists
 bool fileExists(const fs::path & path)  // Check if file exists
@@ -2131,7 +2150,7 @@ fs::path getDataPath(const fs::path & filename)  // Resolve a relative path agai
 fs::path getDataPathRoot()  // Get the current data path root as fs::path.
 fs::path getExecutableDir()  // Get the directory containing the running executable.
 fs::path getExecutablePath()  // Get the absolute path of the running executable.
-std::string getFileExtension(const fs::path & path)  // Get file extension without dot
+std::string getFileExtension(const fs::path & path)  // Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do.
 std::string getFileName(const fs::path & path)  // Get filename from path
 int64_t getFileSize(const fs::path & path)  // Get file size in bytes
 std::string getParentDirectory(const fs::path & path)  // Get parent directory
@@ -2143,8 +2162,8 @@ std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
 std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
 bool removeFile(const fs::path & path)  // Remove file
-bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success.
-bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file
+bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false.
+bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened
 void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
 fs::path utf8ToPath(std::string_view utf8)  // Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later).
@@ -2163,7 +2182,7 @@ void setBeepVolume(float vol)  // Set the output volume for beep() (0.0-1.0).
 size_t getAudioAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer for FFT / visualization. numSamples is capped at the analysis buffer size (4096). Returns the number of samples written.
 size_t getMicAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest microphone input samples into outBuffer. Convenience wrapper over getMicInput().getBuffer(). numSamples is capped at the mic buffer size (4096). Returns the number of samples written.
 MicInput & getMicInput()  // Get the global MicInput singleton (microphone capture). Call start() on it to open the device.
-void initAudio()  // Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
+void initAudio()  // Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener).
 void shutdownAudio()  // Shut down the global AudioEngine and close the audio device. Usually unnecessary (runs at program exit).
 ```
 
@@ -2362,8 +2381,8 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup() for good, like audioOut; the same rule applies: don't wait on the main thread or on its locks in here.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
+void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached after cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here.
+void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
 Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
@@ -2404,7 +2423,7 @@ int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-pl
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
 AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread load. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
 std::vector<AudioVoiceInfo> AudioEngine::getVoices()  // Snapshot of the voices currently playing or paused (AudioVoiceInfo: slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level). Voices left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
-bool AudioEngine::init() [+1]  // Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success.
+bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
@@ -2428,7 +2447,7 @@ bool AudioEngine::waitForCallbackIdle()  // Teardown barrier for audioOut / audi
 ```cpp
 ```
 
-### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks
+### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it
 
 ```cpp
 uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
@@ -2436,7 +2455,7 @@ fs::path AudioRecorder::getPath() const  // Resolved path of the file being writ
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
 bool AudioRecorder::isRecording() const  // True while recording
 bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
+void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -2728,7 +2747,7 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing
+bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
@@ -3056,12 +3075,12 @@ LoadResult LoadResult::success()  // Make a success result (static)
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-std::string Logger::getLogFilePath() const  // Get the path of the current log file
+std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
-bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output
+bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
 ```
 
 ### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
@@ -3458,7 +3477,7 @@ void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save image to file
+bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned
 void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
@@ -3736,7 +3755,7 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
 LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
@@ -4339,6 +4358,7 @@ int Window::getHeight() const  // Window height in logical points (matches its c
 const std::string & Window::getTitle() const  // Last title set for this window (via WindowSettings or setTitle)
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
 bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
+bool Window::isOccluded() const  // Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window
 bool Window::isOpen() const  // Whether the native window is still open
 void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open (both log an error and leave the window as it is)
 void Window::setClearColor(const Color & c)  // Background clear color for this window
@@ -4375,7 +4395,7 @@ bool Xml::empty() const  // Return true if the document has no content.
 bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success.
+bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
 ```
 
