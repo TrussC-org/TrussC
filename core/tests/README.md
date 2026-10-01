@@ -1,7 +1,7 @@
 # core/tests
 
 Headless **behavioral regression tests** for the TrussC core. Each test's
-`main()` returns non-zero on failure. CI builds and runs every `core/tests/*/`
+entry (`TC_CORE_TEST_MAIN`, see below) returns non-zero on failure. CI builds and runs every `core/tests/*/`
 here (`build_all.py --core-tests-only`); a non-zero exit fails the job. This is
 the same convention bundled addons use (`addons/*/tests/`).
 
@@ -22,7 +22,9 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
 ## Two test shapes
 
 1. **trusscli project tests** (default) — a `src/` dir; built via `trusscli` and
-   linked against libTrussC. `threadSafety/` is one.
+   linked against libTrussC. `threadSafety/` is one. In CI they are compiled
+   into **one app**, `allCoreTests/` (see below), unless the dir has an
+   `own-binary` marker.
 2. **Standalone CMake unit tests** — a committed `CMakeLists.txt` with source at
    the dir root (no `src/`); built with plain `cmake`, **not** linked against
    libTrussC. Use this when a test must compile a library directly with options
@@ -30,6 +32,73 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
    `sokol_gl` on `SOKOL_DUMMY_BACKEND` (no GPU) to assert GPU-resource
    accounting. `build_all.py` tells the two apart by the committed `CMakeLists.txt`
    + absence of `src/`, and runs both under `--core-tests-only`.
+
+## One app for all tests (`allCoreTests/`)
+
+Building every test as its own project took most of the CI time, so
+`build_all.py --core-tests-only` builds `core/tests/allCoreTests/` **once**:
+its `local.cmake` compiles every `core/tests/<name>/src` that has a
+`main.cpp` and no `own-binary` marker into it. Each test still **runs in its
+own process** (`allCoreTests <name>`, cwd = the test's own dir), so
+process-wide state (Logger, AudioEngine, MCP server, signal handlers, atexit,
+the app runtime) is never shared between tests. Every test also still builds
+alone, exactly as before.
+
+### Adding a test
+
+1. Make `core/tests/<name>/src/main.cpp` (copy a small one such as
+   `clipSpace/`, with its `addons.make` and `.gitignore`).
+2. Include the entry header and keep everything after the includes and
+   `using`s in an anonymous namespace, so names like `Probe` or `HeadlessApp`
+   never collide with another test's in the one app:
+
+   ```cpp
+   #include <TrussC.h>
+   #include "../../common/tcCoreTest.h"
+
+   using namespace std;
+   using namespace tc;
+
+   namespace {
+   // helpers, globals, App classes ...
+   } // namespace
+
+   TC_CORE_TEST_MAIN() {          // or TC_CORE_TEST_MAIN(int argc, char** argv)
+       ...
+       return g_fail ? 1 : 0;
+   }
+   ```
+
+   Built alone, `TC_CORE_TEST_MAIN(...)` is `int main(...)`. In
+   `allCoreTests` it registers the entry under the dir name; argv[0] is kept
+   and the test name removed, so `argc`/`argv` are the same either way.
+3. Keep namespace-scope objects inert: their constructors and destructors run
+   in **every** test's process of `allCoreTests`. No TrussC calls (Logger,
+   clock, Window, MCP, sockets, threads) at static init or exit; put such an
+   object in the entry as a function-local `static` (see `onceGate/`).
+
+Use an **`own-binary`** marker file (one line saying why) instead when the
+test cannot share an executable: it replaces or interposes a library
+function for the whole binary (`operator new`, `fclose`, `write`, `ioctl`,
+`pthread_create`), needs a special project shape (hot reload host/guest),
+or needs an addon. Such a test is built and run alone, as before. Today:
+`audioDiagnostics`, `hotReloadLifecycle`, `serialBaudRate`, `serialHangup`,
+`tcpServerClients`.
+
+### Running tests locally
+
+```sh
+tools/bin/trusscli update -p core/tests/allCoreTests --tc-root "$PWD" --ide cmake
+cd core/tests/allCoreTests
+cmake -S . -B build-linux -DCMAKE_BUILD_TYPE=Release && cmake --build build-linux -j
+./bin/allCoreTests --list                 # registered tests, one per line
+cd ../clipSpace && ../allCoreTests/bin/allCoreTests clipSpace   # run one
+```
+
+(On macOS the binary is `bin/allCoreTests.app/Contents/MacOS/allCoreTests`.)
+Arguments after the name go to the test, e.g. `allCoreTests fontSfntCheck
+--dump font.ttf`. An unknown name prints the usage and exits 2. Build it in
+Release: `entryStacks` and `scopedStack` skip in a debug build.
 
 ### Also on web (`web-test` marker)
 
@@ -40,7 +109,8 @@ lane). Use it when the invariant lives in
 web-only code (`#ifdef __EMSCRIPTEN__`), which the web example builds only ever
 compile. The test is the regular web app build (Emscripten's default
 environment includes node), so it must not touch the canvas / GPU: plain
-`main()` and no drawing. It still runs natively under `--core-tests-only`, so
+`main()` and no drawing. The web run builds each marked test alone (not
+through `allCoreTests`). It still runs natively under `--core-tests-only`, so
 give the native side something real to check (or an explicit skip).
 Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
@@ -92,6 +162,21 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Logger's lock does not wait for it (the line goes to stderr); and on
   Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
   `XOpenDisplay()` failure lands in that file.
+- `onceGate/` — the warn-once gate `OnceGate` (#308): `isFirstTime()` is
+  true the first time and false afterwards, per gate object (a `static` per
+  call site, a member per object); with an interval it is true again once the
+  interval has passed since the last true, not before (0, below 0 or NaN
+  means once); many threads calling one gate get exactly one true between
+  them; and a `static` gate works from a static destructor at exit. It is
+  checked at compile time to be trivially destructible, not copyable or
+  movable, and `constinit`-constructible.
+- `pbrLightLimits/` — the PBR light limits (#333): `addLight()` registers up
+  to 8 lights per window and logs one warning for lights past that, however
+  many; re-adding a registered light on a full list is silent. The pure
+  `internal::selectPbrSpecialLightSlots()` gives the single projector slot to
+  the first Spot light with a projection texture and the single IES slot to
+  the first light with a profile (among the first 8), and flags a further
+  projector or IES light that gets no slot (the PBR draw warns once from it).
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
@@ -122,7 +207,19 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   holds with no allocation sized from the stated length (the largest request
   is recorded by `src/allocProbe.cpp`), and growth past the first reservation
   lands on a correctly stated length. A voice on a buffer with no frames
-  stops at its first mix.
+  stops at its first mix. A file reached through `<dir>/..` is reported as
+  given, the same string in `getPath()`, the drop warning, `getPlayingSounds()`
+  and the tool (#365); `getBufferSize()` and the tool's `requestedBufferSize`
+  are the requested size, while `AudioDeviceChangedArgs::bufferSize` is the
+  period the device runs with (also with the default request 0).
+- `soundVoiceLifetime/` — a `Sound` plays only while it, or a copy of it, is
+  alive (#281), on the real `AudioEngine` over miniaudio's null backend:
+  `maxPolyphony + 8` scoped looping Sounds each play and a new Sound plays
+  afterwards, a scoped copy does not stop the original, a scoped one-shot
+  stops when its scope ends, copy / move assignment release the old voice (a
+  move keeps the moved voice playing), a paused voice is released too, and a
+  streamed voice closes its file on `stop()` and when its last handle goes
+  away (checked through `/proc/self/fd` on Linux).
 - `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
   read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
   measured on `audioOut` with files of DC levels: `setPosition()` moves the
@@ -155,6 +252,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the logger that names the requested device, and a later `init()` succeeds
   (#279). An `init()` on the null backend the test requested logs no
   "no usable audio backend" warning (that warning is for a fallback to it).
+- `streamWorkerIdle/` — the StreamWorker sleeps while no stream needs it
+  (#447), on the real `AudioEngine` over miniaudio's null backend: with a
+  stream that has played to its end (its voice still held), and with one
+  stream playing, the process CPU time over ~1 s (`getrusage` /
+  `GetProcessTimes`, the main thread asleep) stays under a quarter of one
+  core (the worker used to spin a whole core); while it plays, every
+  `audioOut` block holds the file's full DC level (no gap), also at speed 10;
+  and a seek on a playing stream is heard within 100 ms (the mean is printed).
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
@@ -165,7 +270,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   a moved-from object.
 - `audioListenerTeardown/` — nothing on the audio thread reaches an object
   after its owner let it go (#256), on the real `AudioEngine` over miniaudio's
-  null backend: `AudioEngine::waitForCallbackIdle()` waits for an `audioOut`
+  null backend: `AudioEngine::waitForAudioCallbacks()` waits for an `audioOut`
   pass in flight, returns at once with no audio running and from inside a
   listener, and gives up (warning, `false`) on a listener stuck for a second;
   an App torn down by `runHeadlessApp` while its `audioOut()` runs keeps the
@@ -235,6 +340,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `hotReloadLifecycle/` — *(hot reload host/guest build)* the real
+  `GuestLibrary` loads, runs and unloads the guest several times (see the
+  header of `src/main.cpp` for every check). `events().hotReloadUnload` fires
+  once per unload, while the guest's App is still the main window's root, and
+  a guest singleton's listeners on the host's events (tcxNodeInspector's
+  toggle key) are gone after each unload (#416). `--reload-check` (needs a
+  display and cmake, not run in CI) reloads the windowed host twice with
+  tcxNodeInspector attached: the host's listener counts stay those of the
+  first generation (the Hierarchy is drawn once), and a press away from the
+  panels is not taken by a previous generation's tcxImGui.
 - `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
   pre-build check decide "does this project use hot reload" the same way:
   `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
@@ -285,7 +400,19 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   and the listener reconnected while `disconnect()` was joining that thread.
   Destroying a client whose listener reconnects on every `onDisconnect`
   finishes without any `onDisconnect` and without reconnecting: the
-  destructor does not notify.
+  destructor does not notify. When an `onError` listener reconnects, the
+  replaced attempt reports no `onConnect(false)` (#393), through
+  `connectAsync()` and without threads; a refused `connectAsync()` with no
+  reconnect reports `onConnect(false)` exactly once.
+- `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
+  (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
+  `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also
+  reports a port that is already in use: on a fixed port another server
+  listens on, `mcp::startHttpServer()` fails to bind, logs exactly one
+  "Failed to bind" error through the Logger, and the other server keeps
+  answering every request. And the default host: `mcp::startHttpServer()`
+  with no host argument logs `http://127.0.0.1:PORT/mcp` and answers a client
+  that connects to 127.0.0.1.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and
@@ -564,3 +691,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
+- `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's
+  `globalPos` (`TC_DERIVED`, derived from `pos`): `reflectToJson()` writes
+  `pos` and no `globalPos` (`reflectToJson(obj, true)` writes both), and a
+  restore gives the exact saved `pos` after the parent moved, into a node with
+  no parent yet (then `addChild()`), and under a parent scaled to 0; an edited
+  `pos` is applied; `globalPos` alone moves the node in world space; when both
+  are written, `globalPos` is applied first and `pos` wins, also for JSON
+  saved with `globalPos`. `Reflector::isDerived()` marks only the derived
+  value, and `JsonWriteReflector::derived` lists derived paths, nested ones
+  too (`span.end`, a derived member in a `TC_REFLECT_FREE` type). Through the
+  MCP tools on a headless App: `tc_get_node_tree` shows `globalPos` and names
+  it under `derived`, writing the read object back with an edited `pos` via
+  `tc_set_node_members` applies the edit, and `globalPos` alone moves the node.

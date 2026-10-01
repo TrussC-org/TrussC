@@ -14,6 +14,23 @@ terminator in `numBytes`; the web build delivers it like native:
 The bytes are laid out as Emscripten hands them over, so the check runs
 natively. The web handler itself is only compiled (web CI job).
 
+It also checks fragmented messages on the native client (RFC 6455 5.4) over
+loopback: a core `TcpServer` answers the upgrade request and writes frames by
+hand. It listens on the first free port from 23380 to 23399, below Linux's
+ephemeral port range (`TcpServer` cannot report a port the OS picked).
+
+- text in 3 fragments with a Ping in between -> one `onMessage` with the full
+  text, and one masked Pong echoing the Ping;
+- binary in 2 fragments, and 100 KB of text in 3 fragments -> one
+  `onMessage` each, bytes intact;
+- a first fragment only, then `disconnect()` and `connect()` -> the next
+  message arrives on its own;
+- a continuation with no message in progress, or a new Text frame during
+  one -> Close 1002, then `onError`, then `onClose`;
+- a frame, or fragments together, over the 64 MiB message limit -> Close
+  1009, then `onError`, then `onClose`;
+- an `onError` listener that calls `disconnect()` -> one `onClose`.
+
 tcxWebSocket depends on tcxTls, which builds mbedTLS, so this harness has a
 `daily-only` marker: CI runs it in the daily workflow
 (`examples/build_all.py --addon-tests-only --include-daily`), not per PR. Run

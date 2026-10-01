@@ -23,9 +23,18 @@
 // logs "[MCP] HTTP server listening on http://HOST:PORT/mcp" through the
 // Logger at Notice, exactly once, with the actual (here OS-assigned) port, so
 // the line reaches onLog listeners and the log file, not only stderr.
+//
+// Also checks that the MCP server reports a port that is already in use: on a
+// fixed port another server listens on, it fails to bind, logs exactly one
+// "Failed to bind" error, and the other server keeps answering.
+//
+// Also checks the default host: mcp::startHttpServer() with no host argument
+// listens on 127.0.0.1 (the port line names it, and a client connecting to
+// 127.0.0.1 gets an answer), the same on every OS.
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -41,6 +50,8 @@
 using namespace std;
 using namespace tc;
 
+namespace {
+
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
     printf("%-64s %s%s\n", name.c_str(), ok ? "PASS" : "FAIL",
@@ -49,10 +60,108 @@ static void check(const string& name, bool ok, const string& detail = "") {
     if (!ok) ++g_fail;
 }
 
+// A port that is already in use. The first server listens on a port the OS
+// picked; mcp::startHttpServer() on that same port must fail to bind and log
+// exactly one "Failed to bind" error, and the first server must keep
+// answering every request. Both use 127.0.0.1.
+static void testPortInUse() {
+    httplib::Server first;
+    first.Get("/", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("first", "text/plain");
+    });
+    const int fixedPort = first.bind_to_any_port("127.0.0.1");
+    check("first server bound to a port", fixedPort > 0);
+    if (fixedPort <= 0) return;
+    thread firstThread([&] { first.listen_after_bind(); });
+    first.wait_until_ready();
+
+    atomic<int> bindErrors{0};
+    EventListener listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("Failed to bind") != string::npos) {
+            ++bindErrors;
+        }
+    });
+
+    mcp::startHttpServer(fixedPort, "127.0.0.1");
+    for (int i = 0; i < 300 && bindErrors.load() == 0; i++) {
+        this_thread::sleep_for(chrono::milliseconds(10));
+    }
+    this_thread::sleep_for(chrono::milliseconds(100)); // a second error would land here
+    check("port in use -> exactly one \"Failed to bind\" error", bindErrors.load() == 1,
+          to_string(bindErrors.load()) + " errors");
+
+    httplib::Client cli("127.0.0.1", fixedPort);
+    cli.set_connection_timeout(5);
+    cli.set_read_timeout(10);
+    const int requests = 20;
+    int answeredByFirst = 0;
+    for (int i = 0; i < requests; i++) {
+        auto r = cli.Get("/");
+        if (r && r->status == 200 && r->body == "first") ++answeredByFirst;
+    }
+    check("port in use -> first server answers every request", answeredByFirst == requests,
+          to_string(answeredByFirst) + " of " + to_string(requests));
+
+    listener.disconnect();
+    mcp::stopHttpServer();
+    first.stop();
+    firstThread.join();
+}
+
+// The default host. Started with no arguments, the server picks a port, logs
+// "[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp" and answers a
+// client that connects to the 127.0.0.1 address. Runs last: stopHttpServer()
+// closes the request channel, and GET / does not use it.
+static void testDefaultHost() {
+    mutex logMutex;
+    string portLine;
+    EventListener listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.message.find("HTTP server listening on") == string::npos) return;
+        lock_guard<mutex> lock(logMutex);
+        if (portLine.empty()) portLine = e.message;
+    });
+
+    mcp::startHttpServer();
+    string line;
+    for (int i = 0; i < 500 && line.empty(); i++) {
+        this_thread::sleep_for(chrono::milliseconds(10));
+        lock_guard<mutex> lock(logMutex);
+        line = portLine;
+    }
+    listener.disconnect();
+
+    const string prefix = "[MCP] HTTP server listening on http://127.0.0.1:";
+    const string suffix = "/mcp";
+    int port = 0;
+    if (line.size() > prefix.size() + suffix.size() &&
+        line.compare(0, prefix.size(), prefix) == 0 &&
+        line.compare(line.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        port = atoi(line.substr(prefix.size(), line.size() - prefix.size() - suffix.size()).c_str());
+    }
+    check("default host -> port line names http://127.0.0.1:PORT/mcp", port > 0, line);
+    check("default host -> port line has the bound port", port > 0 && port == mcp::getHttpPort(),
+          to_string(port) + " vs " + to_string(mcp::getHttpPort()));
+
+    if (port > 0) {
+        httplib::Client cli("127.0.0.1", port);
+        cli.set_connection_timeout(5);
+        cli.set_read_timeout(10);
+        auto r = cli.Get("/");
+        check("default host -> answers on 127.0.0.1", r && r->status == 200,
+              r ? to_string(r->status) : httplib::to_string(r.error()));
+        check("default host -> answer is the MCP server info",
+              r && r->body.find("TrussC MCP Server") != string::npos, r ? r->body : "");
+    }
+
+    mcp::stopHttpServer();
+}
+
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
 static const string kToken = "test-token-0123456789abcdef";
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // Token comparison helper, no server needed.
     {
         using mcp::detail::constantTimeEquals;
@@ -225,6 +334,9 @@ int main() {
     worker.join();
     mcp::stopHttpServer();
     logListener.disconnect();
+
+    testPortInUse();
+    testDefaultHost();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

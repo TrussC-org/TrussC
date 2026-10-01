@@ -303,6 +303,22 @@ struct Streamable {
 inline std::ostream& operator<<(std::ostream& os, const Settings&) { static int freeShl = 0; (void)freeShl; return os; }  // expect: fx::operator::freeShl
 inline int& afterFreeShift() { static int afs = 0; return afs; }          // expect: fx::afterFreeShift::afs
 
+// --- A static OnceGate is accepted by its type; other state next to it is not
+class OnceGate;
+namespace tc { class OnceGate; }
+inline void notFlaggedOnceGate() { static OnceGate warned; (void)warned; }
+inline void notFlaggedOnceGateInterval() { static OnceGate underrun{5.0}; (void)underrun; }
+inline void notFlaggedOnceGateParen() { static OnceGate underrun(5.0); (void)underrun; }
+inline void notFlaggedOnceGateQualified() { static tc::OnceGate warned; (void)warned; }
+inline void notFlaggedOnceGateTwo() { static OnceGate a, b{1.0}; (void)a; (void)b; }
+inline void onceGatePointer() { static OnceGate* gp = nullptr; (void)gp; }        // expect: fx::onceGatePointer::gp
+inline void onceGateArray() { static OnceGate gates[2]; (void)gates; }            // expect: fx::onceGateArray::gates
+inline void onceGateAndPointer() { static OnceGate g, *alsoPtr; (void)g; }        // expect: fx::onceGateAndPointer::g fx::onceGateAndPointer::alsoPtr
+inline void onceGateThreadLocal() { thread_local OnceGate perThreadGate; (void)perThreadGate; }  // expect: fx::onceGateThreadLocal::perThreadGate
+inline void onceGateLookalike() { static OnceGateFlags flags; (void)flags; }      // expect: fx::onceGateLookalike::flags
+inline void onceGateNeighbour() { static OnceGate warned; static bool flag = false; (void)warned; (void)flag; }  // expect: fx::onceGateNeighbour::flag
+#define FX_NOT_FLAGGED_ONCE_GATE() do { static OnceGate macroGate; (void)macroGate; } while (0)
+
 // --- Both sides of an #if
 #ifdef _WIN32
 inline int windowsOnly = 0;                                 // expect: fx::windowsOnly

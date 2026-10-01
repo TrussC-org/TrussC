@@ -16,10 +16,10 @@
 #
 # The category must be one of these four (the checker rejects anything else):
 #
-#   harmless       a per-module copy breaks nothing: a warn-once flag, a cache
-#                  of derived data, a counter only one side uses. NOT a cache
-#                  of GPU objects that nothing frees (sokol_gl contexts,
-#                  shaders, pipelines, samplers, font atlases): every reloaded
+#   harmless       a per-module copy breaks nothing: a cache of derived data,
+#                  a counter only one side uses. NOT a cache of GPU objects
+#                  that nothing frees (sokol_gl contexts, shaders,
+#                  pipelines, samplers, font atlases): every reloaded
 #                  generation would build and keep a new set in the host's
 #                  sokol pools, and sokol_gl has 4 context slots, sokol_gfx
 #                  32 shader slots.
@@ -32,17 +32,16 @@
 # The declaration in the header carries a comment saying the same, so whoever
 # edits it sees why the per-module copy is fine.
 #
+# A warn-once flag is a function-local `static OnceGate` (tc/utils/tcOnceGate.h)
+# instead. The checker accepts it by its type, so it needs no entry here.
+#
 # State that must be one per process (a singleton, a registry, a setting app
 # code writes and the core loop reads) does not belong here: define it
 # non-inline in a .cpp (tcGlobal.cpp or a sibling) and declare an accessor in
 # the header.
 
-# --- TrussC.h: bitmap font atlas
-core/include/TrussC.h trussc::ensureFontAtlas::warned          # harmless: warn-once flag
-
 # --- TrussC.h: window / projection settings
 core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set by the launcher, applied in _setup_cb
-core/include/TrussC.h trussc::internal::warnIfSecondaryWindowControl::warned  # harmless: warn-once flag
 
 # --- TrussC.h: sokol_gl / GPU budgets
 core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)
@@ -50,8 +49,6 @@ core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: la
 # --- TrussC.h: loop timing
 core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: advanced by the host's loop, read through getFrameCount() / getUpdateCount() (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
-core/include/TrussC.h trussc::setIndependentFps::warned        # harmless: warn-once flag
-core/include/TrussC.h trussc::redraw::warned                   # harmless: warn-once flag
 
 # --- TrussC.h: input / launcher wiring
 core/include/TrussC.h trussc::internal::touchPressedListener   # host-only: installed by the launcher
@@ -88,7 +85,6 @@ core/include/tcMath.h trussc::internal::getRandomEngine::engine  # harmless: thr
 
 # --- tc/3d
 core/include/tc/3d/tcEnvironment.h trussc::Environment::isIosWeb::cached                 # harmless: cached platform probe
-core/include/tc/3d/tcEnvironment.h trussc::Environment::bakeFromEquirectTexture::warned  # harmless: warn-once flag
 
 # --- tc/app
 core/include/tc/app/tcHeadlessApp.h trussc::headless::running     # no-hot-reload: runHeadlessApp only (hot reload is windowed)
