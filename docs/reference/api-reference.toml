@@ -4429,11 +4429,9 @@ description.ja = "銀のプリセット"
 description.ko = "은 프리셋"
 
 ["MatrixScope"]
-keywords = ["raii", "guard", "scope", "transform", "stack", "push", "pop"]
-description.en = "RAII guard returned by scopedMatrix(): it called pushMatrix() when it was made and calls popMatrix() on the same render context when it goes out of scope. [[nodiscard]]; neither copyable nor movable (write `auto m = scopedMatrix();`)"
-description.ja = "scopedMatrix() が返す RAII ガード。作られたときに pushMatrix() を呼んでおり、スコープを抜けると同じレンダーコンテキストで popMatrix() を呼ぶ。[[nodiscard]]。コピーもムーブもできない（`auto m = scopedMatrix();` と書く）"
-description.ko = "scopedMatrix()가 반환하는 RAII 가드. 만들어질 때 pushMatrix()를 호출했고, 스코프를 벗어나면 같은 렌더 컨텍스트에서 popMatrix()를 호출한다. [[nodiscard]]. 복사도 이동도 할 수 없다 (`auto m = scopedMatrix();`로 쓴다)"
-related = ["scopedMatrix", "pushMatrix", "popMatrix", "StyleScope"]
+hide = true
+lua = false
+keywords = ["raii", "guard", "scope"]
 
 ["Mesh"]
 category = "types_mesh"
@@ -8970,11 +8968,9 @@ description.ja = "内部の三角形メッシュを再構築（編集後、draw 
 description.ko = "내부 삼각형 메시를 재구축(편집 후 draw 전에 호출)"
 
 ["StyleScope"]
-keywords = ["raii", "guard", "scope", "style", "stack", "push", "pop"]
-description.en = "RAII guard returned by scopedStyle(): it called pushStyle() when it was made and calls popStyle() on the same render context when it goes out of scope. [[nodiscard]]; neither copyable nor movable (write `auto s = scopedStyle();`)"
-description.ja = "scopedStyle() が返す RAII ガード。作られたときに pushStyle() を呼んでおり、スコープを抜けると同じレンダーコンテキストで popStyle() を呼ぶ。[[nodiscard]]。コピーもムーブもできない（`auto s = scopedStyle();` と書く）"
-description.ko = "scopedStyle()가 반환하는 RAII 가드. 만들어질 때 pushStyle()를 호출했고, 스코프를 벗어나면 같은 렌더 컨텍스트에서 popStyle()를 호출한다. [[nodiscard]]. 복사도 이동도 할 수 없다 (`auto s = scopedStyle();`로 쓴다)"
-related = ["scopedStyle", "pushStyle", "popStyle", "MatrixScope"]
+hide = true
+lua = false
+keywords = ["raii", "guard", "scope"]
 
 ["TcpClient"]
 keywords = ["socket client", "stream", "connection", "network client"]
@@ -15940,20 +15936,28 @@ description.ko = "크기 조절"
 related = ["translate", "rotate"]
 
 ["scopedMatrix"]
+lua = false
 category = "transform"
 keywords = ["raii", "scope", "guard", "save", "restore", "transform", "stack", "push", "pop", "early return"]
 description.en = "pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning"
 description.ja = "今 pushMatrix() し、スコープの終わりで popMatrix() する。`auto m = scopedMatrix();` はスコープを抜けると（早期 return や例外でも）ポップする MatrixScope ガードを返す。出口が複数あるコードや長いブロック向け。基本の書き方は pushMatrix() / popMatrix() のまま。[[nodiscard]]: `scopedMatrix();` だけの行はすぐにポップしてしまうため、コンパイラが警告する"
 description.ko = "지금 pushMatrix()하고 스코프 끝에서 popMatrix()한다. `auto m = scopedMatrix();`는 스코프를 벗어날 때(조기 return이나 예외에서도) 팝하는 MatrixScope 가드를 반환한다. 출구가 여러 개인 코드나 긴 블록용. 기본 형태는 여전히 pushMatrix() / popMatrix(). [[nodiscard]]: `scopedMatrix();`만 쓴 줄은 곧바로 팝되므로 컴파일러가 경고한다"
-related = ["pushMatrix", "popMatrix", "scopedStyle", "MatrixScope"]
+related = ["pushMatrix", "popMatrix", "scopedStyle"]
+details.en = "C++ only: Lua has no scope-bound guard, so in Lua use pushMatrix() / popMatrix()."
+details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無いので、Lua では pushMatrix() / popMatrix() を使う。"
+details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushMatrix() / popMatrix()를 사용한다."
 
 ["scopedStyle"]
+lua = false
 category = "graphics_style"
 keywords = ["raii", "scope", "guard", "save", "restore", "state", "stack", "push", "pop", "early return"]
 description.en = "pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning"
 description.ja = "今 pushStyle() し、スコープの終わりで popStyle() する。`auto s = scopedStyle();` はスコープを抜けると（早期 return や例外でも）ポップする StyleScope ガードを返す。出口が複数あるコードや長いブロック向け。基本の書き方は pushStyle() / popStyle() のまま。[[nodiscard]]: `scopedStyle();` だけの行はすぐにポップしてしまうため、コンパイラが警告する"
 description.ko = "지금 pushStyle()하고 스코프 끝에서 popStyle()한다. `auto s = scopedStyle();`는 스코프를 벗어날 때(조기 return이나 예외에서도) 팝하는 StyleScope 가드를 반환한다. 출구가 여러 개인 코드나 긴 블록용. 기본 형태는 여전히 pushStyle() / popStyle(). [[nodiscard]]: `scopedStyle();`만 쓴 줄은 곧바로 팝되므로 컴파일러가 경고한다"
-related = ["pushStyle", "popStyle", "scopedMatrix", "StyleScope"]
+related = ["pushStyle", "popStyle", "scopedMatrix"]
+details.en = "C++ only: Lua has no scope-bound guard, so in Lua use pushStyle() / popStyle()."
+details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無いので、Lua では pushStyle() / popStyle() を使う。"
+details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushStyle() / popStyle()를 사용한다."
 
 ["screenToWorld"]
 category = "graphics_3d_setup"
