@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <algorithm>
 #include <atomic>
@@ -50,6 +51,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 
@@ -162,7 +165,9 @@ static rawsocket_t connectSilentPeer(int port, bool shrinkRecvBuffer = true) {
     return s;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);

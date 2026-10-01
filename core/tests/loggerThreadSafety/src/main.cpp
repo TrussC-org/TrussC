@@ -38,6 +38,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -63,6 +64,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -655,7 +658,9 @@ static void testXOpenDisplayFailureReachesLogFile() {
 #endif
 #endif // LOGGER_TEST_FORK
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     printf("=== loggerThreadSafety (#265) ===\n");
     testFileSwitching();
     testConsole();
