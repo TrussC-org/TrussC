@@ -19,6 +19,10 @@ std::vector<std::string> listSystemFonts() {
     return {};
 }
 
+internal::SystemFontFace internal::systemFontFace(const std::string& /*name*/) {
+    return {};
+}
+
 } // namespace trussc
 
 #endif // __EMSCRIPTEN__

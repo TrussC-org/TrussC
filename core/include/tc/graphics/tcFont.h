@@ -61,7 +61,7 @@
     #define TC_FONT_SANS_JA  "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-jp@latest/japanese-400-normal.ttf"
     #define TC_FONT_SERIF_JA "https://cdn.jsdelivr.net/fontsource/fonts/noto-serif-jp@latest/japanese-400-normal.ttf"
 #elif defined(_WIN32)
-    // Windows — resolved via DirectWrite (not yet implemented; falls back to path)
+    // Windows — resolved via DirectWrite
     #define TC_FONT_SANS     "Segoe UI"
     #define TC_FONT_SERIF    "Times New Roman"
     #define TC_FONT_MONO     "Consolas"
@@ -82,7 +82,7 @@
     #define TC_FONT_SANS_JA  "Noto Sans CJK JP"
     #define TC_FONT_SERIF_JA "Noto Serif CJK JP"
 #else
-    // Linux — resolved via fontconfig (not yet implemented; falls back to path)
+    // Linux — resolved via fontconfig
     #define TC_FONT_SANS     "DejaVu Sans"
     #define TC_FONT_SERIF    "DejaVu Serif"
     #define TC_FONT_MONO     "DejaVu Sans Mono"
@@ -106,11 +106,12 @@ void setStbttLimitsForTests(int maxVertices, int maxPoints, size_t mallocMax);
 void resetStbttLimitsForTests();
 
 // ---------------------------------------------------------------------------
-// Font cache key (font path + size)
+// Font cache key (font path + face index + size)
 // ---------------------------------------------------------------------------
 struct FontCacheKey {
     std::string fontPath;
     int fontSize;
+    int faceIndex = 0;      // face inside a collection (.ttc / .otc); 0 for a single font
     bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
 
@@ -120,6 +121,7 @@ struct FontCacheKey {
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
+            && faceIndex == other.faceIndex
             && mipmaps == other.mipmaps && oversample == other.oversample;
     }
 };
@@ -130,7 +132,8 @@ struct FontCacheKeyHash {
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
         size_t h4 = std::hash<int>()(key.oversample);
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
+        size_t h5 = std::hash<int>()(key.faceIndex);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
     }
 };
 
@@ -208,7 +211,9 @@ public:
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
-    bool setup(const std::string& fontPath, int fontSize) {
+    // `faceIndex` picks the face inside a font collection (.ttc / .otc); a
+    // single font has only face 0.
+    bool setup(const std::string& fontPath, int fontSize, int faceIndex = 0) {
         cleanup();
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
@@ -244,10 +249,10 @@ public:
             return false;
         }
 
-        return initFromFontData(fontSize);
+        return initFromFontData(fontSize, faceIndex);
     }
 
-    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
+    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, int faceIndex = 0) {
         cleanup();
 
         if (!data && size > 0) {
@@ -257,7 +262,7 @@ public:
         // Empty data is rejected by the sfnt check in initFromFontData.
         fontData_.assign(data, data + size);
 
-        return initFromFontData(fontSize);
+        return initFromFontData(fontSize, faceIndex);
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
@@ -287,7 +292,18 @@ public:
     int getOversample() const { return oversample_; }
 
 private:
-    bool initFromFontData(int fontSize, int fontIndex = 0) {
+    bool initFromFontData(int fontSize, int fontIndex) {
+        // The face index is checked against the number of faces in the data:
+        // the font count of a collection, 1 for a single font.
+        const uint64_t faces = faceCount(fontData_.data(), fontData_.size());
+        if (faces > 0 && (fontIndex < 0 || (uint64_t)fontIndex >= faces)) {
+            logError() << "FontAtlasManager: face index " << fontIndex
+                       << " is out of range (the font has " << faces
+                       << (faces == 1 ? " face)" : " faces)");
+            fontData_.clear();
+            return false;
+        }
+
         // The sfnt structure is checked against the data size before the data
         // is given to stb_truetype.
         std::string reason;
@@ -395,6 +411,22 @@ private:
     static constexpr uint64_t kMaxFontDataSize = 0x40000000u;
     static constexpr const char* kTooLargeReason =
         "the bundled font engine (stb_truetype) cannot handle fonts larger than 1 GiB";
+
+    // Number of faces in font data: the font count of a collection whose
+    // header and offset table fit in the data, 1 for any other data of at
+    // least 12 bytes, 0 when the header cannot be read (checkSfntSkeleton
+    // gives the reason then).
+    static uint64_t faceCount(const uint8_t* data, size_t size) {
+        if (!data || size < 12) return 0;
+        auto u32 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 24) | ((uint64_t)data[o + 1] << 16) |
+                   ((uint64_t)data[o + 2] << 8) | data[o + 3];
+        };
+        if (u32(0) != 0x74746366u) return 1;  // 'ttcf'
+        const uint64_t numFonts = u32(8);
+        if (numFonts == 0 || 12 + 4 * numFonts > (uint64_t)size) return 0;
+        return numFonts;
+    }
 
     static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
                                   std::string& reason) {
@@ -1232,7 +1264,7 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setup(key.fontPath, key.fontSize)) {
+        if (!manager->setup(key.fontPath, key.fontSize, key.faceIndex)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
@@ -1251,7 +1283,7 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setupFromMemory(data, size, key.fontSize)) {
+        if (!manager->setupFromMemory(data, size, key.fontSize, key.faceIndex)) {
             return nullptr;
         }
         manager->setMipmaps(key.mipmaps);
@@ -1333,8 +1365,16 @@ public:
     //   - A URL (Emscripten only, async load)
     //   - A filesystem path
     //   - A system font name (PostScript or family name) — resolved via
-    //     tc::systemFontPath when the path doesn't exist on disk. Lets users
-    //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
+    //     the OS font lookup (as tc::systemFontPath) when the path doesn't
+    //     exist on disk. Lets users write `font.load("HiraginoSans-W3", 24)`
+    //     cross-platform. The name opens the face the OS resolves it to,
+    //     including a later face of a font collection (.ttc).
+    // `faceIndex` picks the face inside a font collection (.ttc / .otc) given
+    // as a file or URL; a single font has only face 0. It must be below the
+    // number of faces in the file, or the load fails with an error. A system
+    // font name uses the face the OS resolves it to instead. The order of the
+    // faces is part of the file, so a file and a face index load the same
+    // face on every OS; system font names depend on the fonts each OS has.
     // -------------------------------------------------------------------------
     // Oversampling (supersampled glyph rasterization)
     // -------------------------------------------------------------------------
@@ -1421,7 +1461,7 @@ private:
     }
 
 public:
-    LoadResult load(const fs::path& nameOrPath, int size) {
+    LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
         dpiScale_ = sapp_dpi_scale();
@@ -1437,15 +1477,25 @@ public:
         // system-font lookup use.
         std::string nameStr = internal::pathToUtf8(nameOrPath);
         std::string actualPath = nameStr;
+        int actualFace = faceIndex;
         if (!isUrl(nameStr)) {
             std::ifstream test(nameOrPath, std::ios::binary);
             if (!test.good()) {
-                // Not a usable file path — try as a system font name.
-                fs::path resolved = systemFontPath(nameStr);
-                if (!resolved.empty()) {
-                    actualPath = internal::pathToUtf8(resolved);
+                // Not a usable file path — try as a system font name. The OS
+                // gives the file and the face inside it.
+                internal::SystemFontFace resolved = internal::systemFontFace(nameStr);
+                if (!resolved.path.empty()) {
+                    actualPath = internal::pathToUtf8(resolved.path);
+                    actualFace = resolved.index;
+                    if (faceIndex != 0) {
+                        logWarning("Font") << "faceIndex " << faceIndex
+                                           << " applies to font files; \"" << nameStr
+                                           << "\" is a system font name and uses face "
+                                           << actualFace;
+                    }
                     logNotice("Font") << "Resolved \"" << nameStr
-                                      << "\" → " << actualPath;
+                                      << "\" → " << actualPath << " (face " << actualFace
+                                      << ")";
                 }
                 // If resolution failed, fall through with the original input so
                 // the eventual load error mentions what the user actually asked for.
@@ -1463,13 +1513,14 @@ public:
 
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
+        cacheKey_.faceIndex = actualFace;
         cacheKey_.oversample = oversample_;
         cacheKey_.mipmaps = mipmaps_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
             // Async load - returns immediately, font available after fetch completes
-            loadFromUrlAsync(actualPath, physicalSize);
+            loadFromUrlAsync(actualPath, physicalSize, actualFace);
             return LoadResult::success();  // Will be loaded asynchronously
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
@@ -1496,8 +1547,9 @@ public:
                 if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
                 return LoadResult::fail(LoadError::FileNotFound, msg);
             }
-            return LoadResult::fail(LoadError::DecodeFailed,
-                                    "failed to init font: " + actualPath);
+            std::string msg = "failed to init font: " + actualPath;
+            if (actualFace != 0) msg += " (face " + std::to_string(actualFace) + ")";
+            return LoadResult::fail(LoadError::DecodeFailed, msg);
         }
         return LoadResult::success();
     }
@@ -1548,9 +1600,10 @@ private:
         emscripten_fetch_close(fetch);
     }
 
-    void loadFromUrlAsync(const std::string& url, int size) {
+    void loadFromUrlAsync(const std::string& url, int size, int faceIndex) {
         // Check cache first (don't try to load from file)
         internal::FontCacheKey key{url, size};
+        key.faceIndex = faceIndex;
         auto cached = internal::SharedFontCache::getInstance().get(key);
         if (cached) {
             atlasManager_ = cached;
