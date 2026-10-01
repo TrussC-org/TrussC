@@ -1177,9 +1177,7 @@ inline void ensureFontAtlas(int rows) {
     // registered beyond capacity degrade gracefully: their cells are skipped
     // by generateAtlasPixels and they render as blanks.
     if (rows > bitmapfont::CELLS_PER_COL) {
-        static bool warned = false;  // warn-once flag: a per-module copy is harmless
-        if (!warned) {
-            warned = true;
+        if (logOnce("BitmapFont.atlasFull")) {
             logWarning("BitmapFont") << "Glyph atlas is full ("
                 << bitmapfont::CELLS_PER_COL << " rows, "
                 << bitmapfont::TOTAL_CELLS << " cells); glyphs registered "
@@ -1472,8 +1470,7 @@ namespace internal {
 // context, where the caller proceeds normally.
 inline bool warnIfSecondaryWindowControl(const char* fn, const char* why) {
     if (currentWindowContext().isMain) return false;
-    static std::unordered_set<std::string> warned;  // warn-once set: a per-module copy is harmless
-    if (warned.insert(fn).second) {
+    if (logOnce(std::string("Window.mainWindowOnly.") + fn)) {
         logWarning("Window") << fn << "() is main-window only (" << why
             << "). Called from a secondary window's context — ignored to avoid "
             "retargeting the main window.";
@@ -1946,9 +1943,7 @@ inline void setFps(float fps) {
 // (Window::setFps); calling this from a secondary tick logs once and no-ops.
 inline void setIndependentFps(float updateFps, float drawFps) {
     if (!internal::currentWindowContext().isMain) {
-        static bool warned = false;  // warn-once flag: a per-module copy is harmless
-        if (!warned) {
-            warned = true;
+        if (logOnce("Window.setIndependentFps.secondary")) {
             logWarning("Window") << "setIndependentFps() is main-window only; a "
                 "secondary window runs a single synced rate. Use Window::setFps() "
                 "(or the context-aware setFps()). Ignored.";
@@ -2015,9 +2010,7 @@ inline float getFps() {
 // setFps throttles them); redraw() from a secondary tick logs once and no-ops.
 inline void redraw(int count = 1) {
     if (!internal::currentWindowContext().isMain) {
-        static bool warned = false;  // warn-once flag: a per-module copy is harmless
-        if (!warned) {
-            warned = true;
+        if (logOnce("Window.redraw.secondary")) {
             logWarning("Window") << "redraw() / event-driven loop is main-window "
                 "only; secondary windows are paced by their display link. Ignored.";
         }

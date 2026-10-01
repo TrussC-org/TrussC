@@ -323,9 +323,7 @@ private:
         // IBL is opt-in via setEnvironment(), so this only affects apps that use
         // it; they degrade gracefully on iOS instead of breaking.
         if (isIosWeb()) {
-            static bool warned = false;  // warn-once flag: a per-module copy is harmless
-            if (!warned) {
-                warned = true;
+            if (logOnce("Environment.iblBakeSkippedIosWeb")) {
                 logWarning("Environment")
                     << "IBL bake skipped on iOS Safari (cube-face render targets "
                        "break the canvas there). Using flat ambient + direct lights.";

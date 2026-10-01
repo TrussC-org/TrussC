@@ -401,6 +401,22 @@ inline LogStream logFatal(const std::string& module = "") {
 }
 
 // ---------------------------------------------------------------------------
+// Log-once gate
+// Usage:
+//   if (logOnce("Sound.unsupportedExtension")) logWarning("Sound") << "...";
+//   if (logOnce("Audio.underrun", 5.0))        logWarning("Audio") << "...";
+// ---------------------------------------------------------------------------
+// Returns true the first time it is called with `key`, and false afterwards.
+// With intervalSeconds > 0 it returns true again once at least that many
+// seconds have passed since the last true (steady clock). Thread-safe. The
+// state is one per process (tcLog.cpp), so header code and hot reload guests
+// need no `static bool warned` flag of their own. Prefix the key with the
+// component or addon name ("Sound.", "tcxFoo.") so keys don't collide;
+// several call sites may share a key on purpose. A per-object "once" (one
+// warning per Thread, say) belongs in a member of that object instead.
+bool logOnce(const std::string& key, double intervalSeconds = 0);
+
+// ---------------------------------------------------------------------------
 // Deprecated tc-prefixed aliases (legacy, pre-namespace naming). v1.0.0 removal.
 // ---------------------------------------------------------------------------
 [[deprecated("Use logAt() instead. Will be removed in v1.0.0")]]

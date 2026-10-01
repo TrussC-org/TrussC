@@ -15391,6 +15391,47 @@ description.ja = "コンソールに出力"
 description.ko = "콘솔에 출력"
 related = ["logWarning", "logError", "setConsoleLogLevel"]
 
+["logOnce"]
+category = "utility"
+keywords = ["warn once", "once", "rate limit", "throttle", "suppress", "repeat", "deduplicate"]
+description.en = "Gate a log line: true the first time for a key, then at most once per interval"
+description.ja = "ログ出力のゲート：キーごとに初回だけ true、間隔指定時はその間隔に最大1回 true"
+description.ko = "로그 출력 게이트: 키마다 처음에만 true, 간격 지정 시 그 간격마다 최대 1번 true"
+details.en = '''
+`if (logOnce("Sound.unsupportedExtension")) logWarning("Sound") << "...";`
+logs the warning only the first time. With `intervalSeconds > 0` it returns
+true again once that many seconds have passed since the last true:
+`if (logOnce("Audio.underrun", 5.0)) ...` logs at most every 5 seconds. Works
+with any log level, since the caller writes the line. Thread-safe. The state
+is one per process (kept in TrussC's `.cpp`, so it holds across hot reloads);
+use it instead of a `static bool warned` flag. Prefix the key with the
+component or addon name so keys don't collide; several call sites may share a
+key on purpose. A once-per-object warning keeps its flag as a member instead.
+'''
+details.ja = '''
+`if (logOnce("Sound.unsupportedExtension")) logWarning("Sound") << "...";`
+で警告を初回だけ出す。`intervalSeconds > 0` を渡すと、前回 true を返してから
+その秒数が経つと再び true を返す：`if (logOnce("Audio.underrun", 5.0)) ...`
+は最大5秒に1回だけ出す。ログ行は呼び出し側が書くので、どのログレベルにも
+使える。スレッドセーフ。状態はプロセスに1つ（TrussC の `.cpp` にあるので
+ホットリロードをまたいでも保たれる）。`static bool warned` フラグの代わりに
+使う。キーはコンポーネント名またはアドオン名を前置きして衝突を避ける。複数の
+呼び出し箇所で意図的にキーを共有してもよい。オブジェクトごとに1回の警告は、
+そのオブジェクトのメンバにフラグを持たせる。
+'''
+details.ko = '''
+`if (logOnce("Sound.unsupportedExtension")) logWarning("Sound") << "...";`
+로 경고를 처음 한 번만 출력한다. `intervalSeconds > 0`이면 마지막으로 true를
+반환한 뒤 그 초가 지나면 다시 true를 반환한다: `if (logOnce("Audio.underrun", 5.0)) ...`
+는 최대 5초에 한 번 출력한다. 로그 줄은 호출 측이 쓰므로 어떤 로그 레벨에도
+쓸 수 있다. 스레드 안전. 상태는 프로세스당 하나(TrussC의 `.cpp`에 있어 핫
+리로드를 거쳐도 유지됨)이며, `static bool warned` 플래그 대신 사용한다. 키에는
+컴포넌트 이름이나 애드온 이름을 접두어로 붙여 충돌을 피한다. 여러 호출 위치가
+의도적으로 키를 공유해도 된다. 객체마다 한 번인 경고는 그 객체의 멤버에
+플래그를 둔다.
+'''
+related = ["logWarning", "logNotice", "logError"]
+
 ["logVerbose"]
 category = "utility"
 keywords = ["trace", "debug", "print"]

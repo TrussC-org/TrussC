@@ -38,11 +38,9 @@
 # the header.
 
 # --- TrussC.h: bitmap font atlas
-core/include/TrussC.h trussc::ensureFontAtlas::warned          # harmless: warn-once flag
 
 # --- TrussC.h: window / projection settings
 core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set by the launcher, applied in _setup_cb
-core/include/TrussC.h trussc::internal::warnIfSecondaryWindowControl::warned  # harmless: warn-once flag
 
 # --- TrussC.h: sokol_gl / GPU budgets
 core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: launcher -> setup() (tcGlobal.cpp)
@@ -50,8 +48,6 @@ core/include/TrussC.h trussc::internal::gpuUniformBufferReserve  # host-only: la
 # --- TrussC.h: loop timing
 core/include/TrussC.h trussc::internal::updateFrameCount       # host-only: advanced by the host's loop, read through getFrameCount() / getUpdateCount() (tcGlobal.cpp)
 core/include/TrussC.h trussc::internal::frameReentryGuard      # host-only: _frame_cb
-core/include/TrussC.h trussc::setIndependentFps::warned        # harmless: warn-once flag
-core/include/TrussC.h trussc::redraw::warned                   # harmless: warn-once flag
 
 # --- TrussC.h: input / launcher wiring
 core/include/TrussC.h trussc::internal::touchPressedListener   # host-only: installed by the launcher
@@ -88,7 +84,6 @@ core/include/tcMath.h trussc::internal::getRandomEngine::engine  # harmless: thr
 
 # --- tc/3d
 core/include/tc/3d/tcEnvironment.h trussc::Environment::isIosWeb::cached                 # harmless: cached platform probe
-core/include/tc/3d/tcEnvironment.h trussc::Environment::bakeFromEquirectTexture::warned  # harmless: warn-once flag
 
 # --- tc/app
 core/include/tc/app/tcHeadlessApp.h trussc::headless::running     # no-hot-reload: runHeadlessApp only (hot reload is windowed)
