@@ -410,6 +410,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   0), with a warning naming it (`update() ended with 1 pushMatrix() ...`),
   rate-limited per entry point; values set outside a push carry on. Checks
   run in a release build only (headless `pushMatrix()` reaches sokol_gl).
+- `nodeTransform/` — Node global transform and picking (#264): `addChild()` /
+  `insertChild()` / `removeChild()` / `removeAllChildren()` /
+  `sweepDeadChildren()` refresh the moved node's global matrix, so
+  `getGlobalPos()`, `globalToLocal()` and the press `e.pos` use the new parent
+  right away (also with `keepGlobalPosition`); picking uses
+  `Mat4::tryInvert()`, so a node with an axis scaled to 0 and its subtree
+  (including a clipping RectNode's children) are not hit, while a tiny valid
+  scale still inverts; `tryInvert()` fails on singular matrices and leaves
+  `out` unchanged, `inverted()` still returns identity.
 - `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
   holds the hovered / grabbed / selected node weakly and dispatch holds a
   strong reference while handlers run, so a node freed by `removeChild()` /
