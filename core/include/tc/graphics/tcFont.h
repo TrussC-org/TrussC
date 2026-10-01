@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <functional>
 #include <cstring>
+#include <cmath>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/fetch.h>
@@ -39,6 +40,7 @@
 #include "stb/stb_truetype.h"
 
 #include "../utils/tcLog.h"
+#include "../utils/tcOnceGate.h"
 #include "tc/utils/tcLoadResult.h"
 #include "../utils/tcSystemFont.h"
 #include "../types/tcDirection.h"
@@ -244,6 +246,7 @@ public:
             return false;
         }
 
+        fontName_ = fontPath;
         return initFromFontData(fontSize);
     }
 
@@ -257,6 +260,7 @@ public:
         // Empty data is rejected by the sfnt check in initFromFontData.
         fontData_.assign(data, data + size);
 
+        fontName_ = "font data in memory";
         return initFromFontData(fontSize);
     }
 
@@ -283,10 +287,45 @@ public:
 
     // Must be set before any glyph is rasterized (glyphs are lazy, so setting
     // it right after setup() is early enough). Clamped to at least 1.
-    void setOversample(int n) { oversample_ = (n < 1) ? 1 : n; }
+    void setOversample(int n) {
+        oversample_ = (n < 1) ? 1 : n;
+        if (loaded_) warnIfGlyphsExceedPage();
+    }
     int getOversample() const { return oversample_; }
 
+    // Largest atlas page side in texels (the GPU limit, capped at 8192).
+    int getMaxAtlasSize() const { return maxAtlasSize_; }
+
 private:
+    // A glyph fits the largest page when its padded box fits the region the
+    // packer fills first on a page grown to maxAtlasSize_: the right half,
+    // starting GLYPH_PADDING in from the top and from the middle.
+    bool fitsLargestPage(int paddedWidth, int paddedHeight) const {
+        return paddedWidth <= maxAtlasSize_ / 2 - GLYPH_PADDING &&
+               paddedHeight <= maxAtlasSize_ - GLYPH_PADDING;
+    }
+
+    // Load-time check: the font's overall bounding box at this size and
+    // oversampling against the largest page. When some glyphs can be larger
+    // than a page, those glyphs are rasterized at a lower resolution (see
+    // addGlyphToAtlas); one warning per loaded font says so.
+    void warnIfGlyphsExceedPage() {
+        int bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        stbtt_GetFontBoundingBox(&fontInfo_, &bx0, &by0, &bx1, &by1);
+        const double s = (double)scale_ * oversample_;
+        const double w = std::ceil(bx1 * s) - std::floor(bx0 * s) + (oversample_ - 1);
+        const double h = std::ceil(by1 * s) - std::floor(by0 * s) + (oversample_ - 1);
+        const int pw = (int)std::min(w + GLYPH_PADDING, 1e9);
+        const int ph = (int)std::min(h + GLYPH_PADDING, 1e9);
+        if (fitsLargestPage(pw, ph)) return;
+        if (!pageLimitWarned_.isFirstTime()) return;
+        logWarning("Font") << fontName_ << " at size " << fontSize_
+                           << " (oversampling " << oversample_
+                           << "): some glyphs are larger than an atlas page ("
+                           << maxAtlasSize_ << "x" << maxAtlasSize_
+                           << " texels); those glyphs are drawn at a lower resolution";
+    }
+
     bool initFromFontData(int fontSize, int fontIndex = 0) {
         // The sfnt structure is checked against the data size before the data
         // is given to stb_truetype.
@@ -357,6 +396,7 @@ private:
         createNewAtlas();
 
         loaded_ = true;
+        warnIfGlyphsExceedPage();
         return true;
     }
 
@@ -613,14 +653,11 @@ public:
             return &it->second;
         }
 
-        // Add glyph
+        // Add glyph. A glyph that cannot be placed is kept with valid_ = false,
+        // so it is not tried again until clearAtlas().
         GlyphInfo info;
-        if (addGlyphToAtlas(codepoint, info)) {
-            glyphs_[codepoint] = info;
-            return &glyphs_[codepoint];
-        }
-
-        return nullptr;
+        if (!addGlyphToAtlas(codepoint, info)) info.valid_ = false;
+        return &(glyphs_[codepoint] = info);
     }
 
     bool hasGlyph(uint32_t codepoint) const {
@@ -812,6 +849,8 @@ private:
     bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
     bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
     int oversample_ = 1;         // NxN supersampling of the rasterized glyph
+    std::string fontName_;       // path, for log messages
+    OnceGate pageLimitWarned_;   // load-time page-limit warning, once per font
 
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
@@ -918,8 +957,13 @@ private:
         // there is simply more information in the atlas, whatever the transform.
         // Layout below is in OVERSAMPLED texels; the metrics handed back to the
         // draw path are converted to final pixels at the end.
-        const int   os      = oversample_;
-        const float osScale = scale_ * (float)os;
+        //
+        // `rs` is the raster scale (texels per final pixel) and `os` the
+        // prefilter width. Both start at oversample_; for a glyph larger than
+        // the largest page they are lowered below (rs below 1 if needed).
+        int   os      = oversample_;
+        float rs      = (float)os;
+        float osScale = scale_ * rs;
 
         int x0, y0, x1, y1;
         stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
@@ -946,6 +990,43 @@ private:
 
         int paddedWidth = glyphWidth + GLYPH_PADDING;
         int paddedHeight = glyphHeight + GLYPH_PADDING;
+
+        // Checked before any page is created or grown: a glyph whose box does
+        // not fit the largest page is rasterized at a lower resolution that
+        // fits, and drawn scaled up to its size in final pixels. Integer scales
+        // keep the box prefilter; below 1 the glyph is rasterized directly.
+        for (int attempt = 0; attempt < 32 && !fitsLargestPage(paddedWidth, paddedHeight); ++attempt) {
+            const float fitW = (float)(maxAtlasSize_ / 2 - 2 * GLYPH_PADDING) / (float)glyphWidth;
+            const float fitH = (float)(maxAtlasSize_ - 2 * GLYPH_PADDING) / (float)glyphHeight;
+            const float next = rs * std::min(fitW, fitH) * 0.99f;
+            if (next >= 1.0f) {
+                os = (int)next;
+                rs = (float)os;
+            } else {
+                os = 1;
+                rs = next;
+            }
+            if (!(rs > 0.0f)) break;
+            osScale = scale_ * rs;
+            stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
+            glyphWidth  = std::max(x1 - x0, 1) + (os - 1);
+            glyphHeight = std::max(y1 - y0, 1) + (os - 1);
+            paddedWidth = glyphWidth + GLYPH_PADDING;
+            paddedHeight = glyphHeight + GLYPH_PADDING;
+        }
+        if (!fitsLargestPage(paddedWidth, paddedHeight)) {
+            logWarning("Font") << "glyph U+" << std::hex << codepoint << std::dec
+                               << " does not fit an atlas page of " << maxAtlasSize_
+                               << "x" << maxAtlasSize_ << " texels; it is not drawn";
+            outInfo.advance_ = advanceWidth * scale_;
+            outInfo.valid_ = false;
+            return false;
+        }
+        if (rs < (float)oversample_) {
+            logVerbose("Font") << "glyph U+" << std::hex << codepoint << std::dec
+                               << " rasterized at " << rs << " texels per pixel"
+                               << " (oversampling " << oversample_ << ")";
+        }
 
         // Find atlas that can fit glyph
         size_t targetAtlas = atlases_.size();
@@ -1032,7 +1113,7 @@ private:
                                   glyphBitmap.data(),
                                   glyphWidth, glyphHeight,
                                   glyphWidth,  // stride
-                                  scale_, scale_,
+                                  osScale, osScale,
                                   glyphIndex);
         }
 
@@ -1058,7 +1139,7 @@ private:
         // UVs above address oversampled TEXELS; everything the draw path uses is
         // in FINAL pixels, so divide out the oversampling here. This is the only
         // place the two spaces meet -- emitPlacedGlyphsToAtlas needs no changes.
-        const float inv = 1.0f / (float)os;
+        const float inv = 1.0f / rs;
         outInfo.xoff_ = (float)x0 * inv + subX;
         outInfo.yoff_ = (float)y0 * inv + subY;
         outInfo.width_ = (float)glyphWidth * inv;
@@ -1232,11 +1313,12 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
+        // Oversampling first, so the load-time page check uses it.
+        manager->setOversample(key.oversample);
+        manager->setMipmaps(key.mipmaps);
         if (!manager->setup(key.fontPath, key.fontSize)) {
             return nullptr;
         }
-        manager->setMipmaps(key.mipmaps);
-        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -1251,11 +1333,12 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
+        // Oversampling first, so the load-time page check uses it.
+        manager->setOversample(key.oversample);
+        manager->setMipmaps(key.mipmaps);
         if (!manager->setupFromMemory(data, size, key.fontSize)) {
             return nullptr;
         }
-        manager->setMipmaps(key.mipmaps);
-        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
