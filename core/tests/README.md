@@ -197,6 +197,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `mcpHttpGuard/` — a web page in the user's browser cannot drive the
+  loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
+  403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
+  native clients keep working. Also the port line (#311): after bind, the
+  server logs `[MCP] HTTP server listening on http://HOST:PORT/mcp` through
+  the Logger at Notice, exactly once and with the actual port, and the line
+  lands in the log file.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and
