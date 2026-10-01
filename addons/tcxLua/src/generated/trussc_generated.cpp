@@ -86,8 +86,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("runOnMainThread", [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); });
     lua->set_function("logLevelToString", [](trussc::LogLevel level) { return trussc::logLevelToString(level); });
     lua->set_function("getLogger", []() -> decltype(auto) { return trussc::getLogger(); });
+    lua->set_function("setLogLevel", [](trussc::LogLevel level) { return trussc::setLogLevel(level); });
     lua->set_function("setConsoleLogLevel", [](trussc::LogLevel level) { return trussc::setConsoleLogLevel(level); });
     lua->set_function("setFileLogLevel", [](trussc::LogLevel level) { return trussc::setFileLogLevel(level); });
+    lua->set_function("setSystemLogLevel", [](trussc::LogLevel level) { return trussc::setSystemLogLevel(level); });
     lua->set_function("setLogFile", [](const fs::path & path) { return trussc::setLogFile(path); });
     lua->set_function("closeLogFile", []() { return trussc::closeLogFile(); });
     lua->set_function("tcGetLogger", []() -> decltype(auto) { return trussc::tcGetLogger(); });

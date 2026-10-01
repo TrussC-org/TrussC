@@ -752,7 +752,16 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         }
         detail::getHttpPort().store(actualPort);
 
-        std::cerr << "[MCP] HTTP server listening on http://" << host << ":"
+        // The only line with the actual port (an OS-assigned port is known
+        // only here, after bind). Through the Logger so it also reaches the
+        // log file and onLog listeners: "[MCP] HTTP server listening on
+        // http://HOST:PORT/mcp" at Notice (stdout; hidden when the console
+        // level is Warning or higher). Set TRUSSC_MCP_PORT for a known port.
+        trussc::logNotice("MCP") << "HTTP server listening on http://" << host
+                                 << ":" << actualPort << "/mcp";
+        // The raw stderr copy stays for v0.7 so tools that read stderr keep
+        // working; it is removed in v0.8.0 (#414).
+        std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
                   << actualPort << "/mcp" << std::endl;
 
         svr->listen_after_bind();
