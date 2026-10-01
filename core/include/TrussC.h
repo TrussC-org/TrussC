@@ -2456,10 +2456,15 @@ namespace internal {
         // Bring window to front on startup
         bringWindowToFront();
 
-        if (appSetupFunc) appSetupFunc();
+        // App code (the App's constructor) runs here: an entry point (#349).
+        if (appSetupFunc) {
+            EntryStackGuard guard(AppEntry::Setup);
+            appSetupFunc();
+        }
 
         // Set initial app size (must be after appSetupFunc creates the app)
         if (appWindowResizedFunc) {
+            EntryStackGuard guard(AppEntry::Event, "windowResized()");
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
@@ -2499,25 +2504,20 @@ namespace internal {
     // One main-window update: timing (beginMainUpdateCall), then the app's
     // update with the context marked as inside an update, so a Node timer
     // created during it starts counting with the next update (tcNode.h).
+    // Each call is an entry point (#349): the stacks go back to their depth
+    // before it, in both modes (synced: mid-frame; independent: every VSYNC
+    // update and every fixed-Hz step, so an idle EVENT_DRIVEN draw can't let
+    // leaks pile up until the next frame).
     inline void runMainUpdate(double fixedDelta = 0.0,
                               std::chrono::steady_clock::time_point stepTime = {}) {
         beginMainUpdateCall(fixedDelta, stepTime);
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
-        if (appUpdateFunc) appUpdateFunc();
+        if (appUpdateFunc) {
+            EntryStackGuard guard(AppEntry::Update);
+            appUpdateFunc();
+        }
         wctx.inUpdate = false;
-    }
-
-    // After each independent update (#349): update() ran outside any frame, so
-    // drop whatever it left pushed, the same reset as present(). Without it, an
-    // idle setIndependentFps(..., EVENT_DRIVEN) app piles leaks up until the
-    // next draw, which then reads a drifted getMatrix() and, past sokol_gl's
-    // 64-deep matrix stack, loses its 2D draws. Not for the synced update: it
-    // runs mid-frame, after beginFrame() loaded the camera into sokol_gl.
-    // sokol_gl is reset only when set up (headless tests drive this too).
-    inline void resetStacksAfterIndependentUpdate() {
-        getDefaultContext().resetStacksAtFrameEnd("update()");
-        if (sg_isvalid()) sgl_tc_reset_matrix_stacks();
     }
 
     // Update processing of one main-loop frame when update is NOT synced to
@@ -2533,7 +2533,6 @@ namespace internal {
         auto& loop = mainLoop();
         if (loop.updateTargetFps == VSYNC) {
             runMainUpdate();
-            resetStacksAfterIndependentUpdate();
             recordUpdateRateSample(wctx, wctx.updateDeltaTime, 1.0);
         } else if (loop.updateTargetFps > 0) {
             if (!loop.lastUpdateTimeInitialized) {   // first frame, or just after a mode switch
@@ -2561,7 +2560,6 @@ namespace internal {
                 auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                           std::chrono::duration<double>(behind));
                 runMainUpdate(updateInterval, stepTime);
-                resetStacksAfterIndependentUpdate();
             }
             // Measured rate (#228): the time the steps consumed, in steps
             // (fractional: whole steps plus the accumulator's progress), over
@@ -2606,22 +2604,27 @@ namespace internal {
     inline bool beginMainLoopFrame(std::chrono::steady_clock::time_point now) {
         sampleFrameTime(mainWindowContext());
 
-        // Run work marshalled from worker threads (runOnMainThread, Event
-        // Deliver::Main). Done before update/draw so queued tree edits land
-        // while no traversal is in flight.
-        internal::drainMainThreadQueue();
+        {
+            // The queued work below runs app code: one entry point (#349).
+            EntryStackGuard guard(AppEntry::Prelude);
 
-        // Log the dropped plays that could only be counted (off the main
-        // thread, or repeats inside the rate limit). Rate limited.
-        internal::pumpAudioDiagnostics();
+            // Run work marshalled from worker threads (runOnMainThread, Event
+            // Deliver::Main). Done before update/draw so queued tree edits land
+            // while no traversal is in flight.
+            internal::drainMainThreadQueue();
 
-        // Process console input (fire events)
-        console::processQueue();
+            // Log the dropped plays that could only be counted (off the main
+            // thread, or repeats inside the rate limit). Rate limited.
+            internal::pumpAudioDiagnostics();
 
-        // Process MCP HTTP requests on main thread
-        #ifndef __EMSCRIPTEN__
-        mcp::processHttpQueue();
-        #endif
+            // Process console input (fire events)
+            console::processQueue();
+
+            // Process MCP HTTP requests on main thread
+            #ifndef __EMSCRIPTEN__
+            mcp::processHttpQueue();
+            #endif
+        }
 
         // Delta time is written into the main window's context; secondary
         // windows measure their own delta in their tick (windowTick,
@@ -2706,7 +2709,10 @@ namespace internal {
         // Stop console input thread
         console::stop();
 
-        if (appCleanupFunc) appCleanupFunc();
+        if (appCleanupFunc) {
+            EntryStackGuard guard(AppEntry::Exit);
+            appCleanupFunc();
+        }
 
         // Stop the audio device explicitly: the AudioEngine singleton is
         // intentionally leaked (see AudioEngine::getInstance()), so no
@@ -2718,7 +2724,37 @@ namespace internal {
         cleanup();
     }
 
+    // The name an event entry point (#349) gives in its warning, from the
+    // sapp event type: the App handler it reaches. `dragging`: a mouse move
+    // with a button held, delivered as mouseDragged(). Text only; every event
+    // shares AppEntry::Event's rate limit.
+    inline const char* eventEntryName(const sapp_event* ev, bool dragging) {
+        switch (ev->type) {
+            case SAPP_EVENTTYPE_KEY_DOWN:          return "keyPressed()";
+            case SAPP_EVENTTYPE_KEY_UP:            return "keyReleased()";
+            case SAPP_EVENTTYPE_MOUSE_DOWN:        return "mousePressed()";
+            case SAPP_EVENTTYPE_MOUSE_UP:          return "mouseReleased()";
+            case SAPP_EVENTTYPE_MOUSE_ENTER:
+            case SAPP_EVENTTYPE_MOUSE_MOVE:        return dragging ? "mouseDragged()" : "mouseMoved()";
+            case SAPP_EVENTTYPE_MOUSE_SCROLL:      return "mouseScrolled()";
+            case SAPP_EVENTTYPE_TOUCHES_BEGAN:     return "touchPressed()";
+            case SAPP_EVENTTYPE_TOUCHES_MOVED:     return "touchMoved()";
+            case SAPP_EVENTTYPE_TOUCHES_ENDED:
+            case SAPP_EVENTTYPE_TOUCHES_CANCELLED: return "touchReleased()";
+            case SAPP_EVENTTYPE_RESIZED:           return "windowResized()";
+            case SAPP_EVENTTYPE_FILES_DROPPED:     return "filesDropped()";
+            case SAPP_EVENTTYPE_CLIPBOARD_PASTED:  return "the clipboardPasted event";
+            case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
+            default:                               return "a rawEvent listener";
+        }
+    }
+
     inline void _event_cb(const sapp_event* ev) {
+        // Each event is an entry point (#349): the listeners, the App's
+        // handler and the Node handlers it reaches leave the stacks as they
+        // found them.
+        EntryStackGuard guard(AppEntry::Event, eventEntryName(ev, currentMouseButton >= 0));
+
         // Notify raw event listeners (used by addons like tcxImGui)
         events().rawEvent.notify(*ev);
 

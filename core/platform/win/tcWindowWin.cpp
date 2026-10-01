@@ -112,8 +112,13 @@ void windowTick(sapp_window swin, void* user) {
 
     beginFrame();
 
-    win->events().update.notify();
-    win->tickTree();
+    {
+        // This window's update() is an entry point (#349); its draw is
+        // contained at present().
+        internal::EntryStackGuard guard(internal::AppEntry::Update);
+        win->events().update.notify();
+        win->tickTree();
+    }
 
     const Color& cc = win->clearColor_;
     clear(cc.r, cc.g, cc.b, cc.a);
@@ -131,12 +136,12 @@ void windowTick(sapp_window swin, void* user) {
 }
 
 // --- events: map sapp_event onto CoreEvents / App hooks / tree dispatch ----
-void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
-    Window* win = static_cast<Window*>(user);
-    if (!win) return;
-    auto& ctx = win->context();
-    auto* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx;
+// One event is an entry point (#349): the guard restores the stacks while
+// this window's context is still current.
+void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window* win,
+                         internal::WindowContext& ctx) {
+    internal::EntryStackGuard guard(internal::AppEntry::Event,
+        internal::eventEntryName(ev, ctx.mousePressed && ctx.mouseButton >= 0));
 
     // Raw event pass-through (same hook addons use on the main window)
     win->events().rawEvent.notify(*ev);
@@ -258,7 +263,15 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
             // size sync happens per tick.
             break;
     }
+}
 
+void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
+    Window* win = static_cast<Window*>(user);
+    if (!win) return;
+    auto& ctx = win->context();
+    auto* prev = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx;
+    dispatchWindowEvent(ev, swin, win, ctx);
     internal::currentWindowCtx() = prev;
 }
 
@@ -278,6 +291,8 @@ namespace trussc {
 Window::~Window() { close(); }
 
 void Window::close() {
+    // The window's exit() is an entry point (#349).
+    internal::EntryStackGuard guard(internal::AppEntry::Exit);
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     native_ = nullptr;             // re-entrancy guard (close_cb)

@@ -107,9 +107,10 @@ namespace internal {
     uint64_t nextNodeTimerId();
 
     // Runs the node's setup() once and then the framework's post-setup hook,
-    // as the node's first updateTree() / drawTree() does (Node::setupOnce()).
-    // For a runner that drives an App without the tree walk
-    // (runHeadlessApp()). Defined below the Node class.
+    // as the node's first updateTree() / drawTree() does (Node::setupOnce()),
+    // as the setup() entry point (#349): the stacks go back to their depth
+    // before it. For a window's root (the App): runHeadlessApp(), and
+    // App / Window before their tree walk. Defined below the Node class.
     inline void setupNodeOnce(Node& node);
 }
 
@@ -1698,6 +1699,8 @@ protected:
 
 namespace internal {
 inline void setupNodeOnce(Node& node) {
+    if (node.setupCalled_) return;
+    EntryStackGuard guard(AppEntry::Setup);
     node.setupOnce();
 }
 }

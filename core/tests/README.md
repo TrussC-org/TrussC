@@ -304,6 +304,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
   `ScreenRecorder` reads) stays exact after long uptime and, like the
   `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.
+- `entryStacks/` — push/pop containment per entry point (#349): a push that
+  the prelude (`runOnMainThread` work), `update()` (synced, independent VSYNC
+  and every fixed-Hz step, headless), the App's `setup()` or `exit()` leaves
+  open is popped when it returns, back to the depth it was entered at (not
+  0), with a warning naming it (`update() ended with 1 pushMatrix() ...`),
+  rate-limited per entry point; values set outside a push carry on. Checks
+  run in a release build only (headless `pushMatrix()` reaches sokol_gl).
 - `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
   holds the hovered / grabbed / selected node weakly and dispatch holds a
   strong reference while handlers run, so a node freed by `removeChild()` /

@@ -68,6 +68,33 @@ enum class PointStyle {
 // names reachable from trussc:: for those wrappers and advanced users.
 namespace internal {
 
+// Entry points where TrussC calls app code (#349). Each value gives its label
+// in the unbalanced push/pop warnings (appEntryLabel) and its own rate limit,
+// so one value names the entry point everywhere. Wrapped by EntryStackGuard
+// (below), except Draw, whose frame-end reset is present()'s.
+enum class AppEntry {
+    Setup,    // the App's (or a secondary window root's) setup(), and the App's construction
+    Prelude,  // per-frame queues before update: runOnMainThread / Deliver::Main, console, MCP
+    Update,   // update(): synced, independent (VSYNC / each fixed-Hz step), headless, secondary windows
+    Draw,     // the frame: draw(), dropped at present() (#232)
+    Event,    // one window event (key, mouse, touch, drop, resize, ...), main or secondary
+    Exit,     // exit() and cleanup()
+    Count
+};
+
+inline const char* appEntryLabel(AppEntry e) {
+    switch (e) {
+        case AppEntry::Setup:   return "setup()";
+        case AppEntry::Prelude: return "the main-thread queue (runOnMainThread / Deliver::Main / console / MCP)";
+        case AppEntry::Update:  return "update()";
+        case AppEntry::Draw:    return "draw()";
+        case AppEntry::Event:   return "an event handler";
+        case AppEntry::Exit:    return "exit()";
+        case AppEntry::Count:   break;
+    }
+    return "?";
+}
+
 class RenderContext {
 public:
     // -----------------------------------------------------------------------
@@ -293,19 +320,12 @@ public:
     // Frame end (#232): whatever a frame left pushed is dropped, so a missing
     // pop stays contained in the frame where it happened instead of drifting
     // getMatrix() (billboards, screen-fixed text, shader / PBR draws) and
-    // growing the stacks forever. Warns (rate-limited) when anything was left.
-    // Called at the end of present(); the sokol_gl side is reset there too.
-    // `who` names what just ended in the warning: nullptr for a frame, or a
-    // label such as "update()" for an independent update that ran outside any
-    // frame (#349), counted under its own rate limit.
-    void resetStacksAtFrameEnd(const char* who = nullptr) {
-        if (!matrixStack_.empty() || !styleStack_.empty()) {
-            warnUnbalanced(who ? updateEndWarning_ : frameEndWarning_,
-                (who ? std::string(who) + " ended with " : std::string("the frame ended with ")) +
-                std::to_string(matrixStack_.size()) +
-                " pushMatrix() and " + std::to_string(styleStack_.size()) +
-                " pushStyle() still open (missing pop); dropped");
-        }
+    // growing the stacks forever. Warns (rate-limited, as AppEntry::Draw:
+    // "draw() ended with ...") when anything was left. Called at the end of
+    // present(), the draw entry point's end (#349); the sokol_gl side is
+    // reset there too.
+    void resetStacksAtFrameEnd() {
+        warnLeftOpen(AppEntry::Draw, matrixStack_.size(), styleStack_.size());
         matrixStack_.clear();
         styleStack_.clear();
         currentMatrix_ = Mat4::identity();
@@ -332,6 +352,36 @@ public:
         return prev;
     }
     void setStackFloor(const StackFloor& floor) { stackFloor_ = floor; }
+
+    // When an entry point where TrussC calls app code returns (#349): put the
+    // stacks back to the depths they had when it was entered (EntryStackGuard
+    // records them), naming the entry point in the warning (for an event, the
+    // event's name when given: text only, the rate limit is Event's). Pops go
+    // through popMatrix() / popStyle(), as restoreStackDepth() does, so sokol_gl's
+    // matrix stack returns with TrussC's and the two stay in step, also
+    // mid-frame (the synced update). Only the pushes are undone: a style value
+    // or transform set outside a push carries on.
+    void restoreStacksAtEntryEnd(AppEntry entry, size_t matrixDepth, size_t styleDepth,
+                                 const char* eventName = nullptr) {
+        const size_t md = matrixStack_.size(), sd = styleStack_.size();
+        if (md == matrixDepth && sd == styleDepth) return;
+        if (md >= matrixDepth && sd >= styleDepth) {
+            warnLeftOpen(entry, md - matrixDepth, sd - styleDepth, eventName);
+        } else {
+            // Popped below the depth it was entered at (possible only when
+            // entered with something pushed, e.g. an event during a frame).
+            warnUnbalanced(entryWarning(entry),
+                entrySubject(entry, eventName) + " ended with the stacks off their depth at entry (pushMatrix " +
+                std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+                std::to_string((long long)sd - (long long)styleDepth) + "); restored");
+        }
+        while (matrixStack_.size() > matrixDepth) popMatrix();
+        while (styleStack_.size() > styleDepth) popStyle();
+        // The lost entries can't be recovered, but refilling the depth keeps
+        // the caller's pops matched to its pushes.
+        while (matrixStack_.size() < matrixDepth) pushMatrix();
+        while (styleStack_.size() < styleDepth) pushStyle();
+    }
 
     // After a Node's draw() (and its mods) run: if it left the stacks deeper
     // than it found them (a missing pop), name the node and pop back to that
@@ -1096,9 +1146,26 @@ private:
         bool logged = false;
         int suppressed = 0;
     };
-    RateLimitedWarning popMatrixWarning_, popStyleWarning_, frameEndWarning_, nodeDrawWarning_;
-    // Leaks dropped after an independent update (#349), apart from frame ends.
-    RateLimitedWarning updateEndWarning_;
+    RateLimitedWarning popMatrixWarning_, popStyleWarning_, nodeDrawWarning_;
+    // One per entry point (#349), so a leak in one doesn't hide another's.
+    RateLimitedWarning entryWarnings_[static_cast<size_t>(AppEntry::Count)];
+
+    RateLimitedWarning& entryWarning(AppEntry e) { return entryWarnings_[static_cast<size_t>(e)]; }
+
+    // An event names itself ("keyPressed()") when the caller knows which.
+    static std::string entrySubject(AppEntry e, const char* eventName) {
+        return (e == AppEntry::Event && eventName) ? std::string(eventName) : std::string(appEntryLabel(e));
+    }
+
+    // "<entry> ended with N pushMatrix() and M pushStyle() still open (missing
+    // pop); dropped", under the entry point's own rate limit.
+    void warnLeftOpen(AppEntry e, size_t matrixLeft, size_t styleLeft, const char* eventName = nullptr) {
+        if (matrixLeft == 0 && styleLeft == 0) return;
+        warnUnbalanced(entryWarning(e),
+            entrySubject(e, eventName) + " ended with " + std::to_string(matrixLeft) +
+            " pushMatrix() and " + std::to_string(styleLeft) +
+            " pushStyle() still open (missing pop); dropped");
+    }
 
     StackFloor stackFloor_;
 
@@ -1169,6 +1236,28 @@ private:
 // static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
 RenderContext& getDefaultContext();
+
+// Wraps one entry point where TrussC calls app code (#349), as one line at
+// the top of its scope: `EntryStackGuard guard(AppEntry::Update);`. The
+// constructor records the matrix and style stack depths; the destructor puts
+// them back (restoreStacksAtEntryEnd) and warns under the entry point's label
+// and rate limit, so an early return can't skip it. For an event, eventName
+// (a string literal, e.g. "keyPressed()") only names it in the warning.
+class EntryStackGuard {
+public:
+    explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
+        : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
+          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()) {}
+    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_); }
+    EntryStackGuard(const EntryStackGuard&) = delete;
+    EntryStackGuard& operator=(const EntryStackGuard&) = delete;
+
+private:
+    AppEntry entry_;
+    const char* eventName_;
+    RenderContext& rc_;
+    size_t matrixDepth_, styleDepth_;
+};
 
 } // namespace internal
 
