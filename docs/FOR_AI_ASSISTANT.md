@@ -835,8 +835,9 @@ All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This ma
 This is for changes to TrussC itself (`core/include`), not app code. On Windows, a hot-reload app gets its own copy of every such variable, so the app and TrussC would see different values. CI (`tools/check_header_state.py`) flags them. Decide in this order:
 
 1. **A constant?** Make it `constexpr` (or a `const` at namespace scope). Not flagged; done.
-2. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
-3. **Only a warn-once flag or a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
+2. **A warn-once flag?** Drop it and gate the log line with `logOnce("Component.what")` (see Logging). Not flagged; done.
+3. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
+4. **Only a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
 
 Details: docs/ARCHITECTURE.md, "One instance per process".
 
@@ -1567,6 +1568,15 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 ## Logging
 
 Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
+
+### How do I log a warning only once? (logOnce)
+
+Gate the log line with `logOnce(key)`, not a `static bool warned` flag. It returns true the first time for that key; with an interval it returns true again at most once per that many seconds. It works with any level (you write the line yourself), is thread-safe, and keeps its state in TrussC's `.cpp` (one per process, so it holds across hot reloads). Prefix the key with the component or addon name:
+```cpp
+if (logOnce("Sound.unsupportedExtension")) logWarning("Sound") << "unsupported extension";
+if (logOnce("Audio.underrun", 5.0))        logWarning("Audio") << "underrun";  // at most every 5 s
+```
+Several call sites may share a key on purpose. A once-per-object warning (one per `Thread`) keeps its flag as a member of the object instead.
 
 ### How do I write logs to a file? (getLogger + setLogFile)
 

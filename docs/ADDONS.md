@@ -312,6 +312,21 @@ private:
 };
 ```
 
+### Warning Once
+
+To log a warning only the first time (an unsupported format, a missing device), gate it with `tc::logOnce(key)` instead of a `static bool warned` flag. Its state lives in TrussC's `.cpp`, one copy per process, so the gate holds across hot reloads and between host and guest. Prefix the key with your addon name so it does not collide with other keys; pass an interval to repeat at most once per that many seconds:
+
+```cpp
+if (tc::logOnce("tcxMyAddon.unsupportedFormat")) {
+    tc::logWarning("tcxMyAddon") << "format not supported; skipping";
+}
+if (tc::logOnce("tcxMyAddon.queueFull", 5.0)) {   // at most every 5 s
+    tc::logWarning("tcxMyAddon") << "queue full, dropping frames";
+}
+```
+
+A warning that should fire once per object (once per connection, say) keeps its flag as a member of that object instead.
+
 ### Holding on to Nodes
 
 An addon that keeps a `Node` beyond a single call (a target to follow, a selection, a root to draw) stores it as `std::weak_ptr<tc::Node>`, or as `Node::Ptr` when the addon means to own it, never as a raw `Node*`. The app can remove and free the node at any time, and a raw pointer then dangles. Call `lock()` for each use and keep the returned `shared_ptr` while you work with the node. `tcxNodeInspector` keeps its attached root, drag target and selection this way.
