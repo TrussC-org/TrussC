@@ -1050,6 +1050,14 @@ namespace internal {
     // the position the mixer is playing. tcAudio_impl.cpp.
     double voicePosition(const PlayingSound& voice);
 
+    // Stop a voice and release what it holds (Sound::stop(), and the last
+    // Sound handle that shares the voice going away): `playing` and `paused`
+    // become false, so the engine slot is free for the next play(), and a
+    // stream voice gives up its decoder and file (closed on the calling
+    // thread, after the engine lock is released). Calling it again is a
+    // no-op. tcAudio_impl.cpp.
+    void releaseVoice(PlayingSound& voice);
+
     // The framework's teardown barrier (#256): AudioEngine::waitForAudioCallbacks()
     // without its one-second limit. internal::detachAppAudio() waits here
     // before the framework destroys an App (exit, runHeadlessApp, hot reload,
@@ -1266,6 +1274,7 @@ private:
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
+    friend void internal::releaseVoice(PlayingSound&);
 
     // Zero the output meters, the CPU usage window and every playback's
     // level. Only while no device is running (init(), shutdown()), so the
@@ -1556,15 +1565,45 @@ private:
     std::timed_mutex      callbackBarrierMutex_;
 };
 
+namespace internal {
+    // The owner token of a voice started by Sound::play(). Sound copies share
+    // it (Sound::playing_ aliases it), so the voice is released when the last
+    // Sound handle that shares it is destroyed or overwritten.
+    struct VoiceOwner {
+        std::shared_ptr<PlayingSound> voice;
+        explicit VoiceOwner(std::shared_ptr<PlayingSound> v) : voice(std::move(v)) {}
+        ~VoiceOwner() { if (voice) releaseVoice(*voice); }
+        VoiceOwner(const VoiceOwner&) = delete;
+        VoiceOwner& operator=(const VoiceOwner&) = delete;
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Sound Class (user-facing)
 // ---------------------------------------------------------------------------
+//
+// Lifetime: a Sound plays only while it, or a copy of it, is alive. Copies
+// share the voice that play() started; when the last Sound handle that
+// shares it is destroyed or overwritten (copy or move assignment), the voice
+// stops, looping or not, and its slot is free again. A temporary copy going
+// away does not stop the original. To play overlapping one-shots, keep the
+// Sound objects alive (for example as members):
+//
+//   Sound hits_[4];   // members, each loaded once
+//   int next_ = 0;
+//   hits_[next_].play(); next_ = (next_ + 1) % 4;   // up to 4 overlap
+//
+// `{ Sound s = hit; s.play(); }` stops at the closing brace.
+//
+// Stopped means released: stop(), and the last handle going away, also
+// close a streamed voice's decoder and file.
 class Sound {
 public:
     Sound() = default;
-    ~Sound() = default;
+    ~Sound() = default;   // releases the voice if this is its last handle
 
-    // Copy and move
+    // Copy and move. Copies share the voice; assignment releases the old
+    // voice when this was its last handle.
     Sound(const Sound&) = default;
     Sound& operator=(const Sound&) = default;
     Sound(Sound&&) = default;
@@ -1700,7 +1739,12 @@ public:
         // Stop if already playing
         stop();
 
-        playing_ = AudioEngine::getInstance().play(buffer_);
+        if (auto voice = AudioEngine::getInstance().play(buffer_)) {
+            // playing_ points at the voice and shares ownership of its
+            // VoiceOwner, which every copy of this Sound then shares too.
+            auto owner = std::make_shared<internal::VoiceOwner>(voice);
+            playing_ = std::shared_ptr<PlayingSound>(owner, voice.get());
+        }
         if (playing_) {
             playing_->volume = volume_;
             playing_->pan = pan_;
@@ -1713,9 +1757,11 @@ public:
         return playing_ != nullptr;
     }
 
+    // Stop and release the voice (a stream's decoder and file too). Copies
+    // that share the voice see it stopped.
     void stop() {
         if (playing_) {
-            playing_->playing = false;
+            internal::releaseVoice(*playing_);
             playing_.reset();
         }
     }
@@ -1946,6 +1992,7 @@ private:
     }
 
     std::shared_ptr<SoundSource> buffer_;
+    // Points at the voice; owns (and shares with copies) its VoiceOwner.
     std::shared_ptr<PlayingSound> playing_;
     float   volume_  = 1.0f;
     float   pan_     = 0.0f;
