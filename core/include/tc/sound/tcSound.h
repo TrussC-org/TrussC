@@ -214,8 +214,8 @@ public:
 
     // File the samples were decoded from (set by the path-based loaders;
     // for AAC by load(), which Sound::load() uses). Empty for memory / PCM /
-    // generated buffers. Reported per voice by AudioEngine::getVoices() and
-    // tc_get_audio_state.
+    // generated buffers. Reported per playing sound by
+    // AudioEngine::getPlayingSounds() and tc_get_audio_state.
     fs::path getPath() const { return path_; }
 
     // File-based decoders (implemented in tcSound_impl.cpp).
@@ -919,13 +919,13 @@ struct AudioInBuffer {
 };
 
 // ---------------------------------------------------------------------------
-// AudioVoiceInfo — one active voice, as reported by AudioEngine::getVoices().
-// A snapshot: the values are copied under the engine lock, so later changes
-// to the voice are not reflected.
+// PlayingSoundInfo — one playing (or paused) sound, as reported by
+// AudioEngine::getPlayingSounds(). A snapshot: the values are copied under
+// the engine lock, so later changes to the playback are not reflected.
 // ---------------------------------------------------------------------------
-struct AudioVoiceInfo {
-    int         slot = 0;           // mixer slot index (0 .. maxPolyphony-1)
-    std::string path;               // source file (UTF-8, lexically normalized); empty for generated / memory buffers
+struct PlayingSoundInfo {
+    int         slot = 0;           // playback slot index (0 .. maxPolyphony-1)
+    fs::path    path;               // source file (lexically normalized); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;
@@ -934,7 +934,7 @@ struct AudioVoiceInfo {
     float       volume = 1.0f;
     float       pan = 0.0f;
     float       speed = 1.0f;
-    float       level = 0.0f;       // peak of this voice's output in the last callback
+    float       level = 0.0f;       // peak of this playback's output in the last callback
                                     // (linear, 1.0 = full scale; 0 while paused)
 };
 
@@ -947,9 +947,9 @@ struct AudioStats {
     // Plays AudioEngine::play() refused (Sound::play() returned false),
     // in total and by reason.
     uint64_t droppedPlays = 0;
-    uint64_t droppedVoiceLimit = 0;    // every mixer slot busy (AudioSettings::maxPolyphony)
+    uint64_t droppedPolyphonyLimit = 0; // every playback slot busy (AudioSettings::maxPolyphony)
     uint64_t droppedStreamLimit = 0;   // the SoundStream's own maxPolyphony reached (copies of one streamed Sound)
-    uint64_t droppedDecoderError = 0;  // the stream's file could not be reopened for a new voice
+    uint64_t droppedDecoderError = 0;  // the stream's file could not be reopened for a new playback
     uint64_t droppedNotRunning = 0;    // no running output device (init failed or engine shut down)
 
     uint64_t clippedSamples = 0;       // output samples beyond +/-1.0 that were hard-clipped
@@ -957,8 +957,10 @@ struct AudioStats {
     // Meters: 0 while no device is running (before init, after shutdown).
     float peak = 0.0f;                 // master output peak over the last ~100 ms (linear, before clipping)
     float rms = 0.0f;                  // master output RMS over the same window
-    float load = 0.0f;                 // audio thread load: mix time / audio time, averaged over ~0.5 s
-    float loadMax = 0.0f;              // worst single callback in that window (> 1 = overrun)
+    // Fraction of audio-thread time: mix time / audio time, averaged over
+    // ~0.5 s. 1.0 means the callback took as long as the audio it produced.
+    float cpuUsage = 0.0f;
+    float cpuUsagePeak = 0.0f;         // worst single callback in that window (> 1 = a dropout)
 };
 
 // Engine diagnostics state (counters, meters, report timers). Defined in
@@ -1134,10 +1136,10 @@ public:
 
     // Diagnostics (the tc_get_audio_state MCP tool reports both).
     // getStats() only reads atomics: cheap, callable from any thread.
-    // getVoices() copies the active voices under the engine lock: call it
-    // from the main thread, never from an audioOut / audioIn listener.
+    // getPlayingSounds() copies the playing sounds under the engine lock:
+    // call it from the main thread, never from an audioOut / audioIn listener.
     AudioStats getStats() const;
-    std::vector<AudioVoiceInfo> getVoices();
+    std::vector<PlayingSoundInfo> getPlayingSounds() const;
 
     // Real-time audio listeners. audioOut fires once per audio device
     // callback AFTER all Sound voices have been mixed into the output
@@ -1241,9 +1243,9 @@ private:
     AudioEngine();
     ~AudioEngine();
 
-    // Why AudioEngine::play() refused a voice (see AudioStats). The values
+    // Why AudioEngine::play() refused a play (see AudioStats). The values
     // index the diagnostics arrays in tcAudio_impl.cpp: keep the order.
-    enum class DropReason { VoiceLimit, StreamLimit, DecoderError, NotRunning };
+    enum class DropReason { PolyphonyLimit, StreamLimit, DecoderError, NotRunning };
 
     // Count a refused play; log it now when on the main thread and not rate
     // limited, otherwise leave it for reportDiagnostics(). `code` is the
@@ -1265,9 +1267,9 @@ private:
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
 
-    // Zero the output meters, the load window and every voice's level. Only
-    // while no device is running (init(), shutdown()), so the audio thread
-    // cannot race it.
+    // Zero the output meters, the CPU usage window and every playback's
+    // level. Only while no device is running (init(), shutdown()), so the
+    // audio thread cannot race it.
     void resetMeters();
 
     // Mark an audioOut / audioIn notify in flight for waitForCallbackIdle()
@@ -1513,7 +1515,7 @@ private:
                                // when devices are torn down + recreated.
     bool initialized_ = false;
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;  // mutable: getPlayingSounds() const locks it
 
     // Runtime engine configuration. Initialized to defaults; overwritten by
     // every init(AudioSettings) call, success or failure, and reused by a
@@ -1536,7 +1538,7 @@ private:
     size_t analysisWritePos_ = 0;
     std::mutex analysisMutex_;
 
-    // Drop counters, output meters, audio-thread load and the log rate
+    // Drop counters, output meters, audio-thread CPU usage and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
     std::unique_ptr<internal::AudioDiagnostics> diag_;
 

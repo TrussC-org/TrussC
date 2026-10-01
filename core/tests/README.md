@@ -104,8 +104,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   reach the TrussC logger (rate limited, and only from the main thread — an
   off-main drop is counted and reported by `runHeadlessApp`'s own frame pump;
   its exit flush and `AudioEngine::shutdown()` log what the rate limit held
-  back), the audio thread's meters (peak / RMS / clipped samples / voice
-  level / load) work and shutdown clears them, a reused `SoundBuffer`'s
+  back), the audio thread's meters (peak / RMS / clipped samples / each
+  playing sound's level / CPU usage) work and shutdown clears them, a reused `SoundBuffer`'s
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
