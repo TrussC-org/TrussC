@@ -275,6 +275,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Destroying a client whose listener reconnects on every `onDisconnect`
   finishes without any `onDisconnect` and without reconnecting: the
   destructor does not notify.
+- `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
+  (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
+  `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also
+  reports a port that is already in use: on a fixed port another server
+  listens on, `mcp::startHttpServer()` fails to bind, logs exactly one
+  "Failed to bind" error through the Logger, and the other server keeps
+  answering every request.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and

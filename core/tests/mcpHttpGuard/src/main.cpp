@@ -18,6 +18,10 @@
 //
 // The main thread pumps mcp::processHttpQueue() the way the frame loop does;
 // the requests run on a worker with a deadline.
+//
+// Also checks that the MCP server reports a port that is already in use: on a
+// fixed port another server listens on, it fails to bind, logs exactly one
+// "Failed to bind" error, and the other server keeps answering.
 // =============================================================================
 
 #include <TrussC.h>
@@ -37,6 +41,54 @@ static void check(const string& name, bool ok, const string& detail = "") {
            ok || detail.empty() ? "" : ("  -- " + detail).c_str());
     fflush(stdout);
     if (!ok) ++g_fail;
+}
+
+// A port that is already in use. The first server listens on a port the OS
+// picked; mcp::startHttpServer() on that same port must fail to bind and log
+// exactly one "Failed to bind" error, and the first server must keep
+// answering every request. Both use 127.0.0.1.
+static void testPortInUse() {
+    httplib::Server first;
+    first.Get("/", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content("first", "text/plain");
+    });
+    const int fixedPort = first.bind_to_any_port("127.0.0.1");
+    check("first server bound to a port", fixedPort > 0);
+    if (fixedPort <= 0) return;
+    thread firstThread([&] { first.listen_after_bind(); });
+    first.wait_until_ready();
+
+    atomic<int> bindErrors{0};
+    EventListener listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("Failed to bind") != string::npos) {
+            ++bindErrors;
+        }
+    });
+
+    mcp::startHttpServer(fixedPort, "127.0.0.1");
+    for (int i = 0; i < 300 && bindErrors.load() == 0; i++) {
+        this_thread::sleep_for(chrono::milliseconds(10));
+    }
+    this_thread::sleep_for(chrono::milliseconds(100)); // a second error would land here
+    check("port in use -> exactly one \"Failed to bind\" error", bindErrors.load() == 1,
+          to_string(bindErrors.load()) + " errors");
+
+    httplib::Client cli("127.0.0.1", fixedPort);
+    cli.set_connection_timeout(5);
+    cli.set_read_timeout(10);
+    const int requests = 20;
+    int answeredByFirst = 0;
+    for (int i = 0; i < requests; i++) {
+        auto r = cli.Get("/");
+        if (r && r->status == 200 && r->body == "first") ++answeredByFirst;
+    }
+    check("port in use -> first server answers every request", answeredByFirst == requests,
+          to_string(answeredByFirst) + " of " + to_string(requests));
+
+    listener.disconnect();
+    mcp::stopHttpServer();
+    first.stop();
+    firstThread.join();
 }
 
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
@@ -156,6 +208,8 @@ int main() {
     }
     worker.join();
     mcp::stopHttpServer();
+
+    testPortInUse();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
