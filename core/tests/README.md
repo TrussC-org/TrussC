@@ -82,8 +82,8 @@ test cannot share an executable: it replaces or interposes a library
 function for the whole binary (`operator new`, `fclose`, `write`, `ioctl`,
 `pthread_create`), needs a special project shape (hot reload host/guest),
 or needs an addon. Such a test is built and run alone, as before. Today:
-`audioDiagnostics`, `hotReloadLifecycle`, `serialBaudRate`, `serialHangup`,
-`tcpServerClients`.
+`audioDiagnostics`, `dataPathLoads`, `hotReloadLifecycle`, `serialBaudRate`,
+`serialHangup`, `tcpServerClients`.
 
 ### Running tests locally
 
