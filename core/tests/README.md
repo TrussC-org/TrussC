@@ -318,7 +318,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   reports a port that is already in use: on a fixed port another server
   listens on, `mcp::startHttpServer()` fails to bind, logs exactly one
   "Failed to bind" error through the Logger, and the other server keeps
-  answering every request.
+  answering every request. And the default host: `mcp::startHttpServer()`
+  with no host argument logs `http://127.0.0.1:PORT/mcp` and answers a client
+  that connects to 127.0.0.1.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and
