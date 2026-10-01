@@ -326,6 +326,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   replaced attempt reports no `onConnect(false)` (#393), through
   `connectAsync()` and without threads; a refused `connectAsync()` with no
   reconnect reports `onConnect(false)` exactly once.
+- `tcpClientSelfDestroy/` — a `TcpClient` destroyed by a listener on its own
+  receive thread (#262): an owner replaces the `unique_ptr<TcpClient>` that
+  holds the client from an inline `onDisconnect` listener (peer closed, peer
+  reset) and from an inline `onReceive` listener, 50 times each, and connects
+  the new client every round; the destroyed clients' receive threads end
+  (counted on Linux). The receive thread must not read the client after
+  such a notification, which a plain build rarely shows: build it with
+  AddressSanitizer (`-DCMAKE_CXX_FLAGS=-fsanitize=address`) to check that.
 - `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
   (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
   `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also

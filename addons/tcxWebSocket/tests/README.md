@@ -31,6 +31,25 @@ ephemeral port range (`TcpServer` cannot report a port the OS picked).
   1009, then `onError`, then `onClose`;
 - an `onError` listener that calls `disconnect()` -> one `onClose`.
 
+Handshake deadline and reconnecting from the events (#262). The test pumps
+the update event, as the app's frame loop would, for the 101 deadline:
+
+- `ws://` to a server that accepts and never answers the upgrade request,
+  with `setHandshakeTimeout(1)` -> `onError`, then `onClose`, after about
+  1 s; the client is `Disconnected`;
+- `wss://` to a server that accepts and never speaks TLS -> the same,
+  through `TlsClient`'s handshake deadline;
+- an inline `onClose` listener that calls `connect()` when the server drops
+  the connection, and when it sends Close -> 20 reconnects, each reaching
+  `onOpen`;
+- `wss://`: an inline `onError` listener that calls `connect()` after each
+  failed TLS handshake -> 20 reconnects, each reaching the server.
+
+`connect()` from those listeners destroys the `TcpClient` / `TlsClient`
+whose receive thread runs them; build with AddressSanitizer
+(`-DCMAKE_CXX_FLAGS=-fsanitize=address`) to check that the thread does not
+read it afterwards.
+
 tcxWebSocket depends on tcxTls, which builds mbedTLS, so this harness has a
 `daily-only` marker: CI runs it in the daily workflow
 (`examples/build_all.py --addon-tests-only --include-daily`), not per PR. Run

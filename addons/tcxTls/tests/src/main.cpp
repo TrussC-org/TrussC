@@ -55,6 +55,16 @@
 //     reconnect used to leave the generation unchanged.
 //   - Destroying a client while its onError listener runs for a failed
 //     handshake waits for that listener: the receive thread stays owned.
+//   - Handshake deadline (#262): a peer that accepts TCP and never speaks
+//     TLS, with setHandshakeTimeout(1) -> onError, then onConnect(false),
+//     both "TLS handshake timeout", after about 1 s and within 5 s; with
+//     threads and without (update event pumped). With 0 (no deadline)
+//     nothing fires for 1.5 s and disconnect() still returns at once.
+//   - A client destroyed by a listener on its own receive thread (#262): an
+//     owner replaces the unique_ptr holding the client from an inline
+//     onDisconnect listener (the peer sent close_notify), and from an inline
+//     onError listener after a failed handshake (the client verifies the
+//     peer's self-signed certificate), 20 times each.
 //
 //   - No thread is left when main() returns (counted on Linux), although the
 //     clients whose listeners called connect() / disconnect() on the receive
@@ -1119,6 +1129,131 @@ static void scenario() {
           doneWhenDestroyed);
     if (g_fail) bail();
     // victimErr outlives its Event: disconnecting it is a no-op
+
+    // --- handshake deadline (#262) -------------------------------------------
+    // The plain peer accepts TCP and then says nothing
+    for (bool threads : {true, false}) {
+        g_phase = "the handshake deadline";
+        const string name = threads ? "handshake timeout" : "handshake timeout, no threads";
+        TlsClient silent;
+        silent.setVerifyNone();
+        silent.setUseThread(threads);
+        silent.setHandshakeTimeout(1);
+        mutex evMutex;
+        vector<string> evs;
+        EventListener errSub = silent.onError.listen([&](TcpErrorEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back("error: " + e.message);
+        });
+        EventListener conSub = silent.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back(e.success ? string("connected") : "failed: " + e.message);
+        });
+        const auto t0 = chrono::steady_clock::now();
+        check((name + ": connect() to a silent peer").c_str(),
+              silent.connect("127.0.0.1", plainPort));
+        rawsocket_t silentPeer = acceptWithin(plainListener, 2000);
+        check((name + ": the peer accepted").c_str(), silentPeer != kNoSocket);
+        const bool reported = waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 2;
+        });
+        const auto elapsed = chrono::steady_clock::now() - t0;
+        waitFor(100, [&] {   // let any extra event arrive
+            if (!threads) events().update.notify();
+            return false;
+        });
+        check((name + ": reported within 5 s").c_str(), reported);
+        check((name + ": not before the 1 s deadline").c_str(),
+              elapsed >= chrono::milliseconds(900));
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": onError, then onConnect(false), \"TLS handshake timeout\"").c_str(),
+                  evs == vector<string>{"error: TLS handshake timeout",
+                                        "failed: TLS handshake timeout"});
+        }
+        check((name + ": not connected").c_str(), !silent.isConnected());
+        if (silentPeer != kNoSocket) TC_CLOSE(silentPeer);
+        if (g_fail) bail();
+    }
+    {
+        // 0 = no deadline: nothing fires, and disconnect() ends the wait
+        TlsClient patient;
+        patient.setVerifyNone();
+        patient.setHandshakeTimeout(0);
+        atomic<int> fired{0};
+        EventListener errSub = patient.onError.listen([&](TcpErrorEventArgs&) { ++fired; });
+        EventListener conSub = patient.onConnect.listen([&](TcpConnectEventArgs&) { ++fired; });
+        check("no handshake deadline: connect() to a silent peer",
+              patient.connect("127.0.0.1", plainPort));
+        rawsocket_t silentPeer = acceptWithin(plainListener, 2000);
+        check("no handshake deadline: the peer accepted", silentPeer != kNoSocket);
+        this_thread::sleep_for(chrono::milliseconds(1500));
+        check("no handshake deadline: nothing fires in 1.5 s", fired == 0);
+        check("no handshake deadline: disconnect() returns within 2 s",
+              completesWithin(2000, [&] { patient.disconnect(); }));
+        if (silentPeer != kNoSocket) TC_CLOSE(silentPeer);
+        if (g_fail) bail();
+    }
+
+    // --- destroyed by a listener on its own receive thread (#262) ------------
+    // An owner holds the client in a unique_ptr and replaces it from the
+    // client's own event. The old client is destroyed on its receive thread,
+    // which then must not read it again (best caught with AddressSanitizer).
+    struct Owner {
+        unique_ptr<TlsClient> c;
+        EventListener sub;
+        atomic<int> replaced{0};
+        bool onError;   // false: onDisconnect
+        explicit Owner(bool err) : onError(err) { make(); }
+        void make() {
+            c = make_unique<TlsClient>();   // destroys the previous client
+            if (onError) {
+                // Verification on (the default): the peer's self-signed
+                // certificate fails it
+                sub = c->onError.listen([this](TcpErrorEventArgs&) { replace(); });
+            } else {
+                c->setVerifyNone();
+                sub = c->onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
+                    if (e.reason != "Disconnected by client") replace();
+                });
+            }
+        }
+        void replace() {
+            make();
+            ++replaced;
+        }
+    };
+    for (bool fromError : {false, true}) {
+        g_phase = fromError ? "the self-destroy rounds (onError)"
+                            : "the self-destroy rounds (onDisconnect)";
+        const string name = fromError ? "destroyed from its onError"
+                                      : "destroyed from its onDisconnect";
+        const int rounds = 20;
+        Owner owner(fromError);
+        bool ok = true;
+        for (int i = 0; ok && i < rounds; ++i) {
+            const int before = owner.replaced.load();
+            TlsPeer p;
+            ok = owner.c->connect("127.0.0.1", port);
+            if (!ok) break;
+            const bool handshook = p.accept(listener, server.conf, 5000);
+            if (fromError) {
+                // The client rejects the certificate; its onError replaces it
+                p.reset();
+            } else {
+                ok = handshook && waitFor(3000, [&] { return owner.replaced.load() > before ||
+                                                         owner.c->isConnected(); });
+                if (!ok) break;
+                p.closeNotify();
+            }
+            ok = waitFor(5000, [&] { return owner.replaced.load() > before; });
+        }
+        check((name + ": replaced 20 times, nothing crashed").c_str(),
+              ok && owner.replaced.load() == rounds);
+        if (g_fail) bail();
+    }
 
     // --- teardown ---------------------------------------------------------
     g_phase = "the scenario's teardown";
