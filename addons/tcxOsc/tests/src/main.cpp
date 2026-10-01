@@ -42,6 +42,9 @@
 //     (one onParseError, nothing delivered)
 //   - a message that ends before its last zero padding parses, is delivered,
 //     and is logged once per OscReceiver
+//   - every getter at every index gives the same result for a message with
+//     all tags and one mixing tags with and without data, built, decoded,
+//     copied or in a bundle; the mixed message round-trips byte for byte
 // =============================================================================
 
 #include <tcxOsc.h>
@@ -375,6 +378,79 @@ static bool everyTypeMatches(const OscMessage& m) {
         if (m.getArgType(i) != cases[i].tag || !cases[i].check(m, i)) return false;
     }
     return true;
+}
+
+// ----- getter table ----------------------------------------------------------
+// Every getter's result at index i, as one line of text: the tag ('-' when
+// there is none), then each getter whose result is not its default value
+static std::string getterRow(const OscMessage& m, size_t i) {
+    std::string row(1, m.getArgType(i) ? m.getArgType(i) : '-');
+    char buf[64];
+    auto add = [&](const char* name, const std::string& value) { row += std::string(" ") + name + "=" + value; };
+    if (m.getArgAsInt(i) != 0) add("int", std::to_string(m.getArgAsInt(i)));
+    if (m.getArgAsFloat(i) != 0.0f) { std::snprintf(buf, sizeof(buf), "%g", double(m.getArgAsFloat(i))); add("float", buf); }
+    if (m.getArgAsInt64(i) != 0) add("int64", std::to_string(m.getArgAsInt64(i)));
+    if (m.getArgAsDouble(i) != 0.0) { std::snprintf(buf, sizeof(buf), "%g", m.getArgAsDouble(i)); add("double", buf); }
+    if (!m.getArgAsString(i).empty()) add("str", "'" + m.getArgAsString(i) + "'");
+    if (!m.getArgAsSymbol(i).empty()) add("sym", "'" + m.getArgAsSymbol(i) + "'");
+    if (!m.getArgAsBlob(i).empty()) {
+        std::string blob;
+        for (uint8_t v : m.getArgAsBlob(i)) blob += (blob.empty() ? "" : ",") + std::to_string(v);
+        add("blob", "[" + blob + "]");
+    }
+    if (m.getArgAsBool(i)) add("bool", "1");
+    if (m.getArgAsTimetag(i) != 0) add("tt", std::to_string(m.getArgAsTimetag(i)));
+    if (m.getArgAsChar(i) != '\0') add("char", std::to_string(int(m.getArgAsChar(i))));
+    const osc::OscRgba c = m.getArgAsRgba(i);
+    if (c != osc::OscRgba{}) {
+        std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d", c.r, c.g, c.b, c.a);
+        add("rgba", buf);
+    }
+    const osc::OscMidi mi = m.getArgAsMidi(i);
+    if (mi != osc::OscMidi{}) {
+        std::snprintf(buf, sizeof(buf), "%d,%d,%d,%d", mi.port, mi.status, mi.data1, mi.data2);
+        add("midi", buf);
+    }
+    return row;
+}
+
+// The getter rows of `m` are `expected`: one row per argument, then one row
+// for the index past the last argument. Prints the rows that differ.
+static bool rowsMatch(const OscMessage& m, const std::vector<std::string>& expected) {
+    bool same = m.getArgCount() + 1 == expected.size();
+    if (!same) std::printf("  (%zu arguments, %zu expected)\n", m.getArgCount(), expected.size() - 1);
+    for (size_t i = 0; i < expected.size(); ++i) {
+        const std::string row = getterRow(m, i);
+        if (row != expected[i]) {
+            same = false;
+            std::printf("  [%zu] got      %s\n  [%zu] expected %s\n", i, row.c_str(), i, expected[i].c_str());
+        }
+    }
+    return same;
+}
+
+// Tags with and without data, mixed: i T s N f [ i ] b F h I
+static void addMixedArgs(OscMessage& m) {
+    const uint8_t blob[2] = { 1, 2 };
+    m.addInt(5).addBool(true).addString("hi").addNil().addFloat(2.5f)
+     .addArrayBegin().addInt(-3).addArrayEnd().addBlob(blob, 2).addBool(false)
+     .addInt64(int64_t(1) << 40).addImpulse();
+}
+
+static OscMessage makeMixedMessage() {
+    OscMessage m("/mix");
+    addMixedArgs(m);
+    return m;
+}
+
+static std::vector<uint8_t> mixedBytes() {
+    return rawMessage("/mix", "iTsNf[i]bFhI",
+                      { 0, 0, 0, 5,                // i 5
+                        'h', 'i', 0, 0,            // s "hi"
+                        0x40, 0x20, 0, 0,          // f 2.5
+                        0xFF, 0xFF, 0xFF, 0xFD,    // i -3
+                        0, 0, 0, 2, 1, 2, 0, 0,    // b {1, 2}
+                        0, 0, 1, 0, 0, 0, 0, 0 }); // h 1 << 40
 }
 
 int main() {
@@ -1164,6 +1240,109 @@ int main() {
         check("types: second receiver bound", port2 != 0);
         if (port2 != 0) runReceiver(rx2, port2, 1, "2");
         rx2.close();
+    }
+
+    // ----- 12. argument positions: getter table ------------------------------
+    // Every getter at every index of a message with all tags, and of one that
+    // mixes tags with and without data: built with addX(), decoded, copied,
+    // moved, carried in a bundle and rebuilt after clear(). The mixed message
+    // encodes to its wire bytes and round-trips byte for byte.
+    {
+        // One row per index, then the index past the last argument
+        static const std::vector<std::string> EVERY_ROWS = {
+            "i int=-2 float=-2 int64=-2 double=-2",
+            "f int=1 float=1.5 int64=1 double=1.5",
+            "s str='ab' sym='ab'",
+            "b blob=[9,8,7]",
+            "T bool=1",
+            "F",
+            "h int=-84281096 float=-7.26239e+16 int64=-72623859790382856 double=-7.26239e+16",
+            "d int=-2 float=-2.5 int64=-2 double=-2.5",
+            "t tt=72623859790382856",
+            "S str='sym' sym='sym'",
+            "c char=65",
+            "r rgba=1,2,3,4",
+            "m midi=0,144,60,100",
+            "N",
+            "I",
+            "[",
+            "]",
+            "-",
+        };
+        static const std::vector<std::string> MIXED_ROWS = {
+            "i int=5 float=5 int64=5 double=5",
+            "T bool=1",
+            "s str='hi' sym='hi'",
+            "N",
+            "f int=2 float=2.5 int64=2 double=2.5",
+            "[",
+            "i int=-3 float=-3 int64=-3 double=-3",
+            "]",
+            "b blob=[1,2]",
+            "F",
+            "h float=1.09951e+12 int64=1099511627776 double=1.09951e+12",
+            "I",
+            "-",
+        };
+        const std::string MIXED_TEXT = "/mix i:5 T s:\"hi\" N f:2.5 [ i:-3 ] b:[2 bytes] F h:1099511627776 I";
+        bool ok = false;
+
+        check("args: every tag, built: getter table", rowsMatch(makeEveryTypeMessage(), EVERY_ROWS));
+        std::vector<uint8_t> bytes = everyTypeBytes();
+        OscMessage parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("args: every tag, decoded: getter table", ok && rowsMatch(parsed, EVERY_ROWS));
+
+        const OscMessage mixed = makeMixedMessage();
+        const std::vector<uint8_t> mixBytes = mixedBytes();
+        check("args: mixed tags, built: getter table", rowsMatch(mixed, MIXED_ROWS));
+        check("args: mixed tags, built: tags and text",
+              mixed.getTypeTags() == "iTsNf[i]bFhI" && mixed.toString() == MIXED_TEXT);
+        check("args: mixed tags encode to their wire bytes", mixed.toBytes() == mixBytes);
+        parsed = OscMessage::fromBytes(mixBytes.data(), mixBytes.size(), ok);
+        check("args: mixed tags, decoded: getter table", ok && rowsMatch(parsed, MIXED_ROWS));
+        check("args: mixed tags, decoded: tags and text",
+              ok && parsed.getTypeTags() == "iTsNf[i]bFhI" && parsed.toString() == MIXED_TEXT);
+        check("args: mixed tags round-trip byte for byte", ok && parsed.toBytes() == mixBytes);
+
+        OscMessage copied(parsed);
+        OscMessage assigned("/other");
+        assigned.addInt(1).addBool(true);
+        assigned = parsed;
+        check("args: mixed tags, copied: getter table and bytes",
+              rowsMatch(copied, MIXED_ROWS) && rowsMatch(assigned, MIXED_ROWS) &&
+              copied.toBytes() == mixBytes && assigned.toBytes() == mixBytes);
+        OscMessage moved(std::move(copied));
+        check("args: mixed tags, moved: getter table and bytes",
+              rowsMatch(moved, MIXED_ROWS) && moved.toBytes() == mixBytes);
+
+        OscBundle bundle;
+        bundle.addMessage(mixed).addMessage(makeEveryTypeMessage());
+        const std::vector<uint8_t> bundleBytes = bundle.toBytes();
+        OscBundle parsedBundle = OscBundle::fromBytes(bundleBytes.data(), bundleBytes.size(), ok);
+        check("args: mixed and every tag in a bundle: getter tables",
+              ok && parsedBundle.getElementCount() == 2 &&
+              rowsMatch(parsedBundle.getMessageAt(0), MIXED_ROWS) &&
+              rowsMatch(parsedBundle.getMessageAt(1), EVERY_ROWS) &&
+              parsedBundle.toBytes() == bundleBytes);
+
+        OscMessage reused = makeEveryTypeMessage();
+        reused.clear();
+        reused.setAddress("/mix");
+        addMixedArgs(reused);
+        check("args: rebuilt after clear(): getter table and bytes",
+              rowsMatch(reused, MIXED_ROWS) && reused.toBytes() == mixBytes);
+
+        // A message of only T tags, decoded and built
+        const size_t count = 50000;
+        bytes = rawMessage("/t", std::string(count, 'T'), {});
+        parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("args: only T tags, decoded",
+              ok && parsed.getArgCount() == count && parsed.getArgAsBool(0) &&
+              parsed.getArgAsBool(count - 1) && !parsed.getArgAsBool(count) &&
+              parsed.getArgType(count - 1) == 'T' && parsed.toBytes() == bytes);
+        OscMessage built("/t");
+        for (size_t i = 0; i < count; ++i) built.addBool(true);
+        check("args: only T tags, built", built.getArgCount() == count && built.toBytes() == bytes);
     }
 
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
