@@ -193,10 +193,11 @@ void UdpSocket::close() {
         socket_ = INVALID_SOCKET_HANDLE;
     }
 
-    // Wait for thread to finish
-    if (receiveThread_.joinable()) {
-        receiveThread_.join();
-    }
+    // Wait for thread to finish. On that thread itself (an onReceive
+    // listener that closes the socket) it cannot join itself: keep it for a
+    // later join from another thread. Then join what earlier calls kept.
+    keptThreads_.release(receiveThread_);
+    keptThreads_.joinOthers();
     receiving_ = false;
 
     localPort_ = 0;
@@ -310,6 +311,11 @@ void UdpSocket::startReceiving() {
         return;  // Already receiving
     }
 
+    // A receive thread that a listener's stopReceiving() or close() let go
+    // of has been told to stop: wait for it before clearing shouldStop_ for
+    // the new one. The calling thread itself, if kept, stays.
+    keptThreads_.joinOthers();
+
     shouldStop_ = false;
     receiving_ = true;
 
@@ -328,18 +334,13 @@ void UdpSocket::stopReceiving() {
     shouldStop_ = true;
     updateListener_.disconnect();
 
-    if (receiveThread_.joinable()) {
-        // Avoid joining self
-        if (receiveThread_.get_id() == std::this_thread::get_id()) {
-            receiveThread_.detach();
-        } else {
-            // Close socket to unblock recvfrom if blocking
-            // (Note: close() calls stopReceiving, so we might be here via close())
-            // If called directly, we might need to interrupt recvfrom.
-            // On Windows shutdown() helps, on POSIX closing socket helps.
-            receiveThread_.join();
-        }
-    }
+    // The thread waits in slices of 100 ms and sees shouldStop_ there. On
+    // that thread itself (an onReceive listener) it cannot join itself: keep
+    // it, and the next startReceiving(), stopReceiving() or close() on
+    // another thread, or the destructor, joins it. Then join what earlier
+    // calls kept.
+    keptThreads_.release(receiveThread_);
+    keptThreads_.joinOthers();
 
     receiving_ = false;
 }

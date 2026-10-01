@@ -38,16 +38,9 @@ struct YCoCgVsParams {
 inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuffer& buffer) {
     if (!track.isPcm()) return false;
 
-    // Calculate total audio data size
-    size_t totalSize = 0;
-    for (const auto& sample : track.samples) {
-        totalSize += sample.size;
-    }
-
-    // Read all audio samples
+    // Read all audio samples. No size pre-pass: only samples that lie inside
+    // the file are read (see MovParser::readSample()).
     std::vector<uint8_t> audioData;
-    audioData.reserve(totalSize);
-
     for (size_t i = 0; i < track.samples.size(); i++) {
         std::vector<uint8_t> sampleData;
         if (parser.readSample(track, i, sampleData)) {
@@ -629,16 +622,8 @@ private:
     bool loadMp3Audio() {
         if (!audioTrack_) return false;
 
-        // Calculate total MP3 data size
-        size_t totalSize = 0;
-        for (const auto& sample : audioTrack_->samples) {
-            totalSize += sample.size;
-        }
-
         // Read all MP3 data
         std::vector<uint8_t> mp3Data;
-        mp3Data.reserve(totalSize);
-
         for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
             std::vector<uint8_t> sampleData;
             if (movParser_.readSample(*audioTrack_, i, sampleData)) {
@@ -671,16 +656,8 @@ private:
     bool loadAacAudio() {
         if (!audioTrack_) return false;
 
-        // Calculate total size including ADTS headers (7 bytes per frame)
-        size_t totalSize = 0;
-        for (const auto& sample : audioTrack_->samples) {
-            totalSize += sample.size + 7;  // raw frame + ADTS header
-        }
-
         // Read all AAC data with ADTS headers
         std::vector<uint8_t> aacData;
-        aacData.reserve(totalSize);
-
         int sampleRate = audioTrack_->sampleRate;
         int channels = audioTrack_->channels;
 
@@ -1004,15 +981,7 @@ private:
     std::vector<uint8_t> getRawAudioData() const {
         if (!audioTrack_) return {};
 
-        // Calculate total size
-        size_t totalSize = 0;
-        for (const auto& sample : audioTrack_->samples) {
-            totalSize += sample.size;
-        }
-
         std::vector<uint8_t> audioData;
-        audioData.reserve(totalSize);
-
         for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
             std::vector<uint8_t> sampleData;
             if (const_cast<MovParser&>(movParser_).readSample(*audioTrack_, i, sampleData)) {
@@ -1026,15 +995,7 @@ private:
     std::vector<uint8_t> getAacDataWithAdts() const {
         if (!audioTrack_) return {};
 
-        // Calculate total size including ADTS headers (7 bytes per frame)
-        size_t totalSize = 0;
-        for (const auto& sample : audioTrack_->samples) {
-            totalSize += sample.size + 7;
-        }
-
         std::vector<uint8_t> aacData;
-        aacData.reserve(totalSize);
-
         int sampleRate = audioTrack_->sampleRate;
         int channels = audioTrack_->channels;
 

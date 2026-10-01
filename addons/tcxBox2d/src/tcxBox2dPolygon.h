@@ -13,14 +13,15 @@ namespace tcx::box2d {
 // Polygon Body
 // =============================================================================
 // A polygon body. A Box2D polygon is one convex shape of 3 to 8 points.
-//   - setup():         one polygon, 3 to 8 points. Concave input silently
-//                      becomes its convex hull, as Box2D does; draw(),
-//                      drawFill() and getVertices() show that hull, so what
-//                      you see is what collides.
-//   - setupConvex():   any number of points, approximated by one convex hull
-//                      of at most 8 points.
-//   - setupCompound(): any outline, kept exactly (concave parts, holes), as
-//                      one fixture per triangle on one body.
+//   - setup():           one polygon, 3 to 8 points. Concave input becomes
+//                        its convex hull, as Box2D does (the first time in
+//                        the process, a warning names the points dropped);
+//                        draw(), drawFill() and getVertices() show that hull,
+//                        so what you see is what collides.
+//   - setupSimplified(): any number of points, simplified to one convex hull
+//                        of at most 8 points.
+//   - setupCompound():   any outline, kept exactly (concave parts, holes), as
+//                        one fixture per triangle on one body.
 // Input that can't make a polygon (fewer than 3 or more than 8 points for
 // setup(), collinear points, points that nearly coincide, a polygon tiny next
 // to its distance from the local origin) logs a warning and creates no body,
@@ -43,9 +44,13 @@ public:
     // vertices: vertex coordinates (local coordinates, center-based)
     // x, y: center coordinates (world coordinates, pixels)
     // Concave input becomes its convex hull (getVertices() returns the hull).
+    // When the hull leaves input points inside it (concave input, or interior
+    // points), the first such call in the process logs one warning with the
+    // counts, pointing to setupCompound(). Points on the outline (collinear,
+    // duplicates) and hull points in a crossing order don't count.
     // More than 8 points, or degenerate points (collinear, nearly coincident,
     // tiny next to their distance from the local origin), log a warning and
-    // create no body: check isCreated(). For more points use setupConvex()
+    // create no body: check isCreated(). For more points use setupSimplified()
     // (convex approximation) or setupCompound() (exact shape).
     void setup(World& world, const std::vector<tc::Vec2>& vertices, float x, float y);
 
@@ -61,10 +66,10 @@ public:
     // returns the points actually used.
     // Degenerate input (collinear or coincident points) logs a warning and
     // creates no body: check isCreated().
-    void setupConvex(World& world, const std::vector<tc::Vec2>& points, float x, float y);
+    void setupSimplified(World& world, const std::vector<tc::Vec2>& points, float x, float y);
 
     // Same as above with every point of the path (all subpaths together).
-    void setupConvex(World& world, const tc::Path& path, float x, float y);
+    void setupSimplified(World& world, const tc::Path& path, float x, float y);
 
     // Create a body with the exact shape of any outline: concave, with holes,
     // any number of points. Path::buildFillTriangles() triangulates it (the
@@ -99,7 +104,7 @@ public:
     // Properties
     // -------------------------------------------------------------------------
     // The polygon Box2D built (local pixels): the convex hull of the setup()
-    // points, or the reduced hull of setupConvex(). When every setup() point
+    // points, or the reduced hull of setupSimplified(). When every setup() point
     // is a hull vertex and they already go around the outline in order
     // (either winding, any start), they come back as given; otherwise (points
     // dropped, or listed in a crossing order) the order is Box2D's (from the

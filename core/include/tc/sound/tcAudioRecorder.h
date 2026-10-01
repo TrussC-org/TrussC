@@ -253,7 +253,7 @@ public:
     // A take past 4 GiB of samples is finalized as RF64 (logged as a notice).
     // If writing the file failed on the way (disk full, a file size limit),
     // it logs an error instead: the file is incomplete.
-    // It waits on AudioEngine::waitForCallbackIdle(), the engine-wide barrier:
+    // It waits on AudioEngine::waitForAudioCallbacks(), the engine-wide barrier:
     // for every audioOut / audioIn listener running at that moment, not only
     // this recorder's capture (usually well under one buffer). So don't call
     // it while holding a lock that an audioOut / audioIn listener takes: the
@@ -268,7 +268,7 @@ public:
         // only then let the writer finish, so its final drain includes that
         // buffer. The wait also comes before the ring can be refilled by
         // start() or freed.
-        AudioEngine::getInstance().waitForCallbackIdle();
+        AudioEngine::getInstance().waitForAudioCallbacks();
         writing_.store(false, std::memory_order_release);
         if (writer_.joinable()) writer_.join();
         const bool rf64 = patchHeader();
