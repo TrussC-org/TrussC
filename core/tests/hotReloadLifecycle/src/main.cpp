@@ -562,9 +562,11 @@ static int runCycles(const std::string& guestPath, int port) {
             const bool attached = guest->attachApp(first, sub);
             const bool guestSawAttach = attached && guest->seesAttached(sub.get());
             first.setApp(nullptr);
+            first.applyPendingApp();   // the frame boundary
             const bool guestSawRelease = !guest->seesAttached(sub.get());
             const bool attachedNew = guest->attachApp(second, reopened);
             second.setApp(nullptr);
+            second.applyPendingApp();   // the frame boundary
             first.native_ = nullptr;
             second.native_ = nullptr;
             if (!attached || !guestSawAttach) {

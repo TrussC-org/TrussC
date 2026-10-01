@@ -100,11 +100,13 @@ void tcApp::queueFromWorker(std::atomic<int>* ran) {
     worker.join();
 }
 
-// Window::setApp() is inline, so this runs the guest's copy of it: the
-// double-attach guard it consults and adds to must be the one the host's
-// close() removes from.
+// Window::setApp() and applyPendingApp() are inline, so this runs the
+// guest's copies: the double-attach guard they consult and add to must be
+// the one the host's teardown removes from. applyPendingApp() stands in for
+// the window's frame boundary (setApp() is a request).
 bool tcApp::attachApp(Window& window, std::shared_ptr<App> app) {
     window.setApp(app);
+    window.applyPendingApp();   // the frame boundary
     return window.getApp() == app;
 }
 

@@ -1324,8 +1324,8 @@ WindowContext& currentWindowContext() {
     return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
 }
 
-// Window::setApp() (app code) adds to it and the platform close() (host code)
-// removes from it. Leaked like the ones above: ~Window() calls close(), and a
+// Window::applyPendingApp() adds to it and the platform teardown (host code)
+// removes from it. Leaked like the ones above: ~Window() calls the teardown, and a
 // Window an app keeps in a global is destroyed at exit.
 std::unordered_set<const App*>& attachedApps() {
     static auto* apps = new std::unordered_set<const App*>();
