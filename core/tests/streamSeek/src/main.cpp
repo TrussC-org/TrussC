@@ -216,7 +216,7 @@ static double g_recordSum = 0.0;   // left-channel sum of the recorded blocks
 
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }
 
-static bool near(float a, float b, float tol) { return fabs(a - b) <= tol; }
+static bool approx(float a, float b, float tol) { return fabs(a - b) <= tol; }
 
 // Wait (up to `timeoutMs`) until `pred()` holds.
 template <class Pred>
@@ -256,7 +256,7 @@ static SeekTrace seekAndTrace(Sound& s, float target, float newLevel) {
     while (chrono::steady_clock::now() - t0 < chrono::milliseconds(195)) {
         const float p = s.getPosition();
         if (p < t.minSeen) t.minSeen = p;
-        if (!t.switched && near(g_level.load(), newLevel, 0.03f)) {
+        if (!t.switched && approx(g_level.load(), newLevel, 0.03f)) {
             t.atSwitch = s.getPosition();
             t.switched = true;
         }
@@ -361,14 +361,14 @@ int main() {
           internal::lastStreamSeekPointsForTests() == 0,
           to_string(internal::lastStreamSeekPointsForTests()));
     sleepMs(150);
-    check("it plays from the start (level 0.1)", near(g_level.load(), 0.1f, 0.02f),
+    check("it plays from the start (level 0.1)", approx(g_level.load(), 0.1f, 0.02f),
           to_string(g_level.load()));
 
     SeekTrace t = seekAndTrace(s, 2.0f, 0.5f);
-    check("getPosition() is the target right after setPosition()", near(t.first, 2.0f, 0.001f),
+    check("getPosition() is the target right after setPosition()", approx(t.first, 2.0f, 0.001f),
           to_string(t.first));
     check("the audio moved to the target (level 0.5, 200 ms after the seek)",
-          near(t.levelAt200, 0.5f, 0.02f), to_string(t.levelAt200));
+          approx(t.levelAt200, 0.5f, 0.02f), to_string(t.levelAt200));
     check("getPosition() never reported the old position meanwhile", t.minSeen >= 2.0f - 0.001f,
           to_string(t.minSeen));
     check("getPosition() is still the target when the audio moves",
@@ -382,18 +382,18 @@ int main() {
     sleepMs(50);
     const float voiceBefore = streamVoicePosition();
     s.setPosition(0.25f);
-    check("paused: getPosition() is the target at once", near(s.getPosition(), 0.25f, 0.001f),
+    check("paused: getPosition() is the target at once", approx(s.getPosition(), 0.25f, 0.001f),
           to_string(s.getPosition()));
     sleepMs(100);
-    check("paused: getPosition() stays at the target", near(s.getPosition(), 0.25f, 0.001f),
+    check("paused: getPosition() stays at the target", approx(s.getPosition(), 0.25f, 0.001f),
           to_string(s.getPosition()));
     const float voiceAfter = streamVoicePosition();
     check("paused: the voice itself has not moved (the mixer applies the seek)",
-          voiceBefore > 2.0f && near(voiceAfter, voiceBefore, 0.001f),
+          voiceBefore > 2.0f && approx(voiceAfter, voiceBefore, 0.001f),
           to_string(voiceBefore) + " -> " + to_string(voiceAfter));
     s.resume();
     sleepMs(200);
-    check("resumed: it plays from the target (level 0.1)", near(g_level.load(), 0.1f, 0.02f),
+    check("resumed: it plays from the target (level 0.1)", approx(g_level.load(), 0.1f, 0.02f),
           to_string(g_level.load()));
     p = s.getPosition();
     check("resumed: getPosition() follows from the target", p > 0.3f && p < 0.65f, to_string(p));
@@ -402,12 +402,12 @@ int main() {
     s.setPosition(2.5f);
     s.setPosition(0.2f);
     s.setPosition(1.8f);
-    check("repeated: getPosition() is the last target", near(s.getPosition(), 1.8f, 0.001f),
+    check("repeated: getPosition() is the last target", approx(s.getPosition(), 1.8f, 0.001f),
           to_string(s.getPosition()));
     sleepMs(200);
     p = s.getPosition();
     check("repeated: the audio is at the last target (level 0.5)",
-          near(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
+          approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
     check("repeated: getPosition() follows from the last target", p > 1.85f && p < 2.2f,
           to_string(p));
 
@@ -418,12 +418,12 @@ int main() {
     sleepMs(50);
     s.setPosition(0.4f);
     check("repeated while paused: getPosition() is the last target",
-          near(s.getPosition(), 0.4f, 0.001f), to_string(s.getPosition()));
+          approx(s.getPosition(), 0.4f, 0.001f), to_string(s.getPosition()));
     s.resume();
     sleepMs(200);
     p = s.getPosition();
     check("repeated while paused: the audio is at the last target (level 0.1)",
-          near(g_level.load(), 0.1f, 0.02f), to_string(g_level.load()));
+          approx(g_level.load(), 0.1f, 0.02f), to_string(g_level.load()));
     check("repeated while paused: getPosition() follows from the last target",
           p > 0.45f && p < 0.8f, to_string(p));
     s.stop();
@@ -462,7 +462,7 @@ int main() {
               blocks > 10 && oldBlocks == 0,
               to_string(oldBlocks) + " of " + to_string(blocks) + " blocks at the old level");
         check("pending: once served, the audio is at the target (level 0.5)",
-              near(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
+              approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
         g.stop();
 
         Sound n;
@@ -475,7 +475,7 @@ int main() {
               n.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("pending: then it plays from the target (level 0.5)",
-              waitFor([] { return near(g_level.load(), 0.5f, 0.02f); }, 300),
+              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 300),
               to_string(g_level.load()));
         n.stop();
     }
@@ -486,10 +486,10 @@ int main() {
     eager.play();
     sleepMs(100);
     eager.setPosition(2.0f);
-    check("eager: getPosition() is the target at once", near(eager.getPosition(), 2.0f, 0.01f),
+    check("eager: getPosition() is the target at once", approx(eager.getPosition(), 2.0f, 0.01f),
           to_string(eager.getPosition()));
     sleepMs(50);
-    check("eager: the audio moved (level 0.5)", near(g_level.load(), 0.5f, 0.02f),
+    check("eager: the audio moved (level 0.5)", approx(g_level.load(), 0.5f, 0.02f),
           to_string(g_level.load()));
     eager.stop();
 
@@ -515,7 +515,7 @@ int main() {
         check("loadStream() accepts a FLAC whose length is unknown", (bool)r, r.message);
         check("its duration is 0 (unknown)", u.getDuration() == 0.0f, to_string(u.getDuration()));
         check("it plays (level 0.3)",
-              u.play() && waitFor([] { return near(g_level.load(), 0.3f, 0.02f); }, 500),
+              u.play() && waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500),
               to_string(g_level.load()));
         // With no known end there is nothing to clamp a target to: the
         // seek is refused (it used to jump to the start).
@@ -554,7 +554,7 @@ int main() {
               lastLog(LogLevel::Error));
         sleepMs(1000);   // longer than the other stream's ring holds
         check("the other stream is still refilled (level 0.5 a second later)",
-              near(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
+              approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
         // A looping voice whose stream halted plays on silently; what
         // isPlaying() should say then is #448 (undecided), so this pins the
         // current behaviour.
@@ -577,20 +577,20 @@ int main() {
         sleepMs(600);   // the ring drains; nothing new is decoded
         check("the read error is logged once",
               countLogs(LogLevel::Error, "decoder read failed") == 1);
-        check("after a read error the voice falls silent", near(g_level.load(), 0.0f, 0.001f),
+        check("after a read error the voice falls silent", approx(g_level.load(), 0.0f, 0.001f),
               to_string(g_level.load()));
         // #448: see the emptied stream above.
         check("after a read error the looping voice stays playing, silent (#448)", c.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         c.setPosition(2.0f);
         check("after a read error setPosition() makes it play again (level 0.5)",
-              waitFor([] { return near(g_level.load(), 0.5f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 500),
               to_string(g_level.load()));
         c.stop();
 
         Sound after;
         check("the worker refills a new stream afterwards", (bool)after.loadStream(bgmWav) &&
-              after.play() && waitFor([] { return near(g_level.load(), 0.5f, 0.02f); }, 500),
+              after.play() && waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 500),
               to_string(g_level.load()));
         after.stop();
     }
@@ -608,7 +608,7 @@ int main() {
         sleepMs(600);   // the ring (~340 ms) drains; nothing new is decoded
         check("the failed loop seek is logged once",
               countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1);
-        check("after a failed loop seek the voice falls silent", near(g_level.load(), 0.0f, 0.001f),
+        check("after a failed loop seek the voice falls silent", approx(g_level.load(), 0.0f, 0.001f),
               to_string(g_level.load()));
         // #448: see the emptied stream above.
         check("after a failed loop seek the looping voice stays playing, silent (#448)",
@@ -616,7 +616,7 @@ int main() {
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         e.setPosition(0.0f);
         check("after a failed loop seek setPosition() makes it play again (level 0.1)",
-              waitFor([] { return near(g_level.load(), 0.1f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.1f, 0.02f); }, 500),
               to_string(g_level.load()));
         e.stop();
     }
@@ -650,7 +650,7 @@ int main() {
         internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
         sleepMs(450);   // the ring (~340 ms) drains: the mixer underruns
         check("read error with frames: the voice underruns, still playing",
-              w.isPlaying() && near(g_level.load(), 0.0f, 0.001f), to_string(g_level.load()));
+              w.isPlaying() && approx(g_level.load(), 0.0f, 0.001f), to_string(g_level.load()));
         {
             lock_guard<mutex> lock(g_blockMutex);
             g_blockLevels.clear();
@@ -667,7 +667,7 @@ int main() {
         {
             lock_guard<mutex> lock(g_blockMutex);
             for (auto& b : g_blockLevels) {
-                if (near(b.second, 0.5f, 0.02f)) ++heard;
+                if (approx(b.second, 0.5f, 0.02f)) ++heard;
             }
         }
         check("read error with frames: the stream ends with an error log",
@@ -742,7 +742,7 @@ int main() {
             o.setPosition(o.getDuration());
             internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
             sleepMs(600);  // longer than bg's ring
-            if (!near(g_level.load(), 0.5f, 0.02f)) ++starved;
+            if (!approx(g_level.load(), 0.5f, 0.02f)) ++starved;
             o.stop();
         }
         check("overshoot: after a seek at speed 10 the other stream is still refilled",
@@ -773,18 +773,18 @@ int main() {
         s96.sampleRate = 96000;
         check("re-init: the engine restarts at 96 kHz", engine.init(s96));
         const float after = r.getPosition();
-        check("re-init: getPosition() carries over", before > 0.2f && near(after, before, 0.05f),
+        check("re-init: getPosition() carries over", before > 0.2f && approx(after, before, 0.05f),
               to_string(before) + " -> " + to_string(after));
         check("re-init: an ended voice's getPosition() carries over",
-              endedBefore > 0.15f && near(ended.getPosition(), endedBefore, 0.001f),
+              endedBefore > 0.15f && approx(ended.getPosition(), endedBefore, 0.001f),
               to_string(endedBefore) + " -> " + to_string(ended.getPosition()));
         check("re-init: an ended voice's pending seek target carries over",
-              near(endedSeekBefore, 0.1f, 0.001f) && near(endedSeek.getPosition(), 0.1f, 0.001f),
+              approx(endedSeekBefore, 0.1f, 0.001f) && approx(endedSeek.getPosition(), 0.1f, 0.001f),
               to_string(endedSeekBefore) + " -> " + to_string(endedSeek.getPosition()));
         r.setPosition(1.5f);
         sleepMs(200);
         check("re-init: setPosition() lands at the target (level 0.5)",
-              near(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
+              approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
         p = r.getPosition();
         check("re-init: getPosition() follows from the target", p > 1.55f && p < 1.9f, to_string(p));
         r.stop();
@@ -911,7 +911,7 @@ int main() {
         for (auto& f : fill) f.stop();
         check("slot reused: the engine restarts at another rate", reinitAt(otherRate()));
         check("slot reused: the ended voice's getPosition() carries over",
-              before > 0.15f && near(ended.getPosition(), before, 0.001f),
+              before > 0.15f && approx(ended.getPosition(), before, 0.001f),
               to_string(before) + " -> " + to_string(ended.getPosition()));
     }
 
@@ -935,10 +935,10 @@ int main() {
               countLogs(LogLevel::Warning, "stream voice migration failed") == warned + 2,
               lastLog(LogLevel::Warning));
         check("reopen fails: getPosition() carries over",
-              before > 0.2f && near(a.getPosition(), before, 0.05f),
+              before > 0.2f && approx(a.getPosition(), before, 0.05f),
               to_string(before) + " -> " + to_string(a.getPosition()));
         check("reopen fails: a pending target carries over",
-              near(b.getPosition(), 2.5f, 0.001f), to_string(b.getPosition()));
+              approx(b.getPosition(), 2.5f, 0.001f), to_string(b.getPosition()));
         a.stop();
         b.stop();
     }
@@ -948,7 +948,7 @@ int main() {
         Sound u;
         check("unknown length re-init: the FLAC plays (level 0.3)",
               (bool)u.loadStream(unknownFlac) && u.play() &&
-              waitFor([] { return near(g_level.load(), 0.3f, 0.02f); }, 500));
+              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500));
         sleepMs(200);
         const float before = u.getPosition();
         check("unknown length re-init: the engine restarts at another rate", reinitAt(otherRate()));
@@ -956,7 +956,7 @@ int main() {
         check("unknown length re-init: getPosition() restarts from 0 with the audio",
               before > 0.15f && after < 0.05f, to_string(before) + " -> " + to_string(after));
         check("unknown length re-init: it plays again (level 0.3)",
-              waitFor([] { return near(g_level.load(), 0.3f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500),
               to_string(g_level.load()));
         check("unknown length re-init: then it ends", waitFor([&] { return !u.isPlaying(); }, 2000));
         u.stop();
@@ -975,7 +975,7 @@ int main() {
         v.pause();
         float mine = v.getPosition(), listed = streamVoicePosition();
         check("getVoices(): after a re-init it agrees with getPosition()",
-              mine > 0.2f && near(listed, mine, 0.001f),
+              mine > 0.2f && approx(listed, mine, 0.001f),
               to_string(listed) + " vs " + to_string(mine));
         engine.shutdown();
         check("getVoices(): the engine inits at another rate after shutdown()",
@@ -984,7 +984,7 @@ int main() {
         listed = streamVoicePosition();
         check("getVoices(): after shutdown() and an init at another rate it agrees with "
               "getPosition()",
-              mine > 0.2f && near(listed, mine, 0.001f),
+              mine > 0.2f && approx(listed, mine, 0.001f),
               to_string(listed) + " vs " + to_string(mine));
         v.stop();
     }
