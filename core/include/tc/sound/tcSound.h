@@ -333,14 +333,17 @@ public:
             // 16-bit signed integer -> float
             samples.resize(sampleCount);
 
-            const int16_t* src = static_cast<const int16_t*>(data);
+            // Read through memcpy (no alignment assumption on data) and swap
+            // on the unsigned value: a shift on a negative int16_t would
+            // sign-extend and corrupt the swapped sample.
+            const uint8_t* src8 = static_cast<const uint8_t*>(data);
             for (size_t i = 0; i < sampleCount; i++) {
-                int16_t s = src[i];
+                uint16_t u;
+                std::memcpy(&u, src8 + i * 2, sizeof(u));
                 if (bigEndian) {
-                    // Swap bytes for big-endian
-                    s = static_cast<int16_t>((s >> 8) | (s << 8));
+                    u = static_cast<uint16_t>((u >> 8) | (u << 8));
                 }
-                samples[i] = s / 32768.0f;
+                samples[i] = static_cast<int16_t>(u) / 32768.0f;
             }
         } else {
             // 32-bit float: dataSize == sampleCount * sizeof(float) here
@@ -610,8 +613,14 @@ private:
 // Constraints (vs eager SoundBuffer):
 //   - setSpeed() is treated as 1.0 (no resampling on the fly — decoder
 //     outputs engine-rate frames).
-//   - setPosition() seeks the decoder and re-fills the ring buffer
-//     (~10 ms blackout, similar tradeoff to other engines).
+//   - setPosition() posts a seek: the StreamWorker seeks the decoder and
+//     re-fills the ring buffer, and the audio moves once the mixer
+//     reaches the new data (~10 ms blackout, similar tradeoff to other
+//     engines; longer on slow storage or for an MP3 several hours long,
+//     whose seek table is capped). getPosition() reports the requested
+//     target meanwhile. A file whose length is unknown (duration 0, e.g.
+//     a FLAC encoded to a pipe) cannot seek, and an engine re-init at
+//     another sample rate restarts it from the beginning.
 //   - Each polyphony slot costs one open file handle + one decoder +
 //     one ring buffer (default ~16 KB).
 // ---------------------------------------------------------------------------
@@ -791,8 +800,24 @@ struct PlayingSound {
     internal::AtomicSharedPtr<const std::vector<std::vector<int>>> channelMap;
     internal::AtomicSharedPtr<const std::vector<float>>            channelGains;
 
-    // Playback position (floating-point for speed adjustment)
+    // Playback position (floating-point for speed adjustment): source
+    // frames for an eager voice, engine-rate frames for a stream. While the
+    // device runs, code outside the mixer reads or writes it only under the
+    // engine lock (internal::seekVoice() / internal::voicePosition()). A
+    // stream voice's seek never writes it directly: the mixer sets it when
+    // it reaches the post-seek data.
     double positionF{0.0};
+
+    // Frames per second positionF counts (Sound::getPosition() /
+    // setPosition() convert with it). A stream's decoder outputs at the
+    // engine rate of the play() that opened it; the re-init migration
+    // re-expresses positionF at the new rate and updates this. A voice the
+    // migration does not rebuild (it had ended, or its decoder did not
+    // reopen) keeps positionF and this at the old rate, so its position in
+    // seconds does not change. 0 until play() sets it.
+    // internal: set by the engine, do not modify (the trailing underscore
+    // keeps it out of the reference and the Lua bindings).
+    std::atomic<int> positionRateHz_{0};
 
     // Buffer-to-engine sample-rate ratio, set when the sound is queued for
     // playback (buffer->sampleRate / AudioEngine::getInstance().getSampleRate()).
@@ -981,6 +1006,47 @@ namespace internal {
     // State lives in tcAudio_impl.cpp.
     void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
     void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+
+    // Test hook, not a user setting: make the StreamWorker's decoder calls
+    // fail, or make the worker skip every stream (Stalls: a worker that falls
+    // behind, e.g. on slow storage; seek requests wait too), so a headless
+    // test can drive a stream's end-of-stream and seek paths
+    // (core/tests/streamSeek). ReadFails reads no frames; ReadFailsWithFrames
+    // decodes as usual and then reports an error for every read that
+    // returned frames. SeekFails also fails the re-init migration's seek,
+    // and ReopenFails fails the migration's decoder open. MixerLags holds
+    // the worker back until the mixer, with a seek pending, has read how far
+    // the stream's ring is written; the mixer then waits right there (up to
+    // 50 ms) until the worker has served the seek and reached the stream's
+    // end (an audio thread preempted at that point).
+    // Otherwise only the worker's refill is affected, not loadStream() or
+    // play(). State lives in tcAudio_impl.cpp.
+    enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls,
+                                     ReopenFails, MixerLags };
+    void setStreamFaultForTests(StreamFaultForTests fault);
+
+    // Test hook: the number of seek points in the seek table of the stream
+    // decoder opened last (by play() or by the re-init migration), 0 when it
+    // has none (not an MP3). tcAudio_impl.cpp.
+    uint32_t lastStreamSeekPointsForTests();
+
+    // Seek a voice (Sound::setPosition()). `frame` counts the voice's
+    // positionF units: source frames for an eager voice, engine-rate frames
+    // for a stream. An eager voice moves at once (positionF is written
+    // under the engine lock). A stream voice only gets a request: the
+    // StreamWorker seeks its decoder and refills the ring from the new
+    // position, and the mixer, the only writer of the ring's read side and
+    // of positionF, moves to it when it reaches that data (~10 ms). Until
+    // then the request is pending; a later request replaces it (the last
+    // one wins). A stream whose length is unknown ignores it (one warning
+    // per voice). Call it from one thread per voice, like the Sound API.
+    // tcAudio_impl.cpp.
+    void seekVoice(PlayingSound& voice, double frame);
+
+    // The voice's position in positionF units (Sound::getPosition()): the
+    // requested target while a stream seek is pending, otherwise positionF,
+    // the position the mixer is playing. tcAudio_impl.cpp.
+    double voicePosition(const PlayingSound& voice);
 
     // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
     // without its one-second limit. internal::detachAppAudio() waits here
@@ -1196,6 +1262,8 @@ private:
     friend void internal::flushAudioDiagnostics();
     friend void internal::waitForCallbackIdleNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+    friend void internal::seekVoice(PlayingSound&, double);
+    friend double internal::voicePosition(const PlayingSound&);
 
     // Zero the output meters, the load window and every voice's level. Only
     // while no device is running (init(), shutdown()), so the audio thread
@@ -1542,7 +1610,11 @@ public:
     //
     // Limitations vs eager load():
     //   - setSpeed() is ignored (decoder outputs engine-rate frames).
-    //   - setPosition() incurs a seek + ring-buffer refill (~10 ms).
+    //   - setPosition() incurs a seek + ring-buffer refill (usually
+    //     ~10 ms); getPosition() reports the requested position meanwhile.
+    //     A file whose length is unknown (getDuration() is 0) cannot seek,
+    //     and an engine re-init at another sample rate restarts it from the
+    //     beginning.
     //
     // Web (Emscripten): streaming relies on std::thread + on-disk file I/O,
     // neither of which is available in the default browser build. To keep
@@ -1816,19 +1888,29 @@ public:
         return playing_ && playing_->paused;
     }
 
+    // Playback position in seconds. On a stream, after setPosition() and
+    // until the audio has moved there (usually ~10 ms), this is the requested
+    // position; otherwise it is the position being played.
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
-        // For both eager and stream sources positionF is in source-rate
-        // frames so the division yields seconds either way.
-        return (float)playing_->positionF / buffer_->sampleRate;
+        const int rate = positionRate();
+        return rate > 0 ? (float)(internal::voicePosition(*playing_) / (double)rate) : 0.0f;
     }
 
+    // Seek to `seconds`. Eager sounds move at once. A stream moves after
+    // its decoder has seeked and the ring has refilled (~10 ms of silence;
+    // longer on slow storage or for an MP3 several hours long);
+    // getPosition() reports the new position right away, and if
+    // setPosition() is called again before that, the last call wins. A
+    // paused stream moves when it resumes. A stream whose length is
+    // unknown (getDuration() is 0) cannot seek: the call is ignored with a
+    // warning.
     void setPosition(float seconds) {
         if (!playing_ || !buffer_) return;
-        double pos = seconds * buffer_->sampleRate;
+        const int rate = positionRate();
+        double pos = seconds * (double)rate;
         if (pos < 0) pos = 0;
-        // For eager: clamp to numSamples. For streams: clamp to duration
-        // (decoder seek happens lazily in the stream mixer).
+        // For eager: clamp to numSamples. For streams: clamp to duration.
         if (buffer_->kind() == SoundSource::Eager) {
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
             // An empty buffer clamps to 0.
@@ -1836,10 +1918,13 @@ public:
                 pos = eager->numSamples > 0 ? (double)eager->numSamples - 1 : 0.0;
             }
         } else {
-            double maxPos = (double)buffer_->getDuration() * buffer_->sampleRate;
+            // The float duration can be a few frames past the last frame
+            // on a long file; the StreamWorker clamps to the decoder's
+            // length. An unknown length (0) is refused by seekVoice().
+            double maxPos = (double)buffer_->getDuration() * (double)rate;
             if (pos >= maxPos) pos = maxPos - 1;
         }
-        playing_->positionF = pos;
+        internal::seekVoice(*playing_, pos);
     }
 
     float getDuration() const {
@@ -1847,6 +1932,17 @@ public:
     }
 
 private:
+    // Frames per second of the voice's positionF: the source rate for eager
+    // sources; for streams the rate the voice's positionF counts
+    // (PlayingSound::positionRateHz_), the engine rate its decoder outputs
+    // at. Not the engine's current rate (a voice the re-init migration did
+    // not rebuild keeps the old one), nor the stream's sampleRate (the
+    // engine rate at loadStream(), stale after a re-init).
+    int positionRate() const {
+        if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
+        return playing_->positionRateHz_.load(std::memory_order_relaxed);
+    }
+
     std::shared_ptr<SoundSource> buffer_;
     std::shared_ptr<PlayingSound> playing_;
     float   volume_  = 1.0f;

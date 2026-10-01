@@ -386,6 +386,23 @@ scale(2.0f);
 // ... draw ...
 popMatrix();
 ```
+`pushMatrix()` / `popMatrix()` is the main form. Where a pop is easy to miss
+(early returns, several exits, long blocks), the scoped form pops at the end of
+the scope instead; `scopedStyle()` does the same for `pushStyle()` / `popStyle()`:
+```cpp
+void drawItem(const Item& item) {
+    auto m = scopedMatrix();   // pushMatrix() now
+    auto s = scopedStyle();    // pushStyle() now
+    translate(item.x, item.y);
+    if (!item.visible) return; // both popped here
+    setColor(item.color);
+    drawRect(0, 0, item.w, item.h);
+}                              // ...and here
+```
+Keep the guard in a named variable: `scopedMatrix();` alone pops at once (the
+compiler warns, `[[nodiscard]]`). The guard can't be copied or moved.
+
+Pair each `pushMatrix()` / `pushStyle()` with its pop inside the same callback (`setup()`, `update()`, `draw()`, one event handler such as `keyPressed()`, `exit()`, a `runOnMainThread` job). When a callback returns, TrussC pops whatever it left pushed and logs a warning naming it (`keyPressed() ended with 1 pushMatrix() and 0 pushStyle() still open (missing pop); dropped`). So a push in `update()` with its pop in `draw()` does not work: the push is dropped at the end of `update()`. Values set without a push (`setColor()`, a bare `translate()`) carry on as before.
 
 ## Node System (Scene Graph)
 
@@ -928,7 +945,7 @@ The surface (`setup`/`update`/`draw`, `drawCircle`-style calls) resembles oF, bu
 
 Mostly "drop `of`, lowercase the first letter." Common ones:
 - Drawing: `ofDrawRectangle`→`drawRect`, `ofDrawCircle`→`drawCircle`, `ofSetColor`→`setColor` (**0–1**), `ofSetLineWidth`→`setStrokeWeight`
-- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix`, `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
+- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix` (scope-bound form: `auto m = scopedMatrix();`; `scopedStyle()` for `ofPushStyle`), `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
 - Math: `ofMap`→`remap`, `ofLerp`→`lerp`, `ofRandom`→`random`, `ofNoise`→`noise`
 - Queries: `ofGetWidth`/`ofGetHeight`→`getWindowWidth`/`getWindowHeight`, `ofGetMouseX`/`Y`→`getMouseX`/`getMouseY`
 - Types: `ofVec2f`/`ofVec3f`→`Vec2`/`Vec3`, `ofColor`→`Color`, `ofMesh`→`Mesh`, `ofImage`→`Image`, `ofTexture`→`Texture`, `ofFbo`→`Fbo`, `ofTrueTypeFont`→`Font`, `ofSoundPlayer`→`Sound`, `ofMatrix4x4`→`Mat4`, `ofQuaternion`→`Quaternion`
@@ -1803,6 +1820,7 @@ void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
 void resetBlendMode()  // Reset blend mode to Alpha (default)
 void resetScissor()  // Reset (disable) scissor clipping
 void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
+StyleScope scopedStyle()  // pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning
 void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
@@ -1836,6 +1854,7 @@ void rotateYDeg(float degrees)  // Rotate around Y axis (degrees)
 void rotateZ(float radians)  // Rotate around Z axis
 void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
 void scale(float s) [+2]  // Scale
+MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
 void setMatrix(const Mat4 & mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
 void translate(Vec3 pos) [+2]  // Move origin
 ```
@@ -3318,7 +3337,7 @@ uint64_t Node::callAfter(double delay, std::function<void ()> callback)  // Run 
 uint64_t Node::callAfterAsync(double delay, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callAfter, but fired by a precise background scheduler thread (no frame jitter). The callback runs OFF the main thread: guard shared state with a mutex, never draw from it, and don't cancel while holding that mutex. Native only (uses a real thread). Returns a timer id.
 uint64_t Node::callEvery(double interval, std::function<void ()> callback)  // Run callback repeatedly every interval seconds. A frame timer counted down by getDeltaTime() like callAfter. Keeps its phase (next due = previous due + interval); when an update comes more than a whole interval late it fires once, not once per missed interval (callEveryCatchUp does that). Like callAfter, a runtime setFps() / setIndependentFps() that switches the update into a measured mode between updates drops the time since the last update (under a frame in the usual modes; see callAfter). Returns a timer id.
 uint64_t Node::callEveryAsync(double interval, std::function<void ()> callback) [macos,windows,linux,android,ios]  // Like callEvery, but fired by a precise background scheduler thread with no drift (reschedules at absolute times). Ideal for sequencer clocks and LED/MIDI output timing. Same threading rules as callAfterAsync. Native only. Returns a timer id.
-uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp = 0)  // Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id.
+uint64_t Node::callEveryCatchUp(double interval, std::function<void ()> callback, int maxCatchUp)  // Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp has no default; 0 or -1, any value <= 0, means no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id.
 void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancel all async timers on this node (e.g. on mode change). Waits out any in-flight callback. Call it WITHOUT holding the callback's mutex to avoid a deadlock.
 void Node::cancelAllTimers()  // Cancel all frame timers on this node.
 void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancel an async timer by id. Blocks until its callback finishes if it is running now (unless called from inside the callback). Do not call while holding the mutex the callback uses.
@@ -3768,7 +3787,7 @@ std::shared_ptr<const std::vector<std::vector<int>>> Sound::getChannelMap() cons
 float Sound::getDuration() const  // Get total duration in seconds
 MixMode Sound::getMixMode() const  // Current channel mix policy (Auto / DownmixMono). Overridden when a non-empty channel map is set.
 float Sound::getPan() const  // Get current panning
-float Sound::getPosition() const  // Get playback position in seconds
+float Sound::getPosition() const  // Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (usually ~10 ms), this is the requested position.
 float Sound::getSpeed() const  // Get current playback speed
 float Sound::getVolume() const  // Get current volume
 bool Sound::isLoaded() const  // Check if loaded
@@ -3788,7 +3807,7 @@ void Sound::setChannelMap(const std::vector<int> & map) [+1]  // Per-output-chan
 void Sound::setLoop(bool loop)  // Set loop mode
 void Sound::setMixMode(MixMode m)  // Channel routing preset. Auto (default) = mono broadcasts / multi 1:1. DownmixMono = average src to all out ch.
 void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
-void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills.
+void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
 void Sound::stop()  // Stop audio
@@ -3832,13 +3851,13 @@ float SoundSource::getDuration() const  // Duration in seconds. numSamples/sampl
 Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream for SoundStream). Lets the mixer dispatch without a virtual call per frame.
 ```
 
-### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer.
+### SoundStream — Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer.
 
 ```cpp
-float SoundStream::getDuration() const  // Decoded file duration in seconds.
+float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
 fs::path SoundStream::getPath() const  // Path the stream was opened from.
-LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported.
+LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed).
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
@@ -3933,7 +3952,7 @@ SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+
 void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
 void TcpServer::setSendAsyncBufferSize(size_t bytes)  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
 void TcpServer::setSendTimeout(float seconds)  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 10)  // Start listening on a port
+bool TcpServer::start(int port, int maxClients = 0)  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)
 void TcpServer::stop()  // Stop the server
 ```
 

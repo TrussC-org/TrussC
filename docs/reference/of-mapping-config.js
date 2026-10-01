@@ -154,8 +154,10 @@ const ofOnlyEntries = [
     ]},
     // Thread
     { category: "thread", name: "Thread", name_ja: "スレッド", name_ko: "스레드", order: 22, entries: [
-        { of: "ofThread", tc: "std::thread + MainThreadRunner", notes: "Safe sync", notes_ja: "Safe sync", notes_ko: "" },
-        { of: "-", tc: "MainThreadRunner::run(func)", notes: "Execute on main thread", notes_ja: "Execute on main thread", notes_ko: "" },
+        { of: "ofThread", tc: "Thread", notes: "Subclass and override threadedFunction(); startThread() / waitForThread()", notes_ja: "サブクラスで threadedFunction() をオーバーライド。startThread() / waitForThread()", notes_ko: "서브클래스에서 threadedFunction()을 오버라이드. startThread() / waitForThread()" },
+        { of: "-", tc: "runOnMainThread(func)", notes: "Execute on the main thread", notes_ja: "メインスレッドで実行", notes_ko: "메인 스레드에서 실행" },
+        { of: "ofMutex", tc: "std::mutex", notes: "TrussC has no wrapper; use std::mutex", notes_ja: "TrussC にラッパーは無い。std::mutex を使う", notes_ko: "TrussC에는 래퍼가 없음. std::mutex를 사용" },
+        { of: "ofScopedLock", tc: "std::lock_guard / std::scoped_lock", notes: "", notes_ja: "", notes_ko: "" },
     ]},
     // Serial — now a real type (see types section: Serial / SerialDeviceInfo)
 ];

@@ -156,6 +156,6 @@ debug-only main-thread assert).
 
 ## Reporting
 
-Security issues should be reported privately via GitHub Security Advisories on
-the repo, or by email to the maintainer (see `README.md`). Please do not open
-public issues for security bugs.
+Report security issues privately through the repository's **Security** tab:
+choose **Report a vulnerability** (GitHub's private vulnerability reporting).
+Please do not open public issues for security bugs.

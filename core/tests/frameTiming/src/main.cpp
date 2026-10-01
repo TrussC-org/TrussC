@@ -644,7 +644,7 @@ static void testNodeTimers() {
     {
         int every = 0, catchUp = 0;
         uint64_t a = node->callEvery(0.1, [&] { ++every; });
-        uint64_t b = node->callEveryCatchUp(0.1, [&] { ++catchUp; });
+        uint64_t b = node->callEveryCatchUp(0.1, [&] { ++catchUp; }, 0);
         anchorSimClock();
         simUpdate(*node, 0.0);              // start counting
         simUpdate(*node, 0.35);             // due at 0.1, 0.2 and 0.3
@@ -659,7 +659,7 @@ static void testNodeTimers() {
     // setFps()) makes it fire for the whole stall in one update.
     {
         int calls = 0;
-        uint64_t id = node->callEveryCatchUp(0.01, [&] { ++calls; });
+        uint64_t id = node->callEveryCatchUp(0.01, [&] { ++calls; }, 0);
         anchorSimClock();
         simUpdate(*node, 0.0);
         simUpdate(*node, 10.0);
@@ -691,7 +691,7 @@ static void testNodeTimers() {
             ++calls;
             for (int i = 0; i < 64; ++i) node->callAfter(100.0, [] {});
             if (calls == 2) node->cancelTimer(id);
-        });
+        }, 0);
         anchorSimClock();
         simUpdate(*node, 0.0);
         simUpdate(*node, 0.55);             // 5 due
@@ -802,7 +802,7 @@ static void testNodeTimersInLoop() {
         g_loopDuring = [&] {
             if (created) return;
             created = true;
-            node->callEveryCatchUp(1.0 / 480.0, [&] { ++calls; });
+            node->callEveryCatchUp(1.0 / 480.0, [&] { ++calls; }, 0);
         };
         runFrames(t, 2, 1.0 / 60.0);        // created, then counting
         g_loopDuring = nullptr;
@@ -900,7 +900,7 @@ static void testTimersCountFromCreation() {
             sleepMs(300);
             from = Clk::now();
             node->callAfter(0.1, [&] { ++after; });
-            node->callEveryCatchUp(iv, [&] { ++catchUp; });
+            node->callEveryCatchUp(iv, [&] { ++catchUp; }, 0);
             to = Clk::now();
         };
         internal::runSyncedUpdate();        // the long update that creates them

@@ -127,6 +127,33 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   is recorded by `src/allocProbe.cpp`), and growth past the first reservation
   lands on a correctly stated length. A voice on a buffer with no frames
   stops at its first mix.
+- `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
+  read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
+  measured on `audioOut` with files of DC levels: `setPosition()` moves the
+  audio (the level ~200 ms later is the target's), `getPosition()` reports
+  the target from the call on and never the old position, a paused stream
+  reports the target at once while the voice itself does not move, and
+  resumes from it, and of several seeks the last wins (also while paused).
+  While a seek is pending (the worker held back by
+  `internal::setStreamFaultForTests(Stalls)`) no block after the call holds
+  the old position's audio, and a non-looping stream does not end at the old
+  data's end; a seek after an underrun at speed 10 keeps the ring bounded, so
+  another stream is still refilled; after a re-init at another rate
+  `getPosition()` carries over and `setPosition()` lands at the target; eager
+  sounds seek at once. `loadStream()` rejects a file with no frames
+  (`DecodeFailed`) and accepts a FLAC whose length is unknown (STREAMINFO
+  total 0), which plays to its end and ignores `setPosition()` with one
+  warning. A looping stream whose file was emptied after loading ends with
+  one error log while another stream keeps being refilled; a decoder read
+  error, a failed loop seek and a failed seek request each end the stream
+  with one error log: a non-looping voice ends, a looping one stays playing
+  but silent (#448) and `setPosition()` makes it play again. The frames a
+  failing read still returned are played before the voice ends. An MP3
+  stream's decoder gets a seek table (one point per second, at most 1024),
+  also after a re-init; `setPosition(getDuration())` on an ~18 minute MP3,
+  whose float duration is past the last frame, loops instead of failing. An
+  ended voice's position (and pending seek) carries over a re-init. A
+  watchdog turns a StreamWorker that never comes back into a FAIL.
   An `AudioEngine::init()` that can't open the output device (forced with
   more channels than miniaudio accepts) returns false, logs one error through
   the logger that names the requested device, and a later `init()` succeeds
@@ -200,11 +227,25 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   longest LZW prefix chains decodes on a 64 KB thread stack (native POSIX
   only; elsewhere only its output is checked). Image fixtures are made at
   runtime; the Ogg clip is embedded (`src/toneOgg.h`).
+- `scopedStack/` — `scopedMatrix()` / `scopedStyle()` (#492): the guard
+  pushes when it is made and pops when it goes out of scope, read from the
+  matrix and style stack depth before, inside and after the scope, on an
+  early return, a return from a loop, an exception, nested guards and a
+  guard inside a `pushMatrix()` / `pushStyle()` pair (pops only its own
+  entry); the matrix and color set inside are undone after it. Checks run in
+  a release build only (headless `pushMatrix()` reaches sokol_gl).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
+  pre-build check decide "does this project use hot reload" the same way:
+  `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
+  ignores commented-out forms (#234), and `tc_hot_reload_decide()` is OFF on
+  platforms without hot reload (web / Android / iOS) even with the macro in
+  source (#329). The end-to-end build of a macro app as a normal app is
+  `examples/tests/HotReloadFallback`, built by the daily sweeps.
 - `screenshotContract/` — *(also on web)* the screenshot APIs report what they
   actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
   nothing is queued or created, and each API warns once. Native:
@@ -312,6 +353,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
   `ScreenRecorder` reads) stays exact after long uptime and, like the
   `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.
+- `entryStacks/` — push/pop containment per entry point (#349): a push that
+  the prelude (`runOnMainThread` work), `update()` (synced, independent VSYNC
+  and every fixed-Hz step, headless), the App's `setup()` or `exit()` leaves
+  open is popped when it returns, back to the depth it was entered at (not
+  0), with a warning naming it (`update() ended with 1 pushMatrix() ...`),
+  rate-limited per entry point; values set outside a push carry on. Checks
+  run in a release build only (headless `pushMatrix()` reaches sokol_gl).
 - `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
   holds the hovered / grabbed / selected node weakly and dispatch holds a
   strong reference while handlers run, so a node freed by `removeChild()` /
@@ -329,6 +377,66 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
+  client that leaves (closes or resets) are joined while the server runs,
+  not held until `stop()` (on Linux the address space stays flat over 200
+  clients; an unjoined thread leaves `/proc/self/task` but keeps its stack
+  mapped), and joined by an idle server too, with no later connection to
+  prompt it; `start(port, N)` closes connections beyond N, logs one warning per
+  burst and hands a freed slot to the next client; `start(port)` has no limit.
+  Listeners that tear down from their own thread: `disconnectClient()` of its
+  own client in `onReceive` (destroying the server then waits for that
+  thread), `stop()` in `onReceive`, and `stop()` in `onClientConnect` on the
+  accept thread, which closes the listening socket before it returns (the old
+  port refuses connections; on Linux, where `shutdown()` alone already does
+  that, the socket's descriptor must be gone too), where `start()` is
+  refused, and after which the accept thread disconnects the client once the
+  listener returns. A listener's teardown waits for none of the server's
+  threads, and the server's destruction waits for all of them: `stop()` in
+  `onError` after a send timed out mid-payload (the receive thread removes
+  the client meanwhile) returns and a later `start()` works (SKIP where the
+  send is not cut mid-payload, as Winsock may take the whole payload in one
+  `send()`);
+  `disconnectClient()` of its own client, or `stop()`, in `onSendComplete`,
+  with the server destroyed while that listener still runs (the destruction
+  waits for the writer); two `onReceive` listeners disconnecting each
+  other's client both return; two `onReceive`, or two `onSendComplete`,
+  listeners each calling `disconnectAllClients()` both return and the
+  server keeps running; and `disconnectAllClients()` on another
+  thread, while a client connects, returns and leaves that client
+  connected. `stop()` on several threads at once returns on all of
+  them: from `onClientConnect` on the accept thread while another client's
+  thread is parked in `onReceive` or `onSendComplete` and calls it too
+  (either one first); from two clients' `onReceive`, or two `onSendComplete`;
+  from a plain thread together with `onSendComplete` (the listener calls it
+  while the stop hook holds the plain one after its accept-thread join, and
+  the plain one returns only once that listener is done); from
+  `onClientConnect` once a plain thread's `stop()` has taken the accept
+  thread and waits for it (ordered by
+  `internal::setTcpServerAcceptTakenHookForTests()`; the listener's `stop()`
+  still closes the listening socket before it returns); and from two plain threads while the
+  accept thread is held in a listener (neither throws). Every client ends up
+  disconnected. `start()` while another thread's `stop()` is still waiting
+  for the accept thread waits for it too, and the restarted server accepts
+  clients; so does `start()` while that `stop()` has joined the accept thread
+  but not yet disconnected the clients (held there by
+  `internal::setTcpServerStopHookForTests()`), and a client of the restarted
+  server stays connected with no `onClientDisconnect`. `start()` from
+  `onReceive` is refused and the server keeps running. A watchdog turns a
+  hang there into a FAIL line and a non-zero exit.
+  Linux only, in forked children: failing `accept()` calls (descriptors
+  exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning, log
+  once and reach `onError` again after the 5 s interval if they persist; a
+  thread that cannot start closes that connection and reports it through
+  `onError` instead of ending the process — the writer under `RLIMIT_NPROC`,
+  the receive thread through a `pthread_create` wrapper in the test binary
+  that fails one chosen call (the client is announced, then disconnected, and
+  that is reported even right after a different failure; the accept thread
+  does not wait for that client's writer, whose listener waits for the
+  disconnect); and when the
+  accept thread cannot start, `start()` returns false, reports it once and
+  leaves nothing listening, and a later `start()` on that port works. Each
+  server binds a port the OS just handed out, not a fixed one.
 - `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
   reference, so the App can't register itself from its constructor, and the
   code that creates it through a `shared_ptr` does. `runApp()`'s setup
@@ -351,6 +459,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `pcmByteOrder/` — `SoundBuffer::loadPcmFromMemory()` decodes both byte
+  orders (#419). Known 16-bit byte pairs, little- and big-endian, with bytes
+  of 0x80 and above in either position, give exactly `value / 32768` (the old
+  big-endian swap sign-extended, so `01 80` came out as -128 instead of 384);
+  big-endian stereo keeps its channel order. Known 32-bit float byte quads in
+  both orders, with bytes of 0x80 and above in every position, keep their
+  exact bits. Both also from a data pointer that is not aligned to the
+  sample size. The tcxHap side (`twos` / `fl32` files) is in
+  `addons/tcxHap/tests/`.
 - `fontSfntCheck/` — font data is checked before it is given to stb_truetype:
   `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
   bytes, a `.ttc` header whose font count or offset points outside the data,

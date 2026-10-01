@@ -4428,6 +4428,11 @@ description.en = "Silver material preset"
 description.ja = "銀のプリセット"
 description.ko = "은 프리셋"
 
+["MatrixScope"]
+hide = true
+lua = false
+keywords = ["raii", "guard", "scope"]
+
 ["Mesh"]
 category = "types_mesh"
 keywords = ["geometry", "vertices", "of mesh"]
@@ -5416,9 +5421,9 @@ related = ["Node::callAfterAsync", "Node::cancelAsyncTimer", "Node::callEvery"]
 ["Node::callEveryCatchUp"]
 category = "timers"
 keywords = ["timer", "interval", "repeat", "catch up", "missed", "late", "fixed rate"]
-description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id."
-description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp <= 0 が既定で、上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（setMaxUpdateSteps）を超えて捨てた時間は数えない。タイマーidを返す"
-description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(기본값 maxCatchUp <= 0은 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(setMaxUpdateSteps)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
+description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp has no default; 0 or -1, any value <= 0, means no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id."
+description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp は省略できない。0 や -1 など 0 以下なら上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（setMaxUpdateSteps）を超えて捨てた時間は数えない。タイマーidを返す"
+description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(maxCatchUp은 생략할 수 없다. 0이나 -1 등 0 이하이면 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(setMaxUpdateSteps)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
 related = ["Node::callEvery", "Node::cancelTimer", "setMaxUpdateSteps"]
 
 ["Node::cancelAllAsyncTimers"]
@@ -6800,9 +6805,9 @@ description.ja = "ミキサーでこのボイスがアクティブな間 true。
 description.ko = "믹서에서 이 보이스가 활성인 동안 true. atomic"
 
 ["PlayingSound::positionF"]
-description.en = "Floating-point playback cursor in source samples; advances by speed * rateRatio each output frame."
-description.ja = "ソースサンプル単位の浮動小数点再生カーソル。各出力フレームで speed * rateRatio ずつ進む"
-description.ko = "소스 샘플 단위의 부동소수점 재생 커서. 각 출력 프레임마다 speed * rateRatio 만큼 진행"
+description.en = "Floating-point playback cursor; advances by speed * rateRatio each output frame. An eager voice counts source sample frames; a stream counts frames at the engine rate its decoder outputs at (the voice's position rate, which a re-init at another rate can change), not source samples. Use Sound::getPosition() for seconds."
+description.ja = "浮動小数点の再生カーソル。各出力フレームで speed * rateRatio ずつ進む。eager ボイスはソースのサンプルフレーム単位、ストリームはデコーダが出力するエンジンレートのフレーム単位 (ボイスの位置レート。別レートでの再初期化で変わりうる) で、ソースサンプル単位ではない。秒で欲しいときは Sound::getPosition() を使う"
+description.ko = "부동소수점 재생 커서. 각 출력 프레임마다 speed * rateRatio 만큼 진행. eager 보이스는 소스 샘플 프레임 단위, 스트림은 디코더가 출력하는 엔진 레이트의 프레임 단위(보이스의 위치 레이트로, 다른 레이트로 재초기화하면 바뀔 수 있음)이며 소스 샘플 단위가 아님. 초 단위는 Sound::getPosition() 사용"
 
 ["PlayingSound::rateRatio"]
 description.en = "Source-to-engine sample-rate ratio (buffer sampleRate / engine sampleRate), set when queued so the voice plays at correct pitch regardless of engine rate."
@@ -8184,7 +8189,13 @@ How long it may take depends on the platform:
   only a generous ceiling. On a timeout it returns the bytes written so far
   (possibly 0) and logs one warning per connection; the port stays open and
   `onDisconnect` does not fire. A failed write still counts as a loss.
-- **Android:** waits up to 1 s per 16 KB for the device to take the data.
+- **Android:** sends the data in chunks of up to 16 KB and waits for the
+  device to take each one, at most the Windows rule above applied to the
+  chunk: 16 KB at 9600 baud gets about 87 s, at 115200 baud about 21 s. On a
+  timeout it returns the bytes of the chunks that completed (possibly 0) and
+  logs one warning per connection; the port stays open. Android does not
+  report how much of a timed-out chunk went out, so some bytes past the
+  returned count may have reached the device too.
 
 A write that must never stall the app goes on a thread of its own: the other
 I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
@@ -8204,7 +8215,12 @@ details.ja = '''
   タイムアウトすると、それまでに書けたバイト数（0 もありうる）を返し、接続ごとに
   1回だけ警告をログに出す。ポートは開いたままで、`onDisconnect` も発火しない。
   書き込みが失敗した場合は、今までどおり消失として扱う。
-- **Android:** 機器がデータを受け取るのを 16 KB ごとに最大1秒待つ。
+- **Android:** データを最大 16 KB ずつに分けて送り、機器がそれぞれを受け取るのを
+  待つ。上限は上の Windows の規則をその塊に当てはめた時間で、16 KB なら 9600 baud
+  で約 87 秒、115200 baud で約 21 秒。タイムアウトすると、送り終えた塊のバイト数
+  （0 もありうる）を返し、接続ごとに1回だけ警告をログに出す。ポートは開いたまま。
+  タイムアウトした塊がどこまで送れたかは Android が報告しないので、返した数より
+  先のバイトも機器に届いていることがある。
 
 アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
 それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
@@ -8223,7 +8239,12 @@ details.ko = '''
   쓴 바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
   포트는 열린 채로 남고 `onDisconnect`도 발생하지 않는다. 쓰기가 실패하면 기존대로
   소실로 취급한다.
-- **Android:** 장치가 데이터를 받기를 16 KB마다 최대 1초 기다린다.
+- **Android:** 데이터를 최대 16 KB씩 나누어 보내고, 장치가 각각을 받기를
+  기다린다. 상한은 위의 Windows 규칙을 그 덩어리에 적용한 시간으로, 16 KB라면
+  9600 baud에서 약 87초, 115200 baud에서 약 21초. 타임아웃되면 다 보낸 덩어리의
+  바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
+  포트는 열린 채로 남는다. 타임아웃된 덩어리가 어디까지 보내졌는지는 Android가
+  알려 주지 않으므로, 반환한 수보다 뒤의 바이트도 장치에 도달했을 수 있다.
 
 앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
 기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
@@ -8406,9 +8427,9 @@ description.ko = "현재 패닝을 얻음"
 ["Sound::getPosition"]
 category = "sound"
 keywords = ["progress", "playhead", "normalized", "seek"]
-description.en = "Get playback position in seconds"
-description.ja = "再生位置を取得（秒）"
-description.ko = "재생 위치를 초 단위로 얻음"
+description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (usually ~10 ms), this is the requested position."
+description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまで (通常 ~10ms) の間、要求した位置を返す"
+description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 (보통 ~10ms) 요청한 위치를 반환"
 
 ["Sound::getSpeed"]
 category = "sound"
@@ -8552,9 +8573,9 @@ related = ["EasyCam::setPanSensitivity"]
 ["Sound::setPosition"]
 category = "sound"
 keywords = ["seek", "jump", "scrub", "playhead", "normalized"]
-description.en = "Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills."
-description.ja = "指定秒数にシーク。ストリームでは ring 補充に ~10ms 無音"
-description.ko = "지정 시간(초)으로 시크. 스트림은 링 재충전에 ~10ms 무음"
+description.en = "Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning."
+description.ja = "指定秒数にシーク。ストリームではデコーダがシークして ring を補充するので、~10ms の無音の後に音が移る (遅いストレージや数時間の長さの MP3 ではもっとかかる)。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る。長さが不明なストリーム (getDuration() が 0) はシークできず、呼び出しは警告を出して無視される"
+description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전하므로 ~10ms 무음 후에 소리가 옮겨짐 (느린 저장소나 몇 시간 길이의 MP3에서는 더 걸림). getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생. 길이를 알 수 없는 스트림 (getDuration()이 0)은 시크할 수 없으며, 호출은 경고와 함께 무시됨"
 
 ["Sound::setSpeed"]
 category = "sound"
@@ -8770,15 +8791,15 @@ description.ko = "소스의 샘플레이트(Hz)"
 
 ["SoundStream"]
 keywords = ["streaming audio", "bgm", "music stream", "disk audio", "on demand"]
-description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer."
-description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は約10 msのrefillでseekし、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
-description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 약 10 ms의 refill로 seek하며, polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
+description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer."
+description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は通常約10 msのrefillでseekし(長さが不明なファイルはseekできない)、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
+description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 보통 약 10 ms의 refill로 seek하며(길이를 알 수 없는 파일은 seek할 수 없음), polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
 related = ["SoundBuffer", "SoundSource"]
 
 ["SoundStream::getDuration"]
-description.en = "Decoded file duration in seconds."
-description.ja = "デコードしたファイルの秒単位の長さ"
-description.ko = "디코딩된 파일의 초 단위 길이"
+description.en = "Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning."
+description.ja = "デコードしたファイルの秒単位の長さ。ファイルが長さを記録していない場合 (パイプへエンコードした FLAC など) は 0 で、そのストリームは最後まで再生できるがシークはできず、別のサンプルレートでエンジンを再初期化すると先頭から再生し直す"
+description.ko = "디코딩된 파일의 초 단위 길이. 파일에 길이가 기록되어 있지 않으면 (파이프로 인코딩한 FLAC 등) 0이며, 그런 스트림은 끝까지 재생되지만 시크할 수 없고, 다른 샘플레이트로 엔진을 재초기화하면 처음부터 다시 재생됨"
 
 ["SoundStream::getMaxPolyphony"]
 description.en = "Number of concurrent decoder slots reserved at loadStream()."
@@ -8791,9 +8812,9 @@ description.ja = "ストリームを開いた元のパス"
 description.ko = "스트림을 연 원본 경로"
 
 ["SoundStream::loadStream"]
-description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported."
-description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けないか形式が非対応の場合falseを返す"
-description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나 형식이 미지원이면 false 반환"
+description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed)."
+description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けない、形式が非対応、またはオーディオフレームが無い (DecodeFailed) 場合falseを返す"
+description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나, 형식이 미지원이거나, 오디오 프레임이 없으면 (DecodeFailed) false 반환"
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
 
@@ -8961,6 +8982,11 @@ keywords = ["tick", "step", "frame"]
 description.en = "Rebuild the internal triangle mesh (call before draw after edits)"
 description.ja = "内部の三角形メッシュを再構築（編集後、draw の前に呼ぶ）"
 description.ko = "내부 삼각형 메시를 재구축(편집 후 draw 전에 호출)"
+
+["StyleScope"]
+hide = true
+lua = false
+keywords = ["raii", "guard", "scope"]
 
 ["TcpClient"]
 keywords = ["socket client", "stream", "connection", "network client"]
@@ -9415,11 +9441,17 @@ details = "The payload is buffered once and shared by every client's queue, not 
 description.en = "Disconnect all clients"
 description.ja = "全クライアントを切断"
 description.ko = "모든 클라이언트를 연결 해제"
+details.en = "Waits for the clients' threads like disconnectClient(), except in an inline listener on one of the server's own threads, where it disconnects them and returns without waiting. A client that connects while it runs may stay connected."
+details.ja = "disconnectClient() と同じくクライアントのスレッドの終了を待つ。ただしサーバ自身のスレッド上のインラインリスナーでは、切断だけして待たずに戻る。実行中に接続してきたクライアントは接続されたまま残ることがある。"
+details.ko = "disconnectClient()와 마찬가지로 클라이언트 스레드의 종료를 기다린다. 단, 서버 자신의 스레드에서 실행되는 인라인 리스너에서는 연결만 해제하고 기다리지 않고 반환한다. 실행 중에 접속한 클라이언트는 연결된 채로 남을 수 있다."
 
 ["TcpServer::disconnectClient"]
 description.en = "Disconnect a specific client"
 description.ja = "指定クライアントを切断"
 description.ko = "특정 클라이언트를 연결 해제"
+details.en = "Returns once that client's receive and writer threads have ended; the writer first completes whatever is still queued. It may be called from any listener, for its own client or any other: in an inline listener on one of the server's own threads (accept, receive or writer) it disconnects the client and returns without waiting, since such a thread may be waiting for the caller in turn. Those threads are joined later, by the server once they have ended, by the next stop() or start() on another thread, or by the destructor."
+details.ja = "そのクライアントの受信スレッドと送信スレッドが終わってから戻る。送信スレッドはキューに残っている分を先に完了させる。どのリスナーからでも、自分のクライアントにも他のクライアントにも呼べる。サーバ自身のスレッド（accept、受信、送信）上のインラインリスナーでは、クライアントを切断して待たずに戻る。そのスレッドが逆に呼び出し元を待っていることがあるからだ。それらのスレッドは後で join される。終わった時点でサーバが、あるいは別のスレッドでの次の stop() か start()、またはデストラクタが join する。"
+details.ko = "그 클라이언트의 수신 스레드와 송신 스레드가 끝난 뒤에 반환한다. 송신 스레드는 큐에 남은 것을 먼저 완료한다. 어떤 리스너에서든, 자기 클라이언트든 다른 클라이언트든 호출할 수 있다. 서버 자신의 스레드(accept, 수신, 송신)에서 실행되는 인라인 리스너에서는 클라이언트 연결을 해제하고 기다리지 않고 반환한다. 그 스레드가 반대로 호출한 쪽을 기다리고 있을 수 있기 때문이다. 그 스레드들은 나중에 join된다. 끝난 시점에 서버가, 또는 다른 스레드에서의 다음 stop()이나 start(), 혹은 소멸자가 join한다."
 
 ["TcpServer::getClient"]
 description.en = "Client info (nullptr if not found)"
@@ -9474,6 +9506,9 @@ description.ko = "클라이언트 연결 해제 시 발생"
 description.en = "Fired on a server or per-client error"
 description.ja = "サーバまたはクライアント単位のエラー時に発火"
 description.ko = "서버 또는 클라이언트별 오류 시 발생"
+details.en = "Server-level failures (accept() failing, a thread that cannot be started for a new client) fire on the accept thread, at most once every 5 seconds for each kind while they persist; the log counts the ones in between. An inline listener there may call stop() but not start(); stop() there closes the listening socket and returns before the clients are disconnected, which the accept thread does once the listener returns. Listen with Deliver::Main when the listener touches app state."
+details.ja = "サーバ単位の失敗（accept() の失敗、新しいクライアント用のスレッドが起動できない）は accept スレッドで発火し、続いている間は種類ごとに 5 秒に 1 回まで。その間の回数はログが数える。そこでのインラインリスナーは stop() を呼べるが start() は呼べない。そこでの stop() は待ち受けソケットを閉じ、クライアントが切断される前に戻る（切断はリスナーが戻った後に accept スレッドが行う）。リスナーがアプリの状態に触れるなら Deliver::Main で listen する。"
+details.ko = "서버 단위 실패(accept() 실패, 새 클라이언트용 스레드를 시작할 수 없음)는 accept 스레드에서 발생하며, 지속되는 동안 종류별로 5초에 한 번까지다. 그 사이의 횟수는 로그가 센다. 그곳의 인라인 리스너는 stop()은 호출할 수 있지만 start()는 호출할 수 없다. 그곳에서의 stop()은 대기 소켓을 닫고 클라이언트 연결이 해제되기 전에 반환한다(연결 해제는 리스너가 반환된 뒤 accept 스레드가 수행한다). 리스너가 앱 상태를 건드린다면 Deliver::Main으로 listen한다."
 
 ["TcpServer::onReceive"]
 description.en = "Fired when data is received from a client"
@@ -9523,14 +9558,21 @@ description.ja = "受信バッファサイズを設定"
 description.ko = "수신 버퍼 크기를 설정"
 
 ["TcpServer::start"]
-description.en = "Start listening on a port"
-description.ja = "ポートで待ち受けを開始"
-description.ko = "포트에서 수신 대기를 시작"
+description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)"
+description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）"
+description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값)"
+keywords = ["listen", "port", "max clients", "connection limit"]
+details.en = "With maxClients above 0, a connection that arrives while that many clients are connected is closed right away and a warning is logged, at most once every few seconds however many arrive; a slot frees up as soon as a client disconnects. The default of 0 accepts any number of clients. The listen backlog is a fixed value and does not depend on maxClients. The receive and writer threads of clients that leave are joined while the server runs, and a failing accept() is retried with a short back-off rather than in a tight loop. start() calls stop() first, which also joins any thread a listener's stop() left running, and when a stop() on another thread is still tearing the previous session down (waiting for the previous accept thread to end, disconnecting the clients or joining their threads), it waits for that stop() to finish too, so none of it reaches the restarted server. It cannot be called from an inline listener on one of the server's own threads: on the accept thread (onClientConnect, and onError or onClientDisconnect for server-level failures) or on a client's receive or writer thread (onReceive, onSendComplete, onClientDisconnect, onError from those threads) it logs an error and returns false without stopping anything."
+details.ja = "maxClients が 0 より大きい場合、その数のクライアントが接続している間に届いた接続はすぐに閉じられ、警告がログに出る（何件届いても数秒に 1 回まで）。クライアントが切断すればすぐに枠が空く。既定の 0 ではクライアント数に上限はない。listen のバックログは固定値で、maxClients には依存しない。去ったクライアントの受信スレッドと送信スレッドはサーバの動作中に join され、失敗した accept() は間を置かずに繰り返すのではなく、短いバックオフを挟んで再試行される。start() は最初に stop() を呼び（リスナーの stop() が残したスレッドもここで join される）、別のスレッドの stop() が前のセッションをまだ片付けている（前の accept スレッドの終了を待っている、クライアントを切断している、またはそのスレッドを join している）なら、その stop() が終わるまで待つので、片付けが再開後のサーバに及ぶことはない。サーバ自身のスレッド上のインラインリスナーからは呼べない。accept スレッド上（onClientConnect、およびサーバ単位の失敗での onError や onClientDisconnect）や、クライアントの受信スレッド・送信スレッド上（onReceive、onSendComplete、onClientDisconnect、それらのスレッドからの onError）では、エラーをログに出して false を返し、何も停止しない。"
+details.ko = "maxClients가 0보다 크면, 그 수만큼의 클라이언트가 접속해 있는 동안 도착한 연결은 즉시 닫히고 경고가 로그에 남는다(몇 개가 도착하든 몇 초에 한 번까지). 클라이언트가 연결을 끊으면 곧바로 자리가 빈다. 기본값 0은 클라이언트 수를 제한하지 않는다. listen 백로그는 고정값이며 maxClients에 의존하지 않는다. 떠난 클라이언트의 수신 스레드와 송신 스레드는 서버가 동작하는 동안 join되며, 실패한 accept()는 쉴 새 없이 반복하지 않고 짧은 백오프를 두고 재시도된다. start()는 먼저 stop()을 호출하며(리스너의 stop()이 남긴 스레드도 여기서 join된다), 다른 스레드의 stop()이 이전 세션을 아직 정리하고 있다면(이전 accept 스레드의 종료를 기다리거나, 클라이언트 연결을 해제하거나, 그 스레드를 join하는 중이라면) 그 stop()이 끝날 때까지 기다리므로, 그 정리가 다시 시작된 서버에 미치지 않는다. 서버 자신의 스레드에서 실행되는 인라인 리스너에서는 호출할 수 없다. accept 스레드(onClientConnect, 그리고 서버 단위 실패에 대한 onError나 onClientDisconnect)나 클라이언트의 수신 스레드·송신 스레드(onReceive, onSendComplete, onClientDisconnect, 그 스레드들에서의 onError)에서는 오류를 로그에 남기고 false를 반환하며, 아무것도 정지하지 않는다."
 
 ["TcpServer::stop"]
 description.en = "Stop the server"
 description.ja = "サーバを停止"
 description.ko = "서버를 정지"
+details.en = "Returns once the accept thread and every client thread have ended and every client is disconnected; the destructor waits for all of them the same way. The server must not be destroyed from one of its own listeners (on the accept, receive or writer thread): destroy it from another thread, or after the listener has returned (for example from a Deliver::Main listener). When two threads call stop() at once, only one of them waits for the accept thread. It may be called from any listener: in an inline listener on one of the server's own threads it waits for no thread and returns at once, since such a thread may be waiting for the caller in turn. On a client's receive or writer thread (onReceive, onSendComplete, onClientDisconnect, onError from those threads) it disconnects every client first. On the accept thread (onClientConnect, and onError or onClientDisconnect for server-level failures) it closes the listening socket, and the accept thread disconnects the clients once the listener returns. The threads are joined by the next stop() or start() on another thread, or by the destructor. isRunning() is false as soon as stop() is called."
+details.ja = "accept スレッドと全クライアントのスレッドが終わり、全クライアントが切断されてから戻る。デストラクタも同じようにそれらすべてを待つ。サーバ自身のリスナー（accept スレッド、受信スレッド、送信スレッド上）でサーバを破棄してはならない。別のスレッドから、またはリスナーが戻った後に（たとえば Deliver::Main のリスナーから）破棄する。2 つのスレッドが同時に stop() を呼んだ場合、accept スレッドを待つのはその一方だけ。どのリスナーからでも呼べる。サーバ自身のスレッド上のインラインリスナーでは、どのスレッドも待たずにすぐ戻る。そのスレッドが逆に呼び出し元を待っていることがあるからだ。クライアントの受信スレッド・送信スレッド上（onReceive、onSendComplete、onClientDisconnect、それらのスレッドからの onError）では、先に全クライアントを切断する。accept スレッド上（onClientConnect、およびサーバ単位の失敗での onError や onClientDisconnect）では待ち受けソケットを閉じ、クライアントの切断はリスナーが戻った後に accept スレッドが行う。スレッドは別のスレッドでの次の stop() か start()、またはデストラクタが join する。isRunning() は stop() が呼ばれた時点で false になる。"
+details.ko = "accept 스레드와 모든 클라이언트 스레드가 끝나고 모든 클라이언트 연결이 해제된 뒤에 반환한다. 소멸자도 같은 방식으로 그 전부를 기다린다. 서버 자신의 리스너(accept 스레드, 수신 스레드, 송신 스레드)에서 서버를 파괴해서는 안 된다. 다른 스레드에서, 또는 리스너가 반환된 뒤에(예를 들어 Deliver::Main 리스너에서) 파괴한다. 두 스레드가 동시에 stop()을 호출하면 accept 스레드를 기다리는 것은 그중 하나뿐이다. 어떤 리스너에서든 호출할 수 있다. 서버 자신의 스레드에서 실행되는 인라인 리스너에서는 어떤 스레드도 기다리지 않고 바로 반환한다. 그 스레드가 반대로 호출한 쪽을 기다리고 있을 수 있기 때문이다. 클라이언트의 수신 스레드·송신 스레드(onReceive, onSendComplete, onClientDisconnect, 그 스레드들에서의 onError)에서는 먼저 모든 클라이언트 연결을 해제한다. accept 스레드(onClientConnect, 그리고 서버 단위 실패에 대한 onError나 onClientDisconnect)에서는 대기 소켓을 닫고, 클라이언트 연결 해제는 리스너가 반환된 뒤 accept 스레드가 수행한다. 스레드들은 다른 스레드에서의 다음 stop()이나 start(), 또는 소멸자가 join한다. isRunning()은 stop()이 호출된 시점에 false가 된다."
 
 ["TcpServerClient"]
 keywords = ["connected client", "peer", "remote socket", "client handle"]
@@ -15601,10 +15643,13 @@ related = ["listNetworkInterfaces", "getLocalIps"]
 category = "transform"
 keywords = ["save", "transform", "stack", "ofpushmatrix"]
 of = ["ofPushMatrix"]
+of_notes.en = "Scope-bound form: auto m = scopedMatrix();"
+of_notes.ja = "スコープで閉じる形: auto m = scopedMatrix();"
+of_notes.ko = "스코프로 닫는 형태: auto m = scopedMatrix();"
 description.en = "Save transform state"
 description.ja = "変換状態を保存"
 description.ko = "변환 상태를 저장"
-related = ["popMatrix", "pushStyle", "translate"]
+related = ["popMatrix", "pushStyle", "translate", "scopedMatrix"]
 
 ["pushScissor"]
 category = "graphics_style"
@@ -15626,10 +15671,13 @@ related = ["popShader", "pushStyle", "pushMatrix"]
 category = "graphics_style"
 keywords = ["save", "state", "stack", "ofpushstyle"]
 of = ["ofPushStyle"]
+of_notes.en = "Scope-bound form: auto s = scopedStyle();"
+of_notes.ja = "スコープで閉じる形: auto s = scopedStyle();"
+of_notes.ko = "스코프로 닫는 형태: auto s = scopedStyle();"
 description.en = "Push current style (color, fill, stroke, blend) onto stack"
 description.ja = "現在のスタイル（色、塗り、ストローク、ブレンド）をスタックにプッシュ"
 description.ko = "현재 스타일(색상, 채우기, 스트로크, 블렌드)을 스택에 푸시"
-related = ["popStyle", "pushMatrix"]
+related = ["popStyle", "pushMatrix", "scopedStyle"]
 
 ["rad2deg"]
 category = "math_trig"
@@ -15956,6 +16004,30 @@ description.en = "Scale"
 description.ja = "拡大縮小"
 description.ko = "크기 조절"
 related = ["translate", "rotate"]
+
+["scopedMatrix"]
+lua = false
+category = "transform"
+keywords = ["raii", "scope", "guard", "save", "restore", "transform", "stack", "push", "pop", "early return"]
+description.en = "pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning"
+description.ja = "今 pushMatrix() し、スコープの終わりで popMatrix() する。`auto m = scopedMatrix();` はスコープを抜けると（早期 return や例外でも）ポップする MatrixScope ガードを返す。出口が複数あるコードや長いブロック向け。基本の書き方は pushMatrix() / popMatrix() のまま。[[nodiscard]]: `scopedMatrix();` だけの行はすぐにポップしてしまうため、コンパイラが警告する"
+description.ko = "지금 pushMatrix()하고 스코프 끝에서 popMatrix()한다. `auto m = scopedMatrix();`는 스코프를 벗어날 때(조기 return이나 예외에서도) 팝하는 MatrixScope 가드를 반환한다. 출구가 여러 개인 코드나 긴 블록용. 기본 형태는 여전히 pushMatrix() / popMatrix(). [[nodiscard]]: `scopedMatrix();`만 쓴 줄은 곧바로 팝되므로 컴파일러가 경고한다"
+related = ["pushMatrix", "popMatrix", "scopedStyle"]
+details.en = "C++ only: Lua has no scope-bound guard, so in Lua use pushMatrix() / popMatrix()."
+details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無いので、Lua では pushMatrix() / popMatrix() を使う。"
+details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushMatrix() / popMatrix()를 사용한다."
+
+["scopedStyle"]
+lua = false
+category = "graphics_style"
+keywords = ["raii", "scope", "guard", "save", "restore", "state", "stack", "push", "pop", "early return"]
+description.en = "pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning"
+description.ja = "今 pushStyle() し、スコープの終わりで popStyle() する。`auto s = scopedStyle();` はスコープを抜けると（早期 return や例外でも）ポップする StyleScope ガードを返す。出口が複数あるコードや長いブロック向け。基本の書き方は pushStyle() / popStyle() のまま。[[nodiscard]]: `scopedStyle();` だけの行はすぐにポップしてしまうため、コンパイラが警告する"
+description.ko = "지금 pushStyle()하고 스코프 끝에서 popStyle()한다. `auto s = scopedStyle();`는 스코프를 벗어날 때(조기 return이나 예외에서도) 팝하는 StyleScope 가드를 반환한다. 출구가 여러 개인 코드나 긴 블록용. 기본 형태는 여전히 pushStyle() / popStyle(). [[nodiscard]]: `scopedStyle();`만 쓴 줄은 곧바로 팝되므로 컴파일러가 경고한다"
+related = ["pushStyle", "popStyle", "scopedMatrix"]
+details.en = "C++ only: Lua has no scope-bound guard, so in Lua use pushStyle() / popStyle()."
+details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無いので、Lua では pushStyle() / popStyle() を使う。"
+details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushStyle() / popStyle()를 사용한다."
 
 ["screenToWorld"]
 category = "graphics_3d_setup"

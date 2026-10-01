@@ -17,6 +17,22 @@ A lightweight creative coding environment optimized for the AI-native and GPU-na
 - `tc::` - Core & Official Modules
 - `tcx::` - Community Addons / Extensions
 
+### How design decisions are made
+
+When a change can take more than one reasonable shape, these rules decide it.
+
+- **Think of three kinds of apps.** TrussC apps are roughly:
+  1. personal projects, where trying things quickly matters most;
+  2. long-running installations (exhibitions), where maintenance comes first: recovering with nobody on site, logs, predictable behavior;
+  3. apps distributed to others, which run on other people's machines, so safety and integrity come first.
+
+  A convenience that puts any one of these at risk is not adopted, however useful it is. If it adds no security risk to any of them, it may be adopted for convenience.
+- **Simple and predictable.** Prefer the design that can be stated in one sentence. Count complexity as a cost, even when it brings an implementation benefit. Options and automatic behavior are added later, when there is a real need.
+- **Follow existing conventions.** Before adding a mechanism, look for code that already does the same thing, and do it the same way.
+- **Fix the code, not the docs.** When the code is wrong, fix the code. A documented workaround is only a stopgap until the fix lands.
+- **No arbitrary limits.** A size or count limit needs a concrete reason, such as a file format's own limit or the range the code can represent. Don't add one just to be safe.
+- **People decide behavior and API changes.** Choices that change behavior or the API are made by a person. AI agents may lay out the options and recommend one, but they don't make the call.
+
 ---
 
 ## 2. Tech Stack
@@ -346,7 +362,7 @@ this->callEveryCatchUp(0.01, [this]{ stepSimulation(0.01); }, 5);
 - A runtime `setFps()` / `setIndependentFps()` that switches the update into a measured mode (VSYNC or `setFps()`) between updates drops the time since the last update, so running timers fire that much later: under a frame in the usual modes, long only after an idle like `EVENT_DRIVEN`. Called inside an update, the time counts from that update's start. Changing only the draw rate drops nothing (switching between synced and independent update counts as an update-mode change even at the same rate); entering a fixed update rate restarts with one step, which can count a little more or less than the time since the last update
 - A node moved during an update, before that update reached it, under a parent the update has already traversed misses that update's countdown, so its timers run one delta late. A node that moves itself from its own `update()` has already been counted down and isn't delayed; one moved under a parent traversed later is counted down once
 - `callEvery` keeps its phase (next due = previous due + interval). If an update comes more than a whole interval late it fires once, not once per missed interval
-- `callEveryCatchUp(interval, callback, maxCatchUp = 0)` keeps the phase too, but calls back once for every interval that came due, at most `maxCatchUp` times per update (`<= 0`: no limit). Past the limit the remaining due intervals are dropped; cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or `setFps()` loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once
+- `callEveryCatchUp(interval, callback, maxCatchUp)` keeps the phase too, but calls back once for every interval that came due, at most `maxCatchUp` times per update. `maxCatchUp` has no default: `0` or `-1` (any value `<= 0`) means no limit. Past the limit the remaining due intervals are dropped; cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or `setFps()` loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once
 - Timers auto-destroyed when Node is deleted
 - Zero overhead when no timers are active
 

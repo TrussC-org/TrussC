@@ -203,8 +203,13 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 
         // Run work marshalled from worker threads (runOnMainThread, Event
         // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
-        internal::drainMainThreadQueue();
-        internal::pumpAudioDiagnostics();
+        // Each app-code call here is an entry point, as in the windowed loop
+        // (#349): the stacks go back to their depth before it.
+        {
+            internal::EntryStackGuard guard(internal::AppEntry::Prelude);
+            internal::drainMainThreadQueue();
+            internal::pumpAudioDiagnostics();
+        }
 
         // Fixed timestep update
         internal::FixedStepAdvance adv = internal::advanceFixedStep(
@@ -215,6 +220,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         }
         for (int i = 0; i < adv.steps; ++i) {
             ctx.updateDeltaTime = targetDelta;
+            internal::EntryStackGuard guard(internal::AppEntry::Update);
             app->update();
             headless::frameCount++;
         }
@@ -232,8 +238,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     }
 
     // Call exit and cleanup
-    app->exit();
-    app->cleanup();
+    {
+        internal::EntryStackGuard guard(internal::AppEntry::Exit);
+        app->exit();
+        app->cleanup();
+    }
 
     // The audio device keeps running: detach the App's audio hooks and wait
     // for a callback in flight before the App goes out of scope (#256).
