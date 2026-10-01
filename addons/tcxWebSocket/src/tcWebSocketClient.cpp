@@ -430,16 +430,11 @@ EM_BOOL WebSocketClient::onEmscriptenOpen(int eventType, const EmscriptenWebSock
 EM_BOOL WebSocketClient::onEmscriptenMessage(int eventType, const EmscriptenWebSocketMessageEvent *websocketEvent, void *userData) {
     WebSocketClient* self = static_cast<WebSocketClient*>(userData);
     WebSocketEventArgs args;
-    args.isBinary = !websocketEvent->isText;
-    
-    // Copy data
-    if (websocketEvent->numBytes > 0) {
-        args.data.assign(websocketEvent->data, websocketEvent->data + websocketEvent->numBytes);
-        if (!args.isBinary) {
-            args.message.assign(reinterpret_cast<char*>(websocketEvent->data), websocketEvent->numBytes);
-        }
-    }
-    
+    // Text messages arrive NUL-terminated with the terminator counted in
+    // numBytes; fillMessageArgs drops it so web matches native.
+    detail::fillMessageArgs(args, websocketEvent->data, websocketEvent->numBytes,
+                            websocketEvent->isText);
+
     self->onMessage.notify(args);
     return EM_TRUE;
 }

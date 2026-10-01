@@ -26,6 +26,24 @@ struct WebSocketEventArgs {
     bool isBinary = false;
 };
 
+namespace detail {
+// Fills args from a message as Emscripten's WebSocket API reports it. For a
+// text message, Emscripten writes the UTF-8 string NUL-terminated and counts
+// the terminator in numBytes; it is dropped here so the web build delivers
+// the same message and data as native ("hello" -> 5 bytes). Binary messages
+// are copied as they are.
+inline void fillMessageArgs(WebSocketEventArgs& args, const unsigned char* data,
+                            size_t numBytes, bool isText) {
+    args.isBinary = !isText;
+    args.data.clear();
+    args.message.clear();
+    if (numBytes == 0 || data == nullptr) return;
+    if (isText && data[numBytes - 1] == 0) --numBytes;
+    args.data.assign(data, data + numBytes);
+    if (isText) args.message.assign(reinterpret_cast<const char*>(data), numBytes);
+}
+}  // namespace detail
+
 // =============================================================================
 // WebSocketClient
 // =============================================================================
