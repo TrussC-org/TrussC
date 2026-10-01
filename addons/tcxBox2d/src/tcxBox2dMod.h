@@ -140,13 +140,13 @@ class RigidBody2D;  // fwd
 // Argument for RigidBody2D collision/trigger events, from the receiving body's
 // point of view. `other` is the body it touched, or null if that was a
 // non-RigidBody2D body (the bounds/ground, or a raw CircleBody/RectBody/...)
-// or if its node went away before this event (an Ended deferred to after the
+// or if its node went away before this event (an Exit deferred to after the
 // physics step, or a listener that ran first dropped it).
 struct Contact2D {
     RigidBody2D* other = nullptr;
     tc::Node*    otherNode = nullptr;   // other ? other->getOwner() : nullptr
-    tc::Vec2     point;                 // pixels (zero on Ended)
-    tc::Vec2     normal;                // world-space (zero on Ended)
+    tc::Vec2     point;                 // pixels (zero on Exit)
+    tc::Vec2     normal;                // world-space (zero on Exit)
 };
 
 namespace detail {
@@ -250,15 +250,23 @@ public:
     float getRestitution() const { return (body_ && body_->GetFixtureList()) ? body_->GetFixtureList()->GetRestitution() : (restitution_ >= 0 ? restitution_ : 0.5f); }
 
     // Collision events (listen via EventListener; fired on the main thread).
-    tc::Event<Contact2D> onCollisionBegan;   // started touching (Enter)
-    tc::Event<Contact2D> onCollisionStay;    // still touching, once per World::update() (Stay)
-    tc::Event<Contact2D> onCollisionEnded;   // stopped touching (Exit)
+    tc::Event<Contact2D> onCollisionEnter;   // started touching
+    tc::Event<Contact2D> onCollisionStay;    // still touching, once per World::update()
+    tc::Event<Contact2D> onCollisionExit;    // stopped touching
 
     // Trigger events — fired instead of the collision ones when EITHER side is a
     // trigger (sensor). `point`/`normal` come from the overlap (zero on Exit).
-    tc::Event<Contact2D> onTriggerBegan;
+    tc::Event<Contact2D> onTriggerEnter;
     tc::Event<Contact2D> onTriggerStay;
-    tc::Event<Contact2D> onTriggerEnded;
+    tc::Event<Contact2D> onTriggerExit;
+
+    // Old names (Began / Ended), kept as aliases of the events above until
+    // v1.0.0. References add nothing to copying: tc::Event already makes
+    // RigidBody2D non-copyable and non-movable, and reflection lists values only.
+    [[deprecated("use onCollisionEnter")]] tc::Event<Contact2D>& onCollisionBegan = onCollisionEnter;
+    [[deprecated("use onCollisionExit")]]  tc::Event<Contact2D>& onCollisionEnded = onCollisionExit;
+    [[deprecated("use onTriggerEnter")]]   tc::Event<Contact2D>& onTriggerBegan   = onTriggerEnter;
+    [[deprecated("use onTriggerExit")]]    tc::Event<Contact2D>& onTriggerEnded   = onTriggerExit;
 
     // Reflection: live, editable physics state in inspectors / MCP node tree.
     TC_REFLECT(RigidBody2D, tc::Mod) {
@@ -406,7 +414,7 @@ protected:
         // Only touch the world if it's still alive — at shutdown it may be
         // destroyed before its bodies' nodes (it frees all bodies itself).
         if (!worldAlive_.expired() && world_ && body_) {
-            // A deferred Ended must not name this body once it is freed
+            // A deferred Exit must not name this body once it is freed
             if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
             if (auto* w = world_->getWorld()) w->DestroyBody(body_);
         }
@@ -426,15 +434,15 @@ private:
         bool trigger = trigger_ || (other && other->trigger_);
         if (trigger) {
             switch (phase) {
-                case 0:  onTriggerBegan.notify(col); break;
+                case 0:  onTriggerEnter.notify(col); break;
                 case 1:  onTriggerStay.notify(col);  break;
-                default: onTriggerEnded.notify(col); break;
+                default: onTriggerExit.notify(col); break;
             }
         } else {
             switch (phase) {
-                case 0:  onCollisionBegan.notify(col); break;
+                case 0:  onCollisionEnter.notify(col); break;
                 case 1:  onCollisionStay.notify(col);  break;
-                default: onCollisionEnded.notify(col); break;
+                default: onCollisionExit.notify(col); break;
             }
         }
     }
