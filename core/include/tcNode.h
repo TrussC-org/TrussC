@@ -1389,16 +1389,17 @@ public:
     }
 
     // Like callEvery, but calls back once for every interval that came due,
-    // at most maxCatchUp times per update (maxCatchUp <= 0: no limit), so a
+    // at most maxCatchUp times per update, so a
     // counter or a simulation driven by it catches up after a late update.
     // Past the limit the remaining due intervals are dropped; the phase is
     // kept. Cancelling the timer from the callback stops the remaining calls.
     // Without a limit, a long stall in a loop whose delta is measured (VSYNC or
     // setFps(), including an EVENT_DRIVEN idle stretch) makes it fire that
     // many times at once. In fixed-Hz update mode it counts step time, so time
-    // dropped by the update step cap is not counted.
+    // dropped by the update step cap is not counted. maxCatchUp has no
+    // default, so the caller decides: 0 or -1 (any value <= 0) means no limit.
     uint64_t callEveryCatchUp(double interval, std::function<void()> callback,
-                              int maxCatchUp = 0) {
+                              int maxCatchUp) {
         return addTimer(interval, interval, true, std::move(callback),
                         true, maxCatchUp);
     }
