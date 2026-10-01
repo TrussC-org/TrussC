@@ -1792,6 +1792,12 @@ static void acceptThreadFailureChild() {
 #endif
 
 int main() {
+#ifdef _WIN32
+    // The test's own sockets (the free-port probe, raw clients) need Winsock
+    // even while no TcpServer or TcpClient exists.
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
 #ifdef __linux__
     // Forked first, while this process has no threads of its own yet
     inChild("accept errors back off (child)", acceptBackoffChild);
