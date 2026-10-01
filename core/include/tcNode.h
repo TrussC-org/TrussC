@@ -443,9 +443,12 @@ public:
     // Transform values go through their setters so the matrix cache / change
     // events stay correct. Subclasses extend with their own block, listing
     // their direct base: TC_REFLECT(Sprite, Node) { TC_VALUE(...) }
+    // globalPos is derived from pos: editable (inspector, MCP), not saved to
+    // JSON. It is listed before pos so that a write carrying both applies pos
+    // last, and pos wins.
     TC_REFLECT_ROOT(Node) {
+        TC_DERIVED(globalPos, getGlobalPos, setGlobalPos)
         TC_VALUE(pos,       getPos,       setPos)
-        TC_VALUE(globalPos, getGlobalPos, setGlobalPos)
         TC_VALUE(rotation,  getEulerDeg,  setEulerDeg)   // euler X/Y/Z, degrees
         TC_VALUE(scale,     getScale,     setScale)
         TC_VALUE(visible,   isVisible,    setVisible)

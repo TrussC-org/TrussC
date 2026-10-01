@@ -294,11 +294,14 @@ bool TcpServer::start(int port, int maxClients) {
         return false;
     }
 
-    // Set SO_REUSEADDR option (to allow immediate port reuse on restart)
-    int opt = 1;
+    // POSIX: SO_REUSEADDR, so a restart can bind the port again right away.
+    // Windows: SO_EXCLUSIVEADDRUSE only, so a port another socket holds fails
+    // to bind.
 #ifdef _WIN32
-    setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+    BOOL opt = TRUE;
+    setsockopt(serverSocket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, (const char*)&opt, sizeof(opt));
 #else
+    int opt = 1;
     setsockopt(serverSocket_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 #endif
 
@@ -318,6 +321,16 @@ bool TcpServer::start(int port, int maxClients) {
         serverSocket_ = -1;
 #endif
         return false;
+    }
+
+    // Report the port the socket is bound to, so start(0) gives the one the
+    // OS picked
+    {
+        struct sockaddr_in boundAddr;
+        socklen_t boundLen = sizeof(boundAddr);
+        if (::getsockname(serverSocket_, (struct sockaddr*)&boundAddr, &boundLen) == 0) {
+            port_ = ntohs(boundAddr.sin_port);
+        }
     }
 
     // Start listening
@@ -352,7 +365,7 @@ bool TcpServer::start(int port, int maxClients) {
         return false;
     }
 
-    logNotice() << "TCP server started on port " << port;
+    logNotice() << "TCP server started on port " << port_;
     return true;
 }
 
