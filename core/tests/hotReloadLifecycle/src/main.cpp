@@ -86,6 +86,14 @@
 // whatever the case: .CPP / .H / .Hpp / .MM count like .cpp / .h / .hpp / .mm,
 // other extensions do not (checkWatcherExtensions()).
 //
+// Guest singletons (#416): the host fires events().hotReloadUnload before it
+// unloads a generation, while the App is still the main window's root (the
+// guest App's own listener records it). Each cycle's guest uses
+// tcxNodeInspector's toggle key, so the inspector singleton of that
+// generation's image listens on the host's keyPressed / exit /
+// hotReloadUnload; after the unload the host's listener counts are back to
+// what they were before the generation was loaded, every cycle.
+//
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
 // no GPU, no file watcher, no cmake rebuild — CI-safe on every desktop
@@ -93,9 +101,19 @@
 //
 // `hotReloadLifecycle --app` instead runs the real hot reload host
 // (TC_RUN_APP): a window, the file watcher and rebuilds, with the guest's
-// tcxImGui panel — edit src/tcApp.cpp while it runs to try a reload by hand.
-// CI only builds that path, which still links the host loop and the guest's
-// addon code on every desktop platform.
+// tcxNodeInspector panel (drawn through tcxImGui) — edit src/tcApp.cpp while
+// it runs to try a reload by hand. CI only builds that path, which still
+// links the host loop and the guest's addon code on every desktop platform.
+//
+// `hotReloadLifecycle --reload-check` runs the same windowed host and reloads
+// the guest twice by itself (Host::reload(): the cmake rebuild of the guest
+// target, then the swap), checking each generation (#416): the host's
+// listener counts on onRender (the inspector's frame driver and tcxImGui's
+// render), rawEvent, the mouse / key events, afterFrame, exit and
+// hotReloadUnload are the same as the first generation's, so the Hierarchy
+// is drawn once; a press over the panel is taken by ImGui, and a press away
+// from it, after a reload that happened while the cursor was over the panel,
+// is not. It needs a display (e.g. Xvfb) and cmake, so CI does not run it.
 // =============================================================================
 
 #include "tcApp.h"
@@ -110,6 +128,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -289,9 +308,17 @@ static int runCycles(const std::string& guestPath, int port) {
         return false;
     };
 
+    // The host's events the guest's inspector singleton listens on (#416)
+    auto hostListenerCounts = [] {
+        return std::vector<size_t>{events().keyPressed.listenerCount(), events().exit.listenerCount(),
+                                   events().hotReloadUnload.listenerCount()};
+    };
+
     const int kCycles = 5;
     uint64_t prevAppId = 0;
     for (int i = 1; i <= kCycles; ++i) {
+        const std::vector<size_t> countsBeforeLoad = hostListenerCounts();
+        UnloadProbe unloadProbe;
         GuestLibrary lib;
         auto fail = [&](int code, const std::string& what) {
             std::printf("hotReloadLifecycle: FAIL - %s (cycle %d)\n", what.c_str(), i);
@@ -325,6 +352,7 @@ static int runCycles(const std::string& guestPath, int port) {
         {
             auto* cycleApp = static_cast<tcApp*>(app);
             cycleApp->cycleOnly = true;   // setup() skips the window / ImGui work
+            cycleApp->unloadProbe = &unloadProbe;
             app->handleUpdate(0, 0);
             app->handleUpdate(0, 0);
             auto& engine = AudioEngine::getInstance();
@@ -341,6 +369,13 @@ static int runCycles(const std::string& guestPath, int port) {
         }
         if (!(mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image"))) {
             return fail(4, "guest MCP registrations not visible to the host");
+        }
+
+        // A guest singleton listening on the host's events (#416)
+        static_cast<tcApp*>(app)->useInspectorToggleKey();
+        if (events().keyPressed.listenerCount() != countsBeforeLoad[0] + 1 ||
+            events().hotReloadUnload.listenerCount() <= countsBeforeLoad[2]) {
+            return fail(42, "the guest's NodeInspector::setToggleKey() did not listen on the host's events");
         }
 
         // Through the HTTP server, as a client sees the running app
@@ -598,6 +633,18 @@ static int runCycles(const std::string& guestPath, int port) {
         if (!isReset(internal::mainWindowContext().rootNode)) {
             return fail(39, "unloading the guest left the main window's root pointing at its App");
         }
+        if (unloadProbe.fired != 1 || !unloadProbe.appWasRoot) {
+            return fail(43, "hotReloadUnload did not fire once before the guest's App and node references were released "
+                            "(fired " + std::to_string(unloadProbe.fired) + " time(s))");
+        }
+        if (hostListenerCounts() != countsBeforeLoad) {
+            const std::vector<size_t> after = hostListenerCounts();
+            return fail(44, "the unloaded generation left listeners on the host's events: keyPressed " +
+                            std::to_string(countsBeforeLoad[0]) + " -> " + std::to_string(after[0]) + ", exit " +
+                            std::to_string(countsBeforeLoad[1]) + " -> " + std::to_string(after[1]) +
+                            ", hotReloadUnload " + std::to_string(countsBeforeLoad[2]) + " -> " +
+                            std::to_string(after[2]));
+        }
         if (AudioEngine::getInstance().audioOut.listenerCount() != (size_t)audioOutBase ||
             AudioEngine::getInstance().audioIn.listenerCount() != (size_t)audioInBase) {
             return fail(41, "the unloaded guest App's audio hooks are still subscribed");
@@ -712,12 +759,137 @@ static int checkLoadFailuresLogged() {
     return rc;
 }
 
+// --reload-check: the real windowed host, reloading the guest by itself from
+// the host's afterFrame (#416). Input goes in the way _event_cb hands it on:
+// the raw sokol event first (ImGui follows the cursor through rawEvent), then
+// the press / release through the core events, whose `consumed` tells whether
+// a listener before the App took it. Returns 0 when every generation passed.
+static int g_reloadCheckResult = 1;
+static bool g_reloadCheckFinished = false;
+
+static int runReloadCheck() {
+    const float kPanelX = 100, kPanelY = 100;    // inside the inspector's Hierarchy panel
+    const float kAwayX = 900, kAwayY = 550;      // no panel there
+    const int kGenerations = 3;
+    const int kFramesPerGeneration = 12;
+
+    auto hostListenerCounts = [] {
+        auto& ev = events();
+        return std::vector<size_t>{ev.onRender.listenerCount(),      ev.rawEvent.listenerCount(),
+                                   ev.mousePressed.listenerCount(),  ev.mouseReleased.listenerCount(),
+                                   ev.mouseMoved.listenerCount(),    ev.mouseDragged.listenerCount(),
+                                   ev.mouseScrolled.listenerCount(), ev.keyPressed.listenerCount(),
+                                   ev.keyReleased.listenerCount(),   ev.afterFrame.listenerCount(),
+                                   ev.exit.listenerCount(),          ev.hotReloadUnload.listenerCount()};
+    };
+    auto countsText = [](const std::vector<size_t>& c) {
+        std::string t;
+        for (size_t v : c) t += (t.empty() ? "" : " ") + std::to_string(v);
+        return t;
+    };
+    auto moveMouse = [](float x, float y) {
+        // Raw sokol events are in framebuffer pixels (sokol_imgui divides by
+        // the DPI scale), so a logical point is scaled up first.
+        sapp_event ev = {};
+        ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
+        ev.mouse_x = x * sapp_dpi_scale();
+        ev.mouse_y = y * sapp_dpi_scale();
+        events().rawEvent.notify(ev);
+    };
+    auto pressTaken = [](float x, float y) {
+        MouseEventArgs press;
+        press.x = x;
+        press.y = y;
+        press.pos = press.globalPos = Vec2(x, y);
+        press.button = MOUSE_BUTTON_LEFT;
+        events().mousePressed.notify(press);
+        MouseEventArgs release = press;
+        events().mouseReleased.notify(release);
+        return press.consumed;
+    };
+
+    std::vector<size_t> firstCounts;
+    int frame = 0;
+    int generation = 1;
+    auto finish = [](int rc, const std::string& what) {
+        if (rc != 0) std::printf("hotReloadLifecycle --reload-check: FAIL - %s\n", what.c_str());
+        else std::printf("hotReloadLifecycle --reload-check: OK\n");
+        std::fflush(stdout);
+        g_reloadCheckResult = rc;
+        g_reloadCheckFinished = true;
+        sapp_quit();
+    };
+#ifdef __APPLE__
+    // On macOS sapp_quit() ends the process through exit(0) and TC_RUN_APP
+    // never returns, so the result is set as the exit code here.
+    std::atexit([] {
+        if (g_reloadCheckFinished) std::_Exit(g_reloadCheckResult);
+    });
+#endif
+    bool done = false;
+    EventListener step = events().afterFrame.listen([&] {
+        if (done) return;
+        const int f = ++frame - (generation - 1) * kFramesPerGeneration;
+        const std::string gen = "generation " + std::to_string(generation);
+        if (frame > kGenerations * kFramesPerGeneration + 60) {
+            done = true;
+            return finish(60, "timed out");
+        }
+        if (f == 3) {
+            const std::vector<size_t> counts = hostListenerCounts();
+            if (generation == 1) {
+                firstCounts = counts;
+                std::printf("hotReloadLifecycle --reload-check: host listener counts %s\n",
+                            countsText(counts).c_str());
+            } else if (counts != firstCounts) {
+                done = true;
+                return finish(61, gen + " has host listener counts " + countsText(counts) +
+                                  ", the first had " + countsText(firstCounts) +
+                                  " (onRender rawEvent mousePressed mouseReleased mouseMoved mouseDragged "
+                                  "mouseScrolled keyPressed keyReleased afterFrame exit hotReloadUnload)");
+            }
+            moveMouse(kAwayX, kAwayY);
+        } else if (f == 6) {
+            if (pressTaken(kAwayX, kAwayY)) {
+                done = true;
+                return finish(62, gen + ": a press away from the panels was taken before the App");
+            }
+            moveMouse(kPanelX, kPanelY);
+        } else if (f == 9) {
+            if (!pressTaken(kPanelX, kPanelY)) {
+                done = true;
+                return finish(63, gen + ": a press over the inspector's panel was not taken by ImGui");
+            }
+        } else if (f == kFramesPerGeneration) {
+            std::printf("hotReloadLifecycle --reload-check: %s ok\n", gen.c_str());
+            std::fflush(stdout);
+            if (generation == kGenerations) {
+                done = true;
+                return finish(0, "");
+            }
+            // Reload while the cursor is over the panel: a manager left
+            // behind would keep taking presses everywhere.
+            if (!trussc::hot_reload::g_host.reload()) {
+                done = true;
+                return finish(64, "Host::reload() failed after " + gen);
+            }
+            ++generation;
+        }
+    });
+
+    WindowSettings settings;
+    settings.setSize(960, 600);
+    TC_RUN_APP(tcApp, settings);
+    return done ? g_reloadCheckResult : 65;
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--app") {
         WindowSettings settings;
         settings.setSize(960, 600);
         return TC_RUN_APP(tcApp, settings);
     }
+    if (argc > 1 && std::string(argv[1]) == "--reload-check") return runReloadCheck();
 
     // Record the main thread id first, as _setup_cb does: isMainThread() and
     // runOnMainThread() key off whichever thread asks first.

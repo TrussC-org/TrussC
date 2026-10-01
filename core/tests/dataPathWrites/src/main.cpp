@@ -24,6 +24,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <fstream>
@@ -38,6 +39,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok) {
@@ -71,7 +74,9 @@ struct Writer {
     function<bool(const fs::path&)> write;
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     const fs::path sandbox = fs::temp_directory_path() / "tc_dataPathWrites_test";
     std::error_code ec;
     fs::remove_all(sandbox, ec);

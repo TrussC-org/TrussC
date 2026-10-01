@@ -515,10 +515,16 @@ bool TlsClient::performHandshake() {
         teardown();
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
 
-        tc::TcpConnectEventArgs args;
-        args.success = false;
-        args.message = std::string("TLS Handshake failed: ") + errBuf;
-        onConnect.notify(args);
+        // An onError listener may have started a newer attempt. That attempt
+        // reports its own result: this one is not reported once the client
+        // is connected or connecting again (running_ is set for every
+        // attempt in progress, the pending connect and the handshake too).
+        if (!connected_ && !running_) {
+            tc::TcpConnectEventArgs args;
+            args.success = false;
+            args.message = std::string("TLS Handshake failed: ") + errBuf;
+            onConnect.notify(args);
+        }
         return false;
     }
 }

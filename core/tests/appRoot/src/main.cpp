@@ -25,6 +25,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <memory>
@@ -32,6 +33,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok) {
@@ -160,7 +163,9 @@ static void runHeadless() {
           getRootNode() == nullptr && rootIsEmpty());
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     EventListener logListener = getLogger().onLog.listen([](LogEventArgs& e) {
         if (e.level == LogLevel::Warning &&
             e.message.find("isn't owned by a shared_ptr yet") != string::npos) {

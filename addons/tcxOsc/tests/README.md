@@ -21,6 +21,18 @@ plus `OscBundle::fromBytes` directly):
   32-bit maximum;
 - valid packets of every argument shape and padding length still parse.
 
+And the OSC 1.0 type tags (messages built byte by byte at run time):
+
+- every tag (`i f s b T F h d t S c r m N I [ ]`) round-trips: `OscMessage`
+  encodes it to its wire bytes and those bytes decode to the same value, one
+  tag per message and all tags in one message;
+- a tag outside OSC 1.0, fixed-size argument data 1 byte short, or an unpaired
+  `[` / `]` fails the message, and a damaged message fails its bundle (also one
+  level down); through `OscReceiver` that is one `onParseError`, nothing
+  delivered;
+- a message that ends before its last zero padding parses and is delivered,
+  and each `OscReceiver` logs one warning the first time.
+
 And the polling queue:
 
 - a receiver polled with `getNextMessage()` only (never `hasNewMessage()`)
