@@ -192,6 +192,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   longest LZW prefix chains decodes on a 64 KB thread stack (native POSIX
   only; elsewhere only its output is checked). Image fixtures are made at
   runtime; the Ogg clip is embedded (`src/toneOgg.h`).
+- `scopedStack/` — `scopedMatrix()` / `scopedStyle()` (#492): the guard
+  pushes when it is made and pops when it goes out of scope, read from the
+  matrix and style stack depth before, inside and after the scope, on an
+  early return, a return from a loop, an exception, nested guards and a
+  guard inside a `pushMatrix()` / `pushStyle()` pair (pops only its own
+  entry); the matrix and color set inside are undone after it. Checks run in
+  a release build only (headless `pushMatrix()` reaches sokol_gl).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
