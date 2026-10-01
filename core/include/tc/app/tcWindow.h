@@ -75,12 +75,14 @@ public:
     // (standard Node lifecycle), i.e. on the window's first tick; its
     // audioOut() / audioIn() are subscribed right after that setup() returns,
     // not at setApp(). An App runs
-    // once: setup() when first attached, exit() / cleanup() when its window
-    // closes (or, with #318, when it is swapped out); closing the window also
-    // detaches its audioOut() / audioIn() for good. To show it again, create
-    // a new App. setApp() refuses an App whose cleanup() already ran, and any
-    // App on a window that is not open (both log an error and leave the
-    // window as it is); setApp(nullptr) always releases.
+    // once: setup() when first attached, exit() / cleanup() when it leaves
+    // its window: when the window closes, when setApp() swaps in another App,
+    // or on setApp(nullptr). Leaving also detaches its audioOut() / audioIn()
+    // for good. An App that user code still holds stays alive, but it does
+    // not run again: to show it again, create a new App. setApp() refuses an
+    // App whose cleanup() already ran, and any App on a window that is not
+    // open (both log an error and leave the window as it is);
+    // setApp(nullptr) always releases.
     void setApp(std::shared_ptr<App> app);
     std::shared_ptr<App> getApp() const { return app_; }
 
@@ -317,10 +319,24 @@ inline void Window::setApp(std::shared_ptr<App> app) {
             return;
         }
     }
-    if (app_) attached.erase(app_.get());
+    // The outgoing App leaves the window first (out of app_, the double-attach
+    // guard and the root), so a setApp() / close() from its exit() or
+    // cleanup() sees the window's new state; the local keeps it alive.
+    std::shared_ptr<App> outgoing = std::move(app_);
+    if (outgoing) attached.erase(outgoing.get());
     if (app) attached.insert(app.get());
     app_ = std::move(app);
     ctx_.rootNode = app_;
+    // An App runs once (#318): a swap or setApp(nullptr) ends the outgoing App
+    // as close() does: exit(), cleanup(), then its audioOut() / audioIn()
+    // detached (with the wait for a callback in flight). An App whose
+    // cleanup() already ran is not ended twice.
+    if (outgoing && !internal::appRanCleanup(*outgoing)) {
+        internal::EntryStackGuard guard(internal::AppEntry::Exit);
+        outgoing->exit();
+        outgoing->cleanup();
+        internal::detachAppAudio(*outgoing);
+    }
 }
 
 // Looked up in the open-window registry rather than cached on the App: every

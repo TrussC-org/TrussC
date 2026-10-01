@@ -456,17 +456,18 @@ TC_CORE_TEST_MAIN() {
         first.setApp(stray);   // closed above
         check("... also one that was open before", first.getApp() == nullptr &&
               countErrors("this window is closed") == closedErrors + 2);
+        // setApp(nullptr) ends keeper as a close does (#318): its hook goes.
         second.setApp(nullptr);
+        check("setApp(nullptr) ends the window's App: its hook is gone",
+              internal::appRanCleanup(*keeper) && engine.audioOut.listenerCount() == hooks,
+              to_string(engine.audioOut.listenerCount()) + " hooks");
         second.setApp(stray);   // the refusals left it free to attach
         check("the refused App can still go to an open window",
-              second.getApp() == stray && engine.audioOut.listenerCount() == hooks + 1);
+              second.getApp() == stray && engine.audioOut.listenerCount() == hooks);
         second.setApp(nullptr);
 
-        // keeper still has its hook (it was set up on second's tick): detach
-        // and wait before it goes, so the audio thread (still running) cannot
-        // be inside it meanwhile. stray and mainApp never ran setup(), so
-        // they have none; detaching them is harmless.
-        internal::detachAppAudio(*keeper);
+        // stray and mainApp never ran setup(), so they have no hook;
+        // detaching them is harmless.
         internal::detachAppAudio(*stray);
         internal::detachAppAudio(*mainApp);
     }
