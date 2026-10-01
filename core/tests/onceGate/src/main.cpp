@@ -124,13 +124,29 @@ int main() {
         check("interval: first call is true", first);
         check("interval: false within the interval", !soon);
         sleepSeconds(iv + 0.1);
+        // The gate's last true lies between these two clock reads, so a check
+        // can tell for sure whether a whole interval has passed since it: a
+        // slow machine that oversleeps skips the "not yet" check instead of
+        // failing it.
+        const auto beforeTrue = std::chrono::steady_clock::now();
         bool after = g.isFirstTime();
+        auto afterTrue = std::chrono::steady_clock::now();
         bool afterAgain = g.isFirstTime();
         check("interval: true again after the interval", after);
         check("interval: then false again (interval restarts)", !afterAgain);
+        auto secondsSince = [](std::chrono::steady_clock::time_point t) {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
+        };
         sleepSeconds(iv / 2);
-        check("interval: false half an interval after the last true", !g.isFirstTime());
-        sleepSeconds(iv / 2 + 0.1);
+        const bool halfTrue = g.isFirstTime();
+        if (secondsSince(beforeTrue) < iv) {
+            check("interval: false half an interval after the last true", !halfTrue);
+        } else {
+            std::printf("interval: half-interval check skipped (overslept to %.3f s)\n",
+                        secondsSince(beforeTrue));
+            if (halfTrue) afterTrue = std::chrono::steady_clock::now();
+        }
+        while (secondsSince(afterTrue) < iv + 0.05) sleepSeconds(0.02);
         check("interval: true again after another interval", g.isFirstTime());
 
         // 0, negative and NaN intervals mean once.

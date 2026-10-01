@@ -27,12 +27,12 @@ And the polling queue:
   receives messages;
 - with the default size (1024) a 150-message bundle arrives whole, 0 dropped;
 - with `setBufferSize(100)` the same bundle keeps the newest 100: 50 dropped
-  and counted in `getDroppedMessages()`;
+  and counted in `getDroppedMessageCount()`;
 - the drop is logged from the polling call (not the receive thread), a second
   overflow within 2 s is not logged yet, and the next report after 2 s gives
   the drops summed since the last one;
 - shrinking a filled queue with `setBufferSize(40)` keeps the newest 40, counts
-  the 110 discarded in `getDroppedMessages()` and reports them in the next
+  the 110 discarded in `getDroppedMessageCount()` and reports them in the next
   poll's warning, so received + dropped == sent over the whole section.
 
 > Note: it does *not* assert that a non-member socket on a *different port* gets

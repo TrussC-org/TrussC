@@ -107,9 +107,10 @@ namespace internal {
     uint64_t nextNodeTimerId();
 
     // Runs the node's setup() once and then the framework's post-setup hook,
-    // as the node's first updateTree() / drawTree() does (Node::setupOnce()).
-    // For a runner that drives an App without the tree walk
-    // (runHeadlessApp()). Defined below the Node class.
+    // as the node's first updateTree() / drawTree() does (Node::setupOnce()),
+    // as the setup() entry point (#349): the stacks go back to their depth
+    // before it. For a window's root (the App): runHeadlessApp(), and
+    // App / Window before their tree walk. Defined below the Node class.
     inline void setupNodeOnce(Node& node);
 }
 
@@ -953,11 +954,16 @@ private:
             auto& rc = internal::getDefaultContext();
             const size_t matrixDepth = rc.getMatrixStackDepth();
             const size_t styleDepth = rc.getStyleStackDepth();
+            // Stack floor (#348): a stray pop in draw() is refused (and names
+            // this node) instead of popping this node's own entry. Saved and
+            // restored, since a draw() can run another node's drawTree().
+            const auto prevFloor = rc.setStackFloor(matrixDepth, styleDepth, &typeid(*this));
             resetStyle();
             draw();
             forEachMod([](Mod* m) { m->draw(); });
-            // An unbalanced push/pop in draw() is named and contained here
-            // (#232): the pop below must undo THIS node's push, not the user's.
+            rc.setStackFloor(prevFloor);
+            // A missing pop in draw() is named and contained here (#232): the
+            // pop below must undo THIS node's push, not the user's.
             if (rc.getMatrixStackDepth() != matrixDepth || rc.getStyleStackDepth() != styleDepth) {
                 rc.restoreStackDepth(matrixDepth, styleDepth, getTypeName().c_str());
             }
@@ -1383,16 +1389,17 @@ public:
     }
 
     // Like callEvery, but calls back once for every interval that came due,
-    // at most maxCatchUp times per update (maxCatchUp <= 0: no limit), so a
+    // at most maxCatchUp times per update, so a
     // counter or a simulation driven by it catches up after a late update.
     // Past the limit the remaining due intervals are dropped; the phase is
     // kept. Cancelling the timer from the callback stops the remaining calls.
     // Without a limit, a long stall in a loop whose delta is measured (VSYNC or
     // setFps(), including an EVENT_DRIVEN idle stretch) makes it fire that
     // many times at once. In fixed-Hz update mode it counts step time, so time
-    // dropped by the update step cap is not counted.
+    // dropped by the update step cap is not counted. maxCatchUp has no
+    // default, so the caller decides: 0 or -1 (any value <= 0) means no limit.
     uint64_t callEveryCatchUp(double interval, std::function<void()> callback,
-                              int maxCatchUp = 0) {
+                              int maxCatchUp) {
         return addTimer(interval, interval, true, std::move(callback),
                         true, maxCatchUp);
     }
@@ -1693,6 +1700,8 @@ protected:
 
 namespace internal {
 inline void setupNodeOnce(Node& node) {
+    if (node.setupCalled_) return;
+    EntryStackGuard guard(AppEntry::Setup);
     node.setupOnce();
 }
 }

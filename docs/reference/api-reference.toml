@@ -262,6 +262,14 @@ description.en = "Maximum number of simultaneously-playing Sound voices."
 description.ja = "同時再生可能な Sound ボイスの最大数"
 description.ko = "동시 재생 가능한 Sound 보이스 최대 수"
 
+["AudioEngine::getPlayingSounds"]
+category = "audioengine"
+keywords = ["playing sounds", "playback", "voices", "active", "diagnostics", "level", "meter"]
+description.en = "Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener."
+description.ja = "再生中・一時停止中のサウンドのスナップショット (PlayingSoundInfo: slot、path、streaming、位置、長さ、volume、pan、speed、loop、paused、level)。shutdown() 後にスロットに残った再生は level 0 で並ぶ。エンジンのロックを取ってコピーするので、メインスレッドから呼ぶこと。audioOut / audioIn のリスナーからは呼ばない"
+description.ko = "재생 중·일시 정지 중인 사운드의 스냅샷 (PlayingSoundInfo: slot, path, streaming, 위치, 길이, volume, pan, speed, loop, paused, level). shutdown() 후 슬롯에 남은 재생은 level 0 으로 나온다. 엔진 락을 잡고 복사하므로 메인 스레드에서 호출할 것. audioOut / audioIn 리스너에서는 호출하지 않는다"
+related = ["PlayingSoundInfo", "AudioEngine::getStats"]
+
 ["AudioEngine::getSampleRate"]
 category = "audioengine"
 keywords = ["samplerate", "hz", "frequency", "khz"]
@@ -271,19 +279,11 @@ description.ko = "현재 엔진 출력 샘플레이트 (Hz). init() 전에는 �
 
 ["AudioEngine::getStats"]
 category = "audioengine"
-keywords = ["diagnostics", "dropped", "clipping", "peak", "rms", "cpu load", "health"]
-description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread load. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
-description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの負荷。atomic を読むだけなので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
-description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 부하. atomic 만 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
-related = ["AudioStats", "AudioEngine::getVoices", "Sound::play"]
-
-["AudioEngine::getVoices"]
-category = "audioengine"
-keywords = ["voices", "playing sounds", "active", "diagnostics", "level", "meter"]
-description.en = "Snapshot of the voices currently playing or paused (AudioVoiceInfo: slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level). Voices left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener."
-description.ja = "再生中・一時停止中のボイスのスナップショット (AudioVoiceInfo: slot、ファイル、streaming、位置、長さ、volume、pan、speed、loop、paused、level)。shutdown() 後にスロットに残ったボイスは level 0 で並ぶ。エンジンのロックを取ってコピーするので、メインスレッドから呼ぶこと。audioOut / audioIn のリスナーからは呼ばない"
-description.ko = "재생 중·일시 정지 중인 보이스의 스냅샷 (AudioVoiceInfo: slot, 파일, streaming, 위치, 길이, volume, pan, speed, loop, paused, level). shutdown() 후 슬롯에 남은 보이스는 level 0 으로 나온다. 엔진 락을 잡고 복사하므로 메인 스레드에서 호출할 것. audioOut / audioIn 리스너에서는 호출하지 않는다"
-related = ["AudioVoiceInfo", "AudioEngine::getStats"]
+keywords = ["diagnostics", "dropped", "clipping", "peak", "rms", "cpu usage", "cpu load", "health"]
+description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
+description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの CPU 使用率。atomic を読むだけなので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
+description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 CPU 사용률. atomic 만 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
+related = ["AudioStats", "AudioEngine::getPlayingSounds", "Sound::play"]
 
 ["AudioEngine::init"]
 category = "audioengine"
@@ -507,21 +507,35 @@ description.ja = "エンジン出力サンプルレート (Hz、0 = エンジン
 description.ko = "엔진 출력 샘플레이트 (Hz, 0 = 엔진 기본값 48000)"
 
 ["AudioStats"]
-keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu load", "meter"]
-description.en = "Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / load describe the recent output."
-description.ja = "AudioEngine::getStats() が返すオーディオエンジンの健全性カウンタとメーター。カウンタはプロセス起動からの累計 (再初期化でも消えない)。peak / rms / load は直近の出力を表す"
-description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상태 카운터와 미터. 카운터는 프로세스 시작 이후 누계 (재초기화해도 유지). peak / rms / load 는 최근 출력을 나타낸다"
-related = ["AudioEngine::getStats", "AudioVoiceInfo"]
+keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu usage", "cpu load", "meter"]
+description.en = "Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output."
+description.ja = "AudioEngine::getStats() が返すオーディオエンジンの健全性カウンタとメーター。カウンタはプロセス起動からの累計 (再初期化でも消えない)。peak / rms / cpuUsage は直近の出力を表す"
+description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상태 카운터와 미터. 카운터는 프로세스 시작 이후 누계 (재초기화해도 유지). peak / rms / cpuUsage 는 최근 출력을 나타낸다"
+related = ["AudioEngine::getStats", "PlayingSoundInfo"]
 
 ["AudioStats::clippedSamples"]
 description.en = "Output samples beyond +/-1.0 that the final clamp cut off (counted per channel sample)."
 description.ja = "最終クランプで切り落とされた ±1.0 を超える出力サンプル数 (チャンネルごとのサンプル単位)"
 description.ko = "최종 클램프에서 잘린 ±1.0 을 넘는 출력 샘플 수 (채널별 샘플 단위)"
 
+["AudioStats::cpuUsage"]
+keywords = ["cpu usage", "cpu load", "audio thread", "dropout", "overrun"]
+description.en = "Fraction of audio-thread time: time spent mixing the playing sounds and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio. 1.0 means the callback took as long as the audio it produced (0.25 = a quarter of the time budget). 0 while the engine is not running."
+description.ja = "オーディオスレッドの時間の割合: 再生中のサウンドと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均。1.0 はコールバックが生成した音と同じだけの時間がかかったことを表す (0.25 = 時間予算の 4 分の 1)。エンジン停止中は 0"
+description.ko = "오디오 스레드 시간의 비율: 재생 중인 사운드와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균. 1.0 은 콜백이 생성한 오디오만큼의 시간이 걸렸다는 뜻 (0.25 = 시간 예산의 4 분의 1). 엔진이 정지 상태면 0"
+related = ["AudioStats::cpuUsagePeak"]
+
+["AudioStats::cpuUsagePeak"]
+keywords = ["cpu usage", "peak", "dropout", "overrun"]
+description.en = "CPU usage of the worst single callback in the same window; above 1 the callback took longer than the audio it produced (a dropout). 0 while the engine is not running."
+description.ja = "同じ区間で最も重かったコールバック 1 回の CPU 使用率。1 を超えたらコールバックが生成した音より長くかかった (音切れ)。エンジン停止中は 0"
+description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 CPU 사용률. 1 을 넘으면 콜백이 생성한 오디오보다 오래 걸린 것 (끊김). 엔진이 정지 상태면 0"
+related = ["AudioStats::cpuUsage"]
+
 ["AudioStats::droppedDecoderError"]
-description.en = "Plays refused because a stream's file could not be reopened for the new voice (moved, deleted or unreadable)."
-description.ja = "ストリームのファイルを新しいボイス用に開き直せず (移動・削除・読めない) 捨てた再生の数"
-description.ko = "스트림 파일을 새 보이스용으로 다시 열 수 없어 (이동·삭제·읽기 불가) 버려진 재생 수"
+description.en = "Plays refused because a stream's file could not be reopened for the new playback (moved, deleted or unreadable)."
+description.ja = "ストリームのファイルを新しい再生用に開き直せず (移動・削除・読めない) 捨てた再生の数"
+description.ko = "스트림 파일을 새 재생용으로 다시 열 수 없어 (이동·삭제·읽기 불가) 버려진 재생 수"
 
 ["AudioStats::droppedNotRunning"]
 description.en = "Plays refused because no output device was running (init failed, or after shutdown())."
@@ -533,25 +547,16 @@ description.en = "Plays AudioEngine::play() refused since startup (Sound::play()
 description.ja = "起動から AudioEngine::play() が拒否した再生の数 (Sound::play() が false を返した)。全理由の合計で、4 つの dropped* フィールドの和"
 description.ko = "시작 이후 AudioEngine::play() 가 거부한 재생 수 (Sound::play() 가 false 반환). 모든 이유의 합계로, 네 개의 dropped* 필드의 합"
 
+["AudioStats::droppedPolyphonyLimit"]
+keywords = ["polyphony", "dropped", "slots busy"]
+description.en = "Plays refused because every playback slot was busy (AudioSettings::maxPolyphony, default 32)."
+description.ja = "全再生スロットが使用中 (AudioSettings::maxPolyphony、既定 32) で捨てた再生の数"
+description.ko = "모든 재생 슬롯이 사용 중 (AudioSettings::maxPolyphony, 기본 32) 이라 버려진 재생 수"
+
 ["AudioStats::droppedStreamLimit"]
-description.en = "Plays refused because a SoundStream already had maxPolyphony voices. Only copies of a streamed Sound can hit this: a single Sound stops its previous voice first."
-description.ja = "SoundStream が既に maxPolyphony 本のボイスを持っていたために捨てた再生の数。ストリームした Sound のコピーでだけ起きる (単独の Sound は前のボイスを先に止める)"
-description.ko = "SoundStream 이 이미 maxPolyphony 개의 보이스를 갖고 있어 버려진 재생 수. 스트리밍 Sound 의 복사본에서만 발생 (단일 Sound 는 이전 보이스를 먼저 정지)"
-
-["AudioStats::droppedVoiceLimit"]
-description.en = "Plays refused because every voice slot was busy (AudioSettings::maxPolyphony, default 32)."
-description.ja = "全ボイススロットが使用中 (AudioSettings::maxPolyphony、既定 32) で捨てた再生の数"
-description.ko = "모든 보이스 슬롯이 사용 중 (AudioSettings::maxPolyphony, 기본 32) 이라 버려진 재생 수"
-
-["AudioStats::load"]
-description.en = "Audio-thread load: time spent mixing voices and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio (0.25 = a quarter of the time budget). 0 while the engine is not running."
-description.ja = "オーディオスレッドの負荷: ボイスと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均 (0.25 = 時間予算の 4 分の 1)。エンジン停止中は 0"
-description.ko = "오디오 스레드 부하: 보이스와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균 (0.25 = 시간 예산의 4 분의 1). 엔진이 정지 상태면 0"
-
-["AudioStats::loadMax"]
-description.en = "Worst single callback's load in the same window; above 1 the callback overran its period. 0 while the engine is not running."
-description.ja = "同じ区間で最も重かったコールバック 1 回の負荷。1 を超えたら周期に間に合っていない。エンジン停止中は 0"
-description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 부하. 1 을 넘으면 주기를 넘긴 것. 엔진이 정지 상태면 0"
+description.en = "Plays refused because a SoundStream already had maxPolyphony playbacks. Only copies of a streamed Sound can hit this: a single Sound stops its previous playback first."
+description.ja = "SoundStream が既に maxPolyphony 本の再生を持っていたために捨てた再生の数。ストリームした Sound のコピーでだけ起きる (単独の Sound は前の再生を先に止める)"
+description.ko = "SoundStream 이 이미 maxPolyphony 개의 재생을 갖고 있어 버려진 재생 수. 스트리밍 Sound 의 복사본에서만 발생 (단일 Sound 는 이전 재생을 먼저 정지)"
 
 ["AudioStats::peak"]
 description.en = "Master output peak over the last ~100 ms, linear (1.0 = full scale). Measured before the clamp, so a value above 1 shows how far the mix overshoots. 0 while the engine is not running."
@@ -562,68 +567,6 @@ description.ko = "최근 약 100 ms 의 마스터 출력 피크 (선형, 1.0 = �
 description.en = "Master output RMS over the same ~100 ms window, linear. 0 while the engine is not running."
 description.ja = "同じ約 100 ms 区間のマスター出力の RMS (リニア)。エンジン停止中は 0"
 description.ko = "같은 약 100 ms 구간의 마스터 출력 RMS (선형). 엔진이 정지 상태면 0"
-
-["AudioVoiceInfo"]
-keywords = ["voice", "playing sound", "diagnostics", "level"]
-description.en = "One active voice as reported by AudioEngine::getVoices(): a copy taken under the engine lock, so later changes to the voice are not reflected."
-description.ja = "AudioEngine::getVoices() が返す再生中ボイス 1 本分。エンジンのロック下で取ったコピーなので、その後のボイスの変化は反映されない"
-description.ko = "AudioEngine::getVoices() 가 반환하는 활성 보이스 하나. 엔진 락 아래에서 만든 복사본이므로 이후 보이스 변화는 반영되지 않는다"
-related = ["AudioEngine::getVoices", "PlayingSound"]
-
-["AudioVoiceInfo::duration"]
-description.en = "Source duration in seconds."
-description.ja = "ソースの長さ (秒)"
-description.ko = "소스 길이 (초)"
-
-["AudioVoiceInfo::level"]
-description.en = "Peak absolute value of this voice's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, and while the engine is not running."
-description.ja = "直近のオーディオコールバックでのこのボイスの出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中と、エンジン停止中は 0"
-description.ko = "최근 오디오 콜백에서 이 보이스 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 그리고 엔진이 정지 상태일 때는 0"
-
-["AudioVoiceInfo::loop"]
-description.en = "Loop flag of the voice."
-description.ja = "ボイスのループ設定"
-description.ko = "보이스의 루프 설정"
-
-["AudioVoiceInfo::pan"]
-description.en = "Pan of the voice (-1 left, 0 center, 1 right)."
-description.ja = "ボイスのパン (-1 左、0 中央、1 右)"
-description.ko = "보이스의 팬 (-1 왼쪽, 0 중앙, 1 오른쪽)"
-
-["AudioVoiceInfo::path"]
-description.en = "Source file as UTF-8; empty for generated or in-memory buffers."
-description.ja = "ソースファイル (UTF-8)。生成したバッファやメモリからのバッファでは空"
-description.ko = "소스 파일 (UTF-8). 생성한 버퍼나 메모리 버퍼에서는 비어 있음"
-
-["AudioVoiceInfo::paused"]
-description.en = "True while the voice is paused (Sound::pause())."
-description.ja = "一時停止中 (Sound::pause()) なら true"
-description.ko = "일시 정지 중 (Sound::pause()) 이면 true"
-
-["AudioVoiceInfo::position"]
-description.en = "Playback position in seconds."
-description.ja = "再生位置 (秒)"
-description.ko = "재생 위치 (초)"
-
-["AudioVoiceInfo::slot"]
-description.en = "Mixer slot index (0 .. maxPolyphony - 1)."
-description.ja = "ミキサーのスロット番号 (0 .. maxPolyphony - 1)"
-description.ko = "믹서 슬롯 번호 (0 .. maxPolyphony - 1)"
-
-["AudioVoiceInfo::speed"]
-description.en = "Playback speed of the voice (1.0 = natural pitch)."
-description.ja = "ボイスの再生速度 (1.0 = 元のピッチ)"
-description.ko = "보이스의 재생 속도 (1.0 = 원래 피치)"
-
-["AudioVoiceInfo::streaming"]
-description.en = "True for a SoundStream voice (Sound::loadStream), false for an eager SoundBuffer."
-description.ja = "SoundStream のボイス (Sound::loadStream) なら true、eager な SoundBuffer なら false"
-description.ko = "SoundStream 보이스 (Sound::loadStream) 면 true, eager SoundBuffer 면 false"
-
-["AudioVoiceInfo::volume"]
-description.en = "Volume of the voice."
-description.ja = "ボイスの音量"
-description.ko = "보이스의 볼륨"
 
 ["AxisMode"]
 description.en = "Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children)."
@@ -3966,25 +3909,105 @@ description.ja = "ログ記録時に生成されるタイムスタンプ文字�
 description.ko = "로그 기록 시 생성되는 타임스탬프 문자열(HH:MM:SS.mmm)"
 
 ["LogLevel"]
-description.en = "Log severity, from Verbose (most detailed) to Fatal; Silent disables logging."
-description.ja = "ログの重大度。Verbose（最も詳細）から Fatal まで。Silent はログを無効化。"
-description.ko = "로그 심각도. Verbose(가장 상세)부터 Fatal까지. Silent는 로깅 비활성화."
-keywords = ["verbose", "warning", "error", "severity", "debug"]
-related = ["logAt", "setConsoleLogLevel", "setFileLogLevel", "Logger", "logNotice"]
-value_desc.Verbose.en = "Detailed info (for debugging)"
-value_desc.Notice.en = "Normal info"
-value_desc.Warning.en = "Warning"
-value_desc.Error.en = "Error"
-value_desc.Fatal.en = "Fatal error"
-value_desc.Silent.en = "No output (for filtering)"
+description.en = "Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off."
+description.ja = "ログの重大度。Verbose（最も詳細）から Fatal まで。各出力（コンソール・ファイル・システム）は自分のレベル以上の行を出す。出力のレベルを Silent にするとその出力は止まる。"
+description.ko = "로그 심각도. Verbose(가장 상세)부터 Fatal까지. 각 출력(콘솔·파일·시스템)은 자신의 레벨 이상의 줄을 낸다. 출력의 레벨을 Silent로 하면 그 출력은 꺼진다."
+keywords = ["verbose", "warning", "error", "severity", "debug", "silent", "log level"]
+related = ["logAt", "setLogLevel", "setConsoleLogLevel", "setFileLogLevel", "setSystemLogLevel", "Logger", "logNotice"]
+value_desc.Verbose.en = "Detail for debugging (per-frame state, per-load info such as sokol's info messages). Hidden by default"
+value_desc.Verbose.ja = "デバッグ用の詳細（フレームごとの状態、sokol の info メッセージのような読み込みごとの情報）。既定では出ない"
+value_desc.Verbose.ko = "디버깅용 상세 정보(프레임마다의 상태, sokol의 info 메시지 같은 로드마다의 정보). 기본으로는 나오지 않음"
+value_desc.Notice.en = "Normal information worth seeing in a normal run. The default level of every output"
+value_desc.Notice.ja = "通常の実行で見る価値のある情報。全出力の既定レベル"
+value_desc.Notice.ko = "일반 실행에서 볼 가치가 있는 정보. 모든 출력의 기본 레벨"
+value_desc.Warning.en = "Something unexpected that the app recovers from (a fallback, a skipped item)"
+value_desc.Warning.ja = "想定外だがアプリは続けられること（フォールバック、項目のスキップなど）"
+value_desc.Warning.ko = "예상 밖이지만 앱이 복구하는 일(폴백, 항목 건너뛰기 등)"
+value_desc.Error.en = "An operation failed (a file did not load, a device did not open)"
+value_desc.Error.ja = "処理が失敗した（ファイルが読めない、デバイスが開けないなど）"
+value_desc.Error.ko = "작업이 실패함(파일을 읽지 못함, 장치를 열지 못함 등)"
+value_desc.Fatal.en = "The app cannot continue"
+value_desc.Fatal.ja = "アプリが続行できない"
+value_desc.Fatal.ko = "앱이 계속할 수 없음"
+value_desc.Silent.en = "Not a line level: as an output's level, it turns that output off"
+value_desc.Silent.ja = "行のレベルではない。出力のレベルに設定するとその出力が止まる"
+value_desc.Silent.ko = "줄의 레벨이 아님. 출력의 레벨로 설정하면 그 출력이 꺼짐"
 
 ["Logger"]
-keywords = ["log", "logging", "console"]
-description.en = "Logging core with console and file output and an onLog event; access the global instance via getLogger()"
-description.ja = "コンソール・ファイル出力と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
-description.ko = "콘솔·파일 출력과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
-details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. One exception: `setLogFile()` with a relative path resolves it through `getDataPath()`, which reads the data path state without a lock, so it must not race `setDataPathRoot()` or the first `getDataPath()` call; an absolute path does not touch that state. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
-related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice"]
+keywords = ["log", "logging", "console", "log level", "os_log", "logcat", "OutputDebugString", "system log"]
+description.en = "Logging core with console, file and system (OS log) output, each with its own level, and an onLog event; access the global instance via getLogger()"
+description.ja = "コンソール・ファイル・システム（OS ログ）出力（それぞれ独自のレベル）と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
+description.ko = "콘솔·파일·시스템(OS 로그) 출력(각각 고유 레벨)과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
+details.en = '''
+Every line goes to three outputs, each filtered by its own level. An output shows a line when the line's level is at or above the output's level; `LogLevel::Silent` turns that output off.
+
+| Output | Where it goes | Level (default) |
+|---|---|---|
+| console | stdout (Verbose / Notice) and stderr (Warning and up) on macOS, Windows, Linux and web; `os_log` on iOS; logcat on Android | `setConsoleLogLevel()` (Notice) |
+| file | the file opened with `setLogFile()` (or `TRUSSC_LOG_FILE`); none until one is opened | `setFileLogLevel()` (Notice) |
+| system | `os_log` on macOS; `OutputDebugStringW` on Windows; none on iOS, Android, Linux and web | `setSystemLogLevel()` (Notice) |
+
+`setLogLevel()` sets all three at once; it overwrites them when called, and a later per-output call wins. On iOS and Android the OS log is the console output, so `setConsoleLogLevel()` controls it and the system level has no effect.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+
+`onLog` listeners receive every line, whatever the levels.
+
+The OS log: Apple's unified log uses subsystem `org.trussc`, category `TrussC`, and is visible in Console.app; on macOS it is skipped while the app runs from Xcode, whose console already shows stdout. Windows' debug output shows in the Visual Studio output window and DebugView (DebugView reads the bytes in the system's ANSI code page, so non-ASCII text shows garbled there); each call has a fixed cost, more with a debugger or DebugView attached.
+
+Thread-safe: `log()` and the settings may be called from any thread. The outputs are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. One exception: `setLogFile()` with a relative path resolves it through `getDataPath()`, which reads the data path state without a lock, so it must not race `setDataPathRoot()` or the first `getDataPath()` call; an absolute path does not touch that state. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose.
+'''
+details.ja = '''
+各行は 3 つの出力に送られ、出力ごとに自分のレベルで絞り込まれる。行のレベルが出力のレベル以上なら、その出力に出る。`LogLevel::Silent` にした出力は止まる。
+
+| 出力 | 出力先 | レベル（既定） |
+|---|---|---|
+| コンソール | macOS・Windows・Linux・web では stdout（Verbose / Notice）と stderr（Warning 以上）。iOS は `os_log`、Android は logcat | `setConsoleLogLevel()`（Notice） |
+| ファイル | `setLogFile()`（または `TRUSSC_LOG_FILE`）で開いたファイル。開くまでは無し | `setFileLogLevel()`（Notice） |
+| システム | macOS は `os_log`、Windows は `OutputDebugStringW`。iOS・Android・Linux・web には無い | `setSystemLogLevel()`（Notice） |
+
+`setLogLevel()` は 3 つを一度に設定する。呼んだ時点で上書きし、その後の出力ごとの呼び出しが優先される。iOS と Android では OS ログがコンソール出力なので `setConsoleLogLevel()` で制御し、システムレベルは効かない。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+
+`onLog` リスナーはレベルに関係なく全行を受け取る。
+
+OS ログについて：Apple の統合ログはサブシステム `org.trussc`、カテゴリ `TrussC` で、Console.app で見られる。macOS では Xcode から起動している間は書かない（Xcode のコンソールが stdout を既に表示するため）。Windows のデバッグ出力は Visual Studio の出力ウィンドウと DebugView に出る（DebugView はシステムの ANSI コードページでバイト列を読むため、非 ASCII の文字は化ける）。1 回の呼び出しごとに固定のコストがあり、デバッガや DebugView が接続中はさらに増える。
+
+スレッドセーフ：`log()` と各設定はどのスレッドからも呼べる。出力は 1 つのミューテックスの下で書かれるので各行は欠けずに出て、`closeFile()` / `setLogFile()` は書き込み中の行を待つ。その他の `onLog` リスナーはログを出したスレッドで、そのミューテックスの外で動くので、リスナー内でもログを出せる。例外が 1 つ：相対パスの `setLogFile()` は `getDataPath()` で解決し、これはデータパスの状態をロックなしで読むため、`setDataPathRoot()` や最初の `getDataPath()` 呼び出しと競合させてはいけない（絶対パスならその状態に触れない）。sokol 自身のメッセージ（`[sg]`、`[sapp]`、`[sgl]`、`[simgui]`）もここを通り、info メッセージは Verbose になる。
+'''
+details.ko = '''
+각 줄은 세 출력으로 가고, 출력마다 자신의 레벨로 걸러진다. 줄의 레벨이 출력의 레벨 이상이면 그 출력에 나온다. `LogLevel::Silent`로 한 출력은 꺼진다.
+
+| 출력 | 출력 대상 | 레벨(기본값) |
+|---|---|---|
+| 콘솔 | macOS·Windows·Linux·web에서는 stdout(Verbose / Notice)과 stderr(Warning 이상). iOS는 `os_log`, Android는 logcat | `setConsoleLogLevel()` (Notice) |
+| 파일 | `setLogFile()`(또는 `TRUSSC_LOG_FILE`)로 연 파일. 열기 전에는 없음 | `setFileLogLevel()` (Notice) |
+| 시스템 | macOS는 `os_log`, Windows는 `OutputDebugStringW`. iOS·Android·Linux·web에는 없음 | `setSystemLogLevel()` (Notice) |
+
+`setLogLevel()`은 셋을 한 번에 설정한다. 호출 시점에 덮어쓰고, 그 뒤의 출력별 호출이 우선한다. iOS와 Android에서는 OS 로그가 콘솔 출력이므로 `setConsoleLogLevel()`로 제어하며 시스템 레벨은 효과가 없다.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+
+`onLog` 리스너는 레벨과 상관없이 모든 줄을 받는다.
+
+OS 로그: Apple의 통합 로그는 서브시스템 `org.trussc`, 카테고리 `TrussC`이며 Console.app에서 볼 수 있다. macOS에서는 Xcode에서 실행하는 동안 쓰지 않는다(Xcode 콘솔이 이미 stdout을 보여 주므로). Windows의 디버그 출력은 Visual Studio 출력 창과 DebugView에 나온다(DebugView는 시스템 ANSI 코드 페이지로 바이트를 읽으므로 비 ASCII 문자는 깨져 보인다). 호출마다 고정 비용이 있고, 디버거나 DebugView가 연결되어 있으면 더 크다.
+
+스레드 안전: `log()`와 설정은 어느 스레드에서나 호출할 수 있다. 출력은 하나의 뮤텍스 아래에서 쓰이므로 각 줄은 온전히 기록되고, `closeFile()` / `setLogFile()`은 진행 중인 쓰기를 기다린다. 그 밖의 `onLog` 리스너는 로그를 낸 스레드에서 그 뮤텍스 밖에서 실행되므로 리스너 안에서도 로그를 낼 수 있다. 예외 하나: 상대 경로의 `setLogFile()`은 `getDataPath()`로 해석하는데, 이는 데이터 경로 상태를 잠금 없이 읽으므로 `setDataPathRoot()`나 첫 `getDataPath()` 호출과 경합하면 안 된다(절대 경로는 그 상태를 건드리지 않음). sokol 자체 메시지(`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`)도 여기를 거치며, info 메시지는 Verbose가 된다.
+'''
+related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice", "setLogLevel", "setConsoleLogLevel", "setFileLogLevel", "setSystemLogLevel", "setLogFile"]
 
 ["Logger::closeFile"]
 description.en = "Close the current log file"
@@ -4000,6 +4023,11 @@ description.ko = "현재 콘솔 로그 레벨을 얻음"
 description.en = "Get the current file log level"
 description.ja = "現在のファイルログレベルを取得"
 description.ko = "현재 파일 로그 레벨을 얻음"
+
+["Logger::getSystemLogLevel"]
+description.en = "Get the current system (OS log) level"
+description.ja = "現在のシステム（OS ログ）レベルを取得"
+description.ko = "현재 시스템(OS 로그) 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
 description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
@@ -4025,16 +4053,146 @@ description.ko = "모든 로그 메시지에서 발생하는 이벤트. 로그 �
 description.en = "Set the minimum console log level"
 description.ja = "コンソールの最小ログレベルを設定"
 description.ko = "콘솔 최소 로그 레벨을 설정"
+details.en = '''
+Lines below this level are not printed to the console (stdout / stderr; `os_log` on iOS, logcat on Android). Default Notice; `LogLevel::Silent` turns the console off. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はコンソール（stdout / stderr。iOS は `os_log`、Android は logcat）に出ない。既定は Notice、`LogLevel::Silent` でコンソール出力が止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 콘솔(stdout / stderr. iOS는 `os_log`, Android는 logcat)에 나오지 않는다. 기본값 Notice, `LogLevel::Silent`면 콘솔 출력이 꺼진다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
 
 ["Logger::setFileLogLevel"]
 description.en = "Set the minimum file log level"
 description.ja = "ファイルの最小ログレベルを設定"
 description.ko = "파일 최소 로그 레벨을 설정"
+details.en = '''
+Lines below this level are not written to the log file (`setLogFile()`). Default Notice; `LogLevel::Silent` stops writing to the file. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はログファイル（`setLogFile()`）に書かれない。既定は Notice、`LogLevel::Silent` でファイルへの書き込みが止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 로그 파일(`setLogFile()`)에 기록되지 않는다. 기본값 Notice, `LogLevel::Silent`면 파일 기록이 멈춘다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+
+["Logger::setLogLevel"]
+description.en = "Set the console, file and system log levels at once (a later per-output call wins)"
+description.ja = "コンソール・ファイル・システムのログレベルを一度に設定（後の出力ごとの呼び出しが優先）"
+description.ko = "콘솔·파일·시스템 로그 레벨을 한 번에 설정 (이후의 출력별 호출이 우선)"
+details.en = '''
+Sets the console, file and system levels at once. It overwrites them when called; a later `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` call wins. There is no `getLogLevel()`, since there is no single level to return. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+コンソール・ファイル・システムのレベルを一度に設定する。呼んだ時点で上書きし、その後の `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` が優先される。返すべき単一のレベルが無いので `getLogLevel()` は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+콘솔·파일·시스템 레벨을 한 번에 설정한다. 호출 시점에 덮어쓰고, 그 뒤의 `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` 호출이 우선한다. 반환할 단일 레벨이 없으므로 `getLogLevel()`은 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
 
 ["Logger::setLogFile"]
 description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
 description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
 description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
+
+["Logger::setSystemLogLevel"]
+description.en = "Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows"
+description.ja = "システム（OS ログ）の最小レベルを設定：macOS は os_log、Windows は OutputDebugStringW"
+description.ko = "시스템(OS 로그) 최소 레벨을 설정: macOS는 os_log, Windows는 OutputDebugStringW"
+details.en = '''
+Lines below this level are not written to the OS log: `os_log` on macOS (Console.app), `OutputDebugStringW` on Windows (Visual Studio output window, DebugView). Default Notice; `LogLevel::Silent` turns it off. No effect on iOS and Android (the OS log is the console output there; use `setConsoleLogLevel()`) or on Linux and web (no OS log output). The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行は OS ログに書かれない。macOS は `os_log`（Console.app）、Windows は `OutputDebugStringW`（Visual Studio の出力ウィンドウ、DebugView）。既定は Notice、`LogLevel::Silent` で止まる。iOS と Android では効かず（OS ログがコンソール出力なので `setConsoleLogLevel()` を使う）、Linux と web にも OS ログ出力は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 OS 로그에 기록되지 않는다. macOS는 `os_log`(Console.app), Windows는 `OutputDebugStringW`(Visual Studio 출력 창, DebugView). 기본값 Notice, `LogLevel::Silent`면 꺼진다. iOS와 Android에서는 효과가 없고(OS 로그가 콘솔 출력이므로 `setConsoleLogLevel()` 사용), Linux와 web에는 OS 로그 출력이 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
 
 ["MOUSE_BUTTON_LEFT"]
 keywords = ["left click", "primary"]
@@ -4427,6 +4585,11 @@ description.ko = "러프니스 값을 설정 (0=거울, 1=무광)"
 description.en = "Silver material preset"
 description.ja = "銀のプリセット"
 description.ko = "은 프리셋"
+
+["MatrixScope"]
+hide = true
+lua = false
+keywords = ["raii", "guard", "scope"]
 
 ["Mesh"]
 category = "types_mesh"
@@ -5416,9 +5579,9 @@ related = ["Node::callAfterAsync", "Node::cancelAsyncTimer", "Node::callEvery"]
 ["Node::callEveryCatchUp"]
 category = "timers"
 keywords = ["timer", "interval", "repeat", "catch up", "missed", "late", "fixed rate"]
-description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp <= 0, the default: no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id."
-description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp <= 0 が既定で、上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（setMaxUpdateSteps）を超えて捨てた時間は数えない。タイマーidを返す"
-description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(기본값 maxCatchUp <= 0은 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(setMaxUpdateSteps)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
+description.en = "Like callEvery, but calls back once for every interval that came due, at most maxCatchUp times per update (maxCatchUp has no default; 0 or -1, any value <= 0, means no limit), e.g. to keep a counter or a simulation in step after a late update. Past the limit the remaining due intervals are dropped and the phase is kept. Cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or setFps() loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once. In fixed-Hz update mode it counts step time, so time the loop drops beyond its step cap (setMaxUpdateSteps) is not counted. Returns a timer id."
+description.ja = "callEvery と同じだが、期限の来たインターバル1つにつき1回ずつ呼ぶ。1回の update で呼ぶのは最大 maxCatchUp 回（maxCatchUp は省略できない。0 や -1 など 0 以下なら上限なし）。update が遅れたあとでもカウンタやシミュレーションを予定どおりに進めたいとき用。上限を超えた分のインターバルは捨て、位相は保つ。コールバック内でこのタイマーをキャンセルすると残りの呼び出しは止まる。上限なしだと、VSYNC / setFps() のループで長く止まったとき（EVENT_DRIVEN モードで長く待機したときも）その回数分を一度に呼ぶ。固定Hz update モードではステップ時間で数えるので、ループがステップ上限（setMaxUpdateSteps）を超えて捨てた時間は数えない。タイマーidを返す"
+description.ko = "callEvery와 같지만, 만기된 인터벌 하나마다 한 번씩 호출한다. 한 번의 update에서 호출하는 것은 최대 maxCatchUp회(maxCatchUp은 생략할 수 없다. 0이나 -1 등 0 이하이면 제한 없음). update가 늦은 뒤에도 카운터나 시뮬레이션을 예정대로 진행시키고 싶을 때 쓴다. 제한을 넘는 인터벌은 버리고 위상은 유지한다. 콜백 안에서 이 타이머를 취소하면 남은 호출은 멈춘다. 제한이 없으면 VSYNC / setFps() 루프가 오래 멈췄을 때(EVENT_DRIVEN 모드에서 오래 대기했을 때도) 그 횟수만큼 한꺼번에 호출한다. 고정 Hz update 모드에서는 스텝 시간으로 세므로, 루프가 스텝 상한(setMaxUpdateSteps)을 넘어 버린 시간은 세지 않는다. 타이머 id를 반환"
 related = ["Node::callEvery", "Node::cancelTimer", "setMaxUpdateSteps"]
 
 ["Node::cancelAllAsyncTimers"]
@@ -6800,9 +6963,9 @@ description.ja = "ミキサーでこのボイスがアクティブな間 true。
 description.ko = "믹서에서 이 보이스가 활성인 동안 true. atomic"
 
 ["PlayingSound::positionF"]
-description.en = "Floating-point playback cursor in source samples; advances by speed * rateRatio each output frame."
-description.ja = "ソースサンプル単位の浮動小数点再生カーソル。各出力フレームで speed * rateRatio ずつ進む"
-description.ko = "소스 샘플 단위의 부동소수점 재생 커서. 각 출력 프레임마다 speed * rateRatio 만큼 진행"
+description.en = "Floating-point playback cursor; advances by speed * rateRatio each output frame. An eager voice counts source sample frames; a stream counts frames at the engine rate its decoder outputs at (the voice's position rate, which a re-init at another rate can change), not source samples. Use Sound::getPosition() for seconds."
+description.ja = "浮動小数点の再生カーソル。各出力フレームで speed * rateRatio ずつ進む。eager ボイスはソースのサンプルフレーム単位、ストリームはデコーダが出力するエンジンレートのフレーム単位 (ボイスの位置レート。別レートでの再初期化で変わりうる) で、ソースサンプル単位ではない。秒で欲しいときは Sound::getPosition() を使う"
+description.ko = "부동소수점 재생 커서. 각 출력 프레임마다 speed * rateRatio 만큼 진행. eager 보이스는 소스 샘플 프레임 단위, 스트림은 디코더가 출력하는 엔진 레이트의 프레임 단위(보이스의 위치 레이트로, 다른 레이트로 재초기화하면 바뀔 수 있음)이며 소스 샘플 단위가 아님. 초 단위는 Sound::getPosition() 사용"
 
 ["PlayingSound::rateRatio"]
 description.en = "Source-to-engine sample-rate ratio (buffer sampleRate / engine sampleRate), set when queued so the voice plays at correct pitch regardless of engine rate."
@@ -6818,6 +6981,68 @@ description.ko = "재생 속도 (0.5 절반, 1.0 일반, 2.0 두 배). atomic"
 description.en = "Playback volume (0.0-1.0). Stored as an atomic; safe to set from the UI thread while playing."
 description.ja = "再生音量 (0.0-1.0)。atomic 格納で、再生中に UI thread から設定して安全"
 description.ko = "재생 음량 (0.0-1.0). atomic 저장이라 재생 중 UI 스레드에서 설정해도 안전"
+
+["PlayingSoundInfo"]
+keywords = ["playing sound", "playback", "voice", "diagnostics", "level"]
+description.en = "One playing (or paused) sound as reported by AudioEngine::getPlayingSounds(): a copy taken under the engine lock, so later changes to the playback are not reflected."
+description.ja = "AudioEngine::getPlayingSounds() が返す再生中 (または一時停止中) のサウンド 1 つ分。エンジンのロック下で取ったコピーなので、その後の再生の変化は反映されない"
+description.ko = "AudioEngine::getPlayingSounds() 가 반환하는 재생 중 (또는 일시 정지 중) 인 사운드 하나. 엔진 락 아래에서 만든 복사본이므로 이후 재생 변화는 반영되지 않는다"
+related = ["AudioEngine::getPlayingSounds", "PlayingSound"]
+
+["PlayingSoundInfo::duration"]
+description.en = "Source duration in seconds."
+description.ja = "ソースの長さ (秒)"
+description.ko = "소스 길이 (초)"
+
+["PlayingSoundInfo::level"]
+description.en = "Peak absolute value of this playback's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, and while the engine is not running."
+description.ja = "直近のオーディオコールバックでのこの再生の出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中と、エンジン停止中は 0"
+description.ko = "최근 오디오 콜백에서 이 재생 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 그리고 엔진이 정지 상태일 때는 0"
+
+["PlayingSoundInfo::loop"]
+description.en = "Loop flag of the playback."
+description.ja = "再生のループ設定"
+description.ko = "재생의 루프 설정"
+
+["PlayingSoundInfo::pan"]
+description.en = "Pan of the playback (-1 left, 0 center, 1 right)."
+description.ja = "再生のパン (-1 左、0 中央、1 右)"
+description.ko = "재생의 팬 (-1 왼쪽, 0 중앙, 1 오른쪽)"
+
+["PlayingSoundInfo::path"]
+description.en = "Source file (fs::path, lexically normalized); empty for generated or in-memory buffers. tc_get_audio_state reports it as UTF-8."
+description.ja = "ソースファイル (fs::path、字句的に正規化済み)。生成したバッファやメモリからのバッファでは空。tc_get_audio_state は UTF-8 で返す"
+description.ko = "소스 파일 (fs::path, 어휘적으로 정규화됨). 생성한 버퍼나 메모리 버퍼에서는 비어 있음. tc_get_audio_state 는 UTF-8 로 보고한다"
+
+["PlayingSoundInfo::paused"]
+description.en = "True while the playback is paused (Sound::pause())."
+description.ja = "一時停止中 (Sound::pause()) なら true"
+description.ko = "일시 정지 중 (Sound::pause()) 이면 true"
+
+["PlayingSoundInfo::position"]
+description.en = "Playback position in seconds."
+description.ja = "再生位置 (秒)"
+description.ko = "재생 위치 (초)"
+
+["PlayingSoundInfo::slot"]
+description.en = "Playback slot index (0 .. maxPolyphony - 1)."
+description.ja = "再生スロットの番号 (0 .. maxPolyphony - 1)"
+description.ko = "재생 슬롯 번호 (0 .. maxPolyphony - 1)"
+
+["PlayingSoundInfo::speed"]
+description.en = "Playback speed (1.0 = natural pitch)."
+description.ja = "再生速度 (1.0 = 元のピッチ)"
+description.ko = "재생 속도 (1.0 = 원래 피치)"
+
+["PlayingSoundInfo::streaming"]
+description.en = "True for a SoundStream playback (Sound::loadStream), false for an eager SoundBuffer."
+description.ja = "SoundStream の再生 (Sound::loadStream) なら true、eager な SoundBuffer なら false"
+description.ko = "SoundStream 재생 (Sound::loadStream) 이면 true, eager SoundBuffer 면 false"
+
+["PlayingSoundInfo::volume"]
+description.en = "Volume of the playback."
+description.ja = "再生の音量"
+description.ko = "재생의 볼륨"
 
 ["PointStyle"]
 category = "types_mesh"
@@ -8184,7 +8409,13 @@ How long it may take depends on the platform:
   only a generous ceiling. On a timeout it returns the bytes written so far
   (possibly 0) and logs one warning per connection; the port stays open and
   `onDisconnect` does not fire. A failed write still counts as a loss.
-- **Android:** waits up to 1 s per 16 KB for the device to take the data.
+- **Android:** sends the data in chunks of up to 16 KB and waits for the
+  device to take each one, at most the Windows rule above applied to the
+  chunk: 16 KB at 9600 baud gets about 87 s, at 115200 baud about 21 s. On a
+  timeout it returns the bytes of the chunks that completed (possibly 0) and
+  logs one warning per connection; the port stays open. Android does not
+  report how much of a timed-out chunk went out, so some bytes past the
+  returned count may have reached the device too.
 
 A write that must never stall the app goes on a thread of its own: the other
 I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
@@ -8204,7 +8435,12 @@ details.ja = '''
   タイムアウトすると、それまでに書けたバイト数（0 もありうる）を返し、接続ごとに
   1回だけ警告をログに出す。ポートは開いたままで、`onDisconnect` も発火しない。
   書き込みが失敗した場合は、今までどおり消失として扱う。
-- **Android:** 機器がデータを受け取るのを 16 KB ごとに最大1秒待つ。
+- **Android:** データを最大 16 KB ずつに分けて送り、機器がそれぞれを受け取るのを
+  待つ。上限は上の Windows の規則をその塊に当てはめた時間で、16 KB なら 9600 baud
+  で約 87 秒、115200 baud で約 21 秒。タイムアウトすると、送り終えた塊のバイト数
+  （0 もありうる）を返し、接続ごとに1回だけ警告をログに出す。ポートは開いたまま。
+  タイムアウトした塊がどこまで送れたかは Android が報告しないので、返した数より
+  先のバイトも機器に届いていることがある。
 
 アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
 それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
@@ -8223,7 +8459,12 @@ details.ko = '''
   쓴 바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
   포트는 열린 채로 남고 `onDisconnect`도 발생하지 않는다. 쓰기가 실패하면 기존대로
   소실로 취급한다.
-- **Android:** 장치가 데이터를 받기를 16 KB마다 최대 1초 기다린다.
+- **Android:** 데이터를 최대 16 KB씩 나누어 보내고, 장치가 각각을 받기를
+  기다린다. 상한은 위의 Windows 규칙을 그 덩어리에 적용한 시간으로, 16 KB라면
+  9600 baud에서 약 87초, 115200 baud에서 약 21초. 타임아웃되면 다 보낸 덩어리의
+  바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
+  포트는 열린 채로 남는다. 타임아웃된 덩어리가 어디까지 보내졌는지는 Android가
+  알려 주지 않으므로, 반환한 수보다 뒤의 바이트도 장치에 도달했을 수 있다.
 
 앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
 기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
@@ -8406,9 +8647,9 @@ description.ko = "현재 패닝을 얻음"
 ["Sound::getPosition"]
 category = "sound"
 keywords = ["progress", "playhead", "normalized", "seek"]
-description.en = "Get playback position in seconds"
-description.ja = "再生位置を取得（秒）"
-description.ko = "재생 위치를 초 단위로 얻음"
+description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (usually ~10 ms), this is the requested position."
+description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまで (通常 ~10ms) の間、要求した位置を返す"
+description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 (보통 ~10ms) 요청한 위치를 반환"
 
 ["Sound::getSpeed"]
 category = "sound"
@@ -8552,9 +8793,9 @@ related = ["EasyCam::setPanSensitivity"]
 ["Sound::setPosition"]
 category = "sound"
 keywords = ["seek", "jump", "scrub", "playhead", "normalized"]
-description.en = "Seek to a specific time in seconds. On streams, costs ~10 ms blackout while the ring refills."
-description.ja = "指定秒数にシーク。ストリームでは ring 補充に ~10ms 無音"
-description.ko = "지정 시간(초)으로 시크. 스트림은 링 재충전에 ~10ms 무음"
+description.en = "Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning."
+description.ja = "指定秒数にシーク。ストリームではデコーダがシークして ring を補充するので、~10ms の無音の後に音が移る (遅いストレージや数時間の長さの MP3 ではもっとかかる)。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る。長さが不明なストリーム (getDuration() が 0) はシークできず、呼び出しは警告を出して無視される"
+description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전하므로 ~10ms 무음 후에 소리가 옮겨짐 (느린 저장소나 몇 시간 길이의 MP3에서는 더 걸림). getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생. 길이를 알 수 없는 스트림 (getDuration()이 0)은 시크할 수 없으며, 호출은 경고와 함께 무시됨"
 
 ["Sound::setSpeed"]
 category = "sound"
@@ -8770,15 +9011,15 @@ description.ko = "소스의 샘플레이트(Hz)"
 
 ["SoundStream"]
 keywords = ["streaming audio", "bgm", "music stream", "disk audio", "on demand"]
-description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ~10 ms refill, and each polyphony slot costs one open file handle + decoder + ring buffer."
-description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は約10 msのrefillでseekし、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
-description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 약 10 ms의 refill로 seek하며, polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
+description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer."
+description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は通常約10 msのrefillでseekし(長さが不明なファイルはseekできない)、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
+description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 보통 약 10 ms의 refill로 seek하며(길이를 알 수 없는 파일은 seek할 수 없음), polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
 related = ["SoundBuffer", "SoundSource"]
 
 ["SoundStream::getDuration"]
-description.en = "Decoded file duration in seconds."
-description.ja = "デコードしたファイルの秒単位の長さ"
-description.ko = "디코딩된 파일의 초 단위 길이"
+description.en = "Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning."
+description.ja = "デコードしたファイルの秒単位の長さ。ファイルが長さを記録していない場合 (パイプへエンコードした FLAC など) は 0 で、そのストリームは最後まで再生できるがシークはできず、別のサンプルレートでエンジンを再初期化すると先頭から再生し直す"
+description.ko = "디코딩된 파일의 초 단위 길이. 파일에 길이가 기록되어 있지 않으면 (파이프로 인코딩한 FLAC 등) 0이며, 그런 스트림은 끝까지 재생되지만 시크할 수 없고, 다른 샘플레이트로 엔진을 재초기화하면 처음부터 다시 재생됨"
 
 ["SoundStream::getMaxPolyphony"]
 description.en = "Number of concurrent decoder slots reserved at loadStream()."
@@ -8791,9 +9032,9 @@ description.ja = "ストリームを開いた元のパス"
 description.ko = "스트림을 연 원본 경로"
 
 ["SoundStream::loadStream"]
-description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened or the format is unsupported."
-description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けないか形式が非対応の場合falseを返す"
-description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나 형식이 미지원이면 false 반환"
+description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed)."
+description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けない、形式が非対応、またはオーディオフレームが無い (DecodeFailed) 場合falseを返す"
+description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나, 형식이 미지원이거나, 오디오 프레임이 없으면 (DecodeFailed) false 반환"
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
 
@@ -8961,6 +9202,11 @@ keywords = ["tick", "step", "frame"]
 description.en = "Rebuild the internal triangle mesh (call before draw after edits)"
 description.ja = "内部の三角形メッシュを再構築（編集後、draw の前に呼ぶ）"
 description.ko = "내부 삼각형 메시를 재구축(편집 후 draw 전에 호출)"
+
+["StyleScope"]
+hide = true
+lua = false
+keywords = ["raii", "guard", "scope"]
 
 ["TcpClient"]
 keywords = ["socket client", "stream", "connection", "network client"]
@@ -15617,10 +15863,13 @@ related = ["listNetworkInterfaces", "getLocalIps"]
 category = "transform"
 keywords = ["save", "transform", "stack", "ofpushmatrix"]
 of = ["ofPushMatrix"]
+of_notes.en = "Scope-bound form: auto m = scopedMatrix();"
+of_notes.ja = "スコープで閉じる形: auto m = scopedMatrix();"
+of_notes.ko = "스코프로 닫는 형태: auto m = scopedMatrix();"
 description.en = "Save transform state"
 description.ja = "変換状態を保存"
 description.ko = "변환 상태를 저장"
-related = ["popMatrix", "pushStyle", "translate"]
+related = ["popMatrix", "pushStyle", "translate", "scopedMatrix"]
 
 ["pushScissor"]
 category = "graphics_style"
@@ -15642,10 +15891,13 @@ related = ["popShader", "pushStyle", "pushMatrix"]
 category = "graphics_style"
 keywords = ["save", "state", "stack", "ofpushstyle"]
 of = ["ofPushStyle"]
+of_notes.en = "Scope-bound form: auto s = scopedStyle();"
+of_notes.ja = "スコープで閉じる形: auto s = scopedStyle();"
+of_notes.ko = "스코프로 닫는 형태: auto s = scopedStyle();"
 description.en = "Push current style (color, fill, stroke, blend) onto stack"
 description.ja = "現在のスタイル（色、塗り、ストローク、ブレンド）をスタックにプッシュ"
 description.ko = "현재 스타일(색상, 채우기, 스트로크, 블렌드)을 스택에 푸시"
-related = ["popStyle", "pushMatrix"]
+related = ["popStyle", "pushMatrix", "scopedStyle"]
 
 ["rad2deg"]
 category = "math_trig"
@@ -15973,6 +16225,30 @@ description.ja = "拡大縮小"
 description.ko = "크기 조절"
 related = ["translate", "rotate"]
 
+["scopedMatrix"]
+lua = false
+category = "transform"
+keywords = ["raii", "scope", "guard", "save", "restore", "transform", "stack", "push", "pop", "early return"]
+description.en = "pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning"
+description.ja = "今 pushMatrix() し、スコープの終わりで popMatrix() する。`auto m = scopedMatrix();` はスコープを抜けると（早期 return や例外でも）ポップする MatrixScope ガードを返す。出口が複数あるコードや長いブロック向け。基本の書き方は pushMatrix() / popMatrix() のまま。[[nodiscard]]: `scopedMatrix();` だけの行はすぐにポップしてしまうため、コンパイラが警告する"
+description.ko = "지금 pushMatrix()하고 스코프 끝에서 popMatrix()한다. `auto m = scopedMatrix();`는 스코프를 벗어날 때(조기 return이나 예외에서도) 팝하는 MatrixScope 가드를 반환한다. 출구가 여러 개인 코드나 긴 블록용. 기본 형태는 여전히 pushMatrix() / popMatrix(). [[nodiscard]]: `scopedMatrix();`만 쓴 줄은 곧바로 팝되므로 컴파일러가 경고한다"
+related = ["pushMatrix", "popMatrix", "scopedStyle"]
+details.en = "C++ only: Lua has no scope-bound guard, so in Lua use pushMatrix() / popMatrix()."
+details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無いので、Lua では pushMatrix() / popMatrix() を使う。"
+details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushMatrix() / popMatrix()를 사용한다."
+
+["scopedStyle"]
+lua = false
+category = "graphics_style"
+keywords = ["raii", "scope", "guard", "save", "restore", "state", "stack", "push", "pop", "early return"]
+description.en = "pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning"
+description.ja = "今 pushStyle() し、スコープの終わりで popStyle() する。`auto s = scopedStyle();` はスコープを抜けると（早期 return や例外でも）ポップする StyleScope ガードを返す。出口が複数あるコードや長いブロック向け。基本の書き方は pushStyle() / popStyle() のまま。[[nodiscard]]: `scopedStyle();` だけの行はすぐにポップしてしまうため、コンパイラが警告する"
+description.ko = "지금 pushStyle()하고 스코프 끝에서 popStyle()한다. `auto s = scopedStyle();`는 스코프를 벗어날 때(조기 return이나 예외에서도) 팝하는 StyleScope 가드를 반환한다. 출구가 여러 개인 코드나 긴 블록용. 기본 형태는 여전히 pushStyle() / popStyle(). [[nodiscard]]: `scopedStyle();`만 쓴 줄은 곧바로 팝되므로 컴파일러가 경고한다"
+related = ["pushStyle", "popStyle", "scopedMatrix"]
+details.en = "C++ only: Lua has no scope-bound guard, so in Lua use pushStyle() / popStyle()."
+details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無いので、Lua では pushStyle() / popStyle() を使う。"
+details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushStyle() / popStyle()를 사용한다."
+
 ["screenToWorld"]
 category = "graphics_3d_setup"
 keywords = ["unproject", "raycast", "ofScreenToWorld"]
@@ -16071,7 +16347,34 @@ keywords = ["verbosity", "filter"]
 description.en = "Set the minimum log level printed to the console"
 description.ja = "コンソールに出力する最小ログレベルを設定"
 description.ko = "콘솔에 출력할 최소 로그 레벨을 설정"
-related = ["LogLevel", "setFileLogLevel", "getLogger", "logNotice"]
+details.en = '''
+Lines below this level are not printed to the console (stdout / stderr; `os_log` on iOS, logcat on Android). Default Notice; `LogLevel::Silent` turns the console off. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はコンソール（stdout / stderr。iOS は `os_log`、Android は logcat）に出ない。既定は Notice、`LogLevel::Silent` でコンソール出力が止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 콘솔(stdout / stderr. iOS는 `os_log`, Android는 logcat)에 나오지 않는다. 기본값 Notice, `LogLevel::Silent`면 콘솔 출력이 꺼진다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setLogLevel", "setFileLogLevel", "setSystemLogLevel", "getLogger", "Logger", "logNotice"]
 
 ["setCursor"]
 category = "window_input"
@@ -16143,7 +16446,34 @@ keywords = ["verbosity", "filter"]
 description.en = "Set the minimum log level written to the log file"
 description.ja = "ログファイルに書き込む最小ログレベルを設定"
 description.ko = "로그 파일에 기록할 최소 로그 레벨을 설정"
-related = ["LogLevel", "setConsoleLogLevel", "setLogFile"]
+details.en = '''
+Lines below this level are not written to the log file (`setLogFile()`). Default Notice; `LogLevel::Silent` stops writing to the file. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はログファイル（`setLogFile()`）に書かれない。既定は Notice、`LogLevel::Silent` でファイルへの書き込みが止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 로그 파일(`setLogFile()`)에 기록되지 않는다. 기본값 Notice, `LogLevel::Silent`면 파일 기록이 멈춘다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setLogLevel", "setConsoleLogLevel", "setSystemLogLevel", "setLogFile", "Logger"]
 
 ["setFps"]
 category = "graphics_shapes"
@@ -16199,6 +16529,41 @@ description.ja = "ログ出力を受けるファイルを開く（追記モー�
 description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
 related = ["closeLogFile", "setFileLogLevel"]
 
+["setLogLevel"]
+category = "utility"
+keywords = ["verbosity", "filter", "log level", "all outputs"]
+description.en = "Set the console, file and system log levels at once (a later per-output call wins)"
+description.ja = "コンソール・ファイル・システムのログレベルを一度に設定（後の出力ごとの呼び出しが優先）"
+description.ko = "콘솔·파일·시스템 로그 레벨을 한 번에 설정 (이후의 출력별 호출이 우선)"
+details.en = '''
+Sets the console, file and system levels at once. It overwrites them when called; a later `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` call wins. There is no `getLogLevel()`, since there is no single level to return. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+コンソール・ファイル・システムのレベルを一度に設定する。呼んだ時点で上書きし、その後の `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` が優先される。返すべき単一のレベルが無いので `getLogLevel()` は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+콘솔·파일·시스템 레벨을 한 번에 설정한다. 호출 시점에 덮어쓰고, 그 뒤의 `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` 호출이 우선한다. 반환할 단일 레벨이 없으므로 `getLogLevel()`은 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setConsoleLogLevel", "setFileLogLevel", "setSystemLogLevel", "Logger"]
+
 ["setMaxUpdateSteps"]
 category = "window_system"
 keywords = ["update cap", "catch up", "fixed step", "stall", "deterministic", "tick rate"]
@@ -16240,6 +16605,41 @@ description.ko = "허용되는 화면 방향을 설정 (모바일). 값: Orienta
 related = ["Orientation", "setImmersiveMode", "getDeviceOrientation"]
 platform_note.en = "Mobile-only. No-op on macOS, Windows, Linux and Web."
 platform_note.ja = "モバイル専用。デスクトップ / Web では no-op。"
+
+["setSystemLogLevel"]
+category = "utility"
+keywords = ["verbosity", "filter", "os_log", "OutputDebugString", "system log", "console.app", "debugview"]
+description.en = "Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows"
+description.ja = "OS ログに書く最小ログレベルを設定：macOS は os_log、Windows は OutputDebugStringW"
+description.ko = "OS 로그에 기록할 최소 로그 레벨을 설정: macOS는 os_log, Windows는 OutputDebugStringW"
+details.en = '''
+Lines below this level are not written to the OS log: `os_log` on macOS (Console.app), `OutputDebugStringW` on Windows (Visual Studio output window, DebugView). Default Notice; `LogLevel::Silent` turns it off. No effect on iOS and Android (the OS log is the console output there; use `setConsoleLogLevel()`) or on Linux and web (no OS log output). The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行は OS ログに書かれない。macOS は `os_log`（Console.app）、Windows は `OutputDebugStringW`（Visual Studio の出力ウィンドウ、DebugView）。既定は Notice、`LogLevel::Silent` で止まる。iOS と Android では効かず（OS ログがコンソール出力なので `setConsoleLogLevel()` を使う）、Linux と web にも OS ログ出力は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 OS 로그에 기록되지 않는다. macOS는 `os_log`(Console.app), Windows는 `OutputDebugStringW`(Visual Studio 출력 창, DebugView). 기본값 Notice, `LogLevel::Silent`면 꺼진다. iOS와 Android에서는 효과가 없고(OS 로그가 콘솔 출력이므로 `setConsoleLogLevel()` 사용), Linux와 web에는 OS 로그 출력이 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setLogLevel", "setConsoleLogLevel", "setFileLogLevel", "Logger"]
 
 ["setScissor"]
 category = "graphics_style"

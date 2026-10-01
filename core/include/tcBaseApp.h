@@ -299,12 +299,16 @@ public:
         windowResized(width, height);
     }
 
+    // The App's setup() runs on its first update or draw, as its own entry
+    // point (#349), before the tree walk.
     void handleUpdate(int mouseX, int mouseY) {
+        internal::setupNodeOnce(*this);
         updateTree();
         updateHoverState((float)mouseX, (float)mouseY);
     }
 
     void handleDraw() {
+        internal::setupNodeOnce(*this);
         drawTree();
     }
 };

@@ -123,13 +123,18 @@ macro(trussc_app)
     # This means: adding or removing TC_HOT_RELOAD → just rebuild, no
     # manual reconfig needed.
     # =========================================================================
-    # The scan rule lives in tc_hot_reload_scan.cmake, shared with the
-    # pre-build check below so the two can never disagree (#234).
+    # The decision (platform gate + scan rule) lives in
+    # tc_hot_reload_scan.cmake, shared with the pre-build check below so the
+    # two can never disagree (#234, #329).
     include("${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake")
-    set(_TC_HOT_RELOAD OFF)
-    if(NOT EMSCRIPTEN AND NOT ANDROID AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        tc_hot_reload_scan(_TC_HOT_RELOAD ${_TC_SOURCES})
+    # Hot reload is unavailable on Android / Emscripten / iOS: TC_HOT_RELOAD in
+    # source is a no-op there. Computed once here and baked into the pre-build
+    # check, which runs in cmake -P mode where these variables are undefined.
+    set(_TC_HR_PLATFORM_SUPPORTED "TRUE")
+    if(EMSCRIPTEN OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(_TC_HR_PLATFORM_SUPPORTED "FALSE")
     endif()
+    tc_hot_reload_decide(_TC_HOT_RELOAD ${_TC_HR_PLATFORM_SUPPORTED} ${_TC_SOURCES})
 
     # Save the detection result to the state file
     set(_TC_HR_STATE_FILE "${CMAKE_BINARY_DIR}/.tc_hot_reload_state")
@@ -140,14 +145,10 @@ macro(trussc_app)
     # than a shell script) keeps this cross-platform — Windows doesn't ship
     # `sh` by default.
     #
-    # Hot-reload-unsupported platforms (Android / Emscripten / iOS) force
-    # _TC_HOT_RELOAD off above regardless of the source scan, so the runtime
-    # check must agree — otherwise it spots TC_HOT_RELOAD in .cpp, decides
-    # CURRENT="ON", and fails the build forever with "state changed".
-    set(_TC_HR_PLATFORM_SUPPORTED "TRUE")
-    if(EMSCRIPTEN OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        set(_TC_HR_PLATFORM_SUPPORTED "FALSE")
-    endif()
+    # The check uses the same tc_hot_reload_decide() with the platform flag
+    # computed above. If it disagreed with the configure step on an
+    # unsupported platform, it would spot TC_HOT_RELOAD in .cpp, decide
+    # CURRENT="ON", and fail the build forever with "state changed".
     set(_TC_HR_CHECK_SCRIPT "${CMAKE_BINARY_DIR}/_tc_check_hot_reload.cmake")
     set(_TC_HR_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
     set(_TC_HR_CMAKELISTS "${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
@@ -168,25 +169,20 @@ set(PLATFORM_SUPPORTED ${_TC_HR_PLATFORM_SUPPORTED})
 set(EXPLICIT_SOURCES \"${_TC_HR_EXPLICIT_SOURCES}\")
 include(\"${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake\")
 
-# Hot reload is unavailable on this platform — TC_HOT_RELOAD in source is
-# treated as a no-op, so just confirm OFF without scanning.
-if(NOT PLATFORM_SUPPORTED)
-    return()
-endif()
-
 set(PREV \"\")
 if(EXISTS \"\${STATE_FILE}\")
     file(READ \"\${STATE_FILE}\" PREV)
     string(STRIP \"\${PREV}\" PREV)
 endif()
 
-# Same files and the same rule as the configure-time scan (#234)
+# Same files, the same platform gate and the same rule as the configure step
+# (#234, #329). On an unsupported platform this is OFF without scanning.
 if(EXPLICIT_SOURCES)
     set(_CPPS \"\${EXPLICIT_SOURCES}\")
 else()
     file(GLOB_RECURSE _CPPS \"\${SRC_DIR}/*.cpp\")
 endif()
-tc_hot_reload_scan(CURRENT \${_CPPS})
+tc_hot_reload_decide(CURRENT \${PLATFORM_SUPPORTED} \${_CPPS})
 
 if(NOT \"\${PREV}\" STREQUAL \"\${CURRENT}\")
     if(CURRENT STREQUAL \"ON\")
@@ -295,6 +291,13 @@ endif()
         # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
         # per build dramatically shortens reload turnaround.
         target_precompile_headers(guest PRIVATE <TrussC.h>)
+        # TrussC.h includes the generated shader headers (tc/gpu/shaders/
+        # *.glsl.h). The guest does not link TrussC, so without this it would
+        # not wait for them, and a first build on a fresh tree could compile
+        # the PCH before they exist.
+        if(TARGET TrussC_shaders)
+            add_dependencies(guest TrussC_shaders)
+        endif()
         # Linux/GCC: disable STB_GNU_UNIQUE bindings for the Guest. GCC's
         # default -fgnu-unique-symbols marks Meyer's singletons (inline
         # function static locals like `static Foo& instance(){ static Foo f; }`)

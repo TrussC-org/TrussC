@@ -30,6 +30,15 @@
 
 namespace tcx::nodeinspector {
 
+class NodeInspector;
+
+namespace internal {
+// Tests only: record a hand edit of `member` (of `mod` when non-null) the way
+// the Inspector panel does, without an ImGui frame (tcxNodeInspector/tests).
+void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod* mod,
+                           const std::string& member);
+}
+
 // Renders each reflected member as the matching ImGui widget. Public so an app
 // can subclass and override a visit() to customize how a given type is edited.
 // Read-only values (getter-only TC_VALUE) render greyed out; enums
@@ -264,6 +273,9 @@ public:
     void resetTouched() { touched_.clear(); }
 
 private:
+    friend void internal::recordTouchedForTests(NodeInspector&, ::tc::Node*, ::tc::Mod*,
+                                                const std::string&);
+
     Style    style_;
     bool     enabled_      = true;
     char     nameBuf_[128] = "";
@@ -347,16 +359,16 @@ private:
     void reconcileSelection();            // prune dead + collapse on external change
 
     // --- touched ---------------------------------------------------------------
-    // Keyed by node + mod + member path. The Inspector's widgets are reused
-    // for whichever node is selected (one ImGuiID for "radius" of every node),
-    // so the ImGui-level record can't say whose value it was — hence this one,
-    // and the Hierarchy / Inspector panels are kept out of the ImGui record.
+    // Keyed by node + mod type (short name, as getModByTypeName()) + member
+    // path. The Inspector's widgets are reused for whichever node is selected
+    // (one ImGuiID for "radius" of every node), so the ImGui-level record
+    // can't say whose value it was — hence this one, and the Hierarchy /
+    // Inspector panels are kept out of the ImGui record.
     struct TouchedMember {
         std::weak_ptr<::tc::Node> node;
         uint64_t          nodeId = 0;
         std::string       nodeType, nodeName;
-        const ::tc::Mod*  mod = nullptr;   // identity only (may have been removed since)
-        std::string       modType;
+        std::string       modType;         // short type name; empty = the node's own member
         std::string       member;          // "pos", "outline.color", "name"
         ::tc::Json        value;           // as of the last edit / read (reported once gone)
     };

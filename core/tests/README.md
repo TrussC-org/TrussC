@@ -82,7 +82,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   listener that logs again, itself or through a thread it waits for, does
   not deadlock. The sokol bridge (`internal::sokolLog`) maps panic / error /
   warning / info to Fatal / Error / Warning / Verbose, with the tag as the
-  module and `id:<item> line:<line>` when sokol passes no message. POSIX
+  module and `id:<item> line:<line>` when sokol passes no message. Each
+  output has its own level (#311): console, file and system default to
+  Notice, `setLogLevel()` overwrites all three and a later per-output call
+  wins; the file and the console filter by their own level while `onLog`
+  listeners get every line. POSIX
   only, each in a forked child: a panic reaches the log file and still
   aborts through `slog_func`; a panic while another thread holds the
   Logger's lock does not wait for it (the line goes to stderr); and on
@@ -112,8 +116,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   reach the TrussC logger (rate limited, and only from the main thread — an
   off-main drop is counted and reported by `runHeadlessApp`'s own frame pump;
   its exit flush and `AudioEngine::shutdown()` log what the rate limit held
-  back), the audio thread's meters (peak / RMS / clipped samples / voice
-  level / load) work and shutdown clears them, a reused `SoundBuffer`'s
+  back), the audio thread's meters (peak / RMS / clipped samples / each
+  playing sound's level / CPU usage) work and shutdown clears them, a reused `SoundBuffer`'s
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
@@ -127,6 +131,33 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   is recorded by `src/allocProbe.cpp`), and growth past the first reservation
   lands on a correctly stated length. A voice on a buffer with no frames
   stops at its first mix.
+- `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
+  read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
+  measured on `audioOut` with files of DC levels: `setPosition()` moves the
+  audio (the level ~200 ms later is the target's), `getPosition()` reports
+  the target from the call on and never the old position, a paused stream
+  reports the target at once while the voice itself does not move, and
+  resumes from it, and of several seeks the last wins (also while paused).
+  While a seek is pending (the worker held back by
+  `internal::setStreamFaultForTests(Stalls)`) no block after the call holds
+  the old position's audio, and a non-looping stream does not end at the old
+  data's end; a seek after an underrun at speed 10 keeps the ring bounded, so
+  another stream is still refilled; after a re-init at another rate
+  `getPosition()` carries over and `setPosition()` lands at the target; eager
+  sounds seek at once. `loadStream()` rejects a file with no frames
+  (`DecodeFailed`) and accepts a FLAC whose length is unknown (STREAMINFO
+  total 0), which plays to its end and ignores `setPosition()` with one
+  warning. A looping stream whose file was emptied after loading ends with
+  one error log while another stream keeps being refilled; a decoder read
+  error, a failed loop seek and a failed seek request each end the stream
+  with one error log: a non-looping voice ends, a looping one stays playing
+  but silent (#448) and `setPosition()` makes it play again. The frames a
+  failing read still returned are played before the voice ends. An MP3
+  stream's decoder gets a seek table (one point per second, at most 1024),
+  also after a re-init; `setPosition(getDuration())` on an ~18 minute MP3,
+  whose float duration is past the last frame, loops instead of failing. An
+  ended voice's position (and pending seek) carries over a re-init. A
+  watchdog turns a StreamWorker that never comes back into a FAIL.
   An `AudioEngine::init()` that can't open the output device (forced with
   more channels than miniaudio accepts) returns false, logs one error through
   the logger that names the requested device, and a later `init()` succeeds
@@ -200,11 +231,25 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   longest LZW prefix chains decodes on a 64 KB thread stack (native POSIX
   only; elsewhere only its output is checked). Image fixtures are made at
   runtime; the Ogg clip is embedded (`src/toneOgg.h`).
+- `scopedStack/` — `scopedMatrix()` / `scopedStyle()` (#492): the guard
+  pushes when it is made and pops when it goes out of scope, read from the
+  matrix and style stack depth before, inside and after the scope, on an
+  early return, a return from a loop, an exception, nested guards and a
+  guard inside a `pushMatrix()` / `pushStyle()` pair (pops only its own
+  entry); the matrix and color set inside are undone after it. Checks run in
+  a release build only (headless `pushMatrix()` reaches sokol_gl).
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
+  pre-build check decide "does this project use hot reload" the same way:
+  `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
+  ignores commented-out forms (#234), and `tc_hot_reload_decide()` is OFF on
+  platforms without hot reload (web / Android / iOS) even with the macro in
+  source (#329). The end-to-end build of a macro app as a normal app is
+  `examples/tests/HotReloadFallback`, built by the daily sweeps.
 - `screenshotContract/` — *(also on web)* the screenshot APIs report what they
   actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
   nothing is queued or created, and each API warns once. Native:
@@ -213,6 +258,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `mcpHttpGuard/` — a web page in the user's browser cannot drive the
+  loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
+  403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
+  native clients keep working. Also the port line (#311): after bind, the
+  server logs `[MCP] HTTP server listening on http://HOST:PORT/mcp` through
+  the Logger at Notice, exactly once and with the actual port, and the line
+  lands in the log file.
 - `winsockLifetime/` — creating and destroying TcpClient / TcpServer any
   number of times leaves networking working (#254): after 200 of each, a raw
   `socket()` still succeeds and a UdpSocket that was already receiving still
@@ -312,6 +364,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `ScreenRecorder` pacer (its `start()`/`tick()` are all the timing
   `ScreenRecorder` reads) stays exact after long uptime and, like the
   `tc_get_health` uptime, ignores `resetElapsedTimeCounter()`.
+- `entryStacks/` — push/pop containment per entry point (#349): a push that
+  the prelude (`runOnMainThread` work), `update()` (synced, independent VSYNC
+  and every fixed-Hz step, headless), the App's `setup()` or `exit()` leaves
+  open is popped when it returns, back to the depth it was entered at (not
+  0), with a warning naming it (`update() ended with 1 pushMatrix() ...`),
+  rate-limited per entry point; values set outside a push carry on. Checks
+  run in a release build only (headless `pushMatrix()` reaches sokol_gl).
 - `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
   holds the hovered / grabbed / selected node weakly and dispatch holds a
   strong reference while handlers run, so a node freed by `removeChild()` /
@@ -411,6 +470,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `pcmByteOrder/` — `SoundBuffer::loadPcmFromMemory()` decodes both byte
+  orders (#419). Known 16-bit byte pairs, little- and big-endian, with bytes
+  of 0x80 and above in either position, give exactly `value / 32768` (the old
+  big-endian swap sign-extended, so `01 80` came out as -128 instead of 384);
+  big-endian stereo keeps its channel order. Known 32-bit float byte quads in
+  both orders, with bytes of 0x80 and above in every position, keep their
+  exact bits. Both also from a data pointer that is not aligned to the
+  sample size. The tcxHap side (`twos` / `fl32` files) is in
+  `addons/tcxHap/tests/`.
 - `fontSfntCheck/` — font data is checked before it is given to stb_truetype:
   `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
   bytes, a `.ttc` header whose font count or offset points outside the data,

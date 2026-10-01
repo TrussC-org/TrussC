@@ -7420,17 +7420,34 @@ static bool _sapp_tc_win32_create_main_window(void) {
 
 /*-- the run loop -------------------------------------------------------------
     Blocks in MsgWaitForMultipleObjectsEx on the due windows' frame latency
-    waitables (plus a timeout for timer-paced windows), drains ALL pending
+    waitables (plus a timer for timer-paced windows), drains ALL pending
     messages, then ticks every due window. Replaces upstream's PeekMessage
-    busy-render-loop: the process sleeps whenever nothing is due. */
+    busy-render-loop: the process sleeps whenever nothing is due.
+
+    Timer-paced windows (earliest_next in the future, e.g. after a tick without
+    a Present) are woken by one high-resolution waitable timer armed for the
+    earliest earliest_next and waited on after the windows' waitables. A plain
+    millisecond timeout ends on the system timer tick (15.625 ms by default),
+    which would start those ticks on that grid instead of near the requested
+    time (#481). Same convention as internal::HeadlessSleeper (tcGlobal.cpp):
+    no timeBeginPeriod. Before Windows 10 1803 the flag is rejected, no timer
+    is created and the wait keeps the millisecond timeout. */
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002   /* Windows SDK 10.0.17134+ */
+#endif
+
 static void _sapp_tc_win32_run_loop(void) {
+    /* auto-reset (synchronization) timer; NULL before Windows 10 1803 */
+    HANDLE pace_timer = CreateWaitableTimerExW(NULL, NULL,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
     bool done = false;
     while (!done && !_sapp_tc.app.quit_ordered) {
-        HANDLE handles[_SAPP_TC_MAX_WINDOWS];
+        HANDLE handles[_SAPP_TC_MAX_WINDOWS + 1];   /* + the pace timer */
         _sapp_tc_window_t* handle_owner[_SAPP_TC_MAX_WINDOWS];
-        DWORD num_handles = 0;
+        DWORD num_handles = 0;          /* frame latency waitables (handle_owner) */
         const double now = _sapp_tc_now();
-        double wake_at = now + 0.1;     /* robustness cap; messages wake us anyway */
+        const double wake_cap = now + 0.1;  /* robustness cap; messages wake us anyway */
+        double wake_at = wake_cap;
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             if (!w || !w->swap_chain || w->in_tick) continue;
@@ -7445,8 +7462,19 @@ static void _sapp_tc_win32_run_loop(void) {
         }
         double timeout_s = wake_at - now;
         if (timeout_s < 0.0) timeout_s = 0.0;
-        DWORD wr = MsgWaitForMultipleObjectsEx(num_handles, handles,
-            (DWORD)(timeout_s * 1000.0), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        DWORD timeout_ms = (DWORD)(timeout_s * 1000.0);
+        DWORD num_wait = num_handles;
+        if (pace_timer && wake_at > now && wake_at < wake_cap) {
+            /* a timer-paced window is next: wake on the timer, not the tick */
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)ceil(timeout_s * 1e7);   /* relative, 100 ns units */
+            if (SetWaitableTimer(pace_timer, &due, 0, NULL, NULL, FALSE)) {
+                handles[num_wait++] = pace_timer;
+                timeout_ms = (DWORD)ceil((wake_cap - now) * 1000.0);   /* only the cap */
+            }
+        }
+        DWORD wr = MsgWaitForMultipleObjectsEx(num_wait, handles,
+            timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         /* If a frame latency waitable satisfied the wait, it was auto-reset here.
            Record it so the due-check consumes THIS signal instead of re-waiting
            the (now-unsignaled) handle. Only one handle is reported per wait; the
@@ -7454,6 +7482,10 @@ static void _sapp_tc_win32_run_loop(void) {
         if (wr >= WAIT_OBJECT_0 && wr < WAIT_OBJECT_0 + num_handles) {
             handle_owner[wr - WAIT_OBJECT_0]->waitable_ready = true;
         }
+        /* WAIT_OBJECT_0 + num_handles (when armed) is the pace timer: nothing to
+           record, the due-check below sees earliest_next has passed. A timer
+           left signaled (the wait ended on a message or waitable first) is only
+           waited on again after SetWaitableTimer re-arms it, which resets it. */
         MSG msg;
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (WM_QUIT == msg.message) {
@@ -7478,6 +7510,7 @@ static void _sapp_tc_win32_run_loop(void) {
             PostMessageW(_sapp_tc.app.main->hwnd, WM_CLOSE, 0, 0);
         }
     }
+    if (pace_timer) CloseHandle(pace_timer);
 }
 
 /*-- public API ---------------------------------------------------------------*/
