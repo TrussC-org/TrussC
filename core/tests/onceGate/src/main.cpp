@@ -1,16 +1,17 @@
 // =============================================================================
-// core/tests/logOnce — behavioral regression test for logOnce() (#308).
+// core/tests/onceGate — behavioral regression test for OnceGate (#308).
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 //
 // Guards the invariants:
-//   - logOnce(key) is true the first time for a key and false afterwards.
-//   - Keys are independent: a new key is true once, whatever other keys did.
+//   - isFirstTime() is true the first time and false afterwards; each gate
+//     object is its own key (a static per call site, a member per object).
 //   - With an interval, it is true again once the interval has passed since
 //     the last true, and not before; an interval of 0 or below means once.
-//   - Thread-safe: many threads calling it with the same key get exactly one
-//     true between them; with one key per call across threads, each key is
-//     true exactly once.
+//   - Thread-safe: many threads calling one gate get exactly one true between
+//     them (also for an interval gate).
+//   - A static gate works from a static destructor (it is constexpr-
+//     constructible and trivially destructible), checked at process exit.
 // =============================================================================
 
 #include <TrussC.h>
@@ -18,12 +19,23 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
-#include <string>
+#include <cstdlib>
+#include <limits>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 using namespace std;
 using namespace tc;
+
+// Compile-time guarantees from the Decision.
+static_assert(is_trivially_destructible_v<OnceGate>, "OnceGate: trivially destructible");
+static_assert(!is_copy_constructible_v<OnceGate> && !is_copy_assignable_v<OnceGate>,
+              "OnceGate: not copyable");
+static_assert(!is_move_constructible_v<OnceGate> && !is_move_assignable_v<OnceGate>,
+              "OnceGate: not movable");
+constinit OnceGate g_constantInitialized;          // constexpr-constructible
+constinit OnceGate g_constantInitializedInterval{1.0};
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -36,92 +48,145 @@ static void sleepSeconds(double s) {
     this_thread::sleep_for(chrono::duration<double>(s));
 }
 
+// A call site with its own static gate, as core headers use it.
+static bool warnSite() {
+    static OnceGate warned;
+    return warned.isFirstTime();
+}
+
+struct PerObject {
+    OnceGate warned;
+};
+
+// --- used from a static destructor ------------------------------------------
+// g_late is constructed before main() and destroyed after main() returns. Its
+// destructor uses a static gate that main() already opened (it must stay
+// closed) and one it touches for the first time there (true once). Both are
+// constant-initialized and trivially destructible, so no destruction order
+// can leave them unusable.
+static OnceGate& exitGate() {
+    static OnceGate gate;
+    return gate;
+}
+
+struct LateUser {
+    ~LateUser() {
+        // exitGate() was opened once in main(), so it must stay closed here.
+        bool reopened = exitGate().isFirstTime();
+        static OnceGate firstUsedAtExit;
+        bool first = firstUsedAtExit.isFirstTime();
+        bool second = firstUsedAtExit.isFirstTime();
+        bool ok = !reopened && first && !second;
+        printf("%-66s %s\n", "static destructor: gates work during static destruction",
+               ok ? "PASS" : "FAIL");
+        printf("%s\n", ok && failsBeforeExit == 0 ? "onceGate: all passed" : "onceGate: FAILED");
+        fflush(stdout);
+        // Report the result through the exit status.
+        if (!ok || failsBeforeExit) _Exit(1);
+    }
+    static inline int failsBeforeExit = 0;
+};
+
+static LateUser g_late;
+
 int main() {
-    // --- once per key -------------------------------------------------------
+    // --- once ---------------------------------------------------------------
     {
-        bool first = logOnce("test.once");
-        bool second = logOnce("test.once");
-        bool third = logOnce("test.once");
+        OnceGate g;
+        bool first = g.isFirstTime();
+        bool second = g.isFirstTime();
+        bool third = g.isFirstTime();
         check("once: first call is true", first);
         check("once: later calls are false", !second && !third);
+        check("once: a constinit global gate works",
+              g_constantInitialized.isFirstTime() && !g_constantInitialized.isFirstTime());
     }
 
-    // --- keys are independent ----------------------------------------------
+    // --- each gate is its own key --------------------------------------------
     {
-        bool a = logOnce("test.keyA");
-        bool b = logOnce("test.keyB");
-        bool a2 = logOnce("test.keyA");
-        bool b2 = logOnce("test.keyB");
-        check("keys: each new key is true once", a && b);
-        check("keys: each key is false after its first", !a2 && !b2);
-        check("keys: an unrelated key does not reset another", !logOnce("test.once"));
+        bool a = warnSite();
+        bool a2 = warnSite();
+        check("static gate: one call site is true once", a && !a2);
+        PerObject p, q;
+        bool p1 = p.warned.isFirstTime();
+        bool q1 = q.warned.isFirstTime();
+        bool p2 = p.warned.isFirstTime();
+        check("member gate: each object is true once", p1 && q1 && !p2);
+        check("member gate: another call site does not reopen", !warnSite());
     }
 
     // --- interval -----------------------------------------------------------
     {
         const double iv = 0.3;
-        bool first = logOnce("test.interval", iv);
-        bool soon = logOnce("test.interval", iv);
+        OnceGate g{iv};
+        bool first = g.isFirstTime();
+        bool soon = g.isFirstTime();
         check("interval: first call is true", first);
         check("interval: false within the interval", !soon);
         sleepSeconds(iv + 0.1);
-        bool after = logOnce("test.interval", iv);
-        bool afterAgain = logOnce("test.interval", iv);
+        bool after = g.isFirstTime();
+        bool afterAgain = g.isFirstTime();
         check("interval: true again after the interval", after);
         check("interval: then false again (interval restarts)", !afterAgain);
-        sleepSeconds(iv + 0.1);
-        check("interval: true again after another interval", logOnce("test.interval", iv));
+        sleepSeconds(iv / 2);
+        check("interval: false half an interval after the last true", !g.isFirstTime());
+        sleepSeconds(iv / 2 + 0.1);
+        check("interval: true again after another interval", g.isFirstTime());
 
-        // 0 and negative intervals mean once.
-        check("interval 0: first true", logOnce("test.zero", 0));
-        check("interval -1: first true", logOnce("test.neg", -1.0));
+        // 0, negative and NaN intervals mean once.
+        OnceGate zero{0.0}, neg{-1.0}, nan{numeric_limits<double>::quiet_NaN()};
+        check("interval 0 / -1 / NaN: first true",
+              zero.isFirstTime() && neg.isFirstTime() && nan.isFirstTime());
         sleepSeconds(0.05);
-        check("interval 0 / -1: never true again", !logOnce("test.zero", 0) && !logOnce("test.neg", -1.0));
+        check("interval 0 / -1 / NaN: never true again",
+              !zero.isFirstTime() && !neg.isFirstTime() && !nan.isFirstTime());
+
+        // A huge interval is not an overflow: true once, then not again.
+        OnceGate huge{1e300};
+        bool h1 = huge.isFirstTime();
+        check("interval 1e300: true once, then false", h1 && !huge.isFirstTime());
     }
 
-    // --- thread safety: one key, many threads -------------------------------
-    {
-        const int kThreads = 8;
-        const int kCalls = 2000;
+    // --- thread safety ------------------------------------------------------
+    auto hammer = [](OnceGate& gate, int threads, int calls) {
         atomic<int> trues{0};
         atomic<bool> go{false};
         vector<thread> ts;
-        for (int t = 0; t < kThreads; ++t) {
+        for (int t = 0; t < threads; ++t) {
             ts.emplace_back([&] {
                 while (!go.load()) this_thread::yield();
-                for (int i = 0; i < kCalls; ++i) {
-                    if (logOnce("test.shared")) trues.fetch_add(1);
+                for (int i = 0; i < calls; ++i) {
+                    if (gate.isFirstTime()) trues.fetch_add(1);
                 }
             });
         }
         go = true;
         for (auto& th : ts) th.join();
-        check("threads: one shared key is true exactly once", trues.load() == 1);
-    }
-
-    // --- thread safety: many keys, many threads -----------------------------
+        return trues.load();
+    };
     {
-        const int kThreads = 8;
-        const int kKeys = 500;
-        vector<atomic<int>> perKey(kKeys);
-        for (auto& c : perKey) c = 0;
-        atomic<bool> go{false};
-        vector<thread> ts;
-        for (int t = 0; t < kThreads; ++t) {
-            ts.emplace_back([&] {
-                while (!go.load()) this_thread::yield();
-                for (int k = 0; k < kKeys; ++k) {
-                    if (logOnce("test.many." + to_string(k))) perKey[k].fetch_add(1);
-                }
-            });
+        bool allOne = true;
+        for (int round = 0; round < 200; ++round) {
+            OnceGate g;
+            if (hammer(g, 8, 200) != 1) allOne = false;
         }
-        go = true;
-        for (auto& th : ts) th.join();
-        int wrong = 0;
-        for (auto& c : perKey) if (c.load() != 1) ++wrong;
-        check("threads: each of 500 keys is true exactly once", wrong == 0);
+        check("threads: 8 threads, one gate -> exactly one true (200 rounds)", allOne);
+    }
+    {
+        // An interval longer than the run: still exactly one true.
+        bool allOne = true;
+        for (int round = 0; round < 200; ++round) {
+            OnceGate g{60.0};
+            if (hammer(g, 8, 200) != 1) allOne = false;
+        }
+        check("threads: interval gate -> exactly one true per interval", allOne);
     }
 
-    printf("%s\n", g_fail ? "logOnce: FAILED" : "logOnce: all passed");
+    // --- open the gate the static destructor checks ---------------------------
+    check("exit gate: first use in main() is true", exitGate().isFirstTime());
+
+    LateUser::failsBeforeExit = g_fail;
+    // The final verdict is printed by g_late's destructor during static
+    // destruction (exit status 1 on failure).
     return g_fail ? 1 : 0;
 }
