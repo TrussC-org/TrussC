@@ -32,6 +32,19 @@
 //                                     // setter so invariants (dirty flags,
 //                                     // clamping, events) run
 //
+// A derived value — one computed from another reflected value, such as Node's
+// globalPos (from pos and the parent's transform) — uses TC_DERIVED:
+//
+//     TC_DERIVED(name, getter, setter)  // readable and writable like the
+//                                       // 3-arg TC_VALUE, but not saved
+//
+// It is visited inside pushDerived()/popDerived(), so backends can tell it
+// apart (isDerived()): inspectors and the MCP tools show and edit it, the JSON
+// writer leaves it out of saved data unless asked to include it. List a derived
+// value BEFORE the value it derives from: readers apply keys in declaration
+// order, so when one write carries both, the derived key is applied first and
+// the canonical key after it, and the canonical key wins.
+//
 // Bases chain recursively: each class lists only its DIRECT bases, and gets
 // the whole ancestor chain through them (multiple direct bases are all
 // chained). TC_REFLECT(Self) with no bases chains nothing. Reflection roots
@@ -323,6 +336,13 @@ struct Reflector {
     void pushReadOnly() { ++readOnlyDepth_; }
     void popReadOnly() { if (readOnlyDepth_ > 0) --readOnlyDepth_; }
 
+    // Derived scope — TC_DERIVED visits inside push/pop. A derived value is
+    // computed from another reflected value: it is readable and writable, but
+    // serializers that save data skip it (the canonical value is saved).
+    bool isDerived() const { return derivedDepth_ > 0; }
+    void pushDerived() { ++derivedDepth_; }
+    void popDerived() { if (derivedDepth_ > 0) --derivedDepth_; }
+
     // Composite scope — a value that decomposes into sub-values (a nested
     // reflectable type, or a TC_REFLECT_FREE type) brackets its members with
     // beginGroup(name)/endGroup(). The default is a no-op: backends that don't
@@ -333,6 +353,7 @@ struct Reflector {
 
 private:
     int readOnlyDepth_ = 0;
+    int derivedDepth_ = 0;
 };
 
 // Chain the listed direct bases' reflect blocks, in order. Qualified calls ->
@@ -467,6 +488,15 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
 #define TC_VALUE_3_(name, getter, setter) \
     do { auto _tcv = _tc_self.getter(); \
          if (::trussc::reflectValue(r, #name, _tcv)) { _tc_self.setter(_tcv); _tc_edited = true; } } while (0);
+
+// A derived value (see the header comment): read via getter, written via
+// setter, visited inside the derived scope.
+#define TC_DERIVED(name, getter, setter) \
+    do { auto _tcv = _tc_self.getter(); \
+         r.pushDerived(); \
+         const bool _tcd = ::trussc::reflectValue(r, #name, _tcv); \
+         r.popDerived(); \
+         if (_tcd) { _tc_self.setter(_tcv); _tc_edited = true; } } while (0);
 
 // Arity dispatch (the extra expansion keeps MSVC's traditional preprocessor
 // from passing __VA_ARGS__ through as a single token).

@@ -126,6 +126,9 @@ public:
     // Set a texture to project through the spot cone. The texture modulates
     // the light's color per-pixel in the projected area. Pass nullptr to
     // disable. The Texture must remain alive while the Light is in use.
+    // The PBR shader currently has one projector slot: only the first
+    // registered Spot light with a texture projects it; further ones light as
+    // plain spot lights, with a one-time warning.
     void setProjectionTexture(const Texture* tex) { projectionTexture_ = tex; }
     const Texture* getProjectionTexture() const { return projectionTexture_; }
     bool hasProjectionTexture() const { return projectionTexture_ != nullptr; }
@@ -200,6 +203,9 @@ public:
     // must remain alive while the Light is in use (weak pointer).
     // IES modulates light intensity by angular distribution independently of
     // the projector texture (which modulates color).
+    // The PBR shader currently has one IES slot: only the first registered
+    // light with a profile uses it; further ones light without their profile,
+    // with a one-time warning.
     void setIesProfile(const IesProfile* ies) { iesProfile_ = ies; }
     const IesProfile* getIesProfile() const { return iesProfile_; }
     bool hasIesProfile() const { return iesProfile_ != nullptr; }

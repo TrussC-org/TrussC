@@ -59,7 +59,7 @@ bool sameNode(const weak_ptr<Node>& a, const weak_ptr<Node>& b) {
 // path no longer resolves). "name" without a mod is the node's name field.
 Json memberValue(Node* node, Mod* mod, const string& member) {
     if (!mod && member == "name") return node->getName();
-    Json j = mod ? reflectToJson(*mod) : reflectToJson(*node);
+    Json j = mod ? reflectToJson(*mod, true) : reflectToJson(*node, true);   // derived included (live view)
     const Json* cur = &j;
     size_t start = 0;
     while (true) {
@@ -776,6 +776,7 @@ void NodeInspector::gizmoReleaseHandler(MouseEventArgs& e) {
 void NodeInspector::enableGizmoInput() {
     if (gizmoInputEnabled_) return;
     gizmoInputEnabled_ = true;
+    ensureExitGuard();
 
     // Slightly ahead of BeforeApp: the gizmo draws in ImGui's FOREGROUND layer
     // (over the panels), so it also wins input over them — what you see on top
@@ -984,13 +985,32 @@ void NodeInspector::ensureToggleKeyListener() {
 // Drop them at the exit event instead, while everything is still alive (the
 // same pattern tcxImGui's ImGuiManager uses). Removing exitListener_ from
 // inside its own callback is fine: the dispatch list is snapshotted.
+//
+// Hot reload: the singleton is a static of the guest image, which the host
+// keeps loaded after a reload, so each generation has its own instance and
+// the old one is never destroyed. The same cleanup runs on hotReloadUnload,
+// before the host unloads this generation, so the old instance stops drawing
+// and taking input (#416).
 void NodeInspector::ensureExitGuard() {
     if (exitListener_) return;
-    exitListener_ = events().exit.listen([this] {
-        autoDraw_ = {};
-        toggleKeyListener_ = {};
-        exitListener_ = {};
-    });
+    exitListener_ = events().exit.listen([this] { releaseListeners(); });
+    hotReloadUnloadListener_ = events().hotReloadUnload.listen([this] { releaseListeners(); });
+}
+
+void NodeInspector::releaseListeners() {
+    autoDraw_ = {};
+    toggleKeyListener_ = {};
+    gizmoPress_ = {};
+    gizmoDrag_ = {};
+    gizmoRelease_ = {};
+    gizmoInputEnabled_ = false;
+    dragAxis_ = -1;
+    dragNode_.reset();
+    dragStarts_.clear();
+    attachRoot_.reset();
+    attachParent_.reset();
+    exitListener_ = {};
+    hotReloadUnloadListener_ = {};
 }
 
 } // namespace tcx::nodeinspector

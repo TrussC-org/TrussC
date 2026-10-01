@@ -351,7 +351,7 @@ std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const {
         info.streaming = (src.kind() == SoundSource::Stream);
         const fs::path p = info.streaming ? static_cast<const SoundStream&>(src).getPath()
                                           : static_cast<const SoundBuffer&>(src).getPath();
-        info.path     = p.lexically_normal();
+        info.path     = p;  // as given, same string as getPath() and the logs
         info.paused   = v->paused;
         info.loop     = v->loop;
         // positionF counts source frames for eager voices and, for streams,
@@ -514,6 +514,12 @@ struct StreamInstance {
     // isPlaying() should say then is #448). Also set by the re-init
     // migration, before the worker sees the instance (see halt()).
     bool halted = false;
+    // The decoder returned no frames on a non-looping stream: nothing more
+    // to read until a seek request, or until the loop flag is set and the
+    // worker starts the file over. Unlike endOfStream it is cleared when the
+    // worker loops back, so a stream that looped after its end and then
+    // stops looping is read on to its real end.
+    bool decoderAtEnd = false;
 
     // Under the engine lock (internal::seekVoice()): a seek on this voice
     // was refused because the length is unknown, and that was logged.
@@ -634,15 +640,31 @@ using internal::StreamInstance;
 
 // ---------------------------------------------------------------------------
 // StreamWorker — single thread + condition variable; refills any registered
-// StreamInstance whose ring buffer is below half capacity. Wakes up on a CV
-// signal whenever a new instance is registered, plus a periodic timeout so
-// long-running streams stay topped up.
+// StreamInstance whose ring has room for another chunk, and serves seek
+// requests (#280).
+//
+// It sleeps while there is no such work (#447): its wait ends on stop, when
+// some stream needs work (hasWork()), or after 5 ms, and it runs a pass at
+// every timeout too, so a refill is never more than 5 ms late. A
+// registration, a seek request and stop() notify it. The mixer notifies it
+// once per seek it applies (the ring then turns from full of old data to
+// empty at once, and the worker can only write the new data after that),
+// and when a callback takes a ring below half full. It does not notify at
+// each refill threshold: a ring that is due a refill (room for 1024 frames
+// of 16384) still holds ~320 ms at 48 kHz, so the timeout picks it up in
+// time. A disposed stream leaves the list at the worker's next look.
 // ---------------------------------------------------------------------------
 class StreamWorker {
 public:
     static StreamWorker& getInstance() {
-        static StreamWorker instance;
-        return instance;
+        // Never destroyed, only stopped: the engine is never destroyed
+        // either, and a device left running at exit (a headless app) still
+        // calls the mixer, which may wake the worker (wakeFromMixer()) after
+        // the static destructors ran. The Stopper joins the thread at the
+        // point this static was destroyed before.
+        static StreamWorker* instance = new StreamWorker();
+        static Stopper stopper{*instance};
+        return *instance;
     }
 
     void registerStream(std::weak_ptr<StreamInstance> w) {
@@ -661,9 +683,30 @@ public:
         if (thread_.joinable()) thread_.join();
     }
 
+    // A stream has new work (a seek request was posted): end the worker's
+    // wait. Taking the lock after the caller's store orders that store
+    // before the worker's next look at hasWork(), so the wakeup is not lost
+    // between its check and its wait. Do not call it under the engine lock.
+    void wake() {
+        { std::lock_guard<std::mutex> lock(mutex_); }
+        cv_.notify_one();
+    }
+
+    // The mixer emptied a stream's ring (it applied a seek) or took it below
+    // half full. From the audio callback, so without the lock (the worker
+    // can hold it while it closes a stream's file): a wakeup that comes
+    // between the worker's check and its wait is lost, and the 5 ms timeout
+    // covers it.
+    void wakeFromMixer() { cv_.notify_one(); }
+
 private:
     StreamWorker() = default;
-    ~StreamWorker() { shutdown(); }
+    ~StreamWorker() = default;   // never called (see getInstance())
+
+    struct Stopper {
+        StreamWorker& worker;
+        ~Stopper() { worker.shutdown(); }
+    };
 
     void ensureRunningLocked() {
         if (running_) return;
@@ -696,34 +739,72 @@ private:
         s.halt(why);
     }
 
-    // Refill one stream up to roughly full. Honor seek requests first.
-    void refillOne(StreamInstance& s) {
-        if (s.disposed.load(std::memory_order_acquire)) return;
-        if (!s.decoderInitialized) return;
+    // Decoding goes in chunks of this many frames; a stream is due a refill
+    // once its ring has room for one.
+    static constexpr size_t kChunkFrames = 1024;
+
+    // refillOne() and hasWork() share these checks, so that hasWork() is
+    // true only when a pass does something for the stream (a true result
+    // with nothing to do would spin the worker).
+
+    // Whether the worker may touch the stream at all.
+    static bool serviceable(const StreamInstance& s) {
+        if (s.disposed.load(std::memory_order_acquire)) return false;
+        if (!s.decoderInitialized) return false;
         const int fault = g_streamFault.load(std::memory_order_relaxed);
         if (fault == (int)internal::StreamFaultForTests::Stalls) {
-            return;   // test: a worker that falls behind (slow storage)
+            return false;   // test: a worker that falls behind (slow storage)
         }
         if (fault == (int)internal::StreamFaultForTests::MixerLags
             && !g_mixerLagReleased.load(std::memory_order_acquire)) {
-            return;   // test: held until the mixer has read the write position
+            return false;   // test: held until the mixer has read the write position
         }
+        return true;
+    }
+
+    // A seek request the worker can take now: a new one, and the mixer has
+    // applied the previous seek (the published fields stay put until then).
+    static bool seekTakeable(const StreamInstance& s) {
+        return s.seekRequestSeq.load(std::memory_order_acquire) != s.seekServedSeq
+            && s.seekAppliedEpoch.load(std::memory_order_acquire)
+                   == s.seekEpoch.load(std::memory_order_relaxed);
+    }
+
+    // Whether the decoder can give more frames (after any seek is taken).
+    static bool readable(const StreamInstance& s) {
+        if (s.halted) return false;
+        return !s.decoderAtEnd || s.looping.load(std::memory_order_acquire);
+    }
+
+    // The wait predicate's test for one stream: a seek to take, or a ring
+    // with room for a chunk that the decoder can fill. The worker thread,
+    // under mutex_ (seekServedSeq, halted and decoderAtEnd are the worker's;
+    // the rest are atomics or fixed before registration).
+    static bool hasWork(const StreamInstance& s) {
+        if (!serviceable(s)) return false;
+        if (seekTakeable(s)) return true;
+        return readable(s) && s.space() >= kChunkFrames;
+    }
+
+    // Refill one stream up to roughly full. Honor seek requests first.
+    void refillOne(StreamInstance& s) {
+        if (!serviceable(s)) return;
 
         // True right after a seek to frame 0: a read that then returns no
         // frames means the stream is empty.
         bool atStart = false;
 
         // Take the latest seek request, once the mixer has applied the
-        // previous one (the published fields stay put until then).
-        const uint64_t req = s.seekRequestSeq.load(std::memory_order_acquire);
-        const uint64_t epoch = s.seekEpoch.load(std::memory_order_relaxed);
-        if (req != s.seekServedSeq
-            && s.seekAppliedEpoch.load(std::memory_order_acquire) == epoch) {
+        // previous one.
+        if (seekTakeable(s)) {
+            const uint64_t req = s.seekRequestSeq.load(std::memory_order_acquire);
+            const uint64_t epoch = s.seekEpoch.load(std::memory_order_relaxed);
             const double target =
                 s.clampSeekTarget(s.seekTargetFrame.load(std::memory_order_relaxed));
             const uint64_t frame = (uint64_t)target;
             s.seekServedSeq = req;
             s.halted = false;
+            s.decoderAtEnd = false;
             const ma_result sr = seekDecoder(s, frame);
             // Publish before writing any post-seek data (see the section
             // comment). endOfStream is reset before the epoch, so a mixer
@@ -740,10 +821,10 @@ private:
             s.seekEpoch.store(epoch + 1, std::memory_order_release);
             atStart = (frame == 0);
         }
-        if (s.halted) return;
+        if (!readable(s)) return;
 
         // Decode in chunks of up to scratchFrames frames at a time.
-        constexpr size_t scratchFrames = 1024;
+        constexpr size_t scratchFrames = kChunkFrames;
         float scratch[scratchFrames * StreamInstance::CHANNELS];
 
         while (!s.disposed.load(std::memory_order_acquire)
@@ -769,8 +850,10 @@ private:
                         break;
                     }
                     atStart = true;
+                    s.decoderAtEnd = false;
                     continue;
                 }
+                s.decoderAtEnd = true;
                 s.endOfStream.store(true, std::memory_order_release);
                 break;
             }
@@ -808,34 +891,50 @@ private:
         }
     }
 
+    // The wait predicate (besides stop): drop the entries of streams that
+    // are gone or disposed, and say whether any other one has work. Under
+    // mutex_.
+    bool anyWorkLocked() {
+        bool work = false;
+        auto it = streams_.begin();
+        while (it != streams_.end()) {
+            auto sp = it->lock();
+            if (!sp || sp->disposed.load(std::memory_order_acquire)) {
+                it = streams_.erase(it);
+                continue;
+            }
+            if (!work && hasWork(*sp)) work = true;
+            ++it;
+        }
+        return work;
+    }
+
     void run() {
+        std::vector<std::shared_ptr<StreamInstance>> live;
+        std::unique_lock<std::mutex> lock(mutex_);
         while (true) {
-            std::unique_lock<std::mutex> lock(mutex_);
+            // Sleep until a stream has work, or for at most 5 ms: the pass
+            // below then runs anyway (see the class comment).
             cv_.wait_for(lock, std::chrono::milliseconds(5),
-                         [this] { return stop_.load() || !streams_.empty(); });
+                         [this] { return stop_.load() || anyWorkLocked(); });
             if (stop_.load()) break;
 
             // Snapshot strong refs while holding the lock, then drop the
             // lock for the actual decode work (which calls into miniaudio
             // and shouldn't block other registrations).
-            std::vector<std::shared_ptr<StreamInstance>> live;
             live.reserve(streams_.size());
-            auto it = streams_.begin();
-            while (it != streams_.end()) {
-                if (auto sp = it->lock()) {
-                    if (!sp->disposed.load(std::memory_order_acquire)) {
-                        live.push_back(std::move(sp));
-                    }
-                    ++it;
-                } else {
-                    it = streams_.erase(it);
-                }
+            for (auto& w : streams_) {
+                if (auto sp = w.lock()) live.push_back(std::move(sp));
             }
             lock.unlock();
 
             for (auto& sp : live) {
                 refillOne(*sp);
             }
+            // Drop the refs before taking the lock again: a stream whose last
+            // other owner let it go meanwhile closes its decoder here.
+            live.clear();
+            lock.lock();
         }
         running_ = false;
     }
@@ -845,7 +944,7 @@ private:
     std::condition_variable cv_;
     std::vector<std::weak_ptr<StreamInstance>> streams_;
     std::atomic<bool> stop_{false};   // written under mutex_; refillOne() polls it
-    bool running_ = false;
+    bool running_ = false;            // under mutex_
 };
 
 // ---------------------------------------------------------------------------
@@ -1112,6 +1211,8 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
         const uint64_t servedSeq = stream->seekPublishedSeq.load(std::memory_order_relaxed);
         stream->seekAppliedEpoch.store(epoch, std::memory_order_release);
         stream->seekAppliedSeq.store(servedSeq, std::memory_order_release);   // not pending
+        // The ring is empty from here: the worker can write the new data now.
+        StreamWorker::getInstance().wakeFromMixer();
     }
     if (stream->seekRequestSeq.load(std::memory_order_acquire)
             != stream->seekAppliedSeq.load(std::memory_order_relaxed)) {
@@ -1122,6 +1223,7 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     }
 
     uint64_t readFrame  = stream->readFrame.load(std::memory_order_relaxed);
+    const uint64_t readStart = readFrame;
     double   subFrame   = stream->subFrame;
 
     int produced = 0;
@@ -1206,6 +1308,17 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
 
     stream->readFrame.store(readFrame, std::memory_order_release);
     stream->subFrame = subFrame;
+
+    // This callback took the ring below half full: wake the worker rather
+    // than wait for its poll (which a coarse system timer, 15.6 ms on
+    // Windows, stretches), e.g. at a high speed. Once per crossing, so a
+    // ring that stays low (the end of the file) does not notify again.
+    // Signed: after an underrun at speed > 1 readFrame can be past it.
+    constexpr int64_t kLowWater = (int64_t)(StreamInstance::RING_FRAMES / 2);
+    if ((int64_t)(writeFrame - readStart) >= kLowWater
+        && (int64_t)(writeFrame - readFrame) < kLowWater) {
+        StreamWorker::getInstance().wakeFromMixer();
+    }
     sound.level.store(level, std::memory_order_relaxed);
 
     // positionF advances by the actual ring frames consumed (which equals
@@ -1235,6 +1348,7 @@ void seekVoice(PlayingSound& voice, double frame) {
     if (!(frame >= 0.0)) frame = 0.0;   // also NaN
     AudioEngine& engine = AudioEngine::getInstance();
     std::string refusedPath;   // logged after the engine lock is released
+    bool requested = false;    // the worker is woken after the engine lock is released
     {
         std::lock_guard<std::mutex> lock(engine.mutex_);
         if (!voice.buffer || voice.buffer->kind() != SoundSource::Stream) {
@@ -1247,14 +1361,20 @@ void seekVoice(PlayingSound& voice, double frame) {
         if (s.totalFramesInFile > 0) {
             s.seekTargetFrame.store(frame, std::memory_order_relaxed);
             s.seekRequestSeq.fetch_add(1, std::memory_order_release);
-            return;
+            requested = true;
+        } else {
+            // The length is unknown (e.g. a FLAC whose STREAMINFO total is
+            // 0): there is no known end to clamp the target to, so such a
+            // stream does not seek. Logged once per voice.
+            if (s.unknownLengthSeekLogged) return;
+            s.unknownLengthSeekLogged = true;
+            refusedPath = s.pathUtf8;
         }
-        // The length is unknown (e.g. a FLAC whose STREAMINFO total is 0):
-        // there is no known end to clamp the target to, so such a stream
-        // does not seek. Logged once per voice.
-        if (s.unknownLengthSeekLogged) return;
-        s.unknownLengthSeekLogged = true;
-        refusedPath = s.pathUtf8;
+    }
+    if (requested) {
+        // The worker sleeps while no stream needs it (#447).
+        StreamWorker::getInstance().wake();
+        return;
     }
     logWarning("SoundStream") << refusedPath
                               << ": setPosition() is ignored, the stream's length is unknown";
@@ -1493,7 +1613,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
     args.deviceName   = std::string(device->playback.name);
     args.sampleRate   = sampleRate_;
     args.channels     = channels_;
-    args.bufferSize   = bufferSize_;
+    // The period the device runs with, in engine-rate frames: miniaudio
+    // reports it at the device's native rate, while the event's sampleRate
+    // is the engine rate, so bufferSize / sampleRate is the period in seconds.
+    {
+        const ma_uint32 period = device->playback.internalPeriodSizeInFrames;
+        const ma_uint32 deviceRate = device->playback.internalSampleRate;
+        args.bufferSize = (deviceRate > 0 && deviceRate != (ma_uint32)sampleRate_)
+            ? (int)(((uint64_t)period * (uint64_t)sampleRate_ + deviceRate / 2) / deviceRate)
+            : (int)period;
+    }
     args.maxPolyphony = (int)playingSounds_.size();
 
     // Determine whether the opened device is the OS default by comparing
@@ -1723,10 +1852,10 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
 namespace {
 // audioOut / audioIn notifies running on this thread (nested when one device
 // callback fires both). Non-zero only on the audio thread inside a listener,
-// where waitForCallbackIdle() must not wait for itself.
+// where waitForAudioCallbacks() must not wait for itself.
 thread_local int t_callbackDepth = 0;
 
-// How long waitForCallbackIdle() waits. A buffer lasts ~1-100 ms, so a
+// How long waitForAudioCallbacks() waits. A buffer lasts ~1-100 ms, so a
 // callback still running after this is stuck, not slow.
 constexpr std::chrono::seconds kCallbackIdleTimeout{1};
 } // namespace
@@ -1748,12 +1877,12 @@ void AudioEngine::endCallback(int slot) {
     --t_callbackDepth;
 }
 
-bool AudioEngine::waitForCallbackIdle() {
+bool AudioEngine::waitForAudioCallbacks() {
     return waitForCallbacks(true);
 }
 
 namespace internal {
-void waitForCallbackIdleNoTimeout() {
+void waitForAudioCallbacksNoTimeout() {
     AudioEngine::getInstance().waitForCallbacks(false);
 }
 } // namespace internal
@@ -1762,7 +1891,7 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
     if (t_callbackDepth > 0) return true;   // audio thread, inside a listener
 
     auto warnGaveUp = [] {
-        logWarning("AudioEngine") << "waitForCallbackIdle: an audioOut / audioIn "
+        logWarning("AudioEngine") << "waitForAudioCallbacks: an audioOut / audioIn "
             "listener has been running for over "
             << kCallbackIdleTimeout.count() << " s; continuing without "
             "waiting for it. Is it waiting on this thread (a lock held here, "

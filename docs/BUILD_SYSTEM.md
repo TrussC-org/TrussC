@@ -471,7 +471,7 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
-2. Old Guest is unloaded (`dlclose` / `FreeLibrary`)
+2. The old Guest's App is destroyed (`events().hotReloadUnload` fires first). Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
 3. New Guest is loaded (`dlopen` / `LoadLibrary`)
 4. A new App instance is created → `setup()` runs again
 
@@ -480,6 +480,16 @@ The Host monitors `src/` for file modifications (polling every 500ms). When a ch
 Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated, and hover, the mouse grab and the node selection (`getSelectedNode()`) start empty. This is the same model as Processing / p5.js live coding.
 
 For most creative coding use cases (adjusting colors, positions, animations), this is sufficient.
+
+State that outlives the App is the exception: singletons and function-local statics in your code (or in an addon) belong to the guest library, which stays loaded after a reload, so the previous build's copy keeps any listener it has on `events()`. Drop them on `events().hotReloadUnload`, which fires before the host unloads the current build while its App is still alive (and once more at exit, after `exit`):
+
+```cpp
+unloadListener_ = events().hotReloadUnload.listen([this] {
+    // release what this build registered (the same cleanup as on exit)
+});
+```
+
+tcxImGui and tcxNodeInspector do this themselves.
 
 ### Disabling Hot Reload
 

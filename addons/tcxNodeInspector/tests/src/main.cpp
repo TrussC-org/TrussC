@@ -19,6 +19,10 @@
 //     that entry
 //   - a mod of another type added in place of a removed one leaves the entry
 //     at modRemoved, under the old type, whatever address the new mod gets
+//
+// Derived members (#287):
+//   - an edit of globalPos (TC_DERIVED, not saved by reflectToJson) is
+//     reported with its current value, the world position
 // =============================================================================
 
 #include <TrussC.h>
@@ -238,10 +242,38 @@ static void testMods() {
     insp.resetTouched();
 }
 
+// ---------------------------------------------------------------------------
+// Derived members (TC_DERIVED) are reported like any other member
+// ---------------------------------------------------------------------------
+static void testDerived() {
+    auto& insp = NodeInspector::instance();
+    insp.resetTouched();
+
+    Driver drv;
+    auto root = make_shared<Node>();
+    auto parent = make_shared<Node>();
+    auto node = make_shared<Node>();
+    root->addChild(parent);
+    parent->addChild(node);
+    parent->setPos(100, 0, 0);
+    drv.setRoot(root);
+    drv.tick();
+
+    node->setGlobalPos(Vec3(130, 5, 0));
+    tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), nullptr, "globalPos");
+    auto e = entries(node->getInstanceId(), "", "globalPos");
+    const bool ok = e.size() == 1 && e[0].contains("value") && e[0]["value"].is_array() &&
+                    e[0]["value"].size() == 3 && e[0]["value"][0].get<float>() == 130.0f &&
+                    e[0]["value"][1].get<float>() == 5.0f;
+    check("derived globalPos edit: reported with its current world value", ok);
+    insp.resetTouched();
+}
+
 int main() {
     std::printf("=== tcxNodeInspector tests ===\n");
     testDestroyed();
     testMods();
+    testDerived();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

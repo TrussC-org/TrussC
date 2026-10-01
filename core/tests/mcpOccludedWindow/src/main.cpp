@@ -29,6 +29,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -39,6 +40,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -97,7 +100,9 @@ static string statusOf(const json& reply) {
 
 static bool contains(const string& s, const string& part) { return s.find(part) != string::npos; }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     OpenWindow visible("visible"), hidden("hidden");
     g_hidden = &hidden;
     internal::windowOccludedHookForTests() = &occludedHook;
