@@ -18707,6 +18707,12 @@ description.en = "Report an error (message + code) from a derived class."
 description.ja = "派生クラスからエラー（メッセージ＋コード）を通知する。"
 description.ko = "파생 클래스에서 에러(메시지 + 코드)를 통지한다."
 
+["TcpClient::processNetworkStep"]
+description.en = "processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client."
+description.ja = "processNetwork() の処理本体（派生クラスと受信スレッド用）。呼び出し側スレッドがクライアントに二度と触れずに止まるべきとき false を返す: 接続の終了を通知した場合、またはリスナーがクライアントを破棄した場合。"
+description.ko = "processNetwork()의 처리 본체(파생 클래스와 수신 스레드용). 호출한 스레드가 클라이언트를 다시 읽지 않고 멈춰야 할 때 false를 반환한다: 연결 종료를 통지했거나 리스너가 클라이언트를 파괴한 경우."
+keywords = ["receive thread", "destroy", "listener", "lifetime"]
+
 ["ChipSoundBundle::Entry::note"]
 description.en = "The chip-synth note for this bundle entry."
 description.ja = "このバンドルエントリのチップシンセノート。"

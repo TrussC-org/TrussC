@@ -10,6 +10,7 @@
 #include <atomic>
 #include <mutex>
 #include <functional>
+#include <memory>
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
 
@@ -121,15 +122,22 @@ public:
     // TlsClient also onConnect and onError around the handshake), a plain
     // (inline) listener that calls connect() runs it on that old receive
     // thread, which connect() detaches from the client first. A listener
-    // that calls disconnect() there detaches it the same way. Nothing waits
-    // for a detached thread, neither disconnect() nor the destructor, and it
-    // goes on using the client after that call returns (the rest of the
-    // listener and of its receive loop). So until #261 / #262 land, do not
-    // destroy a client whose receive-thread listener called connect() or
-    // disconnect(): keep it for the life of the app. And do not call
-    // disconnect() on it from another thread until that call has returned,
-    // or the connection may complete after disconnect() has returned.
-    // Reconnecting from the main thread, as above, avoids all of this.
+    // that calls disconnect() there detaches it the same way.
+    //
+    // Such a listener may also destroy the client (an owner that replaces
+    // it, as WebSocketClient::connect() does): once a notification on the
+    // receive thread returns, the thread checks whether the client still
+    // exists before it reads the client again, and after onDisconnect (and
+    // TlsClient's onConnect(false)) it stops without reading the client at
+    // all (#262).
+    //
+    // Still not covered: nothing waits for a detached thread, neither
+    // disconnect() nor the destructor. So do not destroy such a client from
+    // another thread while that listener may still be running, and do not
+    // call disconnect() on it from another thread until that call has
+    // returned, or the connection may complete after disconnect() has
+    // returned (#261). Reconnecting from the main thread, as above, avoids
+    // all of this.
     //
     // onConnect(false): a failed attempt reports it from connectAsync(), from
     // a pending connect without threads, and from a failed TLS handshake (a
@@ -217,6 +225,20 @@ protected:
     // Accessible from derived classes
     void notifyError(const std::string& msg, int code = 0);
 
+    // Set to false by the destructor. A receive thread holds its own copy:
+    // after a notification it checks this copy, not the client, to find out
+    // whether a listener destroyed the client (#262).
+    using AliveToken = std::shared_ptr<std::atomic<bool>>;
+    AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
+
+    // processNetwork()'s work. alive: the caller's copy of alive_. Returns
+    // false when the calling thread must stop at once without reading the
+    // client again: it reported the end of the connection (onDisconnect, or
+    // onConnect(false)), or a listener destroyed the client. The decision to
+    // stop is made before the notification, since its listeners may destroy,
+    // disconnect or reconnect the client.
+    bool processNetworkStep(const AliveToken& alive);
+
 #ifdef _WIN32
     SOCKET socket_ = INVALID_SOCKET;
 #else
@@ -245,7 +267,7 @@ protected:
     std::atomic<bool> connectPending_{false};
 
 private:
-    void receiveThreadFunc(unsigned generation);
+    void receiveThreadFunc(unsigned generation, AliveToken alive);
     void connectThreadFunc(const std::string& host, int port);
 
     // Close the socket and release the receive thread (connectThread_ is left alone)
@@ -276,7 +298,8 @@ private:
     // another thread before that call has returned races it; destruction
     // races it for as long as the thread runs, which the app cannot see.
     // Hence the rules in the Events comment above. The fix belongs to #261
-    // (a cancellable connect) and #262.
+    // (a cancellable connect). Destruction by a listener on the thread itself
+    // is covered: see alive_.
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
