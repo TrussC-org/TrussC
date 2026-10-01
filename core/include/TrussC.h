@@ -2424,9 +2424,9 @@ namespace internal {
             std::string mcpToken = envToken ? envToken : "";
 
             // Start HTTP server for MCP transport
+            // The server thread logs "[MCP] HTTP server listening on
+            // http://HOST:PORT/mcp" once it has bound the port.
             mcp::startHttpServer(mcpPort, mcpHost, mcpToken);
-
-            logNotice("System") << "MCP HTTP server started";
         }
         #endif
 
