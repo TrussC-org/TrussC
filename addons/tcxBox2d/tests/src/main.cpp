@@ -931,11 +931,11 @@ static void testCompoundEvents() {
         auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(220, 20));
 
         int began = 0, stay = 0, ended = 0, boxBegan = 0, boxEnded = 0;
-        EventListener l1 = bar->onCollisionBegan.listen([&](box2d::Contact2D&) { ++began; });
+        EventListener l1 = bar->onCollisionEnter.listen([&](box2d::Contact2D&) { ++began; });
         EventListener l2 = bar->onCollisionStay.listen([&](box2d::Contact2D&) { ++stay; });
-        EventListener l3 = bar->onCollisionEnded.listen([&](box2d::Contact2D&) { ++ended; });
-        EventListener l4 = box->onCollisionBegan.listen([&](box2d::Contact2D&) { ++boxBegan; });
-        EventListener l5 = box->onCollisionEnded.listen([&](box2d::Contact2D&) { ++boxEnded; });
+        EventListener l3 = bar->onCollisionExit.listen([&](box2d::Contact2D&) { ++ended; });
+        EventListener l4 = box->onCollisionEnter.listen([&](box2d::Contact2D&) { ++boxBegan; });
+        EventListener l5 = box->onCollisionExit.listen([&](box2d::Contact2D&) { ++boxEnded; });
 
         world.getWorld()->Step(1.0f / 60.0f, 8, 3);
         int touching = touchingContacts(world, bar->getBody(), box->getBody());
@@ -1085,10 +1085,10 @@ static void testCompoundHandover() {
         box->getBody()->SetSleepingAllowed(false);
 
         int began = 0, ended = 0, boxBegan = 0, boxEnded = 0;
-        EventListener l1 = bar->onTriggerBegan.listen([&](box2d::Contact2D&) { ++began; });
-        EventListener l2 = bar->onTriggerEnded.listen([&](box2d::Contact2D&) { ++ended; });
-        EventListener l3 = box->onTriggerBegan.listen([&](box2d::Contact2D&) { ++boxBegan; });
-        EventListener l4 = box->onTriggerEnded.listen([&](box2d::Contact2D&) { ++boxEnded; });
+        EventListener l1 = bar->onTriggerEnter.listen([&](box2d::Contact2D&) { ++began; });
+        EventListener l2 = bar->onTriggerExit.listen([&](box2d::Contact2D&) { ++ended; });
+        EventListener l3 = box->onTriggerEnter.listen([&](box2d::Contact2D&) { ++boxBegan; });
+        EventListener l4 = box->onTriggerExit.listen([&](box2d::Contact2D&) { ++boxEnded; });
 
         step(world, 1);
         bool oneAtATime = found;
@@ -1234,8 +1234,8 @@ static void testStayListenerDestroys() {
         });
         // The dropped RigidBody2D unregisters before its body goes, so the
         // bar can't tell it was a trigger: count either kind of Ended.
-        EventListener l2 = bar->onTriggerEnded.listen([&](box2d::Contact2D&) { ++barEnded; });
-        EventListener l3 = bar->onCollisionEnded.listen([&](box2d::Contact2D&) { ++barEnded; });
+        EventListener l2 = bar->onTriggerExit.listen([&](box2d::Contact2D&) { ++barEnded; });
+        EventListener l3 = bar->onCollisionExit.listen([&](box2d::Contact2D&) { ++barEnded; });
 
         world.getCollisionManager()->update();
         check("RigidBody2D Stay drops the next pair's node: one bar Stay, one Ended",
@@ -1396,12 +1396,12 @@ static vector<EventListener> countEvents(box2d::RigidBody2D* rb, ModCounts& n,
         };
     };
     vector<EventListener> ls;
-    ls.push_back(rb->onCollisionBegan.listen(on(0)));
+    ls.push_back(rb->onCollisionEnter.listen(on(0)));
     ls.push_back(rb->onCollisionStay.listen(on(1)));
-    ls.push_back(rb->onCollisionEnded.listen(on(2)));
-    ls.push_back(rb->onTriggerBegan.listen(on(0)));
+    ls.push_back(rb->onCollisionExit.listen(on(2)));
+    ls.push_back(rb->onTriggerEnter.listen(on(0)));
     ls.push_back(rb->onTriggerStay.listen(on(1)));
-    ls.push_back(rb->onTriggerEnded.listen(on(2)));
+    ls.push_back(rb->onTriggerExit.listen(on(2)));
     return ls;
 }
 
@@ -2143,6 +2143,30 @@ static void testReducedConvexHull() {
     check("reducedConvexHull 50,000-point outline: under 1 s", sec < 1.0);
 }
 
+// The old event names (Began / Ended) are deprecated aliases of the new ones
+// (#496): the same Event objects, so a listener on either name sees the same
+// notifications.
+static void testDeprecatedEventAliases(box2d::World& world) {
+    auto node = make_shared<Node>();
+    auto* rb = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(4, 4));
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    check("deprecated aliases: onCollisionBegan is onCollisionEnter", &rb->onCollisionBegan == &rb->onCollisionEnter);
+    check("deprecated aliases: onCollisionEnded is onCollisionExit", &rb->onCollisionEnded == &rb->onCollisionExit);
+    check("deprecated aliases: onTriggerBegan is onTriggerEnter", &rb->onTriggerBegan == &rb->onTriggerEnter);
+    check("deprecated aliases: onTriggerEnded is onTriggerExit", &rb->onTriggerEnded == &rb->onTriggerExit);
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#else
+#pragma GCC diagnostic pop
+#endif
+}
+
 int main() {
     box2d::World world;
     world.setup(0, 0);
@@ -2164,6 +2188,7 @@ int main() {
     testCompoundOffset(world);
     testDensityAndType(world);
     testReducedConvexHull();
+    testDeprecatedEventAliases(world);
 
     if (g_fail) {
         printf("\n%d check(s) FAILED\n", g_fail);
