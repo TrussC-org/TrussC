@@ -33,6 +33,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -42,6 +43,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -212,9 +215,11 @@ private:
     Window& win_;
 };
 
+} // namespace
+
 // -----------------------------------------------------------------------------
 
-int main() {
+TC_CORE_TEST_MAIN() {
     getMainThreadId();   // this thread is the main thread
 
     vector<string> warnings, errors;
