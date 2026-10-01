@@ -314,18 +314,21 @@ private:
 
 ### Warning Once
 
-To log a warning only the first time (an unsupported format, a missing device), gate it with `tc::logOnce(key)` instead of a `static bool warned` flag. Its state lives in TrussC's `.cpp`, one copy per process, so the gate holds across hot reloads and between host and guest. Prefix the key with your addon name so it does not collide with other keys; pass an interval to repeat at most once per that many seconds. A key stays until the process ends, so build keys from fixed strings, not from paths or ids:
+To log a warning only the first time (an unsupported format, a missing device), gate it with a `tc::OnceGate` instead of a `static bool warned` flag. `isFirstTime()` is true the first time; give the constructor an interval in seconds to make it true again once that much time has passed since the last true. It is thread-safe and lock-free, so audio and worker threads can use it too:
 
 ```cpp
-if (tc::logOnce("tcxMyAddon.unsupportedFormat")) {
+static tc::OnceGate unsupportedWarned;
+if (unsupportedWarned.isFirstTime()) {
     tc::logWarning("tcxMyAddon") << "format not supported; skipping";
 }
-if (tc::logOnce("tcxMyAddon.queueFull", 5.0)) {   // at most every 5 s
+
+static tc::OnceGate queueFull{5.0};               // at most once per 5 s
+if (queueFull.isFirstTime()) {
     tc::logWarning("tcxMyAddon") << "queue full, dropping frames";
 }
 ```
 
-A warning that should fire once per object (once per connection, say) keeps its flag as a member of that object instead.
+For a warning that should fire once per object (once per connection, say), make the gate a member of that object: `tc::OnceGate timeoutWarned_;`.
 
 ### Holding on to Nodes
 
