@@ -166,6 +166,8 @@ in the `tc_get_node_tree` encoding (rotation in degrees, colors `[r,g,b,a]`):
 
 A destroyed node reports `"destroyed": true`, and a removed mod
 `"modRemoved": true`, each with the value as of the last edit.
+A mod is identified by its node and type, so a mod of the same type added
+again to that node continues the entry and reports its own current value.
 `tcx_imgui_reset_touched` clears the record. From code:
 
 ```cpp
@@ -221,6 +223,12 @@ cd example-basic
 trusscli update     # generate build files
 trusscli run        # build + launch
 ```
+
+## Tests
+
+`tests/` is a headless console harness, run by CI through
+`examples/build_all.py --addon-tests-only`. Run it locally with
+`trusscli run -p .` from `tests/`.
 
 ## License
 

@@ -74,13 +74,6 @@ Json memberValue(Node* node, Mod* mod, const string& member) {
     }
 }
 
-bool hasMod(Node* node, const Mod* mod) {
-    for (Mod* m : node->getMods()) {
-        if (m == mod) return true;
-    }
-    return false;
-}
-
 } // namespace
 
 NodeInspector::NodeInspector() {
@@ -94,18 +87,22 @@ NodeInspector::NodeInspector() {
 void NodeInspector::recordTouched(Node* node, Mod* mod, const string& member) {
     if (!node) return;
     const uint64_t id = node->getInstanceId();
+    // A mod is identified by (node, short type name), as getModByTypeName()
+    // and tc_set_node_members do: a node holds at most one mod per type, and
+    // a mod of the same type added again continues the same entry.
+    string modType;
+    if (mod) { Mod& m = *mod; modType = shortTypeName(typeid(m)); }
     TouchedMember* t = nullptr;
     for (auto& e : touched_) {
-        if (e.nodeId == id && e.mod == mod && e.member == member) { t = &e; break; }
+        if (e.nodeId == id && e.modType == modType && e.member == member) { t = &e; break; }
     }
     if (!t) {
         touched_.push_back(TouchedMember{});
         t = &touched_.back();
         t->node = node->weak_from_this();
         t->nodeId = id;
-        t->mod = mod;
+        t->modType = modType;
         t->member = member;
-        if (mod) { Mod& m = *mod; t->modType = shortTypeName(typeid(m)); }
     }
     t->nodeType = node->getTypeName();
     t->nodeName = node->hasName() ? node->getName() : string();
@@ -116,25 +113,36 @@ Json NodeInspector::getTouched() {
     Json arr = Json::array();
     for (auto& t : touched_) {
         auto node = t.node.lock();
-        if (node) {   // current names / value while the node lives
+        // Destroyed: freed, or destroy()ed but still held elsewhere (e.g. a
+        // Ptr member of the app). isDead() stays true after the sweep, whose
+        // cleanupTree() also marks the children of a destroyed node.
+        const bool destroyed = !node || node->isDead();
+        if (!destroyed) {   // current names / value while the node lives
             t.nodeType = node->getTypeName();
             t.nodeName = node->hasName() ? node->getName() : string();
         }
         Json e = {{"nodeType", t.nodeType}, {"nodeId", t.nodeId}};
         if (!t.nodeName.empty()) e["nodeName"] = t.nodeName;
-        if (t.mod) e["mod"] = t.modType;
+        if (!t.modType.empty()) e["mod"] = t.modType;
         e["member"] = t.member;
-        if (!node) {
+        Mod* mod = nullptr;
+        if (!destroyed && !t.modType.empty()) mod = node->getModByTypeName(t.modType);
+        if (destroyed) {
             e["destroyed"] = true;             // value as of the last edit
-        } else if (t.mod && !hasMod(node.get(), t.mod)) {
+        } else if (!t.modType.empty() && !mod) {
             e["modRemoved"] = true;            // value as of the last edit
         } else {
-            t.value = memberValue(node.get(), const_cast<Mod*>(t.mod), t.member);
+            t.value = memberValue(node.get(), mod, t.member);
         }
         e["value"] = t.value;
         arr.push_back(std::move(e));
     }
     return arr;
+}
+
+void internal::recordTouchedForTests(NodeInspector& inspector, Node* node, Mod* mod,
+                                     const string& member) {
+    inspector.recordTouched(node, mod, member);
 }
 
 void NodeInspector::syncNameBuf(Node* node) {

@@ -665,6 +665,53 @@ static int checkWatcherExtensions() {
     return rc;
 }
 
+// The host's load failures go through the Logger (#311), so they reach the
+// log file and onLog, not only stderr: a library that is missing (the copy to
+// the temp path fails) and a file that is not a library (dlopen /
+// LoadLibrary fails) each log one Error tagged [HotReload]. Returns 0 when
+// both did.
+static int checkLoadFailuresLogged() {
+    std::mutex m;
+    std::vector<std::string> errors;
+    EventListener listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level != LogLevel::Error) return;
+        std::lock_guard<std::mutex> lock(m);
+        errors.push_back(e.message);
+    });
+    const fs::path dir = fs::temp_directory_path() / "tc_hotReloadLifecycle_loadfail";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const fs::path notALibrary = dir / "notALibrary.so";
+    std::ofstream(notALibrary) << "not a shared library\n";
+
+    int rc = 0;
+    auto expectOneError = [&](const char* name, const fs::path& path) {
+        {
+            std::lock_guard<std::mutex> lock(m);
+            errors.clear();
+        }
+        trussc::hot_reload::GuestLibrary lib;
+        const bool loaded = lib.load(internal::pathToUtf8(path));
+        std::lock_guard<std::mutex> lock(m);
+        if (loaded) {
+            std::printf("hotReloadLifecycle: FAIL - %s loaded\n", name);
+            rc = 50;
+        } else if (errors.size() != 1 || errors[0].rfind("[HotReload] ", 0) != 0) {
+            std::printf("hotReloadLifecycle: FAIL - %s logged %zu Error line(s)%s%s\n", name,
+                        errors.size(), errors.empty() ? "" : ", first: ",
+                        errors.empty() ? "" : errors[0].c_str());
+            rc = 50;
+        }
+    };
+    expectOneError("a missing library", dir / "missing.so");
+    expectOneError("a file that is not a library", notALibrary);
+    listener.disconnect();
+    fs::remove_all(dir, ec);
+    if (rc == 0) std::printf("hotReloadLifecycle: load failures logged ok\n");
+    return rc;
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--app") {
         WindowSettings settings;
@@ -677,6 +724,7 @@ int main(int argc, char** argv) {
     getMainThreadId();
 
     if (int rc = checkWatcherExtensions()) return rc;
+    if (int rc = checkLoadFailuresLogged()) return rc;
 
     std::string guestPath = findGuestLibrary();
     if (guestPath.empty()) {
