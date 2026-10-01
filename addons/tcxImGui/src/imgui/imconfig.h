@@ -66,7 +66,12 @@
 // to the caller's variable and its type are in hand. It declares a scope object
 // that calls ImGuiTcHook_ItemValue() when the widget function RETURNS, through
 // any return path, so the hook sees the final value of this frame (after drag,
-// slider and text-input edits). Active only while TestEngineHookItems is set.
+// slider and text-input edits). At entry, before the widget reads the variable,
+// it calls ImGuiTcHook_ItemEntry(), which may write a value the MCP tools queued
+// for this widget through Data. In that frame every return after the
+// declaration returns true (IMGUI_TC_RETURN), so code that applies a copy only
+// when the widget returns true takes the value; Edited is not set.
+// Active only while TestEngineHookItems is set.
 // Implemented by tcxImGui (tcImGuiHooks.h). See TRUSSC_MODIFICATIONS.md; every
 // patched line in imgui_widgets.cpp carries a "[TrussC]" comment.
 struct ImGuiContext;
@@ -81,14 +86,18 @@ enum ImGuiTcValueKind_
     ImGuiTcValueKind_ComboPreview,  // BeginCombo: Data = const char* preview value (may be NULL)
     ImGuiTcValueKind_Text,          // InputTextEx: Data = char* const* (the function's 'buf' variable,
                                     //   which a resize callback may repoint), Flags = ImGuiInputTextFlags
-    ImGuiTcValueKind_Bool,          // Checkbox, MenuItem(bool*), Selectable(bool*): Data = bool* (NULL: nothing is reported)
-    ImGuiTcValueKind_Radio,         // RadioButton(int*): Data = int* the variable the button group sets
+    ImGuiTcValueKind_Bool,          // Checkbox, MenuItem(bool*), Selectable(bool*): Data = bool* (NULL: nothing is reported),
+                                    //   Flags = ImGuiItemFlags the widget adds for itself (Disabled: MenuItem enabled = false,
+                                    //   ImGuiSelectableFlags_Disabled)
+    ImGuiTcValueKind_Radio,         // RadioButton(int*): Data = int* the variable the button group sets,
+                                    //   Flags = v_button, the value pressing this button sets
     ImGuiTcValueKind_ListBox,       // ListBox: Data = int* current item
     ImGuiTcValueKind_ListBoxBegin,  // BeginListBox: no data (a pick inside its child window is an edit of the list box)
 };
 struct ImGuiTcItemValue;
 extern void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item);
-extern unsigned int ImGuiTcHook_EditCount(ImGuiContext* ctx);   // edits the hooks have seen so far
+extern unsigned int ImGuiTcHook_ItemEntry(ImGuiTcItemValue* item);   // at entry: may write a queued value
+                                                                     // through Data; returns the edit count
 struct ImGuiTcItemValue
 {
     ImGuiContext*   Ctx;            // NULL when hooks are off: nothing is reported
@@ -97,15 +106,18 @@ struct ImGuiTcItemValue
     const char*     Label;
     int             Kind;           // ImGuiTcValueKind_
     int             DataType;       // ImGuiDataType of each component
-    const void*     Data;
+    const void*     Data;           // the caller's variable (written only by ImGuiTcHook_ItemEntry)
     int             Components;
     int             Flags;
     unsigned int    EditCountAtEntry;   // an edit of a part (a component, ##X in ColorEdit) counts as an edit of the whole
+    bool            Injected;       // ImGuiTcHook_ItemEntry wrote a queued value this frame: the widget returns true
     ~ImGuiTcItemValue() { if (Ctx) ImGuiTcHook_ItemValue(this); }
 };
 #define IMGUI_TC_ITEM_VALUE(_ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, _FLAGS) \
-    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), \
-                                             GImGui->TestEngineHookItems ? ImGuiTcHook_EditCount(GImGui) : 0u }
+    ImGuiTcItemValue imgui_tc_item_value = { GImGui->TestEngineHookItems ? GImGui : NULL, GImGui->CurrentWindow, _ID, _LABEL, _KIND, _DATA_TYPE, _DATA, _COMPONENTS, (int)(_FLAGS), 0u, false }; \
+    if (imgui_tc_item_value.Ctx) imgui_tc_item_value.EditCountAtEntry = ImGuiTcHook_ItemEntry(&imgui_tc_item_value)
+// Wraps every return after IMGUI_TC_ITEM_VALUE() in a widget whose value can be set: true in the frame a value was written
+#define IMGUI_TC_RETURN(_RET)   ((_RET) || imgui_tc_item_value.Injected)
 // [TrussC] end
 
 //---- Include imgui_user.h at the end of imgui.h as a convenience

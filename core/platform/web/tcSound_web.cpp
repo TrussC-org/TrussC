@@ -9,6 +9,8 @@
 #include "tc/sound/tcSound.h"
 #include "tc/utils/tcLog.h"
 #include <emscripten.h>
+#include <algorithm>
+#include <climits>
 #include <cstring>
 
 namespace trussc {
@@ -164,33 +166,77 @@ void SoundBuffer::ensureAacLoaded() {
     int srcChannels = getAacChannels();
     int srcSampleRate = getAacSampleRate();
     int srcNumSamples = getAacLength();
+    size_t srcTotal = 0;
+    if (srcNumSamples < 1 || srcSampleRate < 1 ||
+        !internal::interleavedSampleCount((uint64_t)srcNumSamples, srcChannels,
+                                          std::min(samples.max_size(), (size_t)INT_MAX),
+                                          srcTotal)) {
+        logWarning("SoundBuffer") << "Unusable decoded AAC (" << srcChannels << " ch, "
+                                  << srcSampleRate << " Hz, " << srcNumSamples
+                                  << " samples): " << deferredAacPath_;
+        deferredAacPath_.clear();
+        return;
+    }
 
     // Target sample rate (AudioEngine's rate)
     const int targetSampleRate = 44100;
 
     if (srcSampleRate == targetSampleRate) {
-        // No resampling needed
+        // No resampling needed. Exception catching is off on the web, so a
+        // failed allocation would abort: check it first.
+        if (!internal::allocationFits(srcTotal * sizeof(float))) {
+            logWarning("SoundBuffer") << "Out of memory for decoded AAC (" << srcTotal
+                                      << " samples): " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
         channels = srcChannels;
         sampleRate = srcSampleRate;
         numSamples = srcNumSamples;
 
-        size_t totalSamples = numSamples * channels;
-        samples.resize(totalSamples);
-        copyAacData(samples.data(), totalSamples);
+        samples.resize(srcTotal);
+        copyAacData(samples.data(), (int)srcTotal);
     } else {
         // Resample to target sample rate
         double ratio = (double)targetSampleRate / srcSampleRate;
-        size_t newNumSamples = (size_t)(srcNumSamples * ratio);
+        // Range-checked as a double first: the cast of an out-of-range
+        // double to size_t is undefined.
+        const double newFrames = srcNumSamples * ratio;
+        size_t newNumSamples = 0;
+        size_t newTotal = 0;
+        if (newFrames < (double)samples.max_size()) newNumSamples = (size_t)newFrames;
+        if (newNumSamples == 0 ||
+            !internal::interleavedSampleCount(newNumSamples, srcChannels, samples.max_size(),
+                                              newTotal)) {
+            logWarning("SoundBuffer") << "Resampled AAC length out of range: " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
+        // Exception catching is off on the web, so a failed allocation would
+        // abort: check each one first. The resampled buffer is checked while
+        // the source one is held, as both are held at once.
+        if (!internal::allocationFits(srcTotal * sizeof(float))) {
+            logWarning("SoundBuffer") << "Out of memory for decoded AAC (" << srcTotal
+                                      << " samples): " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
+        std::vector<float> srcSamples(srcTotal);
+        if (!internal::allocationFits(newTotal * sizeof(float))) {
+            logWarning("SoundBuffer") << "Out of memory for resampled AAC (" << newTotal
+                                      << " samples): " << deferredAacPath_;
+            deferredAacPath_.clear();
+            return;
+        }
 
         // First, get source data
-        std::vector<float> srcSamples(srcNumSamples * srcChannels);
-        copyAacData(srcSamples.data(), srcNumSamples * srcChannels);
+        copyAacData(srcSamples.data(), (int)srcTotal);
 
         // Resample with linear interpolation
         channels = srcChannels;
         sampleRate = targetSampleRate;
         numSamples = newNumSamples;
-        samples.resize(numSamples * channels);
+        samples.resize(newTotal);
 
         double srcRatio = (double)srcNumSamples / newNumSamples;
         for (size_t i = 0; i < newNumSamples; i++) {

@@ -3,7 +3,9 @@
 // =============================================================================
 
 #include "tc/network/tcUdpSocket.h"
+#include "tc/network/tcSocketInternal.h"
 
+#include <chrono>
 #include <cstring>
 
 #ifdef _WIN32
@@ -28,32 +30,11 @@
 
 namespace trussc {
 
-// Winsock initialization flag
-bool UdpSocket::winsockInitialized_ = false;
-
-// ---------------------------------------------------------------------------
-// Winsock initialization (Windows)
-// ---------------------------------------------------------------------------
-bool UdpSocket::initWinsock() {
-#ifdef _WIN32
-    if (!winsockInitialized_) {
-        WSADATA wsaData;
-        int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-        if (result != 0) {
-            logError() << "WSAStartup failed: " << result;
-            return false;
-        }
-        winsockInitialized_ = true;
-    }
-#endif
-    return true;
-}
-
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
 UdpSocket::UdpSocket() {
-    initWinsock();
+    internal::ensureWinsock();
 #ifdef __EMSCRIPTEN__
     useThread_ = false;
 #endif
@@ -425,6 +406,7 @@ void UdpSocket::receiveThreadFunc() {
     // Re-implementing with select/poll to allow proper stopping
     
     std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+    bool waitFailing = false;   // the previous wait failed too (report once per run)
 
     while (!shouldStop_.load()) {
         // Poll with timeout to allow checking shouldStop
@@ -446,6 +428,25 @@ void UdpSocket::receiveThreadFunc() {
 #endif
 
         if (shouldStop_.load()) break;
+
+        // A failed wait returns at once, so looping straight back into it
+        // would spin a core at 100% for as long as the failure lasts (Winsock
+        // torn down under the socket, for one), silently, while isReceiving()
+        // still says true. Report the first failure of a run and back off for
+        // one wait slice before trying again.
+        if (res < 0) {
+            int err = SOCKET_ERROR_CODE;
+#ifndef _WIN32
+            if (err == EINTR) continue;   // interrupted by a signal, not a failure
+#endif
+            if (!waitFailing) {
+                notifyError("Receive wait failed", err);
+                waitFailing = true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+        waitFailing = false;
 
         if (dataReady) {
             sockaddr_in fromAddr{};
