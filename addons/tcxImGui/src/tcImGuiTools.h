@@ -20,6 +20,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <limits>
+#include <type_traits>
 
 namespace tcx::imgui {
 
@@ -293,6 +295,7 @@ inline void addValueFields(nlohmann::json& e, const WidgetValue& v) {
         e["widget"] = "radio";
         e["valueType"] = "int";
         e["value"] = componentsToJson(v);   // the variable the button group sets
+        e["buttonValue"] = v.buttonValue;   // this button's value (v_button): what pressing it sets
         return;
     case ImGuiTcValueKind_ListBox:
         e["widget"] = "listbox";
@@ -335,6 +338,224 @@ inline nlohmann::json touchedWidgetsJson() {
     return arr;
 }
 
+// ---------------------------------------------------------------------------
+// Setting values through the value hook (tcx_imgui_input on a value widget)
+// ---------------------------------------------------------------------------
+
+// A composite widget (DragFloat3, SliderInt2, InputFloat4, ColorEdit4,
+// ColorPicker4, ...) has no item of its own: its entry is the group of its
+// parts, so a click at its centre lands on one part, or in a gap.
+inline bool isComposite(const WidgetValue& v) {
+    if (v.kind == ImGuiTcValueKind_Color) return true;
+    return (v.kind == ImGuiTcValueKind_Drag || v.kind == ImGuiTcValueKind_Slider ||
+            v.kind == ImGuiTcValueKind_Input) && v.components > 1;
+}
+
+inline const char* kindName(int kind) {
+    switch (kind) {
+    case ImGuiTcValueKind_Drag:        return "drag";
+    case ImGuiTcValueKind_Slider:      return "slider";
+    case ImGuiTcValueKind_SliderAngle: return "slider_angle";
+    case ImGuiTcValueKind_Input:       return "input";
+    case ImGuiTcValueKind_Color:       return "color";
+    case ImGuiTcValueKind_Combo:       return "combo";
+    case ImGuiTcValueKind_Bool:        return "checkbox";
+    case ImGuiTcValueKind_Radio:       return "radio";
+    case ImGuiTcValueKind_ListBox:     return "listbox";
+    default:                           return "widget";
+    }
+}
+
+// What tcx_imgui_input takes for this widget, in the units the tools report
+inline std::string expectedValue(const WidgetValue& v) {
+    const std::string n = std::to_string(v.components);
+    switch (v.kind) {
+    case ImGuiTcValueKind_Bool:        return "true or false";
+    case ImGuiTcValueKind_Combo:
+    case ImGuiTcValueKind_ListBox:     return "the index of an item (an integer)";
+    case ImGuiTcValueKind_Radio:       return "this button's value, " + std::to_string(v.buttonValue) + " (buttonValue)";
+    case ImGuiTcValueKind_SliderAngle: return "a number, in radians";
+    case ImGuiTcValueKind_Color:
+        return "an array of " + n + " numbers, 0-1 (" + (v.hsv ? "[h, s, v" : "[r, g, b") +
+               (v.components == 4 ? ", a])" : "])");
+    default:
+        if (v.components == 1) return std::string("a number (") + dataTypeName(v.dataType) + ")";
+        return "an array of " + n + " numbers (" + dataTypeName(v.dataType) + ")";
+    }
+}
+
+template <class T>
+inline bool jsonToInt(const nlohmann::json& v, unsigned char* out, std::string& err) {
+    using L = std::numeric_limits<T>;
+    T x;
+    if (v.is_number_unsigned()) {
+        uint64_t u = v.get<uint64_t>();
+        if (u > (uint64_t)L::max()) { err = "out of range"; return false; }
+        x = (T)u;
+    } else if (v.is_number_integer()) {
+        int64_t i = v.get<int64_t>();
+        if (std::is_signed<T>::value ? (i < (int64_t)L::min() || i > (int64_t)L::max()) : i < 0) {
+            err = "out of range";
+            return false;
+        }
+        x = (T)i;
+    } else {
+        double d = v.get<double>();
+        if (d != std::floor(d)) { err = "not an integer"; return false; }
+        // max() + 1 is a power of two, exact as a double (max() itself may round up)
+        if (!(d >= (double)L::min() && d < (double)L::max() + 1.0)) { err = "out of range"; return false; }
+        x = (T)d;
+    }
+    std::memcpy(out, &x, sizeof(x));
+    return true;
+}
+
+// One component of type t from v, into out. False, with err, when v is not a
+// value of that type.
+inline bool jsonToScalar(const nlohmann::json& v, ImGuiDataType t, unsigned char* out, std::string& err) {
+    if (t == ImGuiDataType_Bool) {
+        if (!v.is_boolean()) { err = "not true or false"; return false; }
+        bool b = v.get<bool>();
+        std::memcpy(out, &b, sizeof(b));
+        return true;
+    }
+    if (!v.is_number()) { err = "not a number"; return false; }
+    switch (t) {
+    case ImGuiDataType_Float: {
+        double d = v.get<double>();
+        if (std::fabs(d) > (double)std::numeric_limits<float>::max()) { err = "out of range"; return false; }
+        float f = (float)d;
+        std::memcpy(out, &f, sizeof(f));
+        return true;
+    }
+    case ImGuiDataType_Double: { double d = v.get<double>(); std::memcpy(out, &d, sizeof(d)); return true; }
+    case ImGuiDataType_S8:     return jsonToInt<int8_t>(v, out, err);
+    case ImGuiDataType_U8:     return jsonToInt<uint8_t>(v, out, err);
+    case ImGuiDataType_S16:    return jsonToInt<int16_t>(v, out, err);
+    case ImGuiDataType_U16:    return jsonToInt<uint16_t>(v, out, err);
+    case ImGuiDataType_S32:    return jsonToInt<int32_t>(v, out, err);
+    case ImGuiDataType_U32:    return jsonToInt<uint32_t>(v, out, err);
+    case ImGuiDataType_S64:    return jsonToInt<int64_t>(v, out, err);
+    case ImGuiDataType_U64:    return jsonToInt<uint64_t>(v, out, err);
+    default:                   err = "unsupported type"; return false;
+    }
+}
+
+// The bytes of the widget's variable holding `v`: a single value for one
+// component, an array of exactly `components` values otherwise.
+inline bool valueToBytes(const WidgetValue& w, const nlohmann::json& v,
+                         std::vector<unsigned char>& out, std::string& err) {
+    const size_t size = ImGui::DataTypeGetInfo(w.dataType)->Size;
+    out.assign(size * (size_t)w.components, 0);
+    if (w.components == 1) {
+        if (!jsonToScalar(v, w.dataType, out.data(), err)) { err = v.dump() + ": " + err; return false; }
+        return true;
+    }
+    if (!v.is_array() || v.size() != (size_t)w.components) {
+        err = v.is_array() ? std::to_string(v.size()) + " values, not " + std::to_string(w.components)
+                           : v.dump() + " is not an array";
+        return false;
+    }
+    for (int i = 0; i < w.components; i++) {
+        if (!jsonToScalar(v[(size_t)i], w.dataType, out.data() + size * (size_t)i, err)) {
+            err = "element " + std::to_string(i) + " (" + v[(size_t)i].dump() + "): " + err;
+            return false;
+        }
+    }
+    return true;
+}
+
+// A queued value is written only within kPendingValueLifetime of the call, so
+// it never lands after the tool has answered: a widget that runs later gets the
+// Expired error, and nothing is written. The check in the widget's next frame
+// is waited for until kValueCheckDeadline after the call; a value written but
+// not checked by then (its window rendered no frame since the write: slower
+// than one frame per 2 s, or it stopped rendering) is settled as applied on
+// its read-back at the widget's return, from the main window's afterFrame
+// (settleOverdueValues()), as for a widget not drawn again. Both come before
+// tc::mcp's timeout for a deferred reply that is never produced
+// (kTargetedDeferralTimeout, 5 s), whose generic error would hide that the
+// value was written. So a window that renders more often than once every 2 s
+// gets its value written and checked in time.
+inline constexpr std::chrono::seconds kPendingValueLifetime{2};
+inline constexpr std::chrono::seconds kValueCheckDeadline{4};
+static_assert(kPendingValueLifetime < kValueCheckDeadline,
+              "a written value must get time for its check frame");
+static_assert(kValueCheckDeadline + std::chrono::seconds{1} <= tc::mcp::detail::kTargetedDeferralTimeout,
+              "the check must be settled before the deferred reply's timeout");
+
+// The refusal of a RadioButton(int*) given a value other than its own: in
+// ImGui, true from that button means its variable holds its own value, so
+// only the button whose value it is can set it.
+inline std::string otherButtonMessage(const std::string& label, int buttonValue, int wanted) {
+    return "'" + label + "': this button's value is " + std::to_string(buttonValue) + "; to set " +
+           std::to_string(wanted) + ", target the button whose value is " + std::to_string(wanted) +
+           " (buttonValue in tcx_imgui_get_widgets). Nothing was written";
+}
+
+// The reply of tcx_imgui_input for a value written through the value hook,
+// once its outcome is known: after the frame after the call (not drawn, a
+// same-frame change, a refusal), or after the frame after the write, which
+// checks that the variable still holds the value.
+inline nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<PendingValue>& p,
+                                      const std::string& label, const std::string& window) {
+    using State = PendingValue::State;
+    nlohmann::json r = {{"label", label}, {"window", window}};
+    int wid = windowIdFor(ctx);
+    r["windowId"] = wid >= 0 ? nlohmann::json(wid) : nlohmann::json(nullptr);
+    auto error = [&](const std::string& message) {
+        r["status"] = "error";
+        r["message"] = message;
+        return r;
+    };
+    switch (p->state) {
+    case State::Applied:
+        r["status"] = "ok";
+        addValueFields(r, p->readBack);   // read back from the variable
+        return r;
+    case State::Adjusted:
+        r["status"] = "ok";
+        r["message"] = "'" + label + "' took the value, and the app changed it in the next frame (a clamp, "
+                       "or a conversion in its setter?). value = what the variable holds now";
+        addValueFields(r, p->readBack);
+        return r;
+    case State::Changed:
+        addValueFields(r, p->readBack);
+        return error("The value was written, but '" + label + "' changed it again in the same frame "
+                     "(a hand edit at the same time?). value = what the variable holds now");
+    case State::Reverted:
+        addValueFields(r, p->readBack);
+        return error("The value was written and '" + label + "' returned true, but in the next frame "
+                     "its variable held its old value again (value = that value). The app ignores the "
+                     "widget's return value and copies its own value into the variable every frame, or "
+                     "it turned the value back (a clamp to the old value?); if it is the former, this "
+                     "widget cannot be set from MCP: change the value in the app instead");
+    case State::Disabled:
+        return error("'" + label + "' is disabled (inside BeginDisabled(), a disabled MenuItem or "
+                     "Selectable). Nothing was written");
+    case State::Expired:
+        return error("'" + label + "' ran only more than " + std::to_string(kPendingValueLifetime.count()) +
+                     " s after the call (a window that renders very slowly, e.g. Window::setFps below "
+                     "0.5?), too late to be written and checked before the reply. Nothing was written");
+    case State::ReadOnly:
+        return error("'" + label + "' is read-only. Nothing was written");
+    case State::ShapeChanged:
+        return error("'" + label + "' no longer takes this kind of value (it changed since it was listed). "
+                     "Read tcx_imgui_get_widgets again. Nothing was written");
+    case State::Superseded:
+        return error("Superseded by a later tcx_imgui_input on '" + label + "'. Nothing was written");
+    case State::OtherButton: {
+        int wanted = 0;
+        std::memcpy(&wanted, p->bytes.data(), sizeof(wanted));
+        addValueFields(r, p->readBack);   // the variable as it is, and this button's value
+        return error(otherButtonMessage(label, p->readBack.buttonValue, wanted));
+    }
+    default:
+        return error("'" + label + "' was not drawn in the frame after the call (collapsed header, "
+                     "closed or hidden window?). Nothing was written");
+    }
+}
+
 } // namespace detail
 
 // ---------------------------------------------------------------------------
@@ -353,7 +574,7 @@ inline void registerImGuiTools() {
     enableCollection();
 
     // tcx_imgui_get_widgets — list all widgets
-    tc::mcp::tool("tcx_imgui_get_widgets", "List the ImGui widgets drawn in the last frame of every window running imgui: label, window (ImGui panel), windowId (OS window as tc_list_windows numbers it), type, rect, and for value widgets the current value (widget, valueType, value — floats at full precision; colors as the variable holds them, 0-1, with colorSpace; SliderAngle in radians). touched = changed by hand since startup / tcx_imgui_reset_touched")
+    tc::mcp::tool("tcx_imgui_get_widgets", "List the ImGui widgets drawn in the last frame of every window running imgui: label, window (ImGui panel), windowId (OS window as tc_list_windows numbers it), type, rect, and for value widgets the current value (widget, valueType, value — floats at full precision; colors as the variable holds them, 0-1, with colorSpace; SliderAngle in radians; RadioButton(int*): value = the group's variable, buttonValue = the value this button sets). touched = changed by hand since startup / tcx_imgui_reset_touched")
         .arg<std::string>("window", "Filter by ImGui window (panel) name (optional, omit for all)", false)
         .arg<int>("windowId", "Filter by OS window id from tc_list_windows (optional)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
@@ -399,7 +620,7 @@ inline void registerImGuiTools() {
         }));
 
     // tcx_imgui_get_touched — everything changed by hand
-    tc::mcp::tool("tcx_imgui_get_touched", "Values the user changed by hand (dragging, typing, clicking a widget) since startup or the last tcx_imgui_reset_touched, with their current value. widgets: the ImGui value widgets changed (sliders, drags, inputs, colors, combos, text fields, Checkbox, MenuItem/Selectable with a bool*, RadioButton with an int*, ListBox — the list box under its own label with the index), same fields as tcx_imgui_get_widgets; one that is not drawn right now (collapsed, closed) keeps its last known value with visible=false. Items that change no variable are not recorded: buttons, menu headers, action menu items, MenuItem(label, shortcut, bool selected) even when used as a toggle, plain Selectables, RadioButton(label, bool). Other keys come from addons that keep their own record (inspector: tcxNodeInspector edits per node — node type/name/id, mod, member path, value in tc_get_node_tree encoding). Values set from code or by tc_set_node_members are not recorded. Read-only")
+    tc::mcp::tool("tcx_imgui_get_touched", "Values the user changed by hand (dragging, typing, clicking a widget) since startup or the last tcx_imgui_reset_touched, with their current value. widgets: the ImGui value widgets changed (sliders, drags, inputs, colors, combos, text fields, Checkbox, MenuItem/Selectable with a bool*, RadioButton with an int*, ListBox — the list box under its own label with the index), same fields as tcx_imgui_get_widgets; one that is not drawn right now (collapsed, closed) keeps its last known value with visible=false. Items that change no variable are not recorded: buttons, menu headers, action menu items, MenuItem(label, shortcut, bool selected) even when used as a toggle, plain Selectables, RadioButton(label, bool). Other keys come from addons that keep their own record (inspector: tcxNodeInspector edits per node — node type/name/id, mod, member path, value in tc_get_node_tree encoding). Values set from code, by tc_set_node_members or by tcx_imgui_input on a value widget are not recorded (text typed by tcx_imgui_input and clicks by tcx_imgui_click are). Read-only")
         .bind(std::function<json()>([]() -> json {
             json result = {{"status", "ok"}};
             json widgets = detail::touchedWidgetsJson();
@@ -426,7 +647,7 @@ inline void registerImGuiTools() {
         }));
 
     // tcx_imgui_click — click a widget by label
-    tc::mcp::tool("tcx_imgui_click", "Click an ImGui widget by label")
+    tc::mcp::tool("tcx_imgui_click", "Click an ImGui widget by label. A composite widget (DragFloat3, SliderInt2, InputFloat4, ColorEdit4, ColorPicker4, ...) returns an error: a click would hit one of its parts; set its value with tcx_imgui_input")
         .arg<std::string>("label", "Widget label text")
         .arg<std::string>("window", "ImGui window (panel) name (optional, required if label is ambiguous)", false)
         .arg<int>("windowId", "OS window id from tc_list_windows (optional, when the same panel exists in several OS windows)", false)
@@ -441,6 +662,14 @@ inline void registerImGuiTools() {
             if (!ref.widget) {
                 return json{{"status", "error"}, {"message", error}};
             }
+            const WidgetValue& v = ref.widget->value;
+            if (detail::isComposite(v)) {
+                return json{{"status", "error"},
+                            {"message", "'" + label + "' is a composite widget (" + detail::kindName(v.kind) + ", " +
+                                        std::to_string(v.components) + " components): a click at its centre "
+                                        "would hit one of its parts, or a gap. Set its value with tcx_imgui_input: " +
+                                        detail::expectedValue(v)}};
+            }
 
             withContext(ref.ctx, [&] { clickWidget(*ref.widget); });
             return json{
@@ -451,15 +680,15 @@ inline void registerImGuiTools() {
             };
         }));
 
-    // tcx_imgui_input — set the value of an input/slider/drag widget
-    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget: text inputs, and numeric entry on slider/drag widgets")
+    // tcx_imgui_input — set the value of a widget: value widgets through the
+    // value hook, text fields by typing
+    tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget. For widgets that hold a value (and text fields); buttons and other items without a variable are pressed with tcx_imgui_click. Value widgets (slider, drag, number input, SliderAngle, color, checkbox, combo, radio, list box, MenuItem/Selectable with a bool*; composites such as DragFloat3 and ColorEdit4 included): text is the value as JSON, in the units tcx_imgui_get_widgets reports — a number; an array for a composite ([x, y, z]; colors [r, g, b(, a)] as floats 0-1, raw HSV with colorSpace hsv); true/false for a bool; the item index for Combo/ListBox; for a RadioButton(int*), that button's own value (buttonValue in tcx_imgui_get_widgets): target the button whose value you want, another value is refused; radians for SliderAngle. It is written into the app's variable on the widget's next frame, and the widget returns true in that frame (so if (ImGui::DragFloat(\"x\", &x)) node->setX(x); and recompute-on-change code run once; the Edited flag is not set), unless the variable already held the value (then nothing changes and the reply is ok). status ok (with the value read back) means the variable held it at the widget's return and still held it in the next frame; if the app changed it by then (a clamp, a converting setter), ok with a message and the value it holds; if the widget is not drawn in that next frame, or its window renders no frame until 4 s after the call, the read-back at return stands. Errors (nothing written): wrong shape or type (component count, not a number, out of the type's range), the widget not drawn in the frame after the call (collapsed, closed or hidden), disabled (BeginDisabled, a disabled MenuItem/Selectable) or read-only, a RadioButton given another button's value, no variable (a button, an action MenuItem, RadioButton(label, bool): press it with tcx_imgui_click), the widget running more than 2 s after the call (a window rendering slower than one frame per 2 s). Errors after the write: a hand edit in the same frame; the old value back in the next frame (app code that ignores the return value and copies its own value in every frame: such a widget cannot be set from MCP). No clamping to the widget's min/max. Not recorded in tcx_imgui_get_touched. Text fields (InputText): text replaces the text, typed as keystrokes")
         .arg<std::string>("label", "Widget label")
-        .arg<std::string>("text", "Replacement text (or numeric value for slider/drag)")
+        .arg<std::string>("text", "Value widgets: the value as JSON (5, 0.25, [1, 2, 3], true, an index). Text fields: the replacement text")
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)
         .arg<int>("windowId", "OS window id from tc_list_windows (optional)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string label = args.at("label").get<std::string>();
-            std::string text = args.at("text").get<std::string>();
             std::string window = args.value("window", "");
             int windowId = (args.contains("windowId") && args.at("windowId").is_number())
                          ? args.at("windowId").get<int>() : -1;
@@ -469,7 +698,74 @@ inline void registerImGuiTools() {
             if (!ref.widget) {
                 return json{{"status", "error"}, {"message", error}};
             }
+            const WidgetInfo& w = *ref.widget;
 
+            // A value widget: queue the value for the value hook, which writes
+            // it through the widget's variable on its next frame. The reply
+            // waits for that frame.
+            if (detail::isWritableKind(w.value.kind)) {
+                const json& arg = args.at("text");
+                json value = arg.is_string() ? json::parse(arg.get<std::string>(), nullptr, false) : arg;
+                std::vector<unsigned char> bytes;
+                if (value.is_discarded() || !detail::valueToBytes(w.value, value, bytes, error)) {
+                    return json{{"status", "error"},
+                                {"message", "'" + label + "' (" + detail::kindName(w.value.kind) + ") takes " +
+                                            detail::expectedValue(w.value) + " as JSON; got " +
+                                            (value.is_discarded() ? arg.dump() : error) + ". Nothing was written"}};
+                }
+                // A RadioButton(int*) sets only its own value (the value hook
+                // checks it again when the button runs)
+                if (w.value.kind == ImGuiTcValueKind_Radio) {
+                    int wanted = 0;
+                    std::memcpy(&wanted, bytes.data(), sizeof(wanted));
+                    if (wanted != w.value.buttonValue) {
+                        json r = {{"status", "error"}, {"label", label}, {"window", w.windowName},
+                                  {"windowId", windowIdFor(ref.ctx)}};
+                        detail::addValueFields(r, w.value);
+                        r["message"] = detail::otherButtonMessage(label, w.value.buttonValue, wanted);
+                        return r;
+                    }
+                }
+                // The reply is produced when the hooks know the outcome (the
+                // end of the frame after the call, or of the one after the
+                // write). The pending value itself is the deferral's target:
+                // no window drains it; its onDone does.
+                ImGuiContext* ctx = ref.ctx;
+                auto pending = detail::queueValue(ctx, w.id, w.value.kind, w.value.dataType, w.value.components,
+                                                  std::move(bytes), detail::kPendingValueLifetime,
+                                                  detail::kValueCheckDeadline, nullptr);
+                const void* token = pending.get();
+                pending->onDone = [token]() { tc::mcp::drainDeferredResponses(token); };
+                std::string panel = w.windowName;
+                tc::mcp::deferToolResultUntilAfterFrame([ctx, pending, label, panel]() -> json {
+                    return detail::injectionResult(ctx, pending, label, panel);
+                }, token);
+                return json::object();   // the deferred result replaces this
+            }
+            // An item with no variable that takes no text: a button,
+            // RadioButton(label, bool active), an action MenuItem,
+            // MenuItem(label, shortcut, bool selected), a plain Selectable, a
+            // tree node. Nothing to write, and the Ctrl+Click of typing would
+            // press it. (Inputable = takes text. Checkable does not tell:
+            // RadioButton(label, bool) is not checkable, a MenuItem always is.)
+            if (w.value.kind == 0 && !(w.statusFlags & ImGuiItemStatusFlags_Inputable)) {
+                return json{{"status", "error"},
+                            {"message", "'" + label + "' reports no variable and takes no text (a button, "
+                                        "RadioButton(label, bool active), an action MenuItem or MenuItem(label, "
+                                        "shortcut, bool selected), a plain Selectable, a tree node): it has no value "
+                                        "to set; to press it, use tcx_imgui_click"}};
+            }
+            // A custom BeginCombo / BeginListBox reports no variable to write.
+            if (w.value.kind == ImGuiTcValueKind_ComboPreview || w.value.kind == ImGuiTcValueKind_ListBoxBegin) {
+                return json{{"status", "error"},
+                            {"message", "'" + label + "' is a custom " +
+                                        (w.value.kind == ImGuiTcValueKind_ListBoxBegin ? "list box" : "combo") +
+                                        " (BeginCombo / BeginListBox): it has no variable to set. "
+                                        "Pick an item by clicking it with tcx_imgui_click (open a combo first)"}};
+            }
+
+            std::string text = args.at("text").is_string() ? args.at("text").get<std::string>()
+                                                            : args.at("text").dump();
             withContext(ref.ctx, [&] { inputText(*ref.widget, text); });
             return json{
                 {"status", "ok"},

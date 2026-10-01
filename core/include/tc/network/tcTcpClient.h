@@ -86,6 +86,50 @@ public:
     // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
     // firing thread. With setUseThread(false) everything runs on the main
     // thread and this does not apply.
+    //
+    // onDisconnect: TcpDisconnectEventArgs::reason says why the connection
+    // ended.
+    //  - "Connection closed by remote" (wasClean true): the peer closed it.
+    //    Fires on the receive thread.
+    //  - "Connection error" (wasClean false; TlsClient: "TLS error: ..."):
+    //    an error ended it. Fires on the receive thread.
+    //  - "Disconnected by client" (wasClean true): the app ended it, with
+    //    disconnect() or with connect() on a connected client. Fires
+    //    synchronously on the calling thread, before that call returns.
+    // Without threads (setUseThread(false), the default on the web) the first
+    // two fire on the main thread instead, from the update event.
+    // The destructor disconnects without firing it. An auto-reconnect
+    // listener should not reconnect on "Disconnected by client", the app's
+    // own doing:
+    //
+    //   listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
+    //       if (e.reason == "Disconnected by client") return;  // the app did it
+    //       // e.wasClean: true if the peer closed it, false if an error did
+    //       reconnectPending = true;  // reconnect from update(), main thread
+    //   });
+    //
+    // A listener that reconnects with connect() from inside connect()'s own
+    // disconnect anyway is overruled: connect() closes that connection again,
+    // without another notification, and connects where it was asked to.
+    // With threads, do not call connectAsync() from such a listener: the
+    // connect thread it starts runs connect() at the same time as the outer
+    // connect(), which can end in std::terminate (#261). Without threads
+    // connectAsync() is connect(), and is overruled the same way.
+    //
+    // RECONNECTING ON THE RECEIVE THREAD: when an event fires on the receive
+    // thread (onDisconnect for a remote close or an error, onReceive; for
+    // TlsClient also onConnect and onError around the handshake), a plain
+    // (inline) listener that calls connect() runs it on that old receive
+    // thread, which connect() detaches from the client first. A listener
+    // that calls disconnect() there detaches it the same way. Nothing waits
+    // for a detached thread, neither disconnect() nor the destructor, and it
+    // goes on using the client after that call returns (the rest of the
+    // listener and of its receive loop). So until #261 / #262 land, do not
+    // destroy a client whose receive-thread listener called connect() or
+    // disconnect(): keep it for the life of the app. And do not call
+    // disconnect() on it from another thread until that call has returned,
+    // or the connection may complete after disconnect() has returned.
+    // Reconnecting from the main thread, as above, avoids all of this.
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive
@@ -176,27 +220,58 @@ protected:
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
 
-    size_t receiveBufferSize_ = 65536;
+    // Atomic: setReceiveBufferSize() may run on any thread (a listener on the
+    // receive thread, say) while a receive thread reads it
+    std::atomic<size_t> receiveBufferSize_{65536};
     std::mutex sendMutex_;
 
+    // Atomic, both: a receive thread that a listener's disconnect() let go of
+    // may still read them while the app calls setUseThread() or connect()
 #ifdef __EMSCRIPTEN__
-    bool useThread_ = false;
+    std::atomic<bool> useThread_{false};
 #else
-    bool useThread_ = true;
+    std::atomic<bool> useThread_{true};
 #endif
     EventListener updateListener_;
-    bool connectPending_ = false;
+    std::atomic<bool> connectPending_{false};
 
 private:
-    void receiveThreadFunc();
+    void receiveThreadFunc(unsigned generation);
     void connectThreadFunc(const std::string& host, int port);
+
+    // Close the socket and release the receive thread (connectThread_ is left alone)
+    void resetConnection();
+
+    // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
+    // client") if the client was connected. The destructor passes false.
+    void disconnectImpl(bool notify);
 
     std::thread receiveThread_;
     std::thread connectThread_;
 
-    static std::atomic<int> instanceCount_;
-    static void initWinsock();
-    static void cleanupWinsock();
+    // Bumped by every connect(), before it sets any flag for the new
+    // connection; its receive thread gets that value. A thread whose
+    // generation is no longer current stops: processNetwork()'s receive loop and the loop
+    // in receiveThreadFunc() both check it. So a listener on the receive
+    // thread (onReceive or onDisconnect) can reconnect without the old
+    // thread reading the new connection's socket.
+    //
+    // Not covered: the reconnect itself. connect() on the receive thread
+    // detaches that thread and then, on it, creates the socket, resolves the
+    // host, connects (blocking), fires onConnect and starts the new receive
+    // thread. disconnect() called on the receive thread detaches it the same
+    // way. No one owns the detached thread: disconnect() and the destructor
+    // do not wait for it, socket_ is not atomic, and the thread goes on
+    // reading the client after that call returns (the rest of the listener,
+    // of the notification and of its receive loop). A disconnect() from
+    // another thread before that call has returned races it; destruction
+    // races it for as long as the thread runs, which the app cannot see.
+    // Hence the rules in the Events comment above. The fix belongs to #261
+    // (a cancellable connect) and #262.
+    std::atomic<unsigned> receiveGeneration_{0};
+
+    // Receive buffer, sized to receiveBufferSize_ by processNetwork()
+    std::vector<char> recvBuf_;
 };
 
 } // namespace trussc

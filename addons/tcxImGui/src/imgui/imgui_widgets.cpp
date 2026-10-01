@@ -1262,7 +1262,7 @@ bool ImGui::Checkbox(const char* label, bool* v)
         if (!is_multi_select || !g.BoxSelectState.UnclipMode || !g.BoxSelectState.UnclipRect.Overlaps(total_bb)) // Extra layer of "no logic clip" for box-select support
         {
             IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags | ImGuiItemStatusFlags_Checkable | (*v ? ImGuiItemStatusFlags_Checked : 0));
-            return false;
+            return IMGUI_TC_RETURN(false); // [TrussC]
         }
 
     // Range-Selection/Multi-selection support (header)
@@ -1314,7 +1314,7 @@ bool ImGui::Checkbox(const char* label, bool* v)
         RenderText(label_pos, label, label_end, false);
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags | ImGuiItemStatusFlags_Checkable | (*v ? ImGuiItemStatusFlags_Checked : 0));
-    return pressed;
+    return IMGUI_TC_RETURN(pressed); // [TrussC]
 }
 
 template<typename T>
@@ -1422,11 +1422,11 @@ bool ImGui::RadioButton(const char* label, bool active)
 // FIXME: This would work nicely if it was a public template, e.g. 'template<T> RadioButton(const char* label, T* v, T v_button)', but I'm not sure how we would expose it..
 bool ImGui::RadioButton(const char* label, int* v, int v_button)
 {
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Radio, ImGuiDataType_S32, v, 1, 0); // [TrussC]
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Radio, ImGuiDataType_S32, v, 1, v_button); // [TrussC] Flags = this button's value
     const bool pressed = RadioButton(label, *v == v_button);
     if (pressed)
         *v = v_button;
-    return pressed;
+    return IMGUI_TC_RETURN(pressed); // [TrussC]
 }
 
 // size_arg (for each axis) < 0.0f: align to end, 0.0f: auto, > 0.0f: specified size
@@ -2186,7 +2186,7 @@ bool ImGui::Combo(const char* label, int* current_item, const char* (*getter)(vo
         SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, CalcMaxPopupHeightFromItemCount(popup_max_height_in_items)));
 
     if (!BeginCombo(label, preview_value, ImGuiComboFlags_None))
-        return false;
+        return IMGUI_TC_RETURN(false); // [TrussC]
 
     // Display items
     bool value_changed = false;
@@ -2216,7 +2216,7 @@ bool ImGui::Combo(const char* label, int* current_item, const char* (*getter)(vo
     if (value_changed)
         MarkItemEdited(g.LastItemData.ID);
 
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 // Combo box helper allowing to pass an array of strings.
@@ -2781,7 +2781,7 @@ bool ImGui::DragScalar(const char* label, ImGuiDataType data_type, void* p_data,
     if (temp_input_is_active)
     {
         const bool clamp_enabled = TempInputIsClampEnabled(flags, data_type, p_min, p_max);
-        return TempInputScalar(frame_bb, id, label, data_type, p_data, format, clamp_enabled ? p_min : NULL, clamp_enabled ? p_max : NULL);
+        return IMGUI_TC_RETURN(TempInputScalar(frame_bb, id, label, data_type, p_data, format, clamp_enabled ? p_min : NULL, clamp_enabled ? p_max : NULL)); // [TrussC]
     }
 
     // Draw frame
@@ -2808,7 +2808,7 @@ bool ImGui::DragScalar(const char* label, ImGuiDataType data_type, void* p_data,
         RenderText(ImVec2(frame_bb.Max.x + style.ItemInnerSpacing.x, frame_bb.Min.y + style.FramePadding.y), label, label_end, false);
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags | (temp_input_allowed ? ImGuiItemStatusFlags_Inputable : 0));
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::DragScalarN(const char* label, ImGuiDataType data_type, void* p_data, int components, float v_speed, const void* p_min, const void* p_max, const char* format, ImGuiSliderFlags flags)
@@ -2846,7 +2846,7 @@ bool ImGui::DragScalarN(const char* label, ImGuiDataType data_type, void* p_data
     }
 
     EndGroup();
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::DragFloat(const char* label, float* v, float v_speed, float v_min, float v_max, const char* format, ImGuiSliderFlags flags)
@@ -3376,7 +3376,7 @@ bool ImGui::SliderScalar(const char* label, ImGuiDataType data_type, void* p_dat
     {
         // Only clamp Ctrl+Click input when ImGuiSliderFlags_ClampOnInput is set (generally via ImGuiSliderFlags_AlwaysClamp)
         const bool clamp_enabled = (flags & ImGuiSliderFlags_ClampOnInput) != 0; // Don't use TempInputIsClampEnabled()
-        return TempInputScalar(frame_bb, id, label, data_type, p_data, format, clamp_enabled ? p_min : NULL, clamp_enabled ? p_max : NULL);
+        return IMGUI_TC_RETURN(TempInputScalar(frame_bb, id, label, data_type, p_data, format, clamp_enabled ? p_min : NULL, clamp_enabled ? p_max : NULL)); // [TrussC]
     }
 
     // Draw frame
@@ -3408,7 +3408,7 @@ bool ImGui::SliderScalar(const char* label, ImGuiDataType data_type, void* p_dat
         RenderText(ImVec2(frame_bb.Max.x + style.ItemInnerSpacing.x, frame_bb.Min.y + style.FramePadding.y), label, label_end, false);
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags | (temp_input_allowed ? ImGuiItemStatusFlags_Inputable : 0));
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 // Add multiple sliders on 1 line for compact edition of multiple components
@@ -3447,7 +3447,7 @@ bool ImGui::SliderScalarN(const char* label, ImGuiDataType data_type, void* v, i
     }
 
     EndGroup();
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::SliderFloat(const char* label, float* v, float v_min, float v_max, const char* format, ImGuiSliderFlags flags)
@@ -3479,7 +3479,7 @@ bool ImGui::SliderAngle(const char* label, float* v_rad, float v_degrees_min, fl
     bool value_changed = SliderFloat(label, &v_deg, v_degrees_min, v_degrees_max, format, flags);
     if (value_changed)
         *v_rad = v_deg * (2 * IM_PI) / 360.0f;
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::SliderInt(const char* label, int* v, int v_min, int v_max, const char* format, ImGuiSliderFlags flags)
@@ -3562,7 +3562,7 @@ bool ImGui::VSliderScalar(const char* label, const ImVec2& size, ImGuiDataType d
         RenderText(ImVec2(frame_bb.Max.x + style.ItemInnerSpacing.x, frame_bb.Min.y + style.FramePadding.y), label, label_end, false);
 
     IMGUI_TEST_ENGINE_ITEM_INFO(id, label, g.LastItemData.StatusFlags);
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::VSliderFloat(const char* label, const ImVec2& size, float* v, float v_min, float v_max, const char* format, ImGuiSliderFlags flags)
@@ -3913,8 +3913,8 @@ bool ImGui::InputScalar(const char* label, ImGuiDataType data_type, void* p_data
         MarkItemEdited(g.LastItemData.ID);
 
     if (flags & ImGuiInputTextFlags_EnterReturnsTrue)
-        return ret;
-    return value_changed;
+        return IMGUI_TC_RETURN(ret); // [TrussC]
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::InputScalarN(const char* label, ImGuiDataType data_type, void* p_data, int components, const void* p_step, const void* p_step_fast, const char* format, ImGuiInputTextFlags flags)
@@ -3950,7 +3950,7 @@ bool ImGui::InputScalarN(const char* label, ImGuiDataType data_type, void* p_dat
     }
 
     EndGroup();
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::InputFloat(const char* label, float* v, float step, float step_fast, const char* format, ImGuiInputTextFlags flags)
@@ -6099,7 +6099,7 @@ bool ImGui::ColorEdit4(const char* label, float col[4], ImGuiColorEditFlags flag
     if (value_changed && g.LastItemData.ID != 0) // In case of ID collision, the second EndGroup() won't catch g.ActiveId
         MarkItemEdited(g.LastItemData.ID);
 
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 bool ImGui::ColorPicker3(const char* label, float col[3], ImGuiColorEditFlags flags)
@@ -6138,8 +6138,8 @@ bool ImGui::ColorPicker4(const char* label, float col[4], ImGuiColorEditFlags fl
 
     const float width = CalcItemWidth();
     const bool is_readonly = ((g.NextItemData.ItemFlagsSet | g.CurrentItemFlags) & ImGuiItemFlags_ReadOnly) != 0;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Color, ImGuiDataType_Float, col, (flags & ImGuiColorEditFlags_NoAlpha) ? 3 : 4, flags); // [TrussC] before ClearFlags(): sees the ReadOnly flag set for this item
     g.NextItemData.ClearFlags();
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Color, ImGuiDataType_Float, col, (flags & ImGuiColorEditFlags_NoAlpha) ? 3 : 4, flags); // [TrussC]
 
     PushID(label);
     const bool set_current_color_edit_id = (g.ColorEditCurrentID == 0);
@@ -6498,7 +6498,7 @@ bool ImGui::ColorPicker4(const char* label, float col[4], ImGuiColorEditFlags fl
         g.ColorEditCurrentID = 0;
     PopID();
 
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 // A little color square. Return true when clicked.
@@ -7602,13 +7602,13 @@ bool ImGui::Selectable(const char* label, bool selected, ImGuiSelectableFlags fl
 
 bool ImGui::Selectable(const char* label, bool* p_selected, ImGuiSelectableFlags flags, const ImVec2& size_arg)
 {
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, 0); // [TrussC]
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, (flags & ImGuiSelectableFlags_Disabled) ? ImGuiItemFlags_Disabled : 0); // [TrussC]
     if (Selectable(label, *p_selected, flags, size_arg))
     {
         *p_selected = !*p_selected;
-        return true;
+        return IMGUI_TC_RETURN(true); // [TrussC]
     }
-    return false;
+    return IMGUI_TC_RETURN(false); // [TrussC]
 }
 
 
@@ -8918,7 +8918,7 @@ bool ImGui::ListBox(const char* label, int* current_item, const char* (*getter)(
     ImVec2 size(0.0f, ImTrunc(GetTextLineHeightWithSpacing() * height_in_items_f + g.Style.FramePadding.y * 2.0f));
 
     if (!BeginListBox(label, size))
-        return false;
+        return IMGUI_TC_RETURN(false); // [TrussC]
 
     // Assume all items have even height (= 1 line of text). If you need items of different height,
     // you can create a custom version of ListBox() in your code without using the clipper.
@@ -8949,7 +8949,7 @@ bool ImGui::ListBox(const char* label, int* current_item, const char* (*getter)(
     if (value_changed)
         MarkItemEdited(g.LastItemData.ID);
 
-    return value_changed;
+    return IMGUI_TC_RETURN(value_changed); // [TrussC]
 }
 
 //-------------------------------------------------------------------------
@@ -9754,14 +9754,14 @@ bool ImGui::MenuItem(const char* label, const char* shortcut, bool selected, boo
 
 bool ImGui::MenuItem(const char* label, const char* shortcut, bool* p_selected, bool enabled)
 {
-    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, 0); // [TrussC]
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, enabled ? 0 : ImGuiItemFlags_Disabled); // [TrussC]
     if (MenuItemEx(label, NULL, shortcut, p_selected ? *p_selected : false, enabled))
     {
         if (p_selected)
             *p_selected = !*p_selected;
-        return true;
+        return IMGUI_TC_RETURN(true); // [TrussC]
     }
-    return false;
+    return IMGUI_TC_RETURN(false); // [TrussC]
 }
 
 //-------------------------------------------------------------------------
