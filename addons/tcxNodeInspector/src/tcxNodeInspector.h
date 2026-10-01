@@ -351,10 +351,11 @@ private:
     void reconcileSelection();            // prune dead + collapse on external change
 
     // --- touched ---------------------------------------------------------------
-    // Keyed by node + mod type (short name, as getModByTypeName()) + member path. The Inspector's widgets are reused
-    // for whichever node is selected (one ImGuiID for "radius" of every node),
-    // so the ImGui-level record can't say whose value it was — hence this one,
-    // and the Hierarchy / Inspector panels are kept out of the ImGui record.
+    // Keyed by node + mod type (short name, as getModByTypeName()) + member
+    // path. The Inspector's widgets are reused for whichever node is selected
+    // (one ImGuiID for "radius" of every node), so the ImGui-level record
+    // can't say whose value it was — hence this one, and the Hierarchy /
+    // Inspector panels are kept out of the ImGui record.
     struct TouchedMember {
         std::weak_ptr<::tc::Node> node;
         uint64_t          nodeId = 0;
