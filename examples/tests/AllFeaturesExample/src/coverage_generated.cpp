@@ -2077,6 +2077,14 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
     }
 };
 
+struct Cover_OnceGate : af::Scope<OnceGate> {
+    static void run() {
+        (void)OnceGate();
+        (void)OnceGate(af::val<double>());
+        (void)af::val<OnceGate>().isFirstTime();
+    }
+};
+
 struct Cover_Path : af::Scope<Path> {
     static void run() {
         (void)Path();
@@ -3492,6 +3500,7 @@ void af::coverGenerated() {
     af_generated::Cover_NetworkInterface::run();
     af_generated::Cover_Node::run();
     af_generated::Cover_Node__HitResult::run();
+    af_generated::Cover_OnceGate::run();
     af_generated::Cover_Path::run();
     af_generated::Cover_Pixels::run();
     af_generated::Cover_Platform::run();

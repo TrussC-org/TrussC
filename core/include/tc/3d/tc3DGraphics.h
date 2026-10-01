@@ -21,17 +21,23 @@ namespace trussc {
 // Light management
 // ---------------------------------------------------------------------------
 
-// Add light (up to 8 max). Registered by address in the CURRENT window's
-// context — the Light must outlive its registration (prefer stable storage).
+// Add light. Up to 8 lights (internal::maxLights, the PBR shader's light
+// slots) can be registered per window; a light added past that is not
+// registered, with a one-time warning. Adding an already registered light
+// does nothing. Registered by address in the CURRENT window's context — the
+// Light must outlive its registration (prefer stable storage).
 inline void addLight(Light& light) {
     auto& lights = internal::currentWindowContext().activeLights;
-    if (lights.size() < internal::maxLights) {
-        // Duplicate check
-        auto it = std::find(lights.begin(), lights.end(), &light);
-        if (it == lights.end()) {
-            lights.push_back(&light);
+    if (std::find(lights.begin(), lights.end(), &light) != lights.end()) return;
+    if (lights.size() >= static_cast<size_t>(internal::maxLights)) {
+        static OnceGate warned;
+        if (warned.isFirstTime()) {
+            logWarning("TrussC") << "addLight: more than " << internal::maxLights
+                << " lights; lights beyond the limit are not registered";
         }
+        return;
     }
+    lights.push_back(&light);
 }
 
 // Remove light (from the current window's context)

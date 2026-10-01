@@ -312,6 +312,24 @@ private:
 };
 ```
 
+### Warning Once
+
+To log a warning only the first time (an unsupported format, a missing device), gate it with a `tc::OnceGate` instead of a `static bool warned` flag. `isFirstTime()` is true the first time; give the constructor an interval in seconds to make it true again once that much time has passed since the last true. It is thread-safe and lock-free, so audio and worker threads can use it too:
+
+```cpp
+static tc::OnceGate unsupportedWarned;
+if (unsupportedWarned.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "format not supported; skipping";
+}
+
+static tc::OnceGate queueFull{5.0};               // at most once per 5 s
+if (queueFull.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "queue full, dropping frames";
+}
+```
+
+For a warning that should fire once per object (once per connection, say), make the gate a member of that object: `tc::OnceGate timeoutWarned_;`.
+
 ### Holding on to Nodes
 
 An addon that keeps a `Node` beyond a single call (a target to follow, a selection, a root to draw) stores it as `std::weak_ptr<tc::Node>`, or as `Node::Ptr` when the addon means to own it, never as a raw `Node*`. The app can remove and free the node at any time, and a raw pointer then dangles. Call `lock()` for each use and keep the returned `shared_ptr` while you work with the node. `tcxNodeInspector` keeps its attached root, drag target and selection this way.
