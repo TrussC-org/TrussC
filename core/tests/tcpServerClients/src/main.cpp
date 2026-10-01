@@ -13,6 +13,9 @@
 //     is closed at once, a burst of them logs one warning, and a slot that
 //     frees up can be taken again.
 //   - start(port) with no limit accepts any number of clients.
+//   - A second server cannot start on a port the first one is listening on:
+//     its start() returns false and the first keeps running and taking
+//     clients.
 //   - Listeners may tear down from the thread they run on: disconnectClient()
 //     of its own client in onReceive (the server's destruction then waits for
 //     that thread instead of leaving it behind), stop() in onReceive, and
@@ -600,6 +603,30 @@ static void testDefaultUnlimited() {
 
     for (rawsocket_t s : peers) if (s != kBadSocket) TC_CLOSE(s);
     server.stop();
+}
+
+// -----------------------------------------------------------------------------
+// A second server cannot start on a port the first one is listening on
+// -----------------------------------------------------------------------------
+static void testPortInUse() {
+    TcpServer first;
+    const int port = startOnFreePort(first, -1);
+    check("port in use: first server started", port != 0);
+    if (!port) return;
+
+    TcpServer second;
+    check("port in use: a second server on that port fails to start", !second.start(port));
+    check("port in use: the second server is not running", !second.isRunning());
+    check("port in use: the first server is still running", first.isRunning());
+
+    rawsocket_t client = connectTo(port);
+    check("port in use: the first server still takes the client",
+          client != kBadSocket &&
+          waitUntil(3000, [&] { return first.getClientCount() == 1; }));
+    if (client != kBadSocket) TC_CLOSE(client);
+
+    second.stop();
+    first.stop();
 }
 
 // -----------------------------------------------------------------------------
@@ -1819,6 +1846,7 @@ int main() {
     testReclaim();
     testLimit();
     testDefaultUnlimited();
+    testPortInUse();
     testListenerTeardown();
     testListenerTeardownThreads();
     testConcurrentStop();
