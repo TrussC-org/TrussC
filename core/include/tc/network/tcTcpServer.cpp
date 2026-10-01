@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tc/network/tcTcpServer.h"
+#include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include <cstring>
 
@@ -22,22 +23,11 @@
 #endif
 #include <chrono>
 
-// Writing to a socket the peer already closed raises SIGPIPE, whose default
-// action terminates the process. MSG_NOSIGNAL suppresses it per call, and both
-// Linux and current Apple SDKs define it. Older Apple SDKs do not, so each
-// accepted socket also gets SO_NOSIGPIPE below — either mechanism alone is
-// enough (verified on macOS 26.5 with a four-way probe: unprotected sends die
-// on signal 13, each option alone survives). Windows has no SIGPIPE at all and
-// does not define MSG_NOSIGNAL, so the flag is 0 there.
-#if defined(MSG_NOSIGNAL)
-    #define TC_SEND_FLAGS MSG_NOSIGNAL
-#else
-    #define TC_SEND_FLAGS 0
-#endif
+// SIGPIPE: sends pass TC_SEND_FLAGS and every accepted socket gets
+// SO_NOSIGPIPE (see tcSocketInternal.h), so a peer that closed first makes
+// send() fail instead of killing the process.
 
 namespace trussc {
-
-std::atomic<int> TcpServer::instanceCount_{0};
 
 namespace {
 
@@ -127,41 +117,14 @@ constexpr int kWaitSliceMs = 100;
 } // namespace
 
 // =============================================================================
-// Winsock initialization (Windows only)
-// =============================================================================
-void TcpServer::initWinsock() {
-#ifdef _WIN32
-    static bool initialized = false;
-    if (!initialized) {
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            logError() << "Winsock initialization failed";
-        }
-        initialized = true;
-    }
-#endif
-}
-
-void TcpServer::cleanupWinsock() {
-#ifdef _WIN32
-    WSACleanup();
-#endif
-}
-
-// =============================================================================
 // Constructor / Destructor
 // =============================================================================
 TcpServer::TcpServer() {
-    if (instanceCount_++ == 0) {
-        initWinsock();
-    }
+    internal::ensureWinsock();
 }
 
 TcpServer::~TcpServer() {
     stop();
-    if (--instanceCount_ == 0) {
-        cleanupWinsock();
-    }
 }
 
 // =============================================================================
@@ -296,13 +259,7 @@ void TcpServer::acceptThreadFunc() {
         inet_ntop(AF_INET, &clientAddr.sin_addr, hostStr, INET_ADDRSTRLEN);
         int clientPort = ntohs(clientAddr.sin_port);
 
-#ifdef SO_NOSIGPIPE
-        // Belt and braces for Apple SDKs that predate MSG_NOSIGNAL
-        {
-            int on = 1;
-            ::setsockopt(clientSocket, SOL_SOCKET, SO_NOSIGPIPE, &on, sizeof(on));
-        }
-#endif
+        internal::setNoSigpipe(clientSocket);
 
         // SO_SNDTIMEO would bound a blocking send, but nothing can then cut
         // that send short when the client is disconnected. The send loop polls

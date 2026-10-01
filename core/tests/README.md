@@ -197,6 +197,35 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `winsockLifetime/` — creating and destroying TcpClient / TcpServer any
+  number of times leaves networking working (#254): after 200 of each, a raw
+  `socket()` still succeeds and a UdpSocket that was already receiving still
+  gets a loopback packet. The per-class counts used to call `WSACleanup()` on
+  every 0 -> 1 -> 0 cycle and tear Winsock down for the whole process. Only
+  Windows can fail it; elsewhere the same steps run and pass.
+- `tcpClientSigpipe/` — *(POSIX)* `TcpClient::send()` to a peer that reset
+  the connection returns false instead of raising SIGPIPE, which killed the
+  process without a trace (#254). One part keeps `connected_` set (no receive
+  thread) so every send reaches the dead socket; one races the receive thread.
+- `tcpClientIsolation/` — each TcpClient's `onReceive` gets only its own
+  bytes (#254): two clients with different receive buffer sizes take 8 MB each
+  from two loopback peers. The receive buffer used to be one function-local
+  static shared by every client's receive thread.
+- `tcpClientReconnect/` — `TcpClient::connect()` after the peer closed the
+  connection reconnects (#254); it used to assign the new receive thread over
+  the old, still-joinable one (`std::terminate`). Also checks that 20
+  reconnects leak no descriptors and that a reconnect from an inline
+  `onDisconnect` or `onReceive` listener leaves exactly one receive thread
+  (both counted on Linux), that reconnecting through `connectAsync()` works,
+  and that refused attempts release the old socket (counted on Linux) before
+  a later `connect()` succeeds. With an auto-reconnect `onDisconnect`
+  listener attached, `disconnect()` from another thread reports exactly one
+  "Disconnected by client" and leaves no connection: the receive thread
+  used to report the EOF of `disconnect()`'s own shutdown as a remote close,
+  and the listener reconnected while `disconnect()` was joining that thread.
+  Destroying a client whose listener reconnects on every `onDisconnect`
+  finishes without any `onDisconnect` and without reconnecting: the
+  destructor does not notify.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and

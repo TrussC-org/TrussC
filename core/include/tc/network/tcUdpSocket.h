@@ -224,10 +224,6 @@ private:
 
     // Receive buffer size
     static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
-
-    // Winsock initialization (Windows)
-    static bool initWinsock();
-    static bool winsockInitialized_;
 };
 
 } // namespace trussc
