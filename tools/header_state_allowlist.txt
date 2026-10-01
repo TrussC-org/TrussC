@@ -17,10 +17,9 @@
 # The category must be one of these four (the checker rejects anything else):
 #
 #   harmless       a per-module copy breaks nothing: a cache of derived data,
-#                  a counter only one side uses (a warn-once flag uses
-#                  logOnce() instead and needs no entry). NOT a cache
-#                  of GPU objects that nothing frees (sokol_gl contexts,
-#                  shaders, pipelines, samplers, font atlases): every reloaded
+#                  a counter only one side uses. NOT a cache of GPU objects
+#                  that nothing frees (sokol_gl contexts, shaders,
+#                  pipelines, samplers, font atlases): every reloaded
 #                  generation would build and keep a new set in the host's
 #                  sokol pools, and sokol_gl has 4 context slots, sokol_gfx
 #                  32 shader slots.
@@ -33,12 +32,13 @@
 # The declaration in the header carries a comment saying the same, so whoever
 # edits it sees why the per-module copy is fine.
 #
+# A warn-once flag is a function-local `static OnceGate` (tc/utils/tcOnceGate.h)
+# instead. The checker accepts it by its type, so it needs no entry here.
+#
 # State that must be one per process (a singleton, a registry, a setting app
 # code writes and the core loop reads) does not belong here: define it
 # non-inline in a .cpp (tcGlobal.cpp or a sibling) and declare an accessor in
 # the header.
-
-# --- TrussC.h: bitmap font atlas
 
 # --- TrussC.h: window / projection settings
 core/include/TrussC.h trussc::internal::windowDecorated        # host-only: set by the launcher, applied in _setup_cb

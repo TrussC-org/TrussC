@@ -36,6 +36,9 @@ anonymous-namespace variables, any more than a plain namespace-scope `const`:
 all three have internal linkage, so every translation unit on every platform
 already has its own copy of the same constant, and hot reload changes nothing
 about that (tools/header_state_selftest.h pins it: notFlaggedNsStaticConst).
+Nor is a function-local `static OnceGate` (tc/utils/tcOnceGate.h), accepted by
+its type: a per-module copy of a warn-once gate means at most one more log
+line after a hot reload (see is_once_gate).
 Everything else must be listed in the allowlist
 (tools/header_state_allowlist.txt) with the reason a per-module copy is
 harmless, under one of the categories in CATEGORIES below. An allowlist entry
@@ -713,9 +716,37 @@ DECL_SPECIFIERS = {"static", "thread_local", "const", "inline", "mutable", "vola
 ATTRIBUTE_CALLS = {"alignas", "__declspec", "__attribute__"}
 
 
+# A `static OnceGate` (tc/utils/tcOnceGate.h) is a warn-once gate: a separate
+# copy per module only means at most one more log line after a hot reload, so
+# it is accepted by its type, with no allowlist line.
+ONCE_GATE_TYPES = (["OnceGate"], ["tc", "::", "OnceGate"], ["trussc", "::", "OnceGate"],
+                   ["::", "tc", "::", "OnceGate"], ["::", "trussc", "::", "OnceGate"])
+
+
+def is_once_gate(rest, cut):
+    """Is the block-scope declaration `rest` (first declarator cut before its
+    initializer: `cut`) a plain `static OnceGate name...;`? Only `static` and
+    the type before the name, and every declarator a plain name (no pointer,
+    reference or array, which would be other state)."""
+    if len(cut) < 3 or cut[0] != "static" or not is_ident(cut[-1]):
+        return False
+    if cut[1:-1] not in ONCE_GATE_TYPES:
+        return False
+    depth = 0
+    for t in rest:
+        if depth == 0 and t in ("*", "&", "&&", "[", "="):
+            return False
+        if t in ("(", "[", "{"):
+            depth += 1
+        elif t in (")", "]", "}"):
+            depth -= 1
+    return True
+
+
 def static_local(rest, need_declarator=False):
     """The block-scope `static` / `thread_local` declaration `rest` (from that
-    keyword to its `;`): (names, immutable), or None for a constexpr one.
+    keyword to its `;`): (names, immutable), or None for a constexpr one or a
+    `static OnceGate` (see is_once_gate).
     need_declarator (a macro body): None as well when no type and name
     follow, as in `#define FORCE_INLINE static inline __attribute__((...))`."""
     head = first_declarator(declaration_head(rest))
@@ -724,7 +755,7 @@ def static_local(rest, need_declarator=False):
         if t in ("(", "[", "{") and not (k and head[k - 1] in SPECIFIER_CALLS):
             cut = head[:k]
             break
-    if "constexpr" in cut:
+    if "constexpr" in cut or is_once_gate(rest, cut):
         return None
     if need_declarator:
         # Type and name, attribute groups dropped (decltype(...) is a type)
@@ -961,8 +992,7 @@ DEFINE_RE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)", re.M)
 def scan_macros(text, rel):
     """Statics in #define bodies, which the walker never sees (it blanks
     directives): a macro that declares one puts a function-local static into
-    every function that uses it, one per module (a macro with its own logged
-    flag, say; logOnce() replaces that). A
+    every function that uses it, one per module (a warn-once macro, say). A
     static member function the macro defines is not state; the statics in its
     body are."""
     findings = []
@@ -1095,7 +1125,7 @@ EXAMPLE = [
 
 # When each allowlist category applies, one plain line each.
 CATEGORY_HELP = {
-    "harmless": "a separate copy breaks nothing: a small cache (not of GPU objects); for a warn-once flag, use logOnce() instead",
+    "harmless": "a separate copy breaks nothing: a small cache (not of GPU objects); a warn-once flag is a static OnceGate instead, which needs no entry",
     "immutable": "constant data that never changes, so every copy is the same",
     "host-only": "only TrussC's own main loop and .cpp files use it, never app or addon code",
     "no-hot-reload": "only used where hot reload never runs (Android, headless apps)",
