@@ -691,7 +691,7 @@ static void testNodeTimers() {
             ++calls;
             for (int i = 0; i < 64; ++i) node->callAfter(100.0, [] {});
             if (calls == 2) node->cancelTimer(id);
-        });
+        }, 0);
         anchorSimClock();
         simUpdate(*node, 0.0);
         simUpdate(*node, 0.55);             // 5 due
