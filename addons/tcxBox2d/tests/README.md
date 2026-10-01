@@ -13,7 +13,14 @@ Polygon points (#342). `PolyShape::setup()` and `RigidBody2D` with
   `getVertices()` / `shape().verts` hold that hull (what draws is what
   collides); convex input already in outline order keeps its order, and hull
   points listed in a crossing order come back in hull order;
-- `setupConvex()` / `Shape2D::convex()` take any number of points and make one
+- when the hull leaves points inside it (#500), `setup()` and
+  `Shape2D::polygon()` each log one warning with the counts that points to
+  `setupCompound()` / `Shape2D::compound()`, and only the first time in the
+  process; convex input, hull points in a crossing order and a collinear
+  middle point give none (checked before the first warning);
+- `PolyShape::setup()` and `Shape2D::polygon()` with a `tc::Path` use every
+  point of every subpath;
+- `setupSimplified()` / `Shape2D::simplified()` take any number of points and make one
   fixture of at most 8 points whose mass is close to the outline's; input
   they collapse to fewer than 3 points gets a warning saying so. The
   reduction picks the same points as the O(h^2) scan it replaced (kept in the

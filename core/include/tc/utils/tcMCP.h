@@ -656,12 +656,15 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
 
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
-//   host  : "localhost" (default) keeps it loopback-only; pass "0.0.0.0" to
-//           expose on all interfaces.
+//   host  : "127.0.0.1" (default) keeps it loopback-only. The default is an
+//           address, not "localhost": what "localhost" resolves to differs
+//           between OSes, so the default is one address everywhere. Pass
+//           "localhost" or "::1" for those, or "0.0.0.0" to expose on all
+//           interfaces.
 //   token : bearer token required on /mcp. MUST be non-empty when host is not
 //           a loopback address — binding non-local without a token is refused
 //           (fail-closed) so input injection is never silently network-exposed.
-inline void startHttpServer(int port = 0, const std::string& host = "localhost",
+inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
                             const std::string& token = "") {
     auto& svr = detail::getHttpServer();
     if (svr) return; // Already running
@@ -678,6 +681,20 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
     detail::mcpLoopbackOnly().store(isLoopback);
 
     svr = std::make_unique<httplib::Server>();
+
+    // A fixed port that is already in use fails to bind and is reported below.
+    // POSIX: SO_REUSEADDR only, as TcpServer does. Windows: SO_EXCLUSIVEADDRUSE
+    // only, so a port another socket holds fails to bind.
+    svr->set_socket_options([](socket_t sock) {
+#ifdef _WIN32
+        BOOL opt = TRUE;
+        setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&opt), sizeof(opt));
+#else
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+    });
 
     // POST /mcp — JSON-RPC requests. No CORS header: MCP clients are native and
     // ignore CORS, while a wildcard origin would let any web page in the user's
@@ -752,7 +769,16 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         }
         detail::getHttpPort().store(actualPort);
 
-        std::cerr << "[MCP] HTTP server listening on http://" << host << ":"
+        // The only line with the actual port (an OS-assigned port is known
+        // only here, after bind). Through the Logger so it also reaches the
+        // log file and onLog listeners: "[MCP] HTTP server listening on
+        // http://HOST:PORT/mcp" at Notice (stdout; hidden when the console
+        // level is Warning or higher). Set TRUSSC_MCP_PORT for a known port.
+        trussc::logNotice("MCP") << "HTTP server listening on http://" << host
+                                 << ":" << actualPort << "/mcp";
+        // The raw stderr copy stays for v0.7 so tools that read stderr keep
+        // working; it is removed in v0.8.0 (#414).
+        std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
                   << actualPort << "/mcp" << std::endl;
 
         svr->listen_after_bind();

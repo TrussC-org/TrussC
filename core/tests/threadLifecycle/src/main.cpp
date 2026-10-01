@@ -39,6 +39,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -51,6 +52,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -196,7 +199,9 @@ protected:
     }
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // A join that never returns would hang CI; fail loudly instead.
     thread([] {
         this_thread::sleep_for(chrono::seconds(60));

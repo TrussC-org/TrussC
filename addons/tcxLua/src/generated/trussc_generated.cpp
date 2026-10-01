@@ -86,8 +86,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("runOnMainThread", [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); });
     lua->set_function("logLevelToString", [](trussc::LogLevel level) { return trussc::logLevelToString(level); });
     lua->set_function("getLogger", []() -> decltype(auto) { return trussc::getLogger(); });
+    lua->set_function("setLogLevel", [](trussc::LogLevel level) { return trussc::setLogLevel(level); });
     lua->set_function("setConsoleLogLevel", [](trussc::LogLevel level) { return trussc::setConsoleLogLevel(level); });
     lua->set_function("setFileLogLevel", [](trussc::LogLevel level) { return trussc::setFileLogLevel(level); });
+    lua->set_function("setSystemLogLevel", [](trussc::LogLevel level) { return trussc::setSystemLogLevel(level); });
     lua->set_function("setLogFile", [](const fs::path & path) { return trussc::setLogFile(path); });
     lua->set_function("closeLogFile", []() { return trussc::closeLogFile(); });
     lua->set_function("tcGetLogger", []() -> decltype(auto) { return trussc::tcGetLogger(); });
@@ -777,7 +779,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::createWindow(); },
         [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); }
     ));
-    lua->set_function("nodeToJson", [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); });
+    lua->set_function("nodeToJson", sol::overload(
+        [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); },
+        [](trussc::Node & node, int maxDepth, bool includeDerived) { return trussc::nodeToJson(node, maxDepth, includeDerived); }
+    ));
     lua->set_function("lerp", [](float a, float b, float t) { return std::lerp(a, b, t); });
     lua->set_function("sin", [](float x) { return std::sin(x); });
     lua->set_function("cos", [](float x) { return std::cos(x); });

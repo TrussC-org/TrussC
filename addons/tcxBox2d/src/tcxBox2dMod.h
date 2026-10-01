@@ -58,7 +58,11 @@ struct Shape2D {
     }
     static Shape2D box(float size) { return box(size, size); }
     // One convex polygon of 3 to 8 points. Concave input becomes its convex
-    // hull, as Box2D does; once the body exists, RigidBody2D::shape() (and so
+    // hull, as Box2D does: when the hull leaves points inside it (concave
+    // input, or interior points), the first such RigidBody2D in the process
+    // logs one warning with the counts, pointing to compound(); points on the
+    // outline (collinear, duplicates) and a crossing order don't count. Once
+    // the body exists, RigidBody2D::shape() (and so
     // ColliderRenderer2D) holds that hull. Convex input that already goes
     // around its outline in order (either winding, any start) is kept as
     // given; otherwise (points dropped, or listed in a crossing order) the
@@ -66,21 +70,26 @@ struct Shape2D {
     // points, or degenerate points (collinear, nearly coincident, tiny next
     // to their distance from the origin), log a warning when the RigidBody2D
     // is attached and create no body: getBody() stays null and
-    // ColliderRenderer2D draws nothing. For more points use convex() (convex
-    // approximation) or compound() (exact shape).
+    // ColliderRenderer2D draws nothing. For more points use simplified()
+    // (convex approximation) or compound() (exact shape).
     static Shape2D polygon(const std::vector<tc::Vec2>& v) {
         Shape2D s; s.kind = Polygon; s.verts = v; return s;
+    }
+    // Same as above with every point of the path (all subpaths together), so
+    // the path must have 3 to 8 points in total.
+    static Shape2D polygon(const tc::Path& path) {
+        return polygon(detail::pathPoints(path));
     }
     // Any number of points (3 or more), approximated by their convex hull
     // reduced to at most 8 points (the vertices that lose the least area are
     // dropped; tips and extents can shrink). Concave parts and holes are
     // filled. Degenerate input behaves like polygon(): a warning and no body.
-    static Shape2D convex(const std::vector<tc::Vec2>& points) {
+    static Shape2D simplified(const std::vector<tc::Vec2>& points) {
         Shape2D s; s.kind = Polygon; s.verts = detail::reducedConvexHull(points); return s;
     }
     // Same as above with every point of the path (all subpaths together).
-    static Shape2D convex(const tc::Path& path) {
-        return convex(detail::pathPoints(path));
+    static Shape2D simplified(const tc::Path& path) {
+        return simplified(detail::pathPoints(path));
     }
     // Any outline, kept exactly: concave, with holes (a subpath wound opposite
     // to its enclosing one), any number of points. It is triangulated like
@@ -300,19 +309,28 @@ protected:
                 auto log = tc::logWarning();
                 log << "tcxBox2d: RigidBody2D polygon has " << shape_.verts.size() << " points: ";
                 if (err == detail::PolygonError::TooFewPoints) {
-                    // Shape2D::convex() may have reduced many points to these
+                    // Shape2D::simplified() may have reduced many points to these
                     // few, so "needs at least 3 points" would mislead. Shape2D
                     // doesn't record which factory made it, so say "may".
-                    log << detail::describeCollapsedHull("Shape2D::convex()", true) << ".";
+                    log << detail::describeCollapsedHull("Shape2D::simplified()", true) << ".";
                 } else {
                     log << detail::describePolygonError(err) << ".";
                 }
                 if (err == detail::PolygonError::TooManyPoints) {
-                    log << " Use Shape2D::convex() for a convex approximation or"
+                    log << " Use Shape2D::simplified() for a convex approximation or"
                         << " Shape2D::compound() for the exact shape.";
                 }
                 log << " Body not created.";
                 return;
+            }
+            // Concave input becomes its hull, as Box2D does: say so once per
+            // process, so a scene that builds many bodies doesn't flood the log.
+            const size_t dropped = detail::countPointsInsideHull(shape_.verts, hull);
+            static tc::OnceGate droppedWarned;
+            if (dropped > 0 && droppedWarned.isFirstTime()) {
+                tc::logWarning() << "tcxBox2d: Shape2D::polygon() dropped " << dropped << " of "
+                                 << shape_.verts.size() << " points inside the convex hull;"
+                                 << " use Shape2D::compound() to keep the exact shape.";
             }
             shape_.verts = hull;   // draw what collides
             polys.push_back(poly);

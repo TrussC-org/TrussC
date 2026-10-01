@@ -104,6 +104,7 @@
 #include "tc/utils/tcMainThread.h"  // runOnMainThread / drainMainThreadQueue
 #include "tc/utils/tcTime.h"
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"  // OnceGate (warn-once gates)
 #include "tc/utils/tcCompress.h"
 
 // TrussC file dialogs
@@ -1177,9 +1178,8 @@ inline void ensureFontAtlas(int rows) {
     // registered beyond capacity degrade gracefully: their cells are skipped
     // by generateAtlasPixels and they render as blanks.
     if (rows > bitmapfont::CELLS_PER_COL) {
-        static bool warned = false;  // warn-once flag: a per-module copy is harmless
-        if (!warned) {
-            warned = true;
+        static OnceGate warned;
+        if (warned.isFirstTime()) {
             logWarning("BitmapFont") << "Glyph atlas is full ("
                 << bitmapfont::CELLS_PER_COL << " rows, "
                 << bitmapfont::TOTAL_CELLS << " cells); glyphs registered "
@@ -1465,15 +1465,15 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 
 namespace internal {
 // Returns true when called from a secondary window's context, emitting a
-// one-time warning that `fn` is main-window only (`why` states the platform
-// limitation). The global window-control functions that have no per-window
-// implementation call this and bail, so a secondary tick can never silently
+// warning that `fn` is main-window only (`why` states the platform
+// limitation), once per `warned` (the caller's own `static OnceGate`). The
+// global window-control functions that have no per-window implementation
+// call this and bail, so a secondary tick can never silently
 // drive the MAIN window (the pre-Phase-2 trap). No-op / false on the main
 // context, where the caller proceeds normally.
-inline bool warnIfSecondaryWindowControl(const char* fn, const char* why) {
+inline bool warnIfSecondaryWindowControl(OnceGate& warned, const char* fn, const char* why) {
     if (currentWindowContext().isMain) return false;
-    static std::unordered_set<std::string> warned;  // warn-once set: a per-module copy is harmless
-    if (warned.insert(fn).second) {
+    if (warned.isFirstTime()) {
         logWarning("Window") << fn << "() is main-window only (" << why
             << "). Called from a secondary window's context — ignored to avoid "
             "retargeting the main window.";
@@ -1533,21 +1533,24 @@ enum class Cursor {
 
 // Show the mouse cursor (default)
 inline void showCursor() {
-    if (internal::warnIfSecondaryWindowControl("showCursor",
+    static OnceGate warned;
+    if (internal::warnIfSecondaryWindowControl(warned, "showCursor",
         "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
     sapp_show_mouse(true);
 }
 
 // Hide the mouse cursor
 inline void hideCursor() {
-    if (internal::warnIfSecondaryWindowControl("hideCursor",
+    static OnceGate warned;
+    if (internal::warnIfSecondaryWindowControl(warned, "hideCursor",
         "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
     sapp_show_mouse(false);
 }
 
 // Set mouse cursor shape (uses OS system cursors or custom cursors)
 inline void setCursor(Cursor cursor) {
-    if (internal::warnIfSecondaryWindowControl("setCursor",
+    static OnceGate warned;
+    if (internal::warnIfSecondaryWindowControl(warned, "setCursor",
         "sokol_app's cursor shape targets the main window")) return;
     sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
 }
@@ -1946,9 +1949,8 @@ inline void setFps(float fps) {
 // (Window::setFps); calling this from a secondary tick logs once and no-ops.
 inline void setIndependentFps(float updateFps, float drawFps) {
     if (!internal::currentWindowContext().isMain) {
-        static bool warned = false;  // warn-once flag: a per-module copy is harmless
-        if (!warned) {
-            warned = true;
+        static OnceGate warned;
+        if (warned.isFirstTime()) {
             logWarning("Window") << "setIndependentFps() is main-window only; a "
                 "secondary window runs a single synced rate. Use Window::setFps() "
                 "(or the context-aware setFps()). Ignored.";
@@ -2015,9 +2017,8 @@ inline float getFps() {
 // setFps throttles them); redraw() from a secondary tick logs once and no-ops.
 inline void redraw(int count = 1) {
     if (!internal::currentWindowContext().isMain) {
-        static bool warned = false;  // warn-once flag: a per-module copy is harmless
-        if (!warned) {
-            warned = true;
+        static OnceGate warned;
+        if (warned.isFirstTime()) {
             logWarning("Window") << "redraw() / event-driven loop is main-window "
                 "only; secondary windows are paced by their display link. Ignored.";
         }
@@ -2415,18 +2416,19 @@ namespace internal {
                 mcpPort = std::atoi(envPort);
             }
 
-            // Host defaults to localhost (loopback-only). Set TRUSSC_MCP_HOST
+            // Host defaults to 127.0.0.1 (loopback-only, the same address on
+            // every OS; see startHttpServer). Set TRUSSC_MCP_HOST
             // (e.g. 0.0.0.0) to expose externally — requires TRUSSC_MCP_TOKEN,
             // otherwise startHttpServer refuses to bind (fail-closed).
             const char* envHost = std::getenv("TRUSSC_MCP_HOST");
-            std::string mcpHost = envHost ? envHost : "localhost";
+            std::string mcpHost = envHost ? envHost : "127.0.0.1";
             const char* envToken = std::getenv("TRUSSC_MCP_TOKEN");
             std::string mcpToken = envToken ? envToken : "";
 
             // Start HTTP server for MCP transport
+            // The server thread logs "[MCP] HTTP server listening on
+            // http://HOST:PORT/mcp" once it has bound the port.
             mcp::startHttpServer(mcpPort, mcpHost, mcpToken);
-
-            logNotice("System") << "MCP HTTP server started";
         }
         #endif
 

@@ -141,6 +141,8 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
         t["members"] = &trussc::JsonWriteReflector::members;
+        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
+        t["derived"] = &trussc::JsonWriteReflector::derived;
         t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
     }
 }

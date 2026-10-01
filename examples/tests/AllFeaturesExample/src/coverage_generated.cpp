@@ -564,8 +564,10 @@ static void cover_utility() {
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)logLevelToString(af::val<LogLevel>());
     (void)getLogger();
+    (void)setLogLevel(af::val<LogLevel>());
     (void)setConsoleLogLevel(af::val<LogLevel>());
     (void)setFileLogLevel(af::val<LogLevel>());
+    (void)setSystemLogLevel(af::val<LogLevel>());
     (void)setLogFile(af::val<const fs::path>());
     (void)closeLogFile();
     (void)logAt(af::val<LogLevel>());
@@ -615,10 +617,10 @@ static void cover_utility() {
     (void)toJsonString(af::val<const Json>(), af::val<int>());
     (void)parseXml(af::val<const std::string>());
     (void)getVersion();
-    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
-    (void)nodeToJson(af::val<Node>(), af::val<int>());
+    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
 }
 
 static void cover_video() {
@@ -796,7 +798,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().getPlayingSounds();
         (void)af::val<AudioEngine>().audioOut;
         (void)af::val<AudioEngine>().audioIn;
-        (void)af::val<AudioEngine>().waitForCallbackIdle();
+        (void)af::val<AudioEngine>().waitForAudioCallbacks();
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().getAnalysisBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
@@ -1067,6 +1069,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().onRender;
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().exit;
+        (void)af::val<CoreEvents>().hotReloadUnload;
         (void)af::val<CoreEvents>().exitRequested;
         (void)af::val<CoreEvents>().keyPressed;
         (void)af::val<CoreEvents>().keyReleased;
@@ -1511,6 +1514,8 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
 struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
     static void run() {
         (void)af::val<JsonWriteReflector>().members;
+        (void)af::val<JsonWriteReflector>().includeDerived;
+        (void)af::val<JsonWriteReflector>().derived;
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<float>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<int>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<bool>());
@@ -1663,12 +1668,15 @@ struct Cover_Logger : af::Scope<Logger> {
         (void)Logger();
         (void)af::val<Logger>().onLog;
         (void)af::val<Logger>().log(af::val<LogLevel>(), af::val<const std::string>());
+        (void)af::val<Logger>().setLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().setConsoleLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().getConsoleLogLevel();
         (void)af::val<Logger>().setLogFile(af::val<const fs::path>());
         (void)af::val<Logger>().closeFile();
         (void)af::val<Logger>().setFileLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().getFileLogLevel();
+        (void)af::val<Logger>().setSystemLogLevel(af::val<LogLevel>());
+        (void)af::val<Logger>().getSystemLogLevel();
         (void)af::val<Logger>().getLogFilePath();
         (void)af::val<Logger>().isFileOpen();
     }
@@ -2070,6 +2078,14 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
     }
 };
 
+struct Cover_OnceGate : af::Scope<OnceGate> {
+    static void run() {
+        (void)OnceGate();
+        (void)OnceGate(af::val<double>());
+        (void)af::val<OnceGate>().isFirstTime();
+    }
+};
+
 struct Cover_Path : af::Scope<Path> {
     static void run() {
         (void)Path();
@@ -2342,6 +2358,9 @@ struct Cover_Reflector : af::Scope<Reflector> {
         (void)af::val<Reflector>().isReadOnly();
         (void)af::val<Reflector>().pushReadOnly();
         (void)af::val<Reflector>().popReadOnly();
+        (void)af::val<Reflector>().isDerived();
+        (void)af::val<Reflector>().pushDerived();
+        (void)af::val<Reflector>().popDerived();
         (void)af::val<Reflector>().beginGroup(af::val<const char *>());
         (void)af::val<Reflector>().endGroup();
     }
@@ -3482,6 +3501,7 @@ void af::coverGenerated() {
     af_generated::Cover_NetworkInterface::run();
     af_generated::Cover_Node::run();
     af_generated::Cover_Node__HitResult::run();
+    af_generated::Cover_OnceGate::run();
     af_generated::Cover_Path::run();
     af_generated::Cover_Pixels::run();
     af_generated::Cover_Platform::run();

@@ -158,7 +158,8 @@ addons/CMakeLists.txt
 # =============================================================================
 # Auto-generated Shader Headers (sokol-shdc output)
 # =============================================================================
-core/include/tc/gpu/shaders/*.glsl.h
+# Every *.glsl.h is generated from the .glsl next to it at build time.
+*.glsl.h
 
 # =============================================================================
 # AI assistant local state

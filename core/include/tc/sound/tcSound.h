@@ -882,7 +882,7 @@ struct AudioDeviceChangedArgs {
     bool        isDefaultDevice = false;
     int         sampleRate = 0;
     int         channels = 0;
-    int         bufferSize = 0;
+    int         bufferSize = 0;    // period the device runs with, in engine-rate frames (granted by the device)
     int         maxPolyphony = 0;
 };
 
@@ -925,7 +925,7 @@ struct AudioInBuffer {
 // ---------------------------------------------------------------------------
 struct PlayingSoundInfo {
     int         slot = 0;           // playback slot index (0 .. maxPolyphony-1)
-    fs::path    path;               // source file (lexically normalized); empty for generated / memory buffers
+    fs::path    path;               // source file as given (same as getPath()); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;
@@ -1050,7 +1050,15 @@ namespace internal {
     // the position the mixer is playing. tcAudio_impl.cpp.
     double voicePosition(const PlayingSound& voice);
 
-    // The framework's teardown barrier (#256): AudioEngine::waitForCallbackIdle()
+    // Stop a voice and release what it holds (Sound::stop(), and the last
+    // Sound handle that shares the voice going away): `playing` and `paused`
+    // become false, so the engine slot is free for the next play(), and a
+    // stream voice gives up its decoder and file (closed on the calling
+    // thread, after the engine lock is released). Calling it again is a
+    // no-op. tcAudio_impl.cpp.
+    void releaseVoice(PlayingSound& voice);
+
+    // The framework's teardown barrier (#256): AudioEngine::waitForAudioCallbacks()
     // without its one-second limit. internal::detachAppAudio() waits here
     // before the framework destroys an App (exit, runHeadlessApp, hot reload,
     // closing a secondary window). A listener that never returns is an app
@@ -1058,7 +1066,7 @@ namespace internal {
     // seen) rather than destroy what the listener may still use. After one
     // second it logs an error, once, and goes on waiting. Returns at once on
     // the audio thread inside a listener. tcAudio_impl.cpp.
-    void waitForCallbackIdleNoTimeout();
+    void waitForAudioCallbacksNoTimeout();
 }
 
 // ---------------------------------------------------------------------------
@@ -1167,7 +1175,7 @@ public:
     // go:
     //
     //   ~Synth() { listener_.disconnect();
-    //              AudioEngine::getInstance().waitForCallbackIdle(); }
+    //              AudioEngine::getInstance().waitForAudioCallbacks(); }
     //
     // Do it in the most-derived class (or in cleanup()), not in a base-class
     // destructor, which runs after the derived members are already gone. The
@@ -1175,7 +1183,7 @@ public:
     // they are detached after cleanup(), and before the App is destroyed
     // (exit, hot reload, closing a secondary window) the framework waits the
     // same way, but without the one-second limit below
-    // (internal::waitForCallbackIdleNoTimeout()).
+    // (internal::waitForAudioCallbacksNoTimeout()).
     //
     //   - Returns at once when no callback is running: the device is stopped
     //     or was never started, or the audio thread is between two buffers.
@@ -1190,7 +1198,7 @@ public:
     //     is better than destroying the App under a running listener.)
     // It waits for every listener running at that moment, not only the
     // caller's: call it without holding a lock that a listener takes.
-    bool waitForCallbackIdle();
+    bool waitForAudioCallbacks();
 
     // Fired on every successful init() — both the initial startup and any
     // subsequent live re-init. The args carry the new device's real name
@@ -1262,17 +1270,18 @@ private:
     void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
     friend void internal::flushAudioDiagnostics();
-    friend void internal::waitForCallbackIdleNoTimeout();
+    friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
+    friend void internal::releaseVoice(PlayingSound&);
 
     // Zero the output meters, the CPU usage window and every playback's
     // level. Only while no device is running (init(), shutdown()), so the
     // audio thread cannot race it.
     void resetMeters();
 
-    // Mark an audioOut / audioIn notify in flight for waitForCallbackIdle()
+    // Mark an audioOut / audioIn notify in flight for waitForAudioCallbacks()
     // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
     // add each, no lock. beginCallback() returns the slot to pass to
     // endCallback(). audioIn has no engine-side source yet: whatever fires it
@@ -1280,8 +1289,8 @@ private:
     int  beginCallback();
     void endCallback(int slot);
 
-    // Both barriers (tcAudio_impl.cpp): waitForCallbackIdle() gives up after
-    // one second (giveUp), internal::waitForCallbackIdleNoTimeout() does not.
+    // Both barriers (tcAudio_impl.cpp): waitForAudioCallbacks() gives up after
+    // one second (giveUp), internal::waitForAudioCallbacksNoTimeout() does not.
     bool waitForCallbacks(bool giveUp);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
@@ -1475,7 +1484,7 @@ private:
             ob.channels      = num_channels;
             ob.sampleRate    = sampleRate_;
             ob.framePosition = framePosition_;
-            // In flight for waitForCallbackIdle(). Must enclose the notify:
+            // In flight for waitForAudioCallbacks(). Must enclose the notify:
             // it is what loads the listener snapshot.
             const int slot = beginCallback();
             audioOut.notify(ob);
@@ -1543,28 +1552,58 @@ private:
     std::unique_ptr<internal::AudioDiagnostics> diag_;
 
     // Callbacks in flight (beginCallback / endCallback), counted in one of two
-    // slots picked by the epoch's low bit. waitForCallbackIdle() advances the
+    // slots picked by the epoch's low bit. waitForAudioCallbacks() advances the
     // epoch so new callbacks count in the other slot, then waits for the old
     // slot to drain, twice (once per slot): it waits only for callbacks that
     // were already running, and a callback that read the epoch just before an
     // advance is still caught. The mutex serializes barriers (the epoch
     // advances of two barriers must not interleave); the audio thread never
-    // takes it. Timed, so waitForCallbackIdle() keeps its one-second limit
+    // takes it. Timed, so waitForAudioCallbacks() keeps its one-second limit
     // while a framework teardown holds it waiting for a stuck listener.
     std::atomic<uint32_t> callbackEpoch_{0};
     std::atomic<int>      callbacksInFlight_[2]{};
     std::timed_mutex      callbackBarrierMutex_;
 };
 
+namespace internal {
+    // The owner token of a voice started by Sound::play(). Sound copies share
+    // it (Sound::playing_ aliases it), so the voice is released when the last
+    // Sound handle that shares it is destroyed or overwritten.
+    struct VoiceOwner {
+        std::shared_ptr<PlayingSound> voice;
+        explicit VoiceOwner(std::shared_ptr<PlayingSound> v) : voice(std::move(v)) {}
+        ~VoiceOwner() { if (voice) releaseVoice(*voice); }
+        VoiceOwner(const VoiceOwner&) = delete;
+        VoiceOwner& operator=(const VoiceOwner&) = delete;
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Sound Class (user-facing)
 // ---------------------------------------------------------------------------
+//
+// Lifetime: a Sound plays only while it, or a copy of it, is alive. Copies
+// share the voice that play() started; when the last Sound handle that
+// shares it is destroyed or overwritten (copy or move assignment), the voice
+// stops, looping or not, and its slot is free again. A temporary copy going
+// away does not stop the original. To play overlapping one-shots, keep the
+// Sound objects alive (for example as members):
+//
+//   Sound hits_[4];   // members, each loaded once
+//   int next_ = 0;
+//   hits_[next_].play(); next_ = (next_ + 1) % 4;   // up to 4 overlap
+//
+// `{ Sound s = hit; s.play(); }` stops at the closing brace.
+//
+// Stopped means released: stop(), and the last handle going away, also
+// close a streamed voice's decoder and file.
 class Sound {
 public:
     Sound() = default;
-    ~Sound() = default;
+    ~Sound() = default;   // releases the voice if this is its last handle
 
-    // Copy and move
+    // Copy and move. Copies share the voice; assignment releases the old
+    // voice when this was its last handle.
     Sound(const Sound&) = default;
     Sound& operator=(const Sound&) = default;
     Sound(Sound&&) = default;
@@ -1676,7 +1715,7 @@ public:
 
     // Start playing from the beginning (this Sound's previous voice is
     // stopped first). Returns false when nothing will play: not loaded, or
-    // the engine dropped the play — every voice slot busy
+    // the engine dropped the play — every playback slot busy
     // (AudioSettings::maxPolyphony), the stream's own maxPolyphony reached
     // (copies of a streamed Sound share it), the stream file could not be
     // reopened, or no output device is running. Drops are logged as
@@ -1700,7 +1739,12 @@ public:
         // Stop if already playing
         stop();
 
-        playing_ = AudioEngine::getInstance().play(buffer_);
+        if (auto voice = AudioEngine::getInstance().play(buffer_)) {
+            // playing_ points at the voice and shares ownership of its
+            // VoiceOwner, which every copy of this Sound then shares too.
+            auto owner = std::make_shared<internal::VoiceOwner>(voice);
+            playing_ = std::shared_ptr<PlayingSound>(owner, voice.get());
+        }
         if (playing_) {
             playing_->volume = volume_;
             playing_->pan = pan_;
@@ -1713,9 +1757,11 @@ public:
         return playing_ != nullptr;
     }
 
+    // Stop and release the voice (a stream's decoder and file too). Copies
+    // that share the voice see it stopped.
     void stop() {
         if (playing_) {
-            playing_->playing = false;
+            internal::releaseVoice(*playing_);
             playing_.reset();
         }
     }
@@ -1946,6 +1992,7 @@ private:
     }
 
     std::shared_ptr<SoundSource> buffer_;
+    // Points at the voice; owns (and shares with copies) its VoiceOwner.
     std::shared_ptr<PlayingSound> playing_;
     float   volume_  = 1.0f;
     float   pan_     = 0.0f;

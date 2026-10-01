@@ -293,6 +293,31 @@ std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points, siz
     return out;
 }
 
+size_t countPointsInsideHull(const std::vector<tc::Vec2>& points,
+                             const std::vector<tc::Vec2>& hull) {
+    if (points.size() <= hull.size() || hull.size() < 3) return 0;
+    const double tol = World::toPixels(0.5f * b2_linearSlop);
+    size_t inside = 0;
+    for (const auto& p : points) {
+        // Distance to the nearest hull edge, in double. Every point is inside
+        // the hull or on its outline, so this is its distance to the outline.
+        double best = std::numeric_limits<double>::max();
+        for (size_t i = 0; i < hull.size(); ++i) {
+            const tc::Vec2& a = hull[i];
+            const tc::Vec2& b = hull[(i + 1) % hull.size()];
+            const double ex = double(b.x) - a.x, ey = double(b.y) - a.y;
+            const double px = double(p.x) - a.x, py = double(p.y) - a.y;
+            const double len2 = ex * ex + ey * ey;
+            double t = len2 > 0.0 ? (px * ex + py * ey) / len2 : 0.0;
+            t = std::clamp(t, 0.0, 1.0);
+            const double dx = px - t * ex, dy = py - t * ey;
+            best = std::min(best, std::sqrt(dx * dx + dy * dy));
+        }
+        if (best > tol) ++inside;
+    }
+    return inside;
+}
+
 std::vector<tc::Vec2> pathPoints(const tc::Path& path) {
     std::vector<tc::Vec2> out;
     out.reserve(path.getVertices().size());
