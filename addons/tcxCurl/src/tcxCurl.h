@@ -268,6 +268,18 @@ public:
     // query, user:pass@ in the base URL) may still be printed.
     void setVerbose(bool v) { verbose_ = v; }
 
+    // --- TLS ---
+
+    // CA certificate(s) in PEM form for verifying the server, e.g. a device
+    // that serves HTTPS with a self-signed certificate. When set, the server
+    // certificate is checked against this PEM only, in place of the OS default
+    // trust store; verification of the peer and the host name stays on. An
+    // empty string means the OS default trust store (the default). Used by
+    // request() and uploadFile(). If the libcurl build cannot take a PEM from
+    // memory, the request fails with response.error. On Android a request
+    // with a CA set fails with response.error for now.
+    void setTlsCACertificate(const std::string& pem) { tlsCaPem_ = pem; }
+
     // Check if server is reachable
     bool isReachable() {
         auto res = get("/api/health");
@@ -316,8 +328,52 @@ private:
     long timeoutSeconds_ = 30;
     bool followRedirects_ = false;
     bool verbose_ = false;
+    std::string tlsCaPem_;
 
 #ifdef TCX_HTTP_CURL
+    // TLS options shared by request() and uploadFile(). Returns false, with
+    // response.error set, when the CA PEM cannot be applied.
+    bool applyTlsOptions(CURL* curl, HttpResponse& response) const {
+        if (tlsCaPem_.empty()) {
+#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
+            // Windows curl is built against Schannel, which already verifies against the
+            // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
+            // suspenders: if the backend is ever swapped (e.g. an OpenSSL build), it makes
+            // curl use the OS trust store instead of failing with "SSL connect error".
+            curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
+#endif
+            return true;
+        }
+#if LIBCURL_VERSION_NUM >= 0x074D00  // CURLOPT_CAINFO_BLOB: curl 7.77.0
+        // The PEM is the only trust source: no CA file, CA directory or OS store.
+        curl_blob blob;
+        blob.data = const_cast<char*>(tlsCaPem_.data());
+        blob.len = tlsCaPem_.size();
+        blob.flags = CURL_BLOB_COPY;
+        CURLcode rc = curl_easy_setopt(curl, CURLOPT_CAINFO_BLOB, &blob);
+        if (rc != CURLE_OK) {
+            response.error = std::string("setTlsCACertificate: this libcurl cannot use a CA PEM from memory (") +
+                             curl_easy_strerror(rc) + ")";
+            return false;
+        }
+        curl_easy_setopt(curl, CURLOPT_CAINFO, static_cast<char*>(nullptr));
+        curl_easy_setopt(curl, CURLOPT_CAPATH, static_cast<char*>(nullptr));
+#if defined(_WIN32) && defined(CURLSSLOPT_REVOKE_BEST_EFFORT)
+        // No NATIVE_CA here: the PEM replaces the OS store. Revocation is
+        // checked best-effort, so a certificate without a CRL/OCSP URL passes.
+        rc = curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_REVOKE_BEST_EFFORT);
+        if (rc != CURLE_OK) {
+            response.error = std::string("setTlsCACertificate: ") + curl_easy_strerror(rc);
+            return false;
+        }
+#endif
+        return true;
+#else
+        response.error = "setTlsCACertificate: needs libcurl 7.77.0 or newer (CURLOPT_CAINFO_BLOB)";
+        return false;
+#endif
+    }
+
     // libcurl write callback
     static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* userp) {
         auto* response = static_cast<std::string*>(userp);
@@ -461,13 +517,10 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     // image generation, where the server then requests renegotiation) fail with
     // "SSL/TLS connection timeout". CURLOPT_TIMEOUT already bounds the whole
     // operation, so the connect phase stays bounded without breaking renegotiation.
-#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
-    // Windows curl is built against Schannel, which already verifies against the
-    // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
-    // suspenders: if the backend is ever swapped (e.g. an OpenSSL build), it makes
-    // curl use the OS trust store instead of failing with "SSL connect error".
-    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
-#endif
+    if (!applyTlsOptions(curl, response)) {
+        curl_easy_cleanup(curl);
+        return response;
+    }
     if (followRedirects_) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
@@ -542,6 +595,10 @@ inline HttpResponse HttpClient::uploadFile(const std::string& path, const std::s
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);  // 10 min for large RAW files
+    if (!applyTlsOptions(curl, response)) {
+        curl_easy_cleanup(curl);
+        return response;
+    }
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
