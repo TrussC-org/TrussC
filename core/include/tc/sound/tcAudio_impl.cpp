@@ -351,7 +351,7 @@ std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const {
         info.streaming = (src.kind() == SoundSource::Stream);
         const fs::path p = info.streaming ? static_cast<const SoundStream&>(src).getPath()
                                           : static_cast<const SoundBuffer&>(src).getPath();
-        info.path     = p.lexically_normal();
+        info.path     = p;  // as given, same string as getPath() and the logs
         info.paused   = v->paused;
         info.loop     = v->loop;
         // positionF counts source frames for eager voices and, for streams,
@@ -1475,7 +1475,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
     args.deviceName   = std::string(device->playback.name);
     args.sampleRate   = sampleRate_;
     args.channels     = channels_;
-    args.bufferSize   = bufferSize_;
+    // The period the device runs with, in engine-rate frames: miniaudio
+    // reports it at the device's native rate, while the event's sampleRate
+    // is the engine rate, so bufferSize / sampleRate is the period in seconds.
+    {
+        const ma_uint32 period = device->playback.internalPeriodSizeInFrames;
+        const ma_uint32 deviceRate = device->playback.internalSampleRate;
+        args.bufferSize = (deviceRate > 0 && deviceRate != (ma_uint32)sampleRate_)
+            ? (int)(((uint64_t)period * (uint64_t)sampleRate_ + deviceRate / 2) / deviceRate)
+            : (int)period;
+    }
     args.maxPolyphony = (int)playingSounds_.size();
 
     // Determine whether the opened device is the OS default by comparing
