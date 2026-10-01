@@ -334,7 +334,9 @@ namespace androidserial {
     int readBytes(Impl* impl, void* buffer, int length);
     // error: the errno of a failed bulk transfer, 0 otherwise. The backend
     // does not log it: Serial does, once it has released its lock.
-    int writeBytes(Impl* impl, const void* buffer, int length, int& error);
+    // timedOut: a chunk hit internal::serialWriteTimeoutMs(); error stays 0
+    // and the result counts the chunks that completed before it (possibly 0).
+    int writeBytes(Impl* impl, const void* buffer, int length, int& error, bool& timedOut);
     void flushInput(Impl* impl);
 }
 #endif
@@ -382,11 +384,12 @@ namespace internal {
     // busy. A native USB (CDC) device ignores the rate, but a lower rate only
     // makes the timeout longer. Examples: 9600 baud gives 5 ms per byte (64 KB
     // in about 5.5 min), 40000 baud and up give 1 ms per byte (64 KB in about
-    // 70 s). Here, not in the Windows branch, so the tests check it on every
-    // platform.
+    // 70 s). Android applies the same rule to each bulk transfer of a write
+    // (see serialWriteTimeoutMs()). Here, not in a platform branch, so the
+    // tests check it on every platform.
     struct SerialWriteTimeout {
         unsigned long multiplierMs;  // per byte
-        unsigned long constantMs;    // per WriteFile() call
+        unsigned long constantMs;    // per WriteFile() call / bulk transfer
     };
 
     inline SerialWriteTimeout serialWriteTimeout(int baudRate) {
@@ -396,6 +399,23 @@ namespace internal {
         unsigned long baud = baudRate > 0 ? static_cast<unsigned long>(baudRate) : 1;
         unsigned long msPerByte = (bitsPerByte * 1000 * slack + baud - 1) / baud;  // rounded up
         return {msPerByte, constantMs};
+    }
+
+    // The largest bulk transfer the Android backend sends in one go (the
+    // usbfs per-URB limit); a longer write is split into chunks of this size
+    constexpr int serialAndroidWriteChunk = 16384;
+
+    // The whole timeout, in ms, of one transfer of `bytes` bytes at baudRate
+    // under the rule above: multiplierMs * bytes + constantMs. The Android
+    // backend gives this to each chunk of a write (USBDEVFS_BULK), e.g.
+    // 86920 ms for a 16 KB chunk at 9600 baud, 21384 ms at 115200 baud.
+    // Saturates at the largest unsigned int, the type usbfs takes.
+    inline unsigned int serialWriteTimeoutMs(int baudRate, int bytes) {
+        SerialWriteTimeout t = serialWriteTimeout(baudRate);
+        unsigned long long n = bytes > 0 ? static_cast<unsigned long long>(bytes) : 0;
+        unsigned long long ms = t.multiplierMs * n + t.constantMs;
+        const unsigned long long cap = static_cast<unsigned int>(-1);
+        return static_cast<unsigned int>(ms < cap ? ms : cap);
     }
 }
 
@@ -558,7 +578,7 @@ public:
             // Both hold another connection now (see closeLost())
             ++generation_;
             ++other.generation_;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__ANDROID__)
             writeTimeoutWarned_ = false;
 #endif
         }
@@ -740,7 +760,10 @@ public:
                 androidserial::setup(aimpl_, portName, baudRate, endedInSetup, lostInSetup);
             // No I/O call runs before the lock is released, so bumping it
             // only now is the same as before the call
-            if (internal::serialSetupCountsAsNew(result)) ++generation_;
+            if (internal::serialSetupCountsAsNew(result)) {
+                ++generation_;
+                writeTimeoutWarned_ = false;  // a new connection warns again
+            }
             initialized_ = result == internal::SerialSetupResult::Connected;
             if (ended == androidserial::CloseResult::NotOpen) {
                 ended = endedInSetup;
@@ -1222,7 +1245,14 @@ public:
     //   port's rate, plus 5 s. On a timeout it returns the bytes written so
     //   far (possibly 0), logs a warning once per connection, and the port
     //   stays open.
-    // - Android: waits up to 1 s per 16 KB for the device to take the data.
+    // - Android: sends the data in bulk transfers of up to 16 KB and waits
+    //   for the device to take each one, at most
+    //   internal::serialWriteTimeoutMs() for that chunk (the Windows rule
+    //   above, per chunk). On a timeout it returns the bytes of the chunks
+    //   that completed (possibly 0), logs a warning once per connection, and
+    //   the port stays open. usbfs does not report how much of a timed-out
+    //   transfer went out, so some bytes past the returned count may have
+    //   reached the device too.
     // A write that must never stall the app belongs on a thread of its own:
     // the other I/O calls do not wait for it (on Windows available() and the
     // reads still do; see the top of this file).
@@ -1233,6 +1263,8 @@ public:
         std::string port;
 #elif defined(__ANDROID__)
         int writeError = 0;
+        bool warnTimeout = false;  // decided under the lock, logged after it
+        std::string port;
 #endif
         int n = [&]() -> int {
             Shared lock(lock_);
@@ -1258,7 +1290,10 @@ public:
             if ((int)bytesWritten < length) warnTimeout = firstWriteTimeout(port);
             return (int)bytesWritten;
 #elif defined(__ANDROID__)
-            return androidserial::writeBytes(aimpl_, buffer, length, writeError);
+            bool timedOut = false;
+            int written = androidserial::writeBytes(aimpl_, buffer, length, writeError, timedOut);
+            if (timedOut) warnTimeout = firstWriteTimeout(port);
+            return written;
 #else
             ssize_t result = write(fd_, buffer, length);
             if (result == -1) {
@@ -1278,6 +1313,12 @@ public:
                          << " from a thread of its own if the device takes data slowly";
         }
 #elif defined(__ANDROID__)
+        if (warnTimeout) {
+            logWarning() << "Serial: a write to " << port << " timed out (" << n << " of "
+                         << length << " bytes known to be sent, counting whole 16 KB chunks);"
+                         << " writeBytes() returns that count. Write from a thread of its own"
+                         << " if the device takes data slowly";
+        }
         if (writeError != 0) {
             logError() << "Serial: write failed (" << std::strerror(writeError) << ")";
         }
@@ -1376,7 +1417,7 @@ private:
     // Counts the connections: setup() and the moves bump it, so a loss found
     // on one connection never closes the next one (see closeLost())
     std::uint64_t generation_ = 0;
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__ANDROID__)
     // Set once a write of this connection timed out (see writeBytes()).
     // Tested and set with the lock shared (several writers may time out at
     // once), reset by setup() and the moves with it exclusive.
