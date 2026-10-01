@@ -2680,8 +2680,12 @@ namespace internal {
             present();
 
             // After present(): swapchain committed, outside any pass. Safe point
-            // for end-of-frame readback (e.g. VideoRecorder auto-capture).
-            events().afterFrame.notify();
+            // for end-of-frame readback (e.g. VideoRecorder auto-capture). Its
+            // listeners are app code: an entry point (#349).
+            {
+                EntryStackGuard guard(AppEntry::AfterFrame);
+                events().afterFrame.notify();
+            }
 
             // Decrement redrawCount (don't go below 0)
             auto& loop = mainLoop();

@@ -79,6 +79,7 @@ enum class AppEntry {
     Draw,     // the frame: draw(), dropped at present() (#232)
     Event,    // one window event (key, mouse, touch, drop, resize, ...), main or secondary
     Exit,     // exit() and cleanup()
+    AfterFrame,  // events().afterFrame listeners, after present(), main or secondary
     Count
 };
 
@@ -90,6 +91,7 @@ inline const char* appEntryLabel(AppEntry e) {
         case AppEntry::Draw:    return "draw()";
         case AppEntry::Event:   return "an event handler";
         case AppEntry::Exit:    return "exit()";
+        case AppEntry::AfterFrame: return "an afterFrame listener";
         case AppEntry::Count:   break;
     }
     return "?";

@@ -126,7 +126,11 @@ void windowTick(sapp_window swin, void* user) {
     win->drawTreeNow();
 
     present();
-    win->events().afterFrame.notify();
+    {
+        // This window's afterFrame listeners are an entry point (#349).
+        internal::EntryStackGuard guard(internal::AppEntry::AfterFrame);
+        win->events().afterFrame.notify();
+    }
     // Drain this window's saveScreenshot() queue while ITS context (and its
     // lastSwapchainDrawable) is current — must run before we restore prev.
     internal::drainPendingScreenshots();
