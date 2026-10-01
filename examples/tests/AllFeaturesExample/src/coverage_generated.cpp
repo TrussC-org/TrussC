@@ -793,7 +793,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().getBufferSize();
         (void)af::val<AudioEngine>().isInitialized();
         (void)af::val<AudioEngine>().getStats();
-        (void)af::val<AudioEngine>().getVoices();
+        (void)af::val<AudioEngine>().getPlayingSounds();
         (void)af::val<AudioEngine>().audioOut;
         (void)af::val<AudioEngine>().audioIn;
         (void)af::val<AudioEngine>().waitForCallbackIdle();
@@ -857,31 +857,15 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
 struct Cover_AudioStats : af::Scope<AudioStats> {
     static void run() {
         (void)af::val<AudioStats>().droppedPlays;
-        (void)af::val<AudioStats>().droppedVoiceLimit;
+        (void)af::val<AudioStats>().droppedPolyphonyLimit;
         (void)af::val<AudioStats>().droppedStreamLimit;
         (void)af::val<AudioStats>().droppedDecoderError;
         (void)af::val<AudioStats>().droppedNotRunning;
         (void)af::val<AudioStats>().clippedSamples;
         (void)af::val<AudioStats>().peak;
         (void)af::val<AudioStats>().rms;
-        (void)af::val<AudioStats>().load;
-        (void)af::val<AudioStats>().loadMax;
-    }
-};
-
-struct Cover_AudioVoiceInfo : af::Scope<AudioVoiceInfo> {
-    static void run() {
-        (void)af::val<AudioVoiceInfo>().slot;
-        (void)af::val<AudioVoiceInfo>().path;
-        (void)af::val<AudioVoiceInfo>().streaming;
-        (void)af::val<AudioVoiceInfo>().paused;
-        (void)af::val<AudioVoiceInfo>().loop;
-        (void)af::val<AudioVoiceInfo>().position;
-        (void)af::val<AudioVoiceInfo>().duration;
-        (void)af::val<AudioVoiceInfo>().volume;
-        (void)af::val<AudioVoiceInfo>().pan;
-        (void)af::val<AudioVoiceInfo>().speed;
-        (void)af::val<AudioVoiceInfo>().level;
+        (void)af::val<AudioStats>().cpuUsage;
+        (void)af::val<AudioStats>().cpuUsagePeak;
     }
 };
 
@@ -2215,6 +2199,22 @@ struct Cover_PlayingSound : af::Scope<PlayingSound> {
     }
 };
 
+struct Cover_PlayingSoundInfo : af::Scope<PlayingSoundInfo> {
+    static void run() {
+        (void)af::val<PlayingSoundInfo>().slot;
+        (void)af::val<PlayingSoundInfo>().path;
+        (void)af::val<PlayingSoundInfo>().streaming;
+        (void)af::val<PlayingSoundInfo>().paused;
+        (void)af::val<PlayingSoundInfo>().loop;
+        (void)af::val<PlayingSoundInfo>().position;
+        (void)af::val<PlayingSoundInfo>().duration;
+        (void)af::val<PlayingSoundInfo>().volume;
+        (void)af::val<PlayingSoundInfo>().pan;
+        (void)af::val<PlayingSoundInfo>().speed;
+        (void)af::val<PlayingSoundInfo>().level;
+    }
+};
+
 struct Cover_Quaternion : af::Scope<Quaternion> {
     static void run() {
         (void)Quaternion();
@@ -3424,7 +3424,6 @@ void af::coverGenerated() {
     af_generated::Cover_AudioRecorder::run();
     af_generated::Cover_AudioSettings::run();
     af_generated::Cover_AudioStats::run();
-    af_generated::Cover_AudioVoiceInfo::run();
     af_generated::Cover_BuildInfo::run();
     af_generated::Cover_CameraContext::run();
     af_generated::Cover_ChipSoundBundle::run();
@@ -3487,6 +3486,7 @@ void af::coverGenerated() {
     af_generated::Cover_Pixels::run();
     af_generated::Cover_Platform::run();
     af_generated::Cover_PlayingSound::run();
+    af_generated::Cover_PlayingSoundInfo::run();
     af_generated::Cover_Quaternion::run();
     af_generated::Cover_Ray::run();
     af_generated::Cover_Ray__Hit::run();

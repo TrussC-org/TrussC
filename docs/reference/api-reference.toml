@@ -262,6 +262,14 @@ description.en = "Maximum number of simultaneously-playing Sound voices."
 description.ja = "同時再生可能な Sound ボイスの最大数"
 description.ko = "동시 재생 가능한 Sound 보이스 최대 수"
 
+["AudioEngine::getPlayingSounds"]
+category = "audioengine"
+keywords = ["playing sounds", "playback", "voices", "active", "diagnostics", "level", "meter"]
+description.en = "Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener."
+description.ja = "再生中・一時停止中のサウンドのスナップショット (PlayingSoundInfo: slot、path、streaming、位置、長さ、volume、pan、speed、loop、paused、level)。shutdown() 後にスロットに残った再生は level 0 で並ぶ。エンジンのロックを取ってコピーするので、メインスレッドから呼ぶこと。audioOut / audioIn のリスナーからは呼ばない"
+description.ko = "재생 중·일시 정지 중인 사운드의 스냅샷 (PlayingSoundInfo: slot, path, streaming, 위치, 길이, volume, pan, speed, loop, paused, level). shutdown() 후 슬롯에 남은 재생은 level 0 으로 나온다. 엔진 락을 잡고 복사하므로 메인 스레드에서 호출할 것. audioOut / audioIn 리스너에서는 호출하지 않는다"
+related = ["PlayingSoundInfo", "AudioEngine::getStats"]
+
 ["AudioEngine::getSampleRate"]
 category = "audioengine"
 keywords = ["samplerate", "hz", "frequency", "khz"]
@@ -271,19 +279,11 @@ description.ko = "현재 엔진 출력 샘플레이트 (Hz). init() 전에는 �
 
 ["AudioEngine::getStats"]
 category = "audioengine"
-keywords = ["diagnostics", "dropped", "clipping", "peak", "rms", "cpu load", "health"]
-description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread load. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
-description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの負荷。atomic を読むだけなので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
-description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 부하. atomic 만 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
-related = ["AudioStats", "AudioEngine::getVoices", "Sound::play"]
-
-["AudioEngine::getVoices"]
-category = "audioengine"
-keywords = ["voices", "playing sounds", "active", "diagnostics", "level", "meter"]
-description.en = "Snapshot of the voices currently playing or paused (AudioVoiceInfo: slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level). Voices left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener."
-description.ja = "再生中・一時停止中のボイスのスナップショット (AudioVoiceInfo: slot、ファイル、streaming、位置、長さ、volume、pan、speed、loop、paused、level)。shutdown() 後にスロットに残ったボイスは level 0 で並ぶ。エンジンのロックを取ってコピーするので、メインスレッドから呼ぶこと。audioOut / audioIn のリスナーからは呼ばない"
-description.ko = "재생 중·일시 정지 중인 보이스의 스냅샷 (AudioVoiceInfo: slot, 파일, streaming, 위치, 길이, volume, pan, speed, loop, paused, level). shutdown() 후 슬롯에 남은 보이스는 level 0 으로 나온다. 엔진 락을 잡고 복사하므로 메인 스레드에서 호출할 것. audioOut / audioIn 리스너에서는 호출하지 않는다"
-related = ["AudioVoiceInfo", "AudioEngine::getStats"]
+keywords = ["diagnostics", "dropped", "clipping", "peak", "rms", "cpu usage", "cpu load", "health"]
+description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
+description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの CPU 使用率。atomic を読むだけなので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
+description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 CPU 사용률. atomic 만 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
+related = ["AudioStats", "AudioEngine::getPlayingSounds", "Sound::play"]
 
 ["AudioEngine::init"]
 category = "audioengine"
@@ -507,21 +507,35 @@ description.ja = "エンジン出力サンプルレート (Hz、0 = エンジン
 description.ko = "엔진 출력 샘플레이트 (Hz, 0 = 엔진 기본값 48000)"
 
 ["AudioStats"]
-keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu load", "meter"]
-description.en = "Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / load describe the recent output."
-description.ja = "AudioEngine::getStats() が返すオーディオエンジンの健全性カウンタとメーター。カウンタはプロセス起動からの累計 (再初期化でも消えない)。peak / rms / load は直近の出力を表す"
-description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상태 카운터와 미터. 카운터는 프로세스 시작 이후 누계 (재초기화해도 유지). peak / rms / load 는 최근 출력을 나타낸다"
-related = ["AudioEngine::getStats", "AudioVoiceInfo"]
+keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu usage", "cpu load", "meter"]
+description.en = "Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output."
+description.ja = "AudioEngine::getStats() が返すオーディオエンジンの健全性カウンタとメーター。カウンタはプロセス起動からの累計 (再初期化でも消えない)。peak / rms / cpuUsage は直近の出力を表す"
+description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상태 카운터와 미터. 카운터는 프로세스 시작 이후 누계 (재초기화해도 유지). peak / rms / cpuUsage 는 최근 출력을 나타낸다"
+related = ["AudioEngine::getStats", "PlayingSoundInfo"]
 
 ["AudioStats::clippedSamples"]
 description.en = "Output samples beyond +/-1.0 that the final clamp cut off (counted per channel sample)."
 description.ja = "最終クランプで切り落とされた ±1.0 を超える出力サンプル数 (チャンネルごとのサンプル単位)"
 description.ko = "최종 클램프에서 잘린 ±1.0 을 넘는 출력 샘플 수 (채널별 샘플 단위)"
 
+["AudioStats::cpuUsage"]
+keywords = ["cpu usage", "cpu load", "audio thread", "dropout", "overrun"]
+description.en = "Fraction of audio-thread time: time spent mixing the playing sounds and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio. 1.0 means the callback took as long as the audio it produced (0.25 = a quarter of the time budget). 0 while the engine is not running."
+description.ja = "オーディオスレッドの時間の割合: 再生中のサウンドと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均。1.0 はコールバックが生成した音と同じだけの時間がかかったことを表す (0.25 = 時間予算の 4 分の 1)。エンジン停止中は 0"
+description.ko = "오디오 스레드 시간의 비율: 재생 중인 사운드와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균. 1.0 은 콜백이 생성한 오디오만큼의 시간이 걸렸다는 뜻 (0.25 = 시간 예산의 4 분의 1). 엔진이 정지 상태면 0"
+related = ["AudioStats::cpuUsagePeak"]
+
+["AudioStats::cpuUsagePeak"]
+keywords = ["cpu usage", "peak", "dropout", "overrun"]
+description.en = "CPU usage of the worst single callback in the same window; above 1 the callback took longer than the audio it produced (a dropout). 0 while the engine is not running."
+description.ja = "同じ区間で最も重かったコールバック 1 回の CPU 使用率。1 を超えたらコールバックが生成した音より長くかかった (音切れ)。エンジン停止中は 0"
+description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 CPU 사용률. 1 을 넘으면 콜백이 생성한 오디오보다 오래 걸린 것 (끊김). 엔진이 정지 상태면 0"
+related = ["AudioStats::cpuUsage"]
+
 ["AudioStats::droppedDecoderError"]
-description.en = "Plays refused because a stream's file could not be reopened for the new voice (moved, deleted or unreadable)."
-description.ja = "ストリームのファイルを新しいボイス用に開き直せず (移動・削除・読めない) 捨てた再生の数"
-description.ko = "스트림 파일을 새 보이스용으로 다시 열 수 없어 (이동·삭제·읽기 불가) 버려진 재생 수"
+description.en = "Plays refused because a stream's file could not be reopened for the new playback (moved, deleted or unreadable)."
+description.ja = "ストリームのファイルを新しい再生用に開き直せず (移動・削除・読めない) 捨てた再生の数"
+description.ko = "스트림 파일을 새 재생용으로 다시 열 수 없어 (이동·삭제·읽기 불가) 버려진 재생 수"
 
 ["AudioStats::droppedNotRunning"]
 description.en = "Plays refused because no output device was running (init failed, or after shutdown())."
@@ -533,25 +547,16 @@ description.en = "Plays AudioEngine::play() refused since startup (Sound::play()
 description.ja = "起動から AudioEngine::play() が拒否した再生の数 (Sound::play() が false を返した)。全理由の合計で、4 つの dropped* フィールドの和"
 description.ko = "시작 이후 AudioEngine::play() 가 거부한 재생 수 (Sound::play() 가 false 반환). 모든 이유의 합계로, 네 개의 dropped* 필드의 합"
 
+["AudioStats::droppedPolyphonyLimit"]
+keywords = ["polyphony", "dropped", "slots busy"]
+description.en = "Plays refused because every playback slot was busy (AudioSettings::maxPolyphony, default 32)."
+description.ja = "全再生スロットが使用中 (AudioSettings::maxPolyphony、既定 32) で捨てた再生の数"
+description.ko = "모든 재생 슬롯이 사용 중 (AudioSettings::maxPolyphony, 기본 32) 이라 버려진 재생 수"
+
 ["AudioStats::droppedStreamLimit"]
-description.en = "Plays refused because a SoundStream already had maxPolyphony voices. Only copies of a streamed Sound can hit this: a single Sound stops its previous voice first."
-description.ja = "SoundStream が既に maxPolyphony 本のボイスを持っていたために捨てた再生の数。ストリームした Sound のコピーでだけ起きる (単独の Sound は前のボイスを先に止める)"
-description.ko = "SoundStream 이 이미 maxPolyphony 개의 보이스를 갖고 있어 버려진 재생 수. 스트리밍 Sound 의 복사본에서만 발생 (단일 Sound 는 이전 보이스를 먼저 정지)"
-
-["AudioStats::droppedVoiceLimit"]
-description.en = "Plays refused because every voice slot was busy (AudioSettings::maxPolyphony, default 32)."
-description.ja = "全ボイススロットが使用中 (AudioSettings::maxPolyphony、既定 32) で捨てた再生の数"
-description.ko = "모든 보이스 슬롯이 사용 중 (AudioSettings::maxPolyphony, 기본 32) 이라 버려진 재생 수"
-
-["AudioStats::load"]
-description.en = "Audio-thread load: time spent mixing voices and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio (0.25 = a quarter of the time budget). 0 while the engine is not running."
-description.ja = "オーディオスレッドの負荷: ボイスと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均 (0.25 = 時間予算の 4 分の 1)。エンジン停止中は 0"
-description.ko = "오디오 스레드 부하: 보이스와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균 (0.25 = 시간 예산의 4 분의 1). 엔진이 정지 상태면 0"
-
-["AudioStats::loadMax"]
-description.en = "Worst single callback's load in the same window; above 1 the callback overran its period. 0 while the engine is not running."
-description.ja = "同じ区間で最も重かったコールバック 1 回の負荷。1 を超えたら周期に間に合っていない。エンジン停止中は 0"
-description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 부하. 1 을 넘으면 주기를 넘긴 것. 엔진이 정지 상태면 0"
+description.en = "Plays refused because a SoundStream already had maxPolyphony playbacks. Only copies of a streamed Sound can hit this: a single Sound stops its previous playback first."
+description.ja = "SoundStream が既に maxPolyphony 本の再生を持っていたために捨てた再生の数。ストリームした Sound のコピーでだけ起きる (単独の Sound は前の再生を先に止める)"
+description.ko = "SoundStream 이 이미 maxPolyphony 개의 재생을 갖고 있어 버려진 재생 수. 스트리밍 Sound 의 복사본에서만 발생 (단일 Sound 는 이전 재생을 먼저 정지)"
 
 ["AudioStats::peak"]
 description.en = "Master output peak over the last ~100 ms, linear (1.0 = full scale). Measured before the clamp, so a value above 1 shows how far the mix overshoots. 0 while the engine is not running."
@@ -562,68 +567,6 @@ description.ko = "최근 약 100 ms 의 마스터 출력 피크 (선형, 1.0 = �
 description.en = "Master output RMS over the same ~100 ms window, linear. 0 while the engine is not running."
 description.ja = "同じ約 100 ms 区間のマスター出力の RMS (リニア)。エンジン停止中は 0"
 description.ko = "같은 약 100 ms 구간의 마스터 출력 RMS (선형). 엔진이 정지 상태면 0"
-
-["AudioVoiceInfo"]
-keywords = ["voice", "playing sound", "diagnostics", "level"]
-description.en = "One active voice as reported by AudioEngine::getVoices(): a copy taken under the engine lock, so later changes to the voice are not reflected."
-description.ja = "AudioEngine::getVoices() が返す再生中ボイス 1 本分。エンジンのロック下で取ったコピーなので、その後のボイスの変化は反映されない"
-description.ko = "AudioEngine::getVoices() 가 반환하는 활성 보이스 하나. 엔진 락 아래에서 만든 복사본이므로 이후 보이스 변화는 반영되지 않는다"
-related = ["AudioEngine::getVoices", "PlayingSound"]
-
-["AudioVoiceInfo::duration"]
-description.en = "Source duration in seconds."
-description.ja = "ソースの長さ (秒)"
-description.ko = "소스 길이 (초)"
-
-["AudioVoiceInfo::level"]
-description.en = "Peak absolute value of this voice's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, and while the engine is not running."
-description.ja = "直近のオーディオコールバックでのこのボイスの出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中と、エンジン停止中は 0"
-description.ko = "최근 오디오 콜백에서 이 보이스 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 그리고 엔진이 정지 상태일 때는 0"
-
-["AudioVoiceInfo::loop"]
-description.en = "Loop flag of the voice."
-description.ja = "ボイスのループ設定"
-description.ko = "보이스의 루프 설정"
-
-["AudioVoiceInfo::pan"]
-description.en = "Pan of the voice (-1 left, 0 center, 1 right)."
-description.ja = "ボイスのパン (-1 左、0 中央、1 右)"
-description.ko = "보이스의 팬 (-1 왼쪽, 0 중앙, 1 오른쪽)"
-
-["AudioVoiceInfo::path"]
-description.en = "Source file as UTF-8; empty for generated or in-memory buffers."
-description.ja = "ソースファイル (UTF-8)。生成したバッファやメモリからのバッファでは空"
-description.ko = "소스 파일 (UTF-8). 생성한 버퍼나 메모리 버퍼에서는 비어 있음"
-
-["AudioVoiceInfo::paused"]
-description.en = "True while the voice is paused (Sound::pause())."
-description.ja = "一時停止中 (Sound::pause()) なら true"
-description.ko = "일시 정지 중 (Sound::pause()) 이면 true"
-
-["AudioVoiceInfo::position"]
-description.en = "Playback position in seconds."
-description.ja = "再生位置 (秒)"
-description.ko = "재생 위치 (초)"
-
-["AudioVoiceInfo::slot"]
-description.en = "Mixer slot index (0 .. maxPolyphony - 1)."
-description.ja = "ミキサーのスロット番号 (0 .. maxPolyphony - 1)"
-description.ko = "믹서 슬롯 번호 (0 .. maxPolyphony - 1)"
-
-["AudioVoiceInfo::speed"]
-description.en = "Playback speed of the voice (1.0 = natural pitch)."
-description.ja = "ボイスの再生速度 (1.0 = 元のピッチ)"
-description.ko = "보이스의 재생 속도 (1.0 = 원래 피치)"
-
-["AudioVoiceInfo::streaming"]
-description.en = "True for a SoundStream voice (Sound::loadStream), false for an eager SoundBuffer."
-description.ja = "SoundStream のボイス (Sound::loadStream) なら true、eager な SoundBuffer なら false"
-description.ko = "SoundStream 보이스 (Sound::loadStream) 면 true, eager SoundBuffer 면 false"
-
-["AudioVoiceInfo::volume"]
-description.en = "Volume of the voice."
-description.ja = "ボイスの音量"
-description.ko = "보이스의 볼륨"
 
 ["AxisMode"]
 description.en = "Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children)."
@@ -6823,6 +6766,68 @@ description.ko = "재생 속도 (0.5 절반, 1.0 일반, 2.0 두 배). atomic"
 description.en = "Playback volume (0.0-1.0). Stored as an atomic; safe to set from the UI thread while playing."
 description.ja = "再生音量 (0.0-1.0)。atomic 格納で、再生中に UI thread から設定して安全"
 description.ko = "재생 음량 (0.0-1.0). atomic 저장이라 재생 중 UI 스레드에서 설정해도 안전"
+
+["PlayingSoundInfo"]
+keywords = ["playing sound", "playback", "voice", "diagnostics", "level"]
+description.en = "One playing (or paused) sound as reported by AudioEngine::getPlayingSounds(): a copy taken under the engine lock, so later changes to the playback are not reflected."
+description.ja = "AudioEngine::getPlayingSounds() が返す再生中 (または一時停止中) のサウンド 1 つ分。エンジンのロック下で取ったコピーなので、その後の再生の変化は反映されない"
+description.ko = "AudioEngine::getPlayingSounds() 가 반환하는 재생 중 (또는 일시 정지 중) 인 사운드 하나. 엔진 락 아래에서 만든 복사본이므로 이후 재생 변화는 반영되지 않는다"
+related = ["AudioEngine::getPlayingSounds", "PlayingSound"]
+
+["PlayingSoundInfo::duration"]
+description.en = "Source duration in seconds."
+description.ja = "ソースの長さ (秒)"
+description.ko = "소스 길이 (초)"
+
+["PlayingSoundInfo::level"]
+description.en = "Peak absolute value of this playback's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, and while the engine is not running."
+description.ja = "直近のオーディオコールバックでのこの再生の出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中と、エンジン停止中は 0"
+description.ko = "최근 오디오 콜백에서 이 재생 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 그리고 엔진이 정지 상태일 때는 0"
+
+["PlayingSoundInfo::loop"]
+description.en = "Loop flag of the playback."
+description.ja = "再生のループ設定"
+description.ko = "재생의 루프 설정"
+
+["PlayingSoundInfo::pan"]
+description.en = "Pan of the playback (-1 left, 0 center, 1 right)."
+description.ja = "再生のパン (-1 左、0 中央、1 右)"
+description.ko = "재생의 팬 (-1 왼쪽, 0 중앙, 1 오른쪽)"
+
+["PlayingSoundInfo::path"]
+description.en = "Source file (fs::path, lexically normalized); empty for generated or in-memory buffers. tc_get_audio_state reports it as UTF-8."
+description.ja = "ソースファイル (fs::path、字句的に正規化済み)。生成したバッファやメモリからのバッファでは空。tc_get_audio_state は UTF-8 で返す"
+description.ko = "소스 파일 (fs::path, 어휘적으로 정규화됨). 생성한 버퍼나 메모리 버퍼에서는 비어 있음. tc_get_audio_state 는 UTF-8 로 보고한다"
+
+["PlayingSoundInfo::paused"]
+description.en = "True while the playback is paused (Sound::pause())."
+description.ja = "一時停止中 (Sound::pause()) なら true"
+description.ko = "일시 정지 중 (Sound::pause()) 이면 true"
+
+["PlayingSoundInfo::position"]
+description.en = "Playback position in seconds."
+description.ja = "再生位置 (秒)"
+description.ko = "재생 위치 (초)"
+
+["PlayingSoundInfo::slot"]
+description.en = "Playback slot index (0 .. maxPolyphony - 1)."
+description.ja = "再生スロットの番号 (0 .. maxPolyphony - 1)"
+description.ko = "재생 슬롯 번호 (0 .. maxPolyphony - 1)"
+
+["PlayingSoundInfo::speed"]
+description.en = "Playback speed (1.0 = natural pitch)."
+description.ja = "再生速度 (1.0 = 元のピッチ)"
+description.ko = "재생 속도 (1.0 = 원래 피치)"
+
+["PlayingSoundInfo::streaming"]
+description.en = "True for a SoundStream playback (Sound::loadStream), false for an eager SoundBuffer."
+description.ja = "SoundStream の再生 (Sound::loadStream) なら true、eager な SoundBuffer なら false"
+description.ko = "SoundStream 재생 (Sound::loadStream) 이면 true, eager SoundBuffer 면 false"
+
+["PlayingSoundInfo::volume"]
+description.en = "Volume of the playback."
+description.ja = "再生の音量"
+description.ko = "재생의 볼륨"
 
 ["PointStyle"]
 category = "types_mesh"
