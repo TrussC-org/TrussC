@@ -3769,7 +3769,7 @@ void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType 
 ```cpp
 ```
 
-### Sound — Audio playback
+### Sound — Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots.
 
 ```cpp
 void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
@@ -3802,7 +3802,7 @@ void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
 void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop audio
+void Sound::stop()  // Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped.
 ```
 
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
