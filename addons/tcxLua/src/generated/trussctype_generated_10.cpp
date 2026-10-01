@@ -88,12 +88,15 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
             sol::call_constructor, sol::constructors<trussc::Logger()>());
         t["onLog"] = &trussc::Logger::onLog;
         t["log"] = &trussc::Logger::log;
+        t["setLogLevel"] = &trussc::Logger::setLogLevel;
         t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
         t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
         t["setLogFile"] = &trussc::Logger::setLogFile;
         t["closeFile"] = &trussc::Logger::closeFile;
         t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
         t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
+        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
+        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
         t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
         t["isFileOpen"] = &trussc::Logger::isFileOpen;
     }

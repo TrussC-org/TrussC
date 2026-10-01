@@ -3909,25 +3909,105 @@ description.ja = "ログ記録時に生成されるタイムスタンプ文字�
 description.ko = "로그 기록 시 생성되는 타임스탬프 문자열(HH:MM:SS.mmm)"
 
 ["LogLevel"]
-description.en = "Log severity, from Verbose (most detailed) to Fatal; Silent disables logging."
-description.ja = "ログの重大度。Verbose（最も詳細）から Fatal まで。Silent はログを無効化。"
-description.ko = "로그 심각도. Verbose(가장 상세)부터 Fatal까지. Silent는 로깅 비활성화."
-keywords = ["verbose", "warning", "error", "severity", "debug"]
-related = ["logAt", "setConsoleLogLevel", "setFileLogLevel", "Logger", "logNotice"]
-value_desc.Verbose.en = "Detailed info (for debugging)"
-value_desc.Notice.en = "Normal info"
-value_desc.Warning.en = "Warning"
-value_desc.Error.en = "Error"
-value_desc.Fatal.en = "Fatal error"
-value_desc.Silent.en = "No output (for filtering)"
+description.en = "Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off."
+description.ja = "ログの重大度。Verbose（最も詳細）から Fatal まで。各出力（コンソール・ファイル・システム）は自分のレベル以上の行を出す。出力のレベルを Silent にするとその出力は止まる。"
+description.ko = "로그 심각도. Verbose(가장 상세)부터 Fatal까지. 각 출력(콘솔·파일·시스템)은 자신의 레벨 이상의 줄을 낸다. 출력의 레벨을 Silent로 하면 그 출력은 꺼진다."
+keywords = ["verbose", "warning", "error", "severity", "debug", "silent", "log level"]
+related = ["logAt", "setLogLevel", "setConsoleLogLevel", "setFileLogLevel", "setSystemLogLevel", "Logger", "logNotice"]
+value_desc.Verbose.en = "Detail for debugging (per-frame state, per-load info such as sokol's info messages). Hidden by default"
+value_desc.Verbose.ja = "デバッグ用の詳細（フレームごとの状態、sokol の info メッセージのような読み込みごとの情報）。既定では出ない"
+value_desc.Verbose.ko = "디버깅용 상세 정보(프레임마다의 상태, sokol의 info 메시지 같은 로드마다의 정보). 기본으로는 나오지 않음"
+value_desc.Notice.en = "Normal information worth seeing in a normal run. The default level of every output"
+value_desc.Notice.ja = "通常の実行で見る価値のある情報。全出力の既定レベル"
+value_desc.Notice.ko = "일반 실행에서 볼 가치가 있는 정보. 모든 출력의 기본 레벨"
+value_desc.Warning.en = "Something unexpected that the app recovers from (a fallback, a skipped item)"
+value_desc.Warning.ja = "想定外だがアプリは続けられること（フォールバック、項目のスキップなど）"
+value_desc.Warning.ko = "예상 밖이지만 앱이 복구하는 일(폴백, 항목 건너뛰기 등)"
+value_desc.Error.en = "An operation failed (a file did not load, a device did not open)"
+value_desc.Error.ja = "処理が失敗した（ファイルが読めない、デバイスが開けないなど）"
+value_desc.Error.ko = "작업이 실패함(파일을 읽지 못함, 장치를 열지 못함 등)"
+value_desc.Fatal.en = "The app cannot continue"
+value_desc.Fatal.ja = "アプリが続行できない"
+value_desc.Fatal.ko = "앱이 계속할 수 없음"
+value_desc.Silent.en = "Not a line level: as an output's level, it turns that output off"
+value_desc.Silent.ja = "行のレベルではない。出力のレベルに設定するとその出力が止まる"
+value_desc.Silent.ko = "줄의 레벨이 아님. 출력의 레벨로 설정하면 그 출력이 꺼짐"
 
 ["Logger"]
-keywords = ["log", "logging", "console"]
-description.en = "Logging core with console and file output and an onLog event; access the global instance via getLogger()"
-description.ja = "コンソール・ファイル出力と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
-description.ko = "콘솔·파일 출력과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
-details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. One exception: `setLogFile()` with a relative path resolves it through `getDataPath()`, which reads the data path state without a lock, so it must not race `setDataPathRoot()` or the first `getDataPath()` call; an absolute path does not touch that state. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
-related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice"]
+keywords = ["log", "logging", "console", "log level", "os_log", "logcat", "OutputDebugString", "system log"]
+description.en = "Logging core with console, file and system (OS log) output, each with its own level, and an onLog event; access the global instance via getLogger()"
+description.ja = "コンソール・ファイル・システム（OS ログ）出力（それぞれ独自のレベル）と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
+description.ko = "콘솔·파일·시스템(OS 로그) 출력(각각 고유 레벨)과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
+details.en = '''
+Every line goes to three outputs, each filtered by its own level. An output shows a line when the line's level is at or above the output's level; `LogLevel::Silent` turns that output off.
+
+| Output | Where it goes | Level (default) |
+|---|---|---|
+| console | stdout (Verbose / Notice) and stderr (Warning and up) on macOS, Windows, Linux and web; `os_log` on iOS; logcat on Android | `setConsoleLogLevel()` (Notice) |
+| file | the file opened with `setLogFile()` (or `TRUSSC_LOG_FILE`); none until one is opened | `setFileLogLevel()` (Notice) |
+| system | `os_log` on macOS; `OutputDebugStringW` on Windows; none on iOS, Android, Linux and web | `setSystemLogLevel()` (Notice) |
+
+`setLogLevel()` sets all three at once; it overwrites them when called, and a later per-output call wins. On iOS and Android the OS log is the console output, so `setConsoleLogLevel()` controls it and the system level has no effect.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+
+`onLog` listeners receive every line, whatever the levels.
+
+The OS log: Apple's unified log uses subsystem `org.trussc`, category `TrussC`, and is visible in Console.app; on macOS it is skipped while the app runs from Xcode, whose console already shows stdout. Windows' debug output shows in the Visual Studio output window and DebugView (DebugView reads the bytes in the system's ANSI code page, so non-ASCII text shows garbled there); each call has a fixed cost, more with a debugger or DebugView attached.
+
+Thread-safe: `log()` and the settings may be called from any thread. The outputs are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. One exception: `setLogFile()` with a relative path resolves it through `getDataPath()`, which reads the data path state without a lock, so it must not race `setDataPathRoot()` or the first `getDataPath()` call; an absolute path does not touch that state. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose.
+'''
+details.ja = '''
+各行は 3 つの出力に送られ、出力ごとに自分のレベルで絞り込まれる。行のレベルが出力のレベル以上なら、その出力に出る。`LogLevel::Silent` にした出力は止まる。
+
+| 出力 | 出力先 | レベル（既定） |
+|---|---|---|
+| コンソール | macOS・Windows・Linux・web では stdout（Verbose / Notice）と stderr（Warning 以上）。iOS は `os_log`、Android は logcat | `setConsoleLogLevel()`（Notice） |
+| ファイル | `setLogFile()`（または `TRUSSC_LOG_FILE`）で開いたファイル。開くまでは無し | `setFileLogLevel()`（Notice） |
+| システム | macOS は `os_log`、Windows は `OutputDebugStringW`。iOS・Android・Linux・web には無い | `setSystemLogLevel()`（Notice） |
+
+`setLogLevel()` は 3 つを一度に設定する。呼んだ時点で上書きし、その後の出力ごとの呼び出しが優先される。iOS と Android では OS ログがコンソール出力なので `setConsoleLogLevel()` で制御し、システムレベルは効かない。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+
+`onLog` リスナーはレベルに関係なく全行を受け取る。
+
+OS ログについて：Apple の統合ログはサブシステム `org.trussc`、カテゴリ `TrussC` で、Console.app で見られる。macOS では Xcode から起動している間は書かない（Xcode のコンソールが stdout を既に表示するため）。Windows のデバッグ出力は Visual Studio の出力ウィンドウと DebugView に出る（DebugView はシステムの ANSI コードページでバイト列を読むため、非 ASCII の文字は化ける）。1 回の呼び出しごとに固定のコストがあり、デバッガや DebugView が接続中はさらに増える。
+
+スレッドセーフ：`log()` と各設定はどのスレッドからも呼べる。出力は 1 つのミューテックスの下で書かれるので各行は欠けずに出て、`closeFile()` / `setLogFile()` は書き込み中の行を待つ。その他の `onLog` リスナーはログを出したスレッドで、そのミューテックスの外で動くので、リスナー内でもログを出せる。例外が 1 つ：相対パスの `setLogFile()` は `getDataPath()` で解決し、これはデータパスの状態をロックなしで読むため、`setDataPathRoot()` や最初の `getDataPath()` 呼び出しと競合させてはいけない（絶対パスならその状態に触れない）。sokol 自身のメッセージ（`[sg]`、`[sapp]`、`[sgl]`、`[simgui]`）もここを通り、info メッセージは Verbose になる。
+'''
+details.ko = '''
+각 줄은 세 출력으로 가고, 출력마다 자신의 레벨로 걸러진다. 줄의 레벨이 출력의 레벨 이상이면 그 출력에 나온다. `LogLevel::Silent`로 한 출력은 꺼진다.
+
+| 출력 | 출력 대상 | 레벨(기본값) |
+|---|---|---|
+| 콘솔 | macOS·Windows·Linux·web에서는 stdout(Verbose / Notice)과 stderr(Warning 이상). iOS는 `os_log`, Android는 logcat | `setConsoleLogLevel()` (Notice) |
+| 파일 | `setLogFile()`(또는 `TRUSSC_LOG_FILE`)로 연 파일. 열기 전에는 없음 | `setFileLogLevel()` (Notice) |
+| 시스템 | macOS는 `os_log`, Windows는 `OutputDebugStringW`. iOS·Android·Linux·web에는 없음 | `setSystemLogLevel()` (Notice) |
+
+`setLogLevel()`은 셋을 한 번에 설정한다. 호출 시점에 덮어쓰고, 그 뒤의 출력별 호출이 우선한다. iOS와 Android에서는 OS 로그가 콘솔 출력이므로 `setConsoleLogLevel()`로 제어하며 시스템 레벨은 효과가 없다.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+
+`onLog` 리스너는 레벨과 상관없이 모든 줄을 받는다.
+
+OS 로그: Apple의 통합 로그는 서브시스템 `org.trussc`, 카테고리 `TrussC`이며 Console.app에서 볼 수 있다. macOS에서는 Xcode에서 실행하는 동안 쓰지 않는다(Xcode 콘솔이 이미 stdout을 보여 주므로). Windows의 디버그 출력은 Visual Studio 출력 창과 DebugView에 나온다(DebugView는 시스템 ANSI 코드 페이지로 바이트를 읽으므로 비 ASCII 문자는 깨져 보인다). 호출마다 고정 비용이 있고, 디버거나 DebugView가 연결되어 있으면 더 크다.
+
+스레드 안전: `log()`와 설정은 어느 스레드에서나 호출할 수 있다. 출력은 하나의 뮤텍스 아래에서 쓰이므로 각 줄은 온전히 기록되고, `closeFile()` / `setLogFile()`은 진행 중인 쓰기를 기다린다. 그 밖의 `onLog` 리스너는 로그를 낸 스레드에서 그 뮤텍스 밖에서 실행되므로 리스너 안에서도 로그를 낼 수 있다. 예외 하나: 상대 경로의 `setLogFile()`은 `getDataPath()`로 해석하는데, 이는 데이터 경로 상태를 잠금 없이 읽으므로 `setDataPathRoot()`나 첫 `getDataPath()` 호출과 경합하면 안 된다(절대 경로는 그 상태를 건드리지 않음). sokol 자체 메시지(`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`)도 여기를 거치며, info 메시지는 Verbose가 된다.
+'''
+related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice", "setLogLevel", "setConsoleLogLevel", "setFileLogLevel", "setSystemLogLevel", "setLogFile"]
 
 ["Logger::closeFile"]
 description.en = "Close the current log file"
@@ -3943,6 +4023,11 @@ description.ko = "현재 콘솔 로그 레벨을 얻음"
 description.en = "Get the current file log level"
 description.ja = "現在のファイルログレベルを取得"
 description.ko = "현재 파일 로그 레벨을 얻음"
+
+["Logger::getSystemLogLevel"]
+description.en = "Get the current system (OS log) level"
+description.ja = "現在のシステム（OS ログ）レベルを取得"
+description.ko = "현재 시스템(OS 로그) 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
 description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
@@ -3968,16 +4053,146 @@ description.ko = "모든 로그 메시지에서 발생하는 이벤트. 로그 �
 description.en = "Set the minimum console log level"
 description.ja = "コンソールの最小ログレベルを設定"
 description.ko = "콘솔 최소 로그 레벨을 설정"
+details.en = '''
+Lines below this level are not printed to the console (stdout / stderr; `os_log` on iOS, logcat on Android). Default Notice; `LogLevel::Silent` turns the console off. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はコンソール（stdout / stderr。iOS は `os_log`、Android は logcat）に出ない。既定は Notice、`LogLevel::Silent` でコンソール出力が止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 콘솔(stdout / stderr. iOS는 `os_log`, Android는 logcat)에 나오지 않는다. 기본값 Notice, `LogLevel::Silent`면 콘솔 출력이 꺼진다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
 
 ["Logger::setFileLogLevel"]
 description.en = "Set the minimum file log level"
 description.ja = "ファイルの最小ログレベルを設定"
 description.ko = "파일 최소 로그 레벨을 설정"
+details.en = '''
+Lines below this level are not written to the log file (`setLogFile()`). Default Notice; `LogLevel::Silent` stops writing to the file. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はログファイル（`setLogFile()`）に書かれない。既定は Notice、`LogLevel::Silent` でファイルへの書き込みが止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 로그 파일(`setLogFile()`)에 기록되지 않는다. 기본값 Notice, `LogLevel::Silent`면 파일 기록이 멈춘다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+
+["Logger::setLogLevel"]
+description.en = "Set the console, file and system log levels at once (a later per-output call wins)"
+description.ja = "コンソール・ファイル・システムのログレベルを一度に設定（後の出力ごとの呼び出しが優先）"
+description.ko = "콘솔·파일·시스템 로그 레벨을 한 번에 설정 (이후의 출력별 호출이 우선)"
+details.en = '''
+Sets the console, file and system levels at once. It overwrites them when called; a later `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` call wins. There is no `getLogLevel()`, since there is no single level to return. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+コンソール・ファイル・システムのレベルを一度に設定する。呼んだ時点で上書きし、その後の `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` が優先される。返すべき単一のレベルが無いので `getLogLevel()` は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+콘솔·파일·시스템 레벨을 한 번에 설정한다. 호출 시점에 덮어쓰고, 그 뒤의 `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` 호출이 우선한다. 반환할 단일 레벨이 없으므로 `getLogLevel()`은 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
 
 ["Logger::setLogFile"]
 description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
 description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
 description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
+
+["Logger::setSystemLogLevel"]
+description.en = "Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows"
+description.ja = "システム（OS ログ）の最小レベルを設定：macOS は os_log、Windows は OutputDebugStringW"
+description.ko = "시스템(OS 로그) 최소 레벨을 설정: macOS는 os_log, Windows는 OutputDebugStringW"
+details.en = '''
+Lines below this level are not written to the OS log: `os_log` on macOS (Console.app), `OutputDebugStringW` on Windows (Visual Studio output window, DebugView). Default Notice; `LogLevel::Silent` turns it off. No effect on iOS and Android (the OS log is the console output there; use `setConsoleLogLevel()`) or on Linux and web (no OS log output). The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行は OS ログに書かれない。macOS は `os_log`（Console.app）、Windows は `OutputDebugStringW`（Visual Studio の出力ウィンドウ、DebugView）。既定は Notice、`LogLevel::Silent` で止まる。iOS と Android では効かず（OS ログがコンソール出力なので `setConsoleLogLevel()` を使う）、Linux と web にも OS ログ出力は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 OS 로그에 기록되지 않는다. macOS는 `os_log`(Console.app), Windows는 `OutputDebugStringW`(Visual Studio 출력 창, DebugView). 기본값 Notice, `LogLevel::Silent`면 꺼진다. iOS와 Android에서는 효과가 없고(OS 로그가 콘솔 출력이므로 `setConsoleLogLevel()` 사용), Linux와 web에는 OS 로그 출력이 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+Logger& logger = getLogger();
+logger.setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+logger.setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+logger.setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
 
 ["MOUSE_BUTTON_LEFT"]
 keywords = ["left click", "primary"]
@@ -16132,7 +16347,34 @@ keywords = ["verbosity", "filter"]
 description.en = "Set the minimum log level printed to the console"
 description.ja = "コンソールに出力する最小ログレベルを設定"
 description.ko = "콘솔에 출력할 최소 로그 레벨을 설정"
-related = ["LogLevel", "setFileLogLevel", "getLogger", "logNotice"]
+details.en = '''
+Lines below this level are not printed to the console (stdout / stderr; `os_log` on iOS, logcat on Android). Default Notice; `LogLevel::Silent` turns the console off. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はコンソール（stdout / stderr。iOS は `os_log`、Android は logcat）に出ない。既定は Notice、`LogLevel::Silent` でコンソール出力が止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 콘솔(stdout / stderr. iOS는 `os_log`, Android는 logcat)에 나오지 않는다. 기본값 Notice, `LogLevel::Silent`면 콘솔 출력이 꺼진다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setLogLevel", "setFileLogLevel", "setSystemLogLevel", "getLogger", "Logger", "logNotice"]
 
 ["setCursor"]
 category = "window_input"
@@ -16204,7 +16446,34 @@ keywords = ["verbosity", "filter"]
 description.en = "Set the minimum log level written to the log file"
 description.ja = "ログファイルに書き込む最小ログレベルを設定"
 description.ko = "로그 파일에 기록할 최소 로그 레벨을 설정"
-related = ["LogLevel", "setConsoleLogLevel", "setLogFile"]
+details.en = '''
+Lines below this level are not written to the log file (`setLogFile()`). Default Notice; `LogLevel::Silent` stops writing to the file. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行はログファイル（`setLogFile()`）に書かれない。既定は Notice、`LogLevel::Silent` でファイルへの書き込みが止まる。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 로그 파일(`setLogFile()`)에 기록되지 않는다. 기본값 Notice, `LogLevel::Silent`면 파일 기록이 멈춘다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setLogLevel", "setConsoleLogLevel", "setSystemLogLevel", "setLogFile", "Logger"]
 
 ["setFps"]
 category = "graphics_shapes"
@@ -16260,6 +16529,41 @@ description.ja = "ログ出力を受けるファイルを開く（追記モー�
 description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
 related = ["closeLogFile", "setFileLogLevel"]
 
+["setLogLevel"]
+category = "utility"
+keywords = ["verbosity", "filter", "log level", "all outputs"]
+description.en = "Set the console, file and system log levels at once (a later per-output call wins)"
+description.ja = "コンソール・ファイル・システムのログレベルを一度に設定（後の出力ごとの呼び出しが優先）"
+description.ko = "콘솔·파일·시스템 로그 레벨을 한 번에 설정 (이후의 출력별 호출이 우선)"
+details.en = '''
+Sets the console, file and system levels at once. It overwrites them when called; a later `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` call wins. There is no `getLogLevel()`, since there is no single level to return. The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+コンソール・ファイル・システムのレベルを一度に設定する。呼んだ時点で上書きし、その後の `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` が優先される。返すべき単一のレベルが無いので `getLogLevel()` は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+콘솔·파일·시스템 레벨을 한 번에 설정한다. 호출 시점에 덮어쓰고, 그 뒤의 `setConsoleLogLevel()` / `setFileLogLevel()` / `setSystemLogLevel()` 호출이 우선한다. 반환할 단일 레벨이 없으므로 `getLogLevel()`은 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setConsoleLogLevel", "setFileLogLevel", "setSystemLogLevel", "Logger"]
+
 ["setMaxUpdateSteps"]
 category = "window_system"
 keywords = ["update cap", "catch up", "fixed step", "stall", "deterministic", "tick rate"]
@@ -16301,6 +16605,41 @@ description.ko = "허용되는 화면 방향을 설정 (모바일). 값: Orienta
 related = ["Orientation", "setImmersiveMode", "getDeviceOrientation"]
 platform_note.en = "Mobile-only. No-op on macOS, Windows, Linux and Web."
 platform_note.ja = "モバイル専用。デスクトップ / Web では no-op。"
+
+["setSystemLogLevel"]
+category = "utility"
+keywords = ["verbosity", "filter", "os_log", "OutputDebugString", "system log", "console.app", "debugview"]
+description.en = "Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows"
+description.ja = "OS ログに書く最小ログレベルを設定：macOS は os_log、Windows は OutputDebugStringW"
+description.ko = "OS 로그에 기록할 최소 로그 레벨을 설정: macOS는 os_log, Windows는 OutputDebugStringW"
+details.en = '''
+Lines below this level are not written to the OS log: `os_log` on macOS (Console.app), `OutputDebugStringW` on Windows (Visual Studio output window, DebugView). Default Notice; `LogLevel::Silent` turns it off. No effect on iOS and Android (the OS log is the console output there; use `setConsoleLogLevel()`) or on Linux and web (no OS log output). The levels of all outputs are explained under [`Logger`](#Logger).
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ja = '''
+このレベル未満の行は OS ログに書かれない。macOS は `os_log`（Console.app）、Windows は `OutputDebugStringW`（Visual Studio の出力ウィンドウ、DebugView）。既定は Notice、`LogLevel::Silent` で止まる。iOS と Android では効かず（OS ログがコンソール出力なので `setConsoleLogLevel()` を使う）、Linux と web にも OS ログ出力は無い。各出力のレベルの全体像は [`Logger`](#Logger) を参照。
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+details.ko = '''
+이 레벨 미만의 줄은 OS 로그에 기록되지 않는다. macOS는 `os_log`(Console.app), Windows는 `OutputDebugStringW`(Visual Studio 출력 창, DebugView). 기본값 Notice, `LogLevel::Silent`면 꺼진다. iOS와 Android에서는 효과가 없고(OS 로그가 콘솔 출력이므로 `setConsoleLogLevel()` 사용), Linux와 web에는 OS 로그 출력이 없다. 각 출력의 레벨 전체는 [`Logger`](#Logger) 참조.
+
+```cpp
+setLogLevel(LogLevel::Warning);       // console, file and system output: all Warning
+setFileLogLevel(LogLevel::Verbose);   // then only the file goes down to Verbose
+setSystemLogLevel(LogLevel::Silent);  // no OS log (os_log / OutputDebugString)
+```
+'''
+related = ["LogLevel", "setLogLevel", "setConsoleLogLevel", "setFileLogLevel", "Logger"]
 
 ["setScissor"]
 category = "graphics_style"

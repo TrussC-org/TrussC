@@ -28,6 +28,7 @@
 #include <sstream>
 #include <memory>
 #include "tcThreadChannel.h"
+#include "tcLog.h"
 #include "../events/tcEventArgs.h"
 #include "../events/tcCoreEvents.h"
 
@@ -89,7 +90,7 @@ inline void readThread() {
 inline void start() {
 #ifdef __EMSCRIPTEN__
     // Console input is not available on web (no stdin/threads)
-    std::cerr << "[TrussC] console::start() is not available on web platform" << std::endl;
+    logWarning("Console") << "console::start() is not available on web platform";
     return;
 #else
     if (detail::isRunning().load()) {
