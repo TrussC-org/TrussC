@@ -41,7 +41,7 @@ static string str(const Vec3& v) {
     return b;
 }
 static bool exact(const Vec3& a, const Vec3& b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
-static bool near(const Vec3& a, const Vec3& b) {
+static bool nearlyEqual(const Vec3& a, const Vec3& b) {
     return fabs(a.x - b.x) < 1e-4f && fabs(a.y - b.y) < 1e-4f && fabs(a.z - b.z) < 1e-4f;
 }
 static bool contains(const vector<string>& v, const string& s) {
@@ -104,7 +104,7 @@ static void testJsonRoundTrip() {
     if (live.contains("globalPos")) {
         Vec3 g(live["globalPos"][0].get<float>(), live["globalPos"][1].get<float>(),
                live["globalPos"][2].get<float>());
-        check("includeDerived: globalPos value is the world position", near(g, Vec3(110, 0, 0)), str(g));
+        check("includeDerived: globalPos value is the world position", nearlyEqual(g, Vec3(110, 0, 0)), str(g));
     }
 
     // nodeToJson() follows reflectToJson(): derived members only on request
@@ -125,7 +125,7 @@ static void testJsonRoundTrip() {
     check("restore after parent moved: pos is exact (10,0,0)",
           exact(child->getPos(), Vec3(10, 0, 0)), str(child->getPos()));
     check("restore after parent moved: world position is (210,0,0)",
-          near(child->getGlobalPos(), Vec3(210, 0, 0)), str(child->getGlobalPos()));
+          nearlyEqual(child->getGlobalPos(), Vec3(210, 0, 0)), str(child->getGlobalPos()));
     check("restore: globalPos not reported as applied", !contains(r1.applied, "globalPos"));
 
     // 2. Restore into a fresh node with no parent, then attach it.
@@ -135,7 +135,7 @@ static void testJsonRoundTrip() {
           exact(c2->getPos(), Vec3(10, 0, 0)), str(c2->getPos()));
     parent->addChild(c2);
     check("then addChild(): world position is (210,0,0)",
-          near(c2->getGlobalPos(), Vec3(210, 0, 0)), str(c2->getGlobalPos()));
+          nearlyEqual(c2->getGlobalPos(), Vec3(210, 0, 0)), str(c2->getGlobalPos()));
 
     // 3. Edit only pos in the saved JSON.
     Json edited = snap;
@@ -157,8 +157,8 @@ static void testJsonRoundTrip() {
     auto r5 = reflectFromJson(*child, Json{{"globalPos", {250, 0, 0}}});
     check("globalPos alone: applied", contains(r5.applied, "globalPos"));
     check("globalPos alone: world position is (250,0,0)",
-          near(child->getGlobalPos(), Vec3(250, 0, 0)), str(child->getGlobalPos()));
-    check("globalPos alone: pos is (50,0,0)", near(child->getPos(), Vec3(50, 0, 0)), str(child->getPos()));
+          nearlyEqual(child->getGlobalPos(), Vec3(250, 0, 0)), str(child->getGlobalPos()));
+    check("globalPos alone: pos is (50,0,0)", nearlyEqual(child->getPos(), Vec3(50, 0, 0)), str(child->getPos()));
 
     // 6. Both written: pos wins.
     auto r6 = reflectFromJson(*child, Json{{"pos", {7, 0, 0}}, {"globalPos", {999, 0, 0}}});
@@ -253,9 +253,9 @@ public:
         // globalPos alone moves the node in world space.
         callTool("tc_set_node_members", Json{{"id", id}, {"members", {{"globalPos", {300, 0, 0}}}}});
         check("MCP set: globalPos alone moves the node (world 300)",
-              near(child->getGlobalPos(), Vec3(300, 0, 0)), str(child->getGlobalPos()));
+              nearlyEqual(child->getGlobalPos(), Vec3(300, 0, 0)), str(child->getGlobalPos()));
         check("MCP set: globalPos alone gives pos (200,0,0)",
-              near(child->getPos(), Vec3(200, 0, 0)), str(child->getPos()));
+              nearlyEqual(child->getPos(), Vec3(200, 0, 0)), str(child->getPos()));
 
         requestExit();
     }
