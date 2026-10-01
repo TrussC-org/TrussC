@@ -505,6 +505,19 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `fontFaceIndex/` — the face index picks the face inside a font collection
+  (#294). With a two-face `.ttc` built at runtime, face 0 and face 1 give
+  their own glyph metrics through `FontAtlasManager::setupFromMemory()`,
+  `setup()` from a file and `SharedFontCache` (the face index is part of
+  `FontCacheKey`, so each face gets its own atlas); the default is face 0; a
+  face index below 0 or at or past the number of faces fails with an error
+  log. `internal::findFaceByPostScriptName()` (the macOS / iOS face lookup)
+  finds a face by its PostScript name in Windows and Mac name records and
+  reads within the data. On Linux, `"Noto Sans CJK SC"` / `"Noto Sans CJK
+  JP"` resolve to the faces fontconfig reports, whose PostScript names are
+  `NotoSansCJKsc-Regular` / `NotoSansCJKjp-Regular`, and their outlines of
+  U+9AA8 differ (SKIP when Noto Sans CJK is not installed). The system-name
+  check on Windows (`MS PGothic`) and macOS is manual.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
