@@ -16,8 +16,9 @@
 #
 # The category must be one of these four (the checker rejects anything else):
 #
-#   harmless       a per-module copy breaks nothing: a warn-once flag, a cache
-#                  of derived data, a counter only one side uses. NOT a cache
+#   harmless       a per-module copy breaks nothing: a cache of derived data,
+#                  a counter only one side uses (a warn-once flag uses
+#                  logOnce() instead and needs no entry). NOT a cache
 #                  of GPU objects that nothing frees (sokol_gl contexts,
 #                  shaders, pipelines, samplers, font atlases): every reloaded
 #                  generation would build and keep a new set in the host's

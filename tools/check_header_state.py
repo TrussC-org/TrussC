@@ -961,7 +961,8 @@ DEFINE_RE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)", re.M)
 def scan_macros(text, rel):
     """Statics in #define bodies, which the walker never sees (it blanks
     directives): a macro that declares one puts a function-local static into
-    every function that uses it, one per module (a warn-once macro, say). A
+    every function that uses it, one per module (a macro with its own logged
+    flag, say; logOnce() replaces that). A
     static member function the macro defines is not state; the statics in its
     body are."""
     findings = []
@@ -1094,7 +1095,7 @@ EXAMPLE = [
 
 # When each allowlist category applies, one plain line each.
 CATEGORY_HELP = {
-    "harmless": "a separate copy breaks nothing: a warn-once flag, a small cache (not of GPU objects)",
+    "harmless": "a separate copy breaks nothing: a small cache (not of GPU objects); for a warn-once flag, use logOnce() instead",
     "immutable": "constant data that never changes, so every copy is the same",
     "host-only": "only TrussC's own main loop and .cpp files use it, never app or addon code",
     "no-hot-reload": "only used where hot reload never runs (Android, headless apps)",

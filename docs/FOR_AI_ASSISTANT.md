@@ -1571,7 +1571,7 @@ Use the level functions `logVerbose / logNotice / logWarning / logError / logFat
 
 ### How do I log a warning only once? (logOnce)
 
-Gate the log line with `logOnce(key)`, not a `static bool warned` flag. It returns true the first time for that key; with an interval it returns true again at most once per that many seconds. It works with any level (you write the line yourself), is thread-safe, and keeps its state in TrussC's `.cpp` (one per process, so it holds across hot reloads). Prefix the key with the component or addon name:
+Gate the log line with `logOnce(key)`, not a `static bool warned` flag. It returns true the first time for that key; with an interval it returns true again at most once per that many seconds. It works with any level (you write the line yourself), is thread-safe, and keeps its state in TrussC's `.cpp` (one per process, so it holds across hot reloads). A key stays until the process ends, so build keys from fixed strings, not from paths or ids. Prefix the key with the component or addon name:
 ```cpp
 if (logOnce("Sound.unsupportedExtension")) logWarning("Sound") << "unsupported extension";
 if (logOnce("Audio.underrun", 5.0))        logWarning("Audio") << "underrun";  // at most every 5 s

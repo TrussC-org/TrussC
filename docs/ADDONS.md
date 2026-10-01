@@ -314,7 +314,7 @@ private:
 
 ### Warning Once
 
-To log a warning only the first time (an unsupported format, a missing device), gate it with `tc::logOnce(key)` instead of a `static bool warned` flag. Its state lives in TrussC's `.cpp`, one copy per process, so the gate holds across hot reloads and between host and guest. Prefix the key with your addon name so it does not collide with other keys; pass an interval to repeat at most once per that many seconds:
+To log a warning only the first time (an unsupported format, a missing device), gate it with `tc::logOnce(key)` instead of a `static bool warned` flag. Its state lives in TrussC's `.cpp`, one copy per process, so the gate holds across hot reloads and between host and guest. Prefix the key with your addon name so it does not collide with other keys; pass an interval to repeat at most once per that many seconds. A key stays until the process ends, so build keys from fixed strings, not from paths or ids:
 
 ```cpp
 if (tc::logOnce("tcxMyAddon.unsupportedFormat")) {

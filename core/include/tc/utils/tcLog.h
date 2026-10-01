@@ -412,8 +412,10 @@ inline LogStream logFatal(const std::string& module = "") {
 // state is one per process (tcLog.cpp), so header code and hot reload guests
 // need no `static bool warned` flag of their own. Prefix the key with the
 // component or addon name ("Sound.", "tcxFoo.") so keys don't collide;
-// several call sites may share a key on purpose. A per-object "once" (one
-// warning per Thread, say) belongs in a member of that object instead.
+// several call sites may share a key on purpose. A key stays until the
+// process ends, so build keys from fixed strings, not from paths or ids. A
+// per-object "once" (one warning per Thread, say) belongs in a member of that
+// object instead.
 bool logOnce(const std::string& key, double intervalSeconds = 0);
 
 // ---------------------------------------------------------------------------
