@@ -9,14 +9,14 @@
 //
 // Guards the invariants:
 // - Sound::play() returns false when the play is dropped, for every reason
-//   (voice limit, a stream's maxPolyphony, a stream file that cannot be
+//   (polyphony limit, a stream's maxPolyphony, a stream file that cannot be
 //   reopened, no running device), and each drop is counted in getStats().
 // - Drops reach the TrussC logger (onLog / log file / logcat), not stdout:
 //   immediately on the main thread, rate limited, and never from a thread
 //   other than the main one (off-main drops are only counted; the main
 //   thread's pumpAudioDiagnostics() reports them).
 // - The audio thread meters the output: peak / RMS / clipped samples, the
-//   per-voice level and the audio-thread load.
+//   level of each playing sound and the audio-thread CPU usage.
 // - The app loop does the reporting itself: runHeadlessApp's frame pump logs
 //   an off-main drop with no help from the test, and its exit flush logs
 //   what the rate limit still held back; AudioEngine::shutdown() flushes too,
@@ -915,7 +915,7 @@ int main() {
     check("the default-device flag reaches the device report", report.outputIsDefault);
     check("init is logged through the logger", countLogs(LogLevel::Notice, "[AudioEngine] initialized") == 1);
 
-    // --- voice limit ------------------------------------------------------------
+    // --- polyphony limit ------------------------------------------------------------
     Sound a, b, c;
     a.loadTestTone(440.0f, 10.0f);
     b.loadTestTone(550.0f, 10.0f);
@@ -923,8 +923,8 @@ int main() {
     check("play() returns true while a voice is free", a.play() && b.play());
     check("play() returns false when every voice is busy", !c.play());
     AudioStats st = engine.getStats();
-    check("voice-limit drop is counted", st.droppedVoiceLimit == 1 && st.droppedPlays == 1,
-          to_string(st.droppedVoiceLimit) + "/" + to_string(st.droppedPlays));
+    check("polyphony-limit drop is counted", st.droppedPolyphonyLimit == 1 && st.droppedPlays == 1,
+          to_string(st.droppedPolyphonyLimit) + "/" + to_string(st.droppedPlays));
     check("drop is logged as a warning right away",
           countLogs(LogLevel::Warning, "voices are busy") == 1, lastLog(LogLevel::Warning));
 
@@ -932,7 +932,7 @@ int main() {
     for (int i = 0; i < 5; ++i) c.play();
     internal::pumpAudioDiagnostics();
     st = engine.getStats();
-    check("repeated drops are all counted", st.droppedVoiceLimit == 6, to_string(st.droppedVoiceLimit));
+    check("repeated drops are all counted", st.droppedPolyphonyLimit == 6, to_string(st.droppedPolyphonyLimit));
     check("repeated drops inside the interval are not logged one by one",
           countLogs(LogLevel::Warning, "dropped") == 1);
     waitReportInterval();
@@ -950,7 +950,7 @@ int main() {
     thread worker([&] { offThreadResult = c.play(); });
     worker.join();
     check("play() off the main thread returns false when dropped", !offThreadResult.load());
-    check("off-main drop is counted", engine.getStats().droppedVoiceLimit == 7);
+    check("off-main drop is counted", engine.getStats().droppedPolyphonyLimit == 7);
     check("nothing is logged from the other thread",
           allLogsOnMainThread() && countLogs(LogLevel::Warning, "dropped") == dropLinesBefore);
     internal::pumpAudioDiagnostics();
@@ -959,7 +959,7 @@ int main() {
           lastLog(LogLevel::Warning));
     check("every log line came from the main thread", allLogsOnMainThread());
 
-    // --- output meters and voice snapshot ---------------------------------------
+    // --- output meters and playing-sound snapshot ---------------------------------------
     a.stop();
     b.stop();
     SoundBuffer loudBuf;
@@ -977,20 +977,21 @@ int main() {
     check("master peak is measured before the clamp", metered && st.peak > 1.5f && st.peak < 2.1f,
           to_string(st.peak));
     check("master RMS is measured", st.rms > 0.5f, to_string(st.rms));
-    check("audio-thread load is published", waitFor([&] { return engine.getStats().load > 0.0f; }, 1500));
+    check("audio-thread CPU usage is published", waitFor([&] { return engine.getStats().cpuUsage > 0.0f; }, 1500));
 
-    auto voices = engine.getVoices();
-    check("getVoices() lists the one playing voice", voices.size() == 1, to_string(voices.size()));
-    if (voices.size() == 1) {
-        const auto& v = voices[0];
-        check("voice: eager, no file, volume 4", !v.streaming && v.path.empty() && v.volume == 4.0f);
-        check("voice: level is the pre-clip peak of its output", v.level > 1.5f && v.level < 2.1f,
+    const AudioEngine& constEngine = engine;  // getPlayingSounds() is const, like getStats()
+    auto sounds = constEngine.getPlayingSounds();
+    check("getPlayingSounds() lists the one playing sound", sounds.size() == 1, to_string(sounds.size()));
+    if (sounds.size() == 1) {
+        const auto& v = sounds[0];
+        check("playing sound: eager, no file, volume 4", !v.streaming && v.path.empty() && v.volume == 4.0f);
+        check("playing sound: level is the pre-clip peak of its output", v.level > 1.5f && v.level < 2.1f,
               to_string(v.level));
-        check("voice: position advances", v.position > 0.0f && v.duration > 9.0f);
+        check("playing sound: position advances", v.position > 0.0f && v.duration > 9.0f);
     }
     loud.pause();
-    voices = engine.getVoices();
-    check("paused voice reports level 0", voices.size() == 1 && voices[0].paused && voices[0].level == 0.0f);
+    sounds = engine.getPlayingSounds();
+    check("paused sound reports level 0", sounds.size() == 1 && sounds[0].paused && sounds[0].level == 0.0f);
     loud.stop();
 
     // --- streams: maxPolyphony drop, file path ----------------------------------
@@ -1009,9 +1010,9 @@ int main() {
     check("stream-limit drop names the file",
           countLogs(LogLevel::Warning, "maxPolyphony=1 reached for " + internal::pathToUtf8(wav)) == 1,
           lastLog(LogLevel::Warning));
-    voices = engine.getVoices();
-    check("stream voice reports its file",
-          voices.size() == 1 && voices[0].streaming && voices[0].path == internal::pathToUtf8(wav));
+    sounds = engine.getPlayingSounds();
+    check("streamed sound reports its file",
+          sounds.size() == 1 && sounds[0].streaming && sounds[0].path == wav.lexically_normal());
     s1.stop();
 
     Sound eager;
@@ -1019,11 +1020,11 @@ int main() {
     check("the load is logged through the logger (verbose)",
           countLogs(LogLevel::Verbose, "loaded WAV " + internal::pathToUtf8(wav)) == 1);
     check("eager voice plays", eager.play());
-    voices = engine.getVoices();
-    check("eager voice reports its file",
-          voices.size() == 1 && !voices[0].streaming && voices[0].path == internal::pathToUtf8(wav));
+    sounds = engine.getPlayingSounds();
+    check("eager sound reports its file",
+          sounds.size() == 1 && !sounds[0].streaming && sounds[0].path == wav.lexically_normal());
 
-    // A reused SoundBuffer: getPath() (a voice's "file") follows the last fill.
+    // A reused SoundBuffer: getPath() (a playing sound's "file") follows the last fill.
     {
         SoundBuffer reused;
         check("path: loadWav() records the file", (bool)reused.loadWav(wav) && reused.getPath() == wav,
@@ -1108,17 +1109,19 @@ int main() {
               state.value("running", false) && state["output"].value("backend", "") == "Null");
         check("tool: dropped counts match getStats()",
               state["dropped"].value("total", (uint64_t)0) == st.droppedPlays &&
-              state["dropped"].value("voiceLimit", (uint64_t)0) == 7 &&
+              state["dropped"].value("polyphonyLimit", (uint64_t)0) == 7 &&
               state["dropped"].value("streamLimit", (uint64_t)0) == 1 &&
               state["dropped"].value("decoderError", (uint64_t)0) == 1,
               state["dropped"].dump());
-        check("tool: voices list the playing file",
-              state["voices"].size() == 1 &&
-              state["voices"][0].value("file", "") == internal::pathToUtf8(wav.lexically_normal()),
-              state["voices"].dump());
-        check("tool: master meters and thread load present",
+        check("tool: playingSounds list the playing file (UTF-8)",
+              state.contains("playingSounds") && !state.contains("voices") &&
+              state["playingSounds"].size() == 1 &&
+              state["playingSounds"][0].value("file", "") == internal::pathToUtf8(wav.lexically_normal()),
+              state.value("playingSounds", Json::array()).dump());
+        check("tool: master meters and thread CPU usage present",
               state["master"].contains("peak") && state["master"].value("clippedSamples", (uint64_t)0) > 0 &&
-              state["thread"].value("load", 0.0f) > 0.0f && state["thread"].contains("loadMax"),
+              state["thread"].value("cpuUsage", 0.0f) > 0.0f && state["thread"].contains("cpuUsagePeak") &&
+              !state["thread"].contains("load") && !state["dropped"].contains("voiceLimit"),
               state.dump());
         check("tool: input section present", state["input"].contains("running"));
         check("tool: devices enumerated by default",
@@ -1186,11 +1189,11 @@ int main() {
     check("shutdown is logged through the logger", countLogs(LogLevel::Notice, "[AudioEngine] shutdown") == 1);
     st = engine.getStats();
     check("shutdown clears the meters",
-          st.peak == 0.0f && st.rms == 0.0f && st.load == 0.0f && st.loadMax == 0.0f,
+          st.peak == 0.0f && st.rms == 0.0f && st.cpuUsage == 0.0f && st.cpuUsagePeak == 0.0f,
           to_string(st.peak));
-    voices = engine.getVoices();
-    check("voices left in their slots report level 0 after shutdown",
-          !voices.empty() && voices[0].level == 0.0f, to_string(voices.size()));
+    sounds = engine.getPlayingSounds();
+    check("playing sounds left in their slots report level 0 after shutdown",
+          !sounds.empty() && sounds[0].level == 0.0f, to_string(sounds.size()));
     busy1.stop();
     busy2.stop();
 

@@ -119,8 +119,8 @@ struct AudioDiagnostics {
     std::atomic<uint64_t> clippedSamples{0};
     std::atomic<float>    peak{0.0f};
     std::atomic<float>    rms{0.0f};
-    std::atomic<float>    load{0.0f};
-    std::atomic<float>    loadMax{0.0f};
+    std::atomic<float>    cpuUsage{0.0f};
+    std::atomic<float>    cpuUsagePeak{0.0f};
 
     // --- audio thread only (reset while no device runs): meter / load windows ---
     float    winPeak = 0.0f;
@@ -150,7 +150,7 @@ using internal::AudioDiagnostics;
 namespace {
 
 // Module name and summary text per AudioEngine::DropReason, by its index
-// (VoiceLimit, StreamLimit, DecoderError, NotRunning).
+// (PolyphonyLimit, StreamLimit, DecoderError, NotRunning).
 const char* dropModule(int reason) {
     return (reason == 1 || reason == 2) ? "SoundStream" : "AudioEngine";
 }
@@ -209,7 +209,7 @@ void AudioEngine::noteDroppedPlay(DropReason reason, const SoundSource* source, 
 
     auto line = logWarning(dropModule(r));
     switch (reason) {
-        case DropReason::VoiceLimit:
+        case DropReason::PolyphonyLimit:
             line << "play dropped: all " << playingSounds_.size() << " voices are busy ("
                  << sourceLabel(source) << "). Raise AudioSettings::maxPolyphony or stop "
                     "sounds that no longer need to play";
@@ -284,8 +284,8 @@ void AudioEngine::resetMeters() {
     AudioDiagnostics& d = *diag_;
     d.peak.store(0.0f, std::memory_order_relaxed);
     d.rms.store(0.0f, std::memory_order_relaxed);
-    d.load.store(0.0f, std::memory_order_relaxed);
-    d.loadMax.store(0.0f, std::memory_order_relaxed);
+    d.cpuUsage.store(0.0f, std::memory_order_relaxed);
+    d.cpuUsagePeak.store(0.0f, std::memory_order_relaxed);
     d.winPeak = 0.0f;
     d.winSumSq = 0.0;
     d.winSamples = 0;
@@ -304,33 +304,33 @@ AudioStats AudioEngine::getStats() const {
     const AudioDiagnostics& d = *diag_;
     auto get = [](const std::atomic<uint64_t>& a) { return a.load(std::memory_order_relaxed); };
     AudioStats s;
-    s.droppedVoiceLimit   = get(d.dropped[(int)DropReason::VoiceLimit]);
-    s.droppedStreamLimit  = get(d.dropped[(int)DropReason::StreamLimit]);
-    s.droppedDecoderError = get(d.dropped[(int)DropReason::DecoderError]);
-    s.droppedNotRunning   = get(d.dropped[(int)DropReason::NotRunning]);
-    s.droppedPlays = s.droppedVoiceLimit + s.droppedStreamLimit
+    s.droppedPolyphonyLimit = get(d.dropped[(int)DropReason::PolyphonyLimit]);
+    s.droppedStreamLimit    = get(d.dropped[(int)DropReason::StreamLimit]);
+    s.droppedDecoderError   = get(d.dropped[(int)DropReason::DecoderError]);
+    s.droppedNotRunning     = get(d.dropped[(int)DropReason::NotRunning]);
+    s.droppedPlays = s.droppedPolyphonyLimit + s.droppedStreamLimit
                    + s.droppedDecoderError + s.droppedNotRunning;
     s.clippedSamples = get(d.clippedSamples);
-    s.peak    = d.peak.load(std::memory_order_relaxed);
-    s.rms     = d.rms.load(std::memory_order_relaxed);
-    s.load    = d.load.load(std::memory_order_relaxed);
-    s.loadMax = d.loadMax.load(std::memory_order_relaxed);
+    s.peak         = d.peak.load(std::memory_order_relaxed);
+    s.rms          = d.rms.load(std::memory_order_relaxed);
+    s.cpuUsage     = d.cpuUsage.load(std::memory_order_relaxed);
+    s.cpuUsagePeak = d.cpuUsagePeak.load(std::memory_order_relaxed);
     return s;
 }
 
-std::vector<AudioVoiceInfo> AudioEngine::getVoices() {
-    std::vector<AudioVoiceInfo> out;
+std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const {
+    std::vector<PlayingSoundInfo> out;
     std::lock_guard<std::mutex> lock(mutex_);
     for (size_t i = 0; i < playingSounds_.size(); ++i) {
         const auto& v = playingSounds_[i];
         if (!v || !v->buffer || !v->playing) continue;  // paused voices keep playing = true
         const SoundSource& src = *v->buffer;
-        AudioVoiceInfo info;
+        PlayingSoundInfo info;
         info.slot      = (int)i;
         info.streaming = (src.kind() == SoundSource::Stream);
         const fs::path p = info.streaming ? static_cast<const SoundStream&>(src).getPath()
                                           : static_cast<const SoundBuffer&>(src).getPath();
-        info.path     = internal::pathToUtf8(p.lexically_normal());
+        info.path     = p.lexically_normal();
         info.paused   = v->paused;
         info.loop     = v->loop;
         // positionF counts source frames for eager voices and engine-rate
@@ -781,7 +781,7 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
 
     // Mark the just-opened stream as disposed so the worker drops it.
     if (stream) stream->disposed.store(true, std::memory_order_release);
-    noteDroppedPlay(DropReason::VoiceLimit, source.get());
+    noteDroppedPlay(DropReason::PolyphonyLimit, source.get());
     return nullptr;
 }
 
@@ -1293,8 +1293,8 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
     const double busy = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();
 
-    // Audio-thread load: time spent mixing (voices + audioOut listeners)
-    // relative to the audio time this callback produced.
+    // Audio-thread CPU usage: time spent mixing (playing sounds + audioOut
+    // listeners) relative to the audio time this callback produced.
     AudioDiagnostics& d = *diag_;
     const int rate = sampleRate_ > 0 ? sampleRate_ : DEFAULT_SAMPLE_RATE;
     const double audio = (double)num_frames / (double)rate;
@@ -1304,8 +1304,8 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
     d.loadBusy  += busy;
     d.loadAudio += audio;
     if (d.loadAudio >= 0.5) {
-        d.load.store((float)(d.loadBusy / d.loadAudio), std::memory_order_relaxed);
-        d.loadMax.store(d.loadWinMax, std::memory_order_relaxed);
+        d.cpuUsage.store((float)(d.loadBusy / d.loadAudio), std::memory_order_relaxed);
+        d.cpuUsagePeak.store(d.loadWinMax, std::memory_order_relaxed);
         d.loadBusy = 0.0;
         d.loadAudio = 0.0;
         d.loadWinMax = 0.0f;
