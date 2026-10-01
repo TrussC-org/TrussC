@@ -16,7 +16,7 @@
 //      The internal queue is enabled on the first hasNewMessage()/
 //      getNextMessage() call. It holds up to getBufferSize() messages
 //      (default 1024); when full, the oldest is dropped, counted in
-//      getDroppedMessages() and logged as a warning from those two calls
+//      getDroppedMessageCount() and logged as a warning from those two calls
 //      (at most once every 2 s).
 // =============================================================================
 
@@ -186,7 +186,7 @@ public:
     // created: dropped from the full polling queue, or discarded when
     // setBufferSize() shrank it (a running total, never reset). Cheap to
     // call from any thread.
-    uint64_t getDroppedMessages() const {
+    uint64_t getDroppedMessageCount() const {
         return droppedMessages_.load(std::memory_order_relaxed);
     }
 
