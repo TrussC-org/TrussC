@@ -19,6 +19,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cmath>
 #include <cstdio>
@@ -26,6 +27,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -261,7 +264,9 @@ public:
     }
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     testJsonRoundTrip();
     testDerivedMarker();
 
