@@ -12,12 +12,15 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cmath>
 #include <cstdio>
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -243,7 +246,9 @@ static void testTryInvert() {
                return true; }());
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     testReparent();
     testScaleZero();
     testTryInvert();
