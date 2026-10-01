@@ -128,6 +128,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -764,6 +765,7 @@ static int checkLoadFailuresLogged() {
 // the press / release through the core events, whose `consumed` tells whether
 // a listener before the App took it. Returns 0 when every generation passed.
 static int g_reloadCheckResult = 1;
+static bool g_reloadCheckFinished = false;
 
 static int runReloadCheck() {
     const float kPanelX = 100, kPanelY = 100;    // inside the inspector's Hierarchy panel
@@ -786,10 +788,12 @@ static int runReloadCheck() {
         return t;
     };
     auto moveMouse = [](float x, float y) {
+        // Raw sokol events are in framebuffer pixels (sokol_imgui divides by
+        // the DPI scale), so a logical point is scaled up first.
         sapp_event ev = {};
         ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
-        ev.mouse_x = x;
-        ev.mouse_y = y;
+        ev.mouse_x = x * sapp_dpi_scale();
+        ev.mouse_y = y * sapp_dpi_scale();
         events().rawEvent.notify(ev);
     };
     auto pressTaken = [](float x, float y) {
@@ -812,8 +816,16 @@ static int runReloadCheck() {
         else std::printf("hotReloadLifecycle --reload-check: OK\n");
         std::fflush(stdout);
         g_reloadCheckResult = rc;
+        g_reloadCheckFinished = true;
         sapp_quit();
     };
+#ifdef __APPLE__
+    // On macOS sapp_quit() ends the process through exit(0) and TC_RUN_APP
+    // never returns, so the result is set as the exit code here.
+    std::atexit([] {
+        if (g_reloadCheckFinished) std::_Exit(g_reloadCheckResult);
+    });
+#endif
     bool done = false;
     EventListener step = events().afterFrame.listen([&] {
         if (done) return;
