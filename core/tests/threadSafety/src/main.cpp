@@ -11,13 +11,19 @@
 //
 // Run under ThreadSanitizer for the stronger race-free guarantee:
 //   c++ -fsanitize=thread ... (see the thread-safety branch notes)
+//
+// Also guards the per-frame drain (#397): each drain runs only what was queued
+// when it started (in order, nothing dropped), so frames keep starting while a
+// worker keeps the queue non-empty, and the count is reported for tc_get_health.
 // =============================================================================
 
 #include <TrussC.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <queue>
 #include <thread>
 #include <vector>
 
@@ -72,6 +78,66 @@ struct StressApp : App {
 
     void exit() override {
         g_stop.store(true, memory_order_relaxed);
+        if (worker.joinable()) worker.join();
+    }
+};
+
+// --- Flood app (#397): a worker keeps the main-thread queue topped up ---
+// The worker refills the queue as fast as the main thread runs it, and each
+// call returns only after the next one is queued, so the queue is never empty
+// while the worker runs. Each frame's drain runs what was queued when it started; frames
+// must keep starting while the worker is still queueing.
+static atomic<bool>          g_floodStop{false};
+static atomic<bool>          g_floodWorkerActive{false};
+static atomic<long>          g_floodQueued{0};
+static atomic<long>          g_floodSent{0};           // calls already in the queue
+static atomic<long>          g_floodRan{0};
+static atomic<bool>          g_floodOrderOk{true};
+static long                  g_floodNext = 0;          // main thread only
+static int                   g_floodFramesWhileActive = 0;
+static size_t                g_floodMaxPending = 0;
+static constexpr long        kFloodBacklog = 64;
+static constexpr int         kFloodFrames = 100;
+
+struct FloodApp : App {
+    thread worker;
+    int frames = 0;
+
+    void setup() override {
+        g_floodWorkerActive.store(true);
+        worker = thread([] {
+            // Stop after 5 s even if no frame ever comes, so a failure ends
+            // the test instead of hanging it.
+            auto deadline = chrono::steady_clock::now() + chrono::seconds(5);
+            while (!g_floodStop.load() && chrono::steady_clock::now() < deadline) {
+                if (g_floodQueued.load() - g_floodRan.load() < kFloodBacklog) {
+                    long seq = g_floodQueued.fetch_add(1);
+                    runOnMainThread([seq] {
+                        if (seq != g_floodNext) g_floodOrderOk.store(false);
+                        g_floodNext = seq + 1;
+                        g_floodRan.fetch_add(1);
+                        // Return only once the worker has queued the next
+                        // call, so the queue is never empty at this point.
+                        while (g_floodSent.load() <= seq + 1 && g_floodWorkerActive.load())
+                            this_thread::yield();
+                    });
+                    g_floodSent.fetch_add(1);
+                } else {
+                    this_thread::yield();
+                }
+            }
+            g_floodWorkerActive.store(false);
+        });
+    }
+
+    void update() override {
+        g_floodMaxPending = std::max(g_floodMaxPending, internal::getMainThreadQueuePending());
+        if (g_floodWorkerActive.load()) ++g_floodFramesWhileActive;
+        if (++frames >= kFloodFrames) requestExit();
+    }
+
+    void exit() override {
+        g_floodStop.store(true);
         if (worker.joinable()) worker.join();
     }
 };
@@ -203,6 +269,73 @@ int main() {
         check("headless stress: tree stayed bounded/consistent",
               g_root && g_root->getChildren().size() >= 16 &&
               g_root->getChildren().size() <= 17);
+    }
+
+    // --- 5. ThreadChannel::receiveAll takes the whole queue in order ---
+    {
+        ThreadChannel<int> ch;
+        for (int i = 0; i < 5; ++i) ch.send(i);
+        check("ThreadChannel::size counts queued values", ch.size() == 5 && !ch.empty());
+        queue<int> out;
+        out.push(99);   // previous contents are replaced
+        size_t n = ch.receiveAll(out);
+        bool inOrder = out.size() == 5;
+        for (int i = 0; inOrder && i < 5; ++i) { inOrder = out.front() == i; out.pop(); }
+        check("ThreadChannel::receiveAll: returns every value, FIFO", n == 5 && inOrder);
+        check("ThreadChannel::receiveAll: channel empty afterwards", ch.size() == 0 && ch.empty());
+        check("ThreadChannel::receiveAll: 0 when empty", ch.receiveAll(out) == 0 && out.empty());
+        ch.send(1);
+        ch.close();
+        out.push(99);
+        check("ThreadChannel::receiveAll: 0 when closed", ch.receiveAll(out) == 0 && out.empty());
+    }
+
+    // --- 6. drainMainThreadQueue runs what was queued at its start ---
+    // A closure that queues more work (through a worker) does not extend the
+    // current drain: the new work runs in the next one.
+    {
+        // Run what earlier sections left queued, so the counts below are ours.
+        while (!internal::mainThreadQueue().empty()) internal::drainMainThreadQueue();
+        vector<int> order;
+        thread t([&] {
+            runOnMainThread([&] {
+                order.push_back(1);
+                thread inner([&] { runOnMainThread([&] { order.push_back(4); }); });
+                inner.join();   // queued while the drain runs
+            });
+            runOnMainThread([&] { order.push_back(2); });
+            runOnMainThread([&] { order.push_back(3); });
+        });
+        t.join();
+        internal::drainMainThreadQueue();
+        check("drain: runs the queued work in order",
+              order == vector<int>({1, 2, 3}));
+        check("drain: pending count = queued at drain start",
+              internal::getMainThreadQueuePending() == 3);
+        internal::drainMainThreadQueue();
+        check("drain: work queued during a drain runs in the next",
+              order == vector<int>({1, 2, 3, 4}));
+        check("drain: pending count of the next drain",
+              internal::getMainThreadQueuePending() == 1);
+        internal::drainMainThreadQueue();
+        check("drain: pending count 0 when nothing queued",
+              internal::getMainThreadQueuePending() == 0);
+    }
+
+    // --- 7. Headless: frames keep starting while a worker keeps queueing ---
+    {
+        HeadlessSettings hs;
+        hs.setFps(500.0f);
+        runHeadlessApp<FloodApp>(hs);   // returns when update() requests exit
+        check("flood: frames kept starting while the worker queued",
+              g_floodFramesWhileActive >= kFloodFrames - 1);
+        check("flood: pending count reported", g_floodMaxPending > 0);
+        // Run what is left; nothing queued is dropped.
+        for (int i = 0; i < 1000 && !internal::mainThreadQueue().empty(); ++i)
+            internal::drainMainThreadQueue();
+        check("flood: every queued call ran",
+              g_floodQueued.load() > 0 && g_floodRan.load() == g_floodQueued.load());
+        check("flood: calls ran in queue order", g_floodOrderOk.load());
     }
 
     std::printf("\n%s  (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",
