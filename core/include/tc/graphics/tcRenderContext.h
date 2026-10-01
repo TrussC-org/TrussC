@@ -23,6 +23,7 @@
 // are already included: tcMath.h, tcColor.h, tcBitmapFont.h, sokol_gl.h
 
 #include "tc/graphics/tcCurveTessellation.h"
+#include "tc/utils/tcTypeName.h"
 
 #include <vector>
 #include <string>
@@ -66,6 +67,35 @@ enum class PointStyle {
 // API is the free functions that wrap them. A compat `using` below keeps the
 // names reachable from trussc:: for those wrappers and advanced users.
 namespace internal {
+
+// Entry points where TrussC calls app code (#349). Each value gives its label
+// in the unbalanced push/pop warnings (appEntryLabel) and its own rate limit,
+// so one value names the entry point everywhere. Wrapped by EntryStackGuard
+// (below), except Draw, whose frame-end reset is present()'s.
+enum class AppEntry {
+    Setup,    // the App's (or a secondary window root's) setup(), and the App's construction
+    Prelude,  // per-frame queues before update: runOnMainThread / Deliver::Main, console, MCP
+    Update,   // update(): synced, independent (VSYNC / each fixed-Hz step), headless, secondary windows
+    Draw,     // the frame: draw(), dropped at present() (#232)
+    Event,    // one window event (key, mouse, touch, drop, resize, ...), main or secondary
+    Exit,     // exit() and cleanup()
+    AfterFrame,  // events().afterFrame listeners, after present(), main or secondary
+    Count
+};
+
+inline const char* appEntryLabel(AppEntry e) {
+    switch (e) {
+        case AppEntry::Setup:   return "setup()";
+        case AppEntry::Prelude: return "the main-thread queue (runOnMainThread / Deliver::Main / console / MCP)";
+        case AppEntry::Update:  return "update()";
+        case AppEntry::Draw:    return "draw()";
+        case AppEntry::Event:   return "an event handler";
+        case AppEntry::Exit:    return "exit()";
+        case AppEntry::AfterFrame: return "an afterFrame listener";
+        case AppEntry::Count:   break;
+    }
+    return "?";
+}
 
 class RenderContext {
 public:
@@ -253,9 +283,11 @@ public:
 
     // A pop with nothing pushed is a bug in the caller: warn (rate-limited)
     // and leave both stacks alone, so TrussC's and sokol_gl's stay in step.
+    // Inside a Node's draw() the stack floor (#348) is that node's depth, so a
+    // pop that would reach its parent's entries is refused the same way.
     void popMatrix() {
-        if (matrixStack_.empty()) {
-            warnUnbalanced(popMatrixWarning_, "popMatrix() without a matching pushMatrix()");
+        if (matrixStack_.size() <= stackFloor_.matrix) {
+            warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()");
             return;
         }
         currentMatrix_ = matrixStack_.back();
@@ -278,8 +310,8 @@ public:
     }
 
     void popStyle() {
-        if (styleStack_.empty()) {
-            warnUnbalanced(popStyleWarning_, "popStyle() without a matching pushStyle()");
+        if (styleStack_.size() <= stackFloor_.style) {
+            warnPopAtFloor(popStyleWarning_, "popStyle()", "pushStyle()");
             return;
         }
         style_ = styleStack_.back();
@@ -290,34 +322,101 @@ public:
     // Frame end (#232): whatever a frame left pushed is dropped, so a missing
     // pop stays contained in the frame where it happened instead of drifting
     // getMatrix() (billboards, screen-fixed text, shader / PBR draws) and
-    // growing the stacks forever. Warns (rate-limited) when anything was left.
-    // Called at the end of present(); the sokol_gl side is reset there too.
+    // growing the stacks forever. Warns (rate-limited, as AppEntry::Draw:
+    // "draw() ended with ...") when anything was left. Called at the end of
+    // present(), the draw entry point's end (#349); the sokol_gl side is
+    // reset there too.
     void resetStacksAtFrameEnd() {
-        if (!matrixStack_.empty() || !styleStack_.empty()) {
-            warnUnbalanced(frameEndWarning_,
-                "the frame ended with " + std::to_string(matrixStack_.size()) +
-                " pushMatrix() and " + std::to_string(styleStack_.size()) +
-                " pushStyle() still open (missing pop); dropped");
-        }
+        warnLeftOpen(AppEntry::Draw, matrixStack_.size(), styleStack_.size());
         matrixStack_.clear();
         styleStack_.clear();
         currentMatrix_ = Mat4::identity();
+        stackFloor_ = StackFloor{};
     }
 
-    // After a Node's draw() (and its mods) run: if it left the stacks deeper or
-    // shallower than it found them, name the node and put them back, so its
-    // parent's own pop — and every later sibling — see the depth they expect.
+    // Stack floor (#348): popMatrix() / popStyle() never pop below these
+    // depths. Node::drawTree() sets it to the depths it sees before draw(),
+    // with the node's type, so a stray pop in draw() is refused (and names the
+    // node) instead of popping the node's own entry and drawing its children
+    // in the parent's space. A 0 floor with no owner is the plain empty-stack
+    // guard.
+    struct StackFloor {
+        size_t matrix = 0;
+        size_t style = 0;
+        const std::type_info* owner = nullptr;  // node type that set it, or null
+    };
+
+    // Set the floor and return the previous one; the caller puts that back
+    // with setStackFloor(prev), since a draw() can run another node's drawTree().
+    StackFloor setStackFloor(size_t matrixDepth, size_t styleDepth, const std::type_info* owner) {
+        StackFloor prev = stackFloor_;
+        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner};
+        return prev;
+    }
+    void setStackFloor(const StackFloor& floor) { stackFloor_ = floor; }
+
+    // When an entry point where TrussC calls app code returns (#349): put the
+    // stacks back to the depths they had when it was entered (EntryStackGuard
+    // records them), naming the entry point in the warning (for an event, the
+    // event's name when given: text only, the rate limit is Event's). Pops go
+    // through popMatrix() / popStyle(), as restoreStackDepth() does, so sokol_gl's
+    // matrix stack returns with TrussC's and the two stay in step, also
+    // mid-frame (the synced update). Only the pushes are undone: a style value
+    // or transform set outside a push carries on.
+    void restoreStacksAtEntryEnd(AppEntry entry, size_t matrixDepth, size_t styleDepth,
+                                 const char* eventName = nullptr) {
+        const size_t md = matrixStack_.size(), sd = styleStack_.size();
+        if (md == matrixDepth && sd == styleDepth) return;
+        if (md >= matrixDepth && sd >= styleDepth) {
+            warnLeftOpen(entry, md - matrixDepth, sd - styleDepth, eventName);
+        } else {
+            // Popped below the depth it was entered at (possible only when
+            // entered with something pushed, e.g. an event during a frame).
+            warnUnbalanced(entryWarning(entry),
+                entrySubject(entry, eventName) + " ended with the stacks off their depth at entry (pushMatrix " +
+                std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+                std::to_string((long long)sd - (long long)styleDepth) + "); restored");
+        }
+        while (matrixStack_.size() > matrixDepth) popMatrix();
+        while (styleStack_.size() > styleDepth) popStyle();
+        // The lost entries can't be recovered, but refilling the depth keeps
+        // the caller's pops matched to its pushes.
+        while (matrixStack_.size() < matrixDepth) pushMatrix();
+        while (styleStack_.size() < styleDepth) pushStyle();
+    }
+
+    // After a Node's draw() (and its mods) run: if it left the stacks deeper
+    // than it found them (a missing pop), name the node and pop back to that
+    // depth, so its parent's own pop, its children and every later sibling
+    // see the matrix and style they expect. A stray pop is refused at the
+    // floor above; the shallower branch below is a safety net only.
     void restoreStackDepth(size_t matrixDepth, size_t styleDepth, const char* who) {
         const size_t md = matrixStack_.size(), sd = styleStack_.size();
         if (md == matrixDepth && sd == styleDepth) return;
-        warnUnbalanced(nodeDrawWarning_,
-            std::string(who) + "::draw() left the stacks unbalanced (pushMatrix " +
-            std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
-            std::to_string((long long)sd - (long long)styleDepth) + ")");
+        if (md >= matrixDepth && sd >= styleDepth) {
+            // Extra pushes: reported like a stray pop, naming the node (#348).
+            std::string what = std::string(who) + "::draw() called ";
+            if (md > matrixDepth) {
+                what += "pushMatrix() without a matching popMatrix()";
+                if (md - matrixDepth > 1) what += " x" + std::to_string(md - matrixDepth);
+            }
+            if (sd > styleDepth) {
+                if (md > matrixDepth) what += " and ";
+                what += "pushStyle() without a matching popStyle()";
+                if (sd - styleDepth > 1) what += " x" + std::to_string(sd - styleDepth);
+            }
+            warnUnbalanced(nodeDrawWarning_, what + " (dropped)");
+        } else {
+            warnUnbalanced(nodeDrawWarning_,
+                std::string(who) + "::draw() left the stacks unbalanced (pushMatrix " +
+                std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+                std::to_string((long long)sd - (long long)styleDepth) + ")");
+        }
         while (matrixStack_.size() > matrixDepth) popMatrix();
         while (styleStack_.size() > styleDepth) popStyle();
-        // Popped more than it pushed: the lost entries can't be recovered, but
-        // refilling the depth keeps the parent's pops matched to its pushes.
+        // Shallower than expected (only if something got past the floor): the
+        // lost entries can't be recovered, but refilling the depth keeps the
+        // parent's pops matched to its pushes.
         while (matrixStack_.size() < matrixDepth) pushMatrix();
         while (styleStack_.size() < styleDepth) pushStyle();
     }
@@ -1049,7 +1148,41 @@ private:
         bool logged = false;
         int suppressed = 0;
     };
-    RateLimitedWarning popMatrixWarning_, popStyleWarning_, frameEndWarning_, nodeDrawWarning_;
+    RateLimitedWarning popMatrixWarning_, popStyleWarning_, nodeDrawWarning_;
+    // One per entry point (#349), so a leak in one doesn't hide another's.
+    RateLimitedWarning entryWarnings_[static_cast<size_t>(AppEntry::Count)];
+
+    RateLimitedWarning& entryWarning(AppEntry e) { return entryWarnings_[static_cast<size_t>(e)]; }
+
+    // An event names itself ("keyPressed()") when the caller knows which.
+    static std::string entrySubject(AppEntry e, const char* eventName) {
+        return (e == AppEntry::Event && eventName) ? std::string(eventName) : std::string(appEntryLabel(e));
+    }
+
+    // "<entry> ended with N pushMatrix() and M pushStyle() still open (missing
+    // pop); dropped", under the entry point's own rate limit.
+    void warnLeftOpen(AppEntry e, size_t matrixLeft, size_t styleLeft, const char* eventName = nullptr) {
+        if (matrixLeft == 0 && styleLeft == 0) return;
+        warnUnbalanced(entryWarning(e),
+            entrySubject(e, eventName) + " ended with " + std::to_string(matrixLeft) +
+            " pushMatrix() and " + std::to_string(styleLeft) +
+            " pushStyle() still open (missing pop); dropped");
+    }
+
+    StackFloor stackFloor_;
+
+    // A pop refused at the floor (#348): name the node that set it, or use the
+    // generic message outside any node's draw(). The name is resolved only
+    // here, never per node per frame.
+    void warnPopAtFloor(RateLimitedWarning& generic, const char* pop, const char* push) {
+        if (stackFloor_.owner) {
+            warnUnbalanced(nodeDrawWarning_,
+                typeName(*stackFloor_.owner) + "::draw() called " + pop +
+                " without a matching " + push + " (ignored)");
+        } else {
+            warnUnbalanced(generic, std::string(pop) + " without a matching " + push);
+        }
+    }
 
     void warnUnbalanced(RateLimitedWarning& w, const std::string& what) {
         const auto now = std::chrono::steady_clock::now();
@@ -1105,6 +1238,28 @@ private:
 // static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
 RenderContext& getDefaultContext();
+
+// Wraps one entry point where TrussC calls app code (#349), as one line at
+// the top of its scope: `EntryStackGuard guard(AppEntry::Update);`. The
+// constructor records the matrix and style stack depths; the destructor puts
+// them back (restoreStacksAtEntryEnd) and warns under the entry point's label
+// and rate limit, so an early return can't skip it. For an event, eventName
+// (a string literal, e.g. "keyPressed()") only names it in the warning.
+class EntryStackGuard {
+public:
+    explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
+        : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
+          matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()) {}
+    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_); }
+    EntryStackGuard(const EntryStackGuard&) = delete;
+    EntryStackGuard& operator=(const EntryStackGuard&) = delete;
+
+private:
+    AppEntry entry_;
+    const char* eventName_;
+    RenderContext& rc_;
+    size_t matrixDepth_, styleDepth_;
+};
 
 } // namespace internal
 

@@ -107,9 +107,10 @@ namespace internal {
     uint64_t nextNodeTimerId();
 
     // Runs the node's setup() once and then the framework's post-setup hook,
-    // as the node's first updateTree() / drawTree() does (Node::setupOnce()).
-    // For a runner that drives an App without the tree walk
-    // (runHeadlessApp()). Defined below the Node class.
+    // as the node's first updateTree() / drawTree() does (Node::setupOnce()),
+    // as the setup() entry point (#349): the stacks go back to their depth
+    // before it. For a window's root (the App): runHeadlessApp(), and
+    // App / Window before their tree walk. Defined below the Node class.
     inline void setupNodeOnce(Node& node);
 }
 
@@ -953,11 +954,16 @@ private:
             auto& rc = internal::getDefaultContext();
             const size_t matrixDepth = rc.getMatrixStackDepth();
             const size_t styleDepth = rc.getStyleStackDepth();
+            // Stack floor (#348): a stray pop in draw() is refused (and names
+            // this node) instead of popping this node's own entry. Saved and
+            // restored, since a draw() can run another node's drawTree().
+            const auto prevFloor = rc.setStackFloor(matrixDepth, styleDepth, &typeid(*this));
             resetStyle();
             draw();
             forEachMod([](Mod* m) { m->draw(); });
-            // An unbalanced push/pop in draw() is named and contained here
-            // (#232): the pop below must undo THIS node's push, not the user's.
+            rc.setStackFloor(prevFloor);
+            // A missing pop in draw() is named and contained here (#232): the
+            // pop below must undo THIS node's push, not the user's.
             if (rc.getMatrixStackDepth() != matrixDepth || rc.getStyleStackDepth() != styleDepth) {
                 rc.restoreStackDepth(matrixDepth, styleDepth, getTypeName().c_str());
             }
@@ -1693,6 +1699,8 @@ protected:
 
 namespace internal {
 inline void setupNodeOnce(Node& node) {
+    if (node.setupCalled_) return;
+    EntryStackGuard guard(AppEntry::Setup);
     node.setupOnce();
 }
 }

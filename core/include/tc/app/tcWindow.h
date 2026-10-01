@@ -171,11 +171,15 @@ public:
     void tickTree() {
         auto root = ctx_.rootNode.lock();
         if (!root) return;
+        internal::setupNodeOnce(*root);   // the setup() entry point (#349)
         root->updateTree();
         root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
     void drawTreeNow() {
-        if (auto root = ctx_.rootNode.lock()) root->drawTree();
+        if (auto root = ctx_.rootNode.lock()) {
+            internal::setupNodeOnce(*root);   // the setup() entry point (#349)
+            root->drawTree();
+        }
     }
     // Size-sync convention (mirrors the main App, which is a RectNode kept in
     // sync with the window): if the root IS a RectNode it is resized to the

@@ -31,7 +31,9 @@
 //
 // On every platform: the Windows write timeout that setup() derives from the
 // rate (internal::serialWriteTimeout()) leaves a write at least 4 times its
-// time on the wire plus 5 s, rounded up to whole ms per byte.
+// time on the wire plus 5 s, rounded up to whole ms per byte. Android gives
+// each 16 KB bulk transfer of a write the same rule
+// (internal::serialWriteTimeoutMs()) instead of a fixed 1 s (#409).
 // =============================================================================
 
 #include <TrussC.h>
@@ -77,6 +79,32 @@ static void checkWriteTimeouts() {
         if (timeoutMs < 4 * wireMs + 5000) generous = false;
     }
     check("write timeout is at least 4x the wire time + 5 s, 300 to 2000000 baud", generous);
+
+    // Android: the same rule for each bulk transfer of a write (#409), not a
+    // fixed 1 s per 16 KB chunk
+    const int chunk = internal::serialAndroidWriteChunk;
+    check("android write chunk is 16 KB", chunk == 16384);
+    check("android chunk timeout at 9600: 5 ms * 16384 + 5000 = 86920 ms",
+          internal::serialWriteTimeoutMs(9600, chunk) == 86920u);
+    check("android chunk timeout at 115200: 1 ms * 16384 + 5000 = 21384 ms",
+          internal::serialWriteTimeoutMs(115200, chunk) == 21384u);
+    check("android chunk timeout of 1 byte at 9600: 5005 ms",
+          internal::serialWriteTimeoutMs(9600, 1) == 5005u);
+    check("android chunk timeout of 0 bytes: the constant only",
+          internal::serialWriteTimeoutMs(9600, 0) == 5000u &&
+          internal::serialWriteTimeoutMs(9600, -1) == 5000u);
+    check("android chunk timeout for a nonsense rate is finite (40000 ms per byte)",
+          internal::serialWriteTimeoutMs(0, chunk) == 40000u * 16384u + 5000u);
+    check("android chunk timeout saturates instead of wrapping",
+          internal::serialWriteTimeoutMs(0, 0x7fffffff) == static_cast<unsigned int>(-1));
+
+    // A full chunk always leaves 4x its wire time + 5 s
+    bool chunkGenerous = true;
+    for (int rate : {300, 1200, 9600, 31250, 57600, 74880, 115200, 250000, 921600, 2000000}) {
+        const double wireMs = (double)chunk * 10 * 1000 / rate;
+        if (internal::serialWriteTimeoutMs(rate, chunk) < 4 * wireMs + 5000) chunkGenerous = false;
+    }
+    check("android chunk timeout is at least 4x the wire time + 5 s", chunkGenerous);
 }
 
 #if defined(_WIN32) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
