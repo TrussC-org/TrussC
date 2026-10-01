@@ -220,14 +220,17 @@ public:
             // 16-bit signed integer -> float
             samples.resize(sampleCount);
 
-            const int16_t* src = static_cast<const int16_t*>(data);
+            // Read through memcpy (no alignment assumption on data) and swap
+            // on the unsigned value: a shift on a negative int16_t would
+            // sign-extend and corrupt the swapped sample.
+            const uint8_t* src8 = static_cast<const uint8_t*>(data);
             for (size_t i = 0; i < sampleCount; i++) {
-                int16_t s = src[i];
+                uint16_t u;
+                std::memcpy(&u, src8 + i * 2, sizeof(u));
                 if (bigEndian) {
-                    // Swap bytes for big-endian
-                    s = static_cast<int16_t>((s >> 8) | (s << 8));
+                    u = static_cast<uint16_t>((u >> 8) | (u << 8));
                 }
-                samples[i] = s / 32768.0f;
+                samples[i] = static_cast<int16_t>(u) / 32768.0f;
             }
         } else {
             // 32-bit float: dataSize == sampleCount * sizeof(float) here
