@@ -96,6 +96,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   them; and a `static` gate works from a static destructor at exit. It is
   checked at compile time to be trivially destructible, not copyable or
   movable, and `constinit`-constructible.
+- `pbrLightLimits/` — the PBR light limits (#333): `addLight()` registers up
+  to 8 lights per window and logs one warning for lights past that, however
+  many; re-adding a registered light on a full list is silent. The pure
+  `internal::selectPbrSpecialLightSlots()` gives the single projector slot to
+  the first Spot light with a projection texture and the single IES slot to
+  the first light with a profile (among the first 8), and flags a further
+  projector or IES light that gets no slot (the PBR draw warns once from it).
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
