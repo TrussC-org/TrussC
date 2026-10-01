@@ -114,8 +114,8 @@ Never ship `setVerifyNone()` to end users — it silently allows MITM.
 ### Upstream mbedTLS version
 
 `tcxTls` pins mbedTLS to the v3.6.x LTS branch via FetchContent. When bumping
-to a newer patch release, also update the version row in `docs/LICENSE.md` and
-the note in `docs/ROADMAP.md`.
+to a newer patch release, also update its row in `docs/LICENSE.md` (the one
+list of third-party versions; `tools/check_dependencies.py` checks it in CI).
 
 ---
 

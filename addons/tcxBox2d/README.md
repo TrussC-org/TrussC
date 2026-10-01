@@ -1,7 +1,8 @@
 # tcxBox2d
 
 2D physics for [TrussC](https://github.com/TrussC-org/TrussC), built on
-[Box2D](https://box2d.org/) v2.4.1 (fetched by CMake). Namespace `tcx::box2d`.
+[Box2D](https://box2d.org/) (fetched by CMake; version in
+[docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)). Namespace `tcx::box2d`.
 
 Add `tcxBox2d` to your project's `addons.make`, then `#include <tcxBox2d.h>`.
 

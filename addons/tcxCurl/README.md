@@ -23,7 +23,7 @@ If you only need plain **HTTP**, you can use `httplib::Client` directly from `<i
 
 ### Windows での動作
 
-Windows では `find_package(CURL)` が失敗した場合、CMake が自動的に libcurl 8.12.1 をダウンロードしてスタティックライブラリとしてビルドします。TLS には Windows ネイティブの **Schannel** を使用するため、OpenSSL のインストールは不要です。
+Windows では `find_package(CURL)` が失敗した場合、CMake が自動的に libcurl（バージョンは [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)）をダウンロードしてスタティックライブラリとしてビルドします。TLS には Windows ネイティブの **Schannel** を使用するため、OpenSSL のインストールは不要です。
 
 手動で curl をインストールする場合は vcpkg も使えます:
 
