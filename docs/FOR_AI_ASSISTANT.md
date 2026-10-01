@@ -1215,6 +1215,12 @@ Real-time synthesis/processing is done through `AudioEngine` events. Listening t
 
 Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
+### How long does a Sound play? (Sound lifetime)
+
+A `Sound` plays only while it, or a copy of it, is alive (like `ofSoundPlayer`). Copies share the voice that `play()` started; when the last `Sound` handle that shares it is destroyed or overwritten (copy or move assignment), the voice stops, looping or one-shot, and its slot is free again. A temporary copy going away does not stop the original. `stop()` and the last handle going away also close a streamed voice's decoder and file.
+
+So keep the `Sound` objects alive, for example as App members. To play overlapping one-shots, keep several of them (e.g. `Sound hits_[4]` and play them in turn); `{ Sound s = hit; s.play(); }` stops at the closing brace. In tcxLua, a script keeps a reference to each `Sound` it wants to hear, or the sound stops when the GC collects it.
+
 ### Output channel mapping? (setChannelMap)
 
 `Sound` can route to output channels:
@@ -3784,7 +3790,7 @@ void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType 
 ```cpp
 ```
 
-### Sound — Audio playback
+### Sound — Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots.
 
 ```cpp
 void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
@@ -3817,7 +3823,7 @@ void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
 void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop audio
+void Sound::stop()  // Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped.
 ```
 
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.

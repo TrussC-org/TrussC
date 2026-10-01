@@ -1273,6 +1273,24 @@ double voicePosition(const PlayingSound& voice) {
     return voice.positionF;
 }
 
+void releaseVoice(PlayingSound& voice) {
+    AudioEngine& engine = AudioEngine::getInstance();
+    std::shared_ptr<StreamInstance> stream;
+    {
+        // Under the engine lock: the mixer reads voice.stream under it.
+        std::lock_guard<std::mutex> lock(engine.mutex_);
+        voice.playing = false;
+        voice.paused = false;
+        stream = std::move(voice.stream);
+        voice.stream.reset();
+    }
+    // The worker skips a disposed stream. The decoder and file close when
+    // the last reference goes: here, or in the worker if it is refilling
+    // this stream right now. Not under the engine lock, so the mixer does
+    // not wait for the file to close.
+    if (stream) stream->disposed.store(true, std::memory_order_release);
+}
+
 } // namespace internal
 
 // ---------------------------------------------------------------------------
