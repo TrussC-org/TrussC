@@ -467,7 +467,7 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
-2. Old Guest is unloaded (`dlclose` / `FreeLibrary`)
+2. The old Guest's App is destroyed (`events().hotReloadUnload` fires first). Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
 3. New Guest is loaded (`dlopen` / `LoadLibrary`)
 4. A new App instance is created → `setup()` runs again
 
