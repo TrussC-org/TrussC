@@ -1803,6 +1803,7 @@ void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
 void resetBlendMode()  // Reset blend mode to Alpha (default)
 void resetScissor()  // Reset (disable) scissor clipping
 void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
+StyleScope scopedStyle()  // pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning
 void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
@@ -1836,6 +1837,7 @@ void rotateYDeg(float degrees)  // Rotate around Y axis (degrees)
 void rotateZ(float radians)  // Rotate around Z axis
 void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
 void scale(float s) [+2]  // Scale
+MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
 void setMatrix(const Mat4 & mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
 void translate(Vec3 pos) [+2]  // Move origin
 ```
