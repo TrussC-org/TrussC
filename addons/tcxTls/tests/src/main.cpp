@@ -65,6 +65,10 @@
 //     onDisconnect listener (the peer sent close_notify), and from an inline
 //     onError listener after a failed handshake (the client verifies the
 //     peer's self-signed certificate), 20 times each.
+//   - A receive thread that a listener's disconnect() let go of (it cannot
+//     join itself) is joined later: the next connect() and disconnect() on
+//     another thread, and the destructor, return only once that listener
+//     has returned (#543).
 //
 //   - No thread is left when main() returns (counted on Linux), although the
 //     clients whose listeners called connect() / disconnect() on the receive
@@ -485,10 +489,9 @@ struct TlsPeer {
 
 static void scenario() {
     // Constructed first: it also starts Winsock. Kept for the life of the
-    // process, as TcpClient's Events comment asks of a client whose
-    // receive-thread listener called connect() (the onError and onConnect
-    // reconnects below do): the old receive threads those let go of are
-    // never joined.
+    // process: the old receive threads that the onError and onConnect
+    // reconnects below let go of must be joined by the client's later
+    // connect() and disconnect() calls, not only by a destructor (#543).
     TlsClient& client = *new TlsClient();
     client.setVerifyNone();
 
@@ -1007,10 +1010,10 @@ static void scenario() {
     // the pending connect and the handshake on the same SSL context from two
     // threads, for as long as the client lived.
     {
-        // Kept for the life of the process, as TcpClient's Events comment asks
-        // of a client whose receive-thread listener called disconnect(): its
-        // old receive thread is never joined, so destroying the client would
-        // race whatever that thread last touched.
+        // Kept for the life of the process: the old receive thread that the
+        // listener's disconnect() lets go of must be joined by the client's
+        // later connect() (#543). That connect() waits for the listener
+        // first, so the listener's wait below runs out (3 s).
         TlsClient& bn = *new TlsClient();
         bn.setVerifyNone();
 #ifdef __linux__
@@ -1253,6 +1256,62 @@ static void scenario() {
         check((name + ": replaced 20 times, nothing crashed").c_str(),
               ok && owner.replaced.load() == rounds);
         if (g_fail) bail();
+    }
+
+    // --- a thread a listener let go of is joined later (#543) ----------------
+    // An onError listener on the receive thread (a failed handshake) calls
+    // disconnect() and then runs on for a while. The receive thread cannot
+    // join itself: the client keeps it, and the next connect() or
+    // disconnect() on another thread, or the destructor, returns only once
+    // that listener has returned. It used to be detached, with nothing
+    // waiting for it.
+    {
+        auto kc = make_unique<TlsClient>();
+        kc->setVerifyNone();
+        TlsClient* kcPtr = kc.get();
+        atomic<bool> kcArmed{false}, kcLetGo{false}, kcListenerDone{true};
+        EventListener kcErr = kc->onError.listen([&, kcPtr](TcpErrorEventArgs&) {
+            if (!kcArmed.exchange(false)) return;
+            kcListenerDone = false;
+            kcPtr->disconnect();
+            kcLetGo = true;
+            // Still running when the main thread goes on
+            this_thread::sleep_for(chrono::milliseconds(200));
+            kcListenerDone = true;
+        });
+        // Connect to the plain peer, whose close fails the handshake
+        auto connectPlain = [&] {
+            if (!kc->connect("127.0.0.1", plainPort)) return false;
+            rawsocket_t kp = acceptWithin(plainListener, 2000);
+            if (kp == kNoSocket) return false;
+            TC_CLOSE(kp);
+            return true;
+        };
+        // ...and have the listener disconnect from there
+        auto letGoFromListener = [&] {
+            kcLetGo = false;
+            kcArmed = true;
+            return connectPlain() && waitFor(3000, [&] { return kcLetGo.load(); });
+        };
+        check("kept thread: the listener disconnected", letGoFromListener());
+        if (g_fail) bail();
+        check("kept thread: the next connect() waits for it",
+              connectPlain() && kcListenerDone);
+        if (g_fail) bail();
+
+        check("kept thread: the listener disconnected again", letGoFromListener());
+        if (g_fail) bail();
+        kc->disconnect();
+        check("kept thread: the next disconnect() waits for it", kcListenerDone.load());
+        if (g_fail) bail();
+
+        check("kept thread: the listener disconnected once more", letGoFromListener());
+        if (g_fail) bail();
+        check("kept thread: the destructor finishes within 5 s",
+              completesWithin(5000, [&] { kc.reset(); }));
+        check("kept thread: the destructor waits for it", kcListenerDone.load());
+        if (g_fail) bail();
+        // kcErr outlives its Event: disconnecting it is a no-op
     }
 
     // --- teardown ---------------------------------------------------------

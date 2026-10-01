@@ -10,12 +10,15 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cmath>
 #include <cstdio>
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -47,7 +50,9 @@ static CameraContext makeContext(const Mat4& glProj, const Mat4& view, float w, 
     return ctx;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     const float W = 800.0f, H = 600.0f;
     const Vec3 probe(120.0f, -40.0f, 100.0f);
 

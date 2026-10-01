@@ -26,6 +26,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <array>
 #include <chrono>
@@ -45,6 +46,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 using Bytes = vector<unsigned char>;
 
@@ -291,7 +294,9 @@ static bool decodeOnSmallStack(SmallStackJob& job, size_t stackBytes) {
 
 // =============================================================================
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     const string tag = to_string((long long)chrono::steady_clock::now().time_since_epoch().count());
     const fs::path tmp = fs::temp_directory_path();
 

@@ -34,6 +34,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -48,6 +49,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -156,7 +159,9 @@ static void testDefaultHost() {
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
 static const string kToken = "test-token-0123456789abcdef";
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // Token comparison helper, no server needed.
     {
         using mcp::detail::constantTimeEquals;

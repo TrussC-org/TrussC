@@ -243,6 +243,28 @@ TrussC copies the file into whatever app consumes the addon — `.app/Contents/<
 no need to know the app target's name. For generated files, `add_dependencies()`
 your addon target on the generator so the file exists before the copy runs.
 
+### Shaders (`trussc_compile_shaders`)
+
+An addon with its own shaders keeps the `.glsl` sources in the addon (for
+example `src/shaders/`) and compiles them from its `CMakeLists.txt` with the
+same function apps and TrussC core use:
+
+```cmake
+# trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
+trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+```
+
+Every `*.glsl` under the source dir becomes `<name>.glsl.h` next to it (or in
+`OUTPUT_DIR`), compiled with sokol-shdc for every backend TrussC targets
+(Metal for macOS / iOS / the iOS simulator, HLSL, GLSL 4.30, GLSL ES 3, WGSL).
+The addon target depends on the headers, so they exist before anything that
+includes them compiles; on an `INTERFACE` (header-only) addon, every target
+that links it waits for them too. Include the header from your code
+(`#include "shaders/myShader.glsl.h"`, relative to the including file, or add
+the folder to the include path). The headers are build output: don't commit
+them (the repository ignores `*.glsl.h`) and don't ship a pre-generated copy.
+An addon with shaders therefore needs a `CMakeLists.txt`.
+
 ### Main Header (tcxMyAddon.h)
 
 ```cpp
