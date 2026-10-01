@@ -105,6 +105,16 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
         file(MAKE_DIRECTORY "${_TC_SHADERS_OUTPUT_DIR}")
     endif()
 
+    # Under Ninja, sokol-shdc writes into this build tree first and the header
+    # is copied to its place only when its content changed. The headers sit
+    # in source folders that every app shares (core, addons), and Ninja keeps
+    # its build log per build tree: a header rewritten with the same content
+    # by one app's first build would make the others rebuild (and relink a
+    # running hot reload host). Ninja's restat keeps an unchanged header from
+    # rebuilding anything. Other generators compare time stamps and write the
+    # header in place as before.
+    set(_TC_SHADER_TMP_DIR "${CMAKE_CURRENT_BINARY_DIR}/tc_shaders/${_TC_TARGET}")
+
     set(_TC_SHADER_OUTPUTS "")
     foreach(_shader_src ${_TC_SHADER_SOURCES})
         get_filename_component(_shader_name ${_shader_src} NAME)
@@ -114,13 +124,34 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
             set(_shader_out "${_shader_src}.h")
         endif()
         list(APPEND _TC_SHADER_OUTPUTS ${_shader_out})
+        get_filename_component(_shader_out_dir "${_shader_out}" DIRECTORY)
 
-        add_custom_command(
-            OUTPUT ${_shader_out}
-            COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_out} -l ${_TC_SOKOL_SLANG} --ifdef
-            DEPENDS ${_shader_src}
-            COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
-        )
+        # -o is the file name only, from the folder it is written to:
+        # sokol-shdc puts its command line in the header, which then reads
+        # the same in every build tree and with every generator.
+        if(CMAKE_GENERATOR MATCHES "Ninja")
+            file(RELATIVE_PATH _shader_rel "${_TC_SOURCE_DIR}" "${_shader_src}")
+            get_filename_component(_shader_rel_dir "${_shader_rel}" DIRECTORY)
+            set(_shader_tmp_dir "${_TC_SHADER_TMP_DIR}/${_shader_rel_dir}")
+            file(MAKE_DIRECTORY "${_shader_tmp_dir}")
+            add_custom_command(
+                OUTPUT ${_shader_out}
+                BYPRODUCTS "${_shader_tmp_dir}/${_shader_name}.h"
+                COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_shader_name}.h ${_shader_out}
+                WORKING_DIRECTORY ${_shader_tmp_dir}
+                DEPENDS ${_shader_src}
+                COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
+            )
+        else()
+            add_custom_command(
+                OUTPUT ${_shader_out}
+                COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
+                WORKING_DIRECTORY ${_shader_out_dir}
+                DEPENDS ${_shader_src}
+                COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
+            )
+        endif()
     endforeach()
 
     add_custom_target(${_TC_TARGET}_shaders DEPENDS ${_TC_SHADER_OUTPUTS})
