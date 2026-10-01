@@ -102,6 +102,12 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["framePosition"] = &trussc::AudioInBuffer::framePosition;
     }
     {
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate",
+            sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>(),
+            sol::call_constructor, sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>());
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+    }
+    {
         sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
         t["latitude"] = &trussc::Location::latitude;
         t["longitude"] = &trussc::Location::longitude;
