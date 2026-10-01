@@ -3739,9 +3739,9 @@ description.ja = "平行光源に設定"
 description.ko = "방향성 조명으로 설정"
 
 ["Light::setIesProfile"]
-description.en = "Attach IES photometric profile for angular intensity"
-description.ja = "IES配光profileを設定"
-description.ko = "IES 배광 프로파일을 설정"
+description.en = "Attach IES photometric profile for angular intensity (currently one IES slot: only the first registered light with a profile uses it; further ones log a one-time warning)"
+description.ja = "IES配光profileを設定（現在IESスロットは1つ: profile付きで登録された最初のlightだけが使い、2灯目以降は1回だけ警告を出す）"
+description.ko = "IES 배광 프로파일을 설정 (현재 IES 슬롯은 1개: 프로파일이 있는 첫 번째 등록 조명만 사용하며, 그 이후 조명은 경고를 한 번 출력)"
 
 ["Light::setIntensity"]
 description.en = "Set light intensity multiplier"
@@ -3759,9 +3759,9 @@ description.ja = "点光源に設定"
 description.ko = "점 광원으로 설정"
 
 ["Light::setProjectionTexture"]
-description.en = "Set texture for projector-style light (gobo)"
-description.ja = "projector投影用texture（gobo）を設定"
-description.ko = "프로젝터 투영용 텍스처 (고보)를 설정"
+description.en = "Set texture for projector-style light (gobo) (currently one projector slot: only the first registered Spot light with a texture projects it; further ones light as plain spots and log a one-time warning)"
+description.ja = "projector投影用texture（gobo）を設定（現在projectorスロットは1つ: texture付きで登録された最初のSpot lightだけが投影し、2灯目以降は通常のspotとして照らし1回だけ警告を出す）"
+description.ko = "프로젝터 투영용 텍스처 (고보)를 설정 (현재 프로젝터 슬롯은 1개: 텍스처가 있는 첫 번째 등록 Spot 조명만 투영하며, 그 이후 조명은 일반 스포트로 비추고 경고를 한 번 출력)"
 
 ["Light::setProjectorAspect"]
 description.en = "Set projector aspect ratio"
@@ -12970,9 +12970,9 @@ related = ["asin", "atan2"]
 ["addLight"]
 category = "graphics_lighting"
 keywords = ["lamp", "illuminate", "directional", "point light", "ofLight"]
-description.en = "Add a light to the scene"
-description.ja = "シーンにlightを追加"
-description.ko = "씬에 조명을 추가"
+description.en = "Add a light to the scene (up to 8 lights per window; a light added past 8 is not registered, with a one-time warning)"
+description.ja = "シーンにlightを追加（1ウィンドウ最大8灯。9灯目以降は登録されず、1回だけ警告を出す）"
+description.ko = "씬에 조명을 추가 (창당 최대 8개. 8개를 넘어 추가한 조명은 등록되지 않으며 경고를 한 번 출력)"
 related = ["Light", "LightType", "setMaterial", "setEnvironment"]
 
 ["alertDialog"]
