@@ -48,6 +48,8 @@ void tcApp::draw() {
 ImGui renders on top of all TrussC content automatically via the `onRender` event.
 Teardown is automatic too — the addon listens to the framework's exit event and
 shuts itself down when the app closes, so there is nothing to call in `cleanup()`.
+With hot reload, the same teardown runs on `events().hotReloadUnload` before
+each reload, and the new build sets ImGui up again in its `setup()`.
 
 ## API
 

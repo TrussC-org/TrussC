@@ -165,6 +165,11 @@ def find_addon_tests(root_dir, include_daily=False):
             test_paths.append(tdir)
     return test_paths
 
+# core/tests/allCoreTests: one app that holds every combinable core test (see
+# its local.cmake and core/tests/common/tcCoreTest.h). It is the runner, not
+# a test itself.
+ALL_CORE_TESTS_NAME = "allCoreTests"
+
 def find_core_tests(root_dir):
     # Headless behavioral regression tests for the core: core/tests/*/ (each a
     # console TrussC project whose main() returns non-zero on failure). Same
@@ -174,9 +179,17 @@ def find_core_tests(root_dir):
     if os.path.exists(tests_dir):
         for name in sorted(os.listdir(tests_dir)):
             tdir = os.path.join(tests_dir, name)
+            if name == ALL_CORE_TESTS_NAME:
+                continue
             if os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src")):
                 test_paths.append(tdir)
     return test_paths
+
+def is_combined_core_test(test_dir):
+    # Built into allCoreTests: a src/main.cpp and no `own-binary` marker. The
+    # same rule as core/tests/allCoreTests/local.cmake; keep the two in sync.
+    return (os.path.isfile(os.path.join(test_dir, "src", "main.cpp"))
+            and not os.path.isfile(os.path.join(test_dir, "own-binary")))
 
 def find_core_web_tests(root_dir):
     # The trusscli project core tests that ALSO run as a WebAssembly build under
@@ -216,12 +229,13 @@ def find_test_binary(test_dir, platform_info):
                 return p
     return None
 
-def run_test_binary(binary, cwd, launcher=None):
+def run_test_binary(binary, cwd, launcher=None, args=()):
     # Run a test executable, CAPTURE its output and echo it through our own
     # (flushed) stdout. Inherited-handle child output gets lost or reordered
     # on the Windows CI runners, which made failing tests undiagnosable.
     # launcher: an interpreter to run it with (node for a web test's .js).
-    cmd = ([launcher] if launcher else []) + [binary]
+    # args: arguments after the binary (the test name for allCoreTests).
+    cmd = ([launcher] if launcher else []) + [binary] + list(args)
     try:
         r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT, timeout=600)
@@ -264,35 +278,119 @@ def cmake_config_cmd(build_dir_name, platform_info):
     return cmd
 
 
-def build_and_run_test(test_dir, pg_bin, platform_info, args):
-    # Build a native console test project, then RUN it (non-zero exit = failure).
-    # Returns (ok, stage) where stage names what failed for the summary.
+def build_test_project(test_dir, pg_bin, platform_info, args):
+    # trusscli update + configure + build a native console project. Returns
+    # (binary, stage): the built executable, or None and the stage that failed.
     pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
     pg_cmd += update_target_flags(pg_bin, web=False)
     if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
-        return False, "update"
+        return None, "update"
 
     build_dir_name = platform_info["build_dir"]
     cmd_config = cmake_config_cmd(build_dir_name, platform_info)
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
-        return False, "configure"
+        return None, "configure"
 
     cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
     if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
         import multiprocessing
         cmd_build.extend(["-j", str(multiprocessing.cpu_count())])
     if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
-        return False, "build"
+        return None, "build"
 
     binary = find_test_binary(test_dir, platform_info)
     if not binary:
         Colors.print("  Test binary not found after build!", Colors.RED)
-        return False, "binary-missing"
+        return None, "binary-missing"
+    return binary, None
+
+def build_and_run_test(test_dir, pg_bin, platform_info, args):
+    # Build a native console test project, then RUN it (non-zero exit = failure).
+    # Returns (ok, stage) where stage names what failed for the summary.
+    binary, stage = build_test_project(test_dir, pg_bin, platform_info, args)
+    if not binary:
+        return False, stage
 
     Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
     if not run_test_binary(binary, cwd=test_dir):   # captured + echoed (see run_test_binary)
         return False, "run"
     return True, None
+
+def run_combined_core_tests(tests, pg_bin, platform_info, args):
+    # Build core/tests/allCoreTests ONCE (every test in `tests` is compiled
+    # into it), then run each test as its own process: `allCoreTests <name>`
+    # with cwd = that test's own dir, so process-wide state is never shared
+    # and the test sees the same cwd as when built alone. Returns 0 if all
+    # pass, 1 otherwise (also when the build fails or a test is missing).
+    runner_dir = os.path.join(ROOT_DIR, "core", "tests", ALL_CORE_TESTS_NAME)
+    runner_name = os.path.relpath(runner_dir, ROOT_DIR)
+    by_name = {os.path.basename(t): t for t in tests}
+    Colors.print(f"Found {len(tests)} core test(s) for {ALL_CORE_TESTS_NAME}", Colors.YELLOW)
+    print("")
+
+    failed = []
+    Colors.print(f"Building: {runner_name}", Colors.YELLOW)
+    t0 = time.monotonic()
+    binary, stage = build_test_project(runner_dir, pg_bin, platform_info, args)
+    build_secs = time.monotonic() - t0
+    names = []
+    if binary:
+        Colors.print(f"  Built in {build_secs:.1f}s", Colors.GREEN)
+        try:
+            r = subprocess.run([binary, "--list"], cwd=runner_dir, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, timeout=60)
+            out = r.stdout.decode("utf-8", errors="replace")
+            if r.returncode != 0:
+                print(out, flush=True)
+                stage = "list"
+            else:
+                names = [n.strip() for n in out.splitlines() if n.strip()]
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"  {e}", flush=True)
+            stage = "list"
+        if not stage and not names:
+            Colors.print("  --list returned no tests", Colors.RED)
+            stage = "list-empty"
+    if stage:
+        Colors.print(f"  FAILED ({stage})", Colors.RED)
+        failed.append(f"{runner_name} ({stage})")
+
+    if stage:
+        failed.append(f"({len(tests)} core tests not run)")
+    else:
+        # Every combined test dir must be registered, and nothing else.
+        for n in sorted(set(by_name) - set(names)):
+            failed.append(f"core/tests/{n} (not registered in {ALL_CORE_TESTS_NAME})")
+        for n in sorted(set(names) - set(by_name)):
+            failed.append(f"core/tests/{n} (registered, but no such combined test dir)")
+
+    run_names = [n for n in names if n in by_name]
+    passed = 0
+    t0 = time.monotonic()
+    for i, n in enumerate(run_names):
+        tdir = by_name[n]
+        Colors.print(f"[{i+1}/{len(run_names)}] Running: {os.path.relpath(tdir, ROOT_DIR)} "
+                     f"({ALL_CORE_TESTS_NAME} {n})", Colors.YELLOW)
+        if run_test_binary(binary, cwd=tdir, args=[n]):   # captured + echoed
+            Colors.print("  Passed!", Colors.GREEN)
+            passed += 1
+        else:
+            Colors.print("  FAILED (run)", Colors.RED)
+            failed.append(f"{os.path.relpath(tdir, ROOT_DIR)} (run)")
+    run_secs = time.monotonic() - t0
+
+    print("")
+    Colors.print("=== Core Test Summary ===", Colors.BLUE)
+    print(f"{ALL_CORE_TESTS_NAME} build: {build_secs:.1f}s, runs: {run_secs:.1f}s")
+    print(f"Total:  {len(tests)}")
+    Colors.print(f"Passed: {passed}", Colors.GREEN)
+    if failed:
+        Colors.print(f"Failed: {len(failed)}", Colors.RED)
+        for f in failed:
+            print(f"  - {f}")
+        return 1
+    Colors.print("All core tests passed!", Colors.GREEN)
+    return 0
 
 def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
     # Build a standalone CMake test (its own committed CMakeLists.txt, no
@@ -444,9 +542,11 @@ def main():
         sys.exit(run_test_suite(tests, "addon", pg_bin, platform_info, args))
 
     # Core behavioral tests (core/tests/*/): same build+run gate, owned by core.
-    # Two flavours: trusscli project tests (src/, link libTrussC) and standalone
-    # CMake unit tests (committed CMakeLists.txt, no libTrussC link — e.g. sokol
-    # dummy-backend tests). Both run; the job fails if either has a failure.
+    # Two flavours: trusscli project tests (src/, link libTrussC; most are
+    # built into the one app core/tests/allCoreTests, see
+    # run_combined_core_tests) and standalone CMake unit tests (committed
+    # CMakeLists.txt, no libTrussC link — e.g. sokol dummy-backend tests).
+    # Both run; the job fails if either has a failure.
     # With --web / --web-only, the project tests carrying a `web-test` marker
     # are also / instead built for WebAssembly and run under node.
     if args.core_tests_only:
@@ -458,8 +558,15 @@ def main():
             Colors.print("No core tests found (core/tests/*/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
         rc = 0
-        if tests:
-            rc |= run_test_suite(tests, "core", pg_bin, platform_info, args)
+        # Most project tests are built into ONE app (core/tests/allCoreTests)
+        # and run one process each; those with an `own-binary` marker are
+        # built and run alone, as before.
+        combined = [t for t in tests if is_combined_core_test(t)]
+        own = [t for t in tests if not is_combined_core_test(t)]
+        if combined:
+            rc |= run_combined_core_tests(combined, pg_bin, platform_info, args)
+        if own:
+            rc |= run_test_suite(own, "core own-binary", pg_bin, platform_info, args)
         if unit_tests:
             rc |= run_test_suite(unit_tests, "core unit", pg_bin, platform_info, args,
                                  builder=build_and_run_unit_test)

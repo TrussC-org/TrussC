@@ -28,6 +28,11 @@
 //     its connection: connect() closes the failed socket before notifying.
 //     The same without threads, where the refused connect is pending and
 //     processNetwork() (driven by the update event) reports the failure.
+//   - A connection attempt that a newer attempt replaced (an onError
+//     listener reconnected) reports no onConnect(false), with connectAsync()
+//     (connect thread) and without threads (pending connect); the newer
+//     attempt reports onConnect(true) once. A refused connectAsync() with no
+//     reconnect still reports onConnect(false) exactly once (#393).
 //   - The "bye" pattern: an onReceive listener calls disconnect() and the
 //     main thread reconnects. The old receive thread reads none of the new
 //     connection's data and stops (counted on Linux); without threads it
@@ -61,6 +66,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -100,6 +106,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
@@ -576,6 +584,10 @@ static void scenario() {
                 ntReconnect = nt.connect("127.0.0.1", port) ? 1 : 0;
             }
         });
+        int ntConnectOk = 0, ntConnectFailed = 0;
+        EventListener ntConnSub = nt.onConnect.listen([&](TcpConnectEventArgs& e) {
+            if (e.success) ++ntConnectOk; else ++ntConnectFailed;
+        });
         string ntReceived;
         EventListener ntRxSub = nt.onReceive.listen([&](TcpReceiveEventArgs& e) {
             ntReceived.append(e.data.begin(), e.data.end());
@@ -604,6 +616,11 @@ static void scenario() {
         check("no threads: client is connected",
               pumpUntil(3000, [&] { return nt.isConnected(); }));
         ntErrSub.disconnect();
+        printf("  (onConnect: %d true, %d false)\n", ntConnectOk, ntConnectFailed);
+        check("no threads: onConnect(true) once for the listener's connection",
+              ntConnectOk == 1);
+        check("no threads: no onConnect(false) for the replaced attempt",
+              ntConnectFailed == 0);
         rawsocket_t ntPeer = acceptWithin(listener, 2000);
         check("no threads: peer accepted the listener's connection", ntPeer != kNoSocket);
         if (g_fail) bail();
@@ -613,6 +630,71 @@ static void scenario() {
               pumpUntil(3000, [&] { return ntReceived == "pong"; }));
         nt.disconnect();
         TC_CLOSE(ntPeer);
+        if (g_fail) bail();
+    }
+
+    // --- connectAsync(): a refused attempt, then a reconnect from onError ----
+    // The refused attempt runs on the connect thread. Its onError listener
+    // connects to the listening peer, which fires onConnect(true). The
+    // replaced attempt then reports no onConnect(false): only the newer
+    // attempt reports its result. Without a reconnect, the refused attempt
+    // reports onConnect(false) exactly once.
+    {
+        TcpClient ac;
+        mutex acMutex;
+        vector<string> acEvents;   // "true" / "false", in the order they fired
+        EventListener acConnSub = ac.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(acMutex);
+            acEvents.push_back(e.success ? "true" : "false");
+        });
+        auto acSnapshot = [&] {
+            lock_guard<mutex> lock(acMutex);
+            return acEvents;
+        };
+        atomic<bool> acArmed{true}, acListenerDone{false};
+        atomic<int> acReconnect{-1};   // -1 not run, 0 connect() failed, 1 ok
+        EventListener acErrSub = ac.onError.listen([&](TcpErrorEventArgs&) {
+            if (acArmed.exchange(false)) {
+                acReconnect = ac.connect("127.0.0.1", port) ? 1 : 0;
+                acListenerDone = true;
+            }
+        });
+        ac.connectAsync("127.0.0.1", refusedPort);
+        check("connectAsync() onError reconnect: listener's connect() is true",
+              waitFor(5000, [&] { return acListenerDone.load(); }) && acReconnect == 1);
+        rawsocket_t acPeer = acceptWithin(listener, 2000);
+        check("connectAsync() onError reconnect: peer accepted", acPeer != kNoSocket);
+        // The replaced attempt's onConnect(false) would fire right after the
+        // listener returned, on the connect thread
+        this_thread::sleep_for(chrono::milliseconds(300));
+        const vector<string> seen = acSnapshot();
+        string seenText;
+        for (const auto& v : seen) seenText += v + " ";
+        printf("  (onConnect: %s)\n", seenText.c_str());
+        check("connectAsync() onError reconnect: onConnect(true) only, once",
+              seen.size() == 1 && seen[0] == "true");
+        check("connectAsync() onError reconnect: client is connected", ac.isConnected());
+        if (g_fail) bail();
+        check("connectAsync() onError reconnect: data reaches the peer",
+              clientToPeer(ac, acPeer, "async rescued"));
+        acErrSub.disconnect();
+        ac.disconnect();
+        TC_CLOSE(acPeer);
+        if (g_fail) bail();
+
+        // No listener reconnects: the refused attempt reports its own result
+        {
+            lock_guard<mutex> lock(acMutex);
+            acEvents.clear();
+        }
+        ac.connectAsync("127.0.0.1", refusedPort);
+        check("connectAsync() refused: onConnect(false) is reported",
+              waitFor(5000, [&] { return !acSnapshot().empty(); }));
+        this_thread::sleep_for(chrono::milliseconds(100));
+        const vector<string> refusedSeen = acSnapshot();
+        check("connectAsync() refused: exactly one onConnect, false",
+              refusedSeen.size() == 1 && refusedSeen[0] == "false");
+        check("connectAsync() refused: client is not connected", !ac.isConnected());
         if (g_fail) bail();
     }
 
@@ -948,7 +1030,9 @@ static void scenario() {
     TC_CLOSE(listener);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);

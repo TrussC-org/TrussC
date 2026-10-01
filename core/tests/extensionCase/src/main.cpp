@@ -23,6 +23,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cmath>
 #include <cstdint>
@@ -41,6 +42,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -104,7 +107,9 @@ static bool listsName(const fs::path& dir, const string& name) {
     return false;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     const fs::path dir = fs::temp_directory_path() /
                          ("tc_extensionCase_" + to_string((long long)TC_GETPID()));
     error_code ec;
