@@ -3,9 +3,10 @@
 //
 // Built and run by CI on every push/PR via examples/build_all.py
 // --addon-tests-only (exit 0 = pass, non-zero = fail). Console only: hand
-// edits are recorded through NodeInspector::recordTouchedForTests() (what the
-// Inspector panel calls), and the tree is updated through a headless Window's
-// tickTree(), which runs updateTree() and so the sweep of destroyed children.
+// edits are recorded through tcx::nodeinspector::internal::
+// recordTouchedForTests() (what the Inspector panel calls), and the tree is
+// updated through a headless Window's tickTree(), which runs updateTree() and
+// so the sweep of destroyed children.
 //
 // Touched record (#326):
 //   - a node destroyed while the test still holds it reports destroyed: true
@@ -117,11 +118,11 @@ static void testDestroyed() {
     drv.tick();
 
     ball->radius = 20.0f;
-    insp.recordTouchedForTests(ball.get(), nullptr, "radius");
+    tcx::nodeinspector::internal::recordTouchedForTests(insp, ball.get(), nullptr, "radius");
     other->radius = 30.0f;
-    insp.recordTouchedForTests(other.get(), nullptr, "radius");
+    tcx::nodeinspector::internal::recordTouchedForTests(insp, other.get(), nullptr, "radius");
     child->radius = 40.0f;
-    insp.recordTouchedForTests(child.get(), nullptr, "radius");
+    tcx::nodeinspector::internal::recordTouchedForTests(insp, child.get(), nullptr, "radius");
 
     auto e = entries(ball->getInstanceId(), "", "radius");
     check("live node: one entry, current value, no destroyed",
@@ -169,7 +170,7 @@ static void testMods() {
         auto node = make_shared<Ball>();
         auto* m = node->addMod<OutlineMod>();
         m->gap = 12.0f;
-        insp.recordTouchedForTests(node.get(), m, "gap");
+        tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), m, "gap");
         auto e = entries(node->getInstanceId(), "OutlineMod", "gap");
         check("mod: entry under its type, current value, no modRemoved",
               e.size() == 1 && valueIs(e[0], 12.0f) && !flag(e[0], "modRemoved"));
@@ -186,7 +187,7 @@ static void testMods() {
         auto node = make_shared<Ball>();
         auto* m = node->addMod<OutlineMod>();
         m->gap = 12.0f;
-        insp.recordTouchedForTests(node.get(), m, "gap");
+        tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), m, "gap");
         node->removeMod<OutlineMod>();
         auto* m2 = node->addMod<OutlineMod>();   // gap = 6 (default)
         std::printf("  (re-added mod %s the freed address)\n", m2 == m ? "reuses" : "does not reuse");
@@ -196,7 +197,7 @@ static void testMods() {
               e.size() == 1 && valueIs(e[0], 6.0f) && !flag(e[0], "modRemoved"));
 
         m2->gap = 8.0f;
-        insp.recordTouchedForTests(node.get(), m2, "gap");
+        tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), m2, "gap");
         e = entries(node->getInstanceId(), "OutlineMod", "gap");
         check("edit of the re-added mod updates the same entry",
               e.size() == 1 && valueIs(e[0], 8.0f) && !flag(e[0], "modRemoved"));
@@ -209,7 +210,7 @@ static void testMods() {
         auto node = make_shared<Ball>();
         auto* m = node->addMod<OutlineMod>();
         m->gap = 12.0f;
-        insp.recordTouchedForTests(node.get(), m, "gap");
+        tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), m, "gap");
         node->removeMod<OutlineMod>();
         auto* g = node->addMod<GlowMod>();       // same size: may land at m's address
         std::printf("  (other-type mod %s the freed address)\n",
@@ -228,7 +229,7 @@ static void testMods() {
         auto node = make_shared<Ball>();
         auto* m = node->addMod<OutlineMod>();
         m->gap = 12.0f;
-        insp.recordTouchedForTests(node.get(), m, "gap");
+        tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), m, "gap");
         node->destroy();
         auto e = entries(node->getInstanceId(), "OutlineMod", "gap");
         check("mod of a destroyed node: destroyed true, last value",

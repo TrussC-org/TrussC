@@ -140,8 +140,9 @@ Json NodeInspector::getTouched() {
     return arr;
 }
 
-void NodeInspector::recordTouchedForTests(Node* node, Mod* mod, const string& member) {
-    recordTouched(node, mod, member);
+void internal::recordTouchedForTests(NodeInspector& inspector, Node* node, Mod* mod,
+                                     const string& member) {
+    inspector.recordTouched(node, mod, member);
 }
 
 void NodeInspector::syncNameBuf(Node* node) {

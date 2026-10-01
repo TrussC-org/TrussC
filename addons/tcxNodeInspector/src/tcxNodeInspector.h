@@ -30,6 +30,15 @@
 
 namespace tcx::nodeinspector {
 
+class NodeInspector;
+
+namespace internal {
+// Tests only: record a hand edit of `member` (of `mod` when non-null) the way
+// the Inspector panel does, without an ImGui frame (tcxNodeInspector/tests).
+void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod* mod,
+                           const std::string& member);
+}
+
 // Renders each reflected member as the matching ImGui widget. Public so an app
 // can subclass and override a visit() to customize how a given type is edited.
 // Read-only values (getter-only TC_VALUE) render greyed out; enums
@@ -263,11 +272,10 @@ public:
     ::tc::Json getTouched();
     void resetTouched() { touched_.clear(); }
 
-    // Tests only: record a hand edit of `member` (of `mod` when non-null) the
-    // way the Inspector panel does, without an ImGui frame.
-    void recordTouchedForTests(::tc::Node* node, ::tc::Mod* mod, const std::string& member);
-
 private:
+    friend void internal::recordTouchedForTests(NodeInspector&, ::tc::Node*, ::tc::Mod*,
+                                                const std::string&);
+
     Style    style_;
     bool     enabled_      = true;
     char     nameBuf_[128] = "";
