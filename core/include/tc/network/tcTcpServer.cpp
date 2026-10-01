@@ -323,6 +323,16 @@ bool TcpServer::start(int port, int maxClients) {
         return false;
     }
 
+    // Report the port the socket is bound to, so start(0) gives the one the
+    // OS picked
+    {
+        struct sockaddr_in boundAddr;
+        socklen_t boundLen = sizeof(boundAddr);
+        if (::getsockname(serverSocket_, (struct sockaddr*)&boundAddr, &boundLen) == 0) {
+            port_ = ntohs(boundAddr.sin_port);
+        }
+    }
+
     // Start listening
     if (::listen(serverSocket_, kListenBacklog) == SOCKET_ERROR) {
         notifyError("Failed to listen on port " + std::to_string(port), SOCKET_ERROR_CODE);
@@ -355,7 +365,7 @@ bool TcpServer::start(int port, int maxClients) {
         return false;
     }
 
-    logNotice() << "TCP server started on port " << port;
+    logNotice() << "TCP server started on port " << port_;
     return true;
 }
 
