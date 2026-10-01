@@ -1434,11 +1434,15 @@ public:
         // Resolve input to a concrete path (file / URL). A font NAME
         // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
         // arrive here; the UTF-8 string form is what cache keys and the
-        // system-font lookup use.
+        // system-font lookup use. A relative file path resolves via
+        // getDataPath, like Image::load; when a file in the data folder and a
+        // system font share a name, the data file wins.
         std::string nameStr = internal::pathToUtf8(nameOrPath);
         std::string actualPath = nameStr;
         if (!isUrl(nameStr)) {
-            std::ifstream test(nameOrPath, std::ios::binary);
+            const fs::path filePath = getDataPath(nameOrPath);   // absolute paths pass through
+            actualPath = internal::pathToUtf8(filePath);
+            std::ifstream test(filePath, std::ios::binary);
             if (!test.good()) {
                 // Not a usable file path — try as a system font name.
                 fs::path resolved = systemFontPath(nameStr);
@@ -1447,8 +1451,8 @@ public:
                     logNotice("Font") << "Resolved \"" << nameStr
                                       << "\" → " << actualPath;
                 }
-                // If resolution failed, fall through with the original input so
-                // the eventual load error mentions what the user actually asked for.
+                // If resolution failed, keep the data-folder path: the load
+                // error then names the input and where it was looked for.
             }
         }
 
