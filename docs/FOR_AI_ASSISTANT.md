@@ -1214,6 +1214,12 @@ Real-time synthesis/processing is done through `AudioEngine` events. Listening t
 
 Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
+### How long does a Sound play? (Sound lifetime)
+
+A `Sound` plays only while it, or a copy of it, is alive (like `ofSoundPlayer`). Copies share the voice that `play()` started; when the last `Sound` handle that shares it is destroyed or overwritten (copy or move assignment), the voice stops, looping or one-shot, and its slot is free again. A temporary copy going away does not stop the original. `stop()` and the last handle going away also close a streamed voice's decoder and file.
+
+So keep the `Sound` objects alive, for example as App members. To play overlapping one-shots, keep several of them (e.g. `Sound hits_[4]` and play them in turn); `{ Sound s = hit; s.play(); }` stops at the closing brace. In tcxLua, a script keeps a reference to each `Sound` it wants to hear, or the sound stops when the GC collects it.
+
 ### Output channel mapping? (setChannelMap)
 
 `Sound` can route to output channels:
