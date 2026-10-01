@@ -40,6 +40,8 @@ constexpr uint32_t ATOM_STSZ = 0x7374737A;
 constexpr uint32_t ATOM_STCO = 0x7374636F;
 constexpr uint32_t ATOM_CO64 = 0x636F3634;
 constexpr uint32_t ATOM_MDAT = 0x6D646174;
+constexpr uint32_t ATOM_WAVE = 0x77617665; // 'wave' - sound description extension
+constexpr uint32_t ATOM_ENDA = 0x656E6461; // 'enda' - endianness (1 = little-endian)
 
 // Handler types
 constexpr uint32_t HANDLER_VIDE = 0x76696465; // 'vide'
@@ -81,6 +83,9 @@ struct MovTrack {
     uint32_t sampleRate = 0;
     uint16_t channels = 0;
     uint16_t bitsPerSample = 0;
+    // True when the sound description has an 'enda' atom set to 1 (in its
+    // 'wave' extension), i.e. the PCM samples are little-endian
+    bool endaLittleEndian = false;
 
     // Sample table
     std::vector<MovSample> samples;
@@ -111,7 +116,11 @@ struct MovTrack {
     }
 
     bool isBigEndianPcm() const {
-        return codecFourCC == FOURCC_TWOS;
+        // 'twos' is always big-endian. 'fl32' is big-endian by default in
+        // QuickTime and little-endian only with an 'enda' atom set to 1.
+        if (codecFourCC == FOURCC_TWOS) return true;
+        if (codecFourCC == FOURCC_FL32) return !endaLittleEndian;
+        return false;
     }
 
     bool isFloatPcm() const {
@@ -502,6 +511,7 @@ private:
         uint32_t entryCount = readU32();
 
         if (entryCount > 0) {
+            uint64_t entryStart = static_cast<uint64_t>(file_.tellg());
             uint32_t entrySize = readU32();
             track.codecFourCC = readU32();
 
@@ -517,7 +527,7 @@ private:
                 track.width = readU16();
                 track.height = readU16();
             } else if (track.isAudio()) {
-                file_.seekg(2, std::ios::cur);  // version
+                uint16_t version = readU16();
                 file_.seekg(2, std::ios::cur);  // revision
                 file_.seekg(4, std::ios::cur);  // vendor
                 track.channels = readU16();
@@ -526,7 +536,34 @@ private:
                 file_.seekg(2, std::ios::cur);  // packet size
                 track.sampleRate = readU16();   // Only integer part
                 file_.seekg(2, std::ios::cur);  // Fixed point fraction
+
+                // Extension atoms follow the version-specific fields
+                uint64_t extStart = static_cast<uint64_t>(file_.tellg());
+                if (version == 1) extStart += 16;
+                else if (version == 2) extStart += 36;
+                uint64_t entryEnd = entryStart + entrySize;
+                if (entrySize >= 8 && extStart < entryEnd && entryEnd <= fileSize_) {
+                    parseSoundExtensions(track, extStart, entryEnd);
+                }
             }
+        }
+    }
+
+    // Walk the atoms after a sound description's fixed fields (directly or
+    // inside 'wave') and pick up 'enda'.
+    void parseSoundExtensions(MovTrack& track, uint64_t pos, uint64_t endPos) {
+        while (pos + 8 <= endPos) {
+            file_.seekg(pos);
+            uint32_t atomSize = readU32();
+            uint32_t atomType = readU32();
+            if (!file_.good() || atomSize < 8 || pos + atomSize > endPos) break;
+
+            if (atomType == ATOM_WAVE) {
+                parseSoundExtensions(track, pos + 8, pos + atomSize);
+            } else if (atomType == ATOM_ENDA && atomSize >= 10) {
+                track.endaLittleEndian = (readU16() & 0xFF) == 1;
+            }
+            pos += atomSize;
         }
     }
 

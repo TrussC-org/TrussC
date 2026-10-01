@@ -31,6 +31,49 @@ struct YCoCgVsParams {
 
 
 // ---------------------------------------------------------------------------
+// loadPcmTrack - read a PCM audio track and decode it into a SoundBuffer
+// ---------------------------------------------------------------------------
+// The byte order and sample format come from the track: 'twos' and 'fl32'
+// without an 'enda' atom are big-endian, 'fl32' is 32-bit float.
+inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuffer& buffer) {
+    if (!track.isPcm()) return false;
+
+    // Calculate total audio data size
+    size_t totalSize = 0;
+    for (const auto& sample : track.samples) {
+        totalSize += sample.size;
+    }
+
+    // Read all audio samples
+    std::vector<uint8_t> audioData;
+    audioData.reserve(totalSize);
+
+    for (size_t i = 0; i < track.samples.size(); i++) {
+        std::vector<uint8_t> sampleData;
+        if (parser.readSample(track, i, sampleData)) {
+            audioData.insert(audioData.end(), sampleData.begin(), sampleData.end());
+        }
+    }
+
+    if (audioData.empty()) {
+        tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
+        return false;
+    }
+
+    // Create SoundBuffer from PCM data
+    bool bigEndian = track.isBigEndianPcm();
+    int bitsPerSample = track.isFloatPcm() ? 32 : track.bitsPerSample;
+
+    if (!buffer.loadPcmFromMemory(audioData.data(), audioData.size(),
+                                  track.channels, track.sampleRate,
+                                  bitsPerSample, bigEndian)) {
+        tc::logWarning("HapPlayer") << "Failed to load PCM audio";
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // HapPlayer - HAP codec video playback (BC compressed texture output)
 // ---------------------------------------------------------------------------
 class HapPlayer : public tc::VideoPlayerBase {
@@ -568,37 +611,8 @@ private:
     bool loadPcmAudio() {
         if (!audioTrack_) return false;
 
-        // Calculate total audio data size
-        size_t totalSize = 0;
-        for (const auto& sample : audioTrack_->samples) {
-            totalSize += sample.size;
-        }
-
-        // Read all audio samples
-        std::vector<uint8_t> audioData;
-        audioData.reserve(totalSize);
-
-        for (size_t i = 0; i < audioTrack_->samples.size(); i++) {
-            std::vector<uint8_t> sampleData;
-            if (movParser_.readSample(*audioTrack_, i, sampleData)) {
-                audioData.insert(audioData.end(), sampleData.begin(), sampleData.end());
-            }
-        }
-
-        if (audioData.empty()) {
-            tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
-            return false;
-        }
-
-        // Create SoundBuffer from PCM data
         tc::SoundBuffer buffer;
-        bool bigEndian = audioTrack_->isBigEndianPcm();
-        int bitsPerSample = audioTrack_->isFloatPcm() ? 32 : audioTrack_->bitsPerSample;
-
-        if (!buffer.loadPcmFromMemory(audioData.data(), audioData.size(),
-                                       audioTrack_->channels, audioTrack_->sampleRate,
-                                       bitsPerSample, bigEndian)) {
-            tc::logWarning("HapPlayer") << "Failed to load PCM audio";
+        if (!loadPcmTrack(movParser_, *audioTrack_, buffer)) {
             return false;
         }
 
