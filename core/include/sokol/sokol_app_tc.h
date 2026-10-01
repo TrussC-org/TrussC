@@ -7484,8 +7484,8 @@ static void _sapp_tc_win32_run_loop(void) {
         }
         /* WAIT_OBJECT_0 + num_handles (when armed) is the pace timer: nothing to
            record, the due-check below sees earliest_next has passed. A timer
-           left signaled (the wait ended on a message or waitable first) is only waited on again
-           after SetWaitableTimer re-arms it, which resets it. */
+           left signaled (the wait ended on a message or waitable first) is only
+           waited on again after SetWaitableTimer re-arms it, which resets it. */
         MSG msg;
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (WM_QUIT == msg.message) {
