@@ -525,15 +525,35 @@ TC_CORE_TEST_MAIN() {
 
         Sound n;
         check("pending: a short non-looping stream plays", (bool)n.loadStream(tailWav) && n.play());
-        sleepMs(50);   // the whole file is in the ring: the worker has hit its end
-        internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
-        n.setPosition(0.0f);
-        sleepMs(400);  // longer than what the ring held
-        check("pending: a non-looping stream does not end at the old data's end",
-              n.isPlaying());
-        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        check("pending: then it plays from the target (level 0.5)",
-              waitLevel(0.5f), to_string(g_level.load()));
+        // The whole file is in the ring after 50 ms: the worker has hit its
+        // end. Nothing signals that, so a sleep that overruns past the 0.3 s
+        // file would let it end before setPosition(): check and retry.
+        bool early = false;
+        string earlyDetail;
+        for (int attempt = 1; attempt <= 3 && !early; ++attempt) {
+            if (attempt > 1) {
+                n.stop();
+                n.play();
+            }
+            sleepMs(50);
+            bool playing = n.isPlaying();
+            float pos = n.getPosition();
+            early = playing && pos < 0.2f;
+            earlyDetail = to_string(attempt) + " attempts, last: position " + to_string(pos) +
+                          ", isPlaying " + (playing ? "true" : "false");
+        }
+        check("pending: it is still playing early in the file (position < 0.2)", early,
+              earlyDetail);
+        if (early) {
+            internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
+            n.setPosition(0.0f);
+            sleepMs(400);  // longer than what the ring held
+            check("pending: a non-looping stream does not end at the old data's end",
+                  n.isPlaying());
+            internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+            check("pending: then it plays from the target (level 0.5)",
+                  waitLevel(0.5f), to_string(g_level.load()));
+        }
         n.stop();
     }
 
