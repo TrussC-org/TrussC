@@ -131,6 +131,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   is recorded by `src/allocProbe.cpp`), and growth past the first reservation
   lands on a correctly stated length. A voice on a buffer with no frames
   stops at its first mix.
+- `soundVoiceLifetime/` — a `Sound` plays only while it, or a copy of it, is
+  alive (#281), on the real `AudioEngine` over miniaudio's null backend:
+  `maxPolyphony + 8` scoped looping Sounds each play and a new Sound plays
+  afterwards, a scoped copy does not stop the original, a scoped one-shot
+  stops when its scope ends, copy / move assignment release the old voice (a
+  move keeps the moved voice playing), a paused voice is released too, and a
+  streamed voice closes its file on `stop()` and when its last handle goes
+  away (checked through `/proc/self/fd` on Linux).
 - `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
   read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
   measured on `audioOut` with files of DC levels: `setPosition()` moves the

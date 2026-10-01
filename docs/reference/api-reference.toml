@@ -8593,11 +8593,11 @@ related = ["Shader::setTexture", "Mat4", "Vec3"]
 
 ["Sound"]
 category = "sound"
-keywords = ["audio", "player", "sfx", "music", "of sound player"]
+keywords = ["audio", "player", "sfx", "music", "of sound player", "lifetime", "voice", "scope"]
 of = ["ofSoundPlayer"]
-description.en = "Audio playback"
-description.ja = "オーディオ再生"
-description.ko = "오디오 재생"
+description.en = "Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots."
+description.ja = "オーディオ再生。Sound は自身かそのコピーが生きている間だけ鳴る: コピーはボイスを共有し、最後のハンドルが破棄または上書きされるとボイスは止まり (ループでもワンショットでも)、スロットが空く。ワンショットを重ねて鳴らすときは Sound オブジェクトを生かしておく (メンバーにするなど)"
+description.ko = "오디오 재생. Sound 는 자신 또는 그 복사본이 살아 있는 동안에만 재생된다: 복사본은 보이스를 공유하고, 마지막 핸들이 파괴되거나 덮어쓰이면 보이스가 정지하고 (루프든 원샷이든) 슬롯이 비워진다. 원샷을 겹쳐 재생하려면 Sound 객체를 살려 둔다 (멤버로 두는 등)"
 of_category = "audio-types"
 related = ["AudioEngine", "SoundBuffer"]
 
@@ -8813,10 +8813,10 @@ description.ko = "음량을 설정 (0.0-1.0)"
 
 ["Sound::stop"]
 category = "sound"
-keywords = ["halt", "end", "reset", "rewind"]
-description.en = "Stop audio"
-description.ja = "音声を停止"
-description.ko = "오디오 정지"
+keywords = ["halt", "end", "reset", "rewind", "release", "close"]
+description.en = "Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped."
+description.ja = "音声を停止してボイスを解放する (ストリームのボイスはデコーダとファイルも閉じる)。ボイスを共有するコピーからも停止して見える"
+description.ko = "오디오를 정지하고 보이스를 해제한다 (스트리밍 보이스는 디코더와 파일도 닫는다). 보이스를 공유하는 복사본에서도 정지로 보인다"
 
 ["SoundBuffer"]
 keywords = ["audio buffer", "pcm ram", "sfx", "waveform", "procedural audio"]
