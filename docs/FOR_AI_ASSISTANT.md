@@ -387,6 +387,8 @@ scale(2.0f);
 popMatrix();
 ```
 
+Pair each `pushMatrix()` / `pushStyle()` with its pop inside the same callback (`setup()`, `update()`, `draw()`, one event handler such as `keyPressed()`, `exit()`, a `runOnMainThread` job). When a callback returns, TrussC pops whatever it left pushed and logs a warning naming it (`keyPressed() ended with 1 pushMatrix() and 0 pushStyle() still open (missing pop); dropped`). So a push in `update()` with its pop in `draw()` does not work: the push is dropped at the end of `update()`. Values set without a push (`setColor()`, a bare `translate()`) carry on as before.
+
 ## Node System (Scene Graph)
 
 App itself is the root node. All nodes use `shared_ptr`.
