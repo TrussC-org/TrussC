@@ -288,7 +288,10 @@ TC_CORE_TEST_MAIN() {
             g_switchLevel.store(high ? 0.5f : 0.1f);
             const int64_t t0 = nowNs();
             s.setPosition(high ? 2.0f : 0.2f);
-            for (int t = 0; t < 500 && g_switchNs.load() == 0; ++t) {
+            // Up to 2 s by the clock (sleep_for can oversleep, so a count of
+            // sleeps would not bound the wait); returns as soon as it is heard.
+            const auto waitEnd = chrono::steady_clock::now() + chrono::milliseconds(2000);
+            while (g_switchNs.load() == 0 && chrono::steady_clock::now() < waitEnd) {
                 this_thread::sleep_for(chrono::microseconds(500));
             }
             const int64_t t1 = g_switchNs.load();
