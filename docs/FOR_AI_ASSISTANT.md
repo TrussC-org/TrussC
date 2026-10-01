@@ -2420,9 +2420,9 @@ int AudioEngine::getBufferSize() const  // Current device buffer size in frames 
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
+std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
-AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread load. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
-std::vector<AudioVoiceInfo> AudioEngine::getVoices()  // Snapshot of the voices currently playing or paused (AudioVoiceInfo: slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level). Voices left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
+AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
 bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
@@ -2463,12 +2463,7 @@ void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV heade
 ```cpp
 ```
 
-### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / load describe the recent output.
-
-```cpp
-```
-
-### AudioVoiceInfo — One active voice as reported by AudioEngine::getVoices(): a copy taken under the engine lock, so later changes to the voice are not reflected.
+### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output.
 
 ```cpp
 ```
@@ -3504,6 +3499,11 @@ const char * Platform::name()  // Short platform name: "web" / "macos" / "ios" /
 ```
 
 ### PlayingSound — A single live mixer voice returned by AudioEngine::play(). Its fields are the real-time playback state the audio thread reads each callback (volume / pan / speed / loop / playing / paused / mixMode / position) plus the channel routing snapshots. Most fields are atomics so the UI thread can mutate them while the audio thread plays; set them directly.
+
+```cpp
+```
+
+### PlayingSoundInfo — One playing (or paused) sound as reported by AudioEngine::getPlayingSounds(): a copy taken under the engine lock, so later changes to the playback are not reflected.
 
 ```cpp
 ```
