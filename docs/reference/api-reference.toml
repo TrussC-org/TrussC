@@ -1365,6 +1365,12 @@ description.en = "Fired when files are dropped onto the window"
 description.ja = "ウィンドウにファイルがドロップされたときに発火"
 description.ko = "윈도우에 파일이 드롭될 때 발생"
 
+["CoreEvents::hotReloadUnload"]
+keywords = ["hot reload", "unload", "reload", "singleton", "listener", "cleanup"]
+description.en = "Hot reload only: fired before the host unloads the current guest build (on each reload, and at exit after exit), while its App is still alive. Guest code whose state outlives the App (singletons, function-local statics) drops its listeners on the host's events here; tcxImGui and tcxNodeInspector do this themselves. Never fired in a normal build"
+description.ja = "ホットリロード専用: ホストが現在のゲストビルドをアンロードする前(リロードのたび、および終了時に exit の後)、App がまだ生きている間に発火。App より長く生きる状態(シングルトン、関数内 static)を持つゲストのコードは、ここでホストのイベントへのリスナーを外す。tcxImGui と tcxNodeInspector は自動で行う。通常ビルドでは発火しない"
+description.ko = "핫 리로드 전용: 호스트가 현재 게스트 빌드를 언로드하기 전(리로드마다, 그리고 종료 시 exit 다음), App이 아직 살아 있는 동안 발생. App보다 오래 사는 상태(싱글턴, 함수 내 static)를 가진 게스트 코드는 여기서 호스트 이벤트의 리스너를 해제함. tcxImGui와 tcxNodeInspector는 자동으로 처리. 일반 빌드에서는 발생하지 않음"
+
 ["CoreEvents::keyPressed"]
 description.en = "Fired when a key is pressed"
 description.ja = "キーが押されたときに発火"
