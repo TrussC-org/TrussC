@@ -119,10 +119,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::logFatal(); },
         [](const std::string & module) { return trussc::logFatal(module); }
     ));
-    lua->set_function("logOnce", sol::overload(
-        [](const std::string & key) { return trussc::logOnce(key); },
-        [](const std::string & key, double intervalSeconds) { return trussc::logOnce(key, intervalSeconds); }
-    ));
     lua->set_function("tcLog", sol::overload(
         []() { return trussc::tcLog(); },
         [](trussc::LogLevel level) { return trussc::tcLog(level); }
