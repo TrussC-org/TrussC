@@ -224,6 +224,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
+  pre-build check decide "does this project use hot reload" the same way:
+  `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
+  ignores commented-out forms (#234), and `tc_hot_reload_decide()` is OFF on
+  platforms without hot reload (web / Android / iOS) even with the macro in
+  source (#329). The end-to-end build of a macro app as a normal app is
+  `examples/tests/HotReloadFallback`, built by the daily sweeps.
 - `screenshotContract/` — *(also on web)* the screenshot APIs report what they
   actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
   nothing is queued or created, and each API warns once. Native:
