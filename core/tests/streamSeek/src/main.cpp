@@ -70,6 +70,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -84,6 +85,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -268,7 +271,9 @@ static SeekTrace seekAndTrace(Sound& s, float target, float newLevel) {
     return t;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // A StreamWorker stuck in one stream never returns, and its static
     // destructor would then hang the exit: fail loudly instead.
     thread([] {
