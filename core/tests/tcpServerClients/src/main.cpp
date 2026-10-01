@@ -56,9 +56,9 @@
 //     start() whose accept thread cannot be started returns false, reports
 //     it and leaves nothing listening.
 //
-// Ports: TcpServer::getPort() returns the port that was passed to start(), so
-// start(0) cannot report where it landed. Each server therefore takes a port
-// the OS has just handed out to a throwaway socket, instead of a fixed one.
+// Ports: each server takes a port the OS has just handed out to a throwaway
+// socket, instead of a fixed one. (start(0) followed by getPort() gives an
+// OS-picked port too, since #535.)
 // =============================================================================
 
 #include <TrussC.h>
