@@ -126,10 +126,11 @@ public:
     // on the connect thread of connectAsync(). The client keeps such a
     // thread, which goes on with the rest of the listener and leaves its
     // loop, and joins it from another thread: the next connect() or
-    // disconnect() waits for it, and so does the destructor. (So a
-    // listener that, after its connect() or disconnect(), waits for
-    // something the app does only once its next connect() or disconnect()
-    // has returned holds that call up until the wait gives up.) Until
+    // disconnect() waits for it, and so does the destructor.
+    // connect(), connectAsync(), disconnect() and the destructor can wait
+    // for a listener still running on one of the client's threads. Do not
+    // call them while holding a lock that such a listener takes: the call
+    // and the listener would wait for each other forever. Until
     // #261 / #262 land, do not call disconnect() on the client from another
     // thread until the listener's call has returned, or the connection may
     // complete after disconnect() has returned.

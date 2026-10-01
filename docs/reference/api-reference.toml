@@ -9362,8 +9362,11 @@ connect thread). The destructor cannot join the thread it runs on: it
 detaches it, and the thread then returns from the listener into the
 destroyed client, which is undefined behavior. Destroy it from another
 thread, or after the listener has returned (for example from a
-`Deliver::Main` listener). Reconnecting from the main thread, as above,
-avoids all of this.
+`Deliver::Main` listener). `connect()`, `connectAsync()`, `disconnect()` and
+the destructor can wait for a listener still running on one of the client's
+threads. Do not call them while holding a lock that such a listener takes:
+the call and the listener would wait for each other forever. Reconnecting
+from the main thread, as above, avoids all of this.
 '''
 details.ja = '''
 [`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason) が理由を示す：
@@ -9412,8 +9415,11 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 しないこと。デストラクタは自分が動いているスレッドを join できないので
 detach し、そのスレッドはリスナーから破棄済みのクライアントへ戻る。これは
 未定義動作になる。別のスレッドから、またはリスナーが返ったあと（たとえば
-`Deliver::Main` のリスナーから）破棄すること。上の例のようにメインスレッドで
-再接続すれば、どれも避けられる。
+`Deliver::Main` のリスナーから）破棄すること。`connect()`、`connectAsync()`、
+`disconnect()`、デストラクタは、クライアントのスレッドの上でまだ動いている
+リスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを
+呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。
+上の例のようにメインスレッドで再接続すれば、どれも避けられる。
 '''
 details.ko = '''
 [`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason)가 이유를 알려 준다:
@@ -9462,7 +9468,10 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는
 리스너에서 이미 파괴된 클라이언트로 돌아간다. 이는 정의되지 않은 동작이다.
 다른 스레드에서, 또는 리스너가 반환된 뒤에(예: `Deliver::Main` 리스너에서)
-파괴할 것. 위 예처럼 메인 스레드에서 재연결하면 모두 피할 수 있다.
+파괴할 것. `connect()`, `connectAsync()`, `disconnect()`와 소멸자는
+클라이언트의 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런
+리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를
+영원히 기다리게 된다. 위 예처럼 메인 스레드에서 재연결하면 모두 피할 수 있다.
 '''
 
 ["TcpClient::onError"]
@@ -10949,9 +10958,9 @@ description.ko = "수신용 포트를 바인드 (startReceiving이 수신 스레
 description.en = "Close the socket"
 description.ja = "ソケットを閉じる"
 description.ko = "소켓을 닫음"
-details.en = "Returns once the receive thread has ended. From an inline onReceive listener, on the receive thread itself, it closes the socket and returns without waiting: the socket keeps that thread, and the next startReceiving(), stopReceiving() or close() on another thread, or the destructor, waits for it. Do not destroy the socket from such a listener: the destructor cannot join the thread it runs on, so it detaches it, and the thread then returns into the destroyed socket, which is undefined behavior. Destroy it from another thread, or after the listener has returned."
-details.ja = "受信スレッドが終わってから戻る。受信スレッドの上の inline の onReceive リスナーから呼ぶと、ソケットを閉じて待たずに戻る：ソケットはそのスレッドを手元に置いておき、別スレッドからの次の startReceiving()、stopReceiving()、close()、またはデストラクタがそれを待つ。そのリスナーからソケットを破棄しないこと：デストラクタは自分が動いているスレッドを join できないので detach し、そのスレッドは破棄済みのソケットへ戻る。これは未定義動作になる。別のスレッドから、またはリスナーが返ったあとに破棄すること。"
-details.ko = "수신 스레드가 끝난 뒤에 반환한다. 수신 스레드 위의 inline onReceive 리스너에서 호출하면 소켓을 닫고 기다리지 않고 반환한다: 소켓은 그 스레드를 보관해 두고, 다른 스레드에서의 다음 startReceiving(), stopReceiving(), close() 또는 소멸자가 그것을 기다린다. 그런 리스너에서 소켓을 파괴하지 말 것: 소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는 이미 파괴된 소켓으로 돌아간다. 이는 정의되지 않은 동작이다. 다른 스레드에서, 또는 리스너가 반환된 뒤에 파괴할 것."
+details.en = "Returns once the receive thread has ended. From an inline onReceive listener, on the receive thread itself, it closes the socket and returns without waiting: the socket keeps that thread, and the next startReceiving(), stopReceiving() or close() on another thread, or the destructor, waits for it. Do not destroy the socket from such a listener: the destructor cannot join the thread it runs on, so it detaches it, and the thread then returns into the destroyed socket, which is undefined behavior. Destroy it from another thread, or after the listener has returned. startReceiving() (bind() calls it), stopReceiving(), close() and the destructor can wait for a listener still running on the receive thread. Do not call them while holding a lock that such a listener takes: the call and the listener would wait for each other forever."
+details.ja = "受信スレッドが終わってから戻る。受信スレッドの上の inline の onReceive リスナーから呼ぶと、ソケットを閉じて待たずに戻る：ソケットはそのスレッドを手元に置いておき、別スレッドからの次の startReceiving()、stopReceiving()、close()、またはデストラクタがそれを待つ。そのリスナーからソケットを破棄しないこと：デストラクタは自分が動いているスレッドを join できないので detach し、そのスレッドは破棄済みのソケットへ戻る。これは未定義動作になる。別のスレッドから、またはリスナーが返ったあとに破棄すること。startReceiving()（bind() が呼ぶ）、stopReceiving()、close()、デストラクタは、受信スレッドの上でまだ動いているリスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。"
+details.ko = "수신 스레드가 끝난 뒤에 반환한다. 수신 스레드 위의 inline onReceive 리스너에서 호출하면 소켓을 닫고 기다리지 않고 반환한다: 소켓은 그 스레드를 보관해 두고, 다른 스레드에서의 다음 startReceiving(), stopReceiving(), close() 또는 소멸자가 그것을 기다린다. 그런 리스너에서 소켓을 파괴하지 말 것: 소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는 이미 파괴된 소켓으로 돌아간다. 이는 정의되지 않은 동작이다. 다른 스레드에서, 또는 리스너가 반환된 뒤에 파괴할 것. startReceiving()(bind()가 호출한다), stopReceiving(), close()와 소멸자는 수신 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런 리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를 영원히 기다리게 된다."
 
 ["UdpSocket::connect"]
 description.en = "Set the destination for send()"
@@ -11099,9 +11108,9 @@ description.ko = "수신 스레드를 시작 (bind 후 자동 호출)"
 description.en = "Stop the receive thread"
 description.ja = "受信スレッドを停止"
 description.ko = "수신 스레드를 정지"
-details.en = "Returns once the receive thread has ended. From an inline onReceive listener, on the receive thread itself, it returns without waiting: the socket keeps that thread, and the next startReceiving(), stopReceiving() or close() on another thread, or the destructor, waits for it."
-details.ja = "受信スレッドが終わってから戻る。受信スレッドの上の inline の onReceive リスナーから呼ぶと待たずに戻る：ソケットはそのスレッドを手元に置いておき、別スレッドからの次の startReceiving()、stopReceiving()、close()、またはデストラクタがそれを待つ。"
-details.ko = "수신 스레드가 끝난 뒤에 반환한다. 수신 스레드 위의 inline onReceive 리스너에서 호출하면 기다리지 않고 반환한다: 소켓은 그 스레드를 보관해 두고, 다른 스레드에서의 다음 startReceiving(), stopReceiving(), close() 또는 소멸자가 그것을 기다린다."
+details.en = "Returns once the receive thread has ended. From an inline onReceive listener, on the receive thread itself, it returns without waiting: the socket keeps that thread, and the next startReceiving(), stopReceiving() or close() on another thread, or the destructor, waits for it. startReceiving() (bind() calls it), stopReceiving(), close() and the destructor can wait for a listener still running on the receive thread. Do not call them while holding a lock that such a listener takes: the call and the listener would wait for each other forever."
+details.ja = "受信スレッドが終わってから戻る。受信スレッドの上の inline の onReceive リスナーから呼ぶと待たずに戻る：ソケットはそのスレッドを手元に置いておき、別スレッドからの次の startReceiving()、stopReceiving()、close()、またはデストラクタがそれを待つ。startReceiving()（bind() が呼ぶ）、stopReceiving()、close()、デストラクタは、受信スレッドの上でまだ動いているリスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。"
+details.ko = "수신 스레드가 끝난 뒤에 반환한다. 수신 스레드 위의 inline onReceive 리스너에서 호출하면 기다리지 않고 반환한다: 소켓은 그 스레드를 보관해 두고, 다른 스레드에서의 다음 startReceiving(), stopReceiving(), close() 또는 소멸자가 그것을 기다린다. startReceiving()(bind()가 호출한다), stopReceiving(), close()와 소멸자는 수신 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런 리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를 영원히 기다리게 된다."
 
 ["VSYNC"]
 keywords = ["frame rate", "fps", "refresh", "sync"]

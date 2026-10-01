@@ -108,7 +108,12 @@ public:
     // Set destination (after setting, can send via send(data, size))
     bool connect(const std::string& host, int port);
 
-    // Close socket
+    // Close socket. Returns once the receive thread has ended (see
+    // onReceive for a call on that thread itself).
+    // startReceiving() (bind() calls it), stopReceiving(), close() and the
+    // destructor can wait for a listener still running on the receive
+    // thread. Do not call them while holding a lock that such a listener
+    // takes: the call and the listener would wait for each other forever.
     void close();
 
     // -------------------------------------------------------------------------
@@ -135,7 +140,12 @@ public:
     // Start receive thread (called automatically after bind)
     void startReceiving();
 
-    // Stop receive thread
+    // Stop receive thread. Returns once it has ended (see onReceive for a
+    // call on that thread itself).
+    // startReceiving() (bind() calls it), stopReceiving(), close() and the
+    // destructor can wait for a listener still running on the receive
+    // thread. Do not call them while holding a lock that such a listener
+    // takes: the call and the listener would wait for each other forever.
     void stopReceiving();
 
     // Whether receiving

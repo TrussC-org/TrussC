@@ -160,9 +160,13 @@ private:
     // another thread, or the destructor, joins it, but socket_ is not
     // atomic. So, as for TcpClient (see its Events comment): until #261 /
     // #262 land, do not call disconnect() on the client from another thread
-    // until the listener's call has returned. And do not destroy the client
-    // on one of its own threads (in an inline listener): the destructor
-    // detaches that thread, which then returns into the destroyed client.
+    // until the listener's call has returned. connect(), connectAsync(),
+    // disconnect() and the destructor can wait for a listener still running
+    // on one of the client's threads. Do not call them while holding a lock
+    // that such a listener takes: the call and the listener would wait for
+    // each other forever. And do not destroy the client on one of its own
+    // threads (in an inline listener): the destructor detaches that thread,
+    // which then returns into the destroyed client.
     std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
