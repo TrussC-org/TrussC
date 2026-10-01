@@ -130,6 +130,15 @@ public:
     // disconnect() on it from another thread until that call has returned,
     // or the connection may complete after disconnect() has returned.
     // Reconnecting from the main thread, as above, avoids all of this.
+    //
+    // onConnect(false): a failed attempt reports it from connectAsync(), from
+    // a pending connect without threads, and from a failed TLS handshake (a
+    // failed blocking connect() returns false instead). An attempt that a
+    // newer attempt has replaced does not report it: when an onError
+    // listener reconnects, the failed attempt reports nothing more once the
+    // client is connected or connecting again, and only the newer attempt
+    // reports its result. connect() still returns false for the failed
+    // attempt while isConnected() is true for the newer one.
     // -------------------------------------------------------------------------
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive

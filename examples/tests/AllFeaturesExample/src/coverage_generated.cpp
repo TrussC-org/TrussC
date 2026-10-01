@@ -617,9 +617,9 @@ static void cover_utility() {
     (void)toJsonString(af::val<const Json>(), af::val<int>());
     (void)parseXml(af::val<const std::string>());
     (void)getVersion();
-    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
+    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)nodeToJson(af::val<Node>(), af::val<int>());
 }
 
