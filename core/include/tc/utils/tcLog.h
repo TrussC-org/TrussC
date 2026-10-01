@@ -15,6 +15,28 @@
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
+// The platform log sink (internal::writeSystemLog, in tcGlobal.cpp): Apple's
+// unified log (os_log, Console.app) and Windows' debug output
+// (OutputDebugStringA: the Visual Studio output window, DebugView). Android
+// has logcat in place of the console below.
+#if defined(__APPLE__) || defined(_WIN32)
+#define TC_LOG_SYSTEM_SINK 1
+#else
+#define TC_LOG_SYSTEM_SINK 0
+#endif
+// On iOS (and the other embedded Apple platforms) os_log replaces the
+// stdout/stderr console: stdout of an app not started from Xcode is not
+// kept, and Xcode's console shows os_log, so writing both would print every
+// line twice there.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+#define TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE 1
+#else
+#define TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE 0
+#endif
 // Uses Event system
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
@@ -84,6 +106,19 @@ namespace internal {
 // lock, and write the line to the console (stderr) alone when another thread
 // holds it, so a panic never waits for the lock. Per thread, in tcGlobal.cpp.
 bool isLogNonBlocking();
+
+#if TC_LOG_SYSTEM_SINK
+// Writes one log line to the platform log (see TC_LOG_SYSTEM_SINK above). The
+// console sink calls it, so it follows the console level. In tcGlobal.cpp.
+// - Apple: os_log, subsystem "org.trussc", category "TrussC", as
+//   "[LEVEL] message" (Verbose -> debug, Notice / Warning -> default,
+//   Error -> error, Fatal -> fault). On macOS it is skipped while os_log is
+//   mirrored into the console that already shows stdout (run from Xcode:
+//   OS_ACTIVITY_DT_MODE / IDE_DISABLED_OS_ACTIVITY_DT_MODE set), so Xcode's
+//   console shows each line once.
+// - Windows: one OutputDebugStringA call per line, "[time] [LEVEL] message".
+void writeSystemLog(const LogEventArgs& e);
+#endif
 } // namespace internal
 
 // ---------------------------------------------------------------------------
@@ -104,8 +139,9 @@ public:
     Event<LogEventArgs> onLog;
 
     Logger() {
-        // Console (stderr/stdout; logcat on Android) and file, as one
-        // listener that takes mutex_ itself.
+        // Console (stderr/stdout, plus os_log on macOS and
+        // OutputDebugStringA on Windows; logcat on Android, os_log alone on
+        // iOS) and file, as one listener that takes mutex_ itself.
         sinkListener_ = onLog.listen([this](LogEventArgs& e) {
             writeSinks(e);
         });
@@ -204,11 +240,17 @@ private:
         }
         __android_log_write(prio, "TrussC", e.message.c_str());
 #else
+#if TC_LOG_SYSTEM_SINK
+        // Apple: os_log; Windows: OutputDebugStringA
+        internal::writeSystemLog(e);
+#endif
+#if !TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE
         // Desktop/web: stderr/stdout
-        std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout;
+        std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout; // log-check: allow (Logger console sink)
         out << "[" << e.timestamp << "] "
             << "[" << logLevelToString(e.level) << "] "
             << e.message << std::endl;
+#endif
 #endif
     }
 
@@ -232,7 +274,8 @@ private:
     // writes. Recursive (TC_MUTEX), and a no-op in single-threaded web builds.
     mutable TC_MUTEX mutex_;
 
-    // Console (desktop/web; logcat on Android)
+    // Console (desktop/web, plus the platform log; logcat on Android,
+    // os_log on iOS)
     std::atomic<LogLevel> consoleLevel_{LogLevel::Notice};
 
     // File

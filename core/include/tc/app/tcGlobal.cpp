@@ -30,6 +30,12 @@
 // internal::sglPremultShader().
 #include "tc/gpu/shaders/sglPremult.glsl.h"
 
+#ifdef __APPLE__
+#include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
+#endif
+#include <cstdlib>
+#include <cstring>
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -960,6 +966,69 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 }
 
 } // namespace internal
+
+// ---------------------------------------------------------------------------
+// Logger platform sink (declared in tcLog.h)
+// ---------------------------------------------------------------------------
+#if TC_LOG_SYSTEM_SINK
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+namespace {
+// True when os_log lines are mirrored into the console that already shows
+// stdout/stderr, so writing both would print each line twice there. Xcode
+// sets OS_ACTIVITY_DT_MODE (libtrace then copies os_log to stderr) or, since
+// Xcode 15, IDE_DISABLED_OS_ACTIVITY_DT_MODE (its console reads the unified
+// log directly). Read once: a running app's environment does not change.
+bool osLogMirroredToConsole() {
+    static const bool mirrored = [] {
+        if (std::getenv("IDE_DISABLED_OS_ACTIVITY_DT_MODE")) return true;
+        const char* dt = std::getenv("OS_ACTIVITY_DT_MODE");
+        if (!dt || !*dt) return false;
+        return std::strcmp(dt, "NO") != 0 && std::strcmp(dt, "no") != 0 &&
+               std::strcmp(dt, "0") != 0 && std::strcmp(dt, "false") != 0;
+    }();
+    return mirrored;
+}
+} // namespace
+#endif
+
+namespace internal {
+
+void writeSystemLog(const LogEventArgs& e) {
+#if defined(__APPLE__)
+#if !TARGET_OS_IPHONE
+    if (osLogMirroredToConsole()) return;
+#endif
+    static os_log_t osLog = os_log_create("org.trussc", "TrussC");
+    os_log_type_t type;
+    switch (e.level) {
+        case LogLevel::Verbose: type = OS_LOG_TYPE_DEBUG; break;
+        case LogLevel::Error:   type = OS_LOG_TYPE_ERROR; break;
+        case LogLevel::Fatal:   type = OS_LOG_TYPE_FAULT; break;
+        default:                type = OS_LOG_TYPE_DEFAULT; break;   // Notice, Warning
+    }
+    // %{public}: without it the unified log shows the text as <private>
+    // outside a debugger.
+    os_log_with_type(osLog, type, "[%{public}s] %{public}s",
+                     logLevelToString(e.level), e.message.c_str());
+#elif defined(_WIN32)
+    // One call per line: each OutputDebugStringA call has a fixed cost (more
+    // with a debugger or DebugView attached), so the whole line is built
+    // first. The console sink has already applied the console level.
+    std::string line;
+    line.reserve(e.timestamp.size() + e.message.size() + 16);
+    line += '[';
+    line += e.timestamp;
+    line += "] [";
+    line += logLevelToString(e.level);
+    line += "] ";
+    line += e.message;
+    line += '\n';
+    OutputDebugStringA(line.c_str());
+#endif
+}
+
+} // namespace internal
+#endif // TC_LOG_SYSTEM_SINK
 
 // ---------------------------------------------------------------------------
 // More one-per-process state (#249). Each of these used to be a function-local
