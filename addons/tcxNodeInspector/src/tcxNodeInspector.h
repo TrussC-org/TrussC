@@ -263,6 +263,10 @@ public:
     ::tc::Json getTouched();
     void resetTouched() { touched_.clear(); }
 
+    // Tests only: record a hand edit of `member` (of `mod` when non-null) the
+    // way the Inspector panel does, without an ImGui frame.
+    void recordTouchedForTests(::tc::Node* node, ::tc::Mod* mod, const std::string& member);
+
 private:
     Style    style_;
     bool     enabled_      = true;
@@ -347,7 +351,7 @@ private:
     void reconcileSelection();            // prune dead + collapse on external change
 
     // --- touched ---------------------------------------------------------------
-    // Keyed by node + mod + member path. The Inspector's widgets are reused
+    // Keyed by node + mod type (short name, as getModByTypeName()) + member path. The Inspector's widgets are reused
     // for whichever node is selected (one ImGuiID for "radius" of every node),
     // so the ImGui-level record can't say whose value it was — hence this one,
     // and the Hierarchy / Inspector panels are kept out of the ImGui record.
@@ -355,8 +359,7 @@ private:
         std::weak_ptr<::tc::Node> node;
         uint64_t          nodeId = 0;
         std::string       nodeType, nodeName;
-        const ::tc::Mod*  mod = nullptr;   // identity only (may have been removed since)
-        std::string       modType;
+        std::string       modType;         // short type name; empty = the node's own member
         std::string       member;          // "pos", "outline.color", "name"
         ::tc::Json        value;           // as of the last edit / read (reported once gone)
     };
