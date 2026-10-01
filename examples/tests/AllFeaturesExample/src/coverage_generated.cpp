@@ -1069,6 +1069,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().onRender;
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().exit;
+        (void)af::val<CoreEvents>().hotReloadUnload;
         (void)af::val<CoreEvents>().exitRequested;
         (void)af::val<CoreEvents>().keyPressed;
         (void)af::val<CoreEvents>().keyReleased;

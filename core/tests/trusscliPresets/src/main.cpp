@@ -60,6 +60,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include "BuildSetup.h"
 #include "ProjectGenerator.h"
@@ -76,6 +77,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 namespace fs = std::filesystem;
 
 static int g_fail = 0;
@@ -1351,7 +1354,9 @@ static void testToolchainCheck() {
 #endif
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     g_root = fs::temp_directory_path() /
              ("trusscliPresets-" + to_string(chrono::steady_clock::now()
                                                 .time_since_epoch().count()));

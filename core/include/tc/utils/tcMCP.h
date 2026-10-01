@@ -656,12 +656,15 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
 
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
-//   host  : "localhost" (default) keeps it loopback-only; pass "0.0.0.0" to
-//           expose on all interfaces.
+//   host  : "127.0.0.1" (default) keeps it loopback-only. The default is an
+//           address, not "localhost": what "localhost" resolves to differs
+//           between OSes, so the default is one address everywhere. Pass
+//           "localhost" or "::1" for those, or "0.0.0.0" to expose on all
+//           interfaces.
 //   token : bearer token required on /mcp. MUST be non-empty when host is not
 //           a loopback address — binding non-local without a token is refused
 //           (fail-closed) so input injection is never silently network-exposed.
-inline void startHttpServer(int port = 0, const std::string& host = "localhost",
+inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
                             const std::string& token = "") {
     auto& svr = detail::getHttpServer();
     if (svr) return; // Already running
