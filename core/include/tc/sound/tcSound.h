@@ -882,7 +882,7 @@ struct AudioDeviceChangedArgs {
     bool        isDefaultDevice = false;
     int         sampleRate = 0;
     int         channels = 0;
-    int         bufferSize = 0;
+    int         bufferSize = 0;    // period the device runs with, in engine-rate frames (granted by the device)
     int         maxPolyphony = 0;
 };
 
@@ -925,7 +925,7 @@ struct AudioInBuffer {
 // ---------------------------------------------------------------------------
 struct PlayingSoundInfo {
     int         slot = 0;           // playback slot index (0 .. maxPolyphony-1)
-    fs::path    path;               // source file (lexically normalized); empty for generated / memory buffers
+    fs::path    path;               // source file as given (same as getPath()); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;

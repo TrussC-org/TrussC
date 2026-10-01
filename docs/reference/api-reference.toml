@@ -161,9 +161,9 @@ description.ko = "AudioEngine::audioDeviceChanged 이벤트의 인자 타입. in
 related = ["AudioEngine::audioDeviceChanged", "AudioEngine"]
 
 ["AudioDeviceChangedArgs::bufferSize"]
-description.en = "Active device buffer size in frames"
-description.ja = "アクティブなデバイスバッファサイズ (フレーム単位)"
-description.ko = "활성 디바이스 버퍼 크기 (프레임 단위)"
+description.en = "Buffer (period) size the device runs with, in frames at the engine rate (granted by the device; bufferSize / sampleRate = period in seconds). Not the requested value: see AudioEngine::getBufferSize."
+description.ja = "デバイスが実際に使うバッファ (ピリオド) サイズ。エンジンのサンプルレートでのフレーム数 (デバイスが許可した値。bufferSize / sampleRate = 秒単位のピリオド)。要求値ではない。要求値は AudioEngine::getBufferSize"
+description.ko = "디바이스가 실제로 사용하는 버퍼 (피리어드) 크기. 엔진 샘플레이트 기준 프레임 수 (디바이스가 허용한 값. bufferSize / sampleRate = 초 단위 피리어드). 요청값이 아님. 요청값은 AudioEngine::getBufferSize"
 
 ["AudioDeviceChangedArgs::channels"]
 description.en = "Active output channel count"
@@ -237,9 +237,9 @@ description.ko = "최신 믹스 출력 샘플 (모노, L+R 평균) 을 outBuffer
 ["AudioEngine::getBufferSize"]
 category = "audioengine"
 keywords = ["frames", "latency", "block"]
-description.en = "Current device buffer size in frames (0 = miniaudio default)."
-description.ja = "現在のデバイスバッファサイズ (フレーム単位、0 = miniaudio デフォルト)"
-description.ko = "현재 디바이스 버퍼 크기 (프레임 단위, 0 = miniaudio 기본값)"
+description.en = "Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize."
+description.ja = "要求したバッファサイズ (フレーム単位)。AudioSettings::bufferSize に渡した値 (0 = バックエンドのデフォルト)。デバイスが実際に使うサイズは AudioDeviceChangedArgs::bufferSize"
+description.ko = "요청한 버퍼 크기 (프레임 단위). AudioSettings::bufferSize 에 전달한 값 (0 = 백엔드 기본값). 디바이스가 실제로 사용하는 크기는 AudioDeviceChangedArgs::bufferSize"
 
 ["AudioEngine::getChannels"]
 category = "audioengine"
@@ -7010,9 +7010,9 @@ description.ja = "再生のパン (-1 左、0 中央、1 右)"
 description.ko = "재생의 팬 (-1 왼쪽, 0 중앙, 1 오른쪽)"
 
 ["PlayingSoundInfo::path"]
-description.en = "Source file (fs::path, lexically normalized); empty for generated or in-memory buffers. tc_get_audio_state reports it as UTF-8."
-description.ja = "ソースファイル (fs::path、字句的に正規化済み)。生成したバッファやメモリからのバッファでは空。tc_get_audio_state は UTF-8 で返す"
-description.ko = "소스 파일 (fs::path, 어휘적으로 정규화됨). 생성한 버퍼나 메모리 버퍼에서는 비어 있음. tc_get_audio_state 는 UTF-8 로 보고한다"
+description.en = "Source file (fs::path) as given, the same value as SoundBuffer::getPath() / SoundStream::getPath() and the file name in the logs; empty for generated or in-memory buffers. tc_get_audio_state reports it as UTF-8."
+description.ja = "ソースファイル (fs::path)。渡されたままの値で、SoundBuffer::getPath() / SoundStream::getPath() やログのファイル名と同じ。生成したバッファやメモリからのバッファでは空。tc_get_audio_state は UTF-8 で返す"
+description.ko = "소스 파일 (fs::path). 전달된 그대로의 값으로, SoundBuffer::getPath() / SoundStream::getPath() 및 로그의 파일 이름과 같다. 생성한 버퍼나 메모리 버퍼에서는 비어 있음. tc_get_audio_state 는 UTF-8 로 보고한다"
 
 ["PlayingSoundInfo::paused"]
 description.en = "True while the playback is paused (Sound::pause())."
