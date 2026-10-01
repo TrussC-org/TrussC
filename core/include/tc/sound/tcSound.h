@@ -26,7 +26,10 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <algorithm>
+#include <new>
 #include <cstdint>
+#include <cstdlib>
 #include <mutex>
 #include <atomic>
 #include <cstring>
@@ -85,6 +88,116 @@ inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCoun
     if (frames > maxCount / (size_t)channels) return false;
     outCount = (size_t)frames * (size_t)channels;
     return true;
+}
+
+// Most decoded samples per byte of encoded input that decodeReserveSamples
+// reserves for. The general rate, 16, is 48 kHz stereo down to 48 kbit/s.
+// MP3 frames run at 8 kbit/s or more (MPEG-2 / 2.5; MPEG-1 at 32 kbit/s or
+// more), so an MP3 decodes to at most 48 samples per byte (24 kHz stereo at
+// 8 kbit/s). Vorbis has no such floor; 32 covers its lowest common quality
+// settings (about 32 kbit/s for 44.1 kHz stereo). Streams that decode to
+// more still load: the buffer grows past the reservation.
+constexpr uint64_t kReserveSamplesPerInputByte = 16;
+constexpr uint64_t kReserveSamplesPerInputByteMp3 = 48;
+constexpr uint64_t kReserveSamplesPerInputByteVorbis = 32;
+
+// Interleaved samples to reserve before decoding a stream whose header states
+// `headerFrames` frames of `channels` channels, read from `inputBytes` bytes
+// of encoded input (0 when unknown). The stated length is only a hint: the
+// reservation is capped by what that much input plausibly decodes to
+// (samplesPerInputByte per byte, one of the kReserveSamplesPerInputByte*
+// rates) and by maxCount. Decoders append what actually decodes and grow the
+// buffer past the reservation when a stream holds more.
+inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t inputBytes,
+                                   uint64_t samplesPerInputByte, size_t maxCount) {
+    constexpr uint64_t kMax = ~(uint64_t)0;
+    if (channels < 1) return 0;
+    const uint64_t ch = (uint64_t)channels;
+    const uint64_t fromHeader = headerFrames > kMax / ch ? kMax : headerFrames * ch;
+    const uint64_t fromInput =
+        samplesPerInputByte != 0 && inputBytes > kMax / samplesPerInputByte
+            ? kMax : inputBytes * samplesPerInputByte;
+    uint64_t n = fromHeader < fromInput ? fromHeader : fromInput;
+    if (n > (uint64_t)maxCount) n = (uint64_t)maxCount;
+    return (size_t)n;
+}
+
+// Test hook, not a user setting: while nonzero, allocationFits() also
+// refuses any single allocation larger than this many bytes, so a headless
+// test can run the growth policy below against a memory limit on any
+// platform (core/tests/audioDiagnostics). 0, the default, turns it off.
+// State lives in tcSound_impl.cpp.
+void setAllocationLimitForTests(size_t bytes);
+size_t allocationLimitForTests();
+
+// Whether one allocation of `bytes` can be made right now. Web (wasm) builds
+// have exception catching off, so there a failed operator new aborts the page
+// instead of throwing std::bad_alloc; malloc, which returns null on failure
+// under ALLOW_MEMORY_GROWTH, is tried and released first. Elsewhere a failed
+// allocation throws and the callers catch it, so this is true unless a test
+// set a limit (setAllocationLimitForTests).
+inline bool allocationFits(size_t bytes) {
+    const size_t limit = allocationLimitForTests();
+    if (limit != 0 && bytes > limit) return false;
+#ifdef __EMSCRIPTEN__
+    // Held in a volatile: the compiler may otherwise drop an unused
+    // malloc / free pair and assume the allocation succeeded.
+    void* volatile p = std::malloc(bytes);
+    if (!p) return false;
+    std::free(p);
+#endif
+    return true;
+}
+
+// Grow the capacity of `buf` to hold at least `needed` samples. The new
+// capacity is twice the current one (geometric growth), or `preferred` when
+// it lies between `needed` and that (a decoder's stated length, so a stream
+// whose length is stated correctly ends without spare capacity). Never more
+// than twice the current capacity, so the growth follows what was actually
+// written.
+//
+// When that size cannot be allocated, smaller steps are tried, the current
+// capacity plus a half, a quarter, an eighth, ... of it, down to the
+// smallest one that still holds `needed`, and last `needed` itself; the
+// first that can be allocated is taken. On the web a size is checked before
+// it is allocated (allocationFits); elsewhere the std::bad_alloc of a failed
+// reserve is caught and the next size tried. A smaller step is only taken
+// after one at most twice its growth failed, so under a fixed memory limit
+// every such step leaves less than half of the room that was left before
+// it: near the limit the buffer is reallocated a logarithmic number of
+// times, not once per decode step, and a load that cannot finish fails as
+// soon as a step no longer fits. (`needed` itself needs no special rule: it
+// is only reached when a step at most twice its growth failed, too.)
+//
+// False, with `buf` unchanged, when even `needed` cannot be allocated.
+inline bool growSampleBuffer(std::vector<float>& buf, size_t needed, size_t preferred = 0) {
+    const size_t capacity = buf.capacity();
+    if (needed <= capacity) return true;
+    if (needed > buf.max_size()) return false;
+    size_t target = capacity > buf.max_size() / 2 ? buf.max_size() : capacity * 2;
+    if (preferred >= needed && preferred < target) target = preferred;
+    if (target < needed) target = needed;
+    // Reserve `n` samples if that can be allocated. target <= max_size(), and
+    // every size tried is at most target, so the byte count cannot wrap. (Web
+    // builds do not catch exceptions; there allocationFits decides.)
+    auto tryReserve = [&buf](size_t n) {
+        if (!allocationFits(n * sizeof(float))) return false;
+        try {
+            buf.reserve(n);
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        return true;
+    };
+    if (tryReserve(target)) return true;
+    size_t smallestTried = target;
+    for (size_t step = capacity / 2; step > 0 && capacity + step >= needed; step /= 2) {
+        // Only sizes below what failed
+        if (capacity + step >= target) continue;
+        if (tryReserve(capacity + step)) return true;
+        smallestTried = capacity + step;
+    }
+    return smallestTried != needed && tryReserve(needed);
 }
 
 } // namespace internal
@@ -416,19 +529,57 @@ public:
     // -------------------------------------------------------------------------
     // Mixing
     // -------------------------------------------------------------------------
+    // Adds `other` into this buffer, scaled by volume, starting offsetSamples
+    // samples per channel in (the unit of numSamples: frames, not interleaved
+    // samples). Grows this buffer when `other` runs past its end. Both buffers
+    // must have the same channel count; a mismatch, or an end past what a
+    // buffer can hold (or what memory allows), is logged and nothing is mixed.
     void mixFrom(const SoundBuffer& other, size_t offsetSamples, float volume = 1.0f) {
         if (other.samples.empty()) return;
-
-        // Ensure we have enough space
-        size_t requiredSize = offsetSamples + other.numSamples;
-        if (samples.size() < requiredSize) {
-            samples.resize(requiredSize, 0.0f);
-            numSamples = requiredSize;
+        if (channels < 1 || other.channels != channels) {
+            logError("SoundBuffer") << "mixFrom: channel counts differ (" << other.channels
+                                    << " into " << channels << "), nothing mixed";
+            return;
         }
+        const size_t ch = (size_t)channels;
+        // Whole frames `other` actually holds
+        const size_t otherFrames = std::min(other.numSamples, other.samples.size() / ch);
+        if (otherFrames == 0) return;
 
-        // Mix (add) samples
-        for (size_t i = 0; i < other.numSamples && i < other.samples.size(); i++) {
-            samples[offsetSamples + i] += other.samples[i] * volume;
+        // End frame and the interleaved size it needs, checked before they are formed
+        size_t needed = 0;
+        if (offsetSamples > SIZE_MAX - otherFrames ||
+            !internal::interleavedSampleCount((uint64_t)(offsetSamples + otherFrames), channels,
+                                              samples.max_size(), needed)) {
+            logError("SoundBuffer") << "mixFrom: offset " << offsetSamples << " + "
+                                    << otherFrames << " frames is past what a buffer holds";
+            return;
+        }
+        const size_t endFrame = offsetSamples + otherFrames;
+        if (samples.size() < needed) {
+            // growSampleBuffer checks the allocation first on the web, where
+            // a failed one aborts instead of throwing
+            bool grown = false;
+            try {
+                grown = internal::growSampleBuffer(samples, needed);
+                if (grown) samples.resize(needed, 0.0f);
+            } catch (const std::bad_alloc&) {
+                grown = false;
+            }
+            if (!grown) {
+                logError("SoundBuffer") << "mixFrom: out of memory growing to " << endFrame
+                                        << " frames, nothing mixed";
+                return;
+            }
+        }
+        if (numSamples < endFrame) numSamples = endFrame;
+
+        // Mix (add) samples, frame by frame with the channel stride
+        float* dst = samples.data() + offsetSamples * ch;
+        const float* src = other.samples.data();
+        const size_t count = otherFrames * ch;
+        for (size_t i = 0; i < count; i++) {
+            dst[i] += src[i] * volume;
         }
     }
 
@@ -1086,6 +1237,17 @@ private:
     // of a negative double is UB).
     static void mixEagerVoice(PlayingSound& sound, const SoundBuffer& src,
                               float* buffer, int num_frames, int num_channels) {
+        // A buffer with no frames, or with fewer samples than numSamples *
+        // channels, has nothing to play: the voice stops, looping or not.
+        size_t srcCount = 0;
+        if (src.numSamples == 0 ||
+            !internal::interleavedSampleCount(src.numSamples, src.channels, src.samples.size(),
+                                              srcCount)) {
+            sound.playing = false;
+            sound.level.store(0.0f, std::memory_order_relaxed);
+            return;
+        }
+
         double posF = sound.positionF;
         float vol = sound.volume;
         float pan = sound.pan;
@@ -1669,7 +1831,10 @@ public:
         // (decoder seek happens lazily in the stream mixer).
         if (buffer_->kind() == SoundSource::Eager) {
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
-            if (pos >= (double)eager->numSamples) pos = (double)eager->numSamples - 1;
+            // An empty buffer clamps to 0.
+            if (pos >= (double)eager->numSamples) {
+                pos = eager->numSamples > 0 ? (double)eager->numSamples - 1 : 0.0;
+            }
         } else {
             double maxPos = (double)buffer_->getDuration() * buffer_->sampleRate;
             if (pos >= maxPos) pos = maxPos - 1;
