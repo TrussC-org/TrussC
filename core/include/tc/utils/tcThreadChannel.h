@@ -4,6 +4,7 @@
 #include <queue>
 #include <condition_variable>
 #include <chrono>
+#include <cstddef>
 
 namespace trussc {
 
@@ -122,6 +123,23 @@ public:
         return false;
     }
 
+    // Receive everything queued right now (non-blocking), in FIFO order.
+    // Takes the lock once and moves the whole queue into `out` (its previous
+    // contents are discarded). Values sent after this call stay queued for the
+    // next receive. Returns the number of values received (0 if the channel is
+    // closed or empty).
+    size_t receiveAll(std::queue<T>& out) {
+        std::queue<T> taken;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (!closed_) {
+                taken.swap(queue_);
+            }
+        }
+        out.swap(taken);   // previous contents of `out` are destroyed outside the lock
+        return out.size();
+    }
+
     // ---------------------------------------------------------------------------
     // Control
     // ---------------------------------------------------------------------------
@@ -145,13 +163,17 @@ public:
     // State
     // ---------------------------------------------------------------------------
 
-    // Whether queue is empty (approximate)
+    // Whether queue is empty. Takes the lock; other threads may send or
+    // receive right after it returns.
     bool empty() const {
+        std::unique_lock<std::mutex> lock(mutex_);
         return queue_.empty();
     }
 
-    // Queue size (approximate)
+    // Queue size. Takes the lock; other threads may send or receive right
+    // after it returns.
     size_t size() const {
+        std::unique_lock<std::mutex> lock(mutex_);
         return queue_.size();
     }
 
@@ -162,7 +184,7 @@ public:
 
 private:
     std::queue<T> queue_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable condition_;
     bool closed_;
 };

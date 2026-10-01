@@ -14,6 +14,13 @@
 // when no traversal is in flight. If you are already on the main thread it runs
 // immediately.
 //
+// Each frame runs what was queued when its drain started, in order; work queued
+// while the drain runs waits for the next frame, so the frame always starts.
+// Nothing is dropped and there is no limit: a queued closure may edit the tree
+// or free something. The count taken at drain start is reported by the
+// tc_get_health MCP tool (mainQueuePending). Code that may queue faster than the
+// app runs it, and can drop values, keeps its own bounded or latest-value buffer.
+//
 //   tcp.onReceive.listen([&](Msg& m){
 //       Msg copy = m;
 //       runOnMainThread([this, copy]{ scene->addChild(make_shared<Enemy>(copy.pos)); });
@@ -24,10 +31,13 @@
 // ---------------------------------------------------------------------------
 
 #include "tcThread.h"        // isMainThread()
+#include <cstddef>
 #include <functional>
 
 #if !defined(__EMSCRIPTEN__)
 #include "tcThreadChannel.h" // ThreadChannel<T>
+#include <atomic>
+#include <queue>
 #endif
 
 namespace trussc {
@@ -37,7 +47,10 @@ namespace trussc {
 // Web is single-threaded — everything already runs on the main thread, so
 // there is nothing to marshal and no queue to drain.
 inline void runOnMainThread(const std::function<void()>& fn) { if (fn) fn(); }
-namespace internal { inline void drainMainThreadQueue() {} }
+namespace internal {
+    inline void drainMainThreadQueue() {}
+    inline size_t getMainThreadQueuePending() { return 0; }
+}
 
 #else
 
@@ -47,6 +60,13 @@ namespace internal {
     // header-inline, a hot reload guest on Windows queued into its own copy,
     // which the host's frame loop never drained (#249).
     ThreadChannel<std::function<void()>>& mainThreadQueue();
+
+    // Number of closures the latest drain started with. Written by the drain,
+    // read by tc_get_health. Defined in tcGlobal.cpp (one per process).
+    std::atomic<size_t>& mainThreadQueuePendingCount();
+    inline size_t getMainThreadQueuePending() {
+        return mainThreadQueuePendingCount().load(std::memory_order_relaxed);
+    }
 }
 
 // Run `fn` on the main thread. Immediately if already on it; otherwise queued
@@ -57,13 +77,20 @@ inline void runOnMainThread(std::function<void()> fn) {
     internal::mainThreadQueue().send(std::move(fn));
 }
 
-// Drain all pending main-thread work. Called by the framework once per frame
-// (in _frame_cb, before update/draw). Headless loops call it via the
+// Run the main-thread work queued so far. Called by the framework once per
+// frame (in _frame_cb, before update/draw). Headless loops call it via the
 // framework's run loop; exposed under internal:: for those paths.
+// Takes everything queued at its start under one lock and runs it in order;
+// work queued meanwhile (by workers, or by a closure here) waits for the next
+// call.
 namespace internal {
 inline void drainMainThreadQueue() {
-    std::function<void()> fn;
-    while (mainThreadQueue().tryReceive(fn)) {
+    std::queue<std::function<void()>> batch;
+    mainThreadQueuePendingCount().store(mainThreadQueue().receiveAll(batch),
+                                        std::memory_order_relaxed);
+    while (!batch.empty()) {
+        std::function<void()> fn = std::move(batch.front());
+        batch.pop();
         if (fn) fn();
     }
 }
