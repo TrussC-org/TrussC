@@ -384,6 +384,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
   `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
   which is checked on every platform.
+- `touchAsMouse/` — touch-as-mouse mapping (#295), through
+  `internal::TouchMouseMapper`: the first finger down is the only touch that
+  drives the mouse (one press, drags, one release on ENDED or CANCELLED); it is
+  found by its full `uintptr_t` identifier, not its index in the touch array;
+  no drag after it lifts; an event with no touches clears it.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
