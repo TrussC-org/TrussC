@@ -173,14 +173,19 @@ TC_CORE_TEST_MAIN() {
     signal(SIGBUS, onFatalSignal);
     signal(SIGABRT, onFatalSignal);
 #endif
-    const int port = 45871;
+    // Every server starts on port 0 and the test connects to whatever the OS
+    // picked, so a port some other connection on the machine holds never
+    // stops a server from starting.
     g_phase = "a send parked behind a non-reading peer";
 
     TcpServer server;
-    if (!server.start(port, 8)) {
-        printf("could not start server on port %d\n", port);
+    if (!server.start(0, 8)) {
+        printf("could not start server\n");
         return 1;
     }
+    const int port = server.getPort();
+    check("start(0) then getPort() reports the port the OS picked", port != 0);
+    if (port == 0) return 1;
 
     // --- a peer that never reads -------------------------------------------
     rawsocket_t stalled = connectSilentPeer(port);
@@ -319,7 +324,8 @@ TC_CORE_TEST_MAIN() {
     g_phase = "an onError listener disconnecting its own client";
     {
         TcpServer s2;
-        if (!s2.start(port + 1, 8)) { printf("could not start second server\n"); bail(); }
+        if (!s2.start(0, 8)) { printf("could not start second server\n"); bail(); }
+        const int port2 = s2.getPort();
         s2.setSendTimeout(0.5f);
 
         auto entered = make_shared<atomic<bool>>(false);
@@ -330,7 +336,7 @@ TC_CORE_TEST_MAIN() {
             handled->store(true);
         });
 
-        rawsocket_t deaf = connectSilentPeer(port + 1);
+        rawsocket_t deaf = connectSilentPeer(port2);
         if (deaf == static_cast<rawsocket_t>(-1)) { printf("no peer\n"); bail(); }
         for (int i = 0; i < 200 && s2.getClientCount() < 1; ++i)
             this_thread::sleep_for(chrono::milliseconds(5));
@@ -412,10 +418,11 @@ TC_CORE_TEST_MAIN() {
     // for the offence of being on a slow link with a big payload.
     {
         TcpServer s3;
-        if (!s3.start(port + 2, 8)) { printf("could not start third server\n"); bail(); }
+        if (!s3.start(0, 8)) { printf("could not start third server\n"); bail(); }
+        const int port3 = s3.getPort();
         s3.setSendTimeout(1.0f);
 
-        rawsocket_t slow = connectSilentPeer(port + 2, /*shrinkRecvBuffer=*/false);
+        rawsocket_t slow = connectSilentPeer(port3, /*shrinkRecvBuffer=*/false);
         if (slow == static_cast<rawsocket_t>(-1)) { printf("no slow peer\n"); bail(); }
         setRecvTimeout(slow, 200);
         for (int i = 0; i < 200 && s3.getClientCount() < 1; ++i)
@@ -491,7 +498,8 @@ TC_CORE_TEST_MAIN() {
     // listener can be well into its 600 ms before stop() even starts.
     {
         TcpServer s5;
-        if (!s5.start(port + 4, 8)) { printf("could not start fifth server\n"); bail(); }
+        if (!s5.start(0, 8)) { printf("could not start fifth server\n"); bail(); }
+        const int port5 = s5.getPort();
 
         auto entered = make_shared<atomic<bool>>(false);
         auto left = make_shared<atomic<bool>>(false);
@@ -501,7 +509,7 @@ TC_CORE_TEST_MAIN() {
             left->store(true);
         });
 
-        rawsocket_t talker = connectSilentPeer(port + 4);
+        rawsocket_t talker = connectSilentPeer(port5);
         if (talker == static_cast<rawsocket_t>(-1)) { printf("no talker\n"); bail(); }
         for (int i = 0; i < 200 && s5.getClientCount() < 1; ++i)
             this_thread::sleep_for(chrono::milliseconds(5));
@@ -546,7 +554,8 @@ TC_CORE_TEST_MAIN() {
     // the queue still full.
     {
         TcpServer s6;
-        if (!s6.start(port + 5, 8)) { printf("could not start sixth server\n"); bail(); }
+        if (!s6.start(0, 8)) { printf("could not start sixth server\n"); bail(); }
+        const int port6 = s6.getPort();
 
         auto completedMutex = make_shared<mutex>();
         auto completed = make_shared<vector<TcpSendCompleteEventArgs>>();
@@ -556,7 +565,7 @@ TC_CORE_TEST_MAIN() {
                 completed->push_back(a);
             });
 
-        rawsocket_t deaf = connectSilentPeer(port + 5);
+        rawsocket_t deaf = connectSilentPeer(port6);
         if (deaf == static_cast<rawsocket_t>(-1)) { printf("no deaf peer\n"); bail(); }
         for (int i = 0; i < 200 && s6.getClientCount() < 1; ++i)
             this_thread::sleep_for(chrono::milliseconds(5));
@@ -648,9 +657,10 @@ TC_CORE_TEST_MAIN() {
     // socket would overtake everything already queued ahead of it.
     {
         TcpServer s7;
-        if (!s7.start(port + 6, 8)) { printf("could not start seventh server\n"); bail(); }
+        if (!s7.start(0, 8)) { printf("could not start seventh server\n"); bail(); }
+        const int port7 = s7.getPort();
 
-        rawsocket_t reader = connectSilentPeer(port + 6, /*shrinkRecvBuffer=*/false);
+        rawsocket_t reader = connectSilentPeer(port7, /*shrinkRecvBuffer=*/false);
         if (reader == static_cast<rawsocket_t>(-1)) { printf("no reader\n"); bail(); }
         setRecvTimeout(reader, 2000);
         for (int i = 0; i < 200 && s7.getClientCount() < 1; ++i)
@@ -677,7 +687,7 @@ TC_CORE_TEST_MAIN() {
 
         // broadcastAsync buffers the payload once and reports how many clients
         // took it.
-        rawsocket_t second = connectSilentPeer(port + 6, /*shrinkRecvBuffer=*/false);
+        rawsocket_t second = connectSilentPeer(port7, /*shrinkRecvBuffer=*/false);
         if (second == static_cast<rawsocket_t>(-1)) { printf("no second reader\n"); bail(); }
         setRecvTimeout(second, 2000);
         for (int i = 0; i < 200 && s7.getClientCount() < 2; ++i)
@@ -720,7 +730,8 @@ TC_CORE_TEST_MAIN() {
     // send after it fills is the one that gets nothing through.
     {
         TcpServer s8;
-        if (!s8.start(port + 7, 8)) { printf("could not start eighth server\n"); bail(); }
+        if (!s8.start(0, 8)) { printf("could not start eighth server\n"); bail(); }
+        const int port8 = s8.getPort();
         s8.setSendTimeout(0.5f);                  // short, so this does not take a minute
         s8.setSendAsyncBufferSize(64 * 1024);     // bounds the queue at 64k one-byte items
 
@@ -733,7 +744,7 @@ TC_CORE_TEST_MAIN() {
                 sawTimeout->store(true);
             });
 
-        rawsocket_t deaf = connectSilentPeer(port + 7);
+        rawsocket_t deaf = connectSilentPeer(port8);
         if (deaf == static_cast<rawsocket_t>(-1)) { printf("no deaf peer\n"); bail(); }
         for (int i = 0; i < 200 && s8.getClientCount() < 1; ++i)
             this_thread::sleep_for(chrono::milliseconds(5));
@@ -782,10 +793,11 @@ TC_CORE_TEST_MAIN() {
         const bool ok = completesWithin(30000, [&] {
             for (int round = 0; round < 20; ++round) {
                 TcpServer s4;
-                if (!s4.start(port + 3, 8)) return;
+                if (!s4.start(0, 8)) return;
+                const int port4 = s4.getPort();
 
-                rawsocket_t a = connectSilentPeer(port + 3);
-                rawsocket_t b = connectSilentPeer(port + 3);
+                rawsocket_t a = connectSilentPeer(port4);
+                rawsocket_t b = connectSilentPeer(port4);
                 for (int i = 0; i < 200 && s4.getClientCount() < 2; ++i)
                     this_thread::sleep_for(chrono::milliseconds(5));
 

@@ -64,10 +64,11 @@ std::vector<uint8_t> OscMessage::toBytes() const {
     // Type tags (comma + tags + null-terminated + padding)
     appendPaddedString(result, "," + typeTags_);
 
-    // Argument data, written by tag
-    for (size_t i = 0; i < args_.size(); ++i) {
-        const ArgVariant& arg = args_[i];
-        switch (typeTags_[i]) {
+    // Argument data, written by tag. T F N I [ ] have no data and no
+    // stored argument.
+    for (const StoredArg& stored : args_) {
+        const ArgVariant& arg = stored.value;
+        switch (typeTags_[stored.index]) {
             case 'i':
                 appendBe32(result, static_cast<uint32_t>(std::get<int32_t>(arg)));
                 break;
@@ -108,7 +109,6 @@ std::vector<uint8_t> OscMessage::toBytes() const {
                 break;
             }
             default:
-                // T F N I [ ] have no data
                 break;
         }
     }
@@ -165,60 +165,57 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok, boo
     msg.typeTags_ = std::string(reinterpret_cast<const char*>(data + typeTagStart), typeTagEnd - typeTagStart);
     pos = skipPadding(typeTagEnd + 1, size, paddingMissing);
 
-    // Read arguments: one stored argument per tag. Every tag must be an OSC
-    // 1.0 tag, and every argument's data must be there in full.
+    // Read arguments: one stored argument per tag with data. Every tag must
+    // be an OSC 1.0 tag, and every argument's data must be there in full.
     int arrayDepth = 0;
-    for (char type : msg.typeTags_) {
-        switch (type) {
+    for (size_t index = 0; index < msg.typeTags_.size(); ++index) {
+        switch (msg.typeTags_[index]) {
             case 'i':
                 if (4 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<int32_t>, static_cast<int32_t>(readBe32(data + pos)));
+                msg.storeArg<int32_t>(index, static_cast<int32_t>(readBe32(data + pos)));
                 pos += 4;
                 break;
             case 'f':
                 if (4 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<float>, uint32ToFloat(readBe32(data + pos)));
+                msg.storeArg<float>(index, uint32ToFloat(readBe32(data + pos)));
                 pos += 4;
                 break;
             case 'c':
                 if (4 > size - pos) return msg;
                 // ASCII character in the low byte of 32 bits
-                msg.args_.emplace_back(std::in_place_type<char>, static_cast<char>(readBe32(data + pos) & 0xFF));
+                msg.storeArg<char>(index, static_cast<char>(readBe32(data + pos) & 0xFF));
                 pos += 4;
                 break;
             case 'r':
                 if (4 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<OscRgba>,
-                                       OscRgba{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
+                msg.storeArg<OscRgba>(index, OscRgba{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
                 pos += 4;
                 break;
             case 'm':
                 if (4 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<OscMidi>,
-                                       OscMidi{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
+                msg.storeArg<OscMidi>(index, OscMidi{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
                 pos += 4;
                 break;
             case 'h':
                 if (8 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<int64_t>, static_cast<int64_t>(readBe64(data + pos)));
+                msg.storeArg<int64_t>(index, static_cast<int64_t>(readBe64(data + pos)));
                 pos += 8;
                 break;
             case 'd':
                 if (8 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<double>, uint64ToDouble(readBe64(data + pos)));
+                msg.storeArg<double>(index, uint64ToDouble(readBe64(data + pos)));
                 pos += 8;
                 break;
             case 't':
                 if (8 > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<OscTimetag>, OscTimetag{ readBe64(data + pos) });
+                msg.storeArg<OscTimetag>(index, OscTimetag{ readBe64(data + pos) });
                 pos += 8;
                 break;
             case 's':
             case 'S': {
                 size_t strEnd = findNull(data, size, pos);
                 if (strEnd == size_t(-1)) return msg;
-                msg.args_.emplace_back(std::in_place_type<std::string>,
-                                       reinterpret_cast<const char*>(data + pos), strEnd - pos);
+                msg.storeArg<std::string>(index, reinterpret_cast<const char*>(data + pos), strEnd - pos);
                 pos = skipPadding(strEnd + 1, size, paddingMissing);
                 break;
             }
@@ -228,29 +225,22 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok, boo
                 pos += 4;
                 // The blob must fit in the data left
                 if (blobSize > size - pos) return msg;
-                msg.args_.emplace_back(std::in_place_type<std::vector<uint8_t>>,
-                                       data + pos, data + pos + blobSize);
+                msg.storeArg<std::vector<uint8_t>>(index, data + pos, data + pos + blobSize);
                 pos = skipPadding(pos + blobSize, size, paddingMissing);
                 break;
             }
             case 'T':
-                msg.args_.emplace_back(std::in_place_type<bool>, true);
-                break;
             case 'F':
-                msg.args_.emplace_back(std::in_place_type<bool>, false);
-                break;
             case 'N':
             case 'I':
-                msg.args_.emplace_back(std::in_place_type<std::monostate>);
+                // No data: the type tag alone is the argument
                 break;
             case '[':
                 ++arrayDepth;
-                msg.args_.emplace_back(std::in_place_type<std::monostate>);
                 break;
             case ']':
                 if (arrayDepth == 0) return msg;  // ']' without a '['
                 --arrayDepth;
-                msg.args_.emplace_back(std::in_place_type<std::monostate>);
                 break;
             default:
                 // Not an OSC 1.0 type tag: its size is unknown
@@ -270,10 +260,16 @@ std::string OscMessage::toString() const {
     std::ostringstream oss;
     oss << address_;
 
-    for (size_t i = 0; i < args_.size(); ++i) {
+    for (size_t i = 0; i < typeTags_.size(); ++i) {
         oss << " ";
-        char type = (i < typeTags_.size()) ? typeTags_[i] : '?';
-        const ArgVariant& arg = args_[i];
+        const char type = typeTags_[i];
+        const ArgVariant* stored = findArg(i);
+        if (!stored) {
+            // T F N I [ ] are shown as their tag
+            oss << type;
+            continue;
+        }
+        const ArgVariant& arg = *stored;
 
         switch (type) {
             case 'i': oss << "i:" << std::get<int32_t>(arg); break;
@@ -296,7 +292,6 @@ std::string OscMessage::toString() const {
                 break;
             }
             default:
-                // T F N I [ ] are shown as their tag
                 oss << type;
                 break;
         }
