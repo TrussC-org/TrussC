@@ -8184,7 +8184,13 @@ How long it may take depends on the platform:
   only a generous ceiling. On a timeout it returns the bytes written so far
   (possibly 0) and logs one warning per connection; the port stays open and
   `onDisconnect` does not fire. A failed write still counts as a loss.
-- **Android:** waits up to 1 s per 16 KB for the device to take the data.
+- **Android:** sends the data in chunks of up to 16 KB and waits for the
+  device to take each one, at most the Windows rule above applied to the
+  chunk: 16 KB at 9600 baud gets about 87 s, at 115200 baud about 21 s. On a
+  timeout it returns the bytes of the chunks that completed (possibly 0) and
+  logs one warning per connection; the port stays open. Android does not
+  report how much of a timed-out chunk went out, so some bytes past the
+  returned count may have reached the device too.
 
 A write that must never stall the app goes on a thread of its own: the other
 I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
@@ -8204,7 +8210,12 @@ details.ja = '''
   タイムアウトすると、それまでに書けたバイト数（0 もありうる）を返し、接続ごとに
   1回だけ警告をログに出す。ポートは開いたままで、`onDisconnect` も発火しない。
   書き込みが失敗した場合は、今までどおり消失として扱う。
-- **Android:** 機器がデータを受け取るのを 16 KB ごとに最大1秒待つ。
+- **Android:** データを最大 16 KB ずつに分けて送り、機器がそれぞれを受け取るのを
+  待つ。上限は上の Windows の規則をその塊に当てはめた時間で、16 KB なら 9600 baud
+  で約 87 秒、115200 baud で約 21 秒。タイムアウトすると、送り終えた塊のバイト数
+  （0 もありうる）を返し、接続ごとに1回だけ警告をログに出す。ポートは開いたまま。
+  タイムアウトした塊がどこまで送れたかは Android が報告しないので、返した数より
+  先のバイトも機器に届いていることがある。
 
 アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
 それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
@@ -8223,7 +8234,12 @@ details.ko = '''
   쓴 바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
   포트는 열린 채로 남고 `onDisconnect`도 발생하지 않는다. 쓰기가 실패하면 기존대로
   소실로 취급한다.
-- **Android:** 장치가 데이터를 받기를 16 KB마다 최대 1초 기다린다.
+- **Android:** 데이터를 최대 16 KB씩 나누어 보내고, 장치가 각각을 받기를
+  기다린다. 상한은 위의 Windows 규칙을 그 덩어리에 적용한 시간으로, 16 KB라면
+  9600 baud에서 약 87초, 115200 baud에서 약 21초. 타임아웃되면 다 보낸 덩어리의
+  바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
+  포트는 열린 채로 남는다. 타임아웃된 덩어리가 어디까지 보내졌는지는 Android가
+  알려 주지 않으므로, 반환한 수보다 뒤의 바이트도 장치에 도달했을 수 있다.
 
 앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
 기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)

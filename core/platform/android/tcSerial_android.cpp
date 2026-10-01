@@ -67,10 +67,10 @@ constexpr int CDC_LINE_DTR_RTS           = 0x03;
 constexpr int    PERMISSION_TIMEOUT_SEC = 60;   // give up on an unanswered dialog
 constexpr int    PERMISSION_POLL_MS     = 200;
 constexpr int    READ_TIMEOUT_MS        = 250;  // per-ioctl bulk read timeout
-constexpr int    WRITE_TIMEOUT_MS       = 1000;
+constexpr int    CONTROL_TIMEOUT_MS     = 1000; // CDC control requests
 constexpr size_t RX_BUFFER_CAP          = 1 << 20;  // drop oldest beyond 1 MiB
 constexpr int    READ_CHUNK             = 4096;     // multiple of bulk max packet
-constexpr int    WRITE_CHUNK            = 16384;    // usbfs per-urb limit
+constexpr int    WRITE_CHUNK            = internal::serialAndroidWriteChunk;  // usbfs per-urb limit
 
 enum class State : int { Idle = 0, Pending = 1, Connected = 2 };
 
@@ -393,7 +393,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
         jbyteArray arr = env->NewByteArray(7);
         env->SetByteArrayRegion(arr, 0, 7, (const jbyte*)coding);
         int r = env->CallIntMethod(connection, controlTransfer,
-            CDC_REQ_TYPE, CDC_SET_LINE_CODING, 0, commIfaceId, arr, 7, WRITE_TIMEOUT_MS);
+            CDC_REQ_TYPE, CDC_SET_LINE_CODING, 0, commIfaceId, arr, 7, CONTROL_TIMEOUT_MS);
         clearJniException(env, "controlTransfer(SET_LINE_CODING)");
         env->DeleteLocalRef(arr);
         if (r < 0) blog(LogLevel::Warning) << "Serial: SET_LINE_CODING not accepted (continuing)";
@@ -401,7 +401,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
         // Assert DTR + RTS so the device starts sending
         env->CallIntMethod(connection, controlTransfer,
             CDC_REQ_TYPE, CDC_SET_CONTROL_LINE_STATE, CDC_LINE_DTR_RTS, commIfaceId,
-            (jbyteArray) nullptr, 0, WRITE_TIMEOUT_MS);
+            (jbyteArray) nullptr, 0, CONTROL_TIMEOUT_MS);
         clearJniException(env, "controlTransfer(SET_CONTROL_LINE_STATE)");
     }
 
@@ -817,8 +817,9 @@ int readBytes(Impl* impl, void* buffer, int length) {
     return n;
 }
 
-int writeBytes(Impl* impl, const void* buffer, int length, int& error) {
+int writeBytes(Impl* impl, const void* buffer, int length, int& error, bool& timedOut) {
     error = 0;
+    timedOut = false;
     if (impl->state.load() != (int)State::Connected) return -1;
     if (length <= 0) return 0;
 
@@ -828,11 +829,20 @@ int writeBytes(Impl* impl, const void* buffer, int length, int& error) {
         usbdevfs_bulktransfer bt{};
         bt.ep = (unsigned int)impl->epOut;
         bt.len = (unsigned int)chunk;
-        bt.timeout = WRITE_TIMEOUT_MS;
+        // From the rate, as on Windows: a 16 KB chunk takes about 17 s at
+        // 9600 baud on a CDC-to-UART bridge
+        bt.timeout = internal::serialWriteTimeoutMs(impl->baud, chunk);
         bt.data = (void*)((const unsigned char*)buffer + written);
         int r = ioctl(impl->fd, USBDEVFS_BULK, &bt);
         if (r < 0) {
-            error = errno;  // Serial logs it, with its lock released
+            int err = errno;
+            if (err == ETIMEDOUT) {
+                // usbfs does not report how much of a timed-out transfer
+                // went out: count the completed chunks only. Serial warns.
+                timedOut = true;
+                return written;
+            }
+            error = err;  // Serial logs it, with its lock released
             return written > 0 ? written : -1;
         }
         written += r;
