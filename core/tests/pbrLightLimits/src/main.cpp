@@ -19,6 +19,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <string>
@@ -26,6 +27,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -44,7 +47,9 @@ static int countWarnings(const string& needle) {
     return n;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
         if (e.level == LogLevel::Warning) g_warnings.push_back(e.message);
     });

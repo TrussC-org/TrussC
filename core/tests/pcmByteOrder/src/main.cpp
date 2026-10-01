@@ -11,6 +11,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -20,6 +21,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -154,7 +157,9 @@ static void check32(bool bigEndian, size_t misalign) {
     }
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     for (size_t misalign : {(size_t)0, (size_t)1}) {
         check16(false, misalign);
         check16(true, misalign);

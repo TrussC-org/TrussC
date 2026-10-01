@@ -2141,11 +2141,11 @@ const char * logLevelToString(LogLevel level)  // Return the uppercase name of a
 LogStream logNotice(const std::string & module = std::string(""))  // Print to console
 LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
 LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
-Json nodeToJson(Node & node, int maxDepth)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection
+Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under "derived"
 Json parseJson(const std::string & str)  // Parse a JSON string into a Json object; returns an empty Json on parse error.
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.
-Json reflectToJson(T & obj)  // Return all reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod.
+Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain.
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
@@ -3652,8 +3652,11 @@ bool RectNodeButton::onMouseRelease(const MouseEventArgs & e)  // Clear the pres
 ```cpp
 void Reflector::beginGroup(const char * name)  // Enter a nested composite group of reflected members (no-op for flat backends).
 void Reflector::endGroup()  // Leave the current nested group.
+bool Reflector::isDerived() const  // Return true if the current member is a derived value (TC_DERIVED): computed from another member, writable, but not saved.
 bool Reflector::isReadOnly() const  // Return true if the current reflection scope is read-only.
+void Reflector::popDerived()  // Leave the current derived-value scope.
 void Reflector::popReadOnly()  // Leave the current read-only scope.
+void Reflector::pushDerived()  // Enter a derived-value scope (TC_DERIVED visits inside it).
 void Reflector::pushReadOnly()  // Enter a read-only scope (members visited inside cannot be written).
 bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflected member by name and value; return true if it was edited.
 ```
@@ -3960,7 +3963,7 @@ void TcpServer::disconnectClient(int clientId)  // Disconnect a specific client
 const TcpServerClient * TcpServer::getClient(int clientId) const  // Client info (nullptr if not found)
 int TcpServer::getClientCount() const  // Number of connected clients
 std::vector<int> TcpServer::getClientIds() const  // IDs of all connected clients
-int TcpServer::getPort() const  // The listening port
+int TcpServer::getPort() const  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
 size_t TcpServer::getSendAsyncBufferSize() const  // The current high-water mark for one client's send queue, in bytes
 size_t TcpServer::getSendAsyncPendingBytes(int clientId) const  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
 bool TcpServer::isRunning() const  // Whether the server is running

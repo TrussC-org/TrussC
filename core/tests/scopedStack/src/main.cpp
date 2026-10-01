@@ -23,12 +23,15 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <stdexcept>
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void checkn(const char* name, bool ok, long long got) {
@@ -185,7 +188,9 @@ static void testException() {
     check("exception: matrix after is identity", isIdentity(getMatrix()));
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifndef NDEBUG
     std::printf("SKIP: needs a release build (sokol_gl asserts it is set up on pushMatrix())\n");
     return 0;

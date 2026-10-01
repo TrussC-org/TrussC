@@ -21,12 +21,13 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 
 #ifdef _WIN32
 
-int main() {
+TC_CORE_TEST_MAIN() {
     printf("SKIP: SIGPIPE does not exist on Windows\n");
     return 0;
 }
@@ -54,6 +55,8 @@ int main() {
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static atomic<int> g_fail{0};
 
@@ -213,7 +216,9 @@ static void scenario() {
     ::close(listener);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // The invariant is that TcpClient does not need SIGPIPE ignored. Make sure
     // nothing in the process ignores it for us, or this test proves nothing.
     std::signal(SIGPIPE, SIG_DFL);

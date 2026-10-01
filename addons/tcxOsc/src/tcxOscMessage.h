@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <utility>
+#include <algorithm>
 
 namespace tcx::osc {
 
@@ -117,8 +118,8 @@ struct OscTimetag {
 // so getArgType(i) and the argument at index i always belong together.
 class OscMessage {
 public:
-    // Argument types. Tags without data (N, I, [, ]) hold std::monostate;
-    // the tag tells them apart.
+    // Argument values. Only tags with data store one; for T F N I [ ] the
+    // type tag alone is the value.
     using ArgVariant = std::variant<int32_t, float, std::string, std::vector<uint8_t>, bool,
                                     int64_t, double, OscTimetag, char, OscRgba, OscMidi,
                                     std::monostate>;
@@ -145,7 +146,7 @@ public:
         return add<std::vector<uint8_t>>('b', std::move(blob));
     }
 
-    OscMessage& addBool(bool value) { return add<bool>(value ? 'T' : 'F', value); }
+    OscMessage& addBool(bool value) { return addTag(value ? 'T' : 'F'); }
 
     OscMessage& addInt64(int64_t value) { return add<int64_t>('h', value); }
     OscMessage& addDouble(double value) { return add<double>('d', value); }
@@ -157,17 +158,17 @@ public:
     OscMessage& addChar(char value) { return add<char>('c', value); }
     OscMessage& addRgba(const OscRgba& value) { return add<OscRgba>('r', value); }
     OscMessage& addMidi(const OscMidi& value) { return add<OscMidi>('m', value); }
-    OscMessage& addNil() { return add<std::monostate>('N', std::monostate{}); }
-    OscMessage& addImpulse() { return add<std::monostate>('I', std::monostate{}); }
+    OscMessage& addNil() { return addTag('N'); }
+    OscMessage& addImpulse() { return addTag('I'); }
     // The arguments added between these two form an array. Each bracket is
     // an argument of its own (tag '[' / ']'), so indexes stay aligned.
-    OscMessage& addArrayBegin() { return add<std::monostate>('[', std::monostate{}); }
-    OscMessage& addArrayEnd() { return add<std::monostate>(']', std::monostate{}); }
+    OscMessage& addArrayBegin() { return addTag('['); }
+    OscMessage& addArrayEnd() { return addTag(']'); }
 
     // -------------------------------------------------------------------------
     // Get arguments
     // -------------------------------------------------------------------------
-    size_t getArgCount() const { return args_.size(); }
+    size_t getArgCount() const { return typeTags_.size(); }
     std::string getTypeTags() const { return typeTags_; }
 
     char getArgType(size_t index) const {
@@ -178,45 +179,50 @@ public:
     // The numeric getters (Int, Float, Int64, Double) convert between the
     // i, f, h and d arguments.
     int32_t getArgAsInt(size_t index) const {
-        if (index >= args_.size()) return 0;
-        if (auto* v = std::get_if<int32_t>(&args_[index])) return *v;
-        if (auto* v = std::get_if<float>(&args_[index])) return static_cast<int32_t>(*v);
-        if (auto* v = std::get_if<int64_t>(&args_[index])) return static_cast<int32_t>(*v);
-        if (auto* v = std::get_if<double>(&args_[index])) return static_cast<int32_t>(*v);
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return 0;
+        if (auto* v = std::get_if<int32_t>(arg)) return *v;
+        if (auto* v = std::get_if<float>(arg)) return static_cast<int32_t>(*v);
+        if (auto* v = std::get_if<int64_t>(arg)) return static_cast<int32_t>(*v);
+        if (auto* v = std::get_if<double>(arg)) return static_cast<int32_t>(*v);
         return 0;
     }
 
     float getArgAsFloat(size_t index) const {
-        if (index >= args_.size()) return 0.0f;
-        if (auto* v = std::get_if<float>(&args_[index])) return *v;
-        if (auto* v = std::get_if<int32_t>(&args_[index])) return static_cast<float>(*v);
-        if (auto* v = std::get_if<int64_t>(&args_[index])) return static_cast<float>(*v);
-        if (auto* v = std::get_if<double>(&args_[index])) return static_cast<float>(*v);
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return 0.0f;
+        if (auto* v = std::get_if<float>(arg)) return *v;
+        if (auto* v = std::get_if<int32_t>(arg)) return static_cast<float>(*v);
+        if (auto* v = std::get_if<int64_t>(arg)) return static_cast<float>(*v);
+        if (auto* v = std::get_if<double>(arg)) return static_cast<float>(*v);
         return 0.0f;
     }
 
     int64_t getArgAsInt64(size_t index) const {
-        if (index >= args_.size()) return 0;
-        if (auto* v = std::get_if<int64_t>(&args_[index])) return *v;
-        if (auto* v = std::get_if<int32_t>(&args_[index])) return *v;
-        if (auto* v = std::get_if<float>(&args_[index])) return static_cast<int64_t>(*v);
-        if (auto* v = std::get_if<double>(&args_[index])) return static_cast<int64_t>(*v);
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return 0;
+        if (auto* v = std::get_if<int64_t>(arg)) return *v;
+        if (auto* v = std::get_if<int32_t>(arg)) return *v;
+        if (auto* v = std::get_if<float>(arg)) return static_cast<int64_t>(*v);
+        if (auto* v = std::get_if<double>(arg)) return static_cast<int64_t>(*v);
         return 0;
     }
 
     double getArgAsDouble(size_t index) const {
-        if (index >= args_.size()) return 0.0;
-        if (auto* v = std::get_if<double>(&args_[index])) return *v;
-        if (auto* v = std::get_if<float>(&args_[index])) return *v;
-        if (auto* v = std::get_if<int32_t>(&args_[index])) return *v;
-        if (auto* v = std::get_if<int64_t>(&args_[index])) return static_cast<double>(*v);
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return 0.0;
+        if (auto* v = std::get_if<double>(arg)) return *v;
+        if (auto* v = std::get_if<float>(arg)) return *v;
+        if (auto* v = std::get_if<int32_t>(arg)) return *v;
+        if (auto* v = std::get_if<int64_t>(arg)) return static_cast<double>(*v);
         return 0.0;
     }
 
     // 's' and 'S' arguments
     std::string getArgAsString(size_t index) const {
-        if (index >= args_.size()) return "";
-        if (auto* v = std::get_if<std::string>(&args_[index])) return *v;
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return "";
+        if (auto* v = std::get_if<std::string>(arg)) return *v;
         return "";
     }
 
@@ -224,38 +230,42 @@ public:
     std::string getArgAsSymbol(size_t index) const { return getArgAsString(index); }
 
     std::vector<uint8_t> getArgAsBlob(size_t index) const {
-        if (index >= args_.size()) return {};
-        if (auto* v = std::get_if<std::vector<uint8_t>>(&args_[index])) return *v;
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return {};
+        if (auto* v = std::get_if<std::vector<uint8_t>>(arg)) return *v;
         return {};
     }
 
+    // true for a 'T' argument, false otherwise
     bool getArgAsBool(size_t index) const {
-        if (index >= args_.size()) return false;
-        if (auto* v = std::get_if<bool>(&args_[index])) return *v;
-        return false;
+        return index < typeTags_.size() && typeTags_[index] == 'T';
     }
 
     uint64_t getArgAsTimetag(size_t index) const {
-        if (index >= args_.size()) return 0;
-        if (auto* v = std::get_if<OscTimetag>(&args_[index])) return v->value;
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return 0;
+        if (auto* v = std::get_if<OscTimetag>(arg)) return v->value;
         return 0;
     }
 
     char getArgAsChar(size_t index) const {
-        if (index >= args_.size()) return '\0';
-        if (auto* v = std::get_if<char>(&args_[index])) return *v;
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return '\0';
+        if (auto* v = std::get_if<char>(arg)) return *v;
         return '\0';
     }
 
     OscRgba getArgAsRgba(size_t index) const {
-        if (index >= args_.size()) return {};
-        if (auto* v = std::get_if<OscRgba>(&args_[index])) return *v;
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return {};
+        if (auto* v = std::get_if<OscRgba>(arg)) return *v;
         return {};
     }
 
     OscMidi getArgAsMidi(size_t index) const {
-        if (index >= args_.size()) return {};
-        if (auto* v = std::get_if<OscMidi>(&args_[index])) return *v;
+        const ArgVariant* arg = findArg(index);
+        if (!arg) return {};
+        if (auto* v = std::get_if<OscMidi>(arg)) return *v;
         return {};
     }
 
@@ -288,16 +298,48 @@ public:
     }
 
 private:
+    // An argument with data, and the index of its type tag
+    struct StoredArg {
+        size_t index;
+        ArgVariant value;
+    };
+
     template <typename T, typename V>
     OscMessage& add(char tag, V&& value) {
+        storeArg<T>(typeTags_.size(), std::forward<V>(value));
         typeTags_ += tag;
-        args_.emplace_back(std::in_place_type<T>, std::forward<V>(value));
         return *this;
     }
 
+    // A tag without data (T F N I [ ]): the type tag alone
+    OscMessage& addTag(char tag) {
+        typeTags_ += tag;
+        return *this;
+    }
+
+    // Append an argument with data for the type tag at index. Indexes are
+    // appended in increasing order, so args_ stays sorted by index.
+    template <typename T, typename... V>
+    void storeArg(size_t index, V&&... value) {
+        args_.push_back(StoredArg{ index, ArgVariant(std::in_place_type<T>, std::forward<V>(value)...) });
+    }
+
+    // The stored argument for the type tag at index, or nullptr when that
+    // tag has no data or index is past the last tag
+    const ArgVariant* findArg(size_t index) const {
+        auto it = std::lower_bound(args_.begin(), args_.end(), index,
+                                   [](const StoredArg& a, size_t i) { return a.index < i; });
+        if (it == args_.end() || it->index != index) return nullptr;
+        return &it->value;
+    }
+
+    friend struct OscMessageTestAccess;  // lets the addon tests count args_
+
     std::string address_;
+    // One tag per argument, with or without data
     std::string typeTags_;
-    std::vector<ArgVariant> args_;
+    // The arguments with data only, in tag order
+    std::vector<StoredArg> args_;
 };
 
 }  // namespace tcx::osc
