@@ -293,8 +293,9 @@ public:
     }
     int getOversample() const { return oversample_; }
 
-    // Largest atlas page side in texels (the GPU limit, capped at 8192).
-    int getMaxAtlasSize() const { return maxAtlasSize_; }
+    // Test hook (core/tests/fontAtlasLimit), not part of the Font API:
+    // largest atlas page side in texels (the GPU limit, capped at 8192).
+    int getMaxAtlasSizeForTests() const { return maxAtlasSize_; }
 
 private:
     // A glyph fits the largest page when its padded box fits the region the

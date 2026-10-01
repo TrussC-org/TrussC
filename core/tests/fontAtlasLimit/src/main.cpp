@@ -142,7 +142,7 @@ static Bytes makeFont() {
 }
 
 // --- checks ------------------------------------------------------------------
-static bool near(float a, float b, float tol) { return fabs(a - b) <= tol; }
+static bool approxEq(float a, float b, float tol) { return fabs(a - b) <= tol; }
 
 // Texel size of a glyph in its atlas page.
 static void texelSize(const internal::FontAtlasManager& m, const internal::GlyphInfo* g,
@@ -158,12 +158,12 @@ static void checkGlyphSize(const string& label, const internal::GlyphInfo* g, in
     const float px = (float)fontSize;
     const float tol = 0.01f * px + 2.0f;
     check(label + ": size in final pixels matches the outline",
-          g && near(g->getWidth(), wEm * px, tol) && near(g->getHeight(), hEm * px, tol),
+          g && approxEq(g->getWidth(), wEm * px, tol) && approxEq(g->getHeight(), hEm * px, tol),
           g ? "w=" + to_string(g->getWidth()) + " h=" + to_string(g->getHeight()) +
                   " expected " + to_string(wEm * px) + " x " + to_string(hEm * px)
             : "no glyph");
     check(label + ": offset in final pixels matches the outline",
-          g && near(g->getXoff(), 0.0f, tol) && near(g->getYoff(), -0.8f * px, tol),
+          g && approxEq(g->getXoff(), 0.0f, tol) && approxEq(g->getYoff(), -0.8f * px, tol),
           g ? "xoff=" + to_string(g->getXoff()) + " yoff=" + to_string(g->getYoff()) : "no glyph");
 }
 
@@ -180,7 +180,7 @@ static void checkFits(const Bytes& font) {
     float tw = 0, th = 0;
     texelSize(m, g, tw, th);
     // 100 px at oversampling 4, plus the 3-texel prefilter margin.
-    check("fits: 'A' keeps oversampling 4", near(tw, 403.0f, 1.0f) && near(th, 403.0f, 1.0f),
+    check("fits: 'A' keeps oversampling 4", approxEq(tw, 403.0f, 1.0f) && approxEq(th, 403.0f, 1.0f),
           "texels " + to_string(tw) + " x " + to_string(th));
     checkGlyphSize("fits: 'A'", g, 100, 1.0f, 1.0f);
 }
@@ -200,7 +200,7 @@ static void checkAbovePageLimit(const Bytes& font) {
     check("above limit: the warning names the size, oversampling and page limit",
           g_lastWarning.find("3000") != string::npos &&
               g_lastWarning.find("oversampling 2") != string::npos &&
-              g_lastWarning.find(to_string(m.getMaxAtlasSize())) != string::npos,
+              g_lastWarning.find(to_string(m.getMaxAtlasSizeForTests())) != string::npos,
           "\"" + g_lastWarning + "\"");
 
     const internal::GlyphInfo* g = m.getOrLoadGlyph('A');
@@ -210,7 +210,7 @@ static void checkAbovePageLimit(const Bytes& font) {
     const size_t memory = m.getMemoryUsage();
     float tw = 0, th = 0;
     texelSize(m, g, tw, th);
-    const int maxSize = m.getMaxAtlasSize();
+    const int maxSize = m.getMaxAtlasSizeForTests();
     check("above limit: 'A' texel box fits the page",
           tw <= maxSize / 2.0f && th <= (float)maxSize && tw > maxSize / 4.0f,
           "texels " + to_string(tw) + " x " + to_string(th));
@@ -276,14 +276,14 @@ static void checkLoweredInteger(const Bytes& font) {
     texelSize(m, gw, tw, th);
     // 600 x 300 px at 3 texels per pixel, plus the 2-texel prefilter margin.
     check("lowered oversampling: 'W' rasterized at 3 texels per pixel",
-          near(tw, 1802.0f, 1.0f) && near(th, 902.0f, 1.0f),
+          approxEq(tw, 1802.0f, 1.0f) && approxEq(th, 902.0f, 1.0f),
           "texels " + to_string(tw) + " x " + to_string(th));
     checkGlyphSize("lowered oversampling: 'W'", gw, fontSize, 2.0f, 1.0f);
     const internal::GlyphInfo* ga = m.getOrLoadGlyph('A');
     float aw = 0, ah = 0;
     if (ga) texelSize(m, ga, aw, ah);
     check("lowered oversampling: 'A' keeps 4 texels per pixel",
-          ga && ga->isValid() && near(aw, 1203.0f, 1.0f),
+          ga && ga->isValid() && approxEq(aw, 1203.0f, 1.0f),
           "texels " + to_string(aw));
     check("lowered oversampling: no further warning", g_warnings - before == 1);
 }
@@ -299,7 +299,7 @@ static void checkBelowOne(const Bytes& font) {
     float tw = 0, th = 0;
     texelSize(m, g, tw, th);
     check("below 1: 'A' rasterized below 1 texel per pixel",
-          tw < (float)fontSize && tw <= m.getMaxAtlasSize() / 2.0f,
+          tw < (float)fontSize && tw <= m.getMaxAtlasSizeForTests() / 2.0f,
           "texels " + to_string(tw) + " x " + to_string(th));
     checkGlyphSize("below 1: 'A'", g, fontSize, 1.0f, 1.0f);
 }
