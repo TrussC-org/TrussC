@@ -23,6 +23,7 @@
 // are already included: tcMath.h, tcColor.h, tcBitmapFont.h, sokol_gl.h
 
 #include "tc/graphics/tcCurveTessellation.h"
+#include "tc/utils/tcTypeName.h"
 
 #include <vector>
 #include <string>
@@ -253,9 +254,11 @@ public:
 
     // A pop with nothing pushed is a bug in the caller: warn (rate-limited)
     // and leave both stacks alone, so TrussC's and sokol_gl's stay in step.
+    // Inside a Node's draw() the stack floor (#348) is that node's depth, so a
+    // pop that would reach its parent's entries is refused the same way.
     void popMatrix() {
-        if (matrixStack_.empty()) {
-            warnUnbalanced(popMatrixWarning_, "popMatrix() without a matching pushMatrix()");
+        if (matrixStack_.size() <= stackFloor_.matrix) {
+            warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()");
             return;
         }
         currentMatrix_ = matrixStack_.back();
@@ -278,8 +281,8 @@ public:
     }
 
     void popStyle() {
-        if (styleStack_.empty()) {
-            warnUnbalanced(popStyleWarning_, "popStyle() without a matching pushStyle()");
+        if (styleStack_.size() <= stackFloor_.style) {
+            warnPopAtFloor(popStyleWarning_, "popStyle()", "pushStyle()");
             return;
         }
         style_ = styleStack_.back();
@@ -306,22 +309,62 @@ public:
         matrixStack_.clear();
         styleStack_.clear();
         currentMatrix_ = Mat4::identity();
+        stackFloor_ = StackFloor{};
     }
 
-    // After a Node's draw() (and its mods) run: if it left the stacks deeper or
-    // shallower than it found them, name the node and put them back, so its
-    // parent's own pop — and every later sibling — see the depth they expect.
+    // Stack floor (#348): popMatrix() / popStyle() never pop below these
+    // depths. Node::drawTree() sets it to the depths it sees before draw(),
+    // with the node's type, so a stray pop in draw() is refused (and names the
+    // node) instead of popping the node's own entry and drawing its children
+    // in the parent's space. A 0 floor with no owner is the plain empty-stack
+    // guard.
+    struct StackFloor {
+        size_t matrix = 0;
+        size_t style = 0;
+        const std::type_info* owner = nullptr;  // node type that set it, or null
+    };
+
+    // Set the floor and return the previous one; the caller puts that back
+    // with setStackFloor(prev), since a draw() can run another node's drawTree().
+    StackFloor setStackFloor(size_t matrixDepth, size_t styleDepth, const std::type_info* owner) {
+        StackFloor prev = stackFloor_;
+        stackFloor_ = StackFloor{matrixDepth, styleDepth, owner};
+        return prev;
+    }
+    void setStackFloor(const StackFloor& floor) { stackFloor_ = floor; }
+
+    // After a Node's draw() (and its mods) run: if it left the stacks deeper
+    // than it found them (a missing pop), name the node and pop back to that
+    // depth, so its parent's own pop, its children and every later sibling
+    // see the matrix and style they expect. A stray pop is refused at the
+    // floor above; the shallower branch below is a safety net only.
     void restoreStackDepth(size_t matrixDepth, size_t styleDepth, const char* who) {
         const size_t md = matrixStack_.size(), sd = styleStack_.size();
         if (md == matrixDepth && sd == styleDepth) return;
-        warnUnbalanced(nodeDrawWarning_,
-            std::string(who) + "::draw() left the stacks unbalanced (pushMatrix " +
-            std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
-            std::to_string((long long)sd - (long long)styleDepth) + ")");
+        if (md >= matrixDepth && sd >= styleDepth) {
+            // Extra pushes: reported like a stray pop, naming the node (#348).
+            std::string what = std::string(who) + "::draw() called ";
+            if (md > matrixDepth) {
+                what += "pushMatrix() without a matching popMatrix()";
+                if (md - matrixDepth > 1) what += " x" + std::to_string(md - matrixDepth);
+            }
+            if (sd > styleDepth) {
+                if (md > matrixDepth) what += " and ";
+                what += "pushStyle() without a matching popStyle()";
+                if (sd - styleDepth > 1) what += " x" + std::to_string(sd - styleDepth);
+            }
+            warnUnbalanced(nodeDrawWarning_, what + " (dropped)");
+        } else {
+            warnUnbalanced(nodeDrawWarning_,
+                std::string(who) + "::draw() left the stacks unbalanced (pushMatrix " +
+                std::to_string((long long)md - (long long)matrixDepth) + ", pushStyle " +
+                std::to_string((long long)sd - (long long)styleDepth) + ")");
+        }
         while (matrixStack_.size() > matrixDepth) popMatrix();
         while (styleStack_.size() > styleDepth) popStyle();
-        // Popped more than it pushed: the lost entries can't be recovered, but
-        // refilling the depth keeps the parent's pops matched to its pushes.
+        // Shallower than expected (only if something got past the floor): the
+        // lost entries can't be recovered, but refilling the depth keeps the
+        // parent's pops matched to its pushes.
         while (matrixStack_.size() < matrixDepth) pushMatrix();
         while (styleStack_.size() < styleDepth) pushStyle();
     }
@@ -1056,6 +1099,21 @@ private:
     RateLimitedWarning popMatrixWarning_, popStyleWarning_, frameEndWarning_, nodeDrawWarning_;
     // Leaks dropped after an independent update (#349), apart from frame ends.
     RateLimitedWarning updateEndWarning_;
+
+    StackFloor stackFloor_;
+
+    // A pop refused at the floor (#348): name the node that set it, or use the
+    // generic message outside any node's draw(). The name is resolved only
+    // here, never per node per frame.
+    void warnPopAtFloor(RateLimitedWarning& generic, const char* pop, const char* push) {
+        if (stackFloor_.owner) {
+            warnUnbalanced(nodeDrawWarning_,
+                typeName(*stackFloor_.owner) + "::draw() called " + pop +
+                " without a matching " + push + " (ignored)");
+        } else {
+            warnUnbalanced(generic, std::string(pop) + " without a matching " + push);
+        }
+    }
 
     void warnUnbalanced(RateLimitedWarning& w, const std::string& what) {
         const auto now = std::chrono::steady_clock::now();
