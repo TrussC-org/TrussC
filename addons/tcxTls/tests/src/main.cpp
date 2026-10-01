@@ -43,6 +43,11 @@
 //     listener returned, taking the new connection with it.
 //   - An onError listener that reconnects after a refused connect() keeps
 //     its connection: connect() closes the failed socket before notifying.
+//   - A connection attempt that a newer attempt replaced (an onError
+//     listener reconnected after a failed handshake, or after a refused
+//     connectAsync()) reports no onConnect(false); the newer attempt reports
+//     onConnect(true) once. A failed handshake with no reconnect still
+//     reports onConnect(false) exactly once (#393).
 //   - The "bye" pattern without threads: an onReceive listener calls
 //     disconnect() and the main thread reconnects with setUseThread(false).
 //     The old receive thread stops (counted on Linux) and does not drive the
@@ -869,8 +874,11 @@ static void scenario() {
     check("handshake failure: TLS peer completes the new handshake",
           peer.accept(listener, server.conf, 5000));
     check("handshake failure: client is connected", waitFor(3000, isConnected));
-    check("handshake failure: onConnect(false) for the failed attempt",
-          waitFor(1000, [&] { return connectFailures.load() == 1; }));
+    // The failed attempt was replaced by the listener's: it reports no
+    // onConnect(false), which would have fired right after onError returned
+    this_thread::sleep_for(chrono::milliseconds(300));
+    check("handshake failure: no onConnect(false) for the replaced attempt",
+          connectFailures.load() == 0);
     errSub.disconnect();
     failSub.disconnect();
     if (g_fail) bail();
@@ -911,6 +919,75 @@ static void scenario() {
     client.disconnect();
     peer.reset();
     if (g_fail) bail();
+
+    // --- a failed handshake with no reconnect --------------------------------
+    // Nothing replaces the failed attempt: it reports onConnect(false) once.
+    {
+        TlsClient hc;
+        hc.setVerifyNone();
+        atomic<int> hcFailures{0}, hcSuccesses{0};
+        EventListener hcSub = hc.onConnect.listen([&](TcpConnectEventArgs& e) {
+            if (e.success) ++hcSuccesses; else ++hcFailures;
+        });
+        check("handshake failure, no reconnect: connect() to the plain peer",
+              hc.connect("127.0.0.1", plainPort));
+        rawsocket_t hcPeer = acceptWithin(plainListener, 2000);
+        check("handshake failure, no reconnect: the plain peer accepted", hcPeer != kNoSocket);
+        if (hcPeer != kNoSocket) TC_CLOSE(hcPeer);   // the handshake fails
+        if (g_fail) bail();
+        check("handshake failure, no reconnect: onConnect(false) is reported",
+              waitFor(5000, [&] { return hcFailures.load() > 0; }));
+        this_thread::sleep_for(chrono::milliseconds(100));
+        check("handshake failure, no reconnect: exactly one onConnect(false)",
+              hcFailures.load() == 1 && hcSuccesses.load() == 0);
+        check("handshake failure, no reconnect: client is not connected", !hc.isConnected());
+        if (g_fail) bail();
+    }
+
+    // --- connectAsync(): a refused attempt, then a reconnect from onError ----
+    // The refused attempt runs on the connect thread; its onError listener
+    // connects to the TLS peer, whose handshake fires onConnect(true). The
+    // replaced attempt reports no onConnect(false), before or after that.
+    {
+        TlsClient ac;
+        ac.setVerifyNone();
+        mutex acMutex;
+        string acEvents;   // "T" / "F" per onConnect, in the order they fired
+        EventListener acConnSub = ac.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(acMutex);
+            acEvents += e.success ? "T" : "F";
+        });
+        auto acSnapshot = [&] {
+            lock_guard<mutex> lock(acMutex);
+            return acEvents;
+        };
+        atomic<bool> acArmed{true}, acListenerDone{false};
+        atomic<int> acReconnect{-1};   // -1 not run, 0 connect() failed, 1 ok
+        EventListener acErrSub = ac.onError.listen([&](TcpErrorEventArgs&) {
+            if (acArmed.exchange(false)) {
+                acReconnect = ac.connect("127.0.0.1", port) ? 1 : 0;
+                acListenerDone = true;
+            }
+        });
+        ac.connectAsync("127.0.0.1", refusedPort);
+        check("connectAsync() onError reconnect: listener's connect() is true",
+              waitFor(5000, [&] { return acListenerDone.load(); }) && acReconnect == 1);
+        check("connectAsync() onError reconnect: TLS peer completes the handshake",
+              peer.accept(listener, server.conf, 5000));
+        check("connectAsync() onError reconnect: client is connected",
+              waitFor(3000, [&] { return ac.isConnected(); }));
+        this_thread::sleep_for(chrono::milliseconds(300));
+        const string seen = acSnapshot();
+        printf("  (onConnect: \"%s\", T = true, F = false)\n", seen.c_str());
+        check("connectAsync() onError reconnect: onConnect(true) only, once", seen == "T");
+        if (g_fail) bail();
+        check("connectAsync() onError reconnect: data reaches the peer",
+              ac.send("async rescued") && peer.expect("async rescued", 3000));
+        acErrSub.disconnect();
+        ac.disconnect();
+        peer.reset();
+        if (g_fail) bail();
+    }
 
     // --- onReceive disconnects, the main thread reconnects without threads ---
     // An onReceive listener calls disconnect(), which lets go of its receive
