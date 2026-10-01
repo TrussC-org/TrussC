@@ -9738,9 +9738,9 @@ description.ja = "接続中の全クライアントID"
 description.ko = "연결된 모든 클라이언트 ID"
 
 ["TcpServer::getPort"]
-description.en = "The listening port"
-description.ja = "待ち受けポート"
-description.ko = "수신 대기 포트"
+description.en = "The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port"
+description.ja = "サーバが bind しているポート。start(0) のあとは OS が選んだポート、固定のポートならそのポート"
+description.ko = "서버가 bind된 포트. start(0) 후에는 OS가 고른 포트, 고정 포트라면 그 포트"
 
 ["TcpServer::getSendAsyncBufferSize"]
 description.en = "The current high-water mark for one client's send queue, in bytes"
