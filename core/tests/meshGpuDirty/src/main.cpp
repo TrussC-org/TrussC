@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -23,6 +24,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -60,7 +63,9 @@ static void expectSame(const char* name, const function<void(Mesh&)>& op) {
     check(name, m.getDataRevision() == before);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     printf("=== meshGpuDirty (#267) ===\n");
 
     // Same-size rebuild: clear() then re-add the same 100 vertices.
