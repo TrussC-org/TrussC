@@ -371,7 +371,8 @@ public:
     // Information retrieval
     // -------------------------------------------------------------------------
 
-    // Listening port
+    // The port the server is bound to. After start(0) this is the port the OS
+    // picked; for a fixed port it is that port.
     int getPort() const;
 
 private:
