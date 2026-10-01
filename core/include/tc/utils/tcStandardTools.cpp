@@ -234,7 +234,7 @@ void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
-    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; playing voices {slot, file, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the voice's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (voice limit, stream maxPolyphony, decoder error, no device), audio-thread load, and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
+    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
         .arg<bool>("devices", "Enumerate playback / capture devices (default true)", false)
         .bind([](const json& args) -> json {
             bool enumerate = true;
@@ -245,9 +245,9 @@ void registerInspectionTools() {
             const trussc::AudioStats st = engine.getStats();
             const auto dev = trussc::internal::audioDeviceReport(enumerate);
 
-            json voices = json::array();
-            for (const auto& v : engine.getVoices()) {
-                voices.push_back({{"slot", v.slot}, {"file", v.path},
+            json playingSounds = json::array();
+            for (const auto& v : engine.getPlayingSounds()) {
+                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToUtf8(v.path)},
                                   {"streaming", v.streaming},
                                   {"position", v.position}, {"duration", v.duration},
                                   {"volume", v.volume}, {"pan", v.pan}, {"speed", v.speed},
@@ -271,15 +271,15 @@ void registerInspectionTools() {
                    {"input", {{"running", mic.isRunning()},
                               {"device", mic.getDeviceName()},
                               {"sampleRate", mic.getSampleRate()}}},
-                   {"voices", voices},
+                   {"playingSounds", playingSounds},
                    {"master", {{"peak", st.peak}, {"rms", st.rms},
                                {"clippedSamples", st.clippedSamples}}},
                    {"dropped", {{"total", st.droppedPlays},
-                                {"voiceLimit", st.droppedVoiceLimit},
+                                {"polyphonyLimit", st.droppedPolyphonyLimit},
                                 {"streamLimit", st.droppedStreamLimit},
                                 {"decoderError", st.droppedDecoderError},
                                 {"notRunning", st.droppedNotRunning}}},
-                   {"thread", {{"load", st.load}, {"loadMax", st.loadMax}}}};
+                   {"thread", {{"cpuUsage", st.cpuUsage}, {"cpuUsagePeak", st.cpuUsagePeak}}}};
             if (dev.enumerated) {
                 auto list = [](const std::vector<trussc::AudioDeviceInfo>& in) {
                     json a = json::array();
