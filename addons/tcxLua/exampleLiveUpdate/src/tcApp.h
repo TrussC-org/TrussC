@@ -2,7 +2,7 @@
 
 #include <TrussC.h>
 
-#include "sol/sol.hpp"
+#include <tcxLua.h>
 
 using namespace std;
 using namespace tc;
@@ -30,6 +30,7 @@ public:
     void reset();
 
     std::string script;
+    std::string compiledScript;   // the script that `step` was last built from
     sol::state lua;
     Fbo fbo;
 

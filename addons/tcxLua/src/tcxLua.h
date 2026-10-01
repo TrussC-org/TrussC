@@ -40,6 +40,45 @@ public:
     /// @return 
     bool canUseLuaJITFromSol2();
 
+    // -------------------------------------------------------------------------
+    // Error-contained entry points
+    // -------------------------------------------------------------------------
+    // Neither helper throws: a Lua error is logged with logError("tcxLua") and
+    // reported as false, so the app keeps running (also on the Web, where C++
+    // exceptions cannot be caught). sol2's own defaults are unchanged.
+
+    /// @brief Call the global Lua function `fn` with `args` through sol::protected_function.
+    /// @return true if the call succeeded. false if it raised a Lua error (logged)
+    ///         or if `fn` is nil (nothing is called, nothing is logged).
+    template<typename... Args>
+    static bool call(sol::state& lua, const char* fn, Args&&... args) {
+        sol::object target = lua[fn];
+        if (target.get_type() == sol::type::lua_nil || target.get_type() == sol::type::none) {
+            return false;
+        }
+        sol::protected_function f = target;
+        sol::protected_function_result result = f(std::forward<Args>(args)...);
+        if (!result.valid()) {
+            sol::error err = result;
+            trussc::logError("tcxLua") << fn << ": " << err.what();
+            return false;
+        }
+        return true;
+    }
+
+    /// @brief Load and run a Lua file with sol::script_pass_on_error.
+    /// @return true if the file loaded and ran. false on a missing file, a syntax
+    ///         error or a runtime error (logged).
+    static bool runFile(sol::state& lua, const std::filesystem::path& path) {
+        sol::protected_function_result result = lua.safe_script_file(path.string(), sol::script_pass_on_error);
+        if (!result.valid()) {
+            sol::error err = result;
+            trussc::logError("tcxLua") << err.what();
+            return false;
+        }
+        return true;
+    }
+
 protected:
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);
     void setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua);   // luagen-types (Phase 2 usertypes)

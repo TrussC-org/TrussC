@@ -1,10 +1,5 @@
 #include "tcApp.h"
 
-#include "sol/sol.hpp"
-
-// FIXME: This example would not work perfectly on Web (Emscripten) some part.
-//        Check notes after here.
-
 void tcApp::setup() {
     lua.open_libraries(sol::lib::base);
 
@@ -18,6 +13,7 @@ void tcApp::reset() {
     y = getHeight() / 2;
 
     script = "x + 1, y + 1";
+    compiledScript.clear();
 }
 
 void tcApp::updateFbo() {
@@ -35,18 +31,20 @@ void tcApp::update() {
     lua["x"] = x;
     lua["y"] = y;
 
-    // FIXME: in emscripten (web), this try catch would not work, just raise runtime_error and abort.
-    // FIXME: in desktop environment, works but warnings are shown if parse error occured.
-
-    try{
-        sol::optional<sol::error> result = lua.safe_script("x, y = " + script);
-        // if (result.has_value()) {
-        //     std::cerr << "Lua execution failed: "
-        //             << result.value().what() << std::endl;
-        // }
-    }catch(const std::exception& e){
-        
+    // Rebuild `step` when the typed expression changes. While typing, the
+    // expression is often incomplete; script_pass_on_error returns that syntax
+    // error instead of throwing, and `step` is cleared so nothing runs until
+    // the expression is valid again.
+    if (script != compiledScript) {
+        compiledScript = script;
+        auto result = lua.safe_script("function step() x, y = " + script + " end", sol::script_pass_on_error);
+        if (!result.valid()) {
+            lua["step"] = sol::lua_nil;
+        }
     }
+
+    // A runtime error is logged and the app keeps running; a nil `step` is skipped.
+    tcxLua::call(lua, "step");
 
     auto&& _x = lua["x"];
     auto&& _y = lua["y"];
