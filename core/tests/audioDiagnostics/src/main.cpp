@@ -926,7 +926,7 @@ int main() {
     check("polyphony-limit drop is counted", st.droppedPolyphonyLimit == 1 && st.droppedPlays == 1,
           to_string(st.droppedPolyphonyLimit) + "/" + to_string(st.droppedPlays));
     check("drop is logged as a warning right away",
-          countLogs(LogLevel::Warning, "voices are busy") == 1, lastLog(LogLevel::Warning));
+          countLogs(LogLevel::Warning, "playback slots are busy") == 1, lastLog(LogLevel::Warning));
 
     // --- rate limit: repeats are summed into one later line ---------------------
     for (int i = 0; i < 5; ++i) c.play();
@@ -1024,7 +1024,7 @@ int main() {
     check("eager sound reports its file",
           sounds.size() == 1 && !sounds[0].streaming && sounds[0].path == wav.lexically_normal());
 
-    // A reused SoundBuffer: getPath() (a playing sound's "file") follows the last fill.
+    // A reused SoundBuffer: getPath() (a playing sound's "path") follows the last fill.
     {
         SoundBuffer reused;
         check("path: loadWav() records the file", (bool)reused.loadWav(wav) && reused.getPath() == wav,
@@ -1116,7 +1116,7 @@ int main() {
         check("tool: playingSounds list the playing file (UTF-8)",
               state.contains("playingSounds") && !state.contains("voices") &&
               state["playingSounds"].size() == 1 &&
-              state["playingSounds"][0].value("file", "") == internal::pathToUtf8(wav.lexically_normal()),
+              state["playingSounds"][0].value("path", "") == internal::pathToUtf8(wav.lexically_normal()),
               state.value("playingSounds", Json::array()).dump());
         check("tool: master meters and thread CPU usage present",
               state["master"].contains("peak") && state["master"].value("clippedSamples", (uint64_t)0) > 0 &&
@@ -1180,7 +1180,7 @@ int main() {
     busy1.setVolume(3.0f);
     check("two voices fill the pool", busy1.play() && busy2.play());
     check("the loud voice is metered", waitFor([&] { return engine.getStats().peak > 1.0f; }, 2000));
-    const string heldLine = "1 play dropped since the last report: every voice slot busy";
+    const string heldLine = "1 play dropped since the last report: every playback slot busy";
     const size_t heldBefore = countLogs(LogLevel::Warning, heldLine);
     check("a first drop (logged now) and a second (held back)", !extra.play() && !extra.play());
     engine.shutdown();

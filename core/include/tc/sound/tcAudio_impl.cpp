@@ -157,9 +157,9 @@ const char* dropModule(int reason) {
 
 const char* dropReasonText(int reason) {
     switch (reason) {
-        case 0: return "every voice slot busy (raise AudioSettings::maxPolyphony)";
+        case 0: return "every playback slot busy (raise AudioSettings::maxPolyphony)";
         case 1: return "a SoundStream reached its maxPolyphony (copies of a streamed Sound share it)";
-        case 2: return "a stream's file could not be reopened for a new voice";
+        case 2: return "a stream's file could not be reopened for a new playback";
         case 3: return "no output device running";
     }
     return "unknown";
@@ -210,7 +210,7 @@ void AudioEngine::noteDroppedPlay(DropReason reason, const SoundSource* source, 
     auto line = logWarning(dropModule(r));
     switch (reason) {
         case DropReason::PolyphonyLimit:
-            line << "play dropped: all " << playingSounds_.size() << " voices are busy ("
+            line << "play dropped: all " << playingSounds_.size() << " playback slots are busy ("
                  << sourceLabel(source) << "). Raise AudioSettings::maxPolyphony or stop "
                     "sounds that no longer need to play";
             break;
@@ -218,12 +218,12 @@ void AudioEngine::noteDroppedPlay(DropReason reason, const SoundSource* source, 
             line << "play dropped: maxPolyphony="
                  << static_cast<const SoundStream*>(source)->getMaxPolyphony()
                  << " reached for " << sourceLabel(source)
-                 << " (copies of a streamed Sound share its voices). Stop a previous "
+                 << " (copies of a streamed Sound share its playback slots). Stop a previous "
                     "instance or raise maxPolyphony in loadStream()";
             break;
         case DropReason::DecoderError:
             line << "play dropped: could not reopen " << sourceLabel(source)
-                 << " for a new voice (result=" << code << ")";
+                 << " for a new playback (result=" << code << ")";
             break;
         case DropReason::NotRunning:
             line << "play dropped: no output device is running (" << sourceLabel(source)
@@ -1109,7 +1109,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     initialized_ = true;
 
     logNotice("AudioEngine") << "initialized (" << sampleRate_ << " Hz, " << channels_ << " ch, "
-                             << playingSounds_.size() << " voices, "
+                             << playingSounds_.size() << " playback slots, "
                              << ma_get_backend_name(ctxArg->backend) << ": "
                              << device->playback.name << ")";
 
@@ -1226,9 +1226,9 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
             cfg.encodingFormat = (ma_encoding_format)src->encodingFormatHint_;
             ma_result r = maDecoderInitPathA(src->path_, &cfg, &newStream->decoder);
             if (r != MA_SUCCESS) {
-                logWarning("AudioEngine") << "stream voice migration failed for "
+                logWarning("AudioEngine") << "stream playback migration failed for "
                                           << internal::pathToUtf8(src->getPath())
-                                          << " (result=" << (int)r << "); stopping the voice";
+                                          << " (result=" << (int)r << "); stopping the playback";
                 slot->playing = false;
                 // Drop the stale stream so its old decoder is destroyed.
                 slot->stream.reset();
