@@ -133,7 +133,7 @@
         contexts, pipelines, vertices or draw commands, set the following sgl_desc_t
         members:
 
-            .context_pool_size      (default: 4)
+            .context_pool_size      (default: 8; [TrussC fork] the pool grows on demand)
             .pipeline_pool_size     (default: 64)
             .max_vertices       (default: 64k)
             .max_commands       (default: 16k)
@@ -736,6 +736,7 @@ extern "C" {
     _SGL_LOGITEM_XMACRO(ADD_COMMIT_LISTENER_FAILED, "sg_add_commit_listener() failed") \
     _SGL_LOGITEM_XMACRO(CONTEXT_POOL_EXHAUSTED, "context pool exhausted (use sgl_desc_t.context_pool_size to adjust)") \
     _SGL_LOGITEM_XMACRO(CANNOT_DESTROY_DEFAULT_CONTEXT, "cannot destroy default context") \
+    _SGL_LOGITEM_XMACRO(CONTEXT_POOL_GROWN, "context pool full, grown (doubled)") \
 
 #define _SGL_LOGITEM_XMACRO(item,msg) SGL_LOGITEM_##item,
 typedef enum sgl_log_item_t {
@@ -815,7 +816,7 @@ typedef struct sgl_allocator_t {
 typedef struct sgl_desc_t {
     int max_vertices;               // default: 64k
     int max_commands;               // default: 16k
-    int context_pool_size;          // max number of contexts (including default context), default: 4
+    int context_pool_size;          // initial number of contexts (including default context), default: 8; [TrussC fork] doubles when full
     int pipeline_pool_size;         // size of internal pipeline pool, default: 64
     sg_pixel_format color_format;
     sg_pixel_format depth_format;
@@ -992,6 +993,7 @@ inline sgl_pipeline sgl_context_make_pipeline(sgl_context ctx, const sg_pipeline
 
 #include <stdlib.h> // malloc/free
 #include <string.h> // memset
+#include <stdio.h>  // snprintf ([TrussC fork] context pool grow log)
 #include <math.h>   // M_PI, sqrtf, sinf, cosf
 
 #ifndef M_PI
@@ -2528,7 +2530,11 @@ typedef struct {
 
 #define _SGL_INVALID_SLOT_INDEX (0)
 #define _SGL_MAX_STACK_DEPTH (64)
-#define _SGL_DEFAULT_CONTEXT_POOL_SIZE (4)
+/* [TrussC fork] Initial context pool size; the pool doubles when full (see
+   _sgl_grow_context_pool). 8 covers the default context plus a few secondary
+   windows and Fbo (sample count, format) pairs without a grow, while a slot
+   is ~13 KB (the matrix stacks), so the start stays ~100 KB. Upstream: 4. */
+#define _SGL_DEFAULT_CONTEXT_POOL_SIZE (8)
 #define _SGL_DEFAULT_PIPELINE_POOL_SIZE (64)
 /* [TrussC fork] Default initial buffer capacities.
    Kept small for low-memory targets (e.g. Raspberry Pi Zero).
@@ -2673,6 +2679,19 @@ static void _sgl_log(sgl_log_item_t log_item, uint32_t log_level, uint32_t line_
         if (log_level == 0) {
             abort();
         }
+    }
+}
+
+/* [TrussC fork] like _sgl_log(), with a message built at run time (also
+   passed in release builds, where _sgl_log() passes none). */
+static void _sgl_log_msg(sgl_log_item_t log_item, uint32_t log_level, const char* msg, uint32_t line_nr) {
+    if (_sgl.desc.logger.func) {
+        #if defined(SOKOL_DEBUG)
+            const char* filename = __FILE__;
+        #else
+            const char* filename = 0;
+        #endif
+        _sgl.desc.logger.func("sgl", log_level, (uint32_t)log_item, msg, line_nr, filename, _sgl.desc.logger.user_data);
     }
 }
 
@@ -2940,19 +2959,32 @@ static void _sgl_init_pipeline(sgl_pipeline pip_id, const sg_pipeline_desc* in_d
             pip->pip[i] = pip->pip[SGL_PRIMITIVETYPE_TRIANGLES];
         } else {
             pip->pip[i] = sg_make_pipeline(&desc);
-            if (pip->pip[i].id == SG_INVALID_ID) {
+            /* [TrussC fork] a pipeline that exists but is not VALID counts as
+               failed too; stop at the first failure, _sgl_make_pipeline()
+               then destroys the ones already made. */
+            if ((pip->pip[i].id == SG_INVALID_ID) || (sg_query_pipeline_state(pip->pip[i]) != SG_RESOURCESTATE_VALID)) {
                 _SGL_ERROR(MAKE_PIPELINE_FAILED);
                 pip->slot.state = SG_RESOURCESTATE_FAILED;
+                break;
             }
         }
     }
 }
 
+static void _sgl_destroy_pipeline(sgl_pipeline pip_id);
 static sgl_pipeline _sgl_make_pipeline(const sg_pipeline_desc* desc, const sgl_context_desc_t* ctx_desc) {
     SOKOL_ASSERT(desc && ctx_desc);
     sgl_pipeline pip_id = _sgl_alloc_pipeline();
     if (pip_id.id != SG_INVALID_ID) {
         _sgl_init_pipeline(pip_id, desc, ctx_desc);
+        /* [TrussC fork] all or nothing: if any sg pipeline could not be made,
+           destroy the ones that were, free the sgl slot and return the
+           invalid id (callers treat id 0 as "no pipeline"). */
+        const _sgl_pipeline_t* pip = _sgl_lookup_pipeline(pip_id.id);
+        if (pip && (pip->slot.state != SG_RESOURCESTATE_VALID)) {
+            _sgl_destroy_pipeline(pip_id);
+            pip_id = _sgl_make_pip_id(SG_INVALID_ID);
+        }
     } else {
         _SGL_ERROR(PIPELINE_POOL_EXHAUSTED);
     }
@@ -3038,9 +3070,57 @@ static sgl_context _sgl_make_ctx_id(uint32_t ctx_id) {
     return ctx;
 }
 
+/* [TrussC fork] Double the context pool when it is full (TrussC's auto-grow
+   policy for fixed-capacity buffers). Contexts are referenced by id (the
+   commit listener stores the slot id), so moving them is safe; the only
+   context pointer held across sgl_make_context() is _sgl.cur_ctx, which is
+   looked up again. Returns false when the pool is at its maximum size. */
+static bool _sgl_grow_context_pool(void) {
+    _sgl_pool_t* pool = &_sgl.context_pool.pool;
+    const int old_num = pool->size - 1;     // slot 0 is reserved
+    int new_num = old_num * 2;
+    if (new_num >= _SGL_MAX_POOL_SIZE) {
+        new_num = _SGL_MAX_POOL_SIZE - 1;
+    }
+    if (new_num <= old_num) {
+        return false;
+    }
+    const int new_size = new_num + 1;
+    uint32_t* gen_ctrs = (uint32_t*) _sgl_malloc_clear(sizeof(uint32_t) * (size_t)new_size);
+    int* free_queue = (int*) _sgl_malloc_clear(sizeof(int) * (size_t)new_num);
+    _sgl_context_t* contexts = (_sgl_context_t*) _sgl_malloc_clear(sizeof(_sgl_context_t) * (size_t)new_size);
+    memcpy(gen_ctrs, pool->gen_ctrs, sizeof(uint32_t) * (size_t)pool->size);
+    memcpy(contexts, _sgl.context_pool.contexts, sizeof(_sgl_context_t) * (size_t)pool->size);
+    int queue_top = pool->queue_top;
+    if (queue_top > 0) {
+        memcpy(free_queue, pool->free_queue, sizeof(int) * (size_t)queue_top);
+    }
+    // new slots, lowest index on top (same order as _sgl_init_pool)
+    for (int i = new_size - 1; i >= pool->size; i--) {
+        free_queue[queue_top++] = i;
+    }
+    _sgl_free(pool->gen_ctrs);
+    _sgl_free(pool->free_queue);
+    _sgl_free(_sgl.context_pool.contexts);
+    pool->gen_ctrs = gen_ctrs;
+    pool->free_queue = free_queue;
+    pool->queue_top = queue_top;
+    pool->size = new_size;
+    _sgl.context_pool.contexts = contexts;
+    _sgl.cur_ctx = _sgl_lookup_context(_sgl.cur_ctx_id.id);
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "context pool full, grown %d -> %d contexts (sgl_desc_t.context_pool_size sets the start)", old_num, new_num);
+    _sgl_log_msg(SGL_LOGITEM_CONTEXT_POOL_GROWN, 2, msg, __LINE__);
+    return true;
+}
+
 static sgl_context _sgl_alloc_context(void) {
     sgl_context res;
     int slot_index = _sgl_pool_alloc_index(&_sgl.context_pool.pool);
+    if ((_SGL_INVALID_SLOT_INDEX == slot_index) && _sgl_grow_context_pool()) {
+        slot_index = _sgl_pool_alloc_index(&_sgl.context_pool.pool);
+    }
     if (_SGL_INVALID_SLOT_INDEX != slot_index) {
         res = _sgl_make_ctx_id(_sgl_slot_alloc(&_sgl.context_pool.pool, &_sgl.context_pool.contexts[slot_index].slot, slot_index));
     } else {
@@ -3831,6 +3911,12 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                 case SGL_COMMAND_DRAW:
                     {
                         const _sgl_draw_args_t* args = &cmd->args.draw;
+                        /* [TrussC fork] a command recorded while an invalid or
+                           destroyed sgl pipeline was loaded has no sg pipeline:
+                           skip it instead of applying pipeline id 0. */
+                        if (args->pip.id == SG_INVALID_ID) {
+                            break;
+                        }
                         if (args->pip.id != cur_pip_id) {
                             sg_apply_pipeline(args->pip);
                             cur_pip_id = args->pip.id;
