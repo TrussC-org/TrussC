@@ -8,6 +8,7 @@
 // denylist. Correctness is verified by COMPILING this output (witness). The one
 // exception is `lua = false` in api-reference.toml (e.noLua): a per-symbol mark
 // for what the types can't tell, such as an RAII guard, which has no meaning in Lua.
+// `TC_LUA_SKIP` on the C++ declaration (e.lua_skip) is the source-side equivalent.
 //
 //   node luagen.js <reference-data.json> > trussc_generated.cpp   (report -> stderr)
 //
@@ -113,6 +114,7 @@ for (const id of Object.keys(data)) {
     if (e.kind !== 'func') continue;
     if (e.hidden) { skip.hidden = (skip.hidden || 0) + 1; continue; }   // `hide = true`: public C++ but not API, don't bind
     if (e.noLua) { skip.noLua = (skip.noLua || 0) + 1; continue; }      // `lua = false`: C++ only (e.g. an RAII guard)
+    if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; continue; }   // TC_LUA_SKIP: not exposed to Lua
     if (e.owner) { skip.member++; continue; }    // type member -> Phase 2
     if (e.ns) { skip.ns++; continue; }           // sub-namespaced -> Phase 2 (Lua tables)
     const s = emit(e);
@@ -145,5 +147,5 @@ ${body}}
 #endif
 `);
 
-console.error(`[luagen] bound free functions: ${count} | skipped: members ${skip.member}, ns ${skip.ns}, templates ${skip.template}, unbindable ${skip.unbindable}, lua=false ${skip.noLua || 0}, no-args(structure.js gap) ${skip.noargs}`);
+console.error(`[luagen] bound free functions: ${count} | skipped: members ${skip.member}, ns ${skip.ns}, templates ${skip.template}, unbindable ${skip.unbindable}, lua=false ${skip.noLua || 0}, TC_LUA_SKIP ${skip.luaSkip || 0}, no-args(structure.js gap) ${skip.noargs}`);
 if (noargsFns.length) console.error(`  missing args[] (report to structure.js): ${[...new Set(noargsFns)].join(', ')}`);

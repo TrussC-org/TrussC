@@ -1430,19 +1430,22 @@ public:
     // fine). Cancel them before the members the callback touches are destroyed
     // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
     // waits for an in-flight callback to finish.
-    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callAfterAsync(double delay, std::function<void()> callback) {
+    //
+    // TC_LUA_SKIP: not exposed to Lua. Lua code only runs on the main thread;
+    // Lua scripts use callAfter / callEvery.
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP uint64_t callAfterAsync(double delay, std::function<void()> callback) {
         return internal::AsyncScheduler::get().after(asyncOwner(), delay, std::move(callback));
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callEveryAsync(double interval, std::function<void()> callback) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP uint64_t callEveryAsync(double interval, std::function<void()> callback) {
         return internal::AsyncScheduler::get().every(asyncOwner(), interval, std::move(callback));
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAsyncTimer(uint64_t id) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP void cancelAsyncTimer(uint64_t id) {
         internal::AsyncScheduler::get().cancel(id);
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAllAsyncTimers() {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP void cancelAllAsyncTimers() {
         if (asyncOwner_) internal::AsyncScheduler::get().cancelOwner(asyncOwner_);
     }
 
