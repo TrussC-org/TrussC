@@ -348,6 +348,10 @@ font.setOversampling(2);              // this font (1–4, default 1)
 Font::setDefaultOversampling(2);      // every font loaded afterwards
 ```
 
+For scale: atlas pages store one byte (coverage) per texel. A page starts at
+256² and doubles as glyphs are added, up to the GPU's maximum 2D texture size
+capped at 8192² (64 MB); after that the font adds another page.
+
 Worth it for small text — at 9–13 px it buys +15 to +20% for an atlas that
 was tiny to begin with. Rarely worth it above ~24 px, where the gain falls
 to a few percent and the atlas is already large. If you only draw big text,
