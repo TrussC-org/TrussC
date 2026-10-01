@@ -620,7 +620,7 @@ static void cover_utility() {
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
     (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-    (void)nodeToJson(af::val<Node>(), af::val<int>());
+    (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
 }
 
 static void cover_video() {
@@ -1514,6 +1514,8 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
 struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
     static void run() {
         (void)af::val<JsonWriteReflector>().members;
+        (void)af::val<JsonWriteReflector>().includeDerived;
+        (void)af::val<JsonWriteReflector>().derived;
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<float>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<int>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<bool>());
@@ -2356,6 +2358,9 @@ struct Cover_Reflector : af::Scope<Reflector> {
         (void)af::val<Reflector>().isReadOnly();
         (void)af::val<Reflector>().pushReadOnly();
         (void)af::val<Reflector>().popReadOnly();
+        (void)af::val<Reflector>().isDerived();
+        (void)af::val<Reflector>().pushDerived();
+        (void)af::val<Reflector>().popDerived();
         (void)af::val<Reflector>().beginGroup(af::val<const char *>());
         (void)af::val<Reflector>().endGroup();
     }
