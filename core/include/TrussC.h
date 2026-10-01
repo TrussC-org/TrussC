@@ -2508,6 +2508,18 @@ namespace internal {
         wctx.inUpdate = false;
     }
 
+    // After each independent update (#349): update() ran outside any frame, so
+    // drop whatever it left pushed, the same reset as present(). Without it, an
+    // idle setIndependentFps(..., EVENT_DRIVEN) app piles leaks up until the
+    // next draw, which then reads a drifted getMatrix() and, past sokol_gl's
+    // 64-deep matrix stack, loses its 2D draws. Not for the synced update: it
+    // runs mid-frame, after beginFrame() loaded the camera into sokol_gl.
+    // sokol_gl is reset only when set up (headless tests drive this too).
+    inline void resetStacksAfterIndependentUpdate() {
+        getDefaultContext().resetStacksAtFrameEnd("update()");
+        if (sg_isvalid()) sgl_tc_reset_matrix_stacks();
+    }
+
     // Update processing of one main-loop frame when update is NOT synced to
     // draw (setIndependentFps). Split out of _frame_cb so the stepping can be
     // driven headless (core/tests/frameTiming).
@@ -2521,6 +2533,7 @@ namespace internal {
         auto& loop = mainLoop();
         if (loop.updateTargetFps == VSYNC) {
             runMainUpdate();
+            resetStacksAfterIndependentUpdate();
             recordUpdateRateSample(wctx, wctx.updateDeltaTime, 1.0);
         } else if (loop.updateTargetFps > 0) {
             if (!loop.lastUpdateTimeInitialized) {   // first frame, or just after a mode switch
@@ -2548,6 +2561,7 @@ namespace internal {
                 auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                           std::chrono::duration<double>(behind));
                 runMainUpdate(updateInterval, stepTime);
+                resetStacksAfterIndependentUpdate();
             }
             // Measured rate (#228): the time the steps consumed, in steps
             // (fractional: whole steps plus the accumulator's progress), over

@@ -292,10 +292,14 @@ public:
     // getMatrix() (billboards, screen-fixed text, shader / PBR draws) and
     // growing the stacks forever. Warns (rate-limited) when anything was left.
     // Called at the end of present(); the sokol_gl side is reset there too.
-    void resetStacksAtFrameEnd() {
+    // `who` names what just ended in the warning: nullptr for a frame, or a
+    // label such as "update()" for an independent update that ran outside any
+    // frame (#349), counted under its own rate limit.
+    void resetStacksAtFrameEnd(const char* who = nullptr) {
         if (!matrixStack_.empty() || !styleStack_.empty()) {
-            warnUnbalanced(frameEndWarning_,
-                "the frame ended with " + std::to_string(matrixStack_.size()) +
+            warnUnbalanced(who ? updateEndWarning_ : frameEndWarning_,
+                (who ? std::string(who) + " ended with " : std::string("the frame ended with ")) +
+                std::to_string(matrixStack_.size()) +
                 " pushMatrix() and " + std::to_string(styleStack_.size()) +
                 " pushStyle() still open (missing pop); dropped");
         }
@@ -1050,6 +1054,8 @@ private:
         int suppressed = 0;
     };
     RateLimitedWarning popMatrixWarning_, popStyleWarning_, frameEndWarning_, nodeDrawWarning_;
+    // Leaks dropped after an independent update (#349), apart from frame ends.
+    RateLimitedWarning updateEndWarning_;
 
     void warnUnbalanced(RateLimitedWarning& w, const std::string& what) {
         const auto now = std::chrono::steady_clock::now();
