@@ -201,9 +201,15 @@ void WebSocketClient::setupClient(bool useTls) {
 void WebSocketClient::handleTcpConnect(TcpConnectEventArgs& args) {
 #ifndef __EMSCRIPTEN__
     if (args.success) {
-        // The 101 deadline counts from here: the TCP (and TLS) connection is up
+        // The 101 deadline counts from the TCP connect (#262). For ws:// that
+        // is now. For wss:// it is when TlsClient's TCP connection came up,
+        // so the TLS handshake and the 101 share one deadline instead of
+        // getting one each. This runs on the thread that ran the handshake,
+        // which is where getTcpConnectTime() may be read.
+        auto start = std::chrono::steady_clock::now();
+        if (auto* tls = dynamic_cast<TlsClient*>(client_.get())) start = tls->getTcpConnectTime();
         upgradeStartNs_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count();
+            start.time_since_epoch()).count();
         awaitingUpgrade_ = true;
         sendHandshake();
     } else {
@@ -225,6 +231,10 @@ void WebSocketClient::handleTcpConnect(TcpConnectEventArgs& args) {
 
 void WebSocketClient::handleTcpDisconnect(TcpDisconnectEventArgs& args) {
 #ifndef __EMSCRIPTEN__
+    // The server closed before the 101: the wait is over. Otherwise the
+    // main thread's deadline check would still fire onError and
+    // disconnect() after this onClose.
+    awaitingUpgrade_ = false;
     state_ = State::Disconnected;
     onClose.notify();
 #endif
@@ -250,7 +260,7 @@ void WebSocketClient::checkHandshakeTimeout() {
     snprintf(seconds, sizeof(seconds), "%g", timeout);
     TcpErrorEventArgs err;
     err.message = std::string("WebSocket handshake timeout: no 101 response within ") +
-                  seconds + " s";
+                  seconds + " s of the TCP connect";
     onError.notify(err);
     if (!*alive || connection_ != connection) return;
     disconnect();

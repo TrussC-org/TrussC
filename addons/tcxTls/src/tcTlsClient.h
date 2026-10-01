@@ -65,6 +65,13 @@ public:
     // next connect().
     void setHandshakeTimeout(float seconds);
 
+    // When the TCP connection of the current attempt came up: the point the
+    // handshake deadline counts from. Read it on the thread that fires
+    // onConnect (the thread that runs the handshake), e.g. in an
+    // onConnect(true) listener; WebSocketClient counts its 101 deadline from
+    // it, so TLS and 101 share one deadline.
+    std::chrono::steady_clock::time_point getTcpConnectTime() const { return handshakeStart_; }
+
     // -------------------------------------------------------------------------
     // Connection Management (override TcpClient)
     // -------------------------------------------------------------------------

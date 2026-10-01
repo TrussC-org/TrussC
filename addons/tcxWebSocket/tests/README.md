@@ -39,6 +39,8 @@ the update event, as the app's frame loop would, for the 101 deadline:
   1 s; the client is `Disconnected`;
 - `wss://` to a server that accepts and never speaks TLS -> the same,
   through `TlsClient`'s handshake deadline;
+- `ws://` to a server that closes the connection before the `101` ->
+  `onClose` only, and no deadline `onError` after it;
 - an inline `onClose` listener that calls `connect()` when the server drops
   the connection, and when it sends Close -> 20 reconnects, each reaching
   `onOpen`;

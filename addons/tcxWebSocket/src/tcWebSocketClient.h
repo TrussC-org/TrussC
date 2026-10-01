@@ -66,11 +66,12 @@ public:
     //  - onOpen, onMessage: the receive thread.
     //  - onClose: the receive thread when the server closes the connection or
     //    it fails; the calling thread, before the call returns, when the app
-    //    calls disconnect() or connect(); the main thread for the handshake
-    //    timeout below.
+    //    calls disconnect() or connect(). For the handshake timeout below:
+    //    the receive thread when it runs out during the TLS handshake, the
+    //    main thread when it runs out waiting for the 101.
     //  - onError: the connect or receive thread for a failed connect or TLS
-    //    handshake, the receive thread for a protocol error, the main thread
-    //    for the 101 timeout.
+    //    handshake (the TLS handshake timeout included), the receive thread
+    //    for a protocol error, the main thread for the 101 timeout.
     // A listener that touches the Node tree, GPU resources, or unguarded app
     // state must opt into main-thread delivery:
     //
@@ -128,16 +129,22 @@ public:
     // connect(). Empty string means use the system default trust store.
     void setTlsCACertificate(const std::string& pem) { tlsCaPem_ = pem; }
 
-    // Time allowed for the opening handshake once the TCP connection is up,
-    // in seconds. Default 15. 0 = no deadline. It applies to each stage: the
-    // TLS handshake (wss://, enforced by TlsClient::setHandshakeTimeout()),
-    // then the server's "101 Switching Protocols" answer to the upgrade
-    // request. When it runs out, the connection is closed, then onError and
-    // onClose fire. The TCP connect before it is not covered: the OS times
-    // that out. The 101 deadline is checked once per frame, on the main
-    // thread (update event), so it needs the app's main loop. Applies to the
-    // next connect(). No effect on Emscripten, where the browser owns the
-    // handshake.
+    // Time allowed for the opening handshake, in seconds, counted from the
+    // moment the TCP connection is up. Default 15. 0 = no deadline. One
+    // deadline covers both stages: the TLS handshake (wss://) and then the
+    // server's "101 Switching Protocols" answer to the upgrade request, so
+    // the whole handshake never waits longer than this. When it runs out:
+    //  - during the TLS handshake (TlsClient::setHandshakeTimeout(), checked
+    //    on the receive thread): the connection is closed, then onError and
+    //    onClose fire on the receive thread;
+    //  - while waiting for the 101 (checked once per frame on the main
+    //    thread, update event, so it needs the app's main loop): onError
+    //    fires on the main thread, then the connection is closed and onClose
+    //    fires there too, unless an onError listener already disconnected,
+    //    reconnected or destroyed the client.
+    // The TCP connect before it is not covered: the OS times that out.
+    // Applies to the next connect(). No effect on Emscripten, where the
+    // browser owns the handshake.
     void setHandshakeTimeout(float seconds) { handshakeTimeout_ = seconds > 0.0f ? seconds : 0.0f; }
 
 private:
@@ -147,7 +154,9 @@ private:
     void handleTcpDisconnect(TcpDisconnectEventArgs& args);
 
     // Main thread, every frame: fails the connection when the 101 has not
-    // arrived within handshakeTimeout_ (onError, then disconnect() -> onClose)
+    // arrived within handshakeTimeout_ of the TCP connect (onError, then
+    // disconnect() -> onClose, skipped when an onError listener already
+    // disconnected, reconnected or destroyed the client)
     void checkHandshakeTimeout();
 
     void sendHandshake();
@@ -198,9 +207,11 @@ private:
     std::atomic<float> handshakeTimeout_{defaultHandshakeTimeout_};
     // Set when the upgrade request goes out (the TCP / TLS connection is up)
     // and cleared by whoever ends the wait first: the 101 on the receive
-    // thread, the timeout on the main thread, or disconnect().
+    // thread, the timeout on the main thread, the server closing the
+    // connection (handleTcpDisconnect()), or disconnect().
     std::atomic<bool> awaitingUpgrade_{false};
-    // When the upgrade request went out, as steady_clock nanoseconds
+    // Where the 101 deadline counts from, as steady_clock nanoseconds: the
+    // TCP connect (for wss://, TlsClient::getTcpConnectTime())
     std::atomic<int64_t> upgradeStartNs_{0};
 
     State state_ = State::Disconnected;
