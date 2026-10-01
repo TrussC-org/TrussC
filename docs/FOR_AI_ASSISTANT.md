@@ -798,7 +798,7 @@ light.setIesProfile(&iesProfile);                           // Photometric profi
 
 ### How do I draw a point cloud / lots of points fast?
 
-Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once — only rebuild (or `markGpuDirty()`) when the data actually changes, not every frame.
+Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once and only rebuild it when the data actually changes, not every frame: every edit re-uploads the whole buffer on the next draw. Any change re-uploads automatically — every mutator (`clear()`, `add*`, `setNormal`, `translate`/`rotate*`/`scale`/`transform`, `append`, `setMode`) and every non-const getter (`getVertices()`, `getColors()`, ...) marks the mesh changed, so writes through `getVertices()[i]` need no `markGpuDirty()`. To only read a mesh, use a `const Mesh&` (or `std::as_const(mesh)`); reading through a non-const reference also re-uploads.
 
 ```cpp
 Mesh cloud;
