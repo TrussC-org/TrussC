@@ -160,8 +160,6 @@ addons/CMakeLists.txt
 # =============================================================================
 # Every *.glsl.h is generated from the .glsl next to it at build time.
 *.glsl.h
-# tcxLut ships this one pre-generated (no .glsl source yet, #523)
-!addons/tcxLut/src/shaders/lut.glsl.h
 
 # =============================================================================
 # AI assistant local state
