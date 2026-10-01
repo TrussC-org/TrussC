@@ -353,7 +353,7 @@ inline void detachAppAudio(App& app) {
     app.audioOutListener_.disconnect();
     app.audioInListener_.disconnect();
     app.cleanupCalled_ = true;
-    waitForCallbackIdleNoTimeout();
+    waitForAudioCallbacksNoTimeout();
 }
 
 inline bool appRanCleanup(const App& app) {

@@ -798,7 +798,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().getPlayingSounds();
         (void)af::val<AudioEngine>().audioOut;
         (void)af::val<AudioEngine>().audioIn;
-        (void)af::val<AudioEngine>().waitForCallbackIdle();
+        (void)af::val<AudioEngine>().waitForAudioCallbacks();
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().getAnalysisBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
