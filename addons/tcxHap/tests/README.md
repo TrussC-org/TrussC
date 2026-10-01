@@ -14,6 +14,9 @@ parsed with `MovParser` and decoded with `loadPcmTrack()`, the path
 - A copy of `sine_fl32be.mov` with its `enda` atom renamed (made at run time in
   the temp folder) has no `enda` at all, is read as big-endian (the QuickTime
   default for `fl32`), and matches too.
+- A copy of `sine_fl32be.mov` whose `enda` (set to 1) sits in a `wave` nested
+  in the `wave` extension (made at run time) is read as big-endian, since
+  `wave` is read one level deep, and matches too.
 
 ## Test files
 

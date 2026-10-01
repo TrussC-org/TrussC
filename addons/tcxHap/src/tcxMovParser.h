@@ -550,8 +550,11 @@ private:
     }
 
     // Walk the atoms after a sound description's fixed fields (directly or
-    // inside 'wave') and pick up 'enda'.
-    void parseSoundExtensions(MovTrack& track, uint64_t pos, uint64_t endPos) {
+    // inside 'wave') and pick up 'enda'. QuickTime puts 'enda' inside a
+    // single 'wave' extension, so 'wave' is read one level deep: a 'wave'
+    // inside 'wave' is skipped.
+    void parseSoundExtensions(MovTrack& track, uint64_t pos, uint64_t endPos,
+                              bool insideWave = false) {
         while (pos + 8 <= endPos) {
             file_.seekg(pos);
             uint32_t atomSize = readU32();
@@ -559,7 +562,7 @@ private:
             if (!file_.good() || atomSize < 8 || pos + atomSize > endPos) break;
 
             if (atomType == ATOM_WAVE) {
-                parseSoundExtensions(track, pos + 8, pos + atomSize);
+                if (!insideWave) parseSoundExtensions(track, pos + 8, pos + atomSize, true);
             } else if (atomType == ATOM_ENDA && atomSize >= 10) {
                 track.endaLittleEndian = (readU16() & 0xFF) == 1;
             }
