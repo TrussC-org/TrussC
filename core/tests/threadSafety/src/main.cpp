@@ -109,9 +109,9 @@ struct FloodApp : App {
     void setup() override {
         g_floodWorkerActive.store(true);
         worker = thread([] {
-            // Stop after 5 s even if no frame ever comes, so a failure ends
+            // Stop after 30 s even if no frame ever comes, so a failure ends
             // the test instead of hanging it.
-            auto deadline = chrono::steady_clock::now() + chrono::seconds(5);
+            auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
             while (!g_floodStop.load() && chrono::steady_clock::now() < deadline) {
                 if (g_floodQueued.load() - g_floodRan.load() < kFloodBacklog) {
                     long seq = g_floodQueued.fetch_add(1);

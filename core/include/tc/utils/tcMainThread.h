@@ -80,9 +80,10 @@ inline void runOnMainThread(std::function<void()> fn) {
 // Run the main-thread work queued so far. Called by the framework once per
 // frame (in _frame_cb, before update/draw). Headless loops call it via the
 // framework's run loop; exposed under internal:: for those paths.
-// Takes everything queued at its start under one lock and runs it in order;
-// work queued meanwhile (by workers, or by a closure here) waits for the next
-// call.
+// Takes everything queued at its start under one lock and runs it in order.
+// A runOnMainThread() called from a closure inside the drain is on the main
+// thread, so it runs right there (inline), not queued. Only work sent from
+// other threads while the drain runs is deferred to the next call.
 namespace internal {
 inline void drainMainThreadQueue() {
     std::queue<std::function<void()>> batch;
