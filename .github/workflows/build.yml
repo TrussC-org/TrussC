@@ -540,6 +540,11 @@ jobs:
   # NSLog in core/include/tc/** and core/platform/**, so core's diagnostics go
   # through the Logger (log file, onLog, platform log). Textual too; the
   # Logger's own sinks carry a `log-check: allow` marker.
+  # And the third-party list check (#407): every row of docs/LICENSE.md
+  # "Third-Party Libraries" matches the build (FetchContent GIT_TAG / URL,
+  # vendored version lines, provenance commits), every FetchContent_Declare
+  # has a row, every listed path exists. Reads files only, no network. The
+  # weekly upstream check is upstream-check.yml.
   # Cheap and independent of the build — always runs (not gated).
   header-state-check:
     timeout-minutes: 5
@@ -553,6 +558,10 @@ jobs:
       - name: core logging check (no printf / cerr / cout / NSLog)
         if: always()
         run: python3 tools/check_core_logging.py
+
+      - name: third-party list check (docs/LICENSE.md vs the build)
+        if: always()
+        run: python3 tools/check_dependencies.py
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
