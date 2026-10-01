@@ -260,6 +260,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   core (the worker used to spin a whole core); while it plays, every
   `audioOut` block holds the file's full DC level (no gap), also at speed 10;
   and a seek on a playing stream is heard within 100 ms (the mean is printed).
+  With no stream playing the worker polls every 50 ms, not 5 ms (#550): its
+  passes over ~1 s (`internal::streamWorkerPassesForTests()`) stay under 60,
+  and a stream resumed after such an idle pause plays without a gap.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
