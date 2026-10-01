@@ -21,6 +21,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <chrono>
 #include <cmath>
@@ -33,6 +34,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -452,7 +455,9 @@ static void checkSystemFaces() {
 }
 #endif
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
         if (e.level == LogLevel::Error) {
             ++g_errors;
