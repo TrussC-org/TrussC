@@ -25,6 +25,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -37,6 +38,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -352,7 +355,9 @@ private:
     Fbo fbo_;
 };
 
-int main(int argc, char** argv) {
+} // namespace
+
+TC_CORE_TEST_MAIN(int argc, char** argv) {
     const bool gpuCheck = argc > 1 && strcmp(argv[1], "--gpu-check") == 0;
     if (!gpuCheck) {
         checkCpuPages();
