@@ -118,6 +118,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `dataPathLoads/` — the loaders share the same path rule (#273):
+  `Pixels::load` / `loadHDR`, `Sound::load` / `loadStream` and tcxLut's
+  `Lut3D::load` resolve a relative path against `getDataPath()` with no
+  working-directory fallback (the test moves the CWD elsewhere; a file only
+  there is not found), `Pixels::save("a.png")` then `Pixels::load("a.png")`
+  round-trips, and a UTF-8 WAV name loads. `getDataPath()` called from two
+  threads at once, before anything else, agrees with the main thread. `Lut3D`
+  is checked up to its `.cube` parse; `Font::load` needs a GPU and is not run.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
