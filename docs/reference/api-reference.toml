@@ -12549,10 +12549,10 @@ description.ko = "보조 윈도우 (현재 macOS 전용). 자체 Node 트리·�
 related = ["createWindow", "WindowSettings"]
 
 ["Window::setApp"]
-keywords = ["attach", "lifecycle", "content"]
-description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open (both log an error and leave the window as it is)"
-description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App。App は 1 回だけ動く: 最初に付けたときに setup()、ウィンドウを閉じたとき (#318 以降は差し替えで外したときも) に exit() / cleanup()。ウィンドウを閉じると audioOut() / audioIn() も切り離され、元には戻らない。もう一度表示するには新しい App を作る。setApp() は cleanup() 済みの App と、開いていないウィンドウへの設定を拒否する (どちらもエラーログを出し、ウィンドウはそのまま)"
-description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나. App 은 한 번만 동작한다: 처음 연결할 때 setup(), 윈도우를 닫을 때 (#318 이후에는 교체로 분리될 때도) exit() / cleanup(). 윈도우를 닫으면 audioOut() / audioIn() 도 분리되고 다시 연결되지 않는다. 다시 표시하려면 새 App 을 만든다. setApp() 은 cleanup() 이 이미 실행된 App 과, 열려 있지 않은 윈도우에 대한 설정을 거부한다 (둘 다 에러 로그를 남기고 윈도우는 그대로)"
+keywords = ["attach", "lifecycle", "content", "swap", "scene", "request", "frame boundary"]
+description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied"
+description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App。App は 1 回だけ動く: 最初に付けたときに setup()、ウィンドウを閉じたとき (#318 以降は差し替えで外したときも) に exit() / cleanup()。ウィンドウを閉じると audioOut() / audioIn() も切り離され、元には戻らない。もう一度表示するには新しい App を作る。setApp() は cleanup() 済みの App と、開いていないウィンドウ・閉じる途中のウィンドウへの設定を拒否する (どちらもエラーログを出し、ウィンドウはそのまま)。setApp() はリクエスト: すぐに戻り、ウィンドウは次のフレーム境界 (そのウィンドウの tick やイベントの前後) で反映する。App 自身の update() / draw() / keyPressed() など、どこから呼んでも同じ。それまで getApp() は今の App を返す。境界までの最後の setApp() が有効で、それより前に close() が要求されていれば close() が優先される。チェックは反映時にもう一度行う"
+description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나. App 은 한 번만 동작한다: 처음 연결할 때 setup(), 윈도우를 닫을 때 (#318 이후에는 교체로 분리될 때도) exit() / cleanup(). 윈도우를 닫으면 audioOut() / audioIn() 도 분리되고 다시 연결되지 않는다. 다시 표시하려면 새 App 을 만든다. setApp() 은 cleanup() 이 이미 실행된 App 과, 열려 있지 않거나 닫히는 중인 윈도우에 대한 설정을 거부한다 (둘 다 에러 로그를 남기고 윈도우는 그대로). setApp() 은 요청이다: 바로 반환되고, 윈도우는 다음 프레임 경계 (그 윈도우의 tick 이나 이벤트의 앞뒤) 에서 반영한다. App 자신의 update() / draw() / keyPressed() 등 어디서 호출해도 같다. 그때까지 getApp() 은 현재 App 을 반환한다. 경계까지의 마지막 setApp() 이 유효하고, 그 전에 close() 가 요청되었으면 close() 가 우선한다. 검사는 반영할 때 다시 수행한다"
 
 ["Window::getApp"]
 description.en = "Get the App attached to this window"
@@ -12565,14 +12565,15 @@ description.ja = "このウィンドウ専用のイベントストリーム (mou
 description.ko = "이 윈도우 전용 이벤트 스트림 (mousePressed / keyPressed / draw 등)"
 
 ["Window::close"]
-description.en = "Close the native window; the main window and other windows keep running"
-description.ja = "ウィンドウを閉じる。メインウィンドウや他のウィンドウは動き続ける"
-description.ko = "윈도우를 닫음. 메인 윈도우와 다른 윈도우는 계속 실행됨"
+keywords = ["close window", "request", "frame boundary", "self close"]
+description.en = "Close the native window; the main window and other windows keep running. A request, like exitApp() for the main window: it returns at once and the window closes at its backend's next safe point (after the current run-loop pass on Linux / Windows, after the next main-window tick on macOS), through the same path as its close button. Until then isOpen() is true and getApp() / App::getWindow() still return the App and the window. Safe to call from the window's own App (update() / draw() / keyPressed()). Destroying the Window (its last shared_ptr) still closes it immediately"
+description.ja = "ウィンドウを閉じる。メインウィンドウや他のウィンドウは動き続ける。メインウィンドウの exitApp() と同じくリクエスト: すぐに戻り、ウィンドウはバックエンドの次の安全な時点 (Linux / Windows は今回のランループの後、macOS は次のメインウィンドウ tick の後) に、閉じるボタンと同じ経路で閉じる。それまで isOpen() は true で、getApp() / App::getWindow() は今の App とウィンドウを返す。ウィンドウ自身の App (update() / draw() / keyPressed()) から呼んでも安全。Window を破棄したとき (最後の shared_ptr) はその場で閉じる"
+description.ko = "윈도우를 닫음. 메인 윈도우와 다른 윈도우는 계속 실행됨. 메인 윈도우의 exitApp() 처럼 요청이다: 바로 반환되고, 윈도우는 백엔드의 다음 안전한 시점 (Linux / Windows 는 이번 런 루프 이후, macOS 는 다음 메인 윈도우 tick 이후) 에 닫기 버튼과 같은 경로로 닫힌다. 그때까지 isOpen() 은 true 이고 getApp() / App::getWindow() 는 현재 App 과 윈도우를 반환한다. 윈도우 자신의 App (update() / draw() / keyPressed()) 에서 호출해도 안전하다. Window 를 파괴하면 (마지막 shared_ptr) 즉시 닫힌다"
 
 ["Window::isOpen"]
-description.en = "Whether the native window is still open"
-description.ja = "ウィンドウが開いているか"
-description.ko = "윈도우가 열려 있는지"
+description.en = "Whether the native window is still open (true until a requested close() lands)"
+description.ja = "ウィンドウが開いているか (要求した close() が反映されるまでは true)"
+description.ko = "윈도우가 열려 있는지 (요청한 close() 가 반영될 때까지 true)"
 
 ["Window::getTitle"]
 description.en = "Last title set for this window (via WindowSettings or setTitle)"
@@ -12680,6 +12681,22 @@ hide = true
 keywords = ["internal"]
 
 ["Window::tickTree"]
+hide = true
+keywords = ["internal"]
+
+["Window::applyPendingApp"]
+hide = true
+keywords = ["internal"]
+
+["Window::endApp"]
+hide = true
+keywords = ["internal"]
+
+["Window::teardown"]
+hide = true
+keywords = ["internal"]
+
+["Window::closeRequested"]
 hide = true
 keywords = ["internal"]
 
