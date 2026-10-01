@@ -435,9 +435,9 @@ related = ["AudioRecordSettings", "AudioEngine", "ScreenRecorder"]
 ["AudioRecorder::start"]
 category = "sound"
 keywords = ["begin", "record", "wav"]
-description.en = "Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened"
-description.ja = "マスターミックスのWAV録音を開始（相対パスは getDataPath で解決）。オーディオエンジンが初期化済みであること。未初期化またはファイルが開けない場合は false"
-description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getDataPath로 해석). 오디오 엔진이 초기화되어 있어야 하며, 아니면(또는 파일을 열 수 없으면) false 반환"
+description.en = "Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "マスターミックスのWAV録音を開始（相対パスは getDataPath で解決）。オーディオエンジンが初期化済みであること。未初期化またはファイルが開けない場合は false。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getDataPath로 해석). 오디오 엔진이 초기화되어 있어야 하며, 아니면(또는 파일을 열 수 없으면) false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["AudioRecorder::stop"]
 category = "sound"
@@ -2383,9 +2383,9 @@ description.ja = "ファイルが開いているか確認"
 description.ko = "파일이 열려 있는지 확인"
 
 ["FileWriter::open"]
-description.en = "Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
-description.ja = "書き込み用にファイルを開く（append = true で既存ファイルに追記）。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
-description.ko = "쓰기용으로 파일을 엶 (append = true면 기존 파일에 추가). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "書き込み用にファイルを開く（append = true で既存ファイルに追記）。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "쓰기용으로 파일을 엶 (append = true면 기존 파일에 추가). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["FileWriter::write"]
 description.en = "Write data to file"
@@ -3107,9 +3107,9 @@ description.ja = "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bic
 description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용"
 
 ["Image::save"]
-description.en = "Save image to file"
-description.ja = "ファイルに画像を保存"
-description.ko = "이미지를 파일로 저장"
+description.en = "Save image to file. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ファイルに画像を保存。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "이미지를 파일로 저장. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["Image::setColor"]
 description.en = "Set pixel color at position (marks image as dirty)"
@@ -6766,9 +6766,9 @@ description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom �
 ["Pixels::save"]
 category = "graphics_pixels"
 keywords = ["write", "export", "file", "png", "store"]
-description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned"
-description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。作れないときはエラーをログに出して false を返す"
-description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 만들 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。作れないときはエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 만들 수 없으면 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["Pixels::setColor"]
 category = "graphics_pixels"
@@ -12451,9 +12451,9 @@ related = ["VideoWriter::submitFrame"]
 ["VideoWriter::open"]
 category = "video"
 keywords = ["create", "begin", "init", "encoder"]
-description.en = "Open the encoder at the given size (path resolved via getDataPath)"
-description.ja = "指定サイズでエンコーダを開く（パスはgetDataPathで解決）"
-description.ko = "지정 크기로 인코더를 엽니다 (경로는 getDataPath로 해석)"
+description.en = "Open the encoder at the given size (path resolved via getDataPath). A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "指定サイズでエンコーダを開く（パスはgetDataPathで解決）。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "지정 크기로 인코더를 엽니다 (경로는 getDataPath로 해석). 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["VideoRecordSettings"]
 
 ["VideoWriter::submitFrame"]
@@ -12914,9 +12914,9 @@ description.ja = "ドキュメントのルート要素ノードを取得"
 description.ko = "문서의 루트 요소 노드를 얻음"
 
 ["Xml::save"]
-description.en = "Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false."
-description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決され、親フォルダがなければ作られる。indent は各レベルのインデント文字列を設定する。成功時に true を返し、失敗時はエラーをログに出して false を返す"
-description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석되고, 상위 폴더가 없으면 만들어진다. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
+description.en = "Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決され、親フォルダがなければ作られる。indent は各レベルのインデント文字列を設定する。成功時に true を返し、失敗時はエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석되고, 상위 폴더가 없으면 만들어진다. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["Xml::toString"]
 description.en = "Serialize the document to an XML string. indent sets the per-level indentation string."
@@ -13059,9 +13059,9 @@ related = ["drawSuperellipse", "appendArc", "beginShape"]
 ["appendToFile"]
 category = "file"
 keywords = ["write", "add", "concat"]
-description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
-description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
-description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["saveTextFile"]
 
 ["applyWindow"]
@@ -14488,10 +14488,10 @@ related = ["setCurveTolerance"]
 category = "file"
 keywords = ["resource", "asset", "resolve"]
 of = ["ofToDataPath"]
-description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged."
-description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る"
-description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨"
-related = ["getDataPathRoot", "getAbsolutePath", "joinPath"]
+description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. This is the bundled data the app reads (bin/data in development, the bundle's Resources when packaged); files the app writes and keeps go to getUserDataPath()."
+description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。アプリが読む同梱データの場所（開発中は bin/data、パッケージ後はバンドルの Resources）。アプリが書いて残すファイルは getUserDataPath() へ"
+description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 앱이 읽는 동봉 데이터의 위치(개발 중에는 bin/data, 패키지 후에는 번들의 Resources). 앱이 쓰고 보관하는 파일은 getUserDataPath()로"
+related = ["getDataPathRoot", "getUserDataPath", "getAbsolutePath", "joinPath"]
 
 ["getDataPathRoot"]
 category = "file"
@@ -14500,6 +14500,25 @@ description.en = "Get the current data path root as fs::path."
 description.ja = "現在のデータパスルートを fs::path で取得"
 description.ko = "현재 데이터 경로 루트를 fs::path로 얻음"
 related = ["setDataPathRoot", "getDataPath"]
+
+["getTempPath"]
+category = "file"
+keywords = ["temporary", "cache", "tmp", "scratch"]
+description.en = "Folder for temporary files, which the OS may delete at any time: $TMPDIR/<bundle id>/ on macOS, %TEMP%\\<app>\\ on Windows, $TMPDIR (or /tmp) /<app>/ on Linux, the app's tmp/ on iOS, the app's cache folder on Android, in-memory /tmp on web. Created on first use. A relative path is joined to it; an absolute path is returned as is."
+description.ja = "一時ファイル用のフォルダ。OS がいつ消してもよいもの。macOS は $TMPDIR/<bundle id>/、Windows は %TEMP%\\<app>\\、Linux は $TMPDIR（なければ /tmp）/<app>/、iOS はアプリの tmp/、Android はアプリのキャッシュフォルダ、web はメモリ上の /tmp。初回使用時に作られる。相対パスはこのフォルダにつなげ、絶対パスはそのまま返す"
+description.ko = "임시 파일용 폴더. OS가 언제든 지울 수 있다. macOS는 $TMPDIR/<bundle id>/, Windows는 %TEMP%\\<app>\\, Linux는 $TMPDIR(없으면 /tmp)/<app>/, iOS는 앱의 tmp/, Android는 앱의 캐시 폴더, web은 메모리상의 /tmp. 처음 사용할 때 만들어진다. 상대 경로는 이 폴더에 이어 붙이고, 절대 경로는 그대로 반환"
+related = ["getUserDataPath", "getDataPath"]
+
+["getUserDataPath"]
+category = "file"
+keywords = ["save", "settings", "preferences", "writable", "application support", "appdata", "user folder"]
+description.en = "Folder for files the app writes and keeps (settings, presets, logs, recordings): always the OS per-user app folder, in development and in a packaged app alike. macOS ~/Library/Application Support/<bundle id>/, Windows %LOCALAPPDATA%\\<app>\\, Linux $XDG_DATA_HOME/<app>/ (default ~/.local/share/<app>/), iOS the app's Library/Application Support/, Android the app's internal files folder; on web it is in memory and not kept. <app> is the executable name. Created on first use. A relative path is joined to it; an absolute path is returned as is. Write and read back through it: saveJson(j, getUserDataPath(\"settings.json\")) then loadJson(getUserDataPath(\"settings.json\")). setUserDataPathRoot() changes it."
+description.ja = "アプリが書いて残すファイル（設定、プリセット、ログ、録画）用のフォルダ。開発中もパッケージ後も常に OS のユーザーごとのアプリフォルダ。macOS は ~/Library/Application Support/<bundle id>/、Windows は %LOCALAPPDATA%\\<app>\\、Linux は $XDG_DATA_HOME/<app>/（既定は ~/.local/share/<app>/）、iOS はアプリの Library/Application Support/、Android はアプリの内部ファイルフォルダ。web ではメモリ上にあり残らない。<app> は実行ファイル名。初回使用時に作られる。相対パスはこのフォルダにつなげ、絶対パスはそのまま返す。書くときも読み戻すときもこれを通す: saveJson(j, getUserDataPath(\"settings.json\")) の後 loadJson(getUserDataPath(\"settings.json\"))。setUserDataPathRoot() で変えられる"
+description.ko = "앱이 쓰고 보관하는 파일(설정, 프리셋, 로그, 녹화)용 폴더. 개발 중이든 패키지 후든 항상 OS의 사용자별 앱 폴더. macOS는 ~/Library/Application Support/<bundle id>/, Windows는 %LOCALAPPDATA%\\<app>\\, Linux는 $XDG_DATA_HOME/<app>/(기본 ~/.local/share/<app>/), iOS는 앱의 Library/Application Support/, Android는 앱의 내부 파일 폴더. web에서는 메모리에 있고 남지 않는다. <app>은 실행 파일 이름. 처음 사용할 때 만들어진다. 상대 경로는 이 폴더에 이어 붙이고, 절대 경로는 그대로 반환. 쓸 때도 다시 읽을 때도 이것을 거친다: saveJson(j, getUserDataPath(\"settings.json\")) 후 loadJson(getUserDataPath(\"settings.json\")). setUserDataPathRoot()로 바꿀 수 있다"
+related = ["setUserDataPathRoot", "getTempPath", "getDataPath", "saveJson"]
+platform_note.en = "On the desktop the folder survives an uninstall; on iOS and Android it survives app updates but not an uninstall. Apple platforms only: a write whose path resolves inside the app bundle is refused by every core writer, with an error naming getUserDataPath(); during development (data folder outside a bundle) the first relative write into the data folder logs one notice. Folders macOS protects (Desktop, Documents, Downloads, removable or network volumes) ask the user once on first access; an unattended installation accepts that prompt during setup."
+platform_note.ja = "デスクトップではアンインストール後もフォルダは残る。iOS と Android ではアプリ更新では残るがアンインストールで消える。Apple のみ: パスがアプリバンドル内に解決される書き込みは、どのコアの書き込み関数でも拒否され、getUserDataPath() を案内するエラーが出る。開発中（データフォルダがバンドル外）は、相対パスでデータフォルダに書いた最初の 1 回に notice を出す。macOS が保護するフォルダ（デスクトップ、書類、ダウンロード、リムーバブル / ネットワークボリューム）は初回アクセス時に一度ユーザーに許可を求める。無人のインストールでは設置時にその許可を済ませておく"
+platform_note.ko = "데스크톱에서는 제거 후에도 폴더가 남는다. iOS와 Android에서는 앱 업데이트에는 남지만 제거하면 사라진다. Apple 전용: 경로가 앱 번들 안으로 해석되는 쓰기는 모든 코어 쓰기 함수에서 거부되며 getUserDataPath()를 안내하는 오류가 남는다. 개발 중(데이터 폴더가 번들 밖)에는 상대 경로로 데이터 폴더에 쓴 첫 1회에 notice를 남긴다. macOS가 보호하는 폴더(데스크톱, 문서, 다운로드, 이동식 / 네트워크 볼륨)는 처음 접근할 때 한 번 사용자에게 허락을 구한다. 무인 설치에서는 설치 시 그 허락을 미리 해 둔다"
 
 ["getDay"]
 category = "time_current"
@@ -16191,17 +16210,17 @@ platform_note.ja = "非同期のファイル保存。iOS は UIDocumentPickerVie
 ["saveJson"]
 category = "file"
 keywords = ["write", "store", "serialize"]
-description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false."
-description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返し、失敗時はエラーをログに出してfalseを返す"
-description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
+description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返し、失敗時はエラーをログに出してfalseを返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 
 ["saveScreenshot"]
 category = "window_system"
 keywords = ["capture", "png", "export", "save image"]
-description.en = "Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
-description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
-description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
+description.en = "Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["grabScreen", "startRecording", "captureWindow"]
 platform_note.en = "Formats: png/jpg/bmp on Linux and Android; macOS also writes tiff/tif and gif; Windows also writes tga; iOS writes only png and jpg/jpeg. Any other extension saves PNG data at the given path, except on Windows, which appends \".png\" to it. Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
 platform_note.ja = "対応形式: Linux と Android は png/jpg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。iOS は png と jpg/jpeg のみ。それ以外の拡張子は指定パスに PNG データで保存する（Windows のみパスに \".png\" を付け足す）。Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
@@ -16211,9 +16230,9 @@ platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추
 category = "file"
 keywords = ["write", "store"]
 of = ["ofBufferToFile"]
-description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
-description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
-description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["loadTextFile", "appendToFile", "saveJson"]
 
 ["scale"]
@@ -16416,6 +16435,14 @@ description.ja = "配布用にデータパスルートをmacOSアプリバンド
 description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음"
 related = ["setDataPathRoot", "getExecutableDir"]
 
+["setUserDataPathRoot"]
+category = "file"
+keywords = ["save", "writable", "override", "installation", "instance"]
+description.en = "Fix the folder getUserDataPath() returns, for installations, several instances of one app, or tests. Mirrors setDataPathRoot(): a relative root is resolved against the executable directory, an absolute root is used as is. The folder is created on first use. A root inside the app bundle (macOS / iOS) still gets its writes refused."
+description.ja = "getUserDataPath() が返すフォルダを固定する。設置作品、同じアプリの複数起動、テスト向け。setDataPathRoot() と同じく、相対ルートは実行ファイルのディレクトリ基準で解決し、絶対ルートはそのまま使う。フォルダは初回使用時に作られる。アプリバンドル内のルート（macOS / iOS）への書き込みはやはり拒否される"
+description.ko = "getUserDataPath()가 반환하는 폴더를 고정. 설치 작품, 같은 앱의 여러 인스턴스, 테스트용. setDataPathRoot()와 같이 상대 루트는 실행 파일 디렉터리 기준으로 해석하고 절대 루트는 그대로 사용. 폴더는 처음 사용할 때 만들어진다. 앱 번들 안의 루트(macOS / iOS)로의 쓰기는 여전히 거부된다"
+related = ["getUserDataPath", "setDataPathRoot"]
+
 ["setDefaultScreenFov"]
 category = "graphics_3d_setup"
 keywords = ["field of view", "projection", "perspective"]
@@ -16524,9 +16551,9 @@ platform_note.ja = "Linux / Web では no-op（xdg-screensaver / Wake Lock API �
 ["setLogFile"]
 category = "utility"
 keywords = ["output", "write", "path"]
-description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
-description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
-description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
+description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["closeLogFile", "setFileLogLevel"]
 
 ["setLogLevel"]

@@ -19,6 +19,7 @@ bool Pixels::save(const fs::path& path) const {
         logError("Pixels") << "No file name in path: " << savePath;
         return false;
     }
+    if (!internal::checkWriteTarget(path, savePath, "Pixels")) return false;
 
     // Create a missing parent folder, like saveScreenshot()
     std::error_code ec;

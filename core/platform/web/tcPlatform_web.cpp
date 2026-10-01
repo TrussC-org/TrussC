@@ -55,6 +55,20 @@ fs::path getExecutableDir() {
     return fs::path("/");
 }
 
+// User data / temp folders: the browser has no persistent file system here,
+// so both live in Emscripten's in-memory file system and are gone on reload.
+fs::path internal::platformUserDataRoot() {
+    return fs::path("/userdata");
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path("/tmp");
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot — not implemented on web (#230)
 // ---------------------------------------------------------------------------

@@ -196,6 +196,47 @@ fs::path getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The executable name (without .exe) names the app's folder.
+fs::path appFolderName() {
+    fs::path name = getExecutablePath().stem();
+    return name.empty() ? fs::path(L"TrussC") : name;
+}
+
+// An environment variable as a path (wide, so non-ASCII names survive)
+fs::path envPath(const wchar_t* name) {
+    wchar_t buf[MAX_PATH * 2] = { 0 };
+    const DWORD cap = (DWORD)(sizeof(buf) / sizeof(buf[0]));
+    DWORD n = GetEnvironmentVariableW(name, buf, cap);
+    if (n == 0 || n >= cap) return {};
+    return fs::path(buf);
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    fs::path base = envPath(L"LOCALAPPDATA");
+    if (base.empty()) {
+        fs::path profile = envPath(L"USERPROFILE");
+        if (profile.empty()) return platformTempRoot();
+        base = profile / L"AppData" / L"Local";
+    }
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    wchar_t buf[MAX_PATH + 1] = { 0 };
+    DWORD n = GetTempPathW(MAX_PATH + 1, buf);   // %TMP%, else %TEMP%, ...
+    fs::path base = (n > 0 && n <= MAX_PATH) ? fs::path(buf) : fs::path(L"C:\\Windows\\Temp");
+    return base / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
 bool captureWindow(Pixels& outPixels) {

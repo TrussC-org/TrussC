@@ -2141,6 +2141,8 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
 #else
     // Resolve relative paths up front so the deferred worker gets an absolute one.
     std::filesystem::path resolved = getDataPath(path);   // absolute passes through
+    // Inside the app bundle: refused, with an Error naming getUserDataPath()
+    if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
 
     // Auto-create the parent directory (mirrors VideoRecorder). This is the
     // failure users want to catch synchronously (missing/unwritable folder).

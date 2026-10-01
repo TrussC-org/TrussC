@@ -141,6 +141,16 @@ fs::path getExecutablePath();
 // Get directory containing executable (with trailing /)
 fs::path getExecutableDir();
 
+namespace internal {
+// The OS folders behind getUserDataPath() / getTempPath() (the table in
+// tcUtils.h), not created here. One definition per platform file.
+fs::path platformUserDataRoot();
+fs::path platformTempRoot();
+// The running .app bundle on macOS / iOS; empty when the app does not run
+// from a bundle and on the other platforms.
+fs::path platformAppBundlePath();
+}
+
 // ---------------------------------------------------------------------------
 // Immersive mode (hide system UI)
 // Android: Sticky Immersive (hides status bar + navigation bar)

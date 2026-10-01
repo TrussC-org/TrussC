@@ -129,6 +129,25 @@ fs::path getExecutableDir() {
     return exePath.parent_path();
 }
 
+// User data / temp folders: the app's own container folders (they belong to
+// this app already, so no bundle id subfolder).
+fs::path internal::platformUserDataRoot() {
+    NSString* support = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    if (support) return fs::path(support.UTF8String);
+    return fs::path(NSHomeDirectory().UTF8String) / "Library" / "Application Support";
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path(NSTemporaryDirectory().UTF8String);
+}
+
+fs::path internal::platformAppBundlePath() {
+    NSString* bundle = [[NSBundle mainBundle] bundlePath];
+    if (!bundle) return {};
+    return fs::path(bundle.UTF8String);
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot (Metal API)
 // ---------------------------------------------------------------------------

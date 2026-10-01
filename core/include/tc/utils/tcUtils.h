@@ -122,6 +122,72 @@ TC_PLATFORMS("macos,ios") inline void setDataPathToResources() {
 }
 
 // ---------------------------------------------------------------------------
+// User data and temp paths (where the app writes)
+// ---------------------------------------------------------------------------
+// getDataPath() is the bundled data the app reads. Files the app writes and
+// keeps go to getUserDataPath(), temporary files to getTempPath(). Both are
+// the OS per-user folders, in development and in a packaged app alike:
+//
+//            getUserDataPath()                      getTempPath()
+//   macOS    ~/Library/Application Support/<id>/    $TMPDIR/<id>/
+//   Windows  %LOCALAPPDATA%\<app>\                  %TEMP%\<app>\
+//   Linux    $XDG_DATA_HOME/<app>/                  $TMPDIR (or /tmp) /<app>/
+//            (default ~/.local/share/<app>/)
+//   iOS      the app's Library/Application Support/ the app's tmp/
+//   Android  the app's internal files folder        the app's cache folder
+//   Web      /userdata/ (in memory, not kept)       /tmp/ (in memory)
+//
+// <id> is the bundle id; <app> is the executable name. The folder is created
+// on first use. A write whose path resolves inside the app bundle (macOS /
+// iOS) is refused by every core writer, with an Error naming
+// getUserDataPath().
+
+namespace internal {
+    // Defined in tcGlobal.cpp: one state per process, also for a hot reload
+    // guest. Both return an absolute folder and create it on first use.
+    fs::path userDataPathRoot();
+    fs::path tempPathRoot();
+    void setUserDataPathRootState(const fs::path& path);
+
+    // Called by the core writers with the path they were given and the path
+    // it resolved to, before anything is created. Returns false, after one
+    // Error (module `module`) naming the file and getUserDataPath(), when
+    // `resolved` is inside the app bundle. On macOS / iOS, the first relative
+    // write into the data folder outside a bundle logs one Notice per process.
+    bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+                          const char* module);
+
+    // Tests: treat `bundle` as the running app bundle (empty: the platform's
+    // own again), and forget the cached default folders (the next call reads
+    // the environment again).
+    void setAppBundlePathForTests(const fs::path& bundle);
+    void resetUserDataPathForTests();
+}
+
+// Folder for files the app writes and keeps (settings, presets, logs,
+// recordings): the OS per-user app folder (see the table above), or the root
+// set with setUserDataPathRoot(). An absolute `path` is returned as is.
+inline fs::path getUserDataPath(const fs::path& path = "") {
+    if (!path.empty() && path.is_absolute()) return path;
+    return internal::userDataPathRoot() / path;
+}
+
+// Folder for temporary files: the OS may delete them at any time. An
+// absolute `path` is returned as is.
+inline fs::path getTempPath(const fs::path& path = "") {
+    if (!path.empty() && path.is_absolute()) return path;
+    return internal::tempPathRoot() / path;
+}
+
+// Fix the folder getUserDataPath() returns (installations, several instances,
+// tests). Mirrors setDataPathRoot(): a relative root is resolved against the
+// executable directory, an absolute one is used as is. A root inside the app
+// bundle still gets its writes refused.
+inline void setUserDataPathRoot(const fs::path& path) {
+    internal::setUserDataPathRootState(path);
+}
+
+// ---------------------------------------------------------------------------
 // toString - Convert value to string
 // ---------------------------------------------------------------------------
 
