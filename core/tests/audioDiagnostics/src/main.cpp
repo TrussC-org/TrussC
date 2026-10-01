@@ -804,12 +804,11 @@ static void checkVorbisSizing(const fs::path& dir, const string& tag) {
               b.samples.capacity() == 10300 * 2, to_string(b.samples.capacity()));
     }
 
-    // The same stream stating 2^31 frames (16 GiB as stereo floats), and
-    // stating no length at all: both load what decodes (the last packet
-    // untrimmed, so a few frames more), without an allocation sized from
-    // the stated length.
+    // The same stream stating a far larger length, and stating no length at
+    // all: both load what decodes (the last packet untrimmed, so a few frames
+    // more), without an allocation sized from the stated length.
     const struct { const char* name; uint64_t granule; } variants[] = {
-        {"a stream stating 2^31 frames", (uint64_t)1 << 31},
+        {"a stream stating a far larger length", (uint64_t)1 << 31},
         {"a stream of unknown length", ~(uint64_t)0},
     };
     for (const auto& variant : variants) {

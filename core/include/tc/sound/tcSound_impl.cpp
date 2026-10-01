@@ -205,12 +205,21 @@ LoadResult drainVorbis(stb_vorbis* vorbis, uint64_t inputBytes, const std::strin
     uint64_t framesRead = 0;
     bool outOfMemory = false;
     try {
+        // Frames are taken one packet at a time with stb_vorbis_get_frame_float
+        // and interleaved here, so whatever decodes is kept whatever length the
+        // stream states. The packet decode trims the last packet to the last
+        // page's granule.
         std::vector<float> chunk((size_t)kDecodeChunkFrames * (size_t)ch);
         for (;;) {
-            const int got = stb_vorbis_get_samples_float_interleaved(
-                vorbis, ch, chunk.data(), kDecodeChunkFrames * ch);
+            float** outputs = nullptr;
+            const int got = stb_vorbis_get_frame_float(vorbis, nullptr, &outputs);
             if (got <= 0) break;
-            if (!appendDecoded(buf, chunk.data(), (size_t)got * (size_t)ch, statedSamples)) {
+            const size_t n = (size_t)got * (size_t)ch;
+            if (n > chunk.size()) chunk.resize(n);
+            for (int i = 0; i < got; ++i) {
+                for (int c = 0; c < ch; ++c) chunk[(size_t)i * ch + c] = outputs[c][i];
+            }
+            if (!appendDecoded(buf, chunk.data(), n, statedSamples)) {
                 outOfMemory = true;
                 break;
             }
