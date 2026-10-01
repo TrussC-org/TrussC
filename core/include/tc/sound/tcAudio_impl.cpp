@@ -1705,10 +1705,10 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
 namespace {
 // audioOut / audioIn notifies running on this thread (nested when one device
 // callback fires both). Non-zero only on the audio thread inside a listener,
-// where waitForCallbackIdle() must not wait for itself.
+// where waitForAudioCallbacks() must not wait for itself.
 thread_local int t_callbackDepth = 0;
 
-// How long waitForCallbackIdle() waits. A buffer lasts ~1-100 ms, so a
+// How long waitForAudioCallbacks() waits. A buffer lasts ~1-100 ms, so a
 // callback still running after this is stuck, not slow.
 constexpr std::chrono::seconds kCallbackIdleTimeout{1};
 } // namespace
@@ -1730,12 +1730,12 @@ void AudioEngine::endCallback(int slot) {
     --t_callbackDepth;
 }
 
-bool AudioEngine::waitForCallbackIdle() {
+bool AudioEngine::waitForAudioCallbacks() {
     return waitForCallbacks(true);
 }
 
 namespace internal {
-void waitForCallbackIdleNoTimeout() {
+void waitForAudioCallbacksNoTimeout() {
     AudioEngine::getInstance().waitForCallbacks(false);
 }
 } // namespace internal
@@ -1744,7 +1744,7 @@ bool AudioEngine::waitForCallbacks(bool giveUp) {
     if (t_callbackDepth > 0) return true;   // audio thread, inside a listener
 
     auto warnGaveUp = [] {
-        logWarning("AudioEngine") << "waitForCallbackIdle: an audioOut / audioIn "
+        logWarning("AudioEngine") << "waitForAudioCallbacks: an audioOut / audioIn "
             "listener has been running for over "
             << kCallbackIdleTimeout.count() << " s; continuing without "
             "waiting for it. Is it waiting on this thread (a lock held here, "

@@ -161,7 +161,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   a moved-from object.
 - `audioListenerTeardown/` — nothing on the audio thread reaches an object
   after its owner let it go (#256), on the real `AudioEngine` over miniaudio's
-  null backend: `AudioEngine::waitForCallbackIdle()` waits for an `audioOut`
+  null backend: `AudioEngine::waitForAudioCallbacks()` waits for an `audioOut`
   pass in flight, returns at once with no audio running and from inside a
   listener, and gives up (warning, `false`) on a listener stuck for a second;
   an App torn down by `runHeadlessApp` while its `audioOut()` runs keeps the
