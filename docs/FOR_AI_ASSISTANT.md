@@ -3956,7 +3956,7 @@ void TcpServer::disconnectClient(int clientId)  // Disconnect a specific client
 const TcpServerClient * TcpServer::getClient(int clientId) const  // Client info (nullptr if not found)
 int TcpServer::getClientCount() const  // Number of connected clients
 std::vector<int> TcpServer::getClientIds() const  // IDs of all connected clients
-int TcpServer::getPort() const  // The listening port
+int TcpServer::getPort() const  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
 size_t TcpServer::getSendAsyncBufferSize() const  // The current high-water mark for one client's send queue, in bytes
 size_t TcpServer::getSendAsyncPendingBytes(int clientId) const  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
 bool TcpServer::isRunning() const  // Whether the server is running
