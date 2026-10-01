@@ -62,7 +62,7 @@
 //   wrote the tail (a test hook delays the mixer there).
 // - A stream whose length is unknown restarts from the beginning at a
 //   re-init, and getPosition() says so.
-// - AudioEngine::getVoices() reports a stream's position as getPosition()
+// - AudioEngine::getPlayingSounds() reports a stream's position as getPosition()
 //   does, after a re-init at another rate and after shutdown() and an init
 //   at another rate (no migration: the voice keeps its old rate).
 // A watchdog turns a StreamWorker that never comes back into a FAIL.
@@ -230,7 +230,7 @@ static bool waitFor(Pred pred, int timeoutMs) {
 
 // Position of the (single) streamed voice as the engine plays it.
 static float streamVoicePosition() {
-    for (auto& v : AudioEngine::getInstance().getVoices()) {
+    for (auto& v : AudioEngine::getInstance().getPlayingSounds()) {
         if (v.streaming) return v.position;
     }
     return -1.0f;
@@ -925,14 +925,14 @@ int main() {
         b.pause();
         b.setPosition(2.5f);
         const float before = a.getPosition();
-        const size_t warned = countLogs(LogLevel::Warning, "stream voice migration failed");
+        const size_t warned = countLogs(LogLevel::Warning, "stream playback migration failed");
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
         const bool restarted = reinitAt(otherRate());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("reopen fails: the engine restarts", restarted);
         check("reopen fails: both voices end with a warning",
               !a.isPlaying() &&
-              countLogs(LogLevel::Warning, "stream voice migration failed") == warned + 2,
+              countLogs(LogLevel::Warning, "stream playback migration failed") == warned + 2,
               lastLog(LogLevel::Warning));
         check("reopen fails: getPosition() carries over",
               before > 0.2f && approx(a.getPosition(), before, 0.05f),
@@ -962,27 +962,27 @@ int main() {
         u.stop();
     }
 
-    // --- getVoices() reports a stream's position at the voice's own rate ------------------
+    // --- getPlayingSounds() reports a stream's position at the voice's own rate ------------------
     // It divides positionF by the rate the voice counts (as getPosition()
     // does), not the engine's current rate. The re-init migration brings a
     // playing voice to the new rate; an init after shutdown() does not
     // migrate, so a voice left over keeps the old one.
     {
         Sound v;
-        check("getVoices(): a stream plays", (bool)v.loadStream(dcWav) && v.play());
+        check("getPlayingSounds(): a stream plays", (bool)v.loadStream(dcWav) && v.play());
         sleepMs(300);
-        check("getVoices(): the engine restarts at another rate", reinitAt(otherRate()));
+        check("getPlayingSounds(): the engine restarts at another rate", reinitAt(otherRate()));
         v.pause();
         float mine = v.getPosition(), listed = streamVoicePosition();
-        check("getVoices(): after a re-init it agrees with getPosition()",
+        check("getPlayingSounds(): after a re-init it agrees with getPosition()",
               mine > 0.2f && approx(listed, mine, 0.001f),
               to_string(listed) + " vs " + to_string(mine));
         engine.shutdown();
-        check("getVoices(): the engine inits at another rate after shutdown()",
+        check("getPlayingSounds(): the engine inits at another rate after shutdown()",
               reinitAt(otherRate()));
         mine = v.getPosition();
         listed = streamVoicePosition();
-        check("getVoices(): after shutdown() and an init at another rate it agrees with "
+        check("getPlayingSounds(): after shutdown() and an init at another rate it agrees with "
               "getPosition()",
               mine > 0.2f && approx(listed, mine, 0.001f),
               to_string(listed) + " vs " + to_string(mine));

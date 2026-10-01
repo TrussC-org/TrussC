@@ -82,7 +82,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   listener that logs again, itself or through a thread it waits for, does
   not deadlock. The sokol bridge (`internal::sokolLog`) maps panic / error /
   warning / info to Fatal / Error / Warning / Verbose, with the tag as the
-  module and `id:<item> line:<line>` when sokol passes no message. POSIX
+  module and `id:<item> line:<line>` when sokol passes no message. Each
+  output has its own level (#311): console, file and system default to
+  Notice, `setLogLevel()` overwrites all three and a later per-output call
+  wins; the file and the console filter by their own level while `onLog`
+  listeners get every line. POSIX
   only, each in a forked child: a panic reaches the log file and still
   aborts through `slog_func`; a panic while another thread holds the
   Logger's lock does not wait for it (the line goes to stderr); and on
@@ -104,8 +108,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   reach the TrussC logger (rate limited, and only from the main thread — an
   off-main drop is counted and reported by `runHeadlessApp`'s own frame pump;
   its exit flush and `AudioEngine::shutdown()` log what the rate limit held
-  back), the audio thread's meters (peak / RMS / clipped samples / voice
-  level / load) work and shutdown clears them, a reused `SoundBuffer`'s
+  back), the audio thread's meters (peak / RMS / clipped samples / each
+  playing sound's level / CPU usage) work and shutdown clears them, a reused `SoundBuffer`'s
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
@@ -246,6 +250,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `mcpHttpGuard/` — a web page in the user's browser cannot drive the
+  loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
+  403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
+  native clients keep working. Also the port line (#311): after bind, the
+  server logs `[MCP] HTTP server listening on http://HOST:PORT/mcp` through
+  the Logger at Notice, exactly once and with the actual port, and the line
+  lands in the log file.
 - `winsockLifetime/` — creating and destroying TcpClient / TcpServer any
   number of times leaves networking working (#254): after 200 of each, a raw
   `socket()` still succeeds and a UdpSocket that was already receiving still

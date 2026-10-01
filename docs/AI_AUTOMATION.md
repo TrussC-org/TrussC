@@ -16,17 +16,17 @@ By enabling MCP mode, your app becomes a "tool" for AI, enabling:
 To start your app in MCP mode, set the `TRUSSC_MCP` environment variable to `1`.
 
 ```bash
-# Auto-assign port (printed to stderr on startup)
+# Auto-assign port (printed on startup, see below)
 TRUSSC_MCP=1 ./myApp
 
-# Or specify a port
+# Or specify a port (a guaranteed, known port)
 TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./myApp
 ```
 
 When enabled:
 1. An **HTTP server** starts on the specified port (or an OS-assigned port).
 2. **Inspection tools** (`tc_get_screenshot`, `tc_save_screenshot`) are automatically registered.
-3. The server endpoint URL is printed to stderr: `[MCP] HTTP server listening on http://localhost:PORT/mcp`
+3. Once the port is bound, the server endpoint URL is printed: `[MCP] HTTP server listening on http://localhost:PORT/mcp`. The line is a Logger Notice, so it also reaches the log file (`TRUSSC_LOG_FILE`) and `onLog` listeners; on the console it goes to stdout, and it is hidden when the console level is Warning or higher. In v0.7 the same line is also written raw to stderr, as before (that copy is removed in v0.8.0). For a port that does not depend on reading this line, set `TRUSSC_MCP_PORT`.
 
 ### Related: `TRUSSC_LOG_FILE`
 
@@ -52,7 +52,7 @@ not logged yet. This is how a supervisor process (e.g. `anchorbolt start`)
 captures logs from an unmodified app.
 
 The audio engine reports through the logger too, so the file also receives
-the plays it had to drop (`Sound::play()` returned false: every voice busy, a
+the plays it had to drop (`Sound::play()` returned false: every playback slot busy, a
 stream's `maxPolyphony`, an unreadable stream file, no output device).
 Repeats are summed into at most one line per drop reason every 2 seconds,
 nothing is logged from the audio thread itself, and what is still held back
@@ -84,7 +84,7 @@ your own tools:
 | `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236). A secondary window is captured inside its own frame, so it must be visible: see [Hidden secondary windows](#hidden-secondary-windows) |
 | `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main). A secondary window must be visible, as for `tc_get_screenshot` |
 | `tc_list_windows` | (none) | List open windows: `{windows: [{index, main, title, width, height, occluded}]}`. Index 0 = main (no `title`, no `occluded`), then the secondary windows. `occluded` is `true` while the OS reports that window hidden (`Window::isOccluded()`). Use the index as the `window` arg above |
-| `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `voices` `[{slot, file (normalized path), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the voice's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, voiceLimit, streamLimit, decoderError, notRunning}` (plays refused since startup); `thread` `{load, loadMax}` (audio-thread time / audio time over ~0.5 s of audio); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getVoices()` |
+| `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `playingSounds` `[{slot, path (normalized, UTF-8), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the playback's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, polyphonyLimit, streamLimit, decoderError, notRunning}` (plays refused since startup; `polyphonyLimit` = every playback slot busy); `thread` `{cpuUsage, cpuUsagePeak}` (fraction of audio-thread time: mix time / audio time over ~0.5 s of audio, 1.0 = a callback took as long as the audio it produced; `cpuUsagePeak` = the worst single callback, > 1 = a dropout); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getPlayingSounds()` |
 | `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
@@ -389,7 +389,8 @@ Configure your MCP client with the HTTP URL:
 
 - If `TRUSSC_MCP_PORT` is set, the app uses that port.
 - If not set (or set to `0`), the OS assigns an available port.
-- The actual port is printed to stderr on startup: `[MCP] HTTP server listening on http://localhost:PORT/mcp`
+- The actual port is printed on startup, once the port is bound: `[MCP] HTTP server listening on http://localhost:PORT/mcp`. It is a Logger Notice (stdout, the log file, `onLog`; hidden on the console when the console level is Warning or higher), plus, in v0.7 only, a raw copy on stderr.
+- For a guaranteed port, set `TRUSSC_MCP_PORT` rather than reading the line.
 - From code: `mcp::getHttpPort()` returns the actual port number.
 
 ## Security Model
