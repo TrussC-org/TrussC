@@ -35,6 +35,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok) {
@@ -203,7 +206,9 @@ static void checkPlatformFolders(const fs::path& sandbox) {
     check("getTempPath(absolute) returns it as is", getTempPath(abs) == abs);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     const fs::path sandbox = fs::absolute(fs::temp_directory_path() / "tc_userDataPath_test");
     std::error_code ec;
     fs::remove_all(sandbox, ec);
