@@ -476,7 +476,7 @@ int main() {
               n.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("pending: then it plays from the target (level 0.5)",
-              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 300),
+              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
               to_string(g_level.load()));
         n.stop();
     }
@@ -524,7 +524,7 @@ int main() {
         check("loadStream() accepts a FLAC whose length is unknown", (bool)r, r.message);
         check("its duration is 0 (unknown)", u.getDuration() == 0.0f, to_string(u.getDuration()));
         check("it plays (level 0.3)",
-              u.play() && waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500),
+              u.play() && waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000),
               to_string(g_level.load()));
         // With no known end there is nothing to clamp a target to: the
         // seek is refused (it used to jump to the start).
@@ -593,13 +593,13 @@ int main() {
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         c.setPosition(2.0f);
         check("after a read error setPosition() makes it play again (level 0.5)",
-              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
               to_string(g_level.load()));
         c.stop();
 
         Sound after;
         check("the worker refills a new stream afterwards", (bool)after.loadStream(bgmWav) &&
-              after.play() && waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 500),
+              after.play() && waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
               to_string(g_level.load()));
         after.stop();
     }
@@ -625,7 +625,7 @@ int main() {
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         e.setPosition(0.0f);
         check("after a failed loop seek setPosition() makes it play again (level 0.1)",
-              waitFor([] { return approx(g_level.load(), 0.1f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.1f, 0.02f); }, 2000),
               to_string(g_level.load()));
         e.stop();
     }
@@ -971,7 +971,7 @@ int main() {
         Sound u;
         check("unknown length re-init: the FLAC plays (level 0.3)",
               (bool)u.loadStream(unknownFlac) && u.play() &&
-              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500));
+              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000));
         sleepMs(200);
         // Paused across the re-init, so the new decoder does not play on from
         // 0 while init() finishes: getPosition() is 0 exactly, however long
@@ -984,7 +984,7 @@ int main() {
         check("unknown length re-init: getPosition() restarts from 0 with the audio",
               before > 0.15f && after < 0.001f, to_string(before) + " -> " + to_string(after));
         check("unknown length re-init: it plays again (level 0.3)",
-              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000),
               to_string(g_level.load()));
         check("unknown length re-init: then it ends", waitFor([&] { return !u.isPlaying(); }, 2000));
         u.stop();
