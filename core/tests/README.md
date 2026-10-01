@@ -252,6 +252,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the logger that names the requested device, and a later `init()` succeeds
   (#279). An `init()` on the null backend the test requested logs no
   "no usable audio backend" warning (that warning is for a fallback to it).
+- `streamWorkerIdle/` — the StreamWorker sleeps while no stream needs it
+  (#447), on the real `AudioEngine` over miniaudio's null backend: with a
+  stream that has played to its end (its voice still held), and with one
+  stream playing, the process CPU time over ~1 s (`getrusage` /
+  `GetProcessTimes`, the main thread asleep) stays under a quarter of one
+  core (the worker used to spin a whole core); while it plays, every
+  `audioOut` block holds the file's full DC level (no gap), also at speed 10;
+  and a seek on a playing stream is heard within 100 ms (the mean is printed).
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
