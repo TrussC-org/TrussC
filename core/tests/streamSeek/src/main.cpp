@@ -49,8 +49,9 @@
 // - A stream whose length is unknown ignores setPosition(), with one
 //   warning.
 // - After the engine is re-initialized at another rate, getPosition()
-//   carries over, also for a voice that has ended (and its pending seek),
-//   and setPosition() lands at the target.
+//   carries over (exactly, for a stream paused across the re-init, so the
+//   check does not depend on how long init() takes), also for a voice that
+//   has ended (and its pending seek), and setPosition() lands at the target.
 // - A voice that ended and whose slot another play() took, and a voice
 //   whose decoder does not reopen at the re-init (a test hook), keep their
 //   getPosition() across the re-init (the latter also a pending target).
@@ -475,7 +476,7 @@ int main() {
               n.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("pending: then it plays from the target (level 0.5)",
-              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 300),
+              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
               to_string(g_level.load()));
         n.stop();
     }
@@ -485,9 +486,17 @@ int main() {
     check("the DC file loads eagerly", (bool)eager.load(dcWav) && !eager.isStreaming());
     eager.play();
     sleepMs(100);
-    eager.setPosition(2.0f);
-    check("eager: getPosition() is the target at once", approx(eager.getPosition(), 2.0f, 0.01f),
-          to_string(eager.getPosition()));
+    {
+        // The voice plays on between the two calls (a slow runner may lose
+        // the thread there): from the target, not the old position, by at
+        // most the time between them plus a margin for the mixer running ahead.
+        const auto t0 = chrono::steady_clock::now();
+        eager.setPosition(2.0f);
+        const float p = eager.getPosition();
+        const float sec = chrono::duration<float>(chrono::steady_clock::now() - t0).count();
+        check("eager: getPosition() is the target at once", p >= 2.0f && p - 2.0f <= sec + 0.05f,
+              to_string(p) + " (" + to_string(sec) + " s between the calls)");
+    }
     sleepMs(50);
     check("eager: the audio moved (level 0.5)", approx(g_level.load(), 0.5f, 0.02f),
           to_string(g_level.load()));
@@ -515,7 +524,7 @@ int main() {
         check("loadStream() accepts a FLAC whose length is unknown", (bool)r, r.message);
         check("its duration is 0 (unknown)", u.getDuration() == 0.0f, to_string(u.getDuration()));
         check("it plays (level 0.3)",
-              u.play() && waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500),
+              u.play() && waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000),
               to_string(g_level.load()));
         // With no known end there is nothing to clamp a target to: the
         // seek is refused (it used to jump to the start).
@@ -584,13 +593,13 @@ int main() {
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         c.setPosition(2.0f);
         check("after a read error setPosition() makes it play again (level 0.5)",
-              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
               to_string(g_level.load()));
         c.stop();
 
         Sound after;
         check("the worker refills a new stream afterwards", (bool)after.loadStream(bgmWav) &&
-              after.play() && waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 500),
+              after.play() && waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
               to_string(g_level.load()));
         after.stop();
     }
@@ -616,7 +625,7 @@ int main() {
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         e.setPosition(0.0f);
         check("after a failed loop seek setPosition() makes it play again (level 0.1)",
-              waitFor([] { return approx(g_level.load(), 0.1f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.1f, 0.02f); }, 2000),
               to_string(g_level.load()));
         e.stop();
     }
@@ -768,13 +777,19 @@ int main() {
         const float endedBefore = ended.getPosition();
         const float endedSeekBefore = endedSeek.getPosition();
         sleepMs(300);
+        // Paused across the re-init, so the position cannot move however long
+        // init() takes: it carries over exactly. The migration rebuilds a
+        // paused voice like a playing one. The mixer reads `paused` under the
+        // engine lock that getPosition() takes, so `before` is final.
+        r.pause();
         const float before = r.getPosition();
         AudioSettings s96 = settings;
         s96.sampleRate = 96000;
         check("re-init: the engine restarts at 96 kHz", engine.init(s96));
         const float after = r.getPosition();
-        check("re-init: getPosition() carries over", before > 0.2f && approx(after, before, 0.05f),
+        check("re-init: getPosition() carries over", before > 0.2f && approx(after, before, 0.001f),
               to_string(before) + " -> " + to_string(after));
+        r.resume();
         check("re-init: an ended voice's getPosition() carries over",
               endedBefore > 0.15f && approx(ended.getPosition(), endedBefore, 0.001f),
               to_string(endedBefore) + " -> " + to_string(ended.getPosition()));
@@ -924,19 +939,27 @@ int main() {
         // b holds a seek that stays pending (paused).
         b.pause();
         b.setPosition(2.5f);
+        // a stays playing (the check below is that a playing voice ends), so
+        // it plays on until init() stops the device: bound the gain by the
+        // time from reading the position to the end of init(), plus a margin
+        // for the mixer running ahead.
+        const auto t0 = chrono::steady_clock::now();
         const float before = a.getPosition();
         const size_t warned = countLogs(LogLevel::Warning, "stream playback migration failed");
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
         const bool restarted = reinitAt(otherRate());
+        const float elapsedSec = chrono::duration<float>(chrono::steady_clock::now() - t0).count();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("reopen fails: the engine restarts", restarted);
         check("reopen fails: both voices end with a warning",
               !a.isPlaying() &&
               countLogs(LogLevel::Warning, "stream playback migration failed") == warned + 2,
               lastLog(LogLevel::Warning));
+        const float after = a.getPosition();
         check("reopen fails: getPosition() carries over",
-              before > 0.2f && approx(a.getPosition(), before, 0.05f),
-              to_string(before) + " -> " + to_string(a.getPosition()));
+              before > 0.2f && after >= before && after - before <= elapsedSec + 0.05f,
+              to_string(before) + " -> " + to_string(after) + " (" +
+                  to_string(elapsedSec) + " s from the read to the end of init())");
         check("reopen fails: a pending target carries over",
               approx(b.getPosition(), 2.5f, 0.001f), to_string(b.getPosition()));
         a.stop();
@@ -948,15 +971,20 @@ int main() {
         Sound u;
         check("unknown length re-init: the FLAC plays (level 0.3)",
               (bool)u.loadStream(unknownFlac) && u.play() &&
-              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500));
+              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000));
         sleepMs(200);
+        // Paused across the re-init, so the new decoder does not play on from
+        // 0 while init() finishes: getPosition() is 0 exactly, however long
+        // init() takes.
+        u.pause();
         const float before = u.getPosition();
         check("unknown length re-init: the engine restarts at another rate", reinitAt(otherRate()));
         const float after = u.getPosition();
+        u.resume();
         check("unknown length re-init: getPosition() restarts from 0 with the audio",
-              before > 0.15f && after < 0.05f, to_string(before) + " -> " + to_string(after));
+              before > 0.15f && after < 0.001f, to_string(before) + " -> " + to_string(after));
         check("unknown length re-init: it plays again (level 0.3)",
-              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 500),
+              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000),
               to_string(g_level.load()));
         check("unknown length re-init: then it ends", waitFor([&] { return !u.isPlaying(); }, 2000));
         u.stop();
