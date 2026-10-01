@@ -116,6 +116,9 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["isReadOnly"] = &trussc::Reflector::isReadOnly;
         t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
         t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["isDerived"] = &trussc::Reflector::isDerived;
+        t["pushDerived"] = &trussc::Reflector::pushDerived;
+        t["popDerived"] = &trussc::Reflector::popDerived;
         t["endGroup"] = &trussc::Reflector::endGroup;
     }
     lua->new_usertype<trussc::TextureFilter>("TextureFilter",

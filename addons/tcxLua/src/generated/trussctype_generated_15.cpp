@@ -60,6 +60,7 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["onRender"] = &trussc::CoreEvents::onRender;
         t["afterFrame"] = &trussc::CoreEvents::afterFrame;
         t["exit"] = &trussc::CoreEvents::exit;
+        t["hotReloadUnload"] = &trussc::CoreEvents::hotReloadUnload;
         t["exitRequested"] = &trussc::CoreEvents::exitRequested;
         t["keyPressed"] = &trussc::CoreEvents::keyPressed;
         t["keyReleased"] = &trussc::CoreEvents::keyReleased;

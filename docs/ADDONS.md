@@ -243,6 +243,28 @@ TrussC copies the file into whatever app consumes the addon — `.app/Contents/<
 no need to know the app target's name. For generated files, `add_dependencies()`
 your addon target on the generator so the file exists before the copy runs.
 
+### Shaders (`trussc_compile_shaders`)
+
+An addon with its own shaders keeps the `.glsl` sources in the addon (for
+example `src/shaders/`) and compiles them from its `CMakeLists.txt` with the
+same function apps and TrussC core use:
+
+```cmake
+# trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
+trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+```
+
+Every `*.glsl` under the source dir becomes `<name>.glsl.h` next to it (or in
+`OUTPUT_DIR`), compiled with sokol-shdc for every backend TrussC targets
+(Metal for macOS / iOS / the iOS simulator, HLSL, GLSL 4.30, GLSL ES 3, WGSL).
+The addon target depends on the headers, so they exist before anything that
+includes them compiles; on an `INTERFACE` (header-only) addon, every target
+that links it waits for them too. Include the header from your code
+(`#include "shaders/myShader.glsl.h"`, relative to the including file, or add
+the folder to the include path). The headers are build output: don't commit
+them (the repository ignores `*.glsl.h`) and don't ship a pre-generated copy.
+An addon with shaders therefore needs a `CMakeLists.txt`.
+
 ### Main Header (tcxMyAddon.h)
 
 ```cpp
@@ -287,9 +309,9 @@ Addons often fire an `Event<T>` from a thread they own (a receive thread, a devi
 1. **Same thread:** a listener removed during `notify()` on the notifying thread is not called again, also not later in the same pass. A listener added during a pass starts from the next `notify()`.
 2. **Across threads, `Event` does not wait.** `disconnect()` (or destroying the `EventListener`) returns while the callback may still be running on the other thread. Two safe patterns:
    - The receiver listens with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
-   - For latency-critical sources such as audio, **the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier and calls it during teardown**: `AudioEngine::waitForCallbackIdle()` for `audioOut` / `audioIn`, the async timer scheduler for `callAfterAsync` / `callEveryAsync` (`cancelAllAsyncTimers()`, also run from `~Node`), and `TcpClient::disconnect()`, which joins the receive thread. If your addon owns a thread that fires events, give it such a stop-and-wait, and let it return at once when it is called from that thread itself.
+   - For latency-critical sources such as audio, **the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier and calls it during teardown**: `AudioEngine::waitForAudioCallbacks()` for `audioOut` / `audioIn`, the async timer scheduler for `callAfterAsync` / `callEveryAsync` (`cancelAllAsyncTimers()`, also run from `~Node`), and `TcpClient::disconnect()`, which joins the receive thread. If your addon owns a thread that fires events, give it such a stop-and-wait, and let it return at once when it is called from that thread itself.
 3. **Order:** the barrier runs before the state the callback touches is destroyed. Call it from the most-derived class's destructor (or from an explicit `close()` / `stop()`), not from a base-class destructor: by the time a base-class destructor runs, the derived members are already gone.
-4. **A listener must return.** The framework's own teardown (an App's `audioOut()` / `audioIn()` on exit, hot reload or window close) waits for a listener in flight without a time limit: one that never returns hangs the app, with an error in the log after one second, rather than letting the App be destroyed under it. The public `AudioEngine::waitForCallbackIdle()` gives up after one second and returns `false` instead. Either way, a listener on the audio thread (or any thread you stop this way) must not wait on the main thread or on a lock the tearing-down thread may hold.
+4. **A listener must return.** The framework's own teardown (an App's `audioOut()` / `audioIn()` on exit, hot reload or window close) waits for a listener in flight without a time limit: one that never returns hangs the app, with an error in the log after one second, rather than letting the App be destroyed under it. The public `AudioEngine::waitForAudioCallbacks()` gives up after one second and returns `false` instead. Either way, a listener on the audio thread (or any thread you stop this way) must not wait on the main thread or on a lock the tearing-down thread may hold.
 
 An addon class that listens on the audio thread:
 
@@ -303,7 +325,7 @@ public:
     }
     ~Scope() {
         listener_.disconnect();                                // no new calls
-        tc::AudioEngine::getInstance().waitForCallbackIdle();  // none still running
+        tc::AudioEngine::getInstance().waitForAudioCallbacks();  // none still running
     }                                                          // members go after this
 private:
     void push(const tc::AudioOutBuffer& b);
@@ -311,6 +333,24 @@ private:
     tc::EventListener listener_;
 };
 ```
+
+### Warning Once
+
+To log a warning only the first time (an unsupported format, a missing device), gate it with a `tc::OnceGate` instead of a `static bool warned` flag. `isFirstTime()` is true the first time; give the constructor an interval in seconds to make it true again once that much time has passed since the last true. It is thread-safe and lock-free, so audio and worker threads can use it too:
+
+```cpp
+static tc::OnceGate unsupportedWarned;
+if (unsupportedWarned.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "format not supported; skipping";
+}
+
+static tc::OnceGate queueFull{5.0};               // at most once per 5 s
+if (queueFull.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "queue full, dropping frames";
+}
+```
+
+For a warning that should fire once per object (once per connection, say), make the gate a member of that object: `tc::OnceGate timeoutWarned_;`.
 
 ### Holding on to Nodes
 
