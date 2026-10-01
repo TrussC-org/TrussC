@@ -3433,6 +3433,12 @@ void Node::update()  // Called every frame before draw
 bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
 ```
 
+### OnceGate — Gate for a log line (or anything else): isFirstTime() is true the first time, and with an interval, again once that much time has passed since the last true
+
+```cpp
+bool OnceGate::isFirstTime()  // True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false
+```
+
 ### Path — Path/Polyline for lines and curves
 
 ```cpp
