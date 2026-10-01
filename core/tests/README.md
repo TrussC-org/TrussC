@@ -197,6 +197,35 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   or without the #230 fix: it catches the web early return leaking into native
   builds. The web half is what guards #230; the daily run (`daily.yml`,
   `sweep-web`) runs it under node.
+- `winsockLifetime/` — creating and destroying TcpClient / TcpServer any
+  number of times leaves networking working (#254): after 200 of each, a raw
+  `socket()` still succeeds and a UdpSocket that was already receiving still
+  gets a loopback packet. The per-class counts used to call `WSACleanup()` on
+  every 0 -> 1 -> 0 cycle and tear Winsock down for the whole process. Only
+  Windows can fail it; elsewhere the same steps run and pass.
+- `tcpClientSigpipe/` — *(POSIX)* `TcpClient::send()` to a peer that reset
+  the connection returns false instead of raising SIGPIPE, which killed the
+  process without a trace (#254). One part keeps `connected_` set (no receive
+  thread) so every send reaches the dead socket; one races the receive thread.
+- `tcpClientIsolation/` — each TcpClient's `onReceive` gets only its own
+  bytes (#254): two clients with different receive buffer sizes take 8 MB each
+  from two loopback peers. The receive buffer used to be one function-local
+  static shared by every client's receive thread.
+- `tcpClientReconnect/` — `TcpClient::connect()` after the peer closed the
+  connection reconnects (#254); it used to assign the new receive thread over
+  the old, still-joinable one (`std::terminate`). Also checks that 20
+  reconnects leak no descriptors and that a reconnect from an inline
+  `onDisconnect` or `onReceive` listener leaves exactly one receive thread
+  (both counted on Linux), that reconnecting through `connectAsync()` works,
+  and that refused attempts release the old socket (counted on Linux) before
+  a later `connect()` succeeds. With an auto-reconnect `onDisconnect`
+  listener attached, `disconnect()` from another thread reports exactly one
+  "Disconnected by client" and leaves no connection: the receive thread
+  used to report the EOF of `disconnect()`'s own shutdown as a remote close,
+  and the listener reconnected while `disconnect()` was joining that thread.
+  Destroying a client whose listener reconnects on every `onDisconnect`
+  finishes without any `onDisconnect` and without reconnecting: the
+  destructor does not notify.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and
@@ -315,6 +344,51 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   exact bits. Both also from a data pointer that is not aligned to the
   sample size. The tcxHap side (`twos` / `fl32` files) is in
   `addons/tcxHap/tests/`.
+- `fontSfntCheck/` — font data is checked before it is given to stb_truetype:
+  `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
+  bytes, a `.ttc` header whose font count or offset points outside the data,
+  a table directory or a table past the end of the data (offset + length is
+  checked in 64 bits), a missing required table (a directory entry at
+  offset 0 counts as missing, as in stb), head / hhea / maxp /
+  cmap shorter than the fields stb reads, cmap encoding records or a used
+  subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
+  hmtx or loca, an unknown loca format, a loca entry past glyf or below the
+  one before it, and a CFF CharStrings INDEX whose count or offset array
+  cannot be read within the CFF table; returns false for a CFF table of 0 to
+  3 bytes, a CFF INDEX with an offset size outside 1..4 and an empty Top
+  DICT, in Debug and Release builds alike; and for
+  copies of a TrueType, a CFF and a collection font cut short in the header,
+  the table directory and each table. A glyph index from the cmap past
+  numGlyphs (for CFF, past the number of CharStrings) and a codepoint above
+  U+10FFFF draw as .notdef. Valid fonts load, including
+  `numberOfHMetrics == numGlyphs`, a cmap format 12 subtable, a table of
+  length 0 and tables that share bytes. Also guards the TrussC patches in
+  `stb_truetype.h`: CFF data is read within the CFF table's length; CFF
+  vertex counting (a glyph over the vertex limit, one whose closing vertex
+  is the one over it, one far over any limit through nested subroutines,
+  and one whose vertex array cannot be allocated come back empty); and the
+  flattened point count (a glyph with more points than the limit is not
+  drawn, one at the limit is). The test lowers these limits through
+  `internal::setStbttLimitsForTests()`. A glyph with a one-point contour
+  loads and rasterizes. Run the core tests under AddressSanitizer after
+  changing stb_truetype or `stb_impl.cpp`; CI does not build with ASan.
+  For this test, from the repository root:
+
+  ```sh
+  tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
+  cd core/tests/fontSfntCheck
+  cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+  cmake --build build-asan -j4
+  ./bin/fontSfntCheck
+  ```
+
+  (Prefix the last line with `setarch -R` where ASan fails to start because
+  of the kernel's address randomization.)
+  The fonts are built at runtime; fonts installed at
+  the usual system paths are also loaded and cut short when present.
+  `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as

@@ -173,7 +173,7 @@ jobs:
       # The behavioral tests again, on top of the full build (cheap next to it).
       - name: Build & run addon tests
         shell: bash
-        run: ./examples/build_all.py --addon-tests-only --verbose
+        run: ./examples/build_all.py --addon-tests-only --include-daily --verbose
 
       - name: Build & run core tests
         shell: bash

@@ -362,10 +362,6 @@ private:
     // socket down and join the writer. The writer closes the descriptor itself,
     // on its way out.
     void closeChannel(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch);
-
-    static std::atomic<int> instanceCount_;
-    static void initWinsock();
-    static void cleanupWinsock();
 };
 
 } // namespace trussc
