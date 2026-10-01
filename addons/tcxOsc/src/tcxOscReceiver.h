@@ -99,7 +99,7 @@ public:
     // -------------------------------------------------------------------------
     // The queue holds up to getBufferSize() messages (default 1024). When a
     // new message arrives while it is full, the oldest one is dropped and
-    // counted in getDroppedMessages(). Drops are also logged as a warning from
+    // counted in getDroppedMessageCount(). Drops are also logged as a warning from
     // these two calls, at most once every 2 s, summed since the last report.
 
     // Check if there are unread messages (queue enabled on first call)
@@ -144,7 +144,7 @@ public:
     // created: dropped from the full polling queue, or discarded when
     // setBufferSize() shrank it (a running total, never reset). Cheap to
     // call from any thread.
-    uint64_t getDroppedMessages() const {
+    uint64_t getDroppedMessageCount() const {
         return droppedMessages_.load(std::memory_order_relaxed);
     }
 

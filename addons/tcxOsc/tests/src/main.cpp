@@ -28,7 +28,7 @@
 // And the polling queue:
 //   - getNextMessage() alone (no hasNewMessage()) enables the queue
 //   - a full queue drops the oldest messages and counts them in
-//     getDroppedMessages(); the default size (1024) takes a 150-message bundle
+//     getDroppedMessageCount(); the default size (1024) takes a 150-message bundle
 //   - drops are logged from the polling calls, at most once every 2 s,
 //     summed since the last report
 //   - shrinking a filled queue with setBufferSize() counts and reports the
@@ -720,7 +720,7 @@ int main() {
             std::vector<int> ids = drain();
             check("queue: default size keeps a 150-message bundle",
                   got && ids.size() == size_t(COUNT) && ids.front() == 0 && ids.back() == COUNT - 1);
-            check("queue: default size drops nothing", got && rx.getDroppedMessages() == 0);
+            check("queue: default size drops nothing", got && rx.getDroppedMessageCount() == 0);
             check("queue: default size logs nothing", logCount() == 0);
 
             // Explicit size 100: the 50 oldest of the bundle are dropped
@@ -730,9 +730,9 @@ int main() {
             ids = drain();
             const auto firstReport = std::chrono::steady_clock::now();
             check("queue: 100 of 150 kept", got && ids.size() == 100);
-            check("queue: dropped == 50", got && rx.getDroppedMessages() == 50);
+            check("queue: dropped == 50", got && rx.getDroppedMessageCount() == 50);
             check("queue: received + dropped == 150",
-                  got && ids.size() + rx.getDroppedMessages() == size_t(COUNT));
+                  got && ids.size() + rx.getDroppedMessageCount() == size_t(COUNT));
             check("queue: the oldest are the ones dropped",
                   got && ids.size() == 100 && ids.front() == 50 && ids.back() == COUNT - 1);
             const std::string line = lastLog();
@@ -747,7 +747,7 @@ int main() {
             const bool within = std::chrono::steady_clock::now() - firstReport <
                                 std::chrono::milliseconds(1500);
             check("queue: second overflow counted (total 100)",
-                  got && ids.size() == 100 && rx.getDroppedMessages() == 100);
+                  got && ids.size() == 100 && rx.getDroppedMessageCount() == 100);
             if (within) {
                 check("queue: no second log line within 2 s", logCount() == 1);
             } else {
@@ -768,10 +768,10 @@ int main() {
             // Shrinking a filled queue: the discarded messages count as dropped
             rx.setBufferSize(1024);
             got = deliverBundle();  // fits whole, not drained
-            check("queue: refill without drops", got && rx.getDroppedMessages() == 100);
+            check("queue: refill without drops", got && rx.getDroppedMessageCount() == 100);
             rx.setBufferSize(40);
             check("queue: shrink to 40 counts the 110 discarded",
-                  got && rx.getDroppedMessages() == 210);
+                  got && rx.getDroppedMessageCount() == 210);
             std::this_thread::sleep_until(secondReport + std::chrono::milliseconds(2100));
             ids = drain();
             check("queue: shrink keeps the newest 40",
@@ -781,7 +781,7 @@ int main() {
                   has(lastLog(), "queue limit 40"));
             // 4 bundles delivered in this section
             check("queue: received + dropped == sent over the section",
-                  got && received + rx.getDroppedMessages() == uint64_t(4 * COUNT));
+                  got && received + rx.getDroppedMessageCount() == uint64_t(4 * COUNT));
             check("queue: drops logged only on the polling thread", !logOffThread);
         }
         rx.close();
