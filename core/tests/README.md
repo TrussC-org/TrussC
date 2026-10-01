@@ -437,6 +437,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `pcmByteOrder/` — `SoundBuffer::loadPcmFromMemory()` decodes both byte
+  orders (#419). Known 16-bit byte pairs, little- and big-endian, with bytes
+  of 0x80 and above in either position, give exactly `value / 32768` (the old
+  big-endian swap sign-extended, so `01 80` came out as -128 instead of 384);
+  big-endian stereo keeps its channel order. Known 32-bit float byte quads in
+  both orders, with bytes of 0x80 and above in every position, keep their
+  exact bits. Both also from a data pointer that is not aligned to the
+  sample size. The tcxHap side (`twos` / `fl32` files) is in
+  `addons/tcxHap/tests/`.
 - `fontSfntCheck/` — font data is checked before it is given to stb_truetype:
   `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
   bytes, a `.ttc` header whose font count or offset points outside the data,
