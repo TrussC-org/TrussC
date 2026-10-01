@@ -21,6 +21,9 @@
 #
 # =============================================================================
 
+# trussc_compile_shaders() (also used by core and addons)
+include("${CMAKE_CURRENT_LIST_DIR}/trussc_shaders.cmake")
+
 macro(trussc_app)
     # Set default build type to RelWithDebInfo
     if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -649,82 +652,7 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
     endif()
 
     # Compile shaders with sokol-shdc (if any .glsl files exist)
-    file(GLOB_RECURSE _TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glsl")
-    if(_TC_SHADER_SOURCES)
-        # Select sokol-shdc binary based on host platform
-        # Download from official sokol-tools-bin repository
-        set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/master/bin")
-        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
-                set(_TC_SOKOL_SHDC_DIR "osx_arm64")
-            else()
-                set(_TC_SOKOL_SHDC_DIR "osx")
-            endif()
-        elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            set(_TC_SOKOL_SHDC_DIR "win32")
-        else()
-            if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "aarch64")
-                set(_TC_SOKOL_SHDC_DIR "linux_arm64")
-            else()
-                set(_TC_SOKOL_SHDC_DIR "linux")
-            endif()
-        endif()
-        # Windows uses .exe extension
-        if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            set(_TC_SOKOL_SHDC_EXT ".exe")
-        else()
-            set(_TC_SOKOL_SHDC_EXT "")
-        endif()
-        set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
-        set(_TC_SOKOL_SHDC_NAME "sokol-shdc${_TC_SOKOL_SHDC_EXT}")
-
-        set(_TC_SOKOL_SHDC "${TC_ROOT}/core/tools/sokol-shdc/${_TC_SOKOL_SHDC_NAME}")
-
-        # Download sokol-shdc if not present
-        if(NOT EXISTS "${_TC_SOKOL_SHDC}")
-            message(STATUS "[${PROJECT_NAME}] Downloading sokol-shdc...")
-            file(MAKE_DIRECTORY "${TC_ROOT}/core/tools/sokol-shdc")
-            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
-                SHOW_PROGRESS
-                STATUS _TC_DOWNLOAD_STATUS)
-            list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
-            if(_TC_DOWNLOAD_ERROR)
-                message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
-            endif()
-            # Make executable on Unix
-            if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-                file(CHMOD "${_TC_SOKOL_SHDC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-            endif()
-            message(STATUS "[${PROJECT_NAME}] sokol-shdc downloaded successfully")
-        endif()
-
-        # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
-        # GLSL 4.30 (Linux desktop, SOKOL_GLCORE), GLSL ES3 (Android/RasPi/
-        # WebGL2), WGSL (Web/WebGPU). metal_sim keeps apps runnable on the
-        # iOS simulator (sg_query_backend() reports SG_BACKEND_METAL_SIMULATOR
-        # there; without it shader lookup returns null sources and crashes).
-        # glsl430 is required for GLCORE — without it every custom shader on
-        # Linux desktop fails with "Failed to get shader desc" (issue #193).
-        set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
-
-        set(_TC_SHADER_OUTPUTS "")
-        foreach(_shader_src ${_TC_SHADER_SOURCES})
-            set(_shader_out "${_shader_src}.h")
-            list(APPEND _TC_SHADER_OUTPUTS ${_shader_out})
-
-            get_filename_component(_shader_name ${_shader_src} NAME)
-            add_custom_command(
-                OUTPUT ${_shader_out}
-                COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_out} -l ${_TC_SOKOL_SLANG} --ifdef
-                DEPENDS ${_shader_src}
-                COMMENT "Compiling shader: ${_shader_name}"
-            )
-        endforeach()
-
-        add_custom_target(${PROJECT_NAME}_shaders DEPENDS ${_TC_SHADER_OUTPUTS})
-        add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_shaders)
-        message(STATUS "[${PROJECT_NAME}] Shader compilation enabled for ${_TC_SHADER_SOURCES}")
-    endif()
+    trussc_compile_shaders(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
     # Output settings
     if(ANDROID)
