@@ -9,8 +9,9 @@
 # compiles the verdicts into a tiny C program that reports them (exit code =
 # failures). It also covers the platform gate in tc_hot_reload_decide() (#329):
 # on platforms without hot reload (web / Android / iOS) the macro must decide
-# OFF, in the configure step and in the pre-build check alike. Plain CMake, no TrussC: build_all.py runs it under
-# --core-tests-only because of this committed CMakeLists.txt.
+# OFF, in the configure step and in the pre-build check alike. Plain CMake, no
+# TrussC: build_all.py runs it under --core-tests-only because of this
+# committed CMakeLists.txt.
 cmake_minimum_required(VERSION 3.16)
 project(hotReloadScan C)
 
@@ -43,7 +44,7 @@ function(tc_decide_case NAME EXPECTED PLATFORM_SUPPORTED)
     set(_code "${_code}    { \"${NAME}\", \"${EXPECTED}\", \"${_got}\", ${_ok} },\n" PARENT_SCOPE)
 endfunction()
 
-file(WRITE "${FX}/plain.cpp"       "#include \"tcApp.h\"\nTC_HOT_RELOAD(tcApp)\n")
+file(WRITE "${FX}/plain.cpp"        "#include \"tcApp.h\"\nTC_HOT_RELOAD(tcApp)\n")
 file(WRITE "${FX}/firstline.cpp"    "TC_HOT_RELOAD(tcApp)\n")
 file(WRITE "${FX}/indented.cpp"     "int x;\n    TC_HOT_RELOAD(tcApp)\n")
 file(WRITE "${FX}/crlf.cpp"         "int x;\r\nTC_HOT_RELOAD(tcApp)\r\n")
