@@ -56,9 +56,15 @@
 //     listener reconnects on every onDisconnect finishes, reports nothing and
 //     does not reconnect.
 //
-//   - No thread is left when main() returns (counted on Linux), although the
-//     clients whose listeners called connect() / disconnect() on the receive
-//     thread are kept for the life of the process.
+//   - A receive thread that a listener's disconnect() let go of (it cannot
+//     join itself) is joined later: the next connect() and disconnect() on
+//     another thread, and the destructor, return only once that listener
+//     has returned (#543).
+//
+//   - No thread is left when main() returns (counted on Linux, macOS and
+//     Windows), although the clients whose listeners called connect() /
+//     disconnect() on the receive thread are kept for the life of the
+//     process.
 //
 // The pre-fix build aborts on the first reconnect. The scenario runs on a
 // worker with a deadline, so a hang reports FAIL instead of eating the CI
@@ -96,6 +102,9 @@
 
 #ifdef __linux__
     #include <dirent.h>
+#endif
+#ifdef __APPLE__
+    #include <mach/mach.h>
 #endif
 
 #if (defined(__linux__) || defined(__APPLE__)) && !defined(__ANDROID__)
@@ -149,7 +158,7 @@ static void check(const char* name, bool ok) {
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
+    thread worker([done, fn = std::move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
     while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
@@ -294,9 +303,9 @@ static int countEntries(const char* path) {
 
 static void scenario() {
     // Constructed first: it also starts Winsock. Kept for the life of the
-    // process, as TcpClient's Events comment asks of a client whose
-    // receive-thread listener called connect() (the listener reconnects
-    // below do): the old receive threads those let go of are never joined.
+    // process: the old receive threads that the listener reconnects below
+    // let go of must be joined by the client's later connect() and
+    // disconnect() calls, not only by a destructor (main() counts threads).
     TcpClient& client = *new TcpClient();
 
     int port = 0;
@@ -707,11 +716,12 @@ static void scenario() {
     // current and went on reading the new socket next to the new receive
     // thread. Here the listener stays until the main thread is inside
     // connect()'s onConnect, which keeps that window open for a while.
+    // Since #543 connect() first waits for the thread the listener let go
+    // of, so the listener's wait runs out (3 s) and the window never opens.
     {
-        // Kept for the life of the process, as the Events comment of
-        // TcpClient asks of a client whose receive-thread listener called
-        // disconnect(): its old receive thread is never joined, so destroying
-        // the client would race whatever that thread last touched.
+        // Kept for the life of the process: the old receive thread that the
+        // listener's disconnect() lets go of must be joined by the client's
+        // later connect() and disconnect() calls (main() counts threads).
         TcpClient& bc = *new TcpClient();
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
@@ -798,7 +808,11 @@ static void scenario() {
     // A reconnect with setUseThread(false) did not bump the generation at all,
     // so the old thread, back from its listener, kept driving the new
     // connection (the pending connect, onConnect, reads) next to the update
-    // event, for as long as the client lived.
+    // event, for as long as the client lived. Since #543 connect() first
+    // waits for the old thread, whose listener's wait then runs out (3 s).
+    // That wait is what crashed on macOS CI: the listener missed the flag,
+    // went on polling it after this block had ended and, nothing waiting
+    // for its thread, after main() had returned.
     {
         TcpClient& bn = *new TcpClient();   // kept, as above
 #ifdef __linux__
@@ -1023,6 +1037,78 @@ static void scenario() {
     check("destroyed client: no reconnect after destruction", !strayAfterDestroy);
     // doomedSub and doomedRx outlive their Events: disconnecting them is a no-op
 
+    // --- a thread a listener let go of is joined later (#543) ----------------
+    // An onReceive listener calls disconnect() and then runs on for a while.
+    // Its receive thread cannot join itself: the client keeps it, and the
+    // next connect() or disconnect() on another thread, or the destructor,
+    // returns only once that listener has returned. The thread used to be
+    // detached with nothing waiting for it: on macOS CI the "bye, no
+    // threads" listener above was still waiting on a flag of this function
+    // after main() had returned, and crashed reading it.
+    {
+        auto kc = make_unique<TcpClient>();
+        TcpClient* kcPtr = kc.get();
+        atomic<bool> kcLetGo{false}, kcListenerDone{true};
+        EventListener kcRx = kc->onReceive.listen([&, kcPtr](TcpReceiveEventArgs&) {
+            kcListenerDone = false;
+            kcPtr->disconnect();
+            kcLetGo = true;
+            // Still running when the main thread goes on
+            this_thread::sleep_for(chrono::milliseconds(200));
+            kcListenerDone = true;
+        });
+        // Connect, and have the peer's data make the listener disconnect
+        auto letGoFromListener = [&] {
+            kcLetGo = false;
+            if (!kc->connect("127.0.0.1", port)) return false;
+            rawsocket_t kp = acceptWithin(listener, 2000);
+            if (kp == kNoSocket) return false;
+            ::send(kp, "x", 1, 0);
+            const bool ok = waitFor(3000, [&] { return kcLetGo.load(); });
+            TC_CLOSE(kp);
+            return ok;
+        };
+#ifdef __linux__
+        // Counted right after each call returns, with no grace period: a
+        // thread the call joined is gone by then
+        const int kcBaseline = countEntries("/proc/self/task");
+        auto threadsAre = [&](const char* name, int expected) {
+            const int n = countEntries("/proc/self/task");
+            printf("  (threads: %d, %d expected)\n", n, expected);
+            check(name, n == expected);
+        };
+#else
+        const int kcBaseline = 0;
+        auto threadsAre = [](const char* name, int) {
+            printf("%-60s %s\n", name, "SKIP (counted on Linux)");
+        };
+#endif
+        check("kept thread: the listener disconnected", letGoFromListener());
+        if (g_fail) bail();
+        check("kept thread: the next connect() waits for it",
+              kc->connect("127.0.0.1", port) && kcListenerDone);
+        threadsAre("kept thread: after connect(), its receive thread only", kcBaseline + 1);
+        rawsocket_t kp = acceptWithin(listener, 2000);
+        if (kp != kNoSocket) TC_CLOSE(kp);
+        if (g_fail) bail();
+
+        check("kept thread: the listener disconnected again", letGoFromListener());
+        if (g_fail) bail();
+        kc->disconnect();
+        check("kept thread: the next disconnect() waits for it", kcListenerDone.load());
+        threadsAre("kept thread: no thread left after disconnect()", kcBaseline);
+        if (g_fail) bail();
+
+        check("kept thread: the listener disconnected once more", letGoFromListener());
+        if (g_fail) bail();
+        check("kept thread: the destructor finishes within 5 s",
+              completesWithin(5000, [&] { kc.reset(); }));
+        check("kept thread: the destructor waits for it", kcListenerDone.load());
+        threadsAre("kept thread: no thread left after the destructor", kcBaseline);
+        if (g_fail) bail();
+        // kcRx outlives its Event: disconnecting it is a no-op
+    }
+
     // --- teardown ---------------------------------------------------------
     g_phase = "the scenario's teardown";
     TC_CLOSE(peer);
@@ -1038,6 +1124,33 @@ TC_CORE_TEST_MAIN() {
     signal(SIGBUS, onFatalSignal);
     signal(SIGABRT, onFatalSignal);
 #endif
+
+    // Threads of this process, -1 where they cannot be counted
+    auto countThreads = []() -> int {
+#if defined(__linux__)
+        return countEntries("/proc/self/task");
+#elif defined(__APPLE__)
+        thread_act_array_t threads = nullptr;
+        mach_msg_type_number_t n = 0;
+        if (task_threads(mach_task_self(), &threads, &n) != KERN_SUCCESS) return -1;
+        for (mach_msg_type_number_t i = 0; i < n; ++i) {
+            mach_port_deallocate(mach_task_self(), threads[i]);
+        }
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
+                      n * sizeof(thread_act_t));
+        return static_cast<int>(n);
+#else
+        // Windows: not counted. Winsock (mswsock.dll) starts a thread of its
+        // own in the onError reconnect phase, after the refused non-blocking
+        // connect, and keeps it: a manual check counted one thread more at
+        // the end than at the start every time, with every std::thread of
+        // the clients ended.
+        return -1;
+#endif
+    };
+    // Before the scenario: the threads the process starts with
+    const int threadsAtStart = countThreads();
+
     g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
@@ -1047,19 +1160,27 @@ TC_CORE_TEST_MAIN() {
 
     // Nothing may still run when the process tears down its statics: not the
     // scenario's worker (joined), and not a receive thread of the clients the
-    // scenario keeps (each has stopped: joined by a disconnect(), or ended on
-    // its own once its generation was replaced).
-#ifdef __linux__
-    int threadsAtExit = -1;
-    waitFor(1000, [&] {
-        threadsAtExit = countEntries("/proc/self/task");
-        return threadsAtExit == 1;
-    });
-    printf("  (threads when main() returns: %d)\n", threadsAtExit);
-    check("no thread is left when main() returns", threadsAtExit == 1);
+    // scenario keeps (each has stopped: joined by a disconnect() or a
+    // connect(), which also join a thread a listener's call let go of).
+    if (threadsAtStart > 0) {
+        int threadsAtExit = -1;
+        waitFor(1000, [&] {
+            threadsAtExit = countThreads();
+            return threadsAtExit >= 0 && threadsAtExit <= threadsAtStart;
+        });
+        printf("  (threads: %d when main() started, %d when it returns)\n",
+               threadsAtStart, threadsAtExit);
+        check("no thread is left when main() returns",
+              threadsAtExit >= 0 && threadsAtExit <= threadsAtStart);
+    } else {
+#ifdef _WIN32
+        printf("%-60s %s\n", "no thread is left when main() returns",
+               "SKIP (Windows: Winsock keeps a thread of its own)");
 #else
-    printf("%-60s %s\n", "no thread is left when main() returns", "SKIP (counted on Linux)");
+        printf("%-60s %s\n", "no thread is left when main() returns",
+               "SKIP (threads not counted here)");
 #endif
+    }
     printf("\n%s\n", g_fail ? "FAILED" : "ALL PASS");
     fflush(stdout);   // a crash in static destruction then still shows this
     g_phase = "exit (static destruction)";
