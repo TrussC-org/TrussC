@@ -29,6 +29,31 @@ Every change goes through a GitHub issue. The one exception is a docs-only fix, 
 - `ready` and `needs-decision` are never on the same issue.
 - An issue without a label hasn't been prioritized yet. Don't start on it.
 
+## CI checks
+
+### What becomes a CI check
+
+A rule goes into CI only when all three hold:
+
+1. It is already a documented convention.
+2. Breaking it harms users silently: nothing else would catch it before it ships.
+3. A failure can be fixed mechanically.
+
+Rules about style alone are not CI checks. They are swept by hand from time to time.
+
+### The checks today
+
+On every pull request and in the merge queue (`.github/workflows/build.yml`). The required status is `ci-ok`, which passes only when every job below passed. A docs-only change skips the build jobs.
+
+| Job | What it checks | When it fails |
+|---|---|---|
+| `build` (macOS, Windows, Linux) | Builds trusscli and `AllFeaturesExample`, which calls every documented public core API (its `coverage_generated.cpp`). Then it builds and runs the addon tests (`addons/*/tests`, except the `daily-only` ones) and the core tests (`core/tests`). | Fix the build error or the failing test on that platform. |
+| `build-android`, `build-web`, `build-ios` | Builds `AllFeaturesExample` for that platform (iOS: device SDK, unsigned). | Fix the compile or link error for that platform. |
+| `reference-check` | `node docs/reference/check.js --strict`: every public symbol has an entry in `docs/reference/api-reference.toml`, with no orphans and no duplicates. | Add the missing entry (en / ja / ko), or remove the orphaned one. |
+| `header-state-check` | `python3 tools/check_header_state.py`: no new mutable state (static locals, `inline` variables, ...) in core headers outside `tools/header_state_allowlist.txt`. | Move the state to a `.cpp` behind an accessor ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)), or add an allowlist line with its category and reason. The failure message prints the line. |
+
+Once a day on `main` (`.github/workflows/daily.yml`), the daily run builds every example (including the addon examples) on every desktop platform and on the web. It also runs the addon tests, including the `daily-only` ones, and the core tests. A failure there opens or updates a tracking issue instead of blocking a pull request.
+
 ## Security
 
 Don't open a public issue for a security problem. Report it privately, as described in [SECURITY.md](SECURITY.md#reporting).
