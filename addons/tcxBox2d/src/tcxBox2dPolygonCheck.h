@@ -62,7 +62,7 @@ std::string describePolygonError(PolygonError err);
 
 // Reason for fewer than 3 points left after reducedConvexHull(), which drops
 // duplicate and collinear points; `caller` names the call that did it
-// (e.g. "setupConvex()"). `mayHave` words it as a possibility, for callers
+// (e.g. "setupSimplified()"). `mayHave` words it as a possibility, for callers
 // that can't tell whether `caller` ran at all.
 std::string describeCollapsedHull(const std::string& caller, bool mayHave = false);
 
@@ -74,6 +74,15 @@ std::string describeCollapsedHull(const std::string& caller, bool mayHave = fals
 // degenerate input.
 std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points,
                                         size_t maxPoints = b2_maxPolygonVertices);
+
+// How many of `points` the convex polygon `hull` (what makePolygonShape()
+// built from them) leaves inside it: points farther than 0.5 * b2_linearSlop
+// from its outline, which the hull dropped because the input was concave or
+// they lay inside. Points on the outline (hull vertices, points Box2D merged
+// into one, collinear points along an edge) don't count: the shape is the
+// same without them. 0 when the hull kept every point.
+size_t countPointsInsideHull(const std::vector<tc::Vec2>& points,
+                             const std::vector<tc::Vec2>& hull);
 
 // Every point of every subpath of `path` (z dropped).
 std::vector<tc::Vec2> pathPoints(const tc::Path& path);

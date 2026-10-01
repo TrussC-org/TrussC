@@ -6,6 +6,7 @@
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"
 #include <queue>
 #include <mutex>
 #include <atomic>
@@ -27,7 +28,10 @@ public:
     // earlier call for the same packet) and modify it (e.g. addMessage() /
     // clear()) while a nested bundle of that packet is being dispatched.
     tc::Event<OscBundle> onBundleReceived;
-    tc::Event<std::string> onParseError;       // Parse error (for robustness)
+    // Parse error: a packet that is not a valid OSC message or bundle (for
+    // example an unknown type tag, data cut short, or a damaged message in a
+    // bundle). The packet is not delivered, not even in part.
+    tc::Event<std::string> onParseError;
 
     OscReceiver() = default;
     ~OscReceiver() { close(); }
@@ -218,8 +222,10 @@ private:
         // Determine if bundle or message
         if (OscBundle::isBundle(data, size)) {
             bool ok = false;
-            OscBundle bundle = OscBundle::fromBytes(data, size, ok);
+            bool paddingMissing = false;
+            OscBundle bundle = OscBundle::fromBytes(data, size, ok, paddingMissing);
             if (ok) {
+                if (paddingMissing) warnPaddingMissing();
                 // Dispatch messages inside bundle individually
                 dispatchBundle(bundle);
             }
@@ -230,8 +236,10 @@ private:
         }
         else {
             bool ok = false;
-            OscMessage msg = OscMessage::fromBytes(data, size, ok);
+            bool paddingMissing = false;
+            OscMessage msg = OscMessage::fromBytes(data, size, ok, paddingMissing);
             if (ok) {
+                if (paddingMissing) warnPaddingMissing();
                 enqueue(msg);  // only if the polling queue is enabled
                 // Always notify listeners
                 onMessageReceived.notify(msg);
@@ -241,6 +249,15 @@ private:
                 onParseError.notify(err);
             }
         }
+    }
+
+    // A message that ends before its zero padding to 4 bytes is accepted;
+    // this logs it once per receiver.
+    void warnPaddingMissing() {
+        if (!paddingWarned_.isFirstTime()) return;
+        tc::logWarning("tcxOsc") << "OscReceiver on port " << port_
+                                 << ": received a message that ends before its zero padding "
+                                    "to 4 bytes; accepted (logged once per receiver)";
     }
 
     // Recursively dispatch messages inside bundle. Walks the parsed tree in
@@ -281,6 +298,8 @@ private:
     std::atomic<uint64_t> droppedMessages_{0};   // running total
     std::atomic<uint64_t> unreportedDrops_{0};   // counted, not logged yet
     std::atomic<int64_t> lastDropReportNs_{kNeverReported};  // steady_clock
+
+    tc::OnceGate paddingWarned_;  // warnPaddingMissing()
 };
 
 }  // namespace tcx::osc

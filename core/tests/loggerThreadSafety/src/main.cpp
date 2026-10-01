@@ -38,6 +38,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -63,6 +64,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -575,6 +578,9 @@ static void testPanicForwards() {
     const fs::path err = tempFile("panic.err");
     const int status = runChild([&] {
         redirectStderr(err);
+        // The forked child keeps off the system log, which is not safe to
+        // use after fork.
+        setSystemLogLevel(LogLevel::Silent);
         getLogger().setLogFile(log);
         internal::sokolLog("sg", 0, 77, nullptr, 123, nullptr, nullptr);
     });
@@ -600,6 +606,9 @@ static void testPanicDoesNotWaitForLock() {
     }
     const int status = runChild([&] {
         redirectStderr(err);
+        // The forked child keeps off the system log, which is not safe to
+        // use after fork.
+        setSystemLogLevel(LogLevel::Silent);
         // A reader that never reads, so the FIFO opens for writing without
         // blocking (setLogFile() opens outside the lock since #356).
         const int reader = open(fifo.c_str(), O_RDONLY | O_NONBLOCK);
@@ -655,7 +664,9 @@ static void testXOpenDisplayFailureReachesLogFile() {
 #endif
 #endif // LOGGER_TEST_FORK
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     printf("=== loggerThreadSafety (#265) ===\n");
     testFileSwitching();
     testConsole();

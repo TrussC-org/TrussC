@@ -18,6 +18,28 @@ parsed with `MovParser` and decoded with `loadPcmTrack()`, the path
   in the `wave` extension (made at run time) is read as big-endian, since
   `wave` is read one level deep, and matches too.
 
+It also checks how `MovParser` handles sample tables (#343). Copies of
+`sine_sowt.mov` are made at run time in the temp folder, each with one field
+changed, and parsed with `MovParser::open()`:
+
+- The unchanged file has 5 video and 24000 audio samples.
+- A copy whose video `stsz` is written as a variable-size table parses to the
+  same samples; the `stsz` cases below use it.
+- Video `stsz` entry count `0xFFFFFFF0`: the video track is skipped, the audio
+  track is kept.
+- Video `stts` entry count `0xFFFFFFF0`: `stts` is ignored, the video track is
+  unchanged.
+- Audio constant-size `stsz` count `0xFFFFFFF0`: the audio track has the 24000
+  samples that `stsc` / `stco` place.
+- Video `mdia` larger than its `trak`: the video track is skipped.
+- One video `stsz` entry `0xFFFFFFF0`: `readSample()` returns false for that
+  sample without sizing the buffer, and the next sample reads.
+- `moov` moved in front of `mdat` and the file cut inside `mdat`: the sample
+  counts are unchanged, a sample past the cut fails to read, and samples 0
+  and 1 read after that.
+
+Each `open()` must return within 2 s.
+
 ## Test files
 
 The files in `bin/data/` were made with ffmpeg 6.1.1 (with the `hap`
