@@ -2103,6 +2103,7 @@ LogStream logError(const std::string & module = std::string(""))  // Stream-base
 LogStream logFatal(const std::string & module = std::string(""))  // Stream-based fatal-level log output
 const char * logLevelToString(LogLevel level)  // Return the uppercase name of a log level (e.g. "NOTICE", "WARNING") 
 LogStream logNotice(const std::string & module = std::string(""))  // Print to console
+bool logOnce(const std::string & key, double intervalSeconds = 0)  // Gate a log line: true the first time for a key, then at most once per interval
 LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
 LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
 Json nodeToJson(Node & node, int maxDepth)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection

@@ -572,6 +572,7 @@ static void cover_utility() {
     (void)logWarning(af::val<const std::string>());
     (void)logError(af::val<const std::string>());
     (void)logFatal(af::val<const std::string>());
+    (void)logOnce(af::val<const std::string>(), af::val<double>());
     (void)toInt(af::val<const std::string>());
     (void)toInt64(af::val<const std::string>());
     (void)toFloat(af::val<const std::string>());
