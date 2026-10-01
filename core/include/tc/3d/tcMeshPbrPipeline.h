@@ -73,6 +73,7 @@ public:
     void ensureInit() {
         if (initialized_) return;
         shader_ = sg_make_shader(tc_pbr_pbr_mesh_shader_desc(sg_query_backend()));
+        shaderReady_ = internal::internalShaderReady(shader_, "PBR");
         initialized_ = true;
     }
 
@@ -112,6 +113,7 @@ public:
     // Assumes mesh has uploaded GPU buffers and currentMaterial is set.
     void drawMesh(const Mesh& mesh) {
         ensureInit();
+        if (!shaderReady_) return;   // warned once in ensureInit()
 
         // Lighting / material / environment / shadow state is all per-window.
         auto& wctx = internal::currentWindowContext();
@@ -543,6 +545,9 @@ private:
 public:
     void beginShadowPass(int lightIndex) {
         ensureShadowInit();
+        // No shadow shader (warned once): no pass; sh.inPass stays false, so
+        // shadowDraw()/endShadowPass() are no-ops.
+        if (!shadowReady_) return;
         auto& wctx = internal::currentWindowContext();
         auto& sh = wctx.shadow;
         const Light& light = *wctx.activeLights[lightIndex];
@@ -709,6 +714,11 @@ private:
         if (shadowInitialized_) return;
 
         shadowShader_ = sg_make_shader(tc_shadow_shadow_depth_shader_desc(sg_query_backend()));
+        shadowReady_ = internal::internalShaderReady(shadowShader_, "shadow depth");
+        if (!shadowReady_) {
+            shadowInitialized_ = true;   // not retried
+            return;
+        }
 
         sg_pipeline_desc pd = {};
         pd.shader = shadowShader_;
@@ -810,12 +820,14 @@ private:
 
     // --- PBR pipeline state ---
     sg_shader shader_{};
+    bool shaderReady_{false};
     std::map<int, sg_pipeline> pipelineCache_;  // keyed by sg_pixel_format
     bool initialized_{false};
 
     // --- Shadow pipeline state ---
     sg_shader shadowShader_{};
     sg_pipeline shadowPipeline_{};
+    bool shadowReady_{false};
     bool shadowInitialized_{false};
 
     sg_image shadowColorImage_{};   // SG_IMAGETYPE_ARRAY, maxShadowLights layers
