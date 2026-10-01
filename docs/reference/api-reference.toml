@@ -9258,6 +9258,49 @@ description.ko = "스레드를 사용 중인지"
 description.en = "Fired when the connection completes"
 description.ja = "接続完了時に発火"
 description.ko = "연결 완료 시 발생"
+details.en = '''
+`success` is true when the connection is up (for `TlsClient`, after the TLS
+handshake) and false when an attempt failed. A failed attempt reports
+`onConnect(false)` from [`connectAsync()`](#TcpClient::connectAsync), from a
+pending connect without threads, and from a failed TLS handshake; a failed
+blocking [`connect()`](#TcpClient::connect) returns false instead.
+
+An attempt that a newer attempt has replaced does not report
+`onConnect(false)`. When an [`onError`](#TcpClient::onError) listener calls
+`connect()` for the failure, the failed attempt reports nothing more once the
+client is connected or connecting again: only the newer attempt reports its
+result. [`connect()`](#TcpClient::connect) itself still returns false for the
+failed attempt, while [`isConnected()`](#TcpClient::isConnected) is true for
+the newer one.
+'''
+details.ja = '''
+`success` は接続できたとき（`TlsClient` では TLS ハンドシェイクの後）に true、
+接続の試みが失敗したときに false。失敗を `onConnect(false)` で知らせるのは
+[`connectAsync()`](#TcpClient::connectAsync)、スレッドなしで保留中だった接続、
+TLS ハンドシェイクの失敗。ブロッキングの [`connect()`](#TcpClient::connect) は
+失敗すると false を返す。
+
+新しい試みに置き換えられた試みは `onConnect(false)` を知らせない。
+[`onError`](#TcpClient::onError) のリスナーがその失敗に対して `connect()` を
+呼び、クライアントがすでに接続済みか接続中なら、失敗した試みはそれ以上何も
+知らせず、新しい試みだけが結果を知らせる。このとき失敗した試みの
+[`connect()`](#TcpClient::connect) は false を返し、
+[`isConnected()`](#TcpClient::isConnected) は新しい接続について true になる。
+'''
+details.ko = '''
+`success`는 연결이 완료되면(`TlsClient`에서는 TLS 핸드셰이크 후) true, 연결
+시도가 실패하면 false다. 실패를 `onConnect(false)`로 알리는 것은
+[`connectAsync()`](#TcpClient::connectAsync), 스레드 없이 대기 중이던 연결,
+TLS 핸드셰이크 실패다. 블로킹 [`connect()`](#TcpClient::connect)는 실패하면
+false를 반환한다.
+
+새 시도로 대체된 시도는 `onConnect(false)`를 알리지 않는다.
+[`onError`](#TcpClient::onError) 리스너가 그 실패에 대해 `connect()`를 호출하여
+클라이언트가 이미 연결되었거나 연결 중이면, 실패한 시도는 더 이상 아무것도
+알리지 않고 새 시도만 결과를 알린다. 이때 실패한 시도의
+[`connect()`](#TcpClient::connect)는 false를 반환하고,
+[`isConnected()`](#TcpClient::isConnected)는 새 연결에 대해 true다.
+'''
 
 ["TcpClient::onDisconnect"]
 description.en = "Fired when the connection ends: the peer closed it, an error ended it, or disconnect() / connect() on a connected client (not from the destructor)"
