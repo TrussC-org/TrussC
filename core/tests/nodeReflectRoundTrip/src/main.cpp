@@ -107,6 +107,17 @@ static void testJsonRoundTrip() {
         check("includeDerived: globalPos value is the world position", near(g, Vec3(110, 0, 0)), str(g));
     }
 
+    // nodeToJson() follows reflectToJson(): derived members only on request
+    Json nodeSaved = nodeToJson(*child, 0);
+    check("nodeToJson: globalPos is not written by default",
+          nodeSaved.contains("members") && nodeSaved["members"].contains("pos") &&
+          !nodeSaved["members"].contains("globalPos") && !nodeSaved.contains("derived"),
+          nodeSaved.dump());
+    Json nodeLive = nodeToJson(*child, 0, true);
+    check("nodeToJson(includeDerived): globalPos is written and named under derived",
+          nodeLive.contains("members") && nodeLive["members"].contains("globalPos") &&
+          nodeLive.contains("derived"), nodeLive.dump());
+
     // 1. Parent moved before restore.
     parent->setPos(200, 0, 0);
     child->setPos(0, 0, 0);

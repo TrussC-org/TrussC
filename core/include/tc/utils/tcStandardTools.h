@@ -45,32 +45,35 @@ namespace trussc {
 // of scope — apply values to existing nodes with reflectFromJson instead)
 // ---------------------------------------------------------------------------
 
-// Reflected members of obj for the live MCP view: derived values (TC_DERIVED)
-// included, and their member paths listed under "derived" in out when any.
+// Reflected members of obj. With includeDerived (the live MCP view), derived
+// values (TC_DERIVED) are included and their member paths listed under
+// "derived" in out; without it they are left out, as in saved data.
 namespace internal {
 template <class T>
-inline void reflectMembersToJson(T& obj, Json& out) {
+inline void reflectMembersToJson(T& obj, Json& out, bool includeDerived) {
     JsonWriteReflector w;
-    w.includeDerived = true;
+    w.includeDerived = includeDerived;
     obj.reflectMembers(w);
     if (!w.members.empty()) out["members"] = std::move(w.members);
-    if (!w.derived.empty()) out["derived"] = std::move(w.derived);
+    if (includeDerived && !w.derived.empty()) out["derived"] = std::move(w.derived);
 }
 } // namespace internal
 
 // One node as JSON: type, optional instance name, instance id, reflected
-// members (same encoding as JsonWriteReflector, derived values included and
-// named in "derived"), mods ({type, members, derived} each), and the children
-// in draw order. maxDepth limits recursion (-1 = unlimited, 0 = this node
-// only); where children are cut off, "childCount" says how many were omitted
-// so a caller can drill in with another tc_get_node_tree(id) call.
-inline Json nodeToJson(Node& node, int maxDepth = -1) {
+// members (same encoding as JsonWriteReflector), mods ({type, members} each),
+// and the children in draw order. Derived values (TC_DERIVED, e.g. globalPos)
+// are left out unless includeDerived is true, as reflectToJson() does; then
+// they are included and named under "derived" (the MCP tools pass true).
+// maxDepth limits recursion (-1 = unlimited, 0 = this node only); where
+// children are cut off, "childCount" says how many were omitted so a caller
+// can drill in with another tc_get_node_tree(id) call.
+inline Json nodeToJson(Node& node, int maxDepth = -1, bool includeDerived = false) {
     Json j = Json::object();
     j["type"] = node.getTypeName();
     if (node.hasName()) j["name"] = node.getName();
     j["id"] = node.getInstanceId();
     j["members"] = Json::object();
-    internal::reflectMembersToJson(node, j);
+    internal::reflectMembersToJson(node, j, includeDerived);
     auto mods = node.getMods();
     if (!mods.empty()) {
         Json jmods = Json::array();
@@ -78,7 +81,7 @@ inline Json nodeToJson(Node& node, int maxDepth = -1) {
             Json jm = Json::object();
             Mod& mod = *m;
             jm["type"] = shortTypeName(typeid(mod));
-            internal::reflectMembersToJson(mod, jm);
+            internal::reflectMembersToJson(mod, jm, includeDerived);
             jmods.push_back(std::move(jm));
         }
         j["mods"] = std::move(jmods);
@@ -89,7 +92,7 @@ inline Json nodeToJson(Node& node, int maxDepth = -1) {
         } else {
             Json children = Json::array();
             for (auto& c : node.getChildren()) {
-                children.push_back(nodeToJson(*c, maxDepth < 0 ? -1 : maxDepth - 1));
+                children.push_back(nodeToJson(*c, maxDepth < 0 ? -1 : maxDepth - 1, includeDerived));
             }
             // Move — an lvalue assignment would deep-copy the whole subtree
             // JSON at every tree level (O(n^2) on deep chains).

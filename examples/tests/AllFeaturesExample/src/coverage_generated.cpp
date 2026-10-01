@@ -620,7 +620,7 @@ static void cover_utility() {
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
     (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-    (void)nodeToJson(af::val<Node>(), af::val<int>());
+    (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
 }
 
 static void cover_video() {

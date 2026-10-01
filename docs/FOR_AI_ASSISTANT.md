@@ -2116,7 +2116,7 @@ const char * logLevelToString(LogLevel level)  // Return the uppercase name of a
 LogStream logNotice(const std::string & module = std::string(""))  // Print to console
 LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
 LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
-Json nodeToJson(Node & node, int maxDepth)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are included and named under "derived"
+Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under "derived"
 Json parseJson(const std::string & str)  // Parse a JSON string into a Json object; returns an empty Json on parse error.
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.

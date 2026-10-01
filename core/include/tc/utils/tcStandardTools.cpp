@@ -372,7 +372,7 @@ void registerInspectionTools() {
             if (args.contains("depth") && args.at("depth").is_number()) {
                 depth = args.at("depth").get<int>();
             }
-            return json{{"status", "ok"}, {"tree", nodeToJson(*root, depth)}};
+            return json{{"status", "ok"}, {"tree", nodeToJson(*root, depth, true)}};
         });
 
     tool("tc_get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
@@ -381,7 +381,7 @@ void registerInspectionTools() {
             if (!n) {
                 return json{{"status", "ok"}, {"selected", nullptr}};
             }
-            return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
+            return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         }));
 }
 
@@ -618,7 +618,7 @@ void registerControlTools() {
                 return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
             }
             setSelectedNode(n);
-            return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
+            return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         });
 
     tool("tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string). A derived member (e.g. globalPos) is applied before its canonical member (pos), so when both are given the canonical one wins")

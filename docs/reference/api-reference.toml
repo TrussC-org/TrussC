@@ -15712,9 +15712,9 @@ related = ["setStrokeWeight"]
 ["nodeToJson"]
 category = "utility"
 keywords = ["serialize", "reflect", "tree", "dump"]
-description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are included and named under \"derived\""
-description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ。派生メンバ（例: globalPos）も含め、\"derived\" に名前を列挙する"
-description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화. 파생 멤버(예: globalPos)도 포함하며 \"derived\"에 이름을 나열한다"
+description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under \"derived\""
+description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ。派生メンバ（例: globalPos）は includeDerived が true のときだけ含め、\"derived\" に名前を列挙する"
+description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화. 파생 멤버(예: globalPos)는 includeDerived가 true일 때만 포함하며 \"derived\"에 이름을 나열한다"
 related = ["getRootNode", "Node::findByInstanceId"]
 
 ["noise"]
