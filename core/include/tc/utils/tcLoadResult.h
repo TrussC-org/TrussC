@@ -9,9 +9,10 @@
 // common pattern working unchanged:
 //
 //     if (img.load("photo.png")) { ... }        // still fine
-//     if (!snd.load("beep.wav")) {
-//         logError() << snd.load("beep.wav").message;   // (illustrative)
-//     }
+//
+// Rule: a loader that returns LoadResult also logs a missing file at Error
+// (same text as `message`), so callers that load optional files check
+// fs::exists() first.
 //
 // Error taxonomy is deliberately coarse for now (v0.7): the enum can gain
 // values and messages can get richer without breaking anything. What CAN'T

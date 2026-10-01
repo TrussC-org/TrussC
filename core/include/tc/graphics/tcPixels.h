@@ -269,6 +269,7 @@ public:
 
         std::error_code ec;
         if (!std::filesystem::exists(path, ec)) {
+            logError("Pixels") << "file not found: " << internal::pathToUtf8(path);
             return LoadResult::fail(LoadError::FileNotFound,
                                     "file not found: " + internal::pathToUtf8(path));
         }
@@ -304,6 +305,7 @@ public:
 
         std::error_code ec;
         if (!std::filesystem::exists(path, ec)) {
+            logError("Pixels") << "file not found: " << internal::pathToUtf8(path);
             return LoadResult::fail(LoadError::FileNotFound,
                                     "file not found: " + internal::pathToUtf8(path));
         }
