@@ -186,8 +186,8 @@ static string accessorJson(int view, int componentType, const string& count,
     return a;
 }
 
-static const int FLOAT = 5126, USHORT = 5123, UINT = 5125;
-static const int INT = 5124;  // not a glTF 2.0 component type
+static const int CT_FLOAT = 5126, CT_USHORT = 5123, CT_UINT = 5125;
+static const int CT_INT = 5124;  // not a glTF 2.0 component type
 
 // The three vertices of the test triangle, its indices, and one normal each.
 static const float POSITIONS[9] = { 0, 0, 0,  1, 0, 0,  0, 1, 0 };
@@ -201,9 +201,9 @@ static GltfBuilder triangle() {
     int pv = b.addView(POSITIONS, sizeof(POSITIONS));
     int iv = b.addView(INDICES, sizeof(INDICES));
     int nv = b.addView(NORMALS, sizeof(NORMALS));
-    b.addAccessor(accessorJson(pv, FLOAT, "3", "VEC3"));
-    b.addAccessor(accessorJson(iv, USHORT, "3", "SCALAR"));
-    b.addAccessor(accessorJson(nv, FLOAT, "3", "VEC3"));
+    b.addAccessor(accessorJson(pv, CT_FLOAT, "3", "VEC3"));
+    b.addAccessor(accessorJson(iv, CT_USHORT, "3", "SCALAR"));
+    b.addAccessor(accessorJson(nv, CT_FLOAT, "3", "VEC3"));
     b.primitive = R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
     return b;
 }
@@ -313,7 +313,7 @@ int main() {
         const float sparseVal[3] = { 5, 5, 5 };
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         int svv = b.addView(sparseVal, sizeof(sparseVal));
-        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+        b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3},"indices":1})";
@@ -359,14 +359,14 @@ int main() {
     // ----- ranges and references ----------------------------------------------
     {
         GltfBuilder b = triangle();
-        b.accessors[0] = accessorJson(0, FLOAT, "4", "VEC3");
-        b.accessors[2] = accessorJson(2, FLOAT, "4", "VEC3");
+        b.accessors[0] = accessorJson(0, CT_FLOAT, "4", "VEC3");
+        b.accessors[2] = accessorJson(2, CT_FLOAT, "4", "VEC3");
         GltfModel m;
         loadCase("accessor count past its buffer view", b, false, m);
     }
     {
         GltfBuilder b = triangle();
-        b.accessors[0] = accessorJson(0, FLOAT, "3", "VEC3", ",\"byteOffset\":4");
+        b.accessors[0] = accessorJson(0, CT_FLOAT, "3", "VEC3", ",\"byteOffset\":4");
         GltfModel m;
         loadCase("accessor offset past its buffer view", b, false, m);
     }
@@ -378,7 +378,7 @@ int main() {
     }
     {
         GltfBuilder b = triangle();
-        b.accessors[1] = accessorJson(7, USHORT, "3", "SCALAR");
+        b.accessors[1] = accessorJson(7, CT_USHORT, "3", "SCALAR");
         GltfModel m;
         loadCase("reference to a missing buffer view", b, false, m);
     }
@@ -391,7 +391,7 @@ int main() {
     if (is64) {
         // POSITION count too large to address
         GltfBuilder b = triangle();
-        b.accessors[0] = accessorJson(0, FLOAT, HUGE_COUNT, "VEC3");
+        b.accessors[0] = accessorJson(0, CT_FLOAT, HUGE_COUNT, "VEC3");
         b.primitive = R"({"attributes":{"POSITION":0}})";
         GltfModel m;
         loadCase("position count too large to address", b, false, m);
@@ -401,7 +401,7 @@ int main() {
         GltfBuilder b = triangle();
         const uint32_t idx32[1] = { 0 };
         int v = b.addView(idx32, sizeof(idx32));
-        b.addAccessor(accessorJson(v, UINT, HUGE_COUNT, "SCALAR"));
+        b.addAccessor(accessorJson(v, CT_UINT, HUGE_COUNT, "SCALAR"));
         b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
         GltfModel m;
         loadCase("index count too large to address", b, false, m);
@@ -413,7 +413,7 @@ int main() {
         const float sparseVal[3] = { 5, 5, 5 };
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         int svv = b.addView(sparseVal, sizeof(sparseVal));
-        b.addAccessor(accessorJson(-1, FLOAT, "3", "VEC3",
+        b.addAccessor(accessorJson(-1, CT_FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":" + HUGE_COUNT + ",\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5125},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
@@ -428,7 +428,7 @@ int main() {
         const float sparseVal[3] = { 5, 5, 5 };
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         int svv = b.addView(sparseVal, sizeof(sparseVal));
-        b.addAccessor(accessorJson(-1, FLOAT, "6148914691236517206", "VEC3",
+        b.addAccessor(accessorJson(-1, CT_FLOAT, "6148914691236517206", "VEC3",
             ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
@@ -452,7 +452,7 @@ int main() {
         int svv = b.addView(sparseVal, sizeof(sparseVal));
         const float after[4] = { 9, 9, 9, 9 };
         b.addView(after, sizeof(after));
-        b.addAccessor(accessorJson(basev, FLOAT, "3", "VEC3",
+        b.addAccessor(accessorJson(basev, CT_FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
@@ -470,7 +470,7 @@ int main() {
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         const float sparseVal[6] = { 5, 5, 5,  6, 6, 6 };
         int svv = b.addView(sparseVal, 20);
-        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+        b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
@@ -492,7 +492,7 @@ int main() {
         // A component type glTF 2.0 does not allow is reported as a
         // validation failure, not as a range problem
         GltfBuilder b = triangle();
-        b.addAccessor(accessorJson(2, INT, "3", "VEC3"));
+        b.addAccessor(accessorJson(2, CT_INT, "3", "VEC3"));
         GltfModel m;
         string warning;
         loadCase("unsupported component type", b, false, m, &warning);
@@ -506,7 +506,7 @@ int main() {
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         const float sparseVal[3] = { 5, 5, 5 };
         int svv = b.addView(sparseVal, sizeof(sparseVal));
-        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+        b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":1,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5124},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         GltfModel m;
@@ -519,7 +519,7 @@ int main() {
     // ----- mesh consistency ---------------------------------------------------
     {
         GltfBuilder b = triangle();
-        b.accessors[2] = accessorJson(2, FLOAT, "2", "VEC3");  // 2 normals, 3 positions
+        b.accessors[2] = accessorJson(2, CT_FLOAT, "2", "VEC3");  // 2 normals, 3 positions
         GltfModel m;
         loadCase("attribute counts differ", b, false, m);
     }
@@ -527,7 +527,7 @@ int main() {
         GltfBuilder b = triangle();
         const uint16_t idx[3] = { 0, 1, 5 };
         int v = b.addView(idx, sizeof(idx));
-        b.addAccessor(accessorJson(v, USHORT, "3", "SCALAR"));
+        b.addAccessor(accessorJson(v, CT_USHORT, "3", "SCALAR"));
         b.primitive = R"({"attributes":{"POSITION":0},"indices":3})";
         GltfModel m;
         loadCase("index past the vertex count", b, false, m);
@@ -536,7 +536,7 @@ int main() {
         // POSITION declared VEC2 over 6 floats: 2 whole vertices are read,
         // and the loader refuses index 2, which is past them
         GltfBuilder b = triangle();
-        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC2"));
+        b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC2"));
         b.primitive = R"({"attributes":{"POSITION":3},"indices":1})";
         GltfModel m;
         string warning;
@@ -577,7 +577,7 @@ int main() {
         // POSITION accessor without a buffer view has no vertex data of its
         // own: the primitive is skipped like one without POSITION
         GltfBuilder b = triangle();
-        b.addAccessor(accessorJson(-1, FLOAT, "3", "VEC3"));
+        b.addAccessor(accessorJson(-1, CT_FLOAT, "3", "VEC3"));
         b.primitive = R"({"attributes":{"POSITION":3}},)"
                       R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
         GltfModel m;
@@ -594,7 +594,7 @@ int main() {
         // than memory: the primitive is skipped without allocating an array
         // from that count, and the other one loads
         GltfBuilder b = triangle();
-        b.addAccessor(accessorJson(-1, UINT, is64 ? "4611686018427387903" : "1073741823",
+        b.addAccessor(accessorJson(-1, CT_UINT, is64 ? "4611686018427387903" : "1073741823",
                                    "SCALAR"));
         b.primitive = R"({"attributes":{"POSITION":0},"indices":3},)"
                       R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
@@ -614,8 +614,8 @@ int main() {
         b.extraBuffers.push_back(R"({"byteLength":64})");
         b.views.push_back(R"({"buffer":1,"byteOffset":0,"byteLength":36})");
         int noDataView = (int)b.views.size() - 1;
-        b.addAccessor(accessorJson(noDataView, FLOAT, "3", "VEC3"));   // 3
-        b.addAccessor(accessorJson(noDataView, USHORT, "3", "SCALAR"));  // 4
+        b.addAccessor(accessorJson(noDataView, CT_FLOAT, "3", "VEC3"));   // 3
+        b.addAccessor(accessorJson(noDataView, CT_USHORT, "3", "SCALAR"));  // 4
         b.primitive = R"({"attributes":{"POSITION":3}},)"
                       R"({"attributes":{"POSITION":0},"indices":4},)"
                       R"({"attributes":{"POSITION":0,"NORMAL":2},"indices":1})";
@@ -636,7 +636,7 @@ int main() {
         int siv = b.addView(sparseIdx, sizeof(sparseIdx));
         const float sparseVal[12] = { 5, 5, 5,  6, 6, 6,  7, 7, 7,  8, 8, 8 };
         int svv = b.addView(sparseVal, sizeof(sparseVal));
-        b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+        b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC3",
             ",\"sparse\":{\"count\":4,\"indices\":{\"bufferView\":" + to_string(siv) +
             ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
         b.primitive = R"({"attributes":{"POSITION":3}})";
@@ -657,7 +657,7 @@ int main() {
             int siv = b.addView(c.idx, 2 * sizeof(uint16_t));
             const float sparseVal[6] = { 5, 5, 5,  6, 6, 6 };
             int svv = b.addView(sparseVal, sizeof(sparseVal));
-            b.addAccessor(accessorJson(0, FLOAT, "3", "VEC3",
+            b.addAccessor(accessorJson(0, CT_FLOAT, "3", "VEC3",
                 ",\"sparse\":{\"count\":2,\"indices\":{\"bufferView\":" + to_string(siv) +
                 ",\"componentType\":5123},\"values\":{\"bufferView\":" + to_string(svv) + "}}"));
             b.primitive = R"({"attributes":{"POSITION":3}})";
@@ -844,7 +844,7 @@ int main() {
         GltfModel m;
         bool first = m.load(writeGltf(triangle()).string());
         GltfBuilder bad = triangle();
-        bad.accessors[0] = accessorJson(0, FLOAT, "4", "VEC3");
+        bad.accessors[0] = accessorJson(0, CT_FLOAT, "4", "VEC3");
         bool second = m.load(writeGltf(bad).string());
         check("reload: good then rejected leaves the model empty",
               first && !second && !m.isLoaded() && m.getNodeCount() == 0);
