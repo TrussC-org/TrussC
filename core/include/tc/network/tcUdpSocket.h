@@ -14,6 +14,7 @@
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
 #include "../utils/tcLog.h"
+#include "tcKeptThreads.h"
 
 // Platform-specific socket type
 #ifdef _WIN32
@@ -66,10 +67,23 @@ public:
     // receive thread — fastest, but you handle the synchronization.
     // With setUseThread(false) everything runs on the main thread and this
     // does not apply.
+    //
+    // An inline onReceive listener may call stopReceiving() or close(). The
+    // receive thread cannot join itself there: the socket keeps it, and the
+    // next startReceiving(), stopReceiving() or close() on another thread,
+    // or the destructor, waits for it (the rest of the listener). The
+    // destructor must not run on the receive thread itself (a listener that
+    // destroys the socket): it detaches the thread, which then returns from
+    // the listener into the destroyed socket, undefined behavior. Destroy it
+    // from another thread, or once the listener has returned.
     Event<UdpReceiveEventArgs> onReceive;   // On data receive
     Event<UdpErrorEventArgs> onError;       // On error
 
     UdpSocket();
+
+    // Closes the socket and returns once the receive thread has ended, one
+    // that a listener's stopReceiving() or close() let go of included. Must
+    // not run on the receive thread (see onReceive).
     ~UdpSocket();
 
     // Copy prohibited
@@ -212,6 +226,12 @@ private:
 
     // Receive thread
     std::thread receiveThread_;
+
+    // receiveThread_ when a call on that very thread (a listener's
+    // stopReceiving() or close(), or the destructor) let go of it. Joined by
+    // the next startReceiving(), stopReceiving() or close() on another
+    // thread, or by the destructor (see tcKeptThreads.h).
+    internal::KeptThreads keptThreads_;
     std::atomic<bool> receiving_{false};
     std::atomic<bool> shouldStop_{false};
     
