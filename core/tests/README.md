@@ -137,7 +137,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   holds with no allocation sized from the stated length (the largest request
   is recorded by `src/allocProbe.cpp`), and growth past the first reservation
   lands on a correctly stated length. A voice on a buffer with no frames
-  stops at its first mix.
+  stops at its first mix. A file reached through `<dir>/..` is reported as
+  given, the same string in `getPath()`, the drop warning, `getPlayingSounds()`
+  and the tool (#365); `getBufferSize()` and the tool's `requestedBufferSize`
+  are the requested size, while `AudioDeviceChangedArgs::bufferSize` is the
+  period the device runs with (also with the default request 0).
 - `soundVoiceLifetime/` — a `Sound` plays only while it, or a copy of it, is
   alive (#281), on the real `AudioEngine` over miniaudio's null backend:
   `maxPolyphony + 8` scoped looping Sounds each play and a new Sound plays
@@ -308,7 +312,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   and the listener reconnected while `disconnect()` was joining that thread.
   Destroying a client whose listener reconnects on every `onDisconnect`
   finishes without any `onDisconnect` and without reconnecting: the
-  destructor does not notify.
+  destructor does not notify. When an `onError` listener reconnects, the
+  replaced attempt reports no `onConnect(false)` (#393), through
+  `connectAsync()` and without threads; a refused `connectAsync()` with no
+  reconnect reports `onConnect(false)` exactly once.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and

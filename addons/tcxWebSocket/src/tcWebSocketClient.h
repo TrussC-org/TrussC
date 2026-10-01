@@ -117,8 +117,25 @@ private:
     void processFrame();
     void sendPong(const std::vector<char>& payload);
 
-    // One masked control frame (Ping / Pong), sent in a single write.
+    // One masked control frame (Ping / Pong / Close), sent in a single write.
     bool sendControl(uint8_t opcode, const char* data, size_t len);
+
+    // Fails the connection (RFC 6455 7.1.7): sends Close with statusCode,
+    // notifies onError, then disconnect() (which fires onClose). disconnect()
+    // is skipped when the onError listener already disconnected, reconnected
+    // or destroyed the client. The caller must return right after without
+    // touching members: any of the listeners may have done so (#262).
+    void failConnection(uint16_t statusCode, const std::string& reason);
+
+    // Largest message accepted, in bytes: one frame, or all fragments of a
+    // fragmented message together. A server that sends more gets Close 1009
+    // (Message Too Big) and the app gets onError then onClose. The size is
+    // checked from the frame header, before the payload is buffered.
+    // 64 MiB is far above typical WebSocket traffic (JSON, commands, encoded
+    // images or audio chunks) and keeps the memory one message can take
+    // bounded to a few such buffers (receive buffer, reassembled message, the
+    // copy handed to onMessage), also in a long-running app.
+    static constexpr uint64_t maxMessageSize_ = 64ull * 1024 * 1024;
 
     std::unique_ptr<TcpClient> client_;
     EventListener receiveListener_;
@@ -132,6 +149,16 @@ private:
     bool useTls_ = false;
 
     std::vector<char> receiveBuffer_;
+    // Fragmented message in progress (RFC 6455 5.4): payload of the frames so
+    // far and the opcode of its first frame (0x1 text, 0x2 binary; 0 = none).
+    std::vector<char> fragmentBuffer_;
+    int fragmentOpcode_ = 0;
+
+    // Lets failConnection() see, after notifying, whether a listener destroyed
+    // the client (alive_ false) or disconnected / reconnected it (connection_
+    // changed). alive_ is copied before the notification and checked first.
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
+    unsigned connection_ = 0;
     std::string handshakeNonce_;
 
     bool tlsVerifyNone_ = false;

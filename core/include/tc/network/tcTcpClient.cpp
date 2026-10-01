@@ -214,7 +214,10 @@ void TcpClient::connectAsync(const std::string& host, int port) {
 
 void TcpClient::connectThreadFunc(const std::string& host, int port) {
     bool success = connect(host, port);
-    if (!success) {
+    // An onError listener may have started a newer attempt from inside the
+    // connect() above. That attempt reports its own result: this one is not
+    // reported once the client is connected or connecting again.
+    if (!success && !connected_ && !running_ && !connectPending_) {
         TcpConnectEventArgs args;
         args.success = false;
         args.message = "Connection failed";
@@ -355,10 +358,13 @@ void TcpClient::processNetwork() {
                 // not have its new connection torn down after it returns
                 disconnect();
                 notifyError("Connection failed", err);
-                TcpConnectEventArgs args;
-                args.success = false;
-                args.message = "Connection failed";
-                onConnect.notify(args);
+                // Not reported if an onError listener started a newer attempt
+                if (!connected_ && !running_ && !connectPending_) {
+                    TcpConnectEventArgs args;
+                    args.success = false;
+                    args.message = "Connection failed";
+                    onConnect.notify(args);
+                }
                 return;
             }
             if (FD_ISSET(socket_, &writefds)) {
@@ -392,10 +398,13 @@ void TcpClient::processNetwork() {
                 // Tear down before notifying (see the Windows branch)
                 disconnect();
                 notifyError("Connection failed", err);
-                TcpConnectEventArgs args;
-                args.success = false;
-                args.message = "Connection failed";
-                onConnect.notify(args);
+                // Not reported if an onError listener started a newer attempt
+                if (!connected_ && !running_ && !connectPending_) {
+                    TcpConnectEventArgs args;
+                    args.success = false;
+                    args.message = "Connection failed";
+                    onConnect.notify(args);
+                }
                 return;
             }
         }

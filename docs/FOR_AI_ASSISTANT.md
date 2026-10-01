@@ -2460,7 +2460,7 @@ void App::windowResized(int width, int height)  // Window resized
 
 ```cpp
 size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)
-int AudioEngine::getBufferSize() const  // Current device buffer size in frames (0 = miniaudio default).
+int AudioEngine::getBufferSize() const  // Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize.
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
