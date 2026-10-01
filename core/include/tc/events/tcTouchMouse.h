@@ -6,8 +6,10 @@
 // Decides which mouse event, if any, a touch event produces when touch-as-mouse
 // is on. The first finger down is the primary touch and is the only one that
 // drives the mouse:
-//   - BEGAN:  with no primary, the first changed touch becomes the primary
-//             and gives one press at its position.
+//   - BEGAN:  a primary that is not among the touches is stale (its ENDED /
+//             CANCELLED never arrived) and is dropped. Then, with no primary,
+//             the first changed touch becomes the primary and gives one press
+//             at its position.
 //   - MOVED:  if the primary is among the touches, a drag at its position.
 //   - ENDED / CANCELLED: if the primary is among the changed touches, one
 //             release at its position, and the primary is cleared.
@@ -56,6 +58,11 @@ public:
 
         switch (phase) {
             case TouchPhase::Began:
+                // A primary that is no longer down lost its end event; without
+                // this it would block every later press.
+                if (primaryId_ && !findPrimary(touches, numTouches)) {
+                    primaryId_.reset();
+                }
                 if (!primaryId_) {
                     for (int i = 0; i < numTouches; i++) {
                         if (touches[i].changed) {

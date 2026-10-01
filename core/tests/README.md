@@ -468,7 +468,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `internal::TouchMouseMapper`: the first finger down is the only touch that
   drives the mouse (one press, drags, one release on ENDED or CANCELLED); it is
   found by its full `uintptr_t` identifier, not its index in the touch array;
-  no drag after it lifts; an event with no touches clears it.
+  no drag after it lifts; an event with no touches clears it; a primary whose
+  end event was lost (not among the touches at the next BEGAN) is dropped so
+  the next finger down presses.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame

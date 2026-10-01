@@ -14,6 +14,8 @@
 //     array, and the full uintptr_t identifier is compared.
 //   - After the primary is released, no drag is produced until a new press.
 //   - An event with no touches clears the primary.
+//   - A primary whose end event never arrived (it is no longer among the
+//     touches at the next BEGAN) is dropped, and the new finger presses.
 // =============================================================================
 
 #include <TrussC.h>
@@ -183,6 +185,23 @@ TC_CORE_TEST_MAIN() {
         feed(m, c, TouchPhase::Began, {touch(kIdB, 30, 30, true)});
         check("no touches: the primary is cleared, the next finger presses",
               cleared && c.press == 2);
+    }
+
+    // --- primary's end event lost: the next finger down still presses ------
+    {
+        TouchMouseMapper m;
+        Counts c;
+        feed(m, c, TouchPhase::Began, {touch(kIdA, 10, 10, true)});
+        // A's ENDED never arrives. B goes down and A is not among the touches.
+        TouchMouseAction p = feed(m, c, TouchPhase::Began, {touch(kIdB, 40, 50, true)});
+        TouchMouseAction d = feed(m, c, TouchPhase::Moved, {touch(kIdB, 45, 55, true)});
+        TouchMouseAction r = feed(m, c, TouchPhase::Ended, {touch(kIdB, 45, 55, true)});
+        check("stale primary: the next finger down presses at its position",
+              c.press == 2 && p.kind == TouchMouseAction::Kind::Press && at(p, 40, 50));
+        check("stale primary: the new primary drags and releases",
+              d.kind == TouchMouseAction::Kind::Drag && at(d, 45, 55) &&
+              r.kind == TouchMouseAction::Kind::Release && at(r, 45, 55) &&
+              !m.hasPrimary());
     }
 
     // --- single finger is unchanged: press, drags, release ------------------
