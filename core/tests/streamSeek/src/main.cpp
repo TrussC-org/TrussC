@@ -240,34 +240,85 @@ static float streamVoicePosition() {
     return -1.0f;
 }
 
-// setPosition(target), then watch getPosition() and the level for 200 ms:
-// getPosition() never drops below the target, it is still close to the
-// target when the level reaches `newLevel`, and the level 200 ms after the
-// call is sampled.
+// Waits for a level the audio should reach (up to 2 s), so no check depends
+// on how long a sleep takes.
+static bool waitLevel(float level) {
+    return waitFor([level] { return approx(g_level.load(), level, 0.02f); }, 2000);
+}
+
+static float secondsSince(chrono::steady_clock::time_point t0) {
+    return chrono::duration<float>(chrono::steady_clock::now() - t0).count();
+}
+
+// How far playback moved on from `target`, which it started from no earlier
+// than `t0`: wait (up to 2 s) until getPosition() is past target + 0.05 s,
+// and measure the time since `t0`. The position may not be past the target
+// by more than that time plus kAheadSec, a margin for the mixer running
+// ahead of the clock. getPosition() never reads below the target meanwhile,
+// so a voice that plays on from elsewhere does not pass by reaching the
+// window later.
+constexpr float kAheadSec = 0.05f;
+struct PlayedFrom {
+    float position = -1.0f;
+    float lowest = 1e9f;  // lowest getPosition() during the wait
+    float sec = 0.0f;     // seconds from t0 to the read
+    bool moved = false;   // past target + 0.05 s within 2 s
+    bool ok(float target) const {
+        return moved && lowest >= target - 0.001f && position > target + 0.05f &&
+               position <= target + sec + kAheadSec;
+    }
+    string detail() const {
+        return to_string(position) + " (" + to_string(sec) +
+               " s after the seek or resume, lowest " + to_string(lowest) + ")";
+    }
+};
+
+static PlayedFrom playedFrom(Sound& s, float target, chrono::steady_clock::time_point t0) {
+    PlayedFrom r;
+    r.moved = waitFor([&] {
+        const float q = s.getPosition();
+        if (q < r.lowest) r.lowest = q;
+        return q > target + 0.05f;
+    }, 2000);
+    r.position = s.getPosition();
+    r.sec = secondsSince(t0);
+    return r;
+}
+
+// setPosition(target), then watch getPosition() and the level until the
+// level reaches `newLevel` (up to 2 s): getPosition() never drops below the
+// target meanwhile, and it is still close to the target when the level
+// switches.
 struct SeekTrace {
+    chrono::steady_clock::time_point t0;   // just before the call
     float first = -1.0f;      // getPosition() right after the call
-    float minSeen = 1e9f;     // lowest getPosition() in the 200 ms
+    float minSeen = 1e9f;     // lowest getPosition() until the switch
     float atSwitch = -1.0f;   // getPosition() when the level switched
+    float switchGapSec = 0.0f;   // from the poll before the switch to atSwitch
     bool switched = false;
-    float levelAt200 = -1.0f; // level 200 ms after the call
 };
 
 static SeekTrace seekAndTrace(Sound& s, float target, float newLevel) {
     SeekTrace t;
-    const auto t0 = chrono::steady_clock::now();
+    t.t0 = chrono::steady_clock::now();
     s.setPosition(target);
     t.first = s.getPosition();
-    while (chrono::steady_clock::now() - t0 < chrono::milliseconds(195)) {
+    auto lastPoll = t.t0;
+    while (chrono::steady_clock::now() - t.t0 < chrono::milliseconds(2000)) {
+        const auto now = chrono::steady_clock::now();
         const float p = s.getPosition();
         if (p < t.minSeen) t.minSeen = p;
-        if (!t.switched && approx(g_level.load(), newLevel, 0.03f)) {
+        if (approx(g_level.load(), newLevel, 0.02f)) {
             t.atSwitch = s.getPosition();
+            // The level switched after the previous poll saw the old one:
+            // the position may have moved on by the time since then.
+            t.switchGapSec = secondsSince(lastPoll);
             t.switched = true;
+            break;
         }
+        lastPoll = now;
         sleepMs(1);
     }
-    this_thread::sleep_until(t0 + chrono::milliseconds(200));
-    t.levelAt200 = g_level.load();
     return t;
 }
 
@@ -366,22 +417,20 @@ TC_CORE_TEST_MAIN() {
     check("a WAV stream's decoder has no seek table",
           internal::lastStreamSeekPointsForTests() == 0,
           to_string(internal::lastStreamSeekPointsForTests()));
-    sleepMs(150);
-    check("it plays from the start (level 0.1)", approx(g_level.load(), 0.1f, 0.02f),
-          to_string(g_level.load()));
+    check("it plays from the start (level 0.1)", waitLevel(0.1f), to_string(g_level.load()));
 
     SeekTrace t = seekAndTrace(s, 2.0f, 0.5f);
     check("getPosition() is the target right after setPosition()", approx(t.first, 2.0f, 0.001f),
           to_string(t.first));
-    check("the audio moved to the target (level 0.5, 200 ms after the seek)",
-          approx(t.levelAt200, 0.5f, 0.02f), to_string(t.levelAt200));
+    check("the audio moved to the target (level 0.5)", t.switched, to_string(g_level.load()));
     check("getPosition() never reported the old position meanwhile", t.minSeen >= 2.0f - 0.001f,
           to_string(t.minSeen));
+    // 0.1 s, plus the time since the poll that still heard the old level.
     check("getPosition() is still the target when the audio moves",
-          t.switched && t.atSwitch >= 2.0f - 0.001f && t.atSwitch < 2.1f, to_string(t.atSwitch));
-    float p = s.getPosition();
-    check("then getPosition() follows the playback from the target", p > 2.05f && p < 2.3f,
-          to_string(p));
+          t.switched && t.atSwitch >= 2.0f - 0.001f && t.atSwitch < 2.1f + t.switchGapSec,
+          to_string(t.atSwitch) + " (" + to_string(t.switchGapSec) + " s since the last poll)");
+    PlayedFrom pf = playedFrom(s, 2.0f, t.t0);
+    check("then getPosition() follows the playback from the target", pf.ok(2.0f), pf.detail());
 
     // --- seek while paused -------------------------------------------------------
     s.pause();
@@ -397,25 +446,24 @@ TC_CORE_TEST_MAIN() {
     check("paused: the voice itself has not moved (the mixer applies the seek)",
           voiceBefore > 2.0f && approx(voiceAfter, voiceBefore, 0.001f),
           to_string(voiceBefore) + " -> " + to_string(voiceAfter));
+    auto t0 = chrono::steady_clock::now();
     s.resume();
-    sleepMs(200);
-    check("resumed: it plays from the target (level 0.1)", approx(g_level.load(), 0.1f, 0.02f),
+    check("resumed: it plays from the target (level 0.1)", waitLevel(0.1f),
           to_string(g_level.load()));
-    p = s.getPosition();
-    check("resumed: getPosition() follows from the target", p > 0.3f && p < 0.65f, to_string(p));
+    pf = playedFrom(s, 0.25f, t0);
+    check("resumed: getPosition() follows from the target", pf.ok(0.25f), pf.detail());
 
     // --- repeated seeks: the last one wins ---------------------------------------
     s.setPosition(2.5f);
     s.setPosition(0.2f);
+    t0 = chrono::steady_clock::now();
     s.setPosition(1.8f);
     check("repeated: getPosition() is the last target", approx(s.getPosition(), 1.8f, 0.001f),
           to_string(s.getPosition()));
-    sleepMs(200);
-    p = s.getPosition();
-    check("repeated: the audio is at the last target (level 0.5)",
-          approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
-    check("repeated: getPosition() follows from the last target", p > 1.85f && p < 2.2f,
-          to_string(p));
+    check("repeated: the audio is at the last target (level 0.5)", waitLevel(0.5f),
+          to_string(g_level.load()));
+    pf = playedFrom(s, 1.8f, t0);
+    check("repeated: getPosition() follows from the last target", pf.ok(1.8f), pf.detail());
 
     // Paused: the worker serves the first request while the second waits for
     // the mixer, which only runs again on resume.
@@ -425,13 +473,13 @@ TC_CORE_TEST_MAIN() {
     s.setPosition(0.4f);
     check("repeated while paused: getPosition() is the last target",
           approx(s.getPosition(), 0.4f, 0.001f), to_string(s.getPosition()));
+    t0 = chrono::steady_clock::now();
     s.resume();
-    sleepMs(200);
-    p = s.getPosition();
-    check("repeated while paused: the audio is at the last target (level 0.1)",
-          approx(g_level.load(), 0.1f, 0.02f), to_string(g_level.load()));
-    check("repeated while paused: getPosition() follows from the last target",
-          p > 0.45f && p < 0.8f, to_string(p));
+    check("repeated while paused: the audio is at the last target (level 0.1)", waitLevel(0.1f),
+          to_string(g_level.load()));
+    pf = playedFrom(s, 0.4f, t0);
+    check("repeated while paused: getPosition() follows from the last target", pf.ok(0.4f),
+          pf.detail());
     s.stop();
 
     // --- while a seek is pending ---------------------------------------------------
@@ -439,8 +487,8 @@ TC_CORE_TEST_MAIN() {
     // ring still holds the old position's data.
     {
         Sound g;
-        check("pending: a stream at level -0.3 plays", (bool)g.loadStream(negWav) && g.play());
-        sleepMs(150);
+        check("pending: a stream at level -0.3 plays",
+              (bool)g.loadStream(negWav) && g.play() && waitLevel(-0.3f), to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
         {
             lock_guard<mutex> lock(g_blockMutex);
@@ -451,7 +499,11 @@ TC_CORE_TEST_MAIN() {
         const uint64_t called = g_blocks.load();
         sleepMs(60);   // the worker serves nothing meanwhile
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        sleepMs(150);
+        // Until the audio is at the target, and at least 11 blocks after the
+        // one that may predate the request.
+        const bool served = waitFor([&] {
+            return approx(g_level.load(), 0.5f, 0.02f) && g_blocks.load() > called + 12;
+        }, 2000);
         g_record.store(false);
         // One block may have been mixed before the request (its audioOut can
         // follow the call); every later block holds no old audio.
@@ -467,30 +519,48 @@ TC_CORE_TEST_MAIN() {
         check("pending: nothing of the old position is heard after setPosition()",
               blocks > 10 && oldBlocks == 0,
               to_string(oldBlocks) + " of " + to_string(blocks) + " blocks at the old level");
-        check("pending: once served, the audio is at the target (level 0.5)",
-              approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
+        check("pending: once served, the audio is at the target (level 0.5)", served,
+              to_string(g_level.load()));
         g.stop();
 
         Sound n;
         check("pending: a short non-looping stream plays", (bool)n.loadStream(tailWav) && n.play());
-        sleepMs(50);   // the whole file is in the ring: the worker has hit its end
-        internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
-        n.setPosition(0.0f);
-        sleepMs(400);  // longer than what the ring held
-        check("pending: a non-looping stream does not end at the old data's end",
-              n.isPlaying());
-        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        check("pending: then it plays from the target (level 0.5)",
-              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
-              to_string(g_level.load()));
+        // The whole file is in the ring after 50 ms: the worker has hit its
+        // end. Nothing signals that, so a sleep that overruns past the 0.3 s
+        // file would let it end before setPosition(): check and retry.
+        bool early = false;
+        string earlyDetail;
+        for (int attempt = 1; attempt <= 3 && !early; ++attempt) {
+            if (attempt > 1) {
+                n.stop();
+                n.play();
+            }
+            sleepMs(50);
+            bool playing = n.isPlaying();
+            float pos = n.getPosition();
+            early = playing && pos < 0.2f;
+            earlyDetail = to_string(attempt) + " attempts, last: position " + to_string(pos) +
+                          ", isPlaying " + (playing ? "true" : "false");
+        }
+        check("pending: it is still playing early in the file (position < 0.2)", early,
+              earlyDetail);
+        if (early) {
+            internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
+            n.setPosition(0.0f);
+            sleepMs(400);  // longer than what the ring held
+            check("pending: a non-looping stream does not end at the old data's end",
+                  n.isPlaying());
+            internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+            check("pending: then it plays from the target (level 0.5)",
+                  waitLevel(0.5f), to_string(g_level.load()));
+        }
         n.stop();
     }
 
     // --- eager sounds seek at once -----------------------------------------------
     Sound eager;
     check("the DC file loads eagerly", (bool)eager.load(dcWav) && !eager.isStreaming());
-    eager.play();
-    sleepMs(100);
+    check("eager: it plays (level 0.1)", eager.play() && waitLevel(0.1f), to_string(g_level.load()));
     {
         // The voice plays on between the two calls (a slow runner may lose
         // the thread there): from the target, not the old position, by at
@@ -502,9 +572,14 @@ TC_CORE_TEST_MAIN() {
         check("eager: getPosition() is the target at once", p >= 2.0f && p - 2.0f <= sec + 0.05f,
               to_string(p) + " (" + to_string(sec) + " s between the calls)");
     }
-    sleepMs(50);
-    check("eager: the audio moved (level 0.5)", approx(g_level.load(), 0.5f, 0.02f),
-          to_string(g_level.load()));
+    // The file reaches 0.5 by itself after 1 s: the voice is past the target
+    // when it is heard.
+    {
+        const bool heard = waitLevel(0.5f);
+        const float p = eager.getPosition();
+        check("eager: the audio moved (level 0.5)", heard && p >= 2.0f,
+              to_string(g_level.load()) + " at " + to_string(p));
+    }
     eager.stop();
 
     // --- zero-length file --------------------------------------------------------
@@ -529,21 +604,27 @@ TC_CORE_TEST_MAIN() {
         check("loadStream() accepts a FLAC whose length is unknown", (bool)r, r.message);
         check("its duration is 0 (unknown)", u.getDuration() == 0.0f, to_string(u.getDuration()));
         check("it plays (level 0.3)",
-              u.play() && waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000),
-              to_string(g_level.load()));
+              u.play() && waitLevel(0.3f), to_string(g_level.load()));
         // With no known end there is nothing to clamp a target to: the
         // seek is refused (it used to jump to the start).
-        sleepMs(100);
+        waitFor([&] { return u.getPosition() > 0.05f; }, 2000);
         const size_t warned = countLogs(LogLevel::Warning, "length is unknown");
         const float before = u.getPosition();
         u.setPosition(0.4f);
         const float after = u.getPosition();
         check("unknown length: setPosition() is ignored (getPosition() goes on)",
               before > 0.05f && after >= before, to_string(before) + " -> " + to_string(after));
+        // getPosition() would report an accepted target at once: it never
+        // drops below `after`, and goes past it.
         u.setPosition(0.0f);
-        sleepMs(50);
+        float lowest = u.getPosition();
+        const bool movedOn = waitFor([&] {
+            const float q = u.getPosition();
+            if (q < lowest) lowest = q;
+            return q > after;
+        }, 2000);
         check("unknown length: the audio did not jump (getPosition() still goes on)",
-              u.getPosition() > after, to_string(u.getPosition()));
+              movedOn && lowest >= after, to_string(lowest) + " -> " + to_string(u.getPosition()));
         check("unknown length: the refused seek is logged once",
               countLogs(LogLevel::Warning, "length is unknown") == warned + 1,
               lastLog(LogLevel::Warning));
@@ -554,7 +635,9 @@ TC_CORE_TEST_MAIN() {
     // --- a looping stream emptied after loading: ends, the others play on ---------
     {
         Sound bgm, vanish;
-        check("a second stream plays", (bool)bgm.loadStream(bgmWav) && bgm.play());
+        // Looping, so it plays on however long the wait below takes.
+        check("a second stream plays",
+              (bool)bgm.loadStream(bgmWav) && (bgm.setLoop(true), bgm.play()));
         check("the stream to empty loads", (bool)vanish.loadStream(vanishWav));
         // The file goes empty (a failed recording overwritten, storage gone
         // quiet): the voice's own decoder opens it with no frames.
@@ -567,8 +650,8 @@ TC_CORE_TEST_MAIN() {
                       1000),
               lastLog(LogLevel::Error));
         sleepMs(1000);   // longer than the other stream's ring holds
-        check("the other stream is still refilled (level 0.5 a second later)",
-              approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
+        check("the other stream is still refilled (level 0.5 a second later)", waitLevel(0.5f),
+              to_string(g_level.load()));
         // A looping voice whose stream halted plays on silently; what
         // isPlaying() should say then is #448 (undecided), so this pins the
         // current behaviour.
@@ -582,29 +665,29 @@ TC_CORE_TEST_MAIN() {
     // --- decoder read error ------------------------------------------------------
     {
         Sound c;
-        check("a looping stream plays", (bool)c.loadStream(dcWav) && (c.setLoop(true), c.play()));
-        sleepMs(100);
+        check("a looping stream plays",
+              (bool)c.loadStream(dcWav) && (c.setLoop(true), c.play()) && waitLevel(0.1f),
+              to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReadFails);
         check("a read error ends the stream with an error log",
               waitFor([] { return countLogs(LogLevel::Error, "decoder read failed") == 1; }, 1000),
               lastLog(LogLevel::Error));
-        sleepMs(600);   // the ring drains; nothing new is decoded
+        // The ring drains; nothing new is decoded.
+        const bool silent = waitFor([] { return approx(g_level.load(), 0.0f, 0.001f); }, 2000);
         check("the read error is logged once",
               countLogs(LogLevel::Error, "decoder read failed") == 1);
-        check("after a read error the voice falls silent", approx(g_level.load(), 0.0f, 0.001f),
-              to_string(g_level.load()));
+        check("after a read error the voice falls silent", silent, to_string(g_level.load()));
         // #448: see the emptied stream above.
         check("after a read error the looping voice stays playing, silent (#448)", c.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         c.setPosition(2.0f);
         check("after a read error setPosition() makes it play again (level 0.5)",
-              waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
-              to_string(g_level.load()));
+              waitLevel(0.5f), to_string(g_level.load()));
         c.stop();
 
         Sound after;
         check("the worker refills a new stream afterwards", (bool)after.loadStream(bgmWav) &&
-              after.play() && waitFor([] { return approx(g_level.load(), 0.5f, 0.02f); }, 2000),
+              after.play() && waitLevel(0.5f),
               to_string(g_level.load()));
         after.stop();
     }
@@ -612,34 +695,34 @@ TC_CORE_TEST_MAIN() {
     // --- failed seek at the loop point -------------------------------------------
     {
         Sound e;
-        check("a short looping stream plays", (bool)e.loadStream(shortWav) && (e.setLoop(true), e.play()));
-        sleepMs(100);
+        check("a short looping stream plays",
+              (bool)e.loadStream(shortWav) && (e.setLoop(true), e.play()) && waitLevel(0.1f),
+              to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
         check("a failed loop seek ends the stream with an error log",
               waitFor([] { return countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1; },
                       1000),
               lastLog(LogLevel::Error));
-        sleepMs(600);   // the ring (~340 ms) drains; nothing new is decoded
+        // The ring (~340 ms) drains; nothing new is decoded.
+        const bool silent = waitFor([] { return approx(g_level.load(), 0.0f, 0.001f); }, 2000);
         check("the failed loop seek is logged once",
               countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1);
-        check("after a failed loop seek the voice falls silent", approx(g_level.load(), 0.0f, 0.001f),
-              to_string(g_level.load()));
+        check("after a failed loop seek the voice falls silent", silent, to_string(g_level.load()));
         // #448: see the emptied stream above.
         check("after a failed loop seek the looping voice stays playing, silent (#448)",
               e.isPlaying());
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         e.setPosition(0.0f);
         check("after a failed loop seek setPosition() makes it play again (level 0.1)",
-              waitFor([] { return approx(g_level.load(), 0.1f, 0.02f); }, 2000),
-              to_string(g_level.load()));
+              waitLevel(0.1f), to_string(g_level.load()));
         e.stop();
     }
 
     // --- failed seek request -----------------------------------------------------
     {
         Sound f;
-        check("a stream plays", (bool)f.loadStream(dcWav) && f.play());
-        sleepMs(100);
+        check("a stream plays", (bool)f.loadStream(dcWav) && f.play() && waitLevel(0.1f),
+              to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
         f.setPosition(2.0f);
         check("a failed seek request ends the stream with an error log",
@@ -659,12 +742,12 @@ TC_CORE_TEST_MAIN() {
     {
         Sound w;
         check("read error with frames: a non-looping stream at level 0.5 plays",
-              (bool)w.loadStream(bgmWav) && w.play());
-        sleepMs(100);
+              (bool)w.loadStream(bgmWav) && w.play() && waitLevel(0.5f), to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
-        sleepMs(450);   // the ring (~340 ms) drains: the mixer underruns
+        // The ring (~340 ms) drains: the mixer underruns.
+        const bool underran = waitFor([] { return approx(g_level.load(), 0.0f, 0.001f); }, 2000);
         check("read error with frames: the voice underruns, still playing",
-              w.isPlaying() && approx(g_level.load(), 0.0f, 0.001f), to_string(g_level.load()));
+              underran && w.isPlaying(), to_string(g_level.load()));
         {
             lock_guard<mutex> lock(g_blockMutex);
             g_blockLevels.clear();
@@ -716,14 +799,16 @@ TC_CORE_TEST_MAIN() {
         check("MP3 long: setPosition(getDuration()) targets a frame past the last one",
               (uint64_t)target > longMp3Total,
               to_string((uint64_t)target) + " vs " + to_string(longMp3Total) + " frames");
-        sleepMs(100);
+        waitFor([&] { return l.getPosition() > 0.05f; }, 2000);
         const size_t failed = countLogs(LogLevel::Error, "seek to frame");
         l.setPosition(l.getDuration());
-        sleepMs(400);
+        // getPosition() reports the target until the audio moves there; then
+        // the voice loops back to the start.
+        const bool looped = waitFor([&] { return l.getPosition() < 1.0f; }, 2000);
         check("MP3 long: the seek to the end does not fail",
               countLogs(LogLevel::Error, "seek to frame") == failed, lastLog(LogLevel::Error));
         const float p = l.getPosition();
-        check("MP3 long: it looped to the start", l.isPlaying() && p < 1.0f, to_string(p));
+        check("MP3 long: it looped to the start", looped && l.isPlaying() && p < 1.0f, to_string(p));
         l.stop();
     }
 
@@ -756,7 +841,7 @@ TC_CORE_TEST_MAIN() {
             o.setPosition(o.getDuration());
             internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
             sleepMs(600);  // longer than bg's ring
-            if (!approx(g_level.load(), 0.5f, 0.02f)) ++starved;
+            if (!waitLevel(0.5f)) ++starved;
             o.stop();
         }
         check("overshoot: after a seek at speed 10 the other stream is still refilled",
@@ -781,7 +866,7 @@ TC_CORE_TEST_MAIN() {
         endedSeek.setPosition(0.1f);
         const float endedBefore = ended.getPosition();
         const float endedSeekBefore = endedSeek.getPosition();
-        sleepMs(300);
+        waitFor([&] { return r.getPosition() > 0.25f; }, 2000);
         // Paused across the re-init, so the position cannot move however long
         // init() takes: it carries over exactly. The migration rebuilds a
         // paused voice like a playing one. The mixer reads `paused` under the
@@ -801,12 +886,12 @@ TC_CORE_TEST_MAIN() {
         check("re-init: an ended voice's pending seek target carries over",
               approx(endedSeekBefore, 0.1f, 0.001f) && approx(endedSeek.getPosition(), 0.1f, 0.001f),
               to_string(endedSeekBefore) + " -> " + to_string(endedSeek.getPosition()));
+        const auto t0 = chrono::steady_clock::now();
         r.setPosition(1.5f);
-        sleepMs(200);
-        check("re-init: setPosition() lands at the target (level 0.5)",
-              approx(g_level.load(), 0.5f, 0.02f), to_string(g_level.load()));
-        p = r.getPosition();
-        check("re-init: getPosition() follows from the target", p > 1.55f && p < 1.9f, to_string(p));
+        check("re-init: setPosition() lands at the target (level 0.5)", waitLevel(0.5f),
+              to_string(g_level.load()));
+        const PlayedFrom pf = playedFrom(r, 1.5f, t0);
+        check("re-init: getPosition() follows from the target", pf.ok(1.5f), pf.detail());
         r.stop();
     }
 
@@ -849,8 +934,9 @@ TC_CORE_TEST_MAIN() {
     // with the tail past the write position it read: it must still play it.
     {
         Sound e;
-        check("near end: a stream plays (silent part)", (bool)e.loadStream(endWav) && e.play());
-        sleepMs(50);
+        check("near end: a stream plays (silent part)",
+              (bool)e.loadStream(endWav) && e.play() &&
+              waitFor([&] { return e.getPosition() > 0.02f; }, 2000));
         {
             lock_guard<mutex> lock(g_blockMutex);
             g_blockLevels.clear();
@@ -883,8 +969,8 @@ TC_CORE_TEST_MAIN() {
     {
         Sound l;
         check("re-init clamp: the long MP3 streams, looping",
-              (bool)l.loadStream(longMp3) && (l.setLoop(true), l.play()));
-        sleepMs(100);
+              (bool)l.loadStream(longMp3) && (l.setLoop(true), l.play()) &&
+              waitFor([&] { return l.getPosition() > 0.05f; }, 2000));
         l.pause();   // the seek stays pending: a paused voice does not apply it
         l.setPosition(l.getDuration());
         const size_t failed = countLogs(LogLevel::Error, "seek to frame");
@@ -892,16 +978,18 @@ TC_CORE_TEST_MAIN() {
         check("re-init clamp: the migration's seek to the end does not fail",
               countLogs(LogLevel::Error, "seek to frame") == failed, lastLog(LogLevel::Error));
         l.resume();
-        sleepMs(400);
+        const bool looped = waitFor([&] { return l.getPosition() < 1.0f; }, 2000);
         const float p = l.getPosition();
-        check("re-init clamp: it looped to the start", l.isPlaying() && p < 1.0f, to_string(p));
+        check("re-init clamp: it looped to the start", looped && l.isPlaying() && p < 1.0f,
+              to_string(p));
         l.stop();
 
         // A failed migration seek halts the stream, like a failed seek
         // request: one error log, and a non-looping voice ends.
         Sound f;
-        check("re-init seek fails: a stream plays", (bool)f.loadStream(dcWav) && f.play());
-        sleepMs(200);
+        check("re-init seek fails: a stream plays",
+              (bool)f.loadStream(dcWav) && f.play() &&
+              waitFor([&] { return f.getPosition() > 0.1f; }, 2000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
         const size_t logged = countLogs(LogLevel::Error, "failed after an engine re-init");
         const bool restarted = reinitAt(otherRate());
@@ -939,8 +1027,8 @@ TC_CORE_TEST_MAIN() {
     {
         Sound a, b;
         check("reopen fails: two streams play",
-              (bool)a.loadStream(dcWav) && a.play() && (bool)b.loadStream(dcWav) && b.play());
-        sleepMs(300);
+              (bool)a.loadStream(dcWav) && a.play() && (bool)b.loadStream(dcWav) && b.play() &&
+              waitFor([&] { return a.getPosition() > 0.25f && b.getPosition() > 0.0f; }, 2000));
         // b holds a seek that stays pending (paused).
         b.pause();
         b.setPosition(2.5f);
@@ -976,8 +1064,7 @@ TC_CORE_TEST_MAIN() {
         Sound u;
         check("unknown length re-init: the FLAC plays (level 0.3)",
               (bool)u.loadStream(unknownFlac) && u.play() &&
-              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000));
-        sleepMs(200);
+              waitLevel(0.3f) && waitFor([&] { return u.getPosition() > 0.2f; }, 2000));
         // Paused across the re-init, so the new decoder does not play on from
         // 0 while init() finishes: getPosition() is 0 exactly, however long
         // init() takes.
@@ -988,8 +1075,7 @@ TC_CORE_TEST_MAIN() {
         u.resume();
         check("unknown length re-init: getPosition() restarts from 0 with the audio",
               before > 0.15f && after < 0.001f, to_string(before) + " -> " + to_string(after));
-        check("unknown length re-init: it plays again (level 0.3)",
-              waitFor([] { return approx(g_level.load(), 0.3f, 0.02f); }, 2000),
+        check("unknown length re-init: it plays again (level 0.3)", waitLevel(0.3f),
               to_string(g_level.load()));
         check("unknown length re-init: then it ends", waitFor([&] { return !u.isPlaying(); }, 2000));
         u.stop();
@@ -1002,8 +1088,9 @@ TC_CORE_TEST_MAIN() {
     // migrate, so a voice left over keeps the old one.
     {
         Sound v;
-        check("getPlayingSounds(): a stream plays", (bool)v.loadStream(dcWav) && v.play());
-        sleepMs(300);
+        check("getPlayingSounds(): a stream plays",
+              (bool)v.loadStream(dcWav) && v.play() &&
+              waitFor([&] { return v.getPosition() > 0.25f; }, 2000));
         check("getPlayingSounds(): the engine restarts at another rate", reinitAt(otherRate()));
         v.pause();
         float mine = v.getPosition(), listed = streamVoicePosition();
