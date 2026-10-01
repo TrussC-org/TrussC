@@ -12,6 +12,7 @@
 #include <functional>
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
+#include "tc/network/tcKeptThreads.h"
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -120,16 +121,29 @@ public:
     // thread (onDisconnect for a remote close or an error, onReceive; for
     // TlsClient also onConnect and onError around the handshake), a plain
     // (inline) listener that calls connect() runs it on that old receive
-    // thread, which connect() detaches from the client first. A listener
-    // that calls disconnect() there detaches it the same way. Nothing waits
-    // for a detached thread, neither disconnect() nor the destructor, and it
-    // goes on using the client after that call returns (the rest of the
-    // listener and of its receive loop). So until #261 / #262 land, do not
-    // destroy a client whose receive-thread listener called connect() or
-    // disconnect(): keep it for the life of the app. And do not call
-    // disconnect() on it from another thread until that call has returned,
-    // or the connection may complete after disconnect() has returned.
+    // thread, which cannot join itself. A listener that calls disconnect()
+    // there is in the same position, and so is one that calls disconnect()
+    // on the connect thread of connectAsync(). The client keeps such a
+    // thread, which goes on with the rest of the listener and leaves its
+    // loop, and joins it from another thread: the next connect() or
+    // disconnect() waits for it, and so does the destructor.
+    // connect(), connectAsync(), disconnect() and the destructor can wait
+    // for a listener still running on one of the client's threads. Do not
+    // call them while holding a lock that such a listener takes: the call
+    // and the listener would wait for each other forever. Until
+    // #261 / #262 land, do not call disconnect() on the client from another
+    // thread until the listener's call has returned, or the connection may
+    // complete after disconnect() has returned.
     // Reconnecting from the main thread, as above, avoids all of this.
+    //
+    // DESTROYING FROM A LISTENER: the destructor must not run on one of the
+    // client's own threads (an inline listener on the receive or connect
+    // thread that deletes the client or drops its last owner). That thread
+    // cannot join itself: the destructor detaches it and returns, and the
+    // thread then returns from the listener into the destroyed client
+    // (Event::notify() and the receive loop read it), which is undefined
+    // behavior. Destroy the client from another thread, or once the
+    // listener has returned (from a Deliver::Main listener, say).
     //
     // onConnect(false): a failed attempt reports it from connectAsync(), from
     // a pending connect without threads, and from a failed TLS handshake (a
@@ -149,6 +163,10 @@ public:
     // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpClient();
+
+    // Disconnects without onDisconnect and returns once every thread of the
+    // client has ended, one that a listener's connect() or disconnect() let
+    // go of included. Must not run on one of those threads (see Events).
     virtual ~TcpClient();
 
     // Copy prohibited
@@ -258,6 +276,12 @@ private:
     std::thread receiveThread_;
     std::thread connectThread_;
 
+    // receiveThread_ or connectThread_ when a call on that very thread (a
+    // listener's connect() or disconnect(), or the destructor) let go of it.
+    // Joined by the next connect() or disconnect() on another thread, or by
+    // the destructor (see tcKeptThreads.h).
+    internal::KeptThreads keptThreads_;
+
     // Bumped by every connect(), before it sets any flag for the new
     // connection; its receive thread gets that value. A thread whose
     // generation is no longer current stops: processNetwork()'s receive loop and the loop
@@ -266,17 +290,15 @@ private:
     // thread reading the new connection's socket.
     //
     // Not covered: the reconnect itself. connect() on the receive thread
-    // detaches that thread and then, on it, creates the socket, resolves the
-    // host, connects (blocking), fires onConnect and starts the new receive
-    // thread. disconnect() called on the receive thread detaches it the same
-    // way. No one owns the detached thread: disconnect() and the destructor
-    // do not wait for it, socket_ is not atomic, and the thread goes on
-    // reading the client after that call returns (the rest of the listener,
-    // of the notification and of its receive loop). A disconnect() from
-    // another thread before that call has returned races it; destruction
-    // races it for as long as the thread runs, which the app cannot see.
-    // Hence the rules in the Events comment above. The fix belongs to #261
-    // (a cancellable connect) and #262.
+    // lets go of that thread (keptThreads_ keeps it) and then, on it,
+    // creates the socket, resolves the host, connects (blocking), fires
+    // onConnect and starts the new receive thread. disconnect() called on
+    // the receive thread lets go of it the same way. The next connect() or
+    // disconnect() on another thread, or the destructor, joins it, but
+    // socket_ is not atomic: a disconnect() from another thread before the
+    // listener's call has returned races it. Hence the rule in the Events
+    // comment above. The fix belongs to #261 (a cancellable connect) and
+    // #262.
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()

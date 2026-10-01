@@ -15,6 +15,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -27,6 +28,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 // Compile-time guarantees from the Decision.
 static_assert(is_trivially_destructible_v<OnceGate>, "OnceGate: trivially destructible");
@@ -59,9 +62,10 @@ struct PerObject {
 };
 
 // --- used from a static destructor ------------------------------------------
-// g_late is constructed before main() and destroyed after main() returns. Its
-// destructor uses a static gate that main() already opened (it must stay
-// closed) and one it touches for the first time there (true once). Both are
+// The LateUser at the top of main() is constructed there and destroyed after
+// main() returns, during static destruction. Its destructor uses a static
+// gate that main() already opened (it must stay closed) and one it touches
+// for the first time there (true once). Both are
 // constant-initialized and trivially destructible, so no destruction order
 // can leave them unusable.
 static OnceGate& exitGate() {
@@ -87,9 +91,13 @@ struct LateUser {
     static inline int failsBeforeExit = 0;
 };
 
-static LateUser g_late;
+} // namespace
 
-int main() {
+TC_CORE_TEST_MAIN() {
+    // A function-local static, so it exists only in this test's process (in
+    // allCoreTests a namespace-scope one would check every other test at exit).
+    static LateUser late;
+
     // --- once ---------------------------------------------------------------
     {
         OnceGate g;
@@ -202,7 +210,7 @@ int main() {
     check("exit gate: first use in main() is true", exitGate().isFirstTime());
 
     LateUser::failsBeforeExit = g_fail;
-    // The final verdict is printed by g_late's destructor during static
+    // The final verdict is printed by late's destructor during static
     // destruction (exit status 1 on failure).
     return g_fail ? 1 : 0;
 }

@@ -155,6 +155,18 @@ struct GuestLibrary {
     }
 
     void unload() {
+        // Tell guest code first, while its App and node references are still
+        // valid: singletons and other statics in the guest image outlive the
+        // App and keep their listeners on the host's events until they drop
+        // them (#416). Dispatched on the main window's events, whichever
+        // window context is current.
+        if (app) {
+            internal::WindowContext*& current = internal::currentWindowCtx();
+            internal::WindowContext* prev = current;
+            current = &internal::mainWindowContext();
+            events().hotReloadUnload.notify();
+            current = prev;
+        }
         // Drop the window contexts' weak references first (hover, grab,
         // selection, the main root; #255). Releasing the last weak reference
         // to a make_shared node runs code of the module that created it, so

@@ -79,6 +79,12 @@ public:
                 overdueListener_ = mainEvents->afterFrame.listen([this]() {
                     detail::settleOverdueValues(imguiCtx_);
                 }, tc::EventPriority::BeforeApp);
+                // Hot reload: the manager registry is a static of the guest
+                // image, which outlives a reload. Tear down this generation's
+                // manager (the same cleanup as at exit) before the host
+                // unloads it, so no stale listener stays on the host's events
+                // (#416). The host fires it on the main window's events.
+                hotReloadUnloadListener_ = mainEvents->hotReloadUnload.listen([this]() { shutdown(); });
             }
         }
 
@@ -150,6 +156,7 @@ public:
     void shutdown() {
         if (!initialized_) return;
         exitListener_ = {};
+        hotReloadUnloadListener_ = {};
         renderListener_ = {};
         overdueListener_ = {};
         eventListener_ = {};
@@ -234,6 +241,7 @@ private:
     bool initialized_ = false;
     bool renderPending_ = false;
     tc::EventListener exitListener_;
+    tc::EventListener hotReloadUnloadListener_;   // on the main window's hotReloadUnload
     tc::EventListener renderListener_;
     tc::EventListener overdueListener_;   // on the main window's afterFrame
     tc::EventListener eventListener_;
