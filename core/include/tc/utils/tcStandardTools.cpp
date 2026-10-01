@@ -353,7 +353,7 @@ void registerInspectionTools() {
 
     // --- Node tree tools ---
 
-    tool("tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), mods, children}. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
+    tool("tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos): editable, but not saved, and when a write carries both, the canonical one (pos) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
         .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
         .bind([](const json& args) -> json {
@@ -621,7 +621,7 @@ void registerControlTools() {
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0)}};
         });
 
-    tool("tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string)")
+    tool("tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string). A derived member (e.g. globalPos) is applied before its canonical member (pos), so when both are given the canonical one wins")
         .arg<int>("id", "Instance id from tc_get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
         .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
@@ -643,10 +643,10 @@ void registerControlTools() {
                                 {"message", "No mod \"" + modName + "\" on node " + std::to_string(id)}};
                 }
                 mod->reflectMembers(r);
-                after = reflectToJson(*mod);
+                after = reflectToJson(*mod, true);
             } else {
                 n->reflectMembers(r);
-                after = reflectToJson(*n);
+                after = reflectToJson(*n, true);
             }
 
             json result{

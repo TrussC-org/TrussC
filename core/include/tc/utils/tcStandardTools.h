@@ -45,17 +45,32 @@ namespace trussc {
 // of scope — apply values to existing nodes with reflectFromJson instead)
 // ---------------------------------------------------------------------------
 
+// Reflected members of obj for the live MCP view: derived values (TC_DERIVED)
+// included, and their member paths listed under "derived" in out when any.
+namespace internal {
+template <class T>
+inline void reflectMembersToJson(T& obj, Json& out) {
+    JsonWriteReflector w;
+    w.includeDerived = true;
+    obj.reflectMembers(w);
+    if (!w.members.empty()) out["members"] = std::move(w.members);
+    if (!w.derived.empty()) out["derived"] = std::move(w.derived);
+}
+} // namespace internal
+
 // One node as JSON: type, optional instance name, instance id, reflected
-// members (same encoding as JsonWriteReflector), mods ({type, members} each),
-// and the children in draw order. maxDepth limits recursion (-1 = unlimited,
-// 0 = this node only); where children are cut off, "childCount" says how many
-// were omitted so a caller can drill in with another tc_get_node_tree(id) call.
+// members (same encoding as JsonWriteReflector, derived values included and
+// named in "derived"), mods ({type, members, derived} each), and the children
+// in draw order. maxDepth limits recursion (-1 = unlimited, 0 = this node
+// only); where children are cut off, "childCount" says how many were omitted
+// so a caller can drill in with another tc_get_node_tree(id) call.
 inline Json nodeToJson(Node& node, int maxDepth = -1) {
     Json j = Json::object();
     j["type"] = node.getTypeName();
     if (node.hasName()) j["name"] = node.getName();
     j["id"] = node.getInstanceId();
-    j["members"] = reflectToJson(node);
+    j["members"] = Json::object();
+    internal::reflectMembersToJson(node, j);
     auto mods = node.getMods();
     if (!mods.empty()) {
         Json jmods = Json::array();
@@ -63,8 +78,7 @@ inline Json nodeToJson(Node& node, int maxDepth = -1) {
             Json jm = Json::object();
             Mod& mod = *m;
             jm["type"] = shortTypeName(typeid(mod));
-            Json members = reflectToJson(mod);
-            if (!members.empty()) jm["members"] = std::move(members);
+            internal::reflectMembersToJson(mod, jm);
             jmods.push_back(std::move(jm));
         }
         j["mods"] = std::move(jmods);

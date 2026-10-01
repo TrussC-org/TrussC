@@ -59,7 +59,7 @@ bool sameNode(const weak_ptr<Node>& a, const weak_ptr<Node>& b) {
 // path no longer resolves). "name" without a mod is the node's name field.
 Json memberValue(Node* node, Mod* mod, const string& member) {
     if (!mod && member == "name") return node->getName();
-    Json j = mod ? reflectToJson(*mod) : reflectToJson(*node);
+    Json j = mod ? reflectToJson(*mod, true) : reflectToJson(*node, true);   // derived included (live view)
     const Json* cur = &j;
     size_t start = 0;
     while (true) {

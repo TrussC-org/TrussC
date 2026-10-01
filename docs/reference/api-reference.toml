@@ -15497,9 +15497,9 @@ related = ["setStrokeWeight"]
 ["nodeToJson"]
 category = "utility"
 keywords = ["serialize", "reflect", "tree", "dump"]
-description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection"
-description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ"
-description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화"
+description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are included and named under \"derived\""
+description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ。派生メンバ（例: globalPos）も含め、\"derived\" に名前を列挙する"
+description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화. 파생 멤버(예: globalPos)도 포함하며 \"derived\"에 이름을 나열한다"
 related = ["getRootNode", "Node::findByInstanceId"]
 
 ["noise"]
@@ -15699,10 +15699,10 @@ related = ["Json", "reflectToJson", "parseJson"]
 
 ["reflectToJson"]
 category = "utility"
-keywords = ["serialize", "reflection", "dump", "members"]
-description.en = "Return all reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod."
-description.ja = "objのreflect済み(TC_REFLECT)メンバをすべてJsonオブジェクトとして返す。NodeやModなど任意のreflected型で動作"
-description.ko = "obj의 reflect된(TC_REFLECT) 멤버를 모두 Json 객체로 반환. Node나 Mod 등 임의의 reflected 타입에서 동작"
+keywords = ["serialize", "reflection", "dump", "members", "save", "derived"]
+description.en = "Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain."
+description.ja = "objのreflect済み(TC_REFLECT)メンバをJsonオブジェクトとして返す。NodeやModなど任意のreflected型で動作。派生値(TC_DERIVED、例: NodeのglobalPos)はincludeDerivedがtrueでない限り含めないので、既定の出力はそのまま保存に使える"
+description.ko = "obj의 reflect된(TC_REFLECT) 멤버를 Json 객체로 반환. Node나 Mod 등 임의의 reflected 타입에서 동작. 파생 값(TC_DERIVED, 예: Node의 globalPos)은 includeDerived가 true가 아니면 제외하므로 기본 출력은 그대로 저장에 쓸 수 있다"
 related = ["Json", "reflectFromJson", "toJsonString"]
 
 ["releaseSglBuffers"]
@@ -17683,6 +17683,24 @@ description.en = "Leave the current read-only scope."
 description.ja = "現在の読み取り専用スコープを抜ける。"
 description.ko = "현재 읽기 전용 범위를 벗어난다."
 
+["Reflector::isDerived"]
+keywords = ["derived", "reflection", "serialize", "TC_DERIVED"]
+description.en = "Return true if the current member is a derived value (TC_DERIVED): computed from another member, writable, but not saved."
+description.ja = "現在のメンバが派生値（TC_DERIVED）なら true を返す。他のメンバから計算され、書き込めるが保存はされない。"
+description.ko = "현재 멤버가 파생 값(TC_DERIVED)이면 true를 반환한다. 다른 멤버에서 계산되며 쓸 수 있지만 저장되지 않는다."
+
+["Reflector::pushDerived"]
+keywords = ["derived", "reflection", "TC_DERIVED"]
+description.en = "Enter a derived-value scope (TC_DERIVED visits inside it)."
+description.ja = "派生値スコープに入る（TC_DERIVED はこの内側で訪れる）。"
+description.ko = "파생 값 범위로 진입한다(TC_DERIVED는 이 안에서 방문한다)."
+
+["Reflector::popDerived"]
+keywords = ["derived", "reflection", "TC_DERIVED"]
+description.en = "Leave the current derived-value scope."
+description.ja = "現在の派生値スコープを抜ける。"
+description.ko = "현재 파생 값 범위를 벗어난다."
+
 ["Reflector::beginGroup"]
 description.en = "Enter a nested composite group of reflected members (no-op for flat backends)."
 description.ja = "反映メンバのネストしたグループに入る（フラットなバックエンドでは何もしない）。"
@@ -17959,6 +17977,18 @@ description.ko = "리플렉션된 멤버를 JSON 객체로 쓰는 Reflector 백�
 description.en = "The accumulated JSON object built from visited members."
 description.ja = "訪問したメンバから構築された JSON オブジェクト。"
 description.ko = "방문한 멤버로 구성된 JSON 객체."
+
+["JsonWriteReflector::includeDerived"]
+keywords = ["derived", "save", "serialize", "globalPos"]
+description.en = "When true, derived values (TC_DERIVED, e.g. Node's globalPos) are written too; false (default) leaves them out, as a save should."
+description.ja = "true なら派生値（TC_DERIVED、例: Node の globalPos）も書き出す。false（既定）では保存用に除外する。"
+description.ko = "true이면 파생 값(TC_DERIVED, 예: Node의 globalPos)도 기록한다. false(기본값)이면 저장용으로 제외한다."
+
+["JsonWriteReflector::derived"]
+keywords = ["derived", "reflection", "globalPos"]
+description.en = "Member paths of the derived values encountered (nested groups joined by '.'), whether or not they were written."
+description.ja = "出会った派生値のメンバパス（ネストしたグループは '.' で連結）。書き出したかどうかに関係なく記録する。"
+description.ko = "만난 파생 값의 멤버 경로(중첩 그룹은 '.'으로 연결). 기록 여부와 관계없이 기록한다."
 
 ["JsonReadReflector"]
 description.en = "Reflector backend that applies a JSON object onto reflected members through their setters."

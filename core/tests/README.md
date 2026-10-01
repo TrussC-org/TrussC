@@ -553,3 +553,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
+- `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's
+  `globalPos` (`TC_DERIVED`, derived from `pos`): `reflectToJson()` writes
+  `pos` and no `globalPos` (`reflectToJson(obj, true)` writes both), and a
+  restore gives the exact saved `pos` after the parent moved, into a node with
+  no parent yet (then `addChild()`), and under a parent scaled to 0; an edited
+  `pos` is applied; `globalPos` alone moves the node in world space; when both
+  are written, `globalPos` is applied first and `pos` wins, also for JSON
+  saved with `globalPos`. `Reflector::isDerived()` marks only the derived
+  value, and `JsonWriteReflector::derived` lists derived paths, nested ones
+  too (`span.end`, a derived member in a `TC_REFLECT_FREE` type). Through the
+  MCP tools on a headless App: `tc_get_node_tree` shows `globalPos` and names
+  it under `derived`, writing the read object back with an edited `pos` via
+  `tc_set_node_members` applies the edit, and `globalPos` alone moves the node.
