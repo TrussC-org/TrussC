@@ -563,6 +563,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `fontAtlasR8/` — TrueType glyph atlas pages are R8, one byte of coverage
+  per texel (#293): `getMemoryUsage()` is the sum of width × height over the
+  pages, and after 300 glyphs grow a page through several doubling steps
+  every glyph still has full coverage at its UV centre and nothing lies
+  outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
+  not run in CI) draws 150 new glyphs into an Fbo in one frame, one
+  `drawString()` each, and checks that the page texture is
+  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` colour,
+  and a minified draw builds and samples the R8 mip chain. The font is
+  built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
