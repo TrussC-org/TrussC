@@ -852,8 +852,9 @@ All projects use `TC_RUN_APP(tcApp, settings)` in `main.cpp` by default. This ma
 This is for changes to TrussC itself (`core/include`), not app code. On Windows, a hot-reload app gets its own copy of every such variable, so the app and TrussC would see different values. CI (`tools/check_header_state.py`) flags them. Decide in this order:
 
 1. **A constant?** Make it `constexpr` (or a `const` at namespace scope). Not flagged; done.
-2. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
-3. **Only a warn-once flag or a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
+2. **A warn-once flag?** Make it a `static OnceGate` and gate the log line with `isFirstTime()` (see Logging). Accepted by its type; done.
+3. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
+4. **Only a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
 
 Details: docs/ARCHITECTURE.md, "One instance per process".
 
@@ -1213,6 +1214,12 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
 
 Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+
+### How long does a Sound play? (Sound lifetime)
+
+A `Sound` plays only while it, or a copy of it, is alive (like `ofSoundPlayer`). Copies share the voice that `play()` started; when the last `Sound` handle that shares it is destroyed or overwritten (copy or move assignment), the voice stops, looping or one-shot, and its slot is free again. A temporary copy going away does not stop the original. `stop()` and the last handle going away also close a streamed voice's decoder and file.
+
+So keep the `Sound` objects alive, for example as App members. To play overlapping one-shots, keep several of them (e.g. `Sound hits_[4]` and play them in turn); `{ Sound s = hit; s.play(); }` stops at the closing brace. In tcxLua, a script keeps a reference to each `Sound` it wants to hear, or the sound stops when the GC collects it.
 
 ### Output channel mapping? (setChannelMap)
 
@@ -1586,6 +1593,20 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
 
 Each output has its own level (default Notice; `LogLevel::Silent` turns it off): the console (`setConsoleLogLevel`), the log file (`setFileLogLevel`) and the OS log on macOS (os_log) and Windows (OutputDebugStringW) (`setSystemLogLevel`; on iOS and Android the OS log is the console). `setLogLevel(level)` sets all three at once; a later per-output call wins. `onLog` listeners get every line whatever the levels.
+
+### How do I log a warning only once? (OnceGate)
+
+Gate the log line with a `OnceGate`, not a `static bool warned` flag. `isFirstTime()` returns true the first time; with an interval (constructor argument, seconds) it returns true again once that much time has passed since the last true. It works with any level (you write the line yourself, and nothing is built while the gate is closed) and is thread-safe and lock-free. The gate object is the key: a `static` one per call site, or a member for once per object:
+```cpp
+static OnceGate unsupportedWarned;              // once
+if (unsupportedWarned.isFirstTime()) logWarning("Sound") << "unsupported extension";
+
+static OnceGate underrun{5.0};                  // at most once per 5 s
+if (underrun.isFirstTime()) logWarning("Audio") << "underrun";
+
+class Connection { OnceGate timeoutWarned_; };  // once per object
+```
+It is not copyable or movable, and a `static` gate still works during static destruction.
 
 ### How do I write logs to a file? (getLogger + setLogFile)
 
@@ -3439,6 +3460,12 @@ void Node::update()  // Called every frame before draw
 bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
 ```
 
+### OnceGate — Gate for a log line (or anything else): isFirstTime() is true the first time, and with an interval, again once that much time has passed since the last true
+
+```cpp
+bool OnceGate::isFirstTime()  // True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false
+```
+
 ### Path — Path/Polyline for lines and curves
 
 ```cpp
@@ -3763,7 +3790,7 @@ void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType 
 ```cpp
 ```
 
-### Sound — Audio playback
+### Sound — Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots.
 
 ```cpp
 void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
@@ -3796,7 +3823,7 @@ void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
 void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop audio
+void Sound::stop()  // Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped.
 ```
 
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
