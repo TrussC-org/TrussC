@@ -9,10 +9,10 @@
 // drives the mixer callback on its own thread, so no sound card is needed.
 //
 // Guards the invariants:
-//   - AudioEngine::waitForCallbackIdle() returns true at once when no audio
+//   - AudioEngine::waitForAudioCallbacks() returns true at once when no audio
 //     runs: before init() and after shutdown().
 //   - It waits for an audioOut pass that is already running: after
-//     `disconnect(); waitForCallbackIdle();` the listener is not running and
+//     `disconnect(); waitForAudioCallbacks();` the listener is not running and
 //     is never called again (Event alone does not wait).
 //   - Called from inside an audioOut listener (the audio thread) it returns
 //     at once instead of waiting for itself.
@@ -29,7 +29,7 @@
 //   - The framework teardown waits for a stuck audioOut() without a time
 //     limit: past one second the App is still not destroyed, one error is
 //     logged, and the teardown goes on once audioOut() returns. Meanwhile the
-//     public waitForCallbackIdle() still gives up after about a second.
+//     public waitForAudioCallbacks() still gives up after about a second.
 //   - An App runs once: Window::setApp() refuses an App whose window closed
 //     (exit(), cleanup(), audio detached) with one error, keeps the window's
 //     App, subscribes no hook and runs no second setup(); and it refuses any
@@ -243,7 +243,7 @@ int main() {
     // --- no audio running -----------------------------------------------------
     {
         auto t0 = Clock::now();
-        const bool ok = engine.waitForCallbackIdle();
+        const bool ok = engine.waitForAudioCallbacks();
         const double took = secondsSince(t0);
         check("barrier before init() returns true at once", ok && took < kAtOnce, ms(took));
     }
@@ -270,7 +270,7 @@ int main() {
         check("a slow audioOut listener runs on the audio thread", entered);
         slow.disconnect();
         auto t0 = Clock::now();
-        const bool ok = engine.waitForCallbackIdle();
+        const bool ok = engine.waitForAudioCallbacks();
         const double took = secondsSince(t0);
         check("barrier waits for the listener already running",
               ok && !inside.load() && took >= 0.05, ms(took));
@@ -282,7 +282,7 @@ int main() {
     // --- engine running, nothing slow in flight -----------------------------------
     {
         auto t0 = Clock::now();
-        const bool ok = engine.waitForCallbackIdle();
+        const bool ok = engine.waitForAudioCallbacks();
         const double took = secondsSince(t0);
         check("barrier with only fast callbacks returns true quickly", ok && took < kAtOnce, ms(took));
     }
@@ -295,13 +295,13 @@ int main() {
         EventListener self = engine.audioOut.listen([&](AudioOutBuffer&) {
             if (done) return;
             auto t0 = Clock::now();
-            result = engine.waitForCallbackIdle();
+            result = engine.waitForAudioCallbacks();
             took = secondsSince(t0);
             done = true;
         });
         const bool ran = waitFor([&] { return done.load(); }, 3000);
         self.disconnect();
-        engine.waitForCallbackIdle();
+        engine.waitForAudioCallbacks();
         check("barrier called inside an audioOut listener returns at once",
               ran && result.load() && took.load() >= 0.0 && took.load() < kAtOnce,
               ran ? ms(took.load()) : "the listener never finished");
@@ -318,16 +318,16 @@ int main() {
         });
         const bool entered = waitFor([&] { return inside.load(); }, 2000);
         stuck.disconnect();
-        const size_t warnBefore = countWarnings("waitForCallbackIdle");
+        const size_t warnBefore = countWarnings("waitForAudioCallbacks");
         auto t0 = Clock::now();
-        const bool ok = engine.waitForCallbackIdle();
+        const bool ok = engine.waitForAudioCallbacks();
         const double took = secondsSince(t0);
         release = true;
         check("barrier gives up on a stuck listener after about a second",
               entered && !ok && took >= 0.9 && took < 3.0, ms(took));
-        check("... and logs a warning", countWarnings("waitForCallbackIdle") == warnBefore + 1);
+        check("... and logs a warning", countWarnings("waitForAudioCallbacks") == warnBefore + 1);
         check("after the listener returns, the barrier returns true",
-              engine.waitForCallbackIdle() && !inside.load());
+              engine.waitForAudioCallbacks() && !inside.load());
     }
 
     // --- App teardown ---------------------------------------------------------------------
@@ -367,7 +367,7 @@ int main() {
             // The public barrier keeps its one-second limit meanwhile.
             this_thread::sleep_for(chrono::milliseconds(300));
             auto t1 = Clock::now();
-            publicResult = engine.waitForCallbackIdle();
+            publicResult = engine.waitForAudioCallbacks();
             publicTook = secondsSince(t1);
             // Well past one second into the teardown's wait.
             this_thread::sleep_for(chrono::milliseconds(300));
@@ -489,7 +489,7 @@ int main() {
         check("AudioRecorder::stop() returns after the audioOut pass in flight",
               entered && !inside.load(), ms(took));
         slow.disconnect();
-        engine.waitForCallbackIdle();
+        engine.waitForAudioCallbacks();
         std::error_code ec;
         fs::remove(wav, ec);
     }
@@ -554,7 +554,7 @@ int main() {
     engine.shutdown();
     {
         auto t0 = Clock::now();
-        const bool ok = engine.waitForCallbackIdle();
+        const bool ok = engine.waitForAudioCallbacks();
         const double took = secondsSince(t0);
         check("barrier after shutdown() returns true at once", ok && took < kAtOnce, ms(took));
     }

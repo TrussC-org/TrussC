@@ -39,10 +39,19 @@ void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float
         log << "tcxBox2d: PolyShape::setup() got " << vertices.size() << " points: "
             << detail::describePolygonError(err) << ".";
         if (err == detail::PolygonError::TooManyPoints) {
-            log << " Use setupConvex() for a convex approximation or setupCompound() for the exact shape.";
+            log << " Use setupSimplified() for a convex approximation or setupCompound() for the exact shape.";
         }
         log << " Body not created.";
         return;
+    }
+    // Concave input becomes its hull, as Box2D does: say so once per
+    // process, so a scene that builds many bodies doesn't flood the log.
+    const size_t dropped = detail::countPointsInsideHull(vertices, hull);
+    static tc::OnceGate droppedWarned;
+    if (dropped > 0 && droppedWarned.isFirstTime()) {
+        tc::logWarning() << "tcxBox2d: PolyShape::setup() dropped " << dropped << " of "
+                         << vertices.size() << " points inside the convex hull;"
+                         << " use setupCompound() to keep the exact shape.";
     }
     vertices_ = hull;
     path_.clear();
@@ -55,11 +64,11 @@ void PolyShape::setup(World& world, const tc::Path& polyline, float cx, float cy
     setup(world, detail::pathPoints(polyline), cx, cy);
 }
 
-void PolyShape::setupConvex(World& world, const std::vector<tc::Vec2>& points, float cx, float cy) {
+void PolyShape::setupSimplified(World& world, const std::vector<tc::Vec2>& points, float cx, float cy) {
     std::vector<tc::Vec2> reduced = detail::reducedConvexHull(points);
     if (reduced.size() < 3) {
-        tc::logWarning() << "tcxBox2d: PolyShape::setupConvex() got " << points.size()
-                         << " points: " << detail::describeCollapsedHull("setupConvex()")
+        tc::logWarning() << "tcxBox2d: PolyShape::setupSimplified() got " << points.size()
+                         << " points: " << detail::describeCollapsedHull("setupSimplified()")
                          << ". Body not created.";
         return;
     }
@@ -67,7 +76,7 @@ void PolyShape::setupConvex(World& world, const std::vector<tc::Vec2>& points, f
     std::vector<tc::Vec2> hull;
     detail::PolygonError err = detail::makePolygonShape(reduced, polygon, hull);
     if (err != detail::PolygonError::None) {
-        tc::logWarning() << "tcxBox2d: PolyShape::setupConvex() got " << points.size()
+        tc::logWarning() << "tcxBox2d: PolyShape::setupSimplified() got " << points.size()
                          << " points whose convex hull can't make a polygon: "
                          << detail::describePolygonError(err) << ". Body not created.";
         return;
@@ -79,8 +88,8 @@ void PolyShape::setupConvex(World& world, const std::vector<tc::Vec2>& points, f
     createBody(world, &polygon, 1, cx, cy);
 }
 
-void PolyShape::setupConvex(World& world, const tc::Path& path, float cx, float cy) {
-    setupConvex(world, detail::pathPoints(path), cx, cy);
+void PolyShape::setupSimplified(World& world, const tc::Path& path, float cx, float cy) {
+    setupSimplified(world, detail::pathPoints(path), cx, cy);
 }
 
 void PolyShape::setupCompound(World& world, const tc::Path& path, float cx, float cy) {

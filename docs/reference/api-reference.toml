@@ -320,7 +320,7 @@ description.ja = "オーディオデバイスを停止して閉じる"
 description.ko = "오디오 디바이스를 정지하고 닫음"
 related = ["shutdownAudio"]
 
-["AudioEngine::waitForCallbackIdle"]
+["AudioEngine::waitForAudioCallbacks"]
 category = "audioengine"
 keywords = ["teardown", "wait", "in-flight", "barrier", "destructor", "disconnect", "use-after-free"]
 description.en = "Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile."
@@ -442,9 +442,9 @@ description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getD
 ["AudioRecorder::stop"]
 category = "sound"
 keywords = ["end", "finalize", "close"]
-description.en = "Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
-description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す。サンプルが 4 GiB を超えたテイクは RF64 にして notice ログを出す。ディスクが一杯などでファイル書き込みが失敗していたら、代わりに error ログを出す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForCallbackIdle() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
-description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록. 샘플이 4 GiB를 넘은 테이크는 RF64로 만들고 notice 로그를 남긴다. 디스크가 가득 차는 등으로 파일 쓰기가 실패했다면 대신 error 로그를 남긴다). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForCallbackIdle() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
+description.en = "Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForAudioCallbacks(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
+description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す。サンプルが 4 GiB を超えたテイクは RF64 にして notice ログを出す。ディスクが一杯などでファイル書き込みが失敗していたら、代わりに error ログを出す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForAudioCallbacks() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
+description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록. 샘플이 4 GiB를 넘은 테이크는 RF64로 만들고 notice 로그를 남긴다. 디스크가 가득 차는 등으로 파일 쓰기가 실패했다면 대신 error 로그를 남긴다). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForAudioCallbacks() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
 
 ["AudioRecorder::isRecording"]
 category = "sound"
@@ -2068,9 +2068,9 @@ description.ko = "Event::listen()이 반환하는 RAII 토큰. 이 토큰이 파
 related = ["Event<T>", "CoreEvents"]
 
 ["EventListener::disconnect"]
-description.en = "Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForCallbackIdle()"
-description.ja = "リスナーを今すぐ明示的に切断(そうしなければ破棄時に自動で行われる)。イベントを発火するスレッド上では、実行中の notify() パスの後半も含めて二度と呼ばれない。別スレッドで実行中のコールバックは待たない。オーディオなら続けて AudioEngine::waitForCallbackIdle() を呼ぶ"
-description.ko = "리스너를 지금 명시적으로 연결 해제(그렇지 않으면 파괴 시 자동으로 수행됨). 이벤트를 발생시키는 스레드에서는 이미 진행 중인 notify() 패스의 뒷부분을 포함해 다시 호출되지 않는다. 다른 스레드에서 실행 중인 콜백은 기다리지 않는다. 오디오라면 이어서 AudioEngine::waitForCallbackIdle() 을 호출한다"
+description.en = "Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForAudioCallbacks()"
+description.ja = "リスナーを今すぐ明示的に切断(そうしなければ破棄時に自動で行われる)。イベントを発火するスレッド上では、実行中の notify() パスの後半も含めて二度と呼ばれない。別スレッドで実行中のコールバックは待たない。オーディオなら続けて AudioEngine::waitForAudioCallbacks() を呼ぶ"
+description.ko = "리스너를 지금 명시적으로 연결 해제(그렇지 않으면 파괴 시 자동으로 수행됨). 이벤트를 발생시키는 스레드에서는 이미 진행 중인 notify() 패스의 뒷부분을 포함해 다시 호출되지 않는다. 다른 스레드에서 실행 중인 콜백은 기다리지 않는다. 오디오라면 이어서 AudioEngine::waitForAudioCallbacks() 을 호출한다"
 
 ["EventListener::isConnected"]
 description.en = "True while the listener is still connected to its event"
