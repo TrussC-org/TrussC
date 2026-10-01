@@ -2281,7 +2281,7 @@ float getNearClip()  // Get the near-clip override (0 = auto-calculate from the 
 ### Lighting & PBR
 
 ```cpp
-void addLight(Light & light)  // Add a light to the scene
+void addLight(Light & light)  // Add a light to the scene (up to 8 lights per window; a light added past 8 is not registered, with a one-time warning)
 void beginShadowPass(Light & light)  // Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)
 Color calculateLighting(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material)  // CPU-side lighting result for a world position and normal, summing all active lights with the given material
 void clearEnvironment()  // Clear IBL environment
@@ -3061,11 +3061,11 @@ void Light::setAmbient(const Color & c) [+1]  // Set ambient light color
 void Light::setAttenuation(float constant, float linear, float quadratic)  // Set distance attenuation factors
 void Light::setDiffuse(const Color & c) [+1]  // Set diffuse (main) light color
 void Light::setDirectional(const Vec3 & direction) [+1]  // Set as directional light
-void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity
+void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity (currently one IES slot: only the first registered light with a profile uses it; further ones log a one-time warning)
 void Light::setIntensity(float i)  // Set light intensity multiplier
 void Light::setLensShift(float sx, float sy)  // Set projector lens shift (-1 to 1, normalized)
 void Light::setPoint(const Vec3 & position) [+1]  // Set as point light
-void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo)
+void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo) (currently one projector slot: only the first registered Spot light with a texture projects it; further ones light as plain spots and log a one-time warning)
 void Light::setProjectorAspect(float a)  // Set projector aspect ratio
 Light & Light::setShadowArea(const Vec3 & center, float radius)  // Set the orthographic shadow volume (center + radius) for a directional light (default radius 500)
 void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
