@@ -17,6 +17,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -28,6 +29,8 @@ using internal::TouchMouseAction;
 using internal::TouchMouseMapper;
 using internal::TouchPhase;
 using internal::TouchSample;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -76,7 +79,9 @@ static bool at(const TouchMouseAction& a, float x, float y) {
     return a.x == x && a.y == y;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // --- two fingers: the second finger gives no mouse events ----------------
     {
         TouchMouseMapper m;
