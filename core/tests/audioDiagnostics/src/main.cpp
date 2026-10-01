@@ -61,6 +61,12 @@
 // - A voice on a buffer with no frames, or with fewer samples than
 //   numSamples * channels, stops at its first mix (looping or not), and
 //   setPosition() on an empty buffer lands on 0.
+// - AudioEngine::init() that can't open the output device returns false,
+//   leaves the engine uninitialized and logs one error through the logger,
+//   naming the requested device (also one that was not found and fell back
+//   to the default); a later init() succeeds (#279).
+// - An init() on the null backend the test requested logs no "no usable
+//   audio backend" warning (that warning is for a fallback to it).
 // =============================================================================
 
 #include <TrussC.h>
@@ -1195,6 +1201,54 @@ int main() {
     check("not-running drop is counted", st.droppedNotRunning == 1);
     check("not-running drop is logged", countLogs(LogLevel::Warning, "no output device is running") == 1);
     check("unloaded Sound: play() returns false", !Sound().play());
+
+    // --- init() failure: logged, device named, callable again (#279) ------------
+    // miniaudio's ma_device_init refuses more than MA_MAX_CHANNELS (254)
+    // channels on the null backend too, which stands in for an output device
+    // that can't be opened. (ma_device_start failing has no such trigger.)
+    {
+        const string failLine = "[AudioEngine] failed to initialize ";
+        AudioSettings bad = settings;
+        bad.channels = 255;
+        size_t before = countLogs(LogLevel::Error, failLine);
+        check("init() returns false when the output device can't be opened",
+              !engine.init(bad) && !engine.isInitialized());
+        check("... logged once through logError(\"AudioEngine\")",
+              countLogs(LogLevel::Error, failLine) == before + 1
+              && lastLog(LogLevel::Error).find("failed to initialize the output device (result=") != string::npos,
+              lastLog(LogLevel::Error));
+
+        // A requested device that exists is named.
+        const auto devices = AudioEngine::listDevices();
+        const string devName = devices.empty() ? string() : devices[0].name;
+        bad.deviceName = devName;
+        before = countLogs(LogLevel::Error, failLine);
+        const bool namedFailed = !devName.empty() && !engine.init(bad);
+        check("a failed init names the requested device",
+              namedFailed && countLogs(LogLevel::Error, failLine) == before + 1
+              && lastLog(LogLevel::Error).find("the output device '" + devName + "'") != string::npos,
+              lastLog(LogLevel::Error));
+
+        // A requested device that is missing: the default it fell back to failed.
+        bad.deviceName = "tc-test-no-such-device";
+        before = countLogs(LogLevel::Error, failLine);
+        check("a failed init names a requested device that wasn't found",
+              !engine.init(bad) && countLogs(LogLevel::Error, failLine) == before + 1
+              && lastLog(LogLevel::Error).find("requested 'tc-test-no-such-device' was not found")
+                 != string::npos,
+              lastLog(LogLevel::Error));
+
+        check("init() called again later succeeds", engine.init(settings) && engine.isInitialized());
+        engine.shutdown();
+    }
+
+    // --- the requested null backend is not a fallback ----------------------------
+    // Every init() above ran on the null backend the test asked for, so none
+    // may log the "no usable audio backend" warning. (Landing on it by
+    // fallback, with no real backend present, can't be forced here.)
+    check("the requested null backend logs no fallback warning",
+          countLogs(LogLevel::Warning, "no usable audio backend") == 0,
+          lastLog(LogLevel::Warning));
 
     fs::remove(wav, ec);
     logSub.disconnect();

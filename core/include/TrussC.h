@@ -2123,7 +2123,9 @@ namespace internal {
 // false if the parent directory could not be created (e.g. no write
 // permission). The rare failure of the deferred write itself (permission/disk
 // after the directory check) is reported via logError("Screenshot").
-// Relative paths resolve against the data path. Supported formats: png/jpg/bmp.
+// Relative paths resolve against the data path. The format comes from the
+// extension (case-insensitive): png/jpg/bmp; macOS also writes tiff/gif,
+// Windows also tga, and iOS only png/jpg.
 //
 // Web: not implemented (no canvas readback). Always returns false (nothing is
 // queued or written) and warns once, pointing to the browser's own screenshot
@@ -2993,7 +2995,8 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         // The main window's scene-graph root (getRootNode()), held weakly
         internal::mainWindowContext().rootNode = app;
         // Note: Size is set in _setup_cb after this callback
-        // setup() is called automatically in updateTree() via setupCalled_ flag
+        // setup() is called automatically in updateTree() via setupCalled_ flag,
+        // and the App's audioOut() / audioIn() are subscribed right after it
     };
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count

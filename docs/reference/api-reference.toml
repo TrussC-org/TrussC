@@ -10,17 +10,17 @@ description.ko = "기반 애플리케이션 클래스: 서브클래싱하여 set
 ["App::audioIn"]
 category = "audioengine"
 keywords = ["microphone", "mic", "capture"]
-description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Detached after cleanup() for good, like audioOut; the same rule applies: don't wait on the main thread or on its locks in here."
-description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく cleanup() の後で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
-description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 cleanup() 후에 분리되고 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
+description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached after cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here."
+description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく setup() が戻った直後から呼ばれ、cleanup() の後で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
+description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 setup() 이 반환된 직후부터 호출되고, cleanup() 후에 분리되어 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
 related = ["Event<T>", "AudioInBuffer", "getMicInput", "getMicAnalysisBuffer"]
 
 ["App::audioOut"]
 category = "events"
 keywords = ["sound", "output", "buffer", "dsp", "synth"]
-description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
-description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。フレームワークが cleanup() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから App を破棄する (終了時、ホットリロード時、App のウィンドウを閉じたとき)。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
-description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. 프레임워크가 cleanup() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 App 을 파괴한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
+description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
+description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。setup() が戻った直後から呼ばれるので、setup() で用意したものはここで使える。一度も動かさない App には呼ばれない。フレームワークが cleanup() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから App を破棄する (終了時、ホットリロード時、App のウィンドウを閉じたとき)。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
+description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. setup() 이 반환된 직후부터 호출되므로 setup() 에서 준비한 것은 여기서 쓸 수 있다. 한 번도 실행되지 않은 App 에는 호출되지 않는다. 프레임워크가 cleanup() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 App 을 파괴한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
 related = ["AudioOutBuffer"]
 
 ["App::exit"]
@@ -288,9 +288,9 @@ related = ["AudioVoiceInfo", "AudioEngine::getStats"]
 ["AudioEngine::init"]
 category = "audioengine"
 keywords = ["initialize", "start", "open", "device", "setup"]
-description.en = "Initialize the engine with defaults, or with an AudioSettings override. Re-init on a running engine migrates active voices to the new settings. Returns true on success."
-description.ja = "デフォルト、または AudioSettings の上書きでエンジンを初期化。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。成功時 true を返す"
-description.ko = "기본값 또는 AudioSettings 오버라이드로 엔진을 초기화. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 성공 시 true 반환"
+description.en = "Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device."
+description.ja = "エンジンを初期化する、または AudioSettings の上書きで再初期化する。init(settings) はサンプルレート、チャンネル、バッファサイズ、ポリフォニーを失敗しても保持し、引数なしの init() は直前のそれらを再利用する (init(settings) を一度も呼んでいなければデフォルト) が、デバイスは常にシステム既定を開く。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。使えるオーディオバックエンドがないと miniaudio は無音の Null デバイスにフォールバックし、init() は成功して警告をログに出す。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること。Sound::load*() はエンジンが未初期化なら init() を呼ぶので、init(settings) が失敗した後はその設定でシステム既定のデバイスが開かれる。要求したデバイスを使いたいならサウンドを読み込む前に init(settings) を呼び直すこと"
+description.ko = "엔진을 초기화하거나 AudioSettings 오버라이드로 재초기화. init(settings) 는 샘플레이트, 채널, 버퍼 크기, 폴리포니를 실패해도 유지하고, 인수 없는 init() 은 마지막 값을 재사용하지만 (init(settings) 를 호출한 적이 없으면 기본값) 디바이스는 항상 시스템 기본 디바이스를 연다. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 사용할 수 있는 오디오 백엔드가 없으면 miniaudio 는 무음의 Null 디바이스로 폴백하고, init() 은 성공하며 경고를 로그에 남긴다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것. Sound::load*() 는 엔진이 초기화되지 않았으면 init() 을 호출하므로, init(settings) 가 실패한 뒤에는 그 설정으로 시스템 기본 디바이스가 열린다. 요청한 디바이스를 쓰려면 사운드를 로드하기 전에 init(settings) 를 다시 호출할 것"
 related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]
@@ -427,9 +427,9 @@ related = ["Sound"]
 ["AudioRecorder"]
 category = "sound"
 keywords = ["record", "wav", "capture", "master", "mix", "tap", "bounce"]
-description.en = "Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks"
-description.ja = "エンジンのマスター出力（Sound再生もaudioOut合成も含む、スピーカーに出る音そのもの）をWAVファイルに録音する。audioOutをMonitor優先度でタップし、ファイルIOはバックグラウンドスレッドで行う（オーディオスレッドはブロックしない）"
-description.ko = "엔진의 마스터 출력(스피커로 나가는 소리 그대로, Sound 재생과 audioOut 합성 포함)을 WAV 파일로 녹음. audioOut을 Monitor 우선순위로 탭하고 파일 IO는 백그라운드 스레드에서 수행(오디오 스레드는 블록되지 않음)"
+description.en = "Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it"
+description.ja = "エンジンのマスター出力（Sound再生もaudioOut合成も含む、スピーカーに出る音そのもの）をWAVファイルに録音する。audioOutをMonitor優先度でタップし、ファイルIOはバックグラウンドスレッドで行う（オーディオスレッドはブロックしない）。どのファイルも RIFF ヘッダの後に 36 バイトの JUNK チャンクを持つので、サンプルは 80 バイト目 (S16) か 92 バイト目 (F32) から始まる。サンプルが 4 GiB を超えるテイク (48 kHz ステレオ F32 で約 3.1 時間) は RF64 (EBU Tech 3306) で書かれ、RF64 に対応していない古いリーダーでは開けない"
+description.ko = "엔진의 마스터 출력(스피커로 나가는 소리 그대로, Sound 재생과 audioOut 합성 포함)을 WAV 파일로 녹음. audioOut을 Monitor 우선순위로 탭하고 파일 IO는 백그라운드 스레드에서 수행(오디오 스레드는 블록되지 않음). 모든 파일은 RIFF 헤더 뒤에 36바이트 JUNK 청크를 가지므로 샘플은 80바이트째(S16) 또는 92바이트째(F32)부터 시작한다. 샘플이 4 GiB를 넘는 테이크(48 kHz 스테레오 F32로 약 3.1시간)는 RF64(EBU Tech 3306)로 기록되며, RF64를 지원하지 않는 오래된 리더에서는 열 수 없다"
 related = ["AudioRecordSettings", "AudioEngine", "ScreenRecorder"]
 
 ["AudioRecorder::start"]
@@ -442,9 +442,9 @@ description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getD
 ["AudioRecorder::stop"]
 category = "sound"
 keywords = ["end", "finalize", "close"]
-description.en = "Stop and finalize the file (patches the WAV header sizes); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
-description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForCallbackIdle() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
-description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForCallbackIdle() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
+description.en = "Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile"
+description.ja = "録音を停止しファイルを確定する（WAVヘッダのサイズを書き戻す。サンプルが 4 GiB を超えたテイクは RF64 にして notice ログを出す。ディスクが一杯などでファイル書き込みが失敗していたら、代わりに error ログを出す）。取り込み途中だったバッファも含まれる。未録音時に呼んでも安全。デストラクタでも自動実行される。AudioEngine::waitForCallbackIdle() で待つので、レコーダーの分だけでなく、その時点で動いている audioOut / audioIn のリスナーすべてを待つ (通常はバッファ 1 つ分より短い)。そうしたリスナーが取るロックを持ったまま呼ばないこと。最大 1 秒止まり、その間は音が途切れる"
+description.ko = "녹음을 정지하고 파일을 마무리(WAV 헤더 크기를 기록. 샘플이 4 GiB를 넘은 테이크는 RF64로 만들고 notice 로그를 남긴다. 디스크가 가득 차는 등으로 파일 쓰기가 실패했다면 대신 error 로그를 남긴다). 캡처 도중이던 버퍼도 포함된다. 녹음 중이 아닐 때 호출해도 안전하며 소멸자에서도 자동 실행됨. AudioEngine::waitForCallbackIdle() 로 기다리므로 레코더 것만이 아니라 그 시점에 실행 중인 audioOut / audioIn 리스너 전부를 기다린다 (보통 버퍼 하나 분량보다 짧다). 그런 리스너가 잡는 락을 쥔 채로 호출하지 말 것. 최대 1 초 멈추고 그동안 소리가 끊긴다"
 
 ["AudioRecorder::isRecording"]
 category = "sound"
@@ -2440,9 +2440,9 @@ description.ja = "ファイルが開いているか確認"
 description.ko = "파일이 열려 있는지 확인"
 
 ["FileWriter::open"]
-description.en = "Open file for writing"
-description.ja = "書き込み用にファイルを開く"
-description.ko = "쓰기용으로 파일을 엶"
+description.en = "Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
+description.ja = "書き込み用にファイルを開く（append = true で既存ファイルに追記）。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
+description.ko = "쓰기용으로 파일을 엶 (append = true면 기존 파일에 추가). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
 
 ["FileWriter::write"]
 description.en = "Write data to file"
@@ -3983,7 +3983,7 @@ keywords = ["log", "logging", "console"]
 description.en = "Logging core with console and file output and an onLog event; access the global instance via getLogger()"
 description.ja = "コンソール・ファイル出力と onLog イベントを備えたロギングコア。グローバルインスタンスは getLogger() でアクセス"
 description.ko = "콘솔·파일 출력과 onLog 이벤트를 갖춘 로깅 코어. 전역 인스턴스는 getLogger() 로 접근"
-details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
+details = "Thread-safe: `log()` and the settings may be called from any thread. The console and file output are written under one mutex, so every line lands whole, and `closeFile()` / `setLogFile()` wait for a write in progress. Other `onLog` listeners run on the thread that logged, outside that mutex, so a listener may log too. One exception: `setLogFile()` with a relative path resolves it through `getDataPath()`, which reads the data path state without a lock, so it must not race `setDataPathRoot()` or the first `getDataPath()` call; an absolute path does not touch that state. sokol's own messages (`[sg]`, `[sapp]`, `[sgl]`, `[simgui]`) come through here as well; its info messages are Verbose."
 related = ["getLogger", "LogLevel", "LogEventArgs", "logNotice"]
 
 ["Logger::closeFile"]
@@ -4002,9 +4002,9 @@ description.ja = "現在のファイルログレベルを取得"
 description.ko = "현재 파일 로그 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
-description.en = "Get the path of the current log file"
-description.ja = "現在のログファイルのパスを取得"
-description.ko = "현재 로그 파일의 경로를 얻음"
+description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
+description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）"
+description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열)"
 
 ["Logger::isFileOpen"]
 description.en = "Check whether a log file is currently open"
@@ -4032,9 +4032,9 @@ description.ja = "ファイルの最小ログレベルを設定"
 description.ko = "파일 최소 로그 레벨을 설정"
 
 ["Logger::setLogFile"]
-description.en = "Open a file to receive log output"
-description.ja = "ログ出力を受けるファイルを開く"
-description.ko = "로그 출력을 받을 파일을 엶"
+description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
+description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
+description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
 
 ["MOUSE_BUTTON_LEFT"]
 keywords = ["left click", "primary"]
@@ -6603,9 +6603,9 @@ description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom �
 ["Pixels::save"]
 category = "graphics_pixels"
 keywords = ["write", "export", "file", "png", "store"]
-description.en = "Save image to file"
-description.ja = "ファイルに画像を保存"
-description.ko = "이미지를 파일로 저장"
+description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned"
+description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。作れないときはエラーをログに出して false を返す"
+description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 만들 수 없으면 오류를 로그에 남기고 false 반환"
 
 ["Pixels::setColor"]
 category = "graphics_pixels"
@@ -7674,19 +7674,21 @@ description.en = "Cross-platform serial port (USB/COM): connect, read/write byte
 description.ja = "クロスプラットフォームのシリアルポート（USB/COM）：接続・バイト読み書き"
 description.ko = "크로스플랫폼 시리얼 포트 (USB/COM): 연결, 바이트 읽기/쓰기"
 of_category = "serial-types"
-related = ["SerialDeviceInfo", "TcpClient"]
+related = ["SerialDeviceInfo", "SerialDisconnectEventArgs", "TcpClient"]
 platform_note.en = "Real backends only on Windows (Win32 COM), macOS/Linux (POSIX termios), and Android (USB Host CDC-ACM via JNI+usbfs, CDC-ACM class devices only, first connect needs an async USB permission dialog). No serial on iOS (sandbox has no /dev/tty access — the macOS __APPLE__ enumeration branch compiles but never lists/opens a device) or wasm (Emscripten has no serial device; setup() falls into the POSIX open()/termios path against the virtual FS and fails)."
 platform_note.ja = "実バックエンドは Windows (Win32 COM)、macOS/Linux (POSIX termios)、Android (USB Host CDC-ACM、JNI+usbfs、CDC-ACMクラス機器のみ、初回接続は非同期のUSB許可ダイアログが必要) のみ。iOS はサンドボックスで /dev/tty にアクセスできず実質不可 (__APPLE__ の列挙分岐はコンパイルされるが機器を列挙/オープンできない)、wasm はシリアルデバイスが存在せず setup() が POSIX open()/termios 経路に落ちて失敗。"
 
 ["Serial::available"]
-description.en = "Number of bytes available to read"
-description.ja = "読み取り可能なバイト数"
-description.ko = "읽을 수 있는 바이트 수"
+description.en = "Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
+description.ja = "読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+related = ["Serial::isConnected", "Serial::readBytes", "Serial::onDisconnect"]
 
 ["Serial::close"]
-description.en = "Disconnect and release resources"
-description.ja = "切断してリソースを解放"
-description.ko = "연결을 끊고 리소스를 해제"
+description.en = "Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open"
+description.ja = "切断してリソースを解放。ポートが開いていれば onDisconnect（wasClean = true）を発火"
+description.ko = "연결을 끊고 리소스를 해제. 포트가 열려 있었으면 onDisconnect(wasClean = true)를 발생"
+related = ["Serial::onDisconnect"]
 
 ["Serial::drain"]
 description.en = "Wait until output transmission completes"
@@ -7716,19 +7718,360 @@ description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
 ["Serial::getDevicePath"]
-description.en = "Current device path"
-description.ja = "現在のデバイスパス"
-description.ko = "현재 장치 경로"
+description.en = "Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call"
+description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す。setup()、close()、I/O 呼び出しを待たない"
+description.ko = "현재 장치 경로. 다른 스레드의 setup()이 바꿀 수 있으므로 복사본을 반환. setup(), close(), I/O 호출을 기다리지 않음"
+
+["Serial::isConnected"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "connected"]
+description.en = "Whether the port is open and working; turns false after close() or when a read/write call finds the device gone"
+description.ja = "ポートが開いていて使えるか。close() 後や、読み書きの呼び出しがデバイスの消失を検出すると false になる"
+description.ko = "포트가 열려 있고 사용 가능한지. close() 후나 읽기/쓰기 호출이 장치 소실을 감지하면 false가 됨"
+related = ["Serial::setup", "Serial::available", "Serial::readBytes", "Serial::writeBytes", "Serial::onDisconnect", "TcpClient::isConnected"]
+details.en = '''
+An unplugged USB-serial device (or a hub power loss, a driver reset) is noticed
+by [`available()`](#Serial::available), [`readBytes()`](#Serial::readBytes),
+[`readByte()`](#Serial::readByte) and [`writeBytes()`](#Serial::writeBytes): the
+call closes the port, logs one warning, fires
+[`onDisconnect`](#Serial::onDisconnect) and returns its error value
+(`available()` returns 0), and `isConnected()` is false from then on. A loop
+that checks `isConnected()` and calls [`setup()`](#Serial::setup) again
+reconnects once the device is back (see `serialExample`). A quiet device that
+sends nothing is not a loss. `isConnected()` itself does not probe the device,
+so an app that never reads or writes does not notice an unplug.
+
+Reconnecting re-asserts DTR, which resets auto-reset boards such as most
+Arduinos. On Windows, any failure of the underlying ClearCommError / ReadFile /
+WriteFile counts as a loss. On Android the flag also turns true after `setup()`
+returned false, once the user grants USB permission, and after an unplug it
+stays true until one of those calls reports the loss (the USB worker thread
+that finds it only records it).
+
+One `Serial` may be used from several threads. Its I/O calls (`available()`,
+`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) never
+wait for each other. Opening and closing (`setup()`, `close()`, closing a lost
+port, the destructor, the moves) wait until the I/O calls in progress have
+returned, so no call ever uses a closed port, and new I/O calls wait behind
+them. `isConnected()` and [`getDevicePath()`](#Serial::getDevicePath) wait
+for neither: they answer with the state at that moment. Which thread reads or
+writes what, and in which order, is still up to the app. So a long
+`writeBytes()` (Windows, Android; see [`writeBytes()`](#Serial::writeBytes))
+or `drain()` delays a `setup()` / `close()` on another thread, not the other
+I/O calls. On Android `close()`, the destructor and a move assignment also
+wait for the USB worker thread to stop (up to about 250 ms once connected).
+On Windows the system itself runs the calls on one port handle one at a time
+(it is not opened for overlapped I/O), so there `available()`, the reads and
+the flush calls still wait for a `writeBytes()` in progress.
+
+A [Logger](#Logger) listener that runs inline may call this `Serial`. One
+exception, on Android: the USB worker thread logs too (permission timeout,
+connected, lost connection, RX overflow, open errors). A listener running
+inline on that thread must not call an I/O call, `setup()` or `close()` on
+the `Serial`, nor destroy it. `setup()` and `close()` stop a USB worker and
+wait for it, which a worker must not do: on any `Serial`'s USB worker thread
+they are refused at once, before they take the lock, with one error log per
+thread, and do nothing. Closing a lost port is refused there too: an I/O call
+there (on any `Serial`) that finds the device gone neither closes the port
+nor fires `onDisconnect`, and `isConnected()` stays true until the next call
+on another thread reports the loss. The destructor and a move cannot refuse.
+Destroying the `Serial` on its own worker leaves the connection to that
+worker, which releases it when it stops. Destroying or moving a `Serial` on a
+worker is only safe while no other thread uses that `Serial`: they take its
+lock first, and a `close()` / `setup()` on another thread holds it while it
+waits for the worker. On another `Serial`'s worker, the destructor also
+waits for the destroyed `Serial`'s own worker, and a move assignment for the
+worker of the `Serial` it assigns over (that one's previous connection); a
+move construction waits for no worker. A worker waited for this way must not
+be waiting for this thread in turn (for example, by destroying this worker's
+`Serial`, or assigning over it, at the same time). An I/O call there may
+deadlock the same way. `isConnected()` and
+`getDevicePath()` are safe there. Listen with `Deliver::Main` to run on the
+main thread instead.
+'''
+details.ja = '''
+USB シリアル機器の抜去（ハブの電源断、ドライバのリセットなども）は
+[`available()`](#Serial::available)、[`readBytes()`](#Serial::readBytes)、
+[`readByte()`](#Serial::readByte)、[`writeBytes()`](#Serial::writeBytes) が検出する。
+その呼び出しがポートを閉じ、警告を1回ログに出し、
+[`onDisconnect`](#Serial::onDisconnect) を発火してエラー値を返し（`available()` は
+0）、以後 `isConnected()` は false になる。`isConnected()` を見て
+[`setup()`](#Serial::setup) を呼び直すループなら、機器が戻れば再接続できる
+（`serialExample` 参照）。何も送ってこないだけの機器は消失とみなさない。
+`isConnected()` 自体は機器を調べないので、読み書きを一切しないアプリは抜去に
+気づかない。
+
+再接続では DTR が再びアサートされ、多くの Arduino のような自動リセット付きボードは
+リセットされる。Windows では下位の ClearCommError / ReadFile / WriteFile の失敗は
+すべて消失として扱う。Android では、`setup()` が false を返した後でもユーザーが
+USB 許可を与えた時点で true になる。また抜去後は、上の呼び出しのどれかが消失を
+報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
+
+1つの `Serial` を複数のスレッドから使ってよい。I/O の呼び出し（`available()`、
+`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）どうしは互いを
+待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
+ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを触るので、閉じた
+ポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで待つ。
+`isConnected()` と [`getDevicePath()`](#Serial::getDevicePath) はどちらも待たず、
+その時点の状態を返す。どのスレッドが何をどの順に読み書きするかは、アプリ側で
+決める必要がある。つまり時間のかかる `writeBytes()`（Windows、Android。
+[`writeBytes()`](#Serial::writeBytes) 参照）や `drain()` が遅らせるのは、別スレッドの
+`setup()` / `close()` で、ほかの I/O 呼び出しではない。Android の `close()`、
+デストラクタ、ムーブ代入は、USB ワーカースレッドが止まるのも待つ（接続後なら最大で
+約 250 ms）。Windows では、システム自体が1つのポートハンドルへの呼び出しを1つずつ
+実行する（オーバーラップ I/O で開いていないため）。そのため Windows では
+`available()`、読み込み、flush 系は実行中の `writeBytes()` を待つ。
+
+インラインで動く [Logger](#Logger) のリスナーから、この `Serial` を呼んでよい。
+例外は Android で、USB ワーカースレッドもログを出す（許可のタイムアウト、接続、
+接続の喪失、受信バッファのあふれ、オープンのエラー）。そのスレッド上でインラインに
+動くリスナーから、`Serial` の I/O 呼び出し、`setup()`、`close()` を呼んだり、
+`Serial` を破棄したりしてはいけない。`setup()` と `close()` は USB ワーカーを止めて
+その終了を待つが、ワーカーがそれをしてはいけない。どの `Serial` の USB ワーカー
+スレッド上でも、この2つはロックを取る前にすぐ拒否され、スレッドごとに1回エラーを
+ログに出して何もしない。失われたポートを閉じるのもそこでは拒否される。そこで
+（どの `Serial` でも）I/O 呼び出しが機器の喪失を見つけても、ポートは閉じられず
+`onDisconnect` も発火せず、別スレッドでの次の呼び出しが喪失を報告するまで
+`isConnected()` は true のまま。デストラクタとムーブは拒否できない。自分のワーカー上で
+`Serial` を破棄すると、接続の後始末はそのワーカーに任され、ワーカーが止まるときに
+解放される。ワーカー上での `Serial` の破棄やムーブが安全なのは、ほかのスレッドが
+その `Serial` を使っていないときだけ。どちらも先にロックを取るが、別スレッドの
+`close()` / `setup()` はロックを持ったままワーカーを待つからだ。別の `Serial` の
+ワーカー上では、デストラクタは破棄する `Serial` 自身のワーカーの終了も待ち、
+ムーブ代入は代入先の `Serial` のワーカー（その前の接続のもの）の終了も待つ。
+ムーブ構築はどのワーカーも待たない。こうして待つワーカーがこのスレッドを待って
+いてはいけない（たとえば同時にこのワーカーの `Serial` を破棄したり、それに
+ムーブ代入したりしている場合）。そこでの I/O 呼び出しも
+同じ理由でデッドロックしうる。`isConnected()` と `getDevicePath()` はそこでも安全。
+メインスレッドで動かすには `Deliver::Main` で listen する。
+'''
+details.ko = '''
+USB 시리얼 장치의 분리(허브 전원 차단, 드라이버 리셋 등 포함)는
+[`available()`](#Serial::available), [`readBytes()`](#Serial::readBytes),
+[`readByte()`](#Serial::readByte), [`writeBytes()`](#Serial::writeBytes)가 감지한다.
+해당 호출이 포트를 닫고 경고를 한 번 로그로 남기고
+[`onDisconnect`](#Serial::onDisconnect)를 발생시킨 뒤 오류 값을 반환하며
+(`available()`은 0), 이후 `isConnected()`는 false가 된다. `isConnected()`를 확인하고
+[`setup()`](#Serial::setup)을 다시 호출하는 루프라면 장치가 돌아왔을 때 재연결된다
+(`serialExample` 참조). 아무것도 보내지 않을 뿐인 장치는 소실로 보지 않는다.
+`isConnected()` 자체는 장치를 조사하지 않으므로, 읽기/쓰기를 전혀 하지 않는 앱은
+분리를 알아채지 못한다.
+
+재연결 시 DTR이 다시 어서트되어 대부분의 Arduino 같은 자동 리셋 보드는 리셋된다.
+Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모두 소실로
+취급한다. Android에서는 `setup()`이 false를 반환한 뒤에도 사용자가 USB 권한을
+허용하면 true가 되며, 분리 후에는 위 호출 중 하나가 소실을 보고할 때까지 true로
+남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
+
+하나의 `Serial`을 여러 스레드에서 사용해도 된다. I/O 호출(`available()`,
+`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)끼리는 서로를
+기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
+이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로, 닫힌 포트를
+쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. `isConnected()`와
+[`getDevicePath()`](#Serial::getDevicePath)는 어느 쪽도 기다리지 않고 그 시점의
+상태를 반환한다. 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다.
+즉 오래 걸리는 `writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes)
+참조)나 `drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O
+호출이 아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
+기다린다(연결 후라면 최대 약 250 ms). Windows에서는 시스템 자체가 하나의 포트
+핸들에 대한 호출을 하나씩 실행한다(오버랩 I/O로 열지 않았기 때문). 그래서
+Windows에서는 `available()`, 읽기, flush 계열이 진행 중인 `writeBytes()`를 기다린다.
+
+인라인으로 실행되는 [Logger](#Logger) 리스너에서 이 `Serial`을 호출해도 된다. 예외는
+Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연결, 연결 소실, 수신
+버퍼 넘침, 열기 오류). 그 스레드에서 인라인으로 실행되는 리스너는 `Serial`의 I/O
+호출, `setup()`, `close()`를 호출하거나 `Serial`을 파괴해서는 안 된다. `setup()`과
+`close()`는 USB 워커를 멈추고 끝나기를 기다리는데, 워커가 그렇게 해서는 안 된다.
+어느 `Serial`의 USB 워커 스레드에서든 이 둘은 락을 잡기 전에 바로 거부되며,
+스레드마다 한 번 오류를 로그로 남기고 아무것도 하지 않는다. 잃어버린 포트를 닫는
+것도 거기서는 거부된다. 거기서 (어느 `Serial`이든) I/O 호출이 장치의 소실을
+발견해도 포트를 닫지 않고 `onDisconnect`도 발생하지 않으며, 다른 스레드의 다음
+호출이 소실을 보고할 때까지 `isConnected()`는 true로 남는다. 소멸자와 이동은 거부할
+수 없다. 자기 워커에서 `Serial`을 파괴하면 연결의 정리는 그 워커에 맡겨져 워커가
+멈출 때 해제된다. 워커에서 `Serial`을 파괴하거나 이동하는 것은 다른 스레드가 그
+`Serial`을 사용하지 않을 때만 안전하다. 둘 다 먼저 락을 잡는데, 다른 스레드의
+`close()` / `setup()`은 락을 잡은 채 워커를 기다리기 때문이다. 다른 `Serial`의
+워커에서는 소멸자가 파괴되는 `Serial` 자신의 워커도 기다리고, 이동 대입은 대입
+대상 `Serial`의 워커(그 이전 연결의 것)도 기다린다. 이동 생성은 어떤 워커도
+기다리지 않는다. 이렇게 기다리는 워커가 이 스레드를 기다리고 있어서는 안 된다
+(예를 들어 동시에 이 워커의 `Serial`을 파괴하거나 거기에 이동 대입하는 경우).
+거기서의 I/O 호출도
+같은 이유로 교착될 수 있다. `isConnected()`와 `getDevicePath()`는 거기서도 안전하다.
+메인 스레드에서 실행하려면 `Deliver::Main`으로 listen한다.
+'''
 
 ["Serial::isInitialized"]
-description.en = "Whether currently connected"
-description.ja = "接続中か"
-description.ko = "현재 연결 중인지"
+description.en = "Whether currently connected; same as isConnected()"
+description.ja = "接続中か。isConnected() と同じ"
+description.ko = "현재 연결 중인지. isConnected()와 같음"
+related = ["Serial::isConnected"]
 
 ["Serial::listDevices"]
 description.en = "List available serial devices"
 description.ja = "利用可能なシリアルデバイスを列挙"
 description.ko = "사용 가능한 시리얼 장치를 나열"
+
+["Serial::onDisconnect"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "disconnect event"]
+description.en = "Event fired once per open connection when it ends: on a detected device loss (wasClean = false) or on close() of an open port (wasClean = true)"
+description.ja = "開いた接続1つにつき1回、接続が終わったときに発火するイベント。デバイスの消失を検出したとき（wasClean = false）と、開いているポートを close() したとき（wasClean = true）"
+description.ko = "열린 연결 하나당 한 번, 연결이 끝날 때 발생하는 이벤트. 장치 소실을 감지했을 때(wasClean = false)와 열린 포트를 close()했을 때(wasClean = true)"
+related = ["SerialDisconnectEventArgs", "Serial::isConnected", "Serial::close", "Serial::setup", "TcpClient::onDisconnect", "Deliver"]
+details.en = '''
+It fires for two reasons, each once per open connection:
+
+- **Loss** (`wasClean = false`): [`available()`](#Serial::available),
+  [`readBytes()`](#Serial::readBytes), [`readByte()`](#Serial::readByte) or
+  [`writeBytes()`](#Serial::writeBytes) found the device gone. `reason` is the
+  text of the warning they log, such as `"read: Input/output error"` or
+  `"hangup"`.
+- **Close** (`wasClean = true`): [`close()`](#Serial::close) closed an open
+  port, directly or through [`setup()`](#Serial::setup), which closes the
+  previous port first. `reason` is `"closed by close()"`.
+
+`close()` on a port that is not open does not fire. Destroying a `Serial`, or
+move-assigning another one over it, closes the port without firing, so a
+listener never runs from a destructor. Neither does `setup()` when it closes a
+port that a listener or another thread opened while it was closing the
+previous one; it logs a warning instead.
+
+Only those four I/O calls find a loss. A device that went away before
+`close()` or `setup()` without one of them noticing ends as a close
+(`wasClean = true`, `"closed by close()"`): the app ended the connection. On
+Android, where the USB worker thread may have found the loss already, the
+reason then goes on with `(the device had already been lost: <reason>)`, still
+with `wasClean = true`.
+
+**Thread.** It fires inline on the thread that made the call, normally the main
+thread, after the call has released the `Serial`'s lock. On Android the USB
+worker thread finds the loss but only records it: the event fires from the
+next `available()`, `readBytes()`, `readByte()`, `writeBytes()`, `close()` or
+`setup()` call on the app's thread, and `isConnected()` stays true until then.
+A listener that must run on the main thread whichever thread uses the `Serial`
+passes `Deliver::Main`: `serial.onDisconnect.listen(fn, Deliver::Main)`.
+
+**Reconnecting.** When a listener runs, the port of the connection that ended
+is closed and the lock is free, so a listener may call
+`setup(e.portName, e.baudRate)`. Check `wasClean` first, or every `close()`
+reopens the port. The call that found the loss still returns its error value
+(`available()` returns 0) and leaves the new connection alone. Another thread
+may call `setup()` in the meantime, so an app that also connects from other
+threads checks `isConnected()` / `getDevicePath()` in the listener before it
+reconnects.
+
+```cpp
+listener = serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
+    logNotice() << e.portName << " (" << e.baudRate << " baud) closed: " << e.reason;
+    if (!e.wasClean && !serial.setup(e.portName, e.baudRate)) {
+        needReconnect = true;  // not back yet: retry from update()
+    }
+});
+```
+
+Listeners belong to the `Serial` they were added to; moving a `Serial` does not
+carry them over.
+'''
+details.ja = '''
+次の2つの理由で、それぞれ開いた接続1つにつき1回発火する。
+
+- **消失**（`wasClean = false`）: [`available()`](#Serial::available)、
+  [`readBytes()`](#Serial::readBytes)、[`readByte()`](#Serial::readByte)、
+  [`writeBytes()`](#Serial::writeBytes) がデバイスの消失を見つけた。`reason` は
+  それらがログに出す警告と同じ文字列で、`"read: Input/output error"` や
+  `"hangup"` など。
+- **クローズ**（`wasClean = true`）: [`close()`](#Serial::close) が開いている
+  ポートを閉じた。直接の呼び出しでも、前のポートを先に閉じる
+  [`setup()`](#Serial::setup) 経由でもよい。`reason` は `"closed by close()"`。
+
+開いていないポートへの `close()` では発火しない。`Serial` の破棄や、別の `Serial`
+のムーブ代入でもポートは閉じるが発火しないので、リスナーがデストラクタから
+呼ばれることはない。`setup()` が前のポートを閉じている間にリスナーや別のスレッドが
+開いたポートを、`setup()` が閉じるときも発火しない（代わりに警告をログに出す）。
+
+消失を見つけるのは上の4つの I/O 呼び出しだけ。それらが気づかないうちに抜けた
+デバイスを `close()` や `setup()` で閉じた場合は、クローズとして終わる
+（`wasClean = true`、`"closed by close()"`）。接続を終えたのはアプリだから。
+Android では USB ワーカースレッドがすでに消失を見つけていることがあり、その場合は
+reason の後ろに `(the device had already been lost: <理由>)` が付く。
+`wasClean` はこの場合も true。
+
+**スレッド。** その呼び出しを行ったスレッドで、呼び出しが `Serial` のロックを
+外した後にインラインで発火する（通常はメインスレッド）。Android では USB
+ワーカースレッドが消失を見つけるが、記録するだけで、アプリのスレッドでの次の
+`available()`、`readBytes()`、`readByte()`、`writeBytes()`、`close()`、`setup()` の
+呼び出しから発火する。それまでは `isConnected()` も true のまま。`Serial` を
+どのスレッドから使っていてもメインスレッドで動く必要のあるリスナーは
+`Deliver::Main` を渡す: `serial.onDisconnect.listen(fn, Deliver::Main)`。
+
+**再接続。** リスナーが呼ばれる時点で、終わった接続のポートは閉じていて、ロックも
+外れているので、リスナーから `setup(e.portName, e.baudRate)` を呼んでよい。先に
+`wasClean` を確認すること。そうしないと `close()` のたびにポートが開き直される。
+消失を見つけた呼び出しは、それでも通常のエラー値を返し（`available()` は 0）、
+新しい接続には手を触れない。その間に別のスレッドが `setup()` を呼ぶこともあるので、
+ほかのスレッドからも接続するアプリは、再接続の前にリスナーの中で `isConnected()` /
+`getDevicePath()` を確かめること。
+
+```cpp
+listener = serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
+    logNotice() << e.portName << " (" << e.baudRate << " baud) closed: " << e.reason;
+    if (!e.wasClean && !serial.setup(e.portName, e.baudRate)) {
+        needReconnect = true;  // not back yet: retry from update()
+    }
+});
+```
+
+リスナーは追加した `Serial` に属し、`Serial` をムーブしても引き継がれない。
+'''
+details.ko = '''
+다음 두 가지 이유로, 각각 열린 연결 하나당 한 번 발생한다.
+
+- **소실**(`wasClean = false`): [`available()`](#Serial::available),
+  [`readBytes()`](#Serial::readBytes), [`readByte()`](#Serial::readByte),
+  [`writeBytes()`](#Serial::writeBytes)가 장치 소실을 발견했다. `reason`은
+  이들이 로그로 남기는 경고와 같은 문자열로, `"read: Input/output error"`나
+  `"hangup"` 등이다.
+- **닫기**(`wasClean = true`): [`close()`](#Serial::close)가 열린 포트를 닫았다.
+  직접 호출이든, 이전 포트를 먼저 닫는 [`setup()`](#Serial::setup)을 거친
+  것이든 같다. `reason`은 `"closed by close()"`이다.
+
+열려 있지 않은 포트에 대한 `close()`는 발생하지 않는다. `Serial`을 파괴하거나
+다른 `Serial`을 이동 대입해도 포트는 닫히지만 발생하지 않으므로, 리스너가
+소멸자에서 실행되는 일은 없다. `setup()`이 이전 포트를 닫는 동안 리스너나 다른
+스레드가 연 포트를 `setup()`이 닫을 때도 발생하지 않는다(대신 경고를 로그로 남긴다).
+
+소실을 찾는 것은 위의 네 I/O 호출뿐이다. 이들이 알아채기 전에 분리된 장치를
+`close()`나 `setup()`으로 닫으면 닫기로 끝난다(`wasClean = true`,
+`"closed by close()"`). 연결을 끝낸 것은 앱이기 때문이다. Android에서는 USB 워커
+스레드가 이미 소실을 찾았을 수 있으며, 그때는 reason 뒤에
+`(the device had already been lost: <사유>)`가 붙는다. 이 경우에도 `wasClean`은
+true이다.
+
+**스레드.** 그 호출을 한 스레드에서, 호출이 `Serial`의 락을 놓은 뒤에 인라인으로
+발생한다(보통 메인 스레드). Android에서는 USB 워커 스레드가 소실을 찾지만 기록만
+하며, 앱 스레드에서의 다음 `available()`, `readBytes()`, `readByte()`,
+`writeBytes()`, `close()`, `setup()` 호출에서 발생한다. 그때까지는
+`isConnected()`도 true로 남는다. `Serial`을 어느 스레드에서 쓰든 메인 스레드에서
+실행되어야 하는 리스너는 `Deliver::Main`을 넘긴다:
+`serial.onDisconnect.listen(fn, Deliver::Main)`.
+
+**재연결.** 리스너가 실행될 때 끝난 연결의 포트는 닫혀 있고 락도 풀려 있으므로,
+리스너에서 `setup(e.portName, e.baudRate)`를 호출해도 된다. 먼저 `wasClean`을
+확인할 것. 그렇지 않으면 `close()`할 때마다 포트가 다시 열린다. 소실을 발견한
+호출은 그래도 평소의 오류 값을 반환하며(`available()`은 0), 새 연결은 건드리지
+않는다. 그 사이에 다른 스레드가 `setup()`을 호출할 수도 있으므로, 다른
+스레드에서도 연결하는 앱은 재연결하기 전에 리스너 안에서 `isConnected()` /
+`getDevicePath()`를 확인할 것.
+
+```cpp
+listener = serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
+    logNotice() << e.portName << " (" << e.baudRate << " baud) closed: " << e.reason;
+    if (!e.wasClean && !serial.setup(e.portName, e.baudRate)) {
+        needReconnect = true;  // not back yet: retry from update()
+    }
+});
+```
+
+리스너는 추가한 `Serial`에 속하며, `Serial`을 이동해도 넘어가지 않는다.
+'''
 
 ["Serial::printDevices"]
 description.en = "Log all available serial devices"
@@ -7736,19 +8079,86 @@ description.ja = "利用可能なシリアルデバイスをログ出力"
 description.ko = "사용 가능한 시리얼 장치를 로그로 출력"
 
 ["Serial::readByte"]
-description.en = "Read a single byte; 0-255 on success, -1 no data, -2 error"
-description.ja = "1バイト読む。成功時0-255、データ無し-1、エラー-2"
-description.ko = "1바이트를 읽음. 성공 0-255, 데이터 없음 -1, 오류 -2"
+description.en = "Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)"
+description.ja = "1バイト読む。成功時0-255、データ無し-1、エラー-2（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "1바이트를 읽음. 성공 0-255, 데이터 없음 -1, 오류 -2 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+related = ["Serial::isConnected", "Serial::onDisconnect"]
 
 ["Serial::readBytes"]
-description.en = "Read bytes; returns actual count (>=0) or -1 on error"
-description.ja = "バイトを読む。実際の読み取り数(>=0)、エラー時-1を返す"
-description.ko = "바이트를 읽음. 실제 읽은 수(>=0) 또는 오류 시 -1 반환"
+description.en = "Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)"
+description.ja = "バイトを読む。実際の読み取り数(>=0)、エラー時-1を返す（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "바이트를 읽음. 실제 읽은 수(>=0) 또는 오류 시 -1 반환 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+related = ["Serial::isConnected", "Serial::available", "Serial::onDisconnect"]
 
 ["Serial::setup"]
+keywords = ["baud rate", "connect", "open port", "250000", "921600"]
 description.en = "Connect to a port by path or by index from listDevices()"
 description.ja = "パス指定、またはlistDevices()のインデックスでポートに接続"
 description.ko = "경로 또는 listDevices()의 인덱스로 포트에 연결"
+related = ["Serial::isConnected", "Serial::listDevices", "Serial::onDisconnect"]
+details.en = '''
+Opens the port as 8N1 without flow control and returns false when it cannot
+be opened or configured. Any rate the driver supports works: on macOS and Linux,
+rates without a termios B-constant (250000, 74880, 921600 on macOS, ...) are set
+with `IOSSIOSPEED` (macOS) or `termios2` (Linux); on Windows the rate goes to
+the driver unchanged. A rate the driver rejects makes `setup()` log an error
+and return false, instead of opening at another speed. A Linux driver may
+instead replace any rate, with or without a B-constant, by another one (often
+9600, for example an FTDI chip asked for more than its maximum): `setup()`
+reads the rate back and fails when it is more than 2% off, and accepts a
+closer one (the driver's nearest divisor) with a warning that names it. A
+driver that applies no rate at all (a USB gadget's `/dev/ttyGS*`,
+`usb_serial_generic`, xHCI DbC) keeps its old rate whatever is asked; `setup()`
+tells it apart by trying one more standard rate, and then succeeds with a
+warning that the rate has no effect there.
+
+Calling `setup()` again, for example to reconnect after
+[`isConnected()`](#Serial::isConnected) turned false, closes the previous port
+first; when it was still open, that fires
+[`onDisconnect`](#Serial::onDisconnect) with `wasClean = true`. Opening
+re-asserts DTR, which resets auto-reset boards such as most Arduinos.
+'''
+details.ja = '''
+8N1・フロー制御なしでポートを開き、開けない・設定できないときは false を返す。
+ドライバが対応するレートなら何でも使える。macOS / Linux では termios に
+B 定数が無いレート（250000、74880、macOS の 921600 など）を `IOSSIOSPEED`（macOS）
+または `termios2`（Linux）で設定する。Windows ではレートをそのままドライバに渡す。
+ドライバが拒否したレートでは、別の速度で開くのではなく、エラーをログに出して
+false を返す。Linux のドライバはレートを拒否せず、B 定数の有無にかかわらず
+別のレート（多くは 9600。たとえば FTDI チップに上限を超えるレートを指定したとき）に
+置き換えることがある。`setup()` は適用されたレートを読み戻し、要求と 2% を超えて
+違えば失敗する。それより近いレート（ドライバが出せる最も近い値）は、
+そのレートを示す警告を出して受け入れる。レートをまったく適用しないドライバ
+（USB ガジェットの `/dev/ttyGS*`、`usb_serial_generic`、xHCI DbC）は、何を指定しても
+元のレートのままになる。`setup()` は別の標準レートをもう1つ試してこれを見分け、
+その場合は「レートは効かない」という警告を出して成功する。
+
+[`isConnected()`](#Serial::isConnected) が false になった後の再接続などで
+`setup()` を呼び直すと、先に前のポートを閉じる。そのポートがまだ開いていれば
+[`onDisconnect`](#Serial::onDisconnect) が `wasClean = true` で発火する。
+開くと DTR が再びアサートされ、多くの Arduino のような自動リセット付きボードは
+リセットされる。
+'''
+details.ko = '''
+8N1, 흐름 제어 없음으로 포트를 열며, 열 수 없거나 설정할 수 없으면 false를 반환한다.
+드라이버가 지원하는 속도라면 무엇이든 쓸 수 있다. macOS / Linux에서는 termios에
+B 상수가 없는 속도(250000, 74880, macOS의 921600 등)를 `IOSSIOSPEED`(macOS) 또는
+`termios2`(Linux)로 설정한다. Windows에서는 속도를 그대로 드라이버에 전달한다.
+드라이버가 거부한 속도라면 다른 속도로 여는 대신 오류를 로그로 남기고 false를
+반환한다. Linux 드라이버는 속도를 거부하지 않고, B 상수가 있든 없든 다른 속도
+(대개 9600. 예를 들어 FTDI 칩에 최대치를 넘는 속도를 지정했을 때)로 바꿔 적용하기도
+한다. `setup()`은 적용된 속도를 다시 읽어 요청과 2%를 넘게 다르면 실패하고,
+그보다 가까운 속도(드라이버가 낼 수 있는 가장 가까운 값)는 그 속도를 알리는 경고와
+함께 받아들인다. 속도를 전혀 적용하지 않는 드라이버(USB 가젯의 `/dev/ttyGS*`,
+`usb_serial_generic`, xHCI DbC)는 무엇을 지정해도 이전 속도를 유지한다. `setup()`은
+다른 표준 속도를 하나 더 시도해 이를 구별하고, 그 경우 속도가 효과가 없다는 경고와
+함께 성공한다.
+
+[`isConnected()`](#Serial::isConnected)가 false가 된 뒤 재연결하는 경우 등
+`setup()`을 다시 호출하면 이전 포트를 먼저 닫는다. 그 포트가 아직 열려 있었으면
+[`onDisconnect`](#Serial::onDisconnect)가 `wasClean = true`로 발생한다. 열 때 DTR이
+다시 어서트되어 대부분의 Arduino 같은 자동 리셋 보드는 리셋된다.
+'''
 
 ["Serial::writeByte"]
 description.en = "Write a single byte; true on success"
@@ -7756,9 +8166,69 @@ description.ja = "1バイト書く。成功でtrue"
 description.ko = "1바이트를 씀. 성공 시 true"
 
 ["Serial::writeBytes"]
-description.en = "Write bytes; returns actual count or -1 on error"
-description.ja = "バイトを書く。実際の書き込み数、エラー時-1を返す"
-description.ko = "바이트를 씀. 실제 쓴 수 또는 오류 시 -1 반환"
+description.en = "Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)"
+description.ja = "バイトを書く。実際の書き込み数、エラー時-1を返す（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "바이트를 씀. 실제 쓴 수 또는 오류 시 -1 반환 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+related = ["Serial::isConnected", "Serial::onDisconnect"]
+details.en = '''
+How long it may take depends on the platform:
+
+- **macOS / Linux:** never blocks (the port is non-blocking). It may write
+  fewer bytes than asked, or return -1 while the output buffer is full; the
+  port stays open.
+- **Windows:** waits until the driver has taken every byte, but at most 4
+  times the time the bytes take on the wire at the port's rate (10 bits per
+  byte, rounded up to whole ms per byte) plus 5 s. At 9600 baud that is
+  5 ms per byte (64 KB in about 5.5 min), at 40000 baud and up 1 ms per byte
+  (64 KB in about 70 s). A native USB device ignores the rate, so this is
+  only a generous ceiling. On a timeout it returns the bytes written so far
+  (possibly 0) and logs one warning per connection; the port stays open and
+  `onDisconnect` does not fire. A failed write still counts as a loss.
+- **Android:** waits up to 1 s per 16 KB for the device to take the data.
+
+A write that must never stall the app goes on a thread of its own: the other
+I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
+Windows, where the reads still do).
+'''
+details.ja = '''
+どれだけ時間がかかりうるかはプラットフォームによる。
+
+- **macOS / Linux:** ブロックしない（ポートはノンブロッキング）。指定より少ない
+  バイト数しか書けないことや、出力バッファがいっぱいの間は -1 を返すことがある。
+  ポートは開いたまま。
+- **Windows:** ドライバが全バイトを受け取るまで待つ。ただし上限は、そのポートの
+  ボーレートでバイト列が線上にかかる時間の4倍（1バイトを10ビットとし、1バイト
+  あたり整数 ms に切り上げ）に 5 秒を足した時間。9600 baud なら1バイト 5 ms
+  （64 KB で約 5.5 分）、40000 baud 以上なら1バイト 1 ms（64 KB で約 70 秒）。
+  ネイティブ USB の機器はレートを無視するので、これは余裕のある上限にすぎない。
+  タイムアウトすると、それまでに書けたバイト数（0 もありうる）を返し、接続ごとに
+  1回だけ警告をログに出す。ポートは開いたままで、`onDisconnect` も発火しない。
+  書き込みが失敗した場合は、今までどおり消失として扱う。
+- **Android:** 機器がデータを受け取るのを 16 KB ごとに最大1秒待つ。
+
+アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
+それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
+参照）。
+'''
+details.ko = '''
+얼마나 걸릴 수 있는지는 플랫폼에 따라 다르다.
+
+- **macOS / Linux:** 블록되지 않는다(포트가 논블로킹). 요청보다 적은 바이트만 쓰거나,
+  출력 버퍼가 가득 찬 동안 -1을 반환할 수 있다. 포트는 열린 채로 남는다.
+- **Windows:** 드라이버가 모든 바이트를 받을 때까지 기다린다. 단 상한은 그 포트의
+  보드레이트로 바이트열이 선로에서 걸리는 시간의 4배(1바이트를 10비트로 보고,
+  1바이트당 정수 ms로 올림)에 5초를 더한 시간이다. 9600 baud라면 1바이트 5 ms
+  (64 KB에 약 5.5분), 40000 baud 이상이면 1바이트 1 ms(64 KB에 약 70초). 네이티브
+  USB 장치는 속도를 무시하므로 이는 여유 있는 상한일 뿐이다. 타임아웃되면 그때까지
+  쓴 바이트 수(0일 수도 있음)를 반환하고, 연결마다 한 번만 경고를 로그로 남긴다.
+  포트는 열린 채로 남고 `onDisconnect`도 발생하지 않는다. 쓰기가 실패하면 기존대로
+  소실로 취급한다.
+- **Android:** 장치가 데이터를 받기를 16 KB마다 최대 1초 기다린다.
+
+앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
+기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
+참조).
+'''
 
 ["SerialDeviceInfo"]
 keywords = ["com port info", "serial device", "port list", "tty info"]
@@ -7798,6 +8268,35 @@ description.ko = "장치 이름"
 description.en = "Device path"
 description.ja = "デバイスパス"
 description.ko = "장치 경로"
+
+["SerialDisconnectEventArgs"]
+keywords = ["disconnect event", "serial unplug", "on disconnect args"]
+of = ["-"]
+description.en = "Event args for Serial::onDisconnect"
+description.ja = "Serial::onDisconnectのイベント引数"
+description.ko = "Serial::onDisconnect의 이벤트 인자"
+of_category = "serial-types"
+related = ["Serial", "Serial::onDisconnect", "TcpDisconnectEventArgs"]
+
+["SerialDisconnectEventArgs::baudRate"]
+description.en = "The rate the port was open at (the one setup() logged); pass it back to setup() to reconnect"
+description.ja = "ポートを開いていたボーレート（setup() がログに出した値）。setup() に渡せば再接続できる"
+description.ko = "포트가 열려 있던 보드레이트(setup()이 로그로 남긴 값). setup()에 넘기면 재연결할 수 있음"
+
+["SerialDisconnectEventArgs::portName"]
+description.en = "Port name as passed to setup()"
+description.ja = "setup() に渡したポート名"
+description.ko = "setup()에 전달한 포트 이름"
+
+["SerialDisconnectEventArgs::reason"]
+description.en = "Human-readable reason: \"closed by close()\" (on Android it may go on with \"(the device had already been lost: ...)\"), or the loss warning's text such as \"read: Input/output error\". For display and logs; tell a close from a loss with wasClean"
+description.ja = "人が読める理由。\"closed by close()\"（Android では後ろに \"(the device had already been lost: ...)\" が付くことがある）、または \"read: Input/output error\" のような消失の警告と同じ文字列。表示やログ用で、クローズか消失かの判定には wasClean を使う"
+description.ko = "사람이 읽을 수 있는 사유. \"closed by close()\"(Android에서는 뒤에 \"(the device had already been lost: ...)\"가 붙을 수 있음) 또는 \"read: Input/output error\" 같은 소실 경고와 같은 문자열. 표시와 로그용이며, 닫기인지 소실인지는 wasClean으로 판단할 것"
+
+["SerialDisconnectEventArgs::wasClean"]
+description.en = "true: closed by the app (close()); false: device lost / I/O error"
+description.ja = "true: アプリが閉じた（close()）、false: デバイスの消失 / I/O エラー"
+description.ko = "true: 앱이 닫음(close()), false: 장치 소실 / I/O 오류"
 
 ["Shader"]
 category = "graphics_shader"
@@ -7963,9 +8462,9 @@ description.ko = "loadStream()으로 로드되었으면 true"
 ["Sound::load"]
 category = "sound"
 keywords = ["open", "read", "file"]
-description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a"
-description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a"
-description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a"
+description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)"
+description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）"
+description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지)"
 
 ["Sound::loadFromBuffer"]
 description.en = "Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr."
@@ -11650,6 +12149,13 @@ description.en = "Window height in logical points (matches its coordinate system
 description.ja = "ウィンドウ高さ (論理ポイント、座標系と一致)"
 description.ko = "윈도우 높이 (논리 포인트, 좌표계와 일치)"
 
+["Window::isOccluded"]
+keywords = ["visible", "visibility", "hidden", "minimized", "covered", "occlusion"]
+description.en = "Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window"
+description.ja = "OS がこのウィンドウを非表示と報告しているか。true の間はフレームを描かない (再び表示されるまで update/draw が止まる)。macOS は最小化・完全に隠れている・別の Space、Windows は最小化または DXGI が occluded と報告、Linux (X11) は最小化または完全に隠れている (コンポジットマネージャがない場合)。閉じたウィンドウでは false"
+description.ko = "OS가 이 윈도우를 보이지 않는 상태로 보고하는지 여부. true인 동안에는 프레임을 그리지 않음 (다시 보일 때까지 update/draw가 멈춤). macOS는 최소화·완전히 가려짐·다른 Space, Windows는 최소화 또는 DXGI가 occluded로 보고, Linux (X11)는 최소화 또는 완전히 가려짐 (컴포지팅 매니저가 없을 때). 닫힌 윈도우에서는 false"
+related = ["Window::isOpen", "Window::setFps"]
+
 ["Window::setClearColor"]
 description.en = "Background clear color for this window"
 description.ja = "このウィンドウの背景クリア色"
@@ -12012,9 +12518,9 @@ description.ja = "ドキュメントのルート要素ノードを取得"
 description.ko = "문서의 루트 요소 노드를 얻음"
 
 ["Xml::save"]
-description.en = "Save the document to a file. Relative paths are resolved via getDataPath. indent sets the per-level indentation string. Returns true on success."
-description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決される。indent は各レベルのインデント文字列を設定する。成功時に true を返す"
-description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석됨. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환"
+description.en = "Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false."
+description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決され、親フォルダがなければ作られる。indent は各レベルのインデント文字列を設定する。成功時に true を返し、失敗時はエラーをログに出して false を返す"
+description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석되고, 상위 폴더가 없으면 만들어진다. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
 
 ["Xml::toString"]
 description.en = "Serialize the document to an XML string. indent sets the per-level indentation string."
@@ -12157,9 +12663,9 @@ related = ["drawSuperellipse", "appendArc", "beginShape"]
 ["appendToFile"]
 category = "file"
 keywords = ["write", "add", "concat"]
-description.en = "Append string to file"
-description.ja = "ファイルに追記"
-description.ko = "파일에 문자열을 추가"
+description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
+description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
+description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
 related = ["saveTextFile"]
 
 ["applyWindow"]
@@ -13746,9 +14252,9 @@ related = ["getTextureCount", "getNodeCount"]
 category = "file"
 keywords = ["ext", "suffix", "type", "format"]
 of = ["ofFilePath::getFileExt"]
-description.en = "Get file extension without dot"
-description.ja = "拡張子を取得（ドットなし）"
-description.ko = "파일 확장자를 얻음 (점 제외)"
+description.en = "Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do."
+description.ja = "拡張子を取得（ドットなし、書かれたとおりの大文字小文字）。大文字小文字を区別せずに比べるには、TrussCのローダーと同じく toLower(getFileExtension(path)) を比べる"
+description.ko = "파일 확장자를 얻음 (점 제외, 쓰인 그대로의 대소문자). 대소문자 무시로 비교하려면 TrussC 로더처럼 toLower(getFileExtension(path))를 비교"
 related = ["getBaseName", "getFileName"]
 
 ["getFileName"]
@@ -14374,9 +14880,9 @@ description.ko = "in-place 역 FFT. 데이터 크기는 2의 거듭제곱이어�
 ["initAudio"]
 category = "audioengine"
 keywords = ["initialize", "start", "engine", "setup", "open"]
-description.en = "Initialize the global AudioEngine. Called automatically by Sound::load() / play(), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
-description.ja = "グローバルなAudioEngineを初期化。Sound::load() / play()から自動的に呼ばれるため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
-description.ko = "전역 AudioEngine을 초기화. Sound::load() / play()에서 자동 호출되므로, 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
+description.en = "Initialize the global AudioEngine. Sound::load(), loadStream(), loadTestTone() and loadFromBuffer() call it automatically while the engine is not initialized (play() does not), so manual use is only needed to start audio early (e.g. before an audioOut synthesis listener)."
+description.ja = "グローバルなAudioEngineを初期化。エンジンが未初期化なら Sound::load() / loadStream() / loadTestTone() / loadFromBuffer() が自動的に初期化する (play() はしない) ため、手動使用はオーディオを早期に開始したい場合(例: audioOut合成リスナーの前)のみ必要"
+description.ko = "전역 AudioEngine을 초기화. 엔진이 초기화되지 않았으면 Sound::load() / loadStream() / loadTestTone() / loadFromBuffer() 가 자동으로 초기화하므로 (play() 는 하지 않음), 수동 사용은 오디오를 일찍 시작하려는 경우(예: audioOut 합성 리스너 이전)에만 필요"
 related = ["AudioEngine::getInstance", "shutdownAudio"]
 
 ["intersectRect"]
@@ -15229,28 +15735,29 @@ platform_note.ja = "非同期のファイル保存。iOS は UIDocumentPickerVie
 ["saveJson"]
 category = "file"
 keywords = ["write", "store", "serialize"]
-description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath. indent sets the pretty-print width (negative for compact). Returns true on success."
-description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返す"
-description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환"
+description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false."
+description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返し、失敗時はエラーをログに出してfalseを返す"
+description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
 related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 
 ["saveScreenshot"]
 category = "window_system"
 keywords = ["capture", "png", "export", "save image"]
-description.en = "Save a screenshot of the rendered frame (png/jpg/bmp). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
-description.ja = "描画済みフレームのスクショを保存（png/jpg/bmp）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
-description.ko = "렌더링된 프레임의 스크린샷 저장(png/jpg/bmp). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
+description.en = "Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
+description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
+description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
 related = ["grabScreen", "startRecording", "captureWindow"]
-platform_note.en = "Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
-platform_note.ja = "Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.en = "Formats: png/jpg/bmp on Linux and Android; macOS also writes tiff/tif and gif; Windows also writes tga; iOS writes only png and jpg/jpeg. Any other extension saves PNG data at the given path, except on Windows, which appends \".png\" to it. Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
+platform_note.ja = "対応形式: Linux と Android は png/jpg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。iOS は png と jpg/jpeg のみ。それ以外の拡張子は指定パスに PNG データで保存する（Windows のみパスに \".png\" を付け足す）。Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. iOS는 png와 jpg/jpeg만 지원. 그 밖의 확장자는 지정한 경로에 PNG 데이터로 저장(Windows만 경로에 \".png\"를 덧붙임). Web에서는 미구현(canvas 읽기 불가): 파일을 쓸 수 없으므로 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
 
 ["saveTextFile"]
 category = "file"
 keywords = ["write", "store"]
 of = ["ofBufferToFile"]
-description.en = "Save string to text file"
-description.ja = "文字列をファイルに保存"
-description.ko = "문자열을 텍스트 파일로 저장"
+description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
+description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
+description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
 related = ["loadTextFile", "appendToFile", "saveJson"]
 
 ["scale"]
@@ -15483,9 +15990,9 @@ platform_note.ja = "Linux / Web では no-op（xdg-screensaver / Wake Lock API �
 ["setLogFile"]
 category = "utility"
 keywords = ["output", "write", "path"]
-description.en = "Open a file to receive log output"
-description.ja = "ログ出力を受けるファイルを開く"
-description.ko = "로그 출력을 받을 파일을 엶"
+description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
+description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
+description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
 related = ["closeLogFile", "setFileLogLevel"]
 
 ["setMaxUpdateSteps"]

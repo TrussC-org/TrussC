@@ -81,6 +81,10 @@ enum ImGuiTcValueKind_
     ImGuiTcValueKind_ComboPreview,  // BeginCombo: Data = const char* preview value (may be NULL)
     ImGuiTcValueKind_Text,          // InputTextEx: Data = char* const* (the function's 'buf' variable,
                                     //   which a resize callback may repoint), Flags = ImGuiInputTextFlags
+    ImGuiTcValueKind_Bool,          // Checkbox, MenuItem(bool*), Selectable(bool*): Data = bool* (NULL: nothing is reported)
+    ImGuiTcValueKind_Radio,         // RadioButton(int*): Data = int* the variable the button group sets
+    ImGuiTcValueKind_ListBox,       // ListBox: Data = int* current item
+    ImGuiTcValueKind_ListBoxBegin,  // BeginListBox: no data (a pick inside its child window is an edit of the list box)
 };
 struct ImGuiTcItemValue;
 extern void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item);

@@ -15,10 +15,10 @@
 //      unmapped memory (SEGV), or a crash in exit-time finalizers on Linux,
 //      where dlclose often keeps images mapped and defers destructors to exit.
 //
-// The App base constructor/destructor traverses exactly that surface
-// (AudioEngine listener auto-subscribe, Event COW list churn), so the test is
-// just the real GuestLibrary driven through load -> create -> destroy ->
-// unload cycles. The guest binary is identical each cycle — the bugs depend on
+// The App base class traverses exactly that surface (the AudioEngine listener
+// subscribe on its first setup(), Event COW list churn), so the test is just
+// the real GuestLibrary driven through load -> create -> first update ->
+// destroy -> unload cycles. The guest binary is identical each cycle — the bugs depend on
 // image lifetime, not on the code changing — and GuestLibrary already loads
 // each cycle from a fresh unique temp copy, exactly like a real reload.
 //
@@ -41,8 +41,7 @@
 // frame: those whose producers run guest code (guest_deferred, which reaches
 // the App through `this`, and tc_get_status_image on the guest's getter) must
 // come back as an error, and a host tool's deferred reply must still answer.
-// After unload the guest tool must be gone from the server as well, and so
-// must the browser origin guest code allowed (the host's stays).
+// After unload the guest tool must be gone from the server as well.
 //
 // Settings and registries app code and the core loop share (#249): guest code
 // calls setFps(), redraw(), setTouchAsMouse(), the clip / fov setters,
@@ -71,11 +70,21 @@
 // contains) every definition checked here; on Windows it fails if any of that
 // state is header-inline again.
 //
+// The App's audio hooks (#426): a new generation's App is not subscribed by
+// its constructor; its first tree update (handleUpdate(), as the host's frame
+// does) runs setup() in guest code and only then subscribes audioOut() /
+// audioIn(), once, through App's override of Node's post-setup hook. The
+// unload detaches them again.
+//
 // Node references (#255), on every platform: the host makes the guest's App
 // the main window's root (getRootNode(), a weak reference), and before it
 // unloads the guest it resets the weak references every window context keeps
 // to nodes (hover, grab, selection, the main root), which here name a node
 // guest code made.
+//
+// The host's source watcher (#305) picks the files it watches by extension,
+// whatever the case: .CPP / .H / .Hpp / .MM count like .cpp / .h / .hpp / .mm,
+// other extensions do not (checkWatcherExtensions()).
 //
 // Exit code: 0 = survived all cycles (including process exit), non-zero or a
 // crash = regression. The test itself never enters TC_RUN_APP: no sokol loop,
@@ -102,6 +111,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -289,8 +299,9 @@ static int runCycles(const std::string& guestPath, int port) {
             return code;
         };
         if (!lib.load(guestPath)) return fail(2, "load failed");
-        // App construction walks the hazardous surface: first-touch of the
-        // AudioEngine singleton, listener registration on host-owned Events.
+        // App construction and its first update (setup(), then the audio
+        // hooks) walk the hazardous surface: first-touch of the AudioEngine
+        // singleton, listener registration on host-owned Events.
         App* app = lib.create();
         if (!app) return fail(3, "create failed");
         // Node ids are unique per process: a new generation's nodes (its App
@@ -306,11 +317,30 @@ static int runCycles(const std::string& guestPath, int port) {
         if (internal::mainWindowContext().rootNode.lock().get() != app) {
             return fail(38, "the guest's App is not the main window's root (getRootNode())");
         }
+        // The first update runs setup() (guest code; it records the audio
+        // listeners it sees) and then subscribes the App's audio hooks. A
+        // hook subscribed by the constructor, or before setup(), would already
+        // be counted in setup(), and the attach would add none.
+        long audioOutBase = -1, audioInBase = -1;   // listeners before this App's
+        {
+            auto* cycleApp = static_cast<tcApp*>(app);
+            cycleApp->cycleOnly = true;   // setup() skips the window / ImGui work
+            app->handleUpdate(0, 0);
+            app->handleUpdate(0, 0);
+            auto& engine = AudioEngine::getInstance();
+            if (cycleApp->setupCalls != 1) return fail(40, "the guest App's setup() did not run exactly once");
+            if (cycleApp->audioOutHooksInSetup < 0 ||
+                engine.audioOut.listenerCount() != (size_t)cycleApp->audioOutHooksInSetup + 1 ||
+                engine.audioIn.listenerCount() != (size_t)cycleApp->audioInHooksInSetup + 1) {
+                return fail(40, "the guest App's audio hooks were not subscribed exactly once, after setup() "
+                                "(" + std::to_string(cycleApp->audioOutHooksInSetup) + " in setup(), " +
+                                std::to_string(engine.audioOut.listenerCount()) + " after)");
+            }
+            audioOutBase = cycleApp->audioOutHooksInSetup;
+            audioInBase = cycleApp->audioInHooksInSetup;
+        }
         if (!(mcp::hasTool("guest_probe") && hasStatus("guest_status") && hasStatusImage("guest_image"))) {
             return fail(4, "guest MCP registrations not visible to the host");
-        }
-        if (!mcp::detail::isAllowedOrigin(kGuestOrigin, port)) {
-            return fail(37, "the browser origin guest code allowed with mcp::allowOrigin() is not allowed");
         }
 
         // Through the HTTP server, as a client sees the running app
@@ -568,6 +598,10 @@ static int runCycles(const std::string& guestPath, int port) {
         if (!isReset(internal::mainWindowContext().rootNode)) {
             return fail(39, "unloading the guest left the main window's root pointing at its App");
         }
+        if (AudioEngine::getInstance().audioOut.listenerCount() != (size_t)audioOutBase ||
+            AudioEngine::getInstance().audioIn.listenerCount() != (size_t)audioInBase) {
+            return fail(41, "the unloaded guest App's audio hooks are still subscribed");
+        }
         for (size_t k = 0; k < 2; k++) {
             json cancelled = toolContent(replies[k]);
             if (!cancelled.is_object() || cancelled.value("status", "") != "error" ||
@@ -586,12 +620,6 @@ static int runCycles(const std::string& guestPath, int port) {
             hasStatus("guest_status") || hasStatusImage("guest_image")) {
             return fail(5, "the destroyed guest's MCP registrations are still listed");
         }
-        if (mcp::detail::isAllowedOrigin(kGuestOrigin, port)) {
-            return fail(37, "the browser origin the destroyed guest allowed is still allowed");
-        }
-        if (!mcp::detail::isAllowedOrigin(kHostOrigin, port)) {
-            return fail(37, "unloading the guest removed a browser origin the host allowed");
-        }
         std::string callError;
         if (!callTool(port, "guest_probe", json::object(), &callError).is_discarded() ||
             callError.find("Tool not found") == std::string::npos) {
@@ -601,6 +629,40 @@ static int runCycles(const std::string& guestPath, int port) {
         std::printf("hotReloadLifecycle: cycle %d/%d ok\n", i, kCycles);
     }
     return 0;
+}
+
+// FileWatcher::init() watches the sources under src/ by extension, compared
+// case-insensitively (#305). Returns 0 when it picked exactly the right files.
+static int checkWatcherExtensions() {
+    const fs::path dir = fs::temp_directory_path() / "tc_hotReloadLifecycle_watch";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "sub", ec);
+    const std::vector<std::string> watched = {"a.cpp", "b.CPP", "c.h", "d.H", "e.Hpp",
+                                              "f.mm", "sub/g.MM"};
+    const std::vector<std::string> ignored = {"h.txt", "i.CPPX", "j.c", "k"};
+    for (auto& n : watched) std::ofstream(dir / n) << "// x\n";
+    for (auto& n : ignored) std::ofstream(dir / n) << "// x\n";
+
+    trussc::hot_reload::FileWatcher w;
+    w.init(internal::pathToUtf8(dir));
+    int rc = 0;
+    for (auto& n : watched) {
+        bool found = false;
+        for (auto& p : w.watchPaths) found = found || fs::equivalent(p, dir / n, ec);
+        if (!found) {
+            std::printf("hotReloadLifecycle: FAIL - watcher skipped %s\n", n.c_str());
+            rc = 40;
+        }
+    }
+    if (w.watchPaths.size() != watched.size()) {
+        std::printf("hotReloadLifecycle: FAIL - watcher took %zu files, expected %zu\n",
+                    w.watchPaths.size(), watched.size());
+        rc = 40;
+    }
+    fs::remove_all(dir, ec);
+    if (rc == 0) std::printf("hotReloadLifecycle: watcher extensions ok\n");
+    return rc;
 }
 
 int main(int argc, char** argv) {
@@ -613,6 +675,8 @@ int main(int argc, char** argv) {
     // Record the main thread id first, as _setup_cb does: isMainThread() and
     // runOnMainThread() key off whichever thread asks first.
     getMainThreadId();
+
+    if (int rc = checkWatcherExtensions()) return rc;
 
     std::string guestPath = findGuestLibrary();
     if (guestPath.empty()) {
@@ -632,9 +696,6 @@ int main(int argc, char** argv) {
         }));
     // What TRUSSC_MCP=1 gives a running app: the standard tools + the server.
     mcp::registerInspectionTools();
-    // A browser origin the host allows: it must survive every unload, while
-    // the one each guest generation allows (tcApp()) goes with it.
-    mcp::allowOrigin(kHostOrigin);
     mcp::startHttpServer(0, "localhost");
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {

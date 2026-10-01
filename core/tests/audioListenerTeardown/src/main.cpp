@@ -94,10 +94,9 @@ static constexpr double kAtOnce = 0.1;
 // time. The derived destructor marks the App as going first, then lingers so
 // that an audio thread still calling audioOut() is caught doing it.
 //
-// App() subscribes the hooks in its own constructor, so the audio thread can
-// reach audioOut() before the SynthApp constructor has finished. That
-// construction-side window is outside #256: such calls are counted apart
-// (g_callsDuringCtor) and skipped.
+// The hooks are subscribed right after setup() returns (#426, guarded by
+// appAudioAttach), so audioOut() never runs during construction here; such a
+// call would be counted apart (g_callsDuringCtor) and skipped.
 
 enum AppState { Constructing, Alive, Destructing };
 static atomic<int>  g_state{Constructing};
@@ -351,8 +350,8 @@ int main() {
         check(tag + "the destructor never started while audioOut() ran",
               g_dtorDuringCall.load() == 0);
     }
-    printf("(info) audioOut() calls during App construction, outside #256: %d\n",
-           g_callsDuringCtor.load());
+    check("audioOut() never ran during App construction (#426)", g_callsDuringCtor.load() == 0,
+          to_string(g_callsDuringCtor.load()) + " calls");
 
     // --- teardown waits for a stuck audioOut(), without a time limit -------------------
     {
@@ -402,16 +401,18 @@ int main() {
         auto sub = make_shared<WindowApp>();
         auto keeper = make_shared<WindowApp>();
         auto stray = make_shared<WindowApp>();
-        const size_t hooks = engine.audioOut.listenerCount();   // one per App above
+        // None of the Apps above is subscribed yet: an App's hooks come right
+        // after its first setup() (#426), on its window's first tick.
+        const size_t hooks = engine.audioOut.listenerCount();
         OpenWindow first, second;
         Window closedWin;
 
         first.setApp(sub);
         tickWindow(first);
         const bool firstAudio = waitFor([&] { return sub->audioCalls.load() > 0; }, 2000);
-        check("a new App attached to an open window: setup() once, audioOut() called, no extra hook",
+        check("a new App attached to an open window: setup() once, audioOut() called, one hook",
               first.getApp() == sub && sub->setups.load() == 1 && firstAudio &&
-              engine.audioOut.listenerCount() == hooks,
+              engine.audioOut.listenerCount() == hooks + 1,
               to_string(engine.audioOut.listenerCount()) + " hooks");
 
         // What the platform Window::close() does, its App part included.
@@ -423,9 +424,10 @@ int main() {
         const int callsAtClose = sub->audioCalls.load();
         this_thread::sleep_for(chrono::milliseconds(50));
         check("after the close, its audioOut() is no longer called",
-              sub->audioCalls.load() == callsAtClose && engine.audioOut.listenerCount() == hooks - 1);
+              sub->audioCalls.load() == callsAtClose && engine.audioOut.listenerCount() == hooks);
 
-        // The cleaned-up App on another open window, which already shows an App.
+        // The cleaned-up App on another open window, which already shows an App
+        // (subscribed on this first tick).
         second.setApp(keeper);
         tickWindow(second);
         const size_t cleanupErrors = countErrors("already ran cleanup()");
@@ -436,7 +438,7 @@ int main() {
               countErrors("already ran cleanup()") == cleanupErrors + 1);
         check("... the window keeps its App", second.getApp() == keeper && keeper->setups.load() == 1);
         check("... no hook comes back, audioOut() is not called",
-              engine.audioOut.listenerCount() == hooks - 1 && sub->audioCalls.load() == callsAtClose,
+              engine.audioOut.listenerCount() == hooks + 1 && sub->audioCalls.load() == callsAtClose,
               to_string(engine.audioOut.listenerCount()) + " hooks");
         check("... and its setup() does not run again", sub->setups.load() == 1);
 
@@ -452,12 +454,13 @@ int main() {
         second.setApp(nullptr);
         second.setApp(stray);   // the refusals left it free to attach
         check("the refused App can still go to an open window",
-              second.getApp() == stray && engine.audioOut.listenerCount() == hooks - 1);
+              second.getApp() == stray && engine.audioOut.listenerCount() == hooks + 1);
         second.setApp(nullptr);
 
-        // Every App here still has its constructor's hook but sub: detach and
-        // wait before they go, so the audio thread (still running) cannot be
-        // inside one meanwhile.
+        // keeper still has its hook (it was set up on second's tick): detach
+        // and wait before it goes, so the audio thread (still running) cannot
+        // be inside it meanwhile. stray and mainApp never ran setup(), so
+        // they have none; detaching them is harmless.
         internal::detachAppAudio(*keeper);
         internal::detachAppAudio(*stray);
         internal::detachAppAudio(*mainApp);
@@ -527,9 +530,10 @@ int main() {
         uint32_t dataBytes = 0;
         uintmax_t fileBytes = 0;
         {
+            // S16 header with the JUNK chunk (#336): the data chunk is at byte 72.
             ifstream f(wav, ios::binary);
             char tag[4] = {};
-            f.seekg(36);
+            f.seekg(72);
             f.read(tag, 4);
             f.read(reinterpret_cast<char*>(&dataBytes), 4);
             if (string(tag, 4) != "data") dataBytes = 0;
@@ -540,7 +544,7 @@ int main() {
         check("AudioRecorder records and a capture is held in flight", recording && some && held);
         check("the held capture's buffer is counted by getRecordedSeconds()", counted == want,
               to_string(counted) + " of " + to_string(want) + " frames");
-        check("... and written to the WAV", inFile == want && fileBytes == 44u + dataBytes,
+        check("... and written to the WAV", inFile == want && fileBytes == 80u + dataBytes,
               to_string(inFile) + " of " + to_string(want) + " frames, " + to_string(fileBytes) + " bytes");
         std::error_code ec;
         fs::remove(wav, ec);

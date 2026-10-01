@@ -1,0 +1,105 @@
+# tcxBox2d tests
+
+Headless console test (no window). The world is stepped by hand and nothing is
+drawn.
+
+Polygon points (#342). `PolyShape::setup()` and `RigidBody2D` with
+`Shape2D::polygon()` share one check, run before the body is created:
+
+- fewer than 3 or more than 8 points, collinear points, points Box2D would
+  merge, and a hull with almost no area each give one warning and no body, in
+  Debug and Release alike;
+- concave input with 3 to 8 points becomes its convex hull, and
+  `getVertices()` / `shape().verts` hold that hull (what draws is what
+  collides); convex input already in outline order keeps its order, and hull
+  points listed in a crossing order come back in hull order;
+- `setupConvex()` / `Shape2D::convex()` take any number of points and make one
+  fixture of at most 8 points whose mass is close to the outline's; input
+  they collapse to fewer than 3 points gets a warning saying so. The
+  reduction picks the same points as the O(h^2) scan it replaced (kept in the
+  harness as the reference) and reduces a 50,000-point outline in under 1 s.
+
+Compound bodies (#427). `setupCompound()` / `Shape2D::compound()` keep any
+outline exactly, one fixture per triangle:
+
+- a 20-point circle gives one fixture per triangle and the 20-gon's mass; a
+  convex outline of at most 8 points (also with a closing point) gives exactly
+  one fixture, a pentagram does not (its center, covered twice by the fill,
+  weighs twice, as documented);
+- the fill kept for drawing is `Path::buildFillTriangles()`' own;
+- a notch and a hole stay empty: a ball in a ring's hole falls to the hole's
+  floor, and a ball above the solid part lands on it;
+- slivers are skipped with one warning; an outline with nothing usable gives a
+  warning and no body;
+- `Collider2D` filter setters, `setSensor()` and `RigidBody2D::setTrigger()`
+  reach every fixture;
+- a box pressed into a compound bar touches several of its fixtures at once,
+  and still gives exactly one Enter / Began per side, one Stay per update, and
+  one Exit / Ended per side when they separate (classic `Collider2D` and Mod
+  `RigidBody2D` events);
+- a small sensor box moved back and forth across the seam between two
+  fixtures, touching one at a time while both contacts live on, gets one
+  Enter / Began and no Exit / Ended until it leaves (Box2D ends the old
+  contact before it begins the new one in one of the two directions);
+- a Stay listener may destroy a body: of the next pair in the list (the
+  survivor still gets its Stay, the destroyed box its Exit and no Stay), of
+  the pair being dispatched (no Stay after it, and the next pair still gets
+  its Stay), or drop a `RigidBody2D` node;
+- the offset/inertia check runs once on the whole body: a 600x40 rounded
+  rectangle with 4 px corners, a 128-gon 1000 px off the origin and a
+  4096-gon keep every triangle with no warning and the analytic mass; a 1 px
+  outline 2000 px off is refused as a whole, and a tiny convex ring far off
+  as one polygon, with the "too small for its distance" warning; bodies just
+  inside the limit, built through `setupCompound()` and `RigidBody2D`, keep a
+  positive inertia at densities 0.001 to 1000 (Debug: no Box2D assert while
+  the fixtures are added);
+- on a compound 128-gon and a hexagon just inside that limit, every fixture
+  has the requested density after creation (`PolyShape` at 1, `RigidBody2D`
+  at its density, dynamic or static), and `setDensity()` /
+  `setBodyType(Dynamic)` (classic: `setStatic()`, `setDensity()`,
+  `setDynamic()`) afterwards give exactly the mass, inertia and center of a
+  body created that way, at densities 0.001 to 1000 (Debug: no Box2D assert).
+
+Event lifetimes (#427). Listeners of a deferred Exit / Ended or of Stay may
+free the other body of their pair, and bodies may be destroyed between
+`Step()` and `update()`:
+
+- an Exit / Ended listener that frees the other body (classic `Body` or a
+  `RigidBody2D`'s node) leaves it unnotified; when two balls leave a
+  platform in one step and the first one's listener frees the platform, the
+  second ball still gets its Exit / Ended, with no other body;
+- `Step()`, destroy the ball, add a new one (Box2D hands out the freed
+  `b2Body` again), then `update()`: the platform's Exit / Ended names no
+  other body, and neither the freed ball nor the new one hears anything;
+  `createBounds()` (new walls at the freed address) and `clear()` there
+  leave the world-level Ended naming no freed body;
+- a `RigidBody2D` Stay listener that drops the other node of the pair being
+  dispatched, and one that also adds a new ball at the freed address: the
+  dropped side gets no Stay, the new ball nothing.
+
+Without the guards these are use-after-frees that a plain build may not
+report; run them under AddressSanitizer after touching the event code.
+
+CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the
+default build type, or Release). Adding the fixtures at density 0 (and
+setting the density once all are in) is guarded only by a Debug build:
+without it, "combined inertia check ... just inside" aborts on Box2D's
+`m_I > 0` assert in Debug and still passes in CI. Run a Debug build after
+touching fixture creation:
+
+```bash
+trusscli build -p . --debug   # from this directory; generates the build files if missing
+./bin/tests                   # macOS: ./bin/tests.app/Contents/MacOS/tests
+```
+
+`trusscli run -p . --debug` builds and runs in one go. Build again without
+`--debug` (or with `--release`) to get back to the default build type.
+
+CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
+push/PR; a non-zero exit fails the job. Run it locally with:
+
+```bash
+trusscli run -p .          # from this directory
+# or from the repo root, run every addon test harness:
+./examples/build_all.py --addon-tests-only --verbose
+```
