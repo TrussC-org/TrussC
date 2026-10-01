@@ -22,6 +22,21 @@
 - `Tween<T>` (as TweenFloat, TweenVec2, TweenVec3, TweenColor)
 - Sound, MicInput
 
+### Sound lifetime
+
+A `Sound` plays only while it, or a copy of it, is alive (the C++ rule). In
+Lua the object goes away when the garbage collector collects it, at a time the
+script does not control, so a script keeps a reference (a global, or a field
+of a table it keeps) to every `Sound` it wants to hear:
+
+```lua
+bgm = Sound.new()          -- global: plays until the script drops it
+bgm:load("music.ogg")
+bgm:play()
+```
+
+A `Sound` held only in a local variable stops when the GC collects it.
+
 ## Lua module sandboxing
 
 `tcxLua::getLuaState()` accepts a `LuaModulePreferences` struct that controls which

@@ -1131,7 +1131,7 @@ pauseListener_ = btn->pressed.listen([this]() { /* ... */ });
 1. **Same thread: a removed listener is not called again.** Once `disconnect()` returns on the thread that fires the event (or the `EventListener` is destroyed or reassigned, or `clear()` runs), that callback is not called again, also not later in a `notify()` pass that is already running. So a listener may disconnect or destroy a later one in the same pass (e.g. a vector of `Tween`s that reallocates inside an `update` listener). A listener added during a pass starts from the next `notify()`.
 2. **Across threads, `Event` does not wait.** When the event fires on another thread (audio, network, the async timer scheduler, your own `Thread`), `disconnect()` returns while the callback may still be running there, and one that was about to start may still start. Two safe patterns:
    - Listen with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
-   - For latency-critical sources such as audio, the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier, and teardown calls it after disconnecting. For `audioOut` / `audioIn` that is `AudioEngine::getInstance().waitForCallbackIdle()`. It waits for every audio listener running at that moment, not only yours, so call it without holding a lock that an audio listener takes (that listener would block, the call would wait up to one second, and the audio drops out meanwhile). The async timers work the same way (`cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for a callback in flight, and `~Node` cancels leftovers), and so does `TcpClient::disconnect()` (it joins the receive thread).
+   - For latency-critical sources such as audio, the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier, and teardown calls it after disconnecting. For `audioOut` / `audioIn` that is `AudioEngine::getInstance().waitForAudioCallbacks()`. It waits for every audio listener running at that moment, not only yours, so call it without holding a lock that an audio listener takes (that listener would block, the call would wait up to one second, and the audio drops out meanwhile). The async timers work the same way (`cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for a callback in flight, and `~Node` cancels leftovers), and so does `TcpClient::disconnect()` (it joins the receive thread).
 3. **Order: the barrier runs before the state the callback touches is destroyed.** Put it in the most-derived class's destructor or in `cleanup()`. A base-class destructor is too late: the derived members are already gone when it runs. The same goes for stopping a thread from a base-class destructor.
 
 ```cpp
@@ -1145,7 +1145,7 @@ public:
     }
     ~Synth() override {
         audioListener_.disconnect();                        // no new calls
-        AudioEngine::getInstance().waitForCallbackIdle();   // none still running
+        AudioEngine::getInstance().waitForAudioCallbacks();   // none still running
     }                                                       // table_ is destroyed after this
     void render(AudioOutBuffer& b);
 };
@@ -1213,7 +1213,13 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
 
-Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForCallbackIdle()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+
+### How long does a Sound play? (Sound lifetime)
+
+A `Sound` plays only while it, or a copy of it, is alive (like `ofSoundPlayer`). Copies share the voice that `play()` started; when the last `Sound` handle that shares it is destroyed or overwritten (copy or move assignment), the voice stops, looping or one-shot, and its slot is free again. A temporary copy going away does not stop the original. `stop()` and the last handle going away also close a streamed voice's decoder and file.
+
+So keep the `Sound` objects alive, for example as App members. To play overlapping one-shots, keep several of them (e.g. `Sound hits_[4]` and play them in turn); `{ Sound s = hit; s.play(); }` stops at the closing brace. In tcxLua, a script keeps a reference to each `Sound` it wants to hear, or the sound stops when the GC collects it.
 
 ### Output channel mapping? (setChannelMap)
 
@@ -1251,7 +1257,7 @@ rec.start("mono.wav", s);
 
 With no map: 1ch engine → mono file, 2ch → stereo, 3ch+ → averaged mono downmix. Several recorders can run at once (e.g. a stereo master and a mapped stem simultaneously). The engine must be initialized before `start()`.
 
-`stop()` keeps the buffer a capture was still copying, and to do that it waits on `AudioEngine::waitForCallbackIdle()`: for every `audioOut` / `audioIn` listener running at that moment, not only the recorder's (usually well under one buffer). So don't call `stop()` (or destroy the recorder) while holding a lock that one of your audio listeners takes: that listener blocks on it, `stop()` waits up to one second for it, and the audio drops out meanwhile. The same goes for calling `waitForCallbackIdle()` yourself.
+`stop()` keeps the buffer a capture was still copying, and to do that it waits on `AudioEngine::waitForAudioCallbacks()`: for every `audioOut` / `audioIn` listener running at that moment, not only the recorder's (usually well under one buffer). So don't call `stop()` (or destroy the recorder) while holding a lock that one of your audio listeners takes: that listener blocks on it, `stop()` waits up to one second for it, and the audio drops out meanwhile. The same goes for calling `waitForAudioCallbacks()` yourself.
 
 ### Abstract anything drawable with HasTexture?
 
@@ -1484,7 +1490,7 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 - **Keep a node beyond one call only as `weak_ptr` (or `Ptr` when you mean to own it), never as a raw pointer.** A `Node*` kept in a member, a global or a lambda capture dangles once the node is removed and freed. `lock()` tells you the node is gone, and the `shared_ptr` it returns keeps the node alive while you use it. The `Node*` from `getSelectedNode()` / `getRootNode()` is for the current call only.
 - **Main-thread-only objects.** GPU objects (`Image`, `Texture`, `Fbo`, `Font`, `Shader`) and the Node tree belong to the main thread. Callbacks from audio, network or async timers must not touch them. See "Which thread does my callback run on?" below.
 - **Stop your own threads before your members go away.** A `Thread` subclass must call `waitForThread()` in its **own** destructor. The base class also stops and joins the thread, but only after your members are already destroyed, and it logs a warning when it finds the thread still running.
-- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. For an event fired on another thread (e.g. `audioOut`), also wait for a callback in flight before your members go: disconnect, then `AudioEngine::getInstance().waitForCallbackIdle()`, in your own destructor or `cleanup()`. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
+- **Callbacks must not outlive their object.** Keep the `EventListener` returned by `listen()` as a member, so it disconnects when the object dies. For an event fired on another thread (e.g. `audioOut`), also wait for a callback in flight before your members go: disconnect, then `AudioEngine::getInstance().waitForAudioCallbacks()`, in your own destructor or `cleanup()`. Don't capture a raw `this` in callbacks that can outlive the object (`runOnMainThread()`, a raw `std::thread`); capture a `weak_ptr` or copies instead.
 
 ### Which thread does my callback run on?
 
@@ -1508,7 +1514,7 @@ Rules for callbacks that are not on the main thread:
    ```
    `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
-3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener and wait for a callback in flight (`AudioEngine::getInstance().waitForCallbackIdle()` for audio), and do it before the members the callback uses are destroyed. Dropping the listener alone does not wait for a callback already running on the other thread (see "Removing a listener while the event fires" above).
+3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener and wait for a callback in flight (`AudioEngine::getInstance().waitForAudioCallbacks()` for audio), and do it before the members the callback uses are destroyed. Dropping the listener alone does not wait for a callback already running on the other thread (see "Removing a listener while the event fires" above).
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
@@ -2131,11 +2137,11 @@ const char * logLevelToString(LogLevel level)  // Return the uppercase name of a
 LogStream logNotice(const std::string & module = std::string(""))  // Print to console
 LogStream logVerbose(const std::string & module = std::string(""))  // Stream-based verbose-level log output
 LogStream logWarning(const std::string & module = std::string(""))  // Stream-based warning-level log output
-Json nodeToJson(Node & node, int maxDepth)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection
+Json nodeToJson(Node & node, int maxDepth, bool includeDerived = false)  // Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under "derived"
 Json parseJson(const std::string & str)  // Parse a JSON string into a Json object; returns an empty Json on parse error.
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.
-Json reflectToJson(T & obj)  // Return all reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod.
+Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain.
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
@@ -2285,7 +2291,7 @@ float getNearClip()  // Get the near-clip override (0 = auto-calculate from the 
 ### Lighting & PBR
 
 ```cpp
-void addLight(Light & light)  // Add a light to the scene
+void addLight(Light & light)  // Add a light to the scene (up to 8 lights per window; a light added past 8 is not registered, with a one-time warning)
 void beginShadowPass(Light & light)  // Begin shadow depth pass from the light's point of view (up to 4 shadow lights per frame)
 Color calculateLighting(const Vec3 & worldPos, const Vec3 & worldNormal, const Material & material)  // CPU-side lighting result for a world position and normal, summing all active lights with the given material
 void clearEnvironment()  // Clear IBL environment
@@ -2454,7 +2460,7 @@ void App::windowResized(int width, int height)  // Window resized
 
 ```cpp
 size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)
-int AudioEngine::getBufferSize() const  // Current device buffer size in frames (0 = miniaudio default).
+int AudioEngine::getBufferSize() const  // Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize.
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
@@ -2467,7 +2473,7 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available 
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Start a new mixer voice for the given source (eager SoundBuffer or streaming SoundStream) and return its live PlayingSound handle. Usually called indirectly via Sound::play().
 void AudioEngine::shutdown()  // Stop and close the audio device.
-bool AudioEngine::waitForCallbackIdle()  // Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile.
+bool AudioEngine::waitForAudioCallbacks()  // Teardown barrier for audioOut / audioIn listeners: returns once every audio callback that was running when it was called has finished. EventListener::disconnect() does not wait for a callback running on the audio thread, so an object whose listener uses its members disconnects, calls this, and only then lets the members go (in its own destructor or cleanup(), not in a base-class destructor). Returns true at once when no audio runs or when called from inside a listener; gives up on a listener stuck for about one second (logs a warning, returns false). It waits for every audioOut / audioIn listener running at that moment, not only yours, so don't call it while holding a lock that a listener takes: that listener blocks, the call waits the full second, and the audio drops out meanwhile.
 ```
 
 ### AudioInBuffer — Argument type for the AudioEngine::audioIn event. Holds the interleaved read-only microphone input for a single capture callback. Process and return quickly; do not call engine APIs from here.
@@ -2493,7 +2499,7 @@ fs::path AudioRecorder::getPath() const  // Resolved path of the file being writ
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
 bool AudioRecorder::isRecording() const  // True while recording
 bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForCallbackIdle(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
+void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForAudioCallbacks(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -2719,7 +2725,7 @@ void Event::notify(T & arg)  // Fire the event, calling all listeners in priorit
 ### EventListener — RAII token returned by Event::listen(); the listener is automatically disconnected when this token is destroyed or reassigned. Move-only
 
 ```cpp
-void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForCallbackIdle()
+void EventListener::disconnect()  // Explicitly disconnect the listener now (otherwise happens automatically on destruction). On the thread that fires the event it is not called again, even later in a notify() pass already running. It does not wait for a callback running on another thread: for audio, follow it with AudioEngine::waitForAudioCallbacks()
 bool EventListener::isConnected() const  // True while the listener is still connected to its event
 ```
 
@@ -3065,11 +3071,11 @@ void Light::setAmbient(const Color & c) [+1]  // Set ambient light color
 void Light::setAttenuation(float constant, float linear, float quadratic)  // Set distance attenuation factors
 void Light::setDiffuse(const Color & c) [+1]  // Set diffuse (main) light color
 void Light::setDirectional(const Vec3 & direction) [+1]  // Set as directional light
-void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity
+void Light::setIesProfile(const IesProfile * ies)  // Attach IES photometric profile for angular intensity (currently one IES slot: only the first registered light with a profile uses it; further ones log a one-time warning)
 void Light::setIntensity(float i)  // Set light intensity multiplier
 void Light::setLensShift(float sx, float sy)  // Set projector lens shift (-1 to 1, normalized)
 void Light::setPoint(const Vec3 & position) [+1]  // Set as point light
-void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo)
+void Light::setProjectionTexture(const Texture * tex)  // Set texture for projector-style light (gobo) (currently one projector slot: only the first registered Spot light with a texture projects it; further ones light as plain spots and log a one-time warning)
 void Light::setProjectorAspect(float a)  // Set projector aspect ratio
 Light & Light::setShadowArea(const Vec3 & center, float radius)  // Set the orthographic shadow volume (center + radius) for a directional light (default radius 500)
 void Light::setShadowBias(float bias)  // Set shadow depth bias in world units
@@ -3642,8 +3648,11 @@ bool RectNodeButton::onMouseRelease(const MouseEventArgs & e)  // Clear the pres
 ```cpp
 void Reflector::beginGroup(const char * name)  // Enter a nested composite group of reflected members (no-op for flat backends).
 void Reflector::endGroup()  // Leave the current nested group.
+bool Reflector::isDerived() const  // Return true if the current member is a derived value (TC_DERIVED): computed from another member, writable, but not saved.
 bool Reflector::isReadOnly() const  // Return true if the current reflection scope is read-only.
+void Reflector::popDerived()  // Leave the current derived-value scope.
 void Reflector::popReadOnly()  // Leave the current read-only scope.
+void Reflector::pushDerived()  // Enter a derived-value scope (TC_DERIVED visits inside it).
 void Reflector::pushReadOnly()  // Enter a read-only scope (members visited inside cannot be written).
 bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflected member by name and value; return true if it was edited.
 ```
@@ -3784,7 +3793,7 @@ void Shader::submitVertices(const ShaderVertex * data, int count, PrimitiveType 
 ```cpp
 ```
 
-### Sound — Audio playback
+### Sound — Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots.
 
 ```cpp
 void Sound::clearChannelGains()  // Clear per-channel gains (back to uniform 1.0).
@@ -3817,7 +3826,7 @@ void Sound::setPan(float pan)  // Set panning (-1.0=left, 0.0=center, 1.0=right)
 void Sound::setPosition(float seconds)  // Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning.
 void Sound::setSpeed(float speed)  // Set playback speed (1.0=normal)
 void Sound::setVolume(float vol)  // Set volume (0.0-1.0)
-void Sound::stop()  // Stop audio
+void Sound::stop()  // Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped.
 ```
 
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
@@ -3950,7 +3959,7 @@ void TcpServer::disconnectClient(int clientId)  // Disconnect a specific client
 const TcpServerClient * TcpServer::getClient(int clientId) const  // Client info (nullptr if not found)
 int TcpServer::getClientCount() const  // Number of connected clients
 std::vector<int> TcpServer::getClientIds() const  // IDs of all connected clients
-int TcpServer::getPort() const  // The listening port
+int TcpServer::getPort() const  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
 size_t TcpServer::getSendAsyncBufferSize() const  // The current high-water mark for one client's send queue, in bytes
 size_t TcpServer::getSendAsyncPendingBytes(int clientId) const  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
 bool TcpServer::isRunning() const  // Whether the server is running
@@ -4783,7 +4792,7 @@ EventListener synthListener;
 synthListener = AudioEngine::getInstance().audioOut.listen(
     [](AudioOutBuffer& buf) { /* ... */ });
 ```
-`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in). The App override is detached for you after `cleanup()`; a listener that captures `this` elsewhere is disconnected, then `AudioEngine::getInstance().waitForCallbackIdle()` runs, in the owner's own destructor, before its members go.
+`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in). The App override is detached for you after `cleanup()`; a listener that captures `this` elsewhere is disconnected, then `AudioEngine::getInstance().waitForAudioCallbacks()` runs, in the owner's own destructor, before its members go.
 
 ### audioDeviceChanged — Device / Rate Change Event
 Fires on every successful `init()` (initial AND re-init):

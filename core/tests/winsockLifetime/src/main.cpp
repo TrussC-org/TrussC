@@ -17,6 +17,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -42,6 +43,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
@@ -78,7 +81,9 @@ static int freeUdpPort() {
     return port;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifndef _WIN32
     printf("(Winsock is Windows-only: these steps pass here but cannot catch the regression)\n");
 #endif

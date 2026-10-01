@@ -239,7 +239,7 @@ public:
     //     running keeps running after disconnect() returns, and one whose
     //     flag was read just before the removal can still start. The owner
     //     of the notifying thread provides the barrier for that (e.g.
-    //     AudioEngine::waitForCallbackIdle()), or the listener uses
+    //     AudioEngine::waitForAudioCallbacks()), or the listener uses
     //     Deliver::Main.
     void notify(T& arg) {
         ConstEntryListPtr snapshot = std::atomic_load(&entries_);

@@ -23,22 +23,31 @@ A Box2D polygon is **one convex shape of 3 to 8 points**
 | Classic | Mod | Takes | Result |
 | --- | --- | --- | --- |
 | `PolyShape::setup(world, points, x, y)` | `Shape2D::polygon(points)` | 3 to 8 points | One polygon. Concave input becomes its convex hull. |
-| `PolyShape::setupConvex(world, points, x, y)` | `Shape2D::convex(points)` | any number of points | One polygon of at most 8 points approximating the convex hull. |
+| `PolyShape::setupSimplified(world, points, x, y)` | `Shape2D::simplified(points)` | any number of points | One polygon of at most 8 points approximating the convex hull. |
 | `PolyShape::setupCompound(world, path, x, y)` | `Shape2D::compound(path)` | any outline | The exact shape, one fixture per triangle. |
 
-All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
-`setup()` and `setupConvex()` use every point of every subpath together;
-`setupCompound()` uses the path as an outline (a vector is one closed outline).
+All three calls, classic and Mod, take either a `std::vector<tc::Vec2>` or a
+`tc::Path`. `setup()` / `polygon()` and `setupSimplified()` / `simplified()`
+use every point of every subpath together; `setupCompound()` / `compound()`
+use the path as an outline (a vector is one closed outline).
 
-- **Concave input** to `setup()` / `polygon()` silently becomes its convex
-  hull, as Box2D itself does. `PolyShape::getVertices()` and
+- **Concave input** to `setup()` / `polygon()` becomes its convex hull, as
+  Box2D itself does. When the hull leaves input points inside it (concave
+  input, or points inside the hull), one warning gives the counts and points
+  to the exact-shape call, once per process for each of `setup()` and
+  `polygon()` (a scene that builds many bodies doesn't flood the log):
+  `tcxBox2d: PolyShape::setup() dropped 2 of 7 points inside the convex hull;
+  use setupCompound() to keep the exact shape.` Points on the outline
+  (collinear points along an edge, duplicates) and hull points listed in a
+  crossing order give no warning: the shape is the same.
+  `PolyShape::getVertices()` and
   `RigidBody2D::shape().verts` hold that hull, and `draw()` / `drawFill()` /
   `ColliderRenderer2D` draw it, so what you see is what collides. Convex
   input whose points already go around the outline in order (either winding,
   any starting point) comes back as given. Otherwise, when points were dropped
   or listed in a crossing order (a Z-ordered square, a star-ordered pentagon),
   the hull comes back in Box2D's order, starting at the rightmost point.
-- **`setupConvex()` / `convex()`** take the convex hull of the points and drop
+- **`setupSimplified()` / `simplified()`** take the convex hull of the points and drop
   the vertices whose removal loses the least area until 8 remain. No point is
   guaranteed to survive: tips and extents can shrink, a symmetric outline can
   come back lopsided, concave parts and holes are filled and curves become
