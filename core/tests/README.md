@@ -119,6 +119,33 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   is recorded by `src/allocProbe.cpp`), and growth past the first reservation
   lands on a correctly stated length. A voice on a buffer with no frames
   stops at its first mix.
+- `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
+  read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
+  measured on `audioOut` with files of DC levels: `setPosition()` moves the
+  audio (the level ~200 ms later is the target's), `getPosition()` reports
+  the target from the call on and never the old position, a paused stream
+  reports the target at once while the voice itself does not move, and
+  resumes from it, and of several seeks the last wins (also while paused).
+  While a seek is pending (the worker held back by
+  `internal::setStreamFaultForTests(Stalls)`) no block after the call holds
+  the old position's audio, and a non-looping stream does not end at the old
+  data's end; a seek after an underrun at speed 10 keeps the ring bounded, so
+  another stream is still refilled; after a re-init at another rate
+  `getPosition()` carries over and `setPosition()` lands at the target; eager
+  sounds seek at once. `loadStream()` rejects a file with no frames
+  (`DecodeFailed`) and accepts a FLAC whose length is unknown (STREAMINFO
+  total 0), which plays to its end and ignores `setPosition()` with one
+  warning. A looping stream whose file was emptied after loading ends with
+  one error log while another stream keeps being refilled; a decoder read
+  error, a failed loop seek and a failed seek request each end the stream
+  with one error log: a non-looping voice ends, a looping one stays playing
+  but silent (#448) and `setPosition()` makes it play again. The frames a
+  failing read still returned are played before the voice ends. An MP3
+  stream's decoder gets a seek table (one point per second, at most 1024),
+  also after a re-init; `setPosition(getDuration())` on an ~18 minute MP3,
+  whose float duration is past the last frame, loops instead of failing. An
+  ended voice's position (and pending seek) carries over a re-init. A
+  watchdog turns a StreamWorker that never comes back into a FAIL.
   An `AudioEngine::init()` that can't open the output device (forced with
   more channels than miniaudio accepts) returns false, logs one error through
   the logger that names the requested device, and a later `init()` succeeds
