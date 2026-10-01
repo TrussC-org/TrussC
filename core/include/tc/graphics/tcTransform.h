@@ -39,6 +39,58 @@ inline void popStyle() {
     getDefaultContext().popStyle();
 }
 
+// ---------------------------------------------------------------------------
+// Scoped push / pop (RAII guards)
+// ---------------------------------------------------------------------------
+// auto m = scopedMatrix();  pushes now and pops at the end of the scope (also
+// on an early return); scopedStyle() does the same for pushStyle()/popStyle().
+// The guard pops on the RenderContext it pushed on. It can't be copied or
+// moved; `auto m = scopedMatrix();` works through guaranteed copy elision.
+// pushMatrix()/popMatrix() remain the main form.
+
+class MatrixScope;
+class StyleScope;
+[[nodiscard]] inline MatrixScope scopedMatrix();
+[[nodiscard]] inline StyleScope scopedStyle();
+
+class [[nodiscard]] MatrixScope {
+public:
+    ~MatrixScope() { ctx_.popMatrix(); }
+    MatrixScope(const MatrixScope&) = delete;
+    MatrixScope& operator=(const MatrixScope&) = delete;
+    MatrixScope(MatrixScope&&) = delete;
+    MatrixScope& operator=(MatrixScope&&) = delete;
+
+private:
+    explicit MatrixScope(internal::RenderContext& ctx) : ctx_(ctx) { ctx_.pushMatrix(); }
+    friend MatrixScope scopedMatrix();
+    internal::RenderContext& ctx_;
+};
+
+class [[nodiscard]] StyleScope {
+public:
+    ~StyleScope() { ctx_.popStyle(); }
+    StyleScope(const StyleScope&) = delete;
+    StyleScope& operator=(const StyleScope&) = delete;
+    StyleScope(StyleScope&&) = delete;
+    StyleScope& operator=(StyleScope&&) = delete;
+
+private:
+    explicit StyleScope(internal::RenderContext& ctx) : ctx_(ctx) { ctx_.pushStyle(); }
+    friend StyleScope scopedStyle();
+    internal::RenderContext& ctx_;
+};
+
+// pushMatrix() now, popMatrix() when the returned guard goes out of scope
+[[nodiscard]] inline MatrixScope scopedMatrix() {
+    return MatrixScope(getDefaultContext());
+}
+
+// pushStyle() now, popStyle() when the returned guard goes out of scope
+[[nodiscard]] inline StyleScope scopedStyle() {
+    return StyleScope(getDefaultContext());
+}
+
 // Reset style to default values (white color, fill enabled, etc.)
 inline void resetStyle() {
     getDefaultContext().resetStyle();

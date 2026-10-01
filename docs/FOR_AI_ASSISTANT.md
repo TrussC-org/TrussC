@@ -386,6 +386,21 @@ scale(2.0f);
 // ... draw ...
 popMatrix();
 ```
+`pushMatrix()` / `popMatrix()` is the main form. Where a pop is easy to miss
+(early returns, several exits, long blocks), the scoped form pops at the end of
+the scope instead; `scopedStyle()` does the same for `pushStyle()` / `popStyle()`:
+```cpp
+void drawItem(const Item& item) {
+    auto m = scopedMatrix();   // pushMatrix() now
+    auto s = scopedStyle();    // pushStyle() now
+    translate(item.x, item.y);
+    if (!item.visible) return; // both popped here
+    setColor(item.color);
+    drawRect(0, 0, item.w, item.h);
+}                              // ...and here
+```
+Keep the guard in a named variable: `scopedMatrix();` alone pops at once (the
+compiler warns, `[[nodiscard]]`). The guard can't be copied or moved.
 
 ## Node System (Scene Graph)
 
@@ -927,7 +942,7 @@ The surface (`setup`/`update`/`draw`, `drawCircle`-style calls) resembles oF, bu
 
 Mostly "drop `of`, lowercase the first letter." Common ones:
 - Drawing: `ofDrawRectangle`→`drawRect`, `ofDrawCircle`→`drawCircle`, `ofSetColor`→`setColor` (**0–1**), `ofSetLineWidth`→`setStrokeWeight`
-- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix`, `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
+- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix` (scope-bound form: `auto m = scopedMatrix();`; `scopedStyle()` for `ofPushStyle`), `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
 - Math: `ofMap`→`remap`, `ofLerp`→`lerp`, `ofRandom`→`random`, `ofNoise`→`noise`
 - Queries: `ofGetWidth`/`ofGetHeight`→`getWindowWidth`/`getWindowHeight`, `ofGetMouseX`/`Y`→`getMouseX`/`getMouseY`
 - Types: `ofVec2f`/`ofVec3f`→`Vec2`/`Vec3`, `ofColor`→`Color`, `ofMesh`→`Mesh`, `ofImage`→`Image`, `ofTexture`→`Texture`, `ofFbo`→`Fbo`, `ofTrueTypeFont`→`Font`, `ofSoundPlayer`→`Sound`, `ofMatrix4x4`→`Mat4`, `ofQuaternion`→`Quaternion`
