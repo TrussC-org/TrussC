@@ -84,7 +84,14 @@ macro(trussc_app)
     else()
         set(_TC_BUILD_DIR "${TRUSSC_DIR}/build-linux")
     endif()
-    
+    # Ninja keeps its build log in each app's own build tree, so a shared
+    # TrussC folder is rebuilt by every app that builds into it. Under Ninja,
+    # TrussC builds into a per-app folder instead (#372). Makefiles, Xcode and
+    # Visual Studio keep the shared folder above.
+    if(CMAKE_GENERATOR MATCHES "Ninja")
+        set(_TC_BUILD_DIR "${CMAKE_BINARY_DIR}/trussc")
+    endif()
+
     if(NOT TARGET TrussC)
         add_subdirectory(${TRUSSC_DIR} ${_TC_BUILD_DIR})
     endif()
