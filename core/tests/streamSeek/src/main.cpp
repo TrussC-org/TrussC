@@ -941,13 +941,14 @@ int main() {
         b.setPosition(2.5f);
         // a stays playing (the check below is that a playing voice ends), so
         // it plays on until init() stops the device: bound the gain by the
-        // time init() took, plus a margin for the mixer running ahead.
+        // time from reading the position to the end of init(), plus a margin
+        // for the mixer running ahead.
+        const auto t0 = chrono::steady_clock::now();
         const float before = a.getPosition();
         const size_t warned = countLogs(LogLevel::Warning, "stream playback migration failed");
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
-        const auto initStart = chrono::steady_clock::now();
         const bool restarted = reinitAt(otherRate());
-        const float initSec = chrono::duration<float>(chrono::steady_clock::now() - initStart).count();
+        const float elapsedSec = chrono::duration<float>(chrono::steady_clock::now() - t0).count();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("reopen fails: the engine restarts", restarted);
         check("reopen fails: both voices end with a warning",
@@ -956,9 +957,9 @@ int main() {
               lastLog(LogLevel::Warning));
         const float after = a.getPosition();
         check("reopen fails: getPosition() carries over",
-              before > 0.2f && after >= before && after - before <= initSec + 0.05f,
-              to_string(before) + " -> " + to_string(after) + " (init() took " +
-                  to_string(initSec) + " s)");
+              before > 0.2f && after >= before && after - before <= elapsedSec + 0.05f,
+              to_string(before) + " -> " + to_string(after) + " (" +
+                  to_string(elapsedSec) + " s from the read to the end of init())");
         check("reopen fails: a pending target carries over",
               approx(b.getPosition(), 2.5f, 0.001f), to_string(b.getPosition()));
         a.stop();
