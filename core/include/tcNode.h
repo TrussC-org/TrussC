@@ -953,11 +953,16 @@ private:
             auto& rc = internal::getDefaultContext();
             const size_t matrixDepth = rc.getMatrixStackDepth();
             const size_t styleDepth = rc.getStyleStackDepth();
+            // Stack floor (#348): a stray pop in draw() is refused (and names
+            // this node) instead of popping this node's own entry. Saved and
+            // restored, since a draw() can run another node's drawTree().
+            const auto prevFloor = rc.setStackFloor(matrixDepth, styleDepth, &typeid(*this));
             resetStyle();
             draw();
             forEachMod([](Mod* m) { m->draw(); });
-            // An unbalanced push/pop in draw() is named and contained here
-            // (#232): the pop below must undo THIS node's push, not the user's.
+            rc.setStackFloor(prevFloor);
+            // A missing pop in draw() is named and contained here (#232): the
+            // pop below must undo THIS node's push, not the user's.
             if (rc.getMatrixStackDepth() != matrixDepth || rc.getStyleStackDepth() != styleDepth) {
                 rc.restoreStackDepth(matrixDepth, styleDepth, getTypeName().c_str());
             }
