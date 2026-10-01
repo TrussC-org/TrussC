@@ -30,6 +30,11 @@
 // internal::sglPremultShader().
 #include "tc/gpu/shaders/sglPremult.glsl.h"
 
+#ifdef __APPLE__
+#include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
+#endif
+#include <cstdlib>
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -960,6 +965,77 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 }
 
 } // namespace internal
+
+// ---------------------------------------------------------------------------
+// Logger platform sink (declared in tcLog.h)
+// ---------------------------------------------------------------------------
+#if TC_LOG_SYSTEM_SINK
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+namespace {
+// True when os_log lines are mirrored into the console that already shows
+// stdout/stderr, so writing both would print each line twice there. Xcode
+// sets OS_ACTIVITY_DT_MODE (libtrace then copies os_log to stderr) or, since
+// Xcode 15, IDE_DISABLED_OS_ACTIVITY_DT_MODE (its console reads the unified
+// log directly). libtrace mirrors whenever OS_ACTIVITY_DT_MODE is set, whatever
+// its value ("NO", "0" and "" included; measured on macOS 26), so only its
+// presence counts. Read once: a running app's environment does not change.
+bool osLogMirroredToConsole() {
+    static const bool mirrored =
+        std::getenv("IDE_DISABLED_OS_ACTIVITY_DT_MODE") != nullptr ||
+        std::getenv("OS_ACTIVITY_DT_MODE") != nullptr;
+    return mirrored;
+}
+} // namespace
+#endif
+
+namespace internal {
+
+void writeSystemLog(const LogEventArgs& e) {
+#if defined(__APPLE__)
+#if !TARGET_OS_IPHONE
+    if (osLogMirroredToConsole()) return;
+#endif
+    static os_log_t osLog = os_log_create("org.trussc", "TrussC");
+    os_log_type_t type;
+    switch (e.level) {
+        case LogLevel::Verbose: type = OS_LOG_TYPE_DEBUG; break;
+        case LogLevel::Error:   type = OS_LOG_TYPE_ERROR; break;
+        case LogLevel::Fatal:   type = OS_LOG_TYPE_FAULT; break;
+        default:                type = OS_LOG_TYPE_DEFAULT; break;   // Notice, Warning
+    }
+    // %{public}: without it the unified log shows the text as <private>
+    // outside a debugger.
+    os_log_with_type(osLog, type, "[%{public}s] %{public}s",
+                     logLevelToString(e.level), e.message.c_str());
+#elif defined(_WIN32)
+    // One call per line: each OutputDebugString call has a fixed cost (more
+    // with a debugger or DebugView attached), so the whole line is built
+    // first. The Logger has already applied the system level.
+    std::string line;
+    line.reserve(e.timestamp.size() + e.message.size() + 16);
+    line += '[';
+    line += e.timestamp;
+    line += "] [";
+    line += logLevelToString(e.level);
+    line += "] ";
+    line += e.message;
+    line += '\n';
+    // The wide call, so a debugger such as Visual Studio gets the UTF-16
+    // text instead of bytes it reads as ANSI. DBWIN listeners (DebugView) get
+    // it converted to the process code page, which is UTF-8 under TrussC's
+    // manifest, so a viewer that reads the system ANSI code page (DebugView
+    // on a Japanese system, say) still shows non-ASCII text garbled. Flags 0:
+    // invalid UTF-8 becomes U+FFFD, nothing throws.
+    int n = ::MultiByteToWideChar(CP_UTF8, 0, line.data(), (int)line.size(), nullptr, 0);
+    if (n <= 0) return;
+    std::wstring wide(n, L'\0');
+    if (::MultiByteToWideChar(CP_UTF8, 0, line.data(), (int)line.size(), wide.data(), n) <= 0) return;
+    OutputDebugStringW(wide.c_str());
+#endif
+}
+
+} // namespace internal
+#endif // TC_LOG_SYSTEM_SINK
 
 // ---------------------------------------------------------------------------
 // More one-per-process state (#249). Each of these used to be a function-local

@@ -18,6 +18,14 @@
 
 #include "TrussC.h"
 
+// Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
+// description as UTF-8, or "(null)" for nil (what %@ formatting printed).
+static std::string tcLogText(id obj) {
+    if (!obj) return "(null)";
+    const char* text = [[obj description] UTF8String];
+    return text ? std::string(text) : std::string();
+}
+
 namespace trussc {
 
 // ---------------------------------------------------------------------------
@@ -81,8 +89,9 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
     // Handle size change (first frame or format change)
     if (width != _platformData->bufferWidth || height != _platformData->bufferHeight) {
-        NSLog(@"VideoGrabber: Frame size changed: %zu x %zu (was %d x %d)",
-              width, height, _platformData->bufferWidth, _platformData->bufferHeight);
+        trussc::logVerbose("VideoGrabber") << "Frame size changed: " << width << " x " << height
+            << " (was " << _platformData->bufferWidth << " x "
+            << _platformData->bufferHeight << ")";
 
         if (_platformData->backBuffer) {
             delete[] _platformData->backBuffer;
@@ -186,8 +195,8 @@ bool VideoGrabber::setupPlatform() {
         NSArray<AVCaptureDevice*>* devices = discoverySession.devices;
 
         if (deviceId_ >= (int)devices.count) {
-            NSLog(@"VideoGrabber: Invalid device ID %d (only %lu devices available)",
-                  deviceId_, (unsigned long)devices.count);
+            logError("VideoGrabber") << "Invalid device ID " << deviceId_ << " (only "
+                << (unsigned long)devices.count << " devices available)";
             delete data;
             platformHandle_ = nullptr;
             return false;
@@ -208,8 +217,8 @@ bool VideoGrabber::setupPlatform() {
             AVCaptureDeviceFormat* bestFormat = nil;
 
             if (verbose_) {
-                NSLog(@"VideoGrabber: Searching for %dx%d in device formats...",
-                      requestedWidth_, requestedHeight_);
+                logVerbose("VideoGrabber") << "Searching for " << requestedWidth_ << "x"
+                    << requestedHeight_ << " in device formats...";
             }
 
             for (AVCaptureDeviceFormat* format in [data->device formats]) {
@@ -226,7 +235,7 @@ bool VideoGrabber::setupPlatform() {
                     bestH = th;
                     bestFormat = format;
                     if (verbose_) {
-                        NSLog(@"VideoGrabber: Found exact match: %dx%d", tw, th);
+                        logVerbose("VideoGrabber") << "Found exact match: " << tw << "x" << th;
                     }
                     break;
                 }
@@ -246,8 +255,8 @@ bool VideoGrabber::setupPlatform() {
             if (bestFormat != nil && bestW > 0 && bestH > 0) {
                 if (bestW != requestedWidth_ || bestH != requestedHeight_) {
                     if (verbose_) {
-                        NSLog(@"VideoGrabber: Requested %dx%d not available. Using closest: %dx%d",
-                              requestedWidth_, requestedHeight_, bestW, bestH);
+                        logVerbose("VideoGrabber") << "Requested " << requestedWidth_ << "x" << requestedHeight_
+                            << " not available. Using closest: " << bestW << "x" << bestH;
                     }
                 }
                 [data->device setActiveFormat:bestFormat];
@@ -259,8 +268,8 @@ bool VideoGrabber::setupPlatform() {
                 width_ = dimensions.width;
                 height_ = dimensions.height;
                 if (verbose_) {
-                    NSLog(@"VideoGrabber: No suitable format found. Using device default: %dx%d",
-                          width_, height_);
+                    logVerbose("VideoGrabber") << "No suitable format found. Using device default: "
+                        << width_ << "x" << height_;
                 }
             }
 
@@ -281,16 +290,16 @@ bool VideoGrabber::setupPlatform() {
                     data->device.activeVideoMinFrameDuration = CMTimeMake(1, desiredFrameRate_);
                     data->device.activeVideoMaxFrameDuration = CMTimeMake(1, desiredFrameRate_);
                     if (verbose_) {
-                        NSLog(@"VideoGrabber: Set frame rate to %d fps", desiredFrameRate_);
+                        logVerbose("VideoGrabber") << "Set frame rate to " << desiredFrameRate_ << " fps";
                     }
                 } else if (verbose_) {
-                    NSLog(@"VideoGrabber: Requested frame rate %d not supported", desiredFrameRate_);
+                    logWarning("VideoGrabber") << "Requested frame rate " << desiredFrameRate_ << " not supported";
                 }
             }
 
             [data->device unlockForConfiguration];
         } else {
-            NSLog(@"VideoGrabber: Failed to lock device: %@", configError.localizedDescription);
+            logWarning("VideoGrabber") << "Failed to lock device: " << tcLogText(configError.localizedDescription);
             CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
                 data->device.activeFormat.formatDescription);
             width_ = dimensions.width;
@@ -304,14 +313,14 @@ bool VideoGrabber::setupPlatform() {
         NSError* error = nil;
         data->input = [AVCaptureDeviceInput deviceInputWithDevice:data->device error:&error];
         if (error || !data->input) {
-            NSLog(@"VideoGrabber: Failed to create input: %@", error.localizedDescription);
+            logError("VideoGrabber") << "Failed to create input: " << tcLogText(error.localizedDescription);
             delete data;
             platformHandle_ = nullptr;
             return false;
         }
 
         if (![data->session canAddInput:data->input]) {
-            NSLog(@"VideoGrabber: Cannot add input to session");
+            logError("VideoGrabber") << "Cannot add input to session";
             delete data;
             platformHandle_ = nullptr;
             return false;
@@ -339,7 +348,7 @@ bool VideoGrabber::setupPlatform() {
         [data->output setSampleBufferDelegate:delegate queue:data->captureQueue];
 
         if (![data->session canAddOutput:data->output]) {
-            NSLog(@"VideoGrabber: Cannot add output to session");
+            logError("VideoGrabber") << "Cannot add output to session";
             delete data;
             platformHandle_ = nullptr;
             return false;
@@ -357,7 +366,7 @@ bool VideoGrabber::setupPlatform() {
         }
 
         if (verbose_) {
-            NSLog(@"VideoGrabber: Configured format: %dx%d", width_, height_);
+            logVerbose("VideoGrabber") << "Configured format: " << width_ << "x" << height_;
         }
 
         // Back buffer
@@ -374,7 +383,7 @@ bool VideoGrabber::setupPlatform() {
                     usingBlock:^(NSNotification* note) {
             if (data->session.isRunning) {
                 [data->session stopRunning];
-                NSLog(@"VideoGrabber: Paused (app entered background)");
+                trussc::logVerbose("VideoGrabber") << "Paused (app entered background)";
             }
         }];
 
@@ -385,15 +394,15 @@ bool VideoGrabber::setupPlatform() {
                     usingBlock:^(NSNotification* note) {
             if (!data->session.isRunning) {
                 [data->session startRunning];
-                NSLog(@"VideoGrabber: Resumed (app entered foreground)");
+                trussc::logVerbose("VideoGrabber") << "Resumed (app entered foreground)";
             }
         }];
 
         // Start capture
         [data->session startRunning];
 
-        NSLog(@"VideoGrabber: Started capturing at %dx%d from %@",
-              width_, height_, data->device.localizedName);
+        logVerbose("VideoGrabber") << "Started capturing at " << width_ << "x" << height_
+            << " from " << tcLogText(data->device.localizedName);
 
         return true;
     }
@@ -535,7 +544,7 @@ void VideoGrabber::updateDelegatePixels() {
         TrussCVideoGrabberDelegate* delegate = (TrussCVideoGrabberDelegate*)data->delegate;
         delegate.targetPixels = pixels_;
         if (verbose_) {
-            NSLog(@"VideoGrabber: Updated delegate pixels pointer to %p", pixels_);
+            logVerbose("VideoGrabber") << "Updated delegate pixels pointer to " << (void*)pixels_;
         }
     }
 }
@@ -552,9 +561,9 @@ void VideoGrabber::requestCameraPermission() {
     [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
                              completionHandler:^(BOOL granted) {
         if (granted) {
-            NSLog(@"VideoGrabber: Camera permission granted");
+            trussc::logVerbose("VideoGrabber") << "Camera permission granted";
         } else {
-            NSLog(@"VideoGrabber: Camera permission denied");
+            trussc::logWarning("VideoGrabber") << "Camera permission denied";
         }
     }];
 }

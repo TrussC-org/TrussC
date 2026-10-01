@@ -1715,7 +1715,7 @@ public:
 
     // Start playing from the beginning (this Sound's previous voice is
     // stopped first). Returns false when nothing will play: not loaded, or
-    // the engine dropped the play — every voice slot busy
+    // the engine dropped the play — every playback slot busy
     // (AudioSettings::maxPolyphony), the stream's own maxPolyphony reached
     // (copies of a streamed Sound share it), the stream file could not be
     // reopened, or no output device is running. Drops are logged as
