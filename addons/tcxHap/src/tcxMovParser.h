@@ -6,6 +6,8 @@
 // Parses MOV container to extract video/audio track information and frame data.
 // Designed for HAP codec support but works with any MOV file.
 
+#include <TrussC.h>
+
 #include <string>
 #include <vector>
 #include <fstream>
@@ -226,8 +228,15 @@ public:
         if (sampleIndex >= track.samples.size()) return false;
 
         const auto& sample = track.samples[sampleIndex];
+        // The sample must lie fully inside the file; this is checked before
+        // the buffer is sized
+        if (sample.size > fileSize_ || sample.offset > fileSize_ - sample.size) {
+            return false;
+        }
         data.resize(sample.size);
 
+        // Each read starts from a clear stream state
+        file_.clear();
         file_.seekg(sample.offset);
         file_.read(reinterpret_cast<char*>(data.data()), sample.size);
 
@@ -256,17 +265,23 @@ private:
     uint64_t fileSize_ = 0;
     MovInfo info_;
 
-    // Read big-endian integers
+    // Set while a track is parsed when one of its atoms or tables fails a
+    // check; parseTrak() then does not keep the track
+    bool trackDamaged_ = false;
+
+    // Read big-endian integers. A failed read returns 0 (the stream state
+    // tells the caller that it failed).
     uint16_t readU16() {
-        uint8_t buf[2];
-        file_.read(reinterpret_cast<char*>(buf), 2);
+        uint8_t buf[2] = {0, 0};
+        if (!file_.read(reinterpret_cast<char*>(buf), 2)) return 0;
         return (buf[0] << 8) | buf[1];
     }
 
     uint32_t readU32() {
-        uint8_t buf[4];
-        file_.read(reinterpret_cast<char*>(buf), 4);
-        return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+        uint8_t buf[4] = {0, 0, 0, 0};
+        if (!file_.read(reinterpret_cast<char*>(buf), 4)) return 0;
+        return (uint32_t(buf[0]) << 24) | (uint32_t(buf[1]) << 16) |
+               (uint32_t(buf[2]) << 8) | uint32_t(buf[3]);
     }
 
     uint64_t readU64() {
@@ -281,12 +296,46 @@ private:
         return val / 65536.0f;
     }
 
+    // Current read position, or false when the stream has failed
+    bool position(uint64_t& pos) {
+        if (!file_.good()) return false;
+        std::streampos p = file_.tellg();
+        if (p < 0) return false;
+        pos = static_cast<uint64_t>(p);
+        return true;
+    }
+
+    // Read the header of the next child atom of a container that ends at
+    // endPos. Returns false when there is no further valid child: the stream
+    // has failed, the header does not fit, the size is below 8, or the child
+    // ends past its parent. bad is set for the last three, so a caller can
+    // tell an atom that fails these checks from the end of the container.
+    bool readChild(uint64_t endPos, uint32_t& atomType, uint64_t& atomEnd, bool& bad) {
+        bad = false;
+        uint64_t atomStart = 0;
+        if (!position(atomStart) || atomStart >= endPos) return false;
+        if (endPos - atomStart < 8) { bad = true; return false; }
+        uint32_t atomSize = readU32();
+        atomType = readU32();
+        if (!file_.good()) { bad = true; return false; }
+        if (atomSize < 8 || atomSize > endPos - atomStart) { bad = true; return false; }
+        atomEnd = atomStart + atomSize;
+        return true;
+    }
+
+    void markTrackDamaged(const MovTrack& track, const char* atom, const char* what) {
+        tc::logWarning("MovParser") << "'" << atom << "' in track " << track.trackId
+                                    << ": " << what << "; track skipped";
+        trackDamaged_ = true;
+    }
+
     // Parse entire file
     bool parse() {
-        while (file_.tellg() < static_cast<std::streampos>(fileSize_)) {
+        while (file_.good() && file_.tellg() < static_cast<std::streampos>(fileSize_)) {
             uint64_t atomStart = file_.tellg();
             uint32_t atomSize = readU32();
             uint32_t atomType = readU32();
+            if (!file_.good()) break;
 
             // Reject malformed atoms (< 8 bytes is impossible for standard atom
             // header; 0 and 1 are legal extensions). Without this the dataSize
@@ -297,6 +346,7 @@ private:
             if (atomSize == 1) {
                 // Extended size
                 uint64_t extSize = readU64();
+                if (!file_.good()) break;
                 if (extSize < 16) break;  // guard underflow
                 dataSize = extSize - 16;
             } else if (atomSize == 0) {
@@ -306,10 +356,11 @@ private:
                 dataSize = atomSize - 8;
             }
 
-            uint64_t atomEnd = static_cast<uint64_t>(file_.tellg()) + dataSize;
-
+            uint64_t dataStart = static_cast<uint64_t>(file_.tellg());
             // Progress guard: atom must advance past its start and stay within file.
-            if (atomEnd <= atomStart || atomEnd > fileSize_) break;
+            if (dataSize > fileSize_ - dataStart) break;
+            uint64_t atomEnd = dataStart + dataSize;
+            if (atomEnd <= atomStart) break;
 
             if (atomType == ATOM_MOOV) {
                 parseMoov(atomEnd);
@@ -323,14 +374,12 @@ private:
     }
 
     void parseMoov(uint64_t endPos) {
-        while (file_.tellg() < static_cast<std::streampos>(endPos)) {
-            uint64_t atomStart = file_.tellg();
-            uint32_t atomSize = readU32();
-            uint32_t atomType = readU32();
-
-            if (atomSize < 8) break;
-            uint64_t atomEnd = atomStart + atomSize;
-
+        uint32_t atomType = 0;
+        uint64_t atomEnd = 0;
+        bool bad = false;
+        // A child atom that fails the checks ends the walk; the tracks
+        // already parsed stay
+        while (readChild(endPos, atomType, atomEnd, bad)) {
             if (atomType == ATOM_MVHD) {
                 parseMvhd();
             } else if (atomType == ATOM_TRAK) {
@@ -338,6 +387,11 @@ private:
             }
 
             file_.seekg(atomEnd);
+        }
+        if (bad) {
+            tc::logWarning("MovParser") << "'moov' has an atom that does not fit; "
+                                        << "parsing stopped after " << info_.tracks.size()
+                                        << " track(s)";
         }
     }
 
@@ -358,15 +412,12 @@ private:
 
     void parseTrak(uint64_t endPos) {
         MovTrack track;
+        trackDamaged_ = false;
 
-        while (file_.tellg() < static_cast<std::streampos>(endPos)) {
-            uint64_t atomStart = file_.tellg();
-            uint32_t atomSize = readU32();
-            uint32_t atomType = readU32();
-
-            if (atomSize < 8) break;
-            uint64_t atomEnd = atomStart + atomSize;
-
+        uint32_t atomType = 0;
+        uint64_t atomEnd = 0;
+        bool bad = false;
+        while (readChild(endPos, atomType, atomEnd, bad)) {
             if (atomType == ATOM_TKHD) {
                 parseTkhd(track);
             } else if (atomType == ATOM_MDIA) {
@@ -375,6 +426,10 @@ private:
 
             file_.seekg(atomEnd);
         }
+        if (bad && !trackDamaged_) markTrackDamaged(track, "trak", "child atom does not fit");
+        if (!file_.good() && !trackDamaged_) markTrackDamaged(track, "trak", "read failed");
+
+        if (trackDamaged_) return;
 
         // Build sample table with timestamps
         buildSampleTimestamps(track);
@@ -412,14 +467,10 @@ private:
     }
 
     void parseMdia(MovTrack& track, uint64_t endPos) {
-        while (file_.tellg() < static_cast<std::streampos>(endPos)) {
-            uint64_t atomStart = file_.tellg();
-            uint32_t atomSize = readU32();
-            uint32_t atomType = readU32();
-
-            if (atomSize < 8) break;
-            uint64_t atomEnd = atomStart + atomSize;
-
+        uint32_t atomType = 0;
+        uint64_t atomEnd = 0;
+        bool bad = false;
+        while (readChild(endPos, atomType, atomEnd, bad)) {
             if (atomType == ATOM_MDHD) {
                 parseMdhd(track);
             } else if (atomType == ATOM_HDLR) {
@@ -430,6 +481,7 @@ private:
 
             file_.seekg(atomEnd);
         }
+        if (bad && !trackDamaged_) markTrackDamaged(track, "mdia", "child atom does not fit");
     }
 
     void parseMdhd(MovTrack& track) {
@@ -454,56 +506,80 @@ private:
     }
 
     void parseMinf(MovTrack& track, uint64_t endPos) {
-        while (file_.tellg() < static_cast<std::streampos>(endPos)) {
-            uint64_t atomStart = file_.tellg();
-            uint32_t atomSize = readU32();
-            uint32_t atomType = readU32();
-
-            if (atomSize < 8) break;
-            uint64_t atomEnd = atomStart + atomSize;
-
+        uint32_t atomType = 0;
+        uint64_t atomEnd = 0;
+        bool bad = false;
+        while (readChild(endPos, atomType, atomEnd, bad)) {
             if (atomType == ATOM_STBL) {
                 parseStbl(track, atomEnd);
             }
 
             file_.seekg(atomEnd);
         }
+        if (bad && !trackDamaged_) markTrackDamaged(track, "minf", "child atom does not fit");
     }
+
+    // Sample sizes from 'stsz': either one size for every sample (kept as
+    // the (size, count) pair, not expanded) or one size per sample
+    struct SampleSizes {
+        uint32_t constantSize = 0;  // 0: sizes are in 'sizes'
+        uint32_t count = 0;
+        std::vector<uint32_t> sizes;
+
+        uint32_t at(size_t i) const { return constantSize ? constantSize : sizes[i]; }
+    };
 
     void parseStbl(MovTrack& track, uint64_t endPos) {
         // Temporary storage for sample table data
-        std::vector<uint32_t> sampleSizes;
+        SampleSizes sampleSizes;
         std::vector<uint64_t> chunkOffsets;
         std::vector<std::pair<uint32_t, uint32_t>> sampleToChunk; // firstChunk, samplesPerChunk
         std::vector<std::pair<uint32_t, uint32_t>> timeToSample;  // count, delta
 
-        while (file_.tellg() < static_cast<std::streampos>(endPos)) {
-            uint64_t atomStart = file_.tellg();
-            uint32_t atomSize = readU32();
-            uint32_t atomType = readU32();
-
-            if (atomSize < 8) break;
-            uint64_t atomEnd = atomStart + atomSize;
-
+        uint32_t atomType = 0;
+        uint64_t atomEnd = 0;
+        bool bad = false;
+        while (readChild(endPos, atomType, atomEnd, bad)) {
             if (atomType == ATOM_STSD) {
                 parseStsd(track);
             } else if (atomType == ATOM_STTS) {
-                parseStts(timeToSample);
+                if (!parseStts(timeToSample, atomEnd)) {
+                    // 'stts' is not used for timing yet, so the track is kept
+                    tc::logWarning("MovParser") << "'stts' in track " << track.trackId
+                        << ": entry count does not fit in the atom; table ignored";
+                    timeToSample.clear();
+                    file_.clear();
+                }
             } else if (atomType == ATOM_STSC) {
-                parseStsc(sampleToChunk);
+                if (!parseStsc(sampleToChunk, atomEnd)) {
+                    markTrackDamaged(track, "stsc", "entry count does not fit in the atom");
+                }
             } else if (atomType == ATOM_STSZ) {
-                parseStsz(sampleSizes);
+                if (!parseStsz(sampleSizes, atomEnd)) {
+                    markTrackDamaged(track, "stsz", "entry count does not fit in the atom");
+                }
             } else if (atomType == ATOM_STCO) {
-                parseStco(chunkOffsets);
+                if (!parseStco(chunkOffsets, atomEnd)) {
+                    markTrackDamaged(track, "stco", "entry count does not fit in the atom");
+                }
             } else if (atomType == ATOM_CO64) {
-                parseCo64(chunkOffsets);
+                if (!parseCo64(chunkOffsets, atomEnd)) {
+                    markTrackDamaged(track, "co64", "entry count does not fit in the atom");
+                }
             }
 
+            if (trackDamaged_) return;
             file_.seekg(atomEnd);
+        }
+        if (bad) {
+            markTrackDamaged(track, "stbl", "child atom does not fit");
+            return;
         }
 
         // Build sample list
-        buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk, timeToSample);
+        if (!buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk)) {
+            markTrackDamaged(track, "stsz", "sample sizes add up to more than the file size");
+        }
     }
 
     void parseStsd(MovTrack& track) {
@@ -570,9 +646,20 @@ private:
         }
     }
 
-    void parseStts(std::vector<std::pair<uint32_t, uint32_t>>& timeToSample) {
+    // Read the version/flags and entry count of a table atom that ends at
+    // atomEnd. Returns false when the stream fails or when count entries of
+    // entrySize bytes do not fit between the count and atomEnd.
+    bool readTableCount(uint64_t atomEnd, uint32_t entrySize, uint32_t& count) {
         file_.seekg(4, std::ios::cur); // version + flags
-        uint32_t entryCount = readU32();
+        count = readU32();
+        uint64_t pos = 0;
+        if (!position(pos) || pos > atomEnd) return false;
+        return count <= (atomEnd - pos) / entrySize;
+    }
+
+    bool parseStts(std::vector<std::pair<uint32_t, uint32_t>>& timeToSample, uint64_t atomEnd) {
+        uint32_t entryCount = 0;
+        if (!readTableCount(atomEnd, 8, entryCount)) return false;
 
         timeToSample.reserve(entryCount);
         for (uint32_t i = 0; i < entryCount; i++) {
@@ -580,11 +667,12 @@ private:
             uint32_t delta = readU32();
             timeToSample.push_back({count, delta});
         }
+        return file_.good();
     }
 
-    void parseStsc(std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
-        file_.seekg(4, std::ios::cur); // version + flags
-        uint32_t entryCount = readU32();
+    bool parseStsc(std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk, uint64_t atomEnd) {
+        uint32_t entryCount = 0;
+        if (!readTableCount(atomEnd, 12, entryCount)) return false;
 
         sampleToChunk.reserve(entryCount);
         for (uint32_t i = 0; i < entryCount; i++) {
@@ -593,61 +681,88 @@ private:
             file_.seekg(4, std::ios::cur); // sample description index
             sampleToChunk.push_back({firstChunk, samplesPerChunk});
         }
+        return file_.good();
     }
 
-    void parseStsz(std::vector<uint32_t>& sampleSizes) {
+    bool parseStsz(SampleSizes& sampleSizes, uint64_t atomEnd) {
         file_.seekg(4, std::ios::cur); // version + flags
-        uint32_t sampleSize = readU32();
-        uint32_t sampleCount = readU32();
+        sampleSizes.constantSize = readU32();
+        sampleSizes.count = readU32();
+        sampleSizes.sizes.clear();
+        uint64_t pos = 0;
+        if (!position(pos) || pos > atomEnd) return false;
 
-        sampleSizes.reserve(sampleCount);
-        if (sampleSize == 0) {
-            // Variable size samples
-            for (uint32_t i = 0; i < sampleCount; i++) {
-                sampleSizes.push_back(readU32());
-            }
-        } else {
-            // Constant size samples
-            for (uint32_t i = 0; i < sampleCount; i++) {
-                sampleSizes.push_back(sampleSize);
-            }
+        if (sampleSizes.constantSize != 0) {
+            // Constant size: nothing more to read. The number of samples is
+            // limited by what 'stsc' / 'stco' place (see buildSamples()).
+            return true;
         }
+
+        // Variable size samples: 4 bytes per entry
+        if (sampleSizes.count > (atomEnd - pos) / 4) return false;
+        sampleSizes.sizes.reserve(sampleSizes.count);
+        for (uint32_t i = 0; i < sampleSizes.count; i++) {
+            sampleSizes.sizes.push_back(readU32());
+        }
+        return file_.good();
     }
 
-    void parseStco(std::vector<uint64_t>& chunkOffsets) {
-        file_.seekg(4, std::ios::cur); // version + flags
-        uint32_t entryCount = readU32();
+    bool parseStco(std::vector<uint64_t>& chunkOffsets, uint64_t atomEnd) {
+        uint32_t entryCount = 0;
+        if (!readTableCount(atomEnd, 4, entryCount)) return false;
 
         chunkOffsets.reserve(entryCount);
         for (uint32_t i = 0; i < entryCount; i++) {
             chunkOffsets.push_back(readU32());
         }
+        return file_.good();
     }
 
-    void parseCo64(std::vector<uint64_t>& chunkOffsets) {
-        file_.seekg(4, std::ios::cur); // version + flags
-        uint32_t entryCount = readU32();
+    bool parseCo64(std::vector<uint64_t>& chunkOffsets, uint64_t atomEnd) {
+        uint32_t entryCount = 0;
+        if (!readTableCount(atomEnd, 8, entryCount)) return false;
 
         chunkOffsets.reserve(entryCount);
         for (uint32_t i = 0; i < entryCount; i++) {
             chunkOffsets.push_back(readU64());
         }
+        return file_.good();
     }
 
-    void buildSamples(MovTrack& track,
-                      const std::vector<uint32_t>& sampleSizes,
+    // Returns false when the samples that lie inside the file add up to more
+    // than the file size (samples of one track do not share bytes, so the
+    // table is inconsistent). Samples that lie past the end of the file
+    // stay in the table, so the frame count and timing are kept;
+    // readSample() returns false for them.
+    bool buildSamples(MovTrack& track,
+                      const SampleSizes& sampleSizes,
                       const std::vector<uint64_t>& chunkOffsets,
-                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk,
-                      const std::vector<std::pair<uint32_t, uint32_t>>& timeToSample) {
+                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
 
-        if (sampleSizes.empty() || chunkOffsets.empty() || sampleToChunk.empty()) {
-            return;
+        if (sampleSizes.count == 0 || chunkOffsets.empty() || sampleToChunk.empty()) {
+            return true;
         }
 
-        track.samples.reserve(sampleSizes.size());
+        // First pass: how many samples the 'stsc' / 'stco' layout places,
+        // capped at the 'stsz' count
+        uint64_t placed = 0;
+        {
+            size_t stscIndex = 0;
+            for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size() &&
+                                        placed < sampleSizes.count; chunkIndex++) {
+                while (stscIndex + 1 < sampleToChunk.size() &&
+                       chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
+                    stscIndex++;
+                }
+                placed += sampleToChunk[stscIndex].second;
+            }
+            if (placed > sampleSizes.count) placed = sampleSizes.count;
+        }
+        track.samples.reserve(static_cast<size_t>(placed));
 
         size_t sampleIndex = 0;
         size_t stscIndex = 0;
+        uint64_t bytesInFile = 0;
 
         for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size(); chunkIndex++) {
             // Find samples per chunk for this chunk
@@ -659,16 +774,25 @@ private:
             uint32_t samplesInChunk = sampleToChunk[stscIndex].second;
             uint64_t offset = chunkOffsets[chunkIndex];
 
-            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < sampleSizes.size(); i++) {
+            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < sampleSizes.count; i++) {
                 MovSample sample;
                 sample.offset = offset;
-                sample.size = sampleSizes[sampleIndex];
+                sample.size = sampleSizes.at(sampleIndex);
                 offset += sample.size;
+
+                if (sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size) {
+                    bytesInFile += sample.size;
+                    if (bytesInFile > fileSize_) {
+                        track.samples.clear();
+                        return false;
+                    }
+                }
 
                 track.samples.push_back(sample);
                 sampleIndex++;
             }
         }
+        return true;
     }
 
     void buildSampleTimestamps(MovTrack& track) {
