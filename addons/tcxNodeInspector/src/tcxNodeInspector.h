@@ -293,13 +293,15 @@ private:
     void doAttach();                          // imguiSetup + onRender listener
     void doDetach();                          // drop the frame driver
     void ensureToggleKeyListener();
-    void ensureExitGuard();                   // drop listeners at exit (before teardown)
+    void ensureExitGuard();                   // drop listeners at exit / hot reload unload
+    void releaseListeners();                  // the cleanup both run
     ::tc::EventListener autoDraw_;             // onRender frame driver (attach)
     std::weak_ptr<::tc::Node> attachRoot_;     // empty or gone => attachParent_
     std::weak_ptr<::tc::Node> attachParent_;   // attachRoot_'s last seen parent; gone => getRootNode()
     std::vector<int>    toggleKeys_;
     ::tc::EventListener toggleKeyListener_;    // installed once, then lives on
     ::tc::EventListener exitListener_;         // clears the above while events() is alive
+    ::tc::EventListener hotReloadUnloadListener_;   // same, before a hot reload unloads this generation
 
     // --- gizmo ---------------------------------------------------------------
     enum class GizmoMode { Translate, Rotate };
