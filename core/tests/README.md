@@ -111,6 +111,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  `SoundBuffer::mixFrom()` counts its offset in frames and refuses (logs)
+  channel mismatches and ends past what a buffer holds. Decoders size buffers
+  from what decodes: a FLAC or Ogg Vorbis stream (`src/vorbisTone.cpp`) whose
+  stated length is larger than its data, or unknown for Vorbis, loads what it
+  holds with no allocation sized from the stated length (the largest request
+  is recorded by `src/allocProbe.cpp`), and growth past the first reservation
+  lands on a correctly stated length. A voice on a buffer with no frames
+  stops at its first mix.
   An `AudioEngine::init()` that can't open the output device (forced with
   more channels than miniaudio accepts) returns false, logs one error through
   the logger that names the requested device, and a later `init()` succeeds
