@@ -16,6 +16,9 @@
 //   - A second server cannot start on a port the first one is listening on:
 //     its start() returns false and the first keeps running and taking
 //     clients.
+//   - A stopped server can start again on the same port right away, whether
+//     the server or the client closed the connection first, and a new client
+//     then connects and gets its message back.
 //   - Listeners may tear down from the thread they run on: disconnectClient()
 //     of its own client in onReceive (the server's destruction then waits for
 //     that thread instead of leaving it behind), stop() in onReceive, and
@@ -627,6 +630,83 @@ static void testPortInUse() {
 
     second.stop();
     first.stop();
+}
+
+// -----------------------------------------------------------------------------
+// A stopped server can start again on the same port right away
+// -----------------------------------------------------------------------------
+// Send "ping" and read it back within 3 s
+static bool echoOnce(rawsocket_t s) {
+    if (s == kBadSocket) return false;
+#ifdef _WIN32
+    DWORD tv = 3000;
+    ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+#else
+    struct timeval tv;
+    tv.tv_sec = 3;
+    tv.tv_usec = 0;
+    ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+    const string ping = "ping";
+    if (::send(s, ping.data(), static_cast<int>(ping.size()), 0) != static_cast<int>(ping.size()))
+        return false;
+    string got;
+    char buf[16];
+    while (got.size() < ping.size()) {
+        const int n = static_cast<int>(::recv(s, buf, sizeof(buf), 0));
+        if (n <= 0) return false;
+        got.append(buf, static_cast<size_t>(n));
+    }
+    return got == ping;
+}
+
+// serverClosesFirst: stop() closes the connection before the client does;
+// otherwise the client closes first and the server stops after it has left.
+static void testRestartSamePort(bool serverClosesFirst) {
+    const string prefix = string("restart (") +
+                          (serverClosesFirst ? "server closes first" : "client closes first") +
+                          "): ";
+    auto name = [&](const char* what) { return prefix + what; };
+
+    TcpServer server;
+    EventListener echo = server.onReceive.listen([&](TcpServerReceiveEventArgs& e) {
+        server.sendAsync(e.clientId, string(e.data.begin(), e.data.end()));
+    });
+
+    // Taken once and then used as a fixed port
+    const int port = startOnFreePort(server, -1);
+    check(name("server started").c_str(), port != 0);
+    if (!port) return;
+
+    rawsocket_t c = connectTo(port);
+    check(name("a client connects and gets its message back").c_str(),
+          c != kBadSocket &&
+          waitUntil(3000, [&] { return server.getClientCount() == 1; }) &&
+          echoOnce(c));
+
+    if (serverClosesFirst) {
+        server.stop();
+        check(name("the client sees the server close the connection").c_str(),
+              c != kBadSocket && closedByServer(c, 3000));
+        if (c != kBadSocket) TC_CLOSE(c);
+    } else {
+        if (c != kBadSocket) TC_CLOSE(c);
+        check(name("the server sees the client leave").c_str(),
+              waitUntil(3000, [&] { return server.getClientCount() == 0; }));
+        server.stop();
+    }
+
+    check(name("a stopped server can start again on the same port right away").c_str(),
+          server.start(port));
+
+    rawsocket_t again = connectTo(port);
+    check(name("a new client connects and gets its message back").c_str(),
+          again != kBadSocket &&
+          waitUntil(3000, [&] { return server.getClientCount() == 1; }) &&
+          echoOnce(again));
+    if (again != kBadSocket) TC_CLOSE(again);
+
+    server.stop();
 }
 
 // -----------------------------------------------------------------------------
@@ -1847,6 +1927,8 @@ int main() {
     testLimit();
     testDefaultUnlimited();
     testPortInUse();
+    testRestartSamePort(true);
+    testRestartSamePort(false);
     testListenerTeardown();
     testListenerTeardownThreads();
     testConcurrentStop();
