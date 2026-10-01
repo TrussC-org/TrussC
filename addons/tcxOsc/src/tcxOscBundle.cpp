@@ -47,10 +47,19 @@ std::vector<uint8_t> OscBundle::toBytes() const {
 // fromBytes - Parse bundle from byte array (robust implementation)
 // =============================================================================
 OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
-    return fromBytesAtDepth(data, size, ok, 1);
+    bool paddingMissing = false;
+    return fromBytesAtDepth(data, size, ok, paddingMissing, 1);
 }
 
-OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok, int depth) {
+OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing) {
+    paddingMissing = false;
+    return fromBytesAtDepth(data, size, ok, paddingMissing, 1);
+}
+
+// paddingMissing is only ever set here (the caller clears it), so each
+// nested level adds to the same flag.
+OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
+                                      bool& paddingMissing, int depth) {
     ok = false;
     OscBundle bundle;
 
@@ -91,7 +100,8 @@ OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok
         // Determine if bundle or message
         if (isBundle(elementData, elementSize)) {
             bool elementOk = false;
-            OscBundle childBundle = fromBytesAtDepth(elementData, elementSize, elementOk, depth + 1);
+            OscBundle childBundle = fromBytesAtDepth(elementData, elementSize, elementOk,
+                                                     paddingMissing, depth + 1);
             // A nested bundle that fails rejects this bundle too, so the
             // caller sees one parse error instead of a partial bundle.
             if (!elementOk) return OscBundle();
@@ -99,10 +109,14 @@ OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok
         }
         else {
             bool elementOk = false;
-            OscMessage msg = OscMessage::fromBytes(elementData, elementSize, elementOk);
-            if (elementOk) {
-                bundle.elements_.emplace_back(std::move(msg));
-            }
+            bool elementPaddingMissing = false;
+            OscMessage msg = OscMessage::fromBytes(elementData, elementSize, elementOk,
+                                                   elementPaddingMissing);
+            // A message that fails rejects the bundle too, as a nested
+            // bundle does.
+            if (!elementOk) return OscBundle();
+            if (elementPaddingMissing) paddingMissing = true;
+            bundle.elements_.emplace_back(std::move(msg));
         }
 
         pos += elementSize;
