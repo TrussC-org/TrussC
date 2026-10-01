@@ -16,17 +16,17 @@ By enabling MCP mode, your app becomes a "tool" for AI, enabling:
 To start your app in MCP mode, set the `TRUSSC_MCP` environment variable to `1`.
 
 ```bash
-# Auto-assign port (printed to stderr on startup)
+# Auto-assign port (printed on startup, see below)
 TRUSSC_MCP=1 ./myApp
 
-# Or specify a port
+# Or specify a port (a guaranteed, known port)
 TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./myApp
 ```
 
 When enabled:
 1. An **HTTP server** starts on the specified port (or an OS-assigned port).
 2. **Inspection tools** (`tc_get_screenshot`, `tc_save_screenshot`) are automatically registered.
-3. The server endpoint URL is printed to stderr: `[MCP] HTTP server listening on http://localhost:PORT/mcp`
+3. Once the port is bound, the server endpoint URL is printed: `[MCP] HTTP server listening on http://localhost:PORT/mcp`. The line is a Logger Notice, so it also reaches the log file (`TRUSSC_LOG_FILE`) and `onLog` listeners; on the console it goes to stdout, and it is hidden when the console level is Warning or higher. In v0.7 the same line is also written raw to stderr, as before (that copy is removed in v0.8.0). For a port that does not depend on reading this line, set `TRUSSC_MCP_PORT`.
 
 ### Related: `TRUSSC_LOG_FILE`
 
@@ -389,7 +389,8 @@ Configure your MCP client with the HTTP URL:
 
 - If `TRUSSC_MCP_PORT` is set, the app uses that port.
 - If not set (or set to `0`), the OS assigns an available port.
-- The actual port is printed to stderr on startup: `[MCP] HTTP server listening on http://localhost:PORT/mcp`
+- The actual port is printed on startup, once the port is bound: `[MCP] HTTP server listening on http://localhost:PORT/mcp`. It is a Logger Notice (stdout, the log file, `onLog`; hidden on the console when the console level is Warning or higher), plus, in v0.7 only, a raw copy on stderr.
+- For a guaranteed port, set `TRUSSC_MCP_PORT` rather than reading the line.
 - From code: `mcp::getHttpPort()` returns the actual port number.
 
 ## Security Model
