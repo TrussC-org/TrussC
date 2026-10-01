@@ -1257,6 +1257,11 @@ bool& touchAsMouse() {
     return enabled;
 }
 
+TouchMouseMapper& touchMouseMapper() {
+    static TouchMouseMapper mapper;
+    return mapper;
+}
+
 DataPathState& dataPathState() {
     static DataPathState* state = [] {
         auto* s = new DataPathState();
