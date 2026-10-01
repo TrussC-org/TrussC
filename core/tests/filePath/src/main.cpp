@@ -31,6 +31,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -42,6 +43,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -89,7 +92,9 @@ static vector<uint8_t> makeWavBytes() {
     return b;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // Sandbox under the OS temp dir. On Windows this is an absolute path like
     // C:\Users\...\Temp — using it as the data-path root exercises the
     // fs::is_absolute() root detection (the old path[0]=='/' check failed it).
