@@ -91,16 +91,15 @@ All three classic calls take either a `std::vector<tc::Vec2>` or a `tc::Path`.
 ## Collision events
 
 Both APIs count contacts per pair: `Collider2D` events per collider pair,
-`RigidBody2D` events per body pair. Enter (`onCollisionEnter`,
-`onCollisionBegan` / `onTriggerBegan`) fires on the pair's first touching
-contact, Stay once per update, and Exit (`onCollisionExit`,
-`onCollisionEnded` / `onTriggerEnded`) when its last contact ends, however
-many fixtures touch.
+`RigidBody2D` events per body pair. Enter (`onCollisionEnter` /
+`onTriggerEnter` on both) fires on the pair's first touching contact, Stay
+once per update, and Exit (`onCollisionExit` / `onTriggerExit`) when its
+last contact ends, however many fixtures touch.
 
 - This covers every body with several fixtures, not only compound ones:
   `World::createBounds()` makes its four walls as one static body, so a
-  `RigidBody2D` already touching the floor gets no new `onCollisionBegan`
-  when it reaches a side wall, and `onCollisionEnded` only when it leaves the
+  `RigidBody2D` already touching the floor gets no new `onCollisionEnter`
+  when it reaches a side wall, and `onCollisionExit` only when it leaves the
   last wall.
 - An Exit whose last contact ends inside a physics step is dispatched after
   that step, and a contact of the same pair that begins in the same step
