@@ -1010,7 +1010,7 @@ void writeSystemLog(const LogEventArgs& e) {
 #elif defined(_WIN32)
     // One call per line: each OutputDebugString call has a fixed cost (more
     // with a debugger or DebugView attached), so the whole line is built
-    // first. The console sink has already applied the console level.
+    // first. The Logger has already applied the system level.
     std::string line;
     line.reserve(e.timestamp.size() + e.message.size() + 16);
     line += '[';

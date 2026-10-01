@@ -4,7 +4,7 @@
 Why: core's own diagnostics go through tc::Logger (logError() / logWarning()
 / logNotice() / logVerbose()), so they reach the log file (setLogFile(),
 TRUSSC_LOG_FILE), onLog listeners and the platform log (logcat, os_log,
-OutputDebugStringA), and honor the console level. A raw printf / cerr / cout
+OutputDebugStringW), and honor the output levels. A raw printf / cerr / cout
 / NSLog reaches none of them, and on Windows Release (GUI subsystem) stdout
 and stderr go nowhere.
 

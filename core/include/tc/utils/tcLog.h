@@ -48,12 +48,12 @@ namespace trussc {
 // Log level
 // ---------------------------------------------------------------------------
 enum class LogLevel {
-    Verbose,    // Detailed info (for debugging)
-    Notice,     // Normal info
-    Warning,    // Warning
-    Error,      // Error
-    Fatal,      // Fatal error
-    Silent      // No output (for filtering)
+    Verbose,    // Detailed info (for debugging); hidden by default
+    Notice,     // Normal info; the default level of every output
+    Warning,    // Something unexpected that the app recovers from
+    Error,      // An operation failed
+    Fatal,      // The app cannot continue
+    Silent      // As an output's level: that output is off
 };
 
 // Convert log level to string
@@ -102,14 +102,15 @@ struct LogEventArgs {
 
 namespace internal {
 // True while the current thread logs from a panic path (the sokol bridge,
-// internal::sokolLog): the Logger's console and file sinks then only try the
-// lock, and write the line to the console (stderr) alone when another thread
-// holds it, so a panic never waits for the lock. Per thread, in tcGlobal.cpp.
+// internal::sokolLog): the Logger's sinks then only try the lock, and write
+// the line to the console (stderr) and the system log alone when another
+// thread holds it, so a panic never waits for the lock. Per thread, in tcGlobal.cpp.
 bool isLogNonBlocking();
 
 #if TC_LOG_SYSTEM_SINK
-// Writes one log line to the platform log (see TC_LOG_SYSTEM_SINK above). The
-// console sink calls it, so it follows the console level. In tcGlobal.cpp.
+// Writes one log line to the platform log (see TC_LOG_SYSTEM_SINK above). In
+// tcGlobal.cpp. The Logger applies the level first: the system level on macOS
+// and Windows; on iOS, where it is the console output, the console level.
 // - Apple: os_log, subsystem "org.trussc", category "TrussC", as
 //   "[LEVEL] message" (Verbose -> debug, Notice / Warning -> default,
 //   Error -> error, Fatal -> fault). On macOS it is skipped while os_log is
@@ -123,6 +124,17 @@ void writeSystemLog(const LogEventArgs& e);
 
 // ---------------------------------------------------------------------------
 // Logger - Logger core
+//
+// Three outputs, each with its own level (default Notice; Silent turns that
+// output off). setLogLevel() sets all three at once; a later per-output call
+// wins.
+//   - console: stdout (Verbose / Notice) and stderr (Warning and up) on
+//     desktop and web; os_log on iOS; logcat on Android.
+//   - file: the file opened with setLogFile() (or TRUSSC_LOG_FILE).
+//   - system: os_log on macOS, OutputDebugStringW on Windows. Elsewhere
+//     there is none (on iOS and Android the OS log is the console output),
+//     and the system level has no effect.
+// onLog listeners receive every line, whatever the levels.
 //
 // Thread-safe: log() and the settings below may be called from any thread.
 // The console and file sinks write under one mutex, so every line lands
@@ -139,9 +151,9 @@ public:
     Event<LogEventArgs> onLog;
 
     Logger() {
-        // Console (stderr/stdout, plus os_log on macOS and
-        // OutputDebugStringW on Windows; logcat on Android, os_log alone on
-        // iOS) and file, as one listener that takes mutex_ itself.
+        // Console (stderr/stdout; logcat on Android, os_log on iOS), system
+        // (os_log on macOS, OutputDebugStringW on Windows) and file, as one
+        // listener that takes mutex_ itself.
         sinkListener_ = onLog.listen([this](LogEventArgs& e) {
             writeSinks(e);
         });
@@ -156,6 +168,17 @@ public:
     void log(LogLevel level, const std::string& message) {
         LogEventArgs args(level, message);
         onLog.notify(args);
+    }
+
+    // === All outputs ===
+
+    // Sets the console, file and system levels to level. It overwrites them
+    // when called; a later setConsoleLogLevel() / setFileLogLevel() /
+    // setSystemLogLevel() call wins. No getter: there is no single level.
+    void setLogLevel(LogLevel level) {
+        consoleLevel_.store(level);
+        fileLevel_.store(level);
+        systemLevel_.store(level);
     }
 
     // === Console settings ===
@@ -191,6 +214,20 @@ public:
         return fileLevel_.load();
     }
 
+    // === System (platform log) settings ===
+
+    // The level of the platform log output: os_log on macOS,
+    // OutputDebugStringW on Windows. No effect on iOS and Android (the OS log
+    // is the console output there, set with setConsoleLogLevel()) or on
+    // Linux and web (no platform log output).
+    void setSystemLogLevel(LogLevel level) {
+        systemLevel_.store(level);
+    }
+
+    LogLevel getSystemLogLevel() const {
+        return systemLevel_.load();
+    }
+
     // A copy taken under the lock (empty when no file is open).
     std::string getLogFilePath() const {
         TC_LOCK_GUARD(mutex_);
@@ -204,11 +241,14 @@ public:
 
 private:
     // The sink listener. Takes mutex_ (only tries it on a panic path, see
-    // internal::isLogNonBlocking) and writes to the console and the file.
+    // internal::isLogNonBlocking) and writes to the system log, the console
+    // and the file.
     void writeSinks(const LogEventArgs& e) {
         if (internal::isLogNonBlocking()) {
             if (!mutex_.try_lock()) {
-                // Another thread holds the lock: the console alone, unlocked.
+                // Another thread holds the lock: the system log and the
+                // console alone, unlocked.
+                writeSystem(e);
                 writeConsole(e);
                 return;
             }
@@ -216,18 +256,34 @@ private:
                 TC_MUTEX& m;
                 ~Unlock() { m.unlock(); }
             } unlock{mutex_};
+            writeSystem(e);
             writeConsole(e);
             writeFile(e);
             return;
         }
         TC_LOCK_GUARD(mutex_);
+        writeSystem(e);
         writeConsole(e);
         writeFile(e);
     }
 
+    static bool passes(LogLevel lineLevel, LogLevel level) {
+        return level != LogLevel::Silent && lineLevel >= level;
+    }
+
+    // macOS: os_log; Windows: OutputDebugStringW, by the system level. Not on
+    // iOS, where os_log is the console output (writeConsole).
+    void writeSystem(const LogEventArgs& e) {
+#if TC_LOG_SYSTEM_SINK && !TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE
+        if (!passes(e.level, systemLevel_.load())) return;
+        internal::writeSystemLog(e);
+#else
+        (void)e;
+#endif
+    }
+
     void writeConsole(const LogEventArgs& e) {
-        const LogLevel level = consoleLevel_.load();
-        if (e.level < level || level == LogLevel::Silent) return;
+        if (!passes(e.level, consoleLevel_.load())) return;
 #ifdef __ANDROID__
         // Android: logcat via __android_log_write
         int prio;
@@ -239,24 +295,20 @@ private:
             default:                prio = ANDROID_LOG_INFO; break;   // Notice
         }
         __android_log_write(prio, "TrussC", e.message.c_str());
-#else
-#if TC_LOG_SYSTEM_SINK
-        // Apple: os_log; Windows: OutputDebugStringW
+#elif TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE
+        // iOS: os_log is the console output
         internal::writeSystemLog(e);
-#endif
-#if !TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE
+#else
         // Desktop/web: stderr/stdout
         std::ostream& out = (e.level >= LogLevel::Warning) ? std::cerr : std::cout; // log-check: allow (Logger console sink)
         out << "[" << e.timestamp << "] "
             << "[" << logLevelToString(e.level) << "] "
             << e.message << std::endl;
 #endif
-#endif
     }
 
     void writeFile(const LogEventArgs& e) {
-        const LogLevel level = fileLevel_.load();
-        if (!fileStream_.is_open() || e.level < level || level == LogLevel::Silent) return;
+        if (!fileStream_.is_open() || !passes(e.level, fileLevel_.load())) return;
         fileStream_ << "[" << e.timestamp << "] "
                     << "[" << logLevelToString(e.level) << "] "
                     << e.message << std::endl;
@@ -274,9 +326,11 @@ private:
     // writes. Recursive (TC_MUTEX), and a no-op in single-threaded web builds.
     mutable TC_MUTEX mutex_;
 
-    // Console (desktop/web, plus the platform log; logcat on Android,
-    // os_log on iOS)
+    // Console (stdout/stderr; logcat on Android, os_log on iOS)
     std::atomic<LogLevel> consoleLevel_{LogLevel::Notice};
+
+    // System (os_log on macOS, OutputDebugStringW on Windows)
+    std::atomic<LogLevel> systemLevel_{LogLevel::Notice};
 
     // File
     std::ofstream fileStream_;
@@ -317,12 +371,20 @@ std::string sokolLogMessage(const char* tag, uint32_t logItem,
 // ---------------------------------------------------------------------------
 // Convenience functions
 // ---------------------------------------------------------------------------
+inline void setLogLevel(LogLevel level) {
+    getLogger().setLogLevel(level);
+}
+
 inline void setConsoleLogLevel(LogLevel level) {
     getLogger().setConsoleLogLevel(level);
 }
 
 inline void setFileLogLevel(LogLevel level) {
     getLogger().setFileLogLevel(level);
+}
+
+inline void setSystemLogLevel(LogLevel level) {
+    getLogger().setSystemLogLevel(level);
 }
 
 inline bool setLogFile(const fs::path& path) {

@@ -82,7 +82,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   listener that logs again, itself or through a thread it waits for, does
   not deadlock. The sokol bridge (`internal::sokolLog`) maps panic / error /
   warning / info to Fatal / Error / Warning / Verbose, with the tag as the
-  module and `id:<item> line:<line>` when sokol passes no message. POSIX
+  module and `id:<item> line:<line>` when sokol passes no message. Each
+  output has its own level (#311): console, file and system default to
+  Notice, `setLogLevel()` overwrites all three and a later per-output call
+  wins; the file and the console filter by their own level while `onLog`
+  listeners get every line. POSIX
   only, each in a forked child: a panic reaches the log file and still
   aborts through `slog_func`; a panic while another thread holds the
   Logger's lock does not wait for it (the line goes to stderr); and on

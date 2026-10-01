@@ -1568,6 +1568,8 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 
 Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
 
+Each output has its own level (default Notice; `LogLevel::Silent` turns it off): the console (`setConsoleLogLevel`), the log file (`setFileLogLevel`) and the OS log on macOS (os_log) and Windows (OutputDebugStringW) (`setSystemLogLevel`; on iOS and Android the OS log is the console). `setLogLevel(level)` sets all three at once; a later per-output call wins. `onLog` listeners get every line whatever the levels.
+
 ### How do I write logs to a file? (getLogger + setLogFile)
 
 Get the global logger (it's a reference — use `auto&`), point it at a file, and optionally raise the file level to keep the file small. `getTimestampString()` makes a filename-safe unique name (no colons):
