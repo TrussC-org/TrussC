@@ -306,6 +306,51 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `MemAvailable` and the cgroup v2 `memory.max` headroom), it also allocates real buffers just past 2 GiB and checks
   `getColor()` / `setColor()` at the far corner and `halve()` reading pixels
   past `INT_MAX` (about 6 s, 2.6 GB peak); otherwise that part prints SKIP.
+- `fontSfntCheck/` — font data is checked before it is given to stb_truetype:
+  `FontAtlasManager::setupFromMemory()` returns false with a warning for 0
+  bytes, a `.ttc` header whose font count or offset points outside the data,
+  a table directory or a table past the end of the data (offset + length is
+  checked in 64 bits), a missing required table (a directory entry at
+  offset 0 counts as missing, as in stb), head / hhea / maxp /
+  cmap shorter than the fields stb reads, cmap encoding records or a used
+  subtable offset past cmap, `numberOfHMetrics` outside 1..numGlyphs, a short
+  hmtx or loca, an unknown loca format, a loca entry past glyf or below the
+  one before it, and a CFF CharStrings INDEX whose count or offset array
+  cannot be read within the CFF table; returns false for a CFF table of 0 to
+  3 bytes, a CFF INDEX with an offset size outside 1..4 and an empty Top
+  DICT, in Debug and Release builds alike; and for
+  copies of a TrueType, a CFF and a collection font cut short in the header,
+  the table directory and each table. A glyph index from the cmap past
+  numGlyphs (for CFF, past the number of CharStrings) and a codepoint above
+  U+10FFFF draw as .notdef. Valid fonts load, including
+  `numberOfHMetrics == numGlyphs`, a cmap format 12 subtable, a table of
+  length 0 and tables that share bytes. Also guards the TrussC patches in
+  `stb_truetype.h`: CFF data is read within the CFF table's length; CFF
+  vertex counting (a glyph over the vertex limit, one whose closing vertex
+  is the one over it, one far over any limit through nested subroutines,
+  and one whose vertex array cannot be allocated come back empty); and the
+  flattened point count (a glyph with more points than the limit is not
+  drawn, one at the limit is). The test lowers these limits through
+  `internal::setStbttLimitsForTests()`. A glyph with a one-point contour
+  loads and rasterizes. Run the core tests under AddressSanitizer after
+  changing stb_truetype or `stb_impl.cpp`; CI does not build with ASan.
+  For this test, from the repository root:
+
+  ```sh
+  tools/bin/trusscli update -p core/tests/fontSfntCheck --tc-root "$PWD" --ide cmake
+  cd core/tests/fontSfntCheck
+  cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer -g" \
+    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address
+  cmake --build build-asan -j4
+  ./bin/fontSfntCheck
+  ```
+
+  (Prefix the last line with `setarch -R` where ASan fails to start because
+  of the kernel's address randomization.)
+  The fonts are built at runtime; fonts installed at
+  the usual system paths are also loaded and cut short when present.
+  `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
