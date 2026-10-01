@@ -48,6 +48,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <algorithm>
 #include <atomic>
@@ -62,6 +63,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -1603,7 +1606,9 @@ static void testHeadlessLoop() {
            g_fMaxPerPass >= 1 && g_fMaxPerPass <= 10, g_fMaxPerPass);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // Must run first: proves the clock origin predates the first read.
     testElapsedClock();
 

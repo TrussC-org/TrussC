@@ -38,6 +38,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -49,6 +50,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static string g_scope;   // "[window] " / "[main] ", prefixed to each check
@@ -752,7 +755,9 @@ static void runAll(Driver& d) {
     selectNodeNobodyOwns(d);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     {
         g_scope = "[window] ";
         WindowDriver d;
