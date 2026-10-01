@@ -45,6 +45,7 @@
 //   - every getter at every index gives the same result for a message with
 //     all tags and one mixing tags with and without data, built, decoded,
 //     copied or in a bundle; the mixed message round-trips byte for byte
+//   - only the tags with data store an argument object (T F N I [ ] none)
 // =============================================================================
 
 #include <tcxOsc.h>
@@ -381,6 +382,15 @@ static bool everyTypeMatches(const OscMessage& m) {
 }
 
 // ----- getter table ----------------------------------------------------------
+// The number of arguments an OscMessage stores a value object for (only the
+// tags with data). OscMessage names this struct as a friend.
+namespace tcx::osc {
+struct OscMessageTestAccess {
+    static size_t storedArgCount(const OscMessage& m) { return m.args_.size(); }
+};
+}  // namespace tcx::osc
+using osc::OscMessageTestAccess;
+
 // Every getter's result at index i, as one line of text: the tag ('-' when
 // there is none), then each getter whose result is not its default value
 static std::string getterRow(const OscMessage& m, size_t i) {
@@ -1332,6 +1342,22 @@ int main() {
         check("args: rebuilt after clear(): getter table and bytes",
               rowsMatch(reused, MIXED_ROWS) && reused.toBytes() == mixBytes);
 
+        // Only the tags with data store an argument object
+        check("args: stored argument objects: every tag 11, mixed 6",
+              OscMessageTestAccess::storedArgCount(makeEveryTypeMessage()) == 11 &&
+              OscMessageTestAccess::storedArgCount(mixed) == 6 &&
+              OscMessageTestAccess::storedArgCount(parsedBundle.getMessageAt(1)) == 11 &&
+              OscMessageTestAccess::storedArgCount(parsedBundle.getMessageAt(0)) == 6 &&
+              OscMessageTestAccess::storedArgCount(moved) == 6);
+        OscMessage dataLess("/n");
+        dataLess.addBool(true).addBool(false).addNil().addImpulse().addArrayBegin().addArrayEnd();
+        bytes = rawMessage("/n", "TFNI[]", {});
+        parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("args: data-less tags store no argument object",
+              ok && dataLess.toBytes() == bytes && dataLess.getArgCount() == 6 &&
+              OscMessageTestAccess::storedArgCount(dataLess) == 0 &&
+              parsed.getArgCount() == 6 && OscMessageTestAccess::storedArgCount(parsed) == 0);
+
         // A message of only T tags, decoded and built
         const size_t count = 50000;
         bytes = rawMessage("/t", std::string(count, 'T'), {});
@@ -1343,6 +1369,9 @@ int main() {
         OscMessage built("/t");
         for (size_t i = 0; i < count; ++i) built.addBool(true);
         check("args: only T tags, built", built.getArgCount() == count && built.toBytes() == bytes);
+        check("args: only T tags store no argument object",
+              OscMessageTestAccess::storedArgCount(parsed) == 0 &&
+              OscMessageTestAccess::storedArgCount(built) == 0);
     }
 
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
