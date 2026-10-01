@@ -1008,7 +1008,7 @@ void writeSystemLog(const LogEventArgs& e) {
     os_log_with_type(osLog, type, "[%{public}s] %{public}s",
                      logLevelToString(e.level), e.message.c_str());
 #elif defined(_WIN32)
-    // One call per line: each OutputDebugStringA call has a fixed cost (more
+    // One call per line: each OutputDebugString call has a fixed cost (more
     // with a debugger or DebugView attached), so the whole line is built
     // first. The console sink has already applied the console level.
     std::string line;
@@ -1020,7 +1020,17 @@ void writeSystemLog(const LogEventArgs& e) {
     line += "] ";
     line += e.message;
     line += '\n';
-    OutputDebugStringA(line.c_str());
+    // The wide call, so a debugger such as Visual Studio gets the UTF-16
+    // text instead of bytes it reads as ANSI. DBWIN listeners (DebugView) get
+    // it converted to the process code page, which is UTF-8 under TrussC's
+    // manifest, so a viewer that reads the system ANSI code page (DebugView
+    // on a Japanese system, say) still shows non-ASCII text garbled. Flags 0:
+    // invalid UTF-8 becomes U+FFFD, nothing throws.
+    int n = ::MultiByteToWideChar(CP_UTF8, 0, line.data(), (int)line.size(), nullptr, 0);
+    if (n <= 0) return;
+    std::wstring wide(n, L'\0');
+    if (::MultiByteToWideChar(CP_UTF8, 0, line.data(), (int)line.size(), wide.data(), n) <= 0) return;
+    OutputDebugStringW(wide.c_str());
 #endif
 }
 

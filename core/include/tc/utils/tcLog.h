@@ -21,7 +21,7 @@
 
 // The platform log sink (internal::writeSystemLog, in tcGlobal.cpp): Apple's
 // unified log (os_log, Console.app) and Windows' debug output
-// (OutputDebugStringA: the Visual Studio output window, DebugView). Android
+// (OutputDebugStringW: the Visual Studio output window, DebugView). Android
 // has logcat in place of the console below.
 #if defined(__APPLE__) || defined(_WIN32)
 #define TC_LOG_SYSTEM_SINK 1
@@ -116,7 +116,7 @@ bool isLogNonBlocking();
 //   mirrored into the console that already shows stdout (run from Xcode:
 //   OS_ACTIVITY_DT_MODE, with any value, or IDE_DISABLED_OS_ACTIVITY_DT_MODE
 //   set), so Xcode's console shows each line once.
-// - Windows: one OutputDebugStringA call per line, "[time] [LEVEL] message".
+// - Windows: one OutputDebugStringW call per line, "[time] [LEVEL] message".
 void writeSystemLog(const LogEventArgs& e);
 #endif
 } // namespace internal
@@ -140,7 +140,7 @@ public:
 
     Logger() {
         // Console (stderr/stdout, plus os_log on macOS and
-        // OutputDebugStringA on Windows; logcat on Android, os_log alone on
+        // OutputDebugStringW on Windows; logcat on Android, os_log alone on
         // iOS) and file, as one listener that takes mutex_ itself.
         sinkListener_ = onLog.listen([this](LogEventArgs& e) {
             writeSinks(e);
@@ -241,7 +241,7 @@ private:
         __android_log_write(prio, "TrussC", e.message.c_str());
 #else
 #if TC_LOG_SYSTEM_SINK
-        // Apple: os_log; Windows: OutputDebugStringA
+        // Apple: os_log; Windows: OutputDebugStringW
         internal::writeSystemLog(e);
 #endif
 #if !TC_LOG_SYSTEM_SINK_REPLACES_CONSOLE
