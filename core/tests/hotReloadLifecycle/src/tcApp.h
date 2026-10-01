@@ -33,13 +33,16 @@ using namespace tc;
 // is the guest's) for the window contexts' weak references the host must
 // drop before it unloads the guest (#255).
 //
-// draw/exit (tcApp.cpp) only run in `--app` mode (see main.cpp); the
-// lifecycle cycles never call them. setup() runs in both: the cycles set
-// cycleOnly and run it through the App's first update, to check its audio
-// hooks are subscribed right after it (#426); it then only records the audio
-// listeners it sees and skips the window work. They use tcxImGui so the guest
-// target is checked for addon include directories and for linking the addon
-// archive.
+// draw/exit (tcApp.cpp) only run in the windowed modes (`--app`,
+// `--reload-check`; see main.cpp); the lifecycle cycles never call them.
+// setup() runs in all: the cycles set cycleOnly and run it through the App's
+// first update, to check its audio hooks are subscribed right after it
+// (#426); it then only records the audio listeners it sees and skips the
+// window work. In a window, setup() attaches tcxNodeInspector (which sets up
+// tcxImGui): two addon singletons that live in the guest image and listen on
+// the host's events, so a reload must not leave the previous generation's
+// copies listening (#416). This also checks the guest target for addon include
+// directories and for linking the addon archives.
 // =============================================================================
 
 // What guest code sees of state the host set (readSharedState).
@@ -72,10 +75,23 @@ struct GuestInstances {
     uint64_t timerId = 0;      // an id the guest's callAfter() handed out
 };
 
+// What the guest App's own hotReloadUnload listener saw (#416): how often it
+// fired, and whether this App was still the main window's root then.
+struct UnloadProbe {
+    int fired = 0;
+    bool appWasRoot = false;
+};
+
 class tcApp : public App {
 public:
     tcApp() {
         updateListener_ = events().update.listen([this]() { ticks_++; });
+        // App code using hotReloadUnload, as the reference shows
+        unloadListener_ = events().hotReloadUnload.listen([this]() {
+            if (!unloadProbe) return;
+            unloadProbe->fired++;
+            unloadProbe->appWasRoot = getRootNode() == static_cast<Node*>(this);
+        });
         // The owner the host tagged this generation with (an identity only)
         const uint64_t generation = (uint64_t)(uintptr_t)mcp::detail::registrationOwner();
         mcp::tool("guest_probe", "hotReloadLifecycle guest tool")
@@ -115,6 +131,9 @@ public:
     virtual bool seesAttached(const App* app);
     // A node made with make_shared in guest code, added as this App's child.
     virtual std::shared_ptr<Node> addGuestChild();
+    // NodeInspector::setToggleKey() as app code calls it: the guest's
+    // inspector singleton listens on the host's events (#416).
+    virtual void useInspectorToggleKey();
 
     // Set by the lifecycle cycles before the first update: setup() records
     // what it sees and skips the window / ImGui work (no window there).
@@ -122,8 +141,10 @@ public:
     int setupCalls = 0;
     long audioOutHooksInSetup = -1;   // AudioEngine audioOut listeners in setup()
     long audioInHooksInSetup = -1;
+    UnloadProbe* unloadProbe = nullptr;   // set by the cycles (host-owned)
 
 private:
     EventListener updateListener_;
+    EventListener unloadListener_;
     int ticks_ = 0;
 };

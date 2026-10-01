@@ -18,6 +18,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <algorithm>
 #include <atomic>
@@ -29,6 +30,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -142,7 +145,9 @@ struct FloodApp : App {
     }
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     getMainThreadId();   // record the main thread id (headless test has no _setup_cb)
 
     // --- 1. runOnMainThread defers off-thread work and runs it ON the main thread ---

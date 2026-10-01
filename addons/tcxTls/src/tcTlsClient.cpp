@@ -317,20 +317,19 @@ bool TlsClient::connect(const std::string& host, int port) {
     closeSocket();
 
     // Ensure the previous receive thread has finished. A listener on that
-    // thread (onDisconnect, say) that reconnects cannot join it: detach
-    // instead. Its loops (processNetwork()'s receive loop, then
-    // tlsReceiveThreadFunc()'s) end on their own once running_ is cleared or
-    // the new receive thread has taken over.
-    if (tlsReceiveThread_.joinable()) {
-        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
-            tlsReceiveThread_.detach();
-        } else {
-            tlsReceiveThread_.join();
-        }
-    }
+    // thread (onDisconnect, say) that reconnects cannot join it: the client
+    // keeps it instead, and the next connect() or disconnect() on another
+    // thread, or the destructor, joins it. Its loops (processNetwork()'s
+    // receive loop, then tlsReceiveThreadFunc()'s) end on their own once
+    // running_ is cleared or the new receive thread has taken over.
+    tlsKeptThreads_.release(tlsReceiveThread_);
     if (connected_.exchange(false)) {
         logWarning() << "TlsClient: connect() closes the connection an onDisconnect listener opened";
     }
+    // A thread an earlier listener's connect() or disconnect() let go of
+    // has been told to stop: wait for it before the SSL context is reset
+    // for the new connection. The calling thread itself, if kept, stays.
+    tlsKeptThreads_.joinOthers();
 
     // Reset SSL context (clear previous connection state)
     resetSslContext();
@@ -507,18 +506,23 @@ bool TlsClient::performHandshake() {
         // Tear the connection down before telling anyone: a listener that
         // reconnects from onError or onConnect runs inline, and a teardown
         // after it returned would take its new connection down. Not
-        // disconnect(), which on this thread detaches it: the thread would
-        // then run the listeners below with no owner, and destroying the
-        // client meanwhile would free it under them. teardown() leaves the
-        // thread joinable, so disconnect() and the destructor still wait for
-        // it; only a listener's own connect() or disconnect() lets go of it.
+        // disconnect(), which on this thread lets go of it. teardown()
+        // leaves the thread joinable, so disconnect() and the destructor
+        // still wait for it; only a listener's own connect() or disconnect()
+        // lets go of it (the client keeps it for a later join).
         teardown();
         notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
 
-        tc::TcpConnectEventArgs args;
-        args.success = false;
-        args.message = std::string("TLS Handshake failed: ") + errBuf;
-        onConnect.notify(args);
+        // An onError listener may have started a newer attempt. That attempt
+        // reports its own result: this one is not reported once the client
+        // is connected or connecting again (running_ is set for every
+        // attempt in progress, the pending connect and the handshake too).
+        if (!connected_ && !running_) {
+            tc::TcpConnectEventArgs args;
+            args.success = false;
+            args.message = std::string("TLS Handshake failed: ") + errBuf;
+            onConnect.notify(args);
+        }
         return false;
     }
 }
@@ -654,14 +658,11 @@ void TlsClient::disconnectImpl(bool notify) {
 
     closeSocket();
 
-    // Wait for receive thread to finish
-    if (tlsReceiveThread_.joinable()) {
-        if (tlsReceiveThread_.get_id() == std::this_thread::get_id()) {
-            tlsReceiveThread_.detach();
-        } else {
-            tlsReceiveThread_.join();
-        }
-    }
+    // Wait for receive thread to finish. On that thread itself (a
+    // listener), keep it for a later join from another thread. Then join
+    // what earlier calls kept.
+    tlsKeptThreads_.release(tlsReceiveThread_);
+    tlsKeptThreads_.joinOthers();
 
     // Fully reset SSL context and config (for reconnection). Before the
     // notification below: a listener that reconnects from it starts a new
@@ -762,8 +763,9 @@ bool TlsClient::send(const std::string& message) {
 // =============================================================================
 void TlsClient::tlsReceiveThreadFunc(unsigned generation) {
     // running_ alone cannot end this loop when a listener on this thread
-    // reconnects: connect() detaches this thread, starts the new connection's
-    // own, and running_ is true again for that one. The generation says which
+    // reconnects: connect() lets go of this thread (the client keeps it for
+    // a later join), starts the new connection's own, and running_ is true
+    // again for that one. The generation says which
     // thread is current (processNetwork()'s receive loop checks it as well).
     while (running_ && tlsReceiveGeneration_ == generation) {
         processNetworkImpl(generation);
