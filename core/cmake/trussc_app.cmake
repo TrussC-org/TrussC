@@ -648,6 +648,14 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         message(STATUS "[${PROJECT_NAME}] Loaded local.cmake")
     endif()
 
+    # Bundle identifier for macOS / iOS. local.cmake may set TC_BUNDLE_ID
+    # (e.g. "com.example.myApp"); otherwise com.trussc.<project> is used.
+    if(TC_BUNDLE_ID)
+        set(_TC_BUNDLE_ID "${TC_BUNDLE_ID}")
+    else()
+        set(_TC_BUNDLE_ID "com.trussc.${PROJECT_NAME}")
+    endif()
+
     # Compile shaders with sokol-shdc (if any .glsl files exist)
     file(GLOB_RECURSE _TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.glsl")
     if(_TC_SHADER_SOURCES)
@@ -1020,13 +1028,13 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_BUNDLE_NAME "${MACOSX_BUNDLE_DISPLAY_NAME}"
-            MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${_TC_BUNDLE_ID}"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
             MACOSX_BUNDLE_INFO_PLIST "${TRUSSC_DIR}/resources/Info-iOS.plist.in"
             XCODE_GENERATE_SCHEME TRUE
             XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${_TC_BUNDLE_ID}"
         )
         # Code signing: always allow automatic signing, let user pick team in Xcode
         set_target_properties(${PROJECT_NAME} PROPERTIES
@@ -1056,8 +1064,8 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set_target_properties(${PROJECT_NAME} PROPERTIES
             MACOSX_BUNDLE TRUE
             MACOSX_BUNDLE_BUNDLE_NAME "${MACOSX_BUNDLE_DISPLAY_NAME}"
-            MACOSX_BUNDLE_GUI_IDENTIFIER "com.trussc.${PROJECT_NAME}"
-            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.trussc.${PROJECT_NAME}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "${_TC_BUNDLE_ID}"
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${_TC_BUNDLE_ID}"
             MACOSX_BUNDLE_BUNDLE_VERSION "1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
             MACOSX_BUNDLE_INFO_PLIST "${TRUSSC_DIR}/resources/Info.plist.in"
