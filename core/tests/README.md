@@ -235,6 +235,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `sglPoolLimits/` — *(standalone, dummy backend)* sokol_gl pool handling
+  in the fork (#317): `sgl_context_make_pipeline()` returns id 0 when the sg
+  pipeline pool cannot hold all of its sg pipelines, and the ones it made are
+  destroyed again (their slots are usable afterwards); `sgl_draw()` skips a
+  command recorded while a destroyed sgl pipeline was loaded and draws the
+  rest; the sgl context pool grows when full, and the current context keeps
+  its vertices and its commit rewind across the grow. Not covered here (no
+  sgl context in headless tests): `RenderTarget::release()` on window close
+  and the one-time warnings; checked by hand with secondary windows.
 - `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
   pre-build check decide "does this project use hot reload" the same way:
   `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
