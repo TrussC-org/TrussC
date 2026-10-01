@@ -8,6 +8,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <string>
@@ -15,6 +16,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -93,7 +96,9 @@ private:
     tc::internal::WindowContext* prev_ = nullptr;
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     Driver drv;
 
     // Tree: root(0,0,800,600) > panel(100,100,400,300) > label(50,50,100,40)

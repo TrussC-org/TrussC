@@ -36,6 +36,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <chrono>
 #include <cstdio>
@@ -46,6 +47,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -308,7 +311,9 @@ static void testHeadless() {
            matrixDepth() == 0, (long long)matrixDepth());
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifndef NDEBUG
     std::printf("SKIP: needs a release build (sokol_gl asserts it is set up on pushMatrix())\n");
     return 0;
