@@ -92,6 +92,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   Logger's lock does not wait for it (the line goes to stderr); and on
   Linux, with no X display and `TRUSSC_LOG_FILE` set, `runApp()`'s
   `XOpenDisplay()` failure lands in that file.
+- `onceGate/` — the warn-once gate `OnceGate` (#308): `isFirstTime()` is
+  true the first time and false afterwards, per gate object (a `static` per
+  call site, a member per object); with an interval it is true again once the
+  interval has passed since the last true, not before (0, below 0 or NaN
+  means once); many threads calling one gate get exactly one true between
+  them; and a `static` gate works from a static destructor at exit. It is
+  checked at compile time to be trivially destructible, not copyable or
+  movable, and `constinit`-constructible.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
