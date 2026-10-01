@@ -26,7 +26,7 @@ TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./myApp
 When enabled:
 1. An **HTTP server** starts on the specified port (or an OS-assigned port).
 2. **Inspection tools** (`tc_get_screenshot`, `tc_save_screenshot`) are automatically registered.
-3. Once the port is bound, the server endpoint URL is printed: `[MCP] HTTP server listening on http://localhost:PORT/mcp`. The line is a Logger Notice, so it also reaches the log file (`TRUSSC_LOG_FILE`) and `onLog` listeners; on the console it goes to stdout, and it is hidden when the console level is Warning or higher. In v0.7 the same line is also written raw to stderr, as before (that copy is removed in v0.8.0). For a port that does not depend on reading this line, set `TRUSSC_MCP_PORT`.
+3. Once the port is bound, the server endpoint URL is printed: `[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp`. The line is a Logger Notice, so it also reaches the log file (`TRUSSC_LOG_FILE`) and `onLog` listeners; on the console it goes to stdout, and it is hidden when the console level is Warning or higher. In v0.7 the same line is also written raw to stderr, as before (that copy is removed in v0.8.0). For a port that does not depend on reading this line, set `TRUSSC_MCP_PORT`.
 
 ### Related: `TRUSSC_LOG_FILE`
 
@@ -277,7 +277,7 @@ TrussC implements a subset of the **MCP (Model Context Protocol)** specification
 
 ### Request (AI -> App)
 ```bash
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc": "2.0",
@@ -324,29 +324,29 @@ the metadata:
 TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./bin/MyApp.app/Contents/MacOS/MyApp &
 
 # Initialize
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}'
 
 # Take screenshot
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"tc_save_screenshot","arguments":{"path":"/tmp/test.png"}}}'
 
 # Mouse click (requires registerControlTools())
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"tc_mouse_click","arguments":{"x":100,"y":200}}}'
 
 # Record a fixed 3-second clip (auto-stops & finalizes itself); omit "duration"
 # for an unlimited recording you end with tc_stop_recording. Omit "path" for a
 # timestamped file in the data dir; the response carries the resolved path.
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":4,"params":{"name":"tc_start_recording","arguments":{"path":"/tmp/clip.mp4","duration":3}}}'
 
 # Stop early (a manual stop always wins — valid shorter file); no-op if idle
-curl -X POST http://localhost:8080/mcp \
+curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":5,"params":{"name":"tc_stop_recording","arguments":{}}}'
 ```
@@ -359,10 +359,10 @@ curl -X POST http://localhost:8080/mcp \
 # Start app, wait, take screenshot, then kill
 TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./bin/myApp.app/Contents/MacOS/myApp &
 sleep 2
-curl -s -X POST http://localhost:8080/mcp \
+curl -s -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}'
-curl -s -X POST http://localhost:8080/mcp \
+curl -s -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"tc_save_screenshot","arguments":{"path":"/tmp/screenshot.png"}}}'
 kill %1
@@ -379,7 +379,7 @@ Configure your MCP client with the HTTP URL:
 {
   "mcpServers": {
     "trussc-app": {
-      "url": "http://localhost:8080/mcp"
+      "url": "http://127.0.0.1:8080/mcp"
     }
   }
 }
@@ -389,7 +389,7 @@ Configure your MCP client with the HTTP URL:
 
 - If `TRUSSC_MCP_PORT` is set, the app uses that port.
 - If not set (or set to `0`), the OS assigns an available port.
-- The actual port is printed on startup, once the port is bound: `[MCP] HTTP server listening on http://localhost:PORT/mcp`. It is a Logger Notice (stdout, the log file, `onLog`; hidden on the console when the console level is Warning or higher), plus, in v0.7 only, a raw copy on stderr.
+- The actual port is printed on startup, once the port is bound: `[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp`. It is a Logger Notice (stdout, the log file, `onLog`; hidden on the console when the console level is Warning or higher), plus, in v0.7 only, a raw copy on stderr.
 - For a guaranteed port, set `TRUSSC_MCP_PORT` rather than reading the line.
 - From code: `mcp::getHttpPort()` returns the actual port number.
 
@@ -405,12 +405,14 @@ Configure your MCP client with the HTTP URL:
 
 ### Network exposure
 
-By default the MCP server binds to **localhost only** and sends no CORS headers,
-so it is reachable only by native MCP clients on the same machine (a wildcard
-CORS origin would otherwise let any web page in your browser drive it). The
-server is for native MCP clients: a web page cannot call it, neither directly
-nor through a dev-server proxy that forwards the page's `Origin`. For remote
-access, SSH tunnelling is the simplest safe option.
+By default the MCP server binds to **127.0.0.1 only** (loopback) and sends no
+CORS headers, so it is reachable only by native MCP clients on the same machine
+(a wildcard CORS origin would otherwise let any web page in your browser drive
+it). The default is the address `127.0.0.1` rather than the name `localhost`,
+because what `localhost` resolves to differs between OSes; one address keeps it
+the same everywhere. The server is for native MCP clients: a web page cannot
+call it, neither directly nor through a dev-server proxy that forwards the
+page's `Origin`. For remote access, SSH tunnelling is the simplest safe option.
 
 A web page can still *send* requests to a loopback server without CORS, so
 every request is also checked before anything runs (as the MCP HTTP transport
@@ -426,7 +428,7 @@ To expose it directly instead, set both:
 
 | Variable | Effect |
 |----------|--------|
-| `TRUSSC_MCP_HOST` | Bind address — e.g. `0.0.0.0` for all interfaces (default `localhost`) |
+| `TRUSSC_MCP_HOST` | Bind address — e.g. `0.0.0.0` for all interfaces (default `127.0.0.1`) |
 | `TRUSSC_MCP_TOKEN` | Bearer token required on every `/mcp` request (`Authorization: Bearer <token>`) |
 
 Binding a non-loopback host **without** `TRUSSC_MCP_TOKEN` is refused
