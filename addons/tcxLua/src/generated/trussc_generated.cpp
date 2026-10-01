@@ -779,7 +779,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::createWindow(); },
         [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); }
     ));
-    lua->set_function("nodeToJson", [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); });
+    lua->set_function("nodeToJson", sol::overload(
+        [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); },
+        [](trussc::Node & node, int maxDepth, bool includeDerived) { return trussc::nodeToJson(node, maxDepth, includeDerived); }
+    ));
     lua->set_function("lerp", [](float a, float b, float t) { return std::lerp(a, b, t); });
     lua->set_function("sin", [](float x) { return std::sin(x); });
     lua->set_function("cos", [](float x) { return std::cos(x); });

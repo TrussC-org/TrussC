@@ -21,6 +21,9 @@ Touched record (#326):
   at `modRemoved`, whatever address the new mod gets;
 - a mod of a destroyed node reports `destroyed: true`.
 
+Derived members (#287): an edit of `globalPos` (`TC_DERIVED`, left out of
+`reflectToJson()` saves) is reported with its current world position.
+
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR; a non-zero exit fails the job. Run it locally with:
 

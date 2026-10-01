@@ -14,7 +14,13 @@
 //     getVertices() / shape().verts hold that hull, so what draws collides;
 //     convex input already in outline order keeps its order, and hull points
 //     in a crossing order come back in hull order;
-//   - setupConvex() / Shape2D::convex() take any number of points and make one
+//   - when the hull leaves points inside it (#500), setup() and
+//     Shape2D::polygon() each log one warning with the counts, pointing to the
+//     exact-shape call, only the first time in the process; every point kept
+//     (also in a crossing order, or with a collinear middle point) gives none;
+//   - setup() and Shape2D::polygon() with a Path use every point of every
+//     subpath;
+//   - setupSimplified() / Shape2D::simplified() take any number of points and make one
 //     fixture of at most 8 points whose mass is close to the outline's; the
 //     reduction is O(h log h) and picks the same points as the plain
 //     O(h^2) scan it replaced.
@@ -249,13 +255,13 @@ static void testPolyShapeRefuses(box2d::World& world) {
               w.lastContains("too small for its distance"));
     }
 
-    // More than 8 points: the warning points to setupConvex().
+    // More than 8 points: the warning points to setupSimplified().
     {
         WarningCapture w;
         box2d::PolyShape poly;
         poly.setup(world, circlePoints(9, 40), 400, 300);
-        check("PolyShape::setup 9 points: warning names setupConvex()",
-              w.lastContains("setupConvex()"));
+        check("PolyShape::setup 9 points: warning names setupSimplified()",
+              w.lastContains("setupSimplified()"));
     }
 
     // A 20-point circle Path: every point of the path counts, so it is refused.
@@ -304,7 +310,9 @@ static void testPolyShapeValid(box2d::World& world) {
         check("PolyShape::setup notched: the notch is solid", poly.containsPoint(410, 300));
         float squareMass = box2d::World::toBox2d(40.0f) * box2d::World::toBox2d(40.0f);
         check("PolyShape::setup notched: mass of the square", abs(poly.getMass() - squareMass) < 1e-4f);
-        check("PolyShape::setup notched: no warning", w.count == 0);
+        // The hull warning is once per process and already fired in
+        // testHullDropWarning().
+        check("PolyShape::setup notched: no second hull warning", w.count == 0);
     }
 
     // setupRegular() still works, and its first vertex is still the top one.
@@ -386,24 +394,24 @@ static void testPolyShapeValid(box2d::World& world) {
     }
 }
 
-static void testSetupConvex(box2d::World& world) {
+static void testSetupSimplified(box2d::World& world) {
     const float r = 50;
     // 20-point circle, vector and Path overloads.
     for (int usePath = 0; usePath < 2; ++usePath) {
         string tag = usePath ? "Path" : "vector";
         WarningCapture w;
         box2d::PolyShape poly;
-        if (usePath) poly.setupConvex(world, Path(circlePoints(20, r)), 400, 300);
-        else         poly.setupConvex(world, circlePoints(20, r), 400, 300);
-        check("setupConvex 20-point circle (" + tag + "): created", poly.isCreated());
-        check("setupConvex 20-point circle (" + tag + "): one fixture", fixtureCount(poly.getBody()) == 1);
-        check("setupConvex 20-point circle (" + tag + "): at most 8 vertices",
+        if (usePath) poly.setupSimplified(world, Path(circlePoints(20, r)), 400, 300);
+        else         poly.setupSimplified(world, circlePoints(20, r), 400, 300);
+        check("setupSimplified 20-point circle (" + tag + "): created", poly.isCreated());
+        check("setupSimplified 20-point circle (" + tag + "): one fixture", fixtureCount(poly.getBody()) == 1);
+        check("setupSimplified 20-point circle (" + tag + "): at most 8 vertices",
               poly.getNumVertices() >= 3 && poly.getNumVertices() <= 8 &&
               polygonVertexCount(poly.getBody()) == poly.getNumVertices());
         float ratio = poly.getMass() / discMass(r);
-        check("setupConvex 20-point circle (" + tag + "): mass within 15% of the disc",
+        check("setupSimplified 20-point circle (" + tag + "): mass within 15% of the disc",
               ratio > 0.85f && ratio <= 1.0f);
-        check("setupConvex 20-point circle (" + tag + "): no warning", w.count == 0);
+        check("setupSimplified 20-point circle (" + tag + "): no warning", w.count == 0);
     }
 
     // Sharp tips cost the most area to drop: a long thin diamond with many
@@ -423,10 +431,10 @@ static void testSetupConvex(box2d::World& world) {
             }
         }
         box2d::PolyShape poly;
-        poly.setupConvex(world, pts, 400, 300);
+        poly.setupSimplified(world, pts, 400, 300);
         const auto& v = poly.getVertices();
-        check("setupConvex 24-point diamond: at most 8 vertices", poly.isCreated() && v.size() <= 8);
-        check("setupConvex 24-point diamond: keeps the 4 tips",
+        check("setupSimplified 24-point diamond: at most 8 vertices", poly.isCreated() && v.size() <= 8);
+        check("setupSimplified 24-point diamond: keeps the 4 tips",
               hasPoint(v, -100, 0) && hasPoint(v, 0, -10) && hasPoint(v, 100, 0) && hasPoint(v, 0, 10));
     }
 
@@ -436,10 +444,10 @@ static void testSetupConvex(box2d::World& world) {
         for (int i = 0; i < 12; ++i) line.push_back(Vec2(i * 5.0f, i * 2.0f));
         WarningCapture w;
         box2d::PolyShape poly;
-        poly.setupConvex(world, line, 400, 300);
-        check("setupConvex 12 collinear points: no body", !poly.isCreated());
-        check("setupConvex 12 collinear points: one warning", w.count == 1);
-        check("setupConvex 12 collinear points: warning says they collapsed",
+        poly.setupSimplified(world, line, 400, 300);
+        check("setupSimplified 12 collinear points: no body", !poly.isCreated());
+        check("setupSimplified 12 collinear points: one warning", w.count == 1);
+        check("setupSimplified 12 collinear points: warning says they collapsed",
               w.lastContains("got 12 points: fewer than 3 distinct, non-collinear points") &&
               w.lastContains("drops duplicate and collinear points"));
     }
@@ -447,29 +455,158 @@ static void testSetupConvex(box2d::World& world) {
         vector<Vec2> same(50, Vec2(7, 3));
         WarningCapture w;
         box2d::PolyShape poly;
-        poly.setupConvex(world, same, 400, 300);
-        check("setupConvex 50 copies of one point: no body", !poly.isCreated());
-        check("setupConvex 50 copies of one point: one warning", w.count == 1);
-        check("setupConvex 50 copies of one point: warning says they collapsed",
+        poly.setupSimplified(world, same, 400, 300);
+        check("setupSimplified 50 copies of one point: no body", !poly.isCreated());
+        check("setupSimplified 50 copies of one point: one warning", w.count == 1);
+        check("setupSimplified 50 copies of one point: warning says they collapsed",
               w.lastContains("got 50 points: fewer than 3 distinct, non-collinear points") &&
               w.lastContains("drops duplicate and collinear points"));
     }
     {
         WarningCapture w;
         box2d::PolyShape poly;
-        poly.setupConvex(world, {{0, 0}, {10, 0}}, 400, 300);
-        check("setupConvex 2 points: no body", !poly.isCreated());
-        check("setupConvex 2 points: one warning", w.count == 1);
+        poly.setupSimplified(world, {{0, 0}, {10, 0}}, 400, 300);
+        check("setupSimplified 2 points: no body", !poly.isCreated());
+        check("setupSimplified 2 points: one warning", w.count == 1);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Mod API: RigidBody2D with Shape2D::polygon() / Shape2D::convex()
+// Mod API: RigidBody2D with Shape2D::polygon() / Shape2D::simplified()
 // ---------------------------------------------------------------------------
 static box2d::RigidBody2D* attach(box2d::World& world, shared_ptr<Node>& node, const box2d::Shape2D& shape) {
     node = make_shared<Node>();
     node->setPos(400, 300);
     return node->addMod<box2d::RigidBody2D>(world, shape);
+}
+
+// ---------------------------------------------------------------------------
+// Hull warning (#500) and Shape2D::polygon(const Path&)
+// ---------------------------------------------------------------------------
+// An L (6 points, its inner corner off the hull) plus one point inside it:
+// the hull keeps 5 of the 7 points.
+static vector<Vec2> lWithInteriorPoint() {
+    return {{-20, -20}, {20, -20}, {20, 0}, {0, 0}, {0, 20}, {-20, 20}, {-10, -10}};
+}
+
+// Runs before any other test builds a polygon with points inside its hull:
+// each call's warning comes once per process, so the "no warning" checks
+// here only mean something before it has fired.
+static void testHullDropWarning(box2d::World& world) {
+    // Every point on the outline: no warning, also in a crossing order, with
+    // a collinear middle point, or with the first point repeated at the end.
+    vector<pair<string, vector<Vec2>>> kept;
+    kept.push_back({"convex pentagon", circlePoints(5, 40)});
+    for (const auto& in : crossingInputs()) kept.push_back({in.name, in.pts});
+    kept.push_back({"collinear middle point", {{-20, -20}, {0, -20}, {20, -20}, {20, 20}, {-20, 20}}});
+    kept.push_back({"closing point repeated", {{-20, -20}, {20, -20}, {20, 20}, {-20, 20}, {-20, -20}}});
+    for (const auto& in : kept) {
+        {
+            WarningCapture w;
+            box2d::PolyShape poly;
+            poly.setup(world, in.second, 400, 300);
+            check("hull warning: setup() " + in.first + ": created, no warning",
+                  poly.isCreated() && w.count == 0);
+        }
+        {
+            WarningCapture w;
+            shared_ptr<Node> node;
+            auto* rb = attach(world, node, box2d::Shape2D::polygon(in.second));
+            check("hull warning: Shape2D::polygon() " + in.first + ": created, no warning",
+                  rb->getBody() && w.count == 0);
+        }
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::simplified(circlePoints(20, 50)));
+        check("hull warning: Shape2D::simplified() 20 points: no warning", rb->getBody() && w.count == 0);
+    }
+
+    // Points inside the hull: one warning naming the counts and setupCompound().
+    {
+        WarningCapture w;
+        box2d::PolyShape poly;
+        poly.setup(world, lWithInteriorPoint(), 400, 300);
+        check("hull warning: setup() L + interior point: created as the 5-point hull",
+              poly.isCreated() && poly.getNumVertices() == 5);
+        check("hull warning: setup() L + interior point: one warning", w.count == 1);
+        check("hull warning: setup() L + interior point: warning names counts and setupCompound()",
+              w.lastContains("tcxBox2d: PolyShape::setup() dropped 2 of 7 points inside the convex hull;"
+                             " use setupCompound() to keep the exact shape."));
+    }
+    // Once per process: neither the same call again nor the Path overload
+    // (which goes through setup()) warns again.
+    {
+        WarningCapture w;
+        box2d::PolyShape a, b;
+        a.setup(world, lWithInteriorPoint(), 400, 300);
+        b.setup(world, Path(lWithInteriorPoint()), 400, 300);
+        check("hull warning: setup() again (vector and Path): created, no warning",
+              a.isCreated() && b.isCreated() && w.count == 0);
+    }
+
+    // Shape2D::polygon() has its own gate: it warns once even though setup()
+    // already did.
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(lWithInteriorPoint()));
+        check("hull warning: Shape2D::polygon() L + interior point: created as the 5-point hull",
+              rb->getBody() && rb->shape().verts.size() == 5);
+        check("hull warning: Shape2D::polygon() L + interior point: one warning", w.count == 1);
+        check("hull warning: Shape2D::polygon() L + interior point: warning names counts and compound()",
+              w.lastContains("tcxBox2d: Shape2D::polygon() dropped 2 of 7 points inside the convex hull;"
+                             " use Shape2D::compound() to keep the exact shape."));
+    }
+    {
+        WarningCapture w;
+        shared_ptr<Node> a, b;
+        auto* ra = attach(world, a, box2d::Shape2D::polygon(lWithInteriorPoint()));
+        auto* rb = attach(world, b, box2d::Shape2D::polygon(Path(lWithInteriorPoint())));
+        check("hull warning: Shape2D::polygon() again (vector and Path): created, no warning",
+              ra->getBody() && rb->getBody() && w.count == 0);
+    }
+}
+
+static void testPolygonPath(box2d::World& world) {
+    // A convex Path keeps its points and order, like the vector overload.
+    {
+        vector<Vec2> penta = circlePoints(5, 40);
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(Path(penta)));
+        check("Shape2D::polygon(Path) pentagon: one fixture, 5 vertices",
+              fixtureCount(rb->getBody()) == 1 && polygonVertexCount(rb->getBody()) == 5);
+        check("Shape2D::polygon(Path) pentagon: shape() keeps the points", rb->shape().verts == penta);
+        check("Shape2D::polygon(Path) pentagon: no warning", w.count == 0);
+    }
+    // Every point of every subpath counts: two 2-point subpaths make a square.
+    {
+        Path p;
+        p.moveTo(-20, -20); p.lineTo(20, -20);
+        p.moveTo(20, 20);   p.lineTo(-20, 20);
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(p));
+        const auto& v = rb->shape().verts;
+        check("Shape2D::polygon(Path) two subpaths: the square of all 4 points",
+              rb->getBody() && polygonVertexCount(rb->getBody()) == 4 && v.size() == 4 &&
+              hasPoint(v, -20, -20) && hasPoint(v, 20, -20) && hasPoint(v, 20, 20) && hasPoint(v, -20, 20));
+
+        box2d::PolyShape poly;
+        poly.setup(world, p, 400, 300);
+        check("PolyShape::setup(Path) two subpaths: the same square",
+              poly.isCreated() && poly.getNumVertices() == 4);
+    }
+    // More than 8 points in total is refused, pointing to simplified().
+    {
+        WarningCapture w;
+        shared_ptr<Node> node;
+        auto* rb = attach(world, node, box2d::Shape2D::polygon(Path(circlePoints(20, 40))));
+        check("Shape2D::polygon(Path) 20 points: no body", rb->getBody() == nullptr);
+        check("Shape2D::polygon(Path) 20 points: one warning naming Shape2D::simplified()",
+              w.count == 1 && w.lastContains("Shape2D::simplified()"));
+    }
 }
 
 static void testRigidBody2D(box2d::World& world) {
@@ -485,16 +622,16 @@ static void testRigidBody2D(box2d::World& world) {
         WarningCapture w;
         shared_ptr<Node> node;
         attach(world, node, box2d::Shape2D::polygon(circlePoints(9, 40)));
-        check("RigidBody2D polygon 9 points: warning names Shape2D::convex()",
-              w.lastContains("Shape2D::convex()"));
+        check("RigidBody2D polygon 9 points: warning names Shape2D::simplified()",
+              w.lastContains("Shape2D::simplified()"));
     }
     {
         WarningCapture w;
         shared_ptr<Node> node;
         attach(world, node, box2d::Shape2D::polygon({{0, 0}, {10, 0}}));
-        check("RigidBody2D polygon 2 points: warning says Shape2D::convex() may have dropped points",
+        check("RigidBody2D polygon 2 points: warning says Shape2D::simplified() may have dropped points",
               w.lastContains("fewer than 3 distinct, non-collinear points") &&
-              w.lastContains("Shape2D::convex() may have dropped duplicate and collinear points"));
+              w.lastContains("Shape2D::simplified() may have dropped duplicate and collinear points"));
     }
     check("RigidBody2D refused polygons left no bodies", world.getBodyCount() == bodiesBefore);
 
@@ -539,42 +676,42 @@ static void testRigidBody2D(box2d::World& world) {
     {
         WarningCapture w;
         shared_ptr<Node> node;
-        auto* rb = attach(world, node, box2d::Shape2D::convex(circlePoints(20, 50)));
-        check("RigidBody2D Shape2D::convex 20 points: one fixture", fixtureCount(rb->getBody()) == 1);
-        check("RigidBody2D Shape2D::convex 20 points: at most 8 vertices",
+        auto* rb = attach(world, node, box2d::Shape2D::simplified(circlePoints(20, 50)));
+        check("RigidBody2D Shape2D::simplified 20 points: one fixture", fixtureCount(rb->getBody()) == 1);
+        check("RigidBody2D Shape2D::simplified 20 points: at most 8 vertices",
               rb->shape().verts.size() <= 8 && polygonVertexCount(rb->getBody()) <= 8);
         float ratio = rb->getBody() ? rb->getBody()->GetMass() / discMass(50) : 0.0f;
-        check("RigidBody2D Shape2D::convex 20 points: mass within 15% of the disc",
+        check("RigidBody2D Shape2D::simplified 20 points: mass within 15% of the disc",
               ratio > 0.85f && ratio <= 1.0f);
-        check("RigidBody2D Shape2D::convex 20 points: no warning", w.count == 0);
+        check("RigidBody2D Shape2D::simplified 20 points: no warning", w.count == 0);
     }
     {
         WarningCapture w;
         shared_ptr<Node> node;
-        auto* rb = attach(world, node, box2d::Shape2D::convex(Path(circlePoints(20, 50))));
-        check("RigidBody2D Shape2D::convex Path: created", rb->getBody() != nullptr);
+        auto* rb = attach(world, node, box2d::Shape2D::simplified(Path(circlePoints(20, 50))));
+        check("RigidBody2D Shape2D::simplified Path: created", rb->getBody() != nullptr);
     }
     {
         vector<Vec2> line;
         for (int i = 0; i < 12; ++i) line.push_back(Vec2(i * 5.0f, 0));
         WarningCapture w;
         shared_ptr<Node> node;
-        auto* rb = attach(world, node, box2d::Shape2D::convex(line));
-        check("RigidBody2D Shape2D::convex collinear: no body", rb->getBody() == nullptr);
-        check("RigidBody2D Shape2D::convex collinear: one warning", w.count == 1);
-        check("RigidBody2D Shape2D::convex collinear: warning says they collapsed",
+        auto* rb = attach(world, node, box2d::Shape2D::simplified(line));
+        check("RigidBody2D Shape2D::simplified collinear: no body", rb->getBody() == nullptr);
+        check("RigidBody2D Shape2D::simplified collinear: one warning", w.count == 1);
+        check("RigidBody2D Shape2D::simplified collinear: warning says they collapsed",
               w.lastContains("fewer than 3 distinct, non-collinear points") &&
-              w.lastContains("Shape2D::convex() may have dropped duplicate and collinear points"));
+              w.lastContains("Shape2D::simplified() may have dropped duplicate and collinear points"));
     }
     {
         WarningCapture w;
         shared_ptr<Node> node;
-        auto* rb = attach(world, node, box2d::Shape2D::convex(vector<Vec2>(50, Vec2(7, 3))));
-        check("RigidBody2D Shape2D::convex 50 copies of one point: no body", rb->getBody() == nullptr);
-        check("RigidBody2D Shape2D::convex 50 copies of one point: one warning", w.count == 1);
-        check("RigidBody2D Shape2D::convex 50 copies of one point: warning says they collapsed",
+        auto* rb = attach(world, node, box2d::Shape2D::simplified(vector<Vec2>(50, Vec2(7, 3))));
+        check("RigidBody2D Shape2D::simplified 50 copies of one point: no body", rb->getBody() == nullptr);
+        check("RigidBody2D Shape2D::simplified 50 copies of one point: one warning", w.count == 1);
+        check("RigidBody2D Shape2D::simplified 50 copies of one point: warning says they collapsed",
               w.lastContains("fewer than 3 distinct, non-collinear points") &&
-              w.lastContains("Shape2D::convex() may have dropped duplicate and collinear points"));
+              w.lastContains("Shape2D::simplified() may have dropped duplicate and collinear points"));
     }
 }
 
@@ -2173,9 +2310,11 @@ int main() {
     world.setAutoUpdate(false);
 
     testPolyShapeRefuses(world);
+    testHullDropWarning(world);
     testPolyShapeValid(world);
-    testSetupConvex(world);
+    testSetupSimplified(world);
     testRigidBody2D(world);
+    testPolygonPath(world);
     testCompoundShapes(world);
     testCompoundFilters(world);
     testCompoundHole();
