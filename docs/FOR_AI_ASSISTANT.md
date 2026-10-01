@@ -315,6 +315,18 @@ Available macros: `TC_FONT_SANS`, `TC_FONT_SERIF`, `TC_FONT_MONO`,
 `TC_FONT_SANS_JA`, `TC_FONT_SERIF_JA`. Backends: CoreText (macOS/iOS),
 DirectWrite (Windows), fontconfig (Linux). Web falls back to a Noto CDN URL.
 
+A name opens the face the OS resolves it to, also when that face is a later
+one inside a font collection (`.ttc`, e.g. `"Noto Sans CJK SC"` is face 2 of
+`NotoSansCJK-Regular.ttc`). System font names depend on the fonts each OS
+has. For identical text on every OS, bundle the font in `data/` and load it
+by file; for a `.ttc`, pass the face index (the order of faces is part of the
+file, so it is the same face everywhere):
+```cpp
+font.load("fonts/NotoSansCJK-Regular.ttc", 24, 2);  // face 2 of the collection
+```
+`faceIndex` defaults to 0. An index at or past the number of faces fails the
+load with an error log.
+
 ### Why is my small text blurry, and how do I sharpen it?
 
 Two knobs, and they are deliberately not symmetric.
