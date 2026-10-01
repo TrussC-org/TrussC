@@ -1256,6 +1256,7 @@ bool ImGui::Checkbox(const char* label, bool* v)
     const ImRect total_bb(pos, pos + ImVec2(square_sz + (label_size.x > 0.0f ? style.ItemInnerSpacing.x + label_size.x : 0.0f), label_size.y + style.FramePadding.y * 2.0f));
     ItemSize(total_bb, style.FramePadding.y);
     const bool is_visible = ItemAdd(total_bb, id);
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, v, 1, 0); // [TrussC] before the clip return: a clipped Checkbox reports too
     const bool is_multi_select = (g.LastItemData.ItemFlags & ImGuiItemFlags_IsMultiSelect) != 0;
     if (!is_visible)
         if (!is_multi_select || !g.BoxSelectState.UnclipMode || !g.BoxSelectState.UnclipRect.Overlaps(total_bb)) // Extra layer of "no logic clip" for box-select support
@@ -1421,6 +1422,7 @@ bool ImGui::RadioButton(const char* label, bool active)
 // FIXME: This would work nicely if it was a public template, e.g. 'template<T> RadioButton(const char* label, T* v, T v_button)', but I'm not sure how we would expose it..
 bool ImGui::RadioButton(const char* label, int* v, int v_button)
 {
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Radio, ImGuiDataType_S32, v, 1, 0); // [TrussC]
     const bool pressed = RadioButton(label, *v == v_button);
     if (pressed)
         *v = v_button;
@@ -7600,6 +7602,7 @@ bool ImGui::Selectable(const char* label, bool selected, ImGuiSelectableFlags fl
 
 bool ImGui::Selectable(const char* label, bool* p_selected, ImGuiSelectableFlags flags, const ImVec2& size_arg)
 {
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, 0); // [TrussC]
     if (Selectable(label, *p_selected, flags, size_arg))
     {
         *p_selected = !*p_selected;
@@ -8868,6 +8871,7 @@ bool ImGui::BeginListBox(const char* label, const ImVec2& size_arg)
         g.NextWindowData.ClearFlags(); // We behave like Begin() and need to consume those values
         return false;
     }
+    IMGUI_TC_ITEM_VALUE(id, label, ImGuiTcValueKind_ListBoxBegin, 0, NULL, 1, 0); // [TrussC]
 
     // FIXME-OPT: We could omit the BeginGroup() if label_size.x == 0.0f but would need to omit the EndGroup() as well.
     BeginGroup();
@@ -8905,6 +8909,7 @@ bool ImGui::ListBox(const char* label, int* current_item, const char* const item
 bool ImGui::ListBox(const char* label, int* current_item, const char* (*getter)(void* user_data, int idx), void* user_data, int items_count, int height_in_items)
 {
     ImGuiContext& g = *GImGui;
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_ListBox, ImGuiDataType_S32, current_item, 1, 0); // [TrussC]
 
     // Calculate size from "height_in_items"
     if (height_in_items < 0)
@@ -9749,6 +9754,7 @@ bool ImGui::MenuItem(const char* label, const char* shortcut, bool selected, boo
 
 bool ImGui::MenuItem(const char* label, const char* shortcut, bool* p_selected, bool enabled)
 {
+    IMGUI_TC_ITEM_VALUE(0, label, ImGuiTcValueKind_Bool, ImGuiDataType_Bool, p_selected, 1, 0); // [TrussC]
     if (MenuItemEx(label, NULL, shortcut, p_selected ? *p_selected : false, enabled))
     {
         if (p_selected)

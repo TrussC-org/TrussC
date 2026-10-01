@@ -79,7 +79,7 @@ void tcApp::keyPressed(int key) {
 void tcApp::filesDropped(const vector<string>& files) {
     for (auto& file : files) {
         // Find first .obj file
-        if (file.size() > 4 && file.substr(file.size() - 4) == ".obj") {
+        if (toLower(getFileExtension(utf8ToPath(file))) == "obj") {
             loader_.clear();
             if (loader_.load(file)) {
                 hasModel_ = true;

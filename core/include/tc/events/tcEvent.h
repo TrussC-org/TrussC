@@ -29,6 +29,7 @@
 namespace trussc {
     struct NullMutex {
         void lock() {}
+        bool try_lock() { return true; }
         void unlock() {}
     };
 }
@@ -228,11 +229,26 @@ public:
 
     // Fire event. Hot path: a single atomic_load (no allocation, no mutex)
     // — safe to call from the audio thread.
+    //
+    // Changes to the listener list during a notify() pass (#107, #256):
+    //   - A listener added during the pass starts from the next notify().
+    //   - A listener removed during the pass on the notifying thread (an
+    //     earlier listener disconnects it, or clear() runs) is not called
+    //     again in that pass: its liveness flag is checked before each call.
+    //   - Removal from ANOTHER thread does not wait. A callback already
+    //     running keeps running after disconnect() returns, and one whose
+    //     flag was read just before the removal can still start. The owner
+    //     of the notifying thread provides the barrier for that (e.g.
+    //     AudioEngine::waitForCallbackIdle()), or the listener uses
+    //     Deliver::Main.
     void notify(T& arg) {
         ConstEntryListPtr snapshot = std::atomic_load(&entries_);
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
+            // Removed earlier in this pass (the snapshot still holds it).
+            // One acquire load per entry, no lock.
+            if (entry.alive && !entry.alive->load(std::memory_order_acquire)) continue;
 
             // Deliver::Main from a worker thread: copy the payload and run the
             // listener on the main thread next frame. Already-main (or Inline)
@@ -421,11 +437,14 @@ private:
 
 public:
     // Fire event. Hot path: a single atomic_load, no allocation, no mutex.
+    // Changes to the listener list during a pass: see Event<T>::notify().
     void notify() {
         ConstEntryListPtr snapshot = std::atomic_load(&entries_);
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
+            // Removed earlier in this pass (the snapshot still holds it).
+            if (entry.alive && !entry.alive->load(std::memory_order_acquire)) continue;
             // Deliver::Main from a worker thread: run on the main thread next
             // frame (no payload to copy for Event<void>).
             if (entry.deliver == Deliver::Main && !isMainThread()) {

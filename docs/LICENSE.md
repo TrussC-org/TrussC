@@ -40,10 +40,11 @@ TrussC includes or depends on the following third-party libraries. All use permi
 |---------|---------|---------|---------------------|-------------|
 | **sokol** | - | zlib License | Andre Weissflog | [LICENSE (in headers)](https://github.com/floooh/sokol/blob/master/sokol_app.h) |
 | **Dear ImGui** | 1.92.9b | MIT | Omar Cornut | [LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt) |
-| **stb_image** | 2.30 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
-| **stb_image_write** | 1.16 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
-| **stb_truetype** | 1.26 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
-| **stb_vorbis** | 1.22 | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE (in README)](https://github.com/nothings/stb?tab=readme-ov-file#whats-the-license) |
+| **stb_image** | 2.30 (fork [nvpro-samples/stb](https://github.com/nvpro-samples/stb) `nv/all-fixes` @ `1cafe0e`, + 2 TrussC patches) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
+| **stb_image_write** | 1.16 (nothings/stb @ `1ee679c`, + 1 TrussC patch) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
+| **stb_perlin** | 0.5 (nothings/stb @ `2bb4a0a`) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
+| **stb_truetype** | 1.26 (nothings/stb @ `6e9f34d`, + 3 TrussC patches) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
+| **stb_vorbis** | 1.22 (fork [sezero/stb](https://github.com/sezero/stb) `stb_vorbis-sezero` @ `dd0c5ec`) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
 | **dr_mp3** | 0.6.39 | Public Domain or MIT-0 | David Reid | [LICENSE (in source)](https://github.com/mackron/dr_libs/blob/master/dr_mp3.h) |
 | **dr_wav** | 0.13.16 | Public Domain or MIT-0 | David Reid | [LICENSE (in source)](https://github.com/mackron/dr_libs/blob/master/dr_wav.h) |
 | **miniaudio** | 0.11.21 | Public Domain or MIT-0 | David Reid | [LICENSE (in README)](https://github.com/mackron/miniaudio?tab=readme-ov-file#license) |
@@ -139,7 +140,7 @@ commercial or non-commercial, and by any means.
 
 **MIT License (alternative):**
 
-MITライセンスを選択する場合は、上記のMIT Licenseセクションを参照してください。
+MITライセンス（Copyright (c) 2017 Sean Barrett）と Public Domain の全文は [core/include/stb/LICENSE](../core/include/stb/LICENSE) にあります。各 stb ファイルの取り込み元・コミット・TrussC 側のパッチは [core/include/stb/README.md](../core/include/stb/README.md) にまとめています。
 
 ### Public Domain / MIT-0 (dr_libs, miniaudio)
 

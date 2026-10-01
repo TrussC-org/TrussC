@@ -471,10 +471,6 @@ private:
     // itself, on its way out. False if the channel was already closed (or
     // null).
     bool shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
-
-    static std::atomic<int> instanceCount_;
-    static void initWinsock();
-    static void cleanupWinsock();
 };
 
 } // namespace trussc

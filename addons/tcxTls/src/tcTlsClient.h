@@ -97,6 +97,23 @@ private:
     bool caUserProvided_ = false;
     bool caAutoLoadAttempted_ = false;
 
+    // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
+    // client") if the client was connected. The destructor passes false.
+    void disconnectImpl(bool notify);
+
+    // Clear the connection flags, close the socket and reset the SSL
+    // context, leaving tlsReceiveThread_ alone. The receive thread calls it
+    // on itself when a handshake fails: the thread stays owned (joinable),
+    // so disconnect() and the destructor still join it while it notifies.
+    // Only a listener that calls connect() or disconnect() there detaches it.
+    void teardown();
+
+    // Shut down and close the socket, if there is one
+    void closeSocket();
+
+    // Free and re-initialise the SSL context and config
+    void resetSslContext();
+
     // Perform TLS handshake
     bool performHandshake();
 
@@ -107,9 +124,37 @@ private:
     void ensureDefaultCAsLoaded();
 
     // Receive thread (for TLS)
-    void tlsReceiveThreadFunc();
+    void tlsReceiveThreadFunc(unsigned generation);
+
+    // processNetwork()'s work, for the receive thread of that generation
+    void processNetworkImpl(unsigned generation);
 
     std::thread tlsReceiveThread_;
+
+    // Bumped by every connect(), before it sets any flag for the new
+    // connection; its receive thread gets that value. A thread whose
+    // generation is no longer current stops: processNetwork()'s receive loop and the loop
+    // in tlsReceiveThreadFunc() both check it. So a listener on the receive
+    // thread can reconnect without the old thread reading the new
+    // connection: onReceive, onDisconnect, and onError or onConnect(false)
+    // after a failed handshake (performHandshake() tears the failed
+    // connection down before it notifies them).
+    //
+    // Not covered: the reconnect itself. connect() on the receive thread
+    // detaches that thread and then, on it, creates the socket, resolves the
+    // host, connects (blocking) and starts the new receive thread. A
+    // disconnect() called on the receive thread detaches it the same way. No
+    // one owns the detached thread: disconnect() and the destructor do not
+    // wait for it, socket_ is not atomic, and the thread goes on reading the
+    // client after that call returns. So, as for TcpClient (see its Events
+    // comment): until #261 / #262 land, do not destroy a client whose
+    // receive-thread listener called connect() or disconnect() (keep it for
+    // the life of the app), and do not call disconnect() on it from another
+    // thread until that call has returned.
+    std::atomic<unsigned> tlsReceiveGeneration_{0};
+
+    // Receive buffer, sized to receiveBufferSize_ by processNetwork()
+    std::vector<unsigned char> tlsRecvBuf_;
 };
 
 }  // namespace tcx::tls

@@ -21,6 +21,20 @@ plus `OscBundle::fromBytes` directly):
   32-bit maximum;
 - valid packets of every argument shape and padding length still parse.
 
+And the polling queue:
+
+- a receiver polled with `getNextMessage()` only (never `hasNewMessage()`)
+  receives messages;
+- with the default size (1024) a 150-message bundle arrives whole, 0 dropped;
+- with `setBufferSize(100)` the same bundle keeps the newest 100: 50 dropped
+  and counted in `getDroppedMessages()`;
+- the drop is logged from the polling call (not the receive thread), a second
+  overflow within 2 s is not logged yet, and the next report after 2 s gives
+  the drops summed since the last one;
+- shrinking a filled queue with `setBufferSize(40)` keeps the newest 40, counts
+  the 110 discarded in `getDroppedMessages()` and reports them in the next
+  poll's warning, so received + dropped == sent over the whole section.
+
 > Note: it does *not* assert that a non-member socket on a *different port* gets
 > nothing while another socket on the host has joined the group — IPv4 membership
 > is an interface-level IGMP concept, so the kernel may still deliver to a

@@ -89,6 +89,12 @@ editor is the IntelliSense provider:
   `launch.json` uses CodeLLDB on every OS. Known limitation: LLDB debugs the
   MSVC build through its PDB, and variable inspection / expression evaluation
   are weaker than with Visual Studio's debugger.
+- The project remembers its IDE: later `trusscli update`, `trusscli addon add`
+  and `trusscli addon remove` runs keep `--ide cursor` (and the `--web` /
+  `--android` / `--ios` targets) without passing them again. It is stored in
+  the project's `CMakePresets.json`, which is per machine (gitignored), so a
+  fresh clone starts from `vscode` again. `trusscli update --ide vscode`
+  switches back.
 
 ---
 

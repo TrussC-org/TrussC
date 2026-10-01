@@ -76,6 +76,7 @@ Linux では追加の開発パッケージが必要です。ヘルパースク�
 - VSCode では C/C++ 拡張と clangd を一緒に入れないでください。IntelliSense がぶつかります。
 - Windows + VSCode でも CodeLLDB を入れて問題ありません。生成される `launch.json` は Windows では C/C++ 拡張のデバッガ（`cppvsdbg`）を使うので、CodeLLDB は使われないだけです。
 - **Windows + VS Code のフォーク**では `cppvsdbg` が使えません。プロジェクトを `--ide cursor` で生成してください（例: `trusscli update --ide cursor`）。この `launch.json` はどの OS でも CodeLLDB を使います。制限として、LLDB は MSVC ビルドを PDB 経由でデバッグするため、変数の表示や式の評価は Visual Studio のデバッガより弱くなります。
+- プロジェクトは IDE を覚えています。その後の `trusscli update`、`trusscli addon add`、`trusscli addon remove` は `--ide cursor`（と `--web` / `--android` / `--ios` のターゲット）を付け直さなくても保ちます。保存先はプロジェクトの `CMakePresets.json` で、マシンごとのファイル（gitignore 対象）なので、clone し直すと `vscode` からになります。戻すときは `trusscli update --ide vscode` です。
 
 ---
 

@@ -272,8 +272,9 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     NSData* data = nil;
-    std::string ext = path.extension().string();
-    if (ext == ".jpg" || ext == ".jpeg") {
+    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    std::string ext = toLower(getFileExtension(path));
+    if (ext == "jpg" || ext == "jpeg") {
         data = UIImageJPEGRepresentation(image, 0.9);
     } else {
         data = UIImagePNGRepresentation(image);

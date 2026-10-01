@@ -258,7 +258,8 @@ jobs:
 
       # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
       # built AND run (non-zero exit fails the job). The tests are small console
-      # projects. No-op when none exist.
+      # projects. No-op when none exist. Harnesses with a `daily-only` marker
+      # (heavy dependencies, e.g. tcxTls builds mbedTLS) run in daily.yml only.
       - name: Build & run addon tests
         shell: bash
         run: |

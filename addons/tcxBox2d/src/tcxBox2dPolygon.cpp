@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcxBox2dPolygon.h"
+#include "tcxBox2dPolygonCheck.h"
 #include <cmath>
 
 namespace tcx::box2d {
@@ -10,6 +11,9 @@ namespace tcx::box2d {
 PolyShape::PolyShape(PolyShape&& other) noexcept
     : Body(std::move(other))
     , vertices_(std::move(other.vertices_))
+    , path_(std::move(other.path_))
+    , fillMesh_(std::move(other.fillMesh_))
+    , compound_(other.compound_)
 {
 }
 
@@ -17,18 +21,103 @@ PolyShape& PolyShape::operator=(PolyShape&& other) noexcept {
     if (this != &other) {
         Body::operator=(std::move(other));
         vertices_ = std::move(other.vertices_);
+        path_ = std::move(other.path_);
+        fillMesh_ = std::move(other.fillMesh_);
+        compound_ = other.compound_;
     }
     return *this;
 }
 
 void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float cx, float cy) {
-    if (vertices.size() < 3 || vertices.size() > 8) {
-        // Box2D only supports 3-8 vertices
+    // Check before creating anything: Box2D would assert (Debug) or build a
+    // 2x2 m box (Release) for points it can't use.
+    b2PolygonShape polygon;
+    std::vector<tc::Vec2> hull;
+    detail::PolygonError err = detail::makePolygonShape(vertices, polygon, hull);
+    if (err != detail::PolygonError::None) {
+        auto log = tc::logWarning();
+        log << "tcxBox2d: PolyShape::setup() got " << vertices.size() << " points: "
+            << detail::describePolygonError(err) << ".";
+        if (err == detail::PolygonError::TooManyPoints) {
+            log << " Use setupConvex() for a convex approximation or setupCompound() for the exact shape.";
+        }
+        log << " Body not created.";
         return;
     }
+    vertices_ = hull;
+    path_.clear();
+    fillMesh_ = tc::Mesh();
+    compound_ = false;
+    createBody(world, &polygon, 1, cx, cy);
+}
 
+void PolyShape::setup(World& world, const tc::Path& polyline, float cx, float cy) {
+    setup(world, detail::pathPoints(polyline), cx, cy);
+}
+
+void PolyShape::setupConvex(World& world, const std::vector<tc::Vec2>& points, float cx, float cy) {
+    std::vector<tc::Vec2> reduced = detail::reducedConvexHull(points);
+    if (reduced.size() < 3) {
+        tc::logWarning() << "tcxBox2d: PolyShape::setupConvex() got " << points.size()
+                         << " points: " << detail::describeCollapsedHull("setupConvex()")
+                         << ". Body not created.";
+        return;
+    }
+    b2PolygonShape polygon;
+    std::vector<tc::Vec2> hull;
+    detail::PolygonError err = detail::makePolygonShape(reduced, polygon, hull);
+    if (err != detail::PolygonError::None) {
+        tc::logWarning() << "tcxBox2d: PolyShape::setupConvex() got " << points.size()
+                         << " points whose convex hull can't make a polygon: "
+                         << detail::describePolygonError(err) << ". Body not created.";
+        return;
+    }
+    vertices_ = hull;
+    path_.clear();
+    fillMesh_ = tc::Mesh();
+    compound_ = false;
+    createBody(world, &polygon, 1, cx, cy);
+}
+
+void PolyShape::setupConvex(World& world, const tc::Path& path, float cx, float cy) {
+    setupConvex(world, detail::pathPoints(path), cx, cy);
+}
+
+void PolyShape::setupCompound(World& world, const tc::Path& path, float cx, float cy) {
+    detail::CompoundShapes shapes;
+    if (!detail::makeCompoundShapes(path, shapes)) {
+        if (shapes.error == detail::PolygonError::TooSmallForOffset) {
+            tc::logWarning() << "tcxBox2d: PolyShape::setupCompound() got " << path.size() << " points: "
+                             << detail::describePolygonError(shapes.error) << ". Body not created.";
+        } else {
+            tc::logWarning() << "tcxBox2d: PolyShape::setupCompound() got " << path.size()
+                             << " points with no area Box2D can use (" << shapes.triangles
+                             << " triangles, none usable). Body not created.";
+        }
+        return;
+    }
+    if (shapes.skipped > 0) {
+        tc::logWarning() << "tcxBox2d: PolyShape::setupCompound() skipped " << shapes.skipped
+                         << " of " << shapes.triangles
+                         << " triangles that are slivers Box2D can't use (collinear or nearly"
+                         << " coincident corners, almost no area).";
+    }
+    vertices_ = detail::pathPoints(path);
+    path_ = path;
+    fillMesh_ = detail::makeFillMesh(shapes.fill);
+    compound_ = true;
+    createBody(world, shapes.shapes.data(), shapes.shapes.size(), cx, cy);
+}
+
+void PolyShape::setupCompound(World& world, const std::vector<tc::Vec2>& points, float cx, float cy) {
+    tc::Path path(points);
+    path.close();
+    setupCompound(world, path, cx, cy);
+}
+
+void PolyShape::createBody(World& world, const b2PolygonShape* shapes, size_t count,
+                           float cx, float cy) {
     world_ = &world;
-    vertices_ = vertices;
 
     // Body definition
     b2BodyDef bodyDef;
@@ -37,39 +126,29 @@ void PolyShape::setup(World& world, const std::vector<tc::Vec2>& vertices, float
 
     body_ = world.getWorld()->CreateBody(&bodyDef);
 
-    // Convert vertices to Box2D format
-    std::vector<b2Vec2> b2Vertices(vertices.size());
-    for (size_t i = 0; i < vertices.size(); ++i) {
-        b2Vertices[i] = World::toBox2d(vertices[i]);
-    }
-
-    // Polygon shape
-    b2PolygonShape polygon;
-    polygon.Set(b2Vertices.data(), static_cast<int32>(b2Vertices.size()));
-
-    // Fixture definition
+    // Fixture definition, one fixture per shape. They are added at density 0
+    // and get their density once all are in: CreateFixture() resets the mass
+    // data after every fixture that has a density, and a compound body's
+    // first few triangles alone can be too small for their offset (an
+    // m_I > 0 assert in Debug) even though the whole body passed the check.
     b2FixtureDef fixtureDef;
-    fixtureDef.shape = &polygon;
-    fixtureDef.density = 1.0f;
+    fixtureDef.density = 0.0f;
     fixtureDef.friction = 0.3f;
     fixtureDef.restitution = 0.3f;
 
-    body_->CreateFixture(&fixtureDef);
+    for (size_t i = 0; i < count; ++i) {
+        fixtureDef.shape = &shapes[i];
+        body_->CreateFixture(&fixtureDef);
+    }
+    for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) f->SetDensity(1.0f);
+    body_->ResetMassData();
 
     // Store Body* in UserData (used by World::getBodyAtPoint())
     body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
     // Create collider component
     auto* collider = setupCollider<PolygonCollider2D>();
-    collider->setVertexCount(static_cast<int>(vertices.size()));
-}
-
-void PolyShape::setup(World& world, const tc::Path& polyline, float cx, float cy) {
-    std::vector<tc::Vec2> vertices;
-    for (int i = 0; i < polyline.size(); ++i) {
-        vertices.push_back(tc::Vec2(polyline[i].x, polyline[i].y));
-    }
-    setup(world, vertices, cx, cy);
+    collider->setVertexCount(static_cast<int>(vertices_.size()));
 }
 
 void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int sides) {
@@ -93,6 +172,11 @@ void PolyShape::setupRegular(World& world, float cx, float cy, float radius, int
 void PolyShape::draw() {
     if (!body_ || vertices_.empty()) return;
 
+    if (compound_) {
+        detail::drawPathOutline(path_);
+        return;
+    }
+
     // Draw at local origin (Node transform already applied)
     for (size_t i = 0; i < vertices_.size(); ++i) {
         size_t next = (i + 1) % vertices_.size();
@@ -104,15 +188,19 @@ void PolyShape::draw() {
 void PolyShape::drawFill() {
     if (!body_ || vertices_.empty()) return;
 
-    // Fill with triangle fan
+    if (compound_) {
+        fillMesh_.draw();   // Path::drawFill()'s fill, kept from setupCompound()
+        return;
+    }
+
+    // Fill with a triangle fan from the first vertex. vertices_ is convex (the
+    // hull Box2D built), but the body origin need not lie inside it.
     tc::Mesh mesh;
     mesh.setMode(tc::PrimitiveMode::TriangleFan);
 
-    mesh.addVertex(tc::Vec3(0, 0, 0));  // Center
     for (const auto& v : vertices_) {
         mesh.addVertex(tc::Vec3(v.x, v.y, 0));
     }
-    mesh.addVertex(tc::Vec3(vertices_[0].x, vertices_[0].y, 0));
 
     mesh.draw();
 }
