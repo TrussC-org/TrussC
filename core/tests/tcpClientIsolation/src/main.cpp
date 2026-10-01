@@ -17,6 +17,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -56,6 +57,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
@@ -229,7 +232,9 @@ static void scenario() {
     TC_CLOSE(lb);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);

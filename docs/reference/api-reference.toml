@@ -9453,14 +9453,24 @@ outer `connect()`, which can end in `std::terminate` (#261). Without threads
 `connectAsync()` is `connect()`, and is overruled the same way.
 
 When the event fires on the receive thread, a plain (inline) listener that
-calls `connect()` runs it on that thread, which the client then lets go of
-and nothing waits for. A listener that calls `disconnect()` there lets go of
-the thread the same way, and the thread goes on using the client after that
-call returns. So until #261 / #262 land, do not destroy a client whose
-receive-thread listener called `connect()` or `disconnect()`: keep it for the
-life of the app. And do not call `disconnect()` on it from another thread
-until that call has returned. Reconnecting from the main thread, as above,
-avoids all of this.
+calls `connect()` runs it on that thread, which cannot join itself. A
+listener that calls `disconnect()` there is in the same position. The client
+keeps that thread and joins it from another thread: the next `connect()` or
+`disconnect()` returns only once the thread has ended (the rest of the
+listener and of its receive loop), and so does the destructor. Until
+#261 / #262 land, do not call `disconnect()` on the client from another
+thread until the listener's call has returned.
+
+Do not destroy the client from one of its own listeners (on the receive or
+connect thread). The destructor cannot join the thread it runs on: it
+detaches it, and the thread then returns from the listener into the
+destroyed client, which is undefined behavior. Destroy it from another
+thread, or after the listener has returned (for example from a
+`Deliver::Main` listener). `connect()`, `connectAsync()`, `disconnect()` and
+the destructor can wait for a listener still running on one of the client's
+threads. Do not call them while holding a lock that such a listener takes:
+the call and the listener would wait for each other forever. Reconnecting
+from the main thread, as above, avoids all of this.
 '''
 details.ja = '''
 [`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason) が理由を示す：
@@ -9497,14 +9507,23 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 同じで、同じように閉じ直される。
 
 受信スレッドで発火したとき、そこで `connect()` を呼ぶ通常の（inline の）
-リスナーは、その受信スレッドの上で動き、クライアントはそのスレッドを手放す。
-誰もそれを待たない。そこで `disconnect()` を呼ぶリスナーも、同じように
-スレッドを手放す。そのスレッドは、呼び出しが返ったあともクライアントを使い
-続ける。だから #261 / #262 が入るまでは、受信スレッドのリスナーが
-`connect()` か `disconnect()` を呼んだクライアントは破棄しないこと（アプリの
-終了まで持ち続ける）。また、その呼び出しが返るまでは、別スレッドから
-`disconnect()` を呼ばないこと。上の例のようにメインスレッドで再接続すれば、
-どれも避けられる。
+リスナーは、その受信スレッドの上で動き、そのスレッドは自分自身を join
+できない。そこで `disconnect()` を呼ぶリスナーも同じだ。クライアントは
+そのスレッドを手元に置いておき、別のスレッドから join する：次の
+`connect()` か `disconnect()` は、そのスレッドが終わってから（リスナーの
+残りと受信ループを抜けるまで）戻り、デストラクタも同じように待つ。
+#261 / #262 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
+`disconnect()` を呼ばないこと。
+
+クライアントを自分のリスナー（受信スレッドや接続スレッドの上）から破棄
+しないこと。デストラクタは自分が動いているスレッドを join できないので
+detach し、そのスレッドはリスナーから破棄済みのクライアントへ戻る。これは
+未定義動作になる。別のスレッドから、またはリスナーが返ったあと（たとえば
+`Deliver::Main` のリスナーから）破棄すること。`connect()`、`connectAsync()`、
+`disconnect()`、デストラクタは、クライアントのスレッドの上でまだ動いている
+リスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを
+呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。
+上の例のようにメインスレッドで再接続すれば、どれも避けられる。
 '''
 details.ko = '''
 [`TcpDisconnectEventArgs::reason`](#TcpDisconnectEventArgs::reason)가 이유를 알려 준다:
@@ -9541,14 +9560,22 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 `connect()`와 같으며, 같은 방식으로 다시 닫힌다.
 
 수신 스레드에서 발생했을 때 그 자리에서 `connect()`를 호출하는 일반(inline)
-리스너는 그 수신 스레드 위에서 실행되며, 클라이언트는 그 스레드를 놓아 버리고
-아무도 그 스레드를 기다리지 않는다. 그 자리에서 `disconnect()`를 호출하는
-리스너도 같은 방식으로 스레드를 놓아 버리며, 그 스레드는 호출이 반환된
-뒤에도 클라이언트를 계속 사용한다. 따라서 #261 / #262가 들어오기 전까지는
-수신 스레드의 리스너가 `connect()`나 `disconnect()`를 호출한 클라이언트를
-파괴하지 말 것(앱이 끝날 때까지 유지한다). 또한 그 호출이 반환될 때까지 다른
-스레드에서 `disconnect()`를 호출하지 말 것. 위 예처럼 메인 스레드에서
-재연결하면 모두 피할 수 있다.
+리스너는 그 수신 스레드 위에서 실행되며, 그 스레드는 자기 자신을 join할 수
+없다. 그 자리에서 `disconnect()`를 호출하는 리스너도 마찬가지다.
+클라이언트는 그 스레드를 보관해 두었다가 다른 스레드에서 join한다: 다음
+`connect()`나 `disconnect()`는 그 스레드가 끝난 뒤에(리스너의 나머지와 수신
+루프를 빠져나올 때까지) 반환하며, 소멸자도 같은 방식으로 기다린다.
+#261 / #262가 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
+`disconnect()`를 호출하지 말 것.
+
+클라이언트를 자신의 리스너(수신 스레드나 연결 스레드 위)에서 파괴하지 말 것.
+소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는
+리스너에서 이미 파괴된 클라이언트로 돌아간다. 이는 정의되지 않은 동작이다.
+다른 스레드에서, 또는 리스너가 반환된 뒤에(예: `Deliver::Main` 리스너에서)
+파괴할 것. `connect()`, `connectAsync()`, `disconnect()`와 소멸자는
+클라이언트의 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런
+리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를
+영원히 기다리게 된다. 위 예처럼 메인 스레드에서 재연결하면 모두 피할 수 있다.
 '''
 
 ["TcpClient::onError"]
@@ -9842,9 +9869,9 @@ description.ja = "接続中の全クライアントID"
 description.ko = "연결된 모든 클라이언트 ID"
 
 ["TcpServer::getPort"]
-description.en = "The listening port"
-description.ja = "待ち受けポート"
-description.ko = "수신 대기 포트"
+description.en = "The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port"
+description.ja = "サーバが bind しているポート。start(0) のあとは OS が選んだポート、固定のポートならそのポート"
+description.ko = "서버가 bind된 포트. start(0) 후에는 OS가 고른 포트, 고정 포트라면 그 포트"
 
 ["TcpServer::getSendAsyncBufferSize"]
 description.en = "The current high-water mark for one client's send queue, in bytes"
@@ -11035,6 +11062,9 @@ description.ko = "수신용 포트를 바인드 (startReceiving이 수신 스레
 description.en = "Close the socket"
 description.ja = "ソケットを閉じる"
 description.ko = "소켓을 닫음"
+details.en = "Returns once the receive thread has ended. From an inline onReceive listener, on the receive thread itself, it closes the socket and returns without waiting: the socket keeps that thread, and the next startReceiving(), stopReceiving() or close() on another thread, or the destructor, waits for it. Do not destroy the socket from such a listener: the destructor cannot join the thread it runs on, so it detaches it, and the thread then returns into the destroyed socket, which is undefined behavior. Destroy it from another thread, or after the listener has returned. startReceiving() (bind() calls it), stopReceiving(), close() and the destructor can wait for a listener still running on the receive thread. Do not call them while holding a lock that such a listener takes: the call and the listener would wait for each other forever."
+details.ja = "受信スレッドが終わってから戻る。受信スレッドの上の inline の onReceive リスナーから呼ぶと、ソケットを閉じて待たずに戻る：ソケットはそのスレッドを手元に置いておき、別スレッドからの次の startReceiving()、stopReceiving()、close()、またはデストラクタがそれを待つ。そのリスナーからソケットを破棄しないこと：デストラクタは自分が動いているスレッドを join できないので detach し、そのスレッドは破棄済みのソケットへ戻る。これは未定義動作になる。別のスレッドから、またはリスナーが返ったあとに破棄すること。startReceiving()（bind() が呼ぶ）、stopReceiving()、close()、デストラクタは、受信スレッドの上でまだ動いているリスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。"
+details.ko = "수신 스레드가 끝난 뒤에 반환한다. 수신 스레드 위의 inline onReceive 리스너에서 호출하면 소켓을 닫고 기다리지 않고 반환한다: 소켓은 그 스레드를 보관해 두고, 다른 스레드에서의 다음 startReceiving(), stopReceiving(), close() 또는 소멸자가 그것을 기다린다. 그런 리스너에서 소켓을 파괴하지 말 것: 소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는 이미 파괴된 소켓으로 돌아간다. 이는 정의되지 않은 동작이다. 다른 스레드에서, 또는 리스너가 반환된 뒤에 파괴할 것. startReceiving()(bind()가 호출한다), stopReceiving(), close()와 소멸자는 수신 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런 리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를 영원히 기다리게 된다."
 
 ["UdpSocket::connect"]
 description.en = "Set the destination for send()"
@@ -11182,6 +11212,9 @@ description.ko = "수신 스레드를 시작 (bind 후 자동 호출)"
 description.en = "Stop the receive thread"
 description.ja = "受信スレッドを停止"
 description.ko = "수신 스레드를 정지"
+details.en = "Returns once the receive thread has ended. From an inline onReceive listener, on the receive thread itself, it returns without waiting: the socket keeps that thread, and the next startReceiving(), stopReceiving() or close() on another thread, or the destructor, waits for it. startReceiving() (bind() calls it), stopReceiving(), close() and the destructor can wait for a listener still running on the receive thread. Do not call them while holding a lock that such a listener takes: the call and the listener would wait for each other forever."
+details.ja = "受信スレッドが終わってから戻る。受信スレッドの上の inline の onReceive リスナーから呼ぶと待たずに戻る：ソケットはそのスレッドを手元に置いておき、別スレッドからの次の startReceiving()、stopReceiving()、close()、またはデストラクタがそれを待つ。startReceiving()（bind() が呼ぶ）、stopReceiving()、close()、デストラクタは、受信スレッドの上でまだ動いているリスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。"
+details.ko = "수신 스레드가 끝난 뒤에 반환한다. 수신 스레드 위의 inline onReceive 리스너에서 호출하면 기다리지 않고 반환한다: 소켓은 그 스레드를 보관해 두고, 다른 스레드에서의 다음 startReceiving(), stopReceiving(), close() 또는 소멸자가 그것을 기다린다. startReceiving()(bind()가 호출한다), stopReceiving(), close()와 소멸자는 수신 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런 리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를 영원히 기다리게 된다."
 
 ["VSYNC"]
 keywords = ["frame rate", "fps", "refresh", "sync"]
@@ -15919,9 +15952,9 @@ related = ["setStrokeWeight"]
 ["nodeToJson"]
 category = "utility"
 keywords = ["serialize", "reflect", "tree", "dump"]
-description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection"
-description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ"
-description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화"
+description.en = "Serialize a node (and its subtree up to maxDepth; -1 = unlimited) to JSON via reflection. Derived members (e.g. globalPos) are left out unless includeDerived is true; then they are included and named under \"derived\""
+description.ja = "ノード（および maxDepth までのサブツリー、-1 = 無制限）をリフレクションで JSON にシリアライズ。派生メンバ（例: globalPos）は includeDerived が true のときだけ含め、\"derived\" に名前を列挙する"
+description.ko = "노드(및 maxDepth까지의 서브트리, -1 = 무제한)를 리플렉션으로 JSON으로 직렬화. 파생 멤버(예: globalPos)는 includeDerived가 true일 때만 포함하며 \"derived\"에 이름을 나열한다"
 related = ["getRootNode", "Node::findByInstanceId"]
 
 ["noise"]
@@ -16121,10 +16154,10 @@ related = ["Json", "reflectToJson", "parseJson"]
 
 ["reflectToJson"]
 category = "utility"
-keywords = ["serialize", "reflection", "dump", "members"]
-description.en = "Return all reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod."
-description.ja = "objのreflect済み(TC_REFLECT)メンバをすべてJsonオブジェクトとして返す。NodeやModなど任意のreflected型で動作"
-description.ko = "obj의 reflect된(TC_REFLECT) 멤버를 모두 Json 객체로 반환. Node나 Mod 등 임의의 reflected 타입에서 동작"
+keywords = ["serialize", "reflection", "dump", "members", "save", "derived"]
+description.en = "Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain."
+description.ja = "objのreflect済み(TC_REFLECT)メンバをJsonオブジェクトとして返す。NodeやModなど任意のreflected型で動作。派生値(TC_DERIVED、例: NodeのglobalPos)はincludeDerivedがtrueでない限り含めないので、既定の出力はそのまま保存に使える"
+description.ko = "obj의 reflect된(TC_REFLECT) 멤버를 Json 객체로 반환. Node나 Mod 등 임의의 reflected 타입에서 동작. 파생 값(TC_DERIVED, 예: Node의 globalPos)은 includeDerived가 true가 아니면 제외하므로 기본 출력은 그대로 저장에 쓸 수 있다"
 related = ["Json", "reflectFromJson", "toJsonString"]
 
 ["releaseSglBuffers"]
@@ -18229,6 +18262,24 @@ description.en = "Leave the current read-only scope."
 description.ja = "現在の読み取り専用スコープを抜ける。"
 description.ko = "현재 읽기 전용 범위를 벗어난다."
 
+["Reflector::isDerived"]
+keywords = ["derived", "reflection", "serialize", "TC_DERIVED"]
+description.en = "Return true if the current member is a derived value (TC_DERIVED): computed from another member, writable, but not saved."
+description.ja = "現在のメンバが派生値（TC_DERIVED）なら true を返す。他のメンバから計算され、書き込めるが保存はされない。"
+description.ko = "현재 멤버가 파생 값(TC_DERIVED)이면 true를 반환한다. 다른 멤버에서 계산되며 쓸 수 있지만 저장되지 않는다."
+
+["Reflector::pushDerived"]
+keywords = ["derived", "reflection", "TC_DERIVED"]
+description.en = "Enter a derived-value scope (TC_DERIVED visits inside it)."
+description.ja = "派生値スコープに入る（TC_DERIVED はこの内側で訪れる）。"
+description.ko = "파생 값 범위로 진입한다(TC_DERIVED는 이 안에서 방문한다)."
+
+["Reflector::popDerived"]
+keywords = ["derived", "reflection", "TC_DERIVED"]
+description.en = "Leave the current derived-value scope."
+description.ja = "現在の派生値スコープを抜ける。"
+description.ko = "현재 파생 값 범위를 벗어난다."
+
 ["Reflector::beginGroup"]
 description.en = "Enter a nested composite group of reflected members (no-op for flat backends)."
 description.ja = "反映メンバのネストしたグループに入る（フラットなバックエンドでは何もしない）。"
@@ -18505,6 +18556,18 @@ description.ko = "리플렉션된 멤버를 JSON 객체로 쓰는 Reflector 백�
 description.en = "The accumulated JSON object built from visited members."
 description.ja = "訪問したメンバから構築された JSON オブジェクト。"
 description.ko = "방문한 멤버로 구성된 JSON 객체."
+
+["JsonWriteReflector::includeDerived"]
+keywords = ["derived", "save", "serialize", "globalPos"]
+description.en = "When true, derived values (TC_DERIVED, e.g. Node's globalPos) are written too; false (default) leaves them out, as a save should."
+description.ja = "true なら派生値（TC_DERIVED、例: Node の globalPos）も書き出す。false（既定）では保存用に除外する。"
+description.ko = "true이면 파생 값(TC_DERIVED, 예: Node의 globalPos)도 기록한다. false(기본값)이면 저장용으로 제외한다."
+
+["JsonWriteReflector::derived"]
+keywords = ["derived", "reflection", "globalPos"]
+description.en = "Member paths of the derived values encountered (nested groups joined by '.'), whether or not they were written."
+description.ja = "出会った派生値のメンバパス（ネストしたグループは '.' で連結）。書き出したかどうかに関係なく記録する。"
+description.ko = "만난 파생 값의 멤버 경로(중첩 그룹은 '.'으로 연결). 기록 여부와 관계없이 기록한다."
 
 ["JsonReadReflector"]
 description.en = "Reflector backend that applies a JSON object onto reflected members through their setters."
