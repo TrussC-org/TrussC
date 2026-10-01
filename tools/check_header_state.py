@@ -103,7 +103,7 @@ SPECIFIER_CALLS = {"decltype", "alignas", "alignof", "sizeof", "typeof", "__type
 # Words that make a parenthesized list a parameter list (see looks_like_initializer)
 TYPE_WORDS = {"void", "bool", "char", "char8_t", "char16_t", "char32_t", "wchar_t", "short",
               "int", "long", "float", "double", "signed", "unsigned", "auto", "const",
-              "volatile", "struct", "class", "enum", "typename", "size_t", "ptrdiff_t"}
+              "volatile", "struct", "class", "enum", "typename", "size_t", "ptrdiff_t", "FILE"}
 FIXED_WIDTH = re.compile(r"u?int(8|16|32|64|ptr|max)_t$")
 # Tokens that only occur in an expression, never in a parameter declaration
 INIT_MARKERS = {"new", "sizeof", "alignof", "true", "false", "nullptr", "this"}
@@ -396,11 +396,19 @@ def classify_head(head):
 
 def looks_like_type_name(a, k):
     """Is a[k] (a name before `*` / `&` in a parameter-or-initializer list)
-    a type? PascalCase (`Foo* p`), a `_t` name, or qualified by std::
+    a type? PascalCase (`Foo* p`), a `_t` name, a snake_case name (an inner
+    `_`, not all caps: C library types such as `sapp_event* e`,
+    `lua_State* L`), any name before `&` (`json& j`), or qualified by std::
     (`std::string* out`); a constant (`kW * kH`, `COUNT * 2`) or a
-    lowercase name (`count * scale`) is an operand."""
+    lowercase name without `_` before `*` (`count * scale`) is an operand.
+    So `v(buf_size * n)` or `v(flags & mask)` reads as a function and is
+    not reported."""
     x = a[k]
     if x in TYPE_WORDS or FIXED_WIDTH.match(x) or x.endswith("_t"):
+        return True
+    if k + 1 < len(a) and a[k + 1] == "&":
+        return True
+    if "_" in x.strip("_") and x != x.upper():
         return True
     if k >= 2 and a[k - 1] == "::" and a[k - 2] == "std":
         return True
@@ -412,7 +420,9 @@ def arg_is_parameter(a):
     (True) or an initializer expression (False)?"""
     if "=" in [t for _, t in top_level(a)]:
         return True                                     # a default argument
-    for k, x in enumerate(a):
+    for k, x in top_level(a):
+        # Top level only: a template argument is not an expression
+        # (`std::function<void(int)>`, `std::aligned_storage_t<sizeof(T)>&`)
         nxt = a[k + 1:k + 3]
         if x in INIT_MARKERS or CAST.match(x):
             return False
@@ -444,7 +454,8 @@ def looks_like_initializer(head):
     type: a type keyword or `const`, two names in a row (`Foo f`), a pointer
     or reference declarator after a type name (`Foo* p`, `Foo&`), `...`, or a
     template argument list; new / sizeof / *_cast / true / false / nullptr /
-    this and functional casts (`int(k)`) only occur in expressions. `()`
+    this and functional casts (`int(k)`) at top level (not inside a template
+    argument list) only occur in expressions. `()`
     declares a function. A lone user-type name is read as an initializer, so
     an unnamed parameter (`static int f(Foo);`) is a false finding: name the
     parameter. (C++ itself reads `int x(int(k));` as a function; written in a
@@ -863,11 +874,9 @@ def scan_tokens(tokens, rel):
             return {"kind": "init", "name": "", "keep": True}
         if any(t == "enum" for _, t in top):
             return {"kind": "init", "name": "", "keep": True}
-        keys = [i for i, t in top if t in CLASS_KEYS]
-        if keys and not any(t == "(" and not b[i - 1] in SPECIFIER_CALLS
-                            for i, t in top if i > keys[0]):
-            rest = [t for t in b[keys[0] + 1:] if is_ident(t) and t not in ("final", "alignas")]
-            return {"kind": "class", "name": rest[0] if rest else "<anon>", "keep": True}
+        cls = class_head_name(b)
+        if cls:
+            return {"kind": "class", "name": cls, "keep": True}
         what, nm = classify_head(b)
         if what == "function" or any(t == "(" and not (i and b[i - 1] in SPECIFIER_CALLS)
                                      for i, t in top):
@@ -955,6 +964,20 @@ def scan_tokens(tokens, rel):
     return findings
 
 
+def class_head_name(b):
+    """`b` (prefix and class specifiers stripped) is the head of a class body
+    at namespace or class scope: a top-level class key with no `(` after it
+    outside SPECIFIER_CALLS. The class name ("<anon>" when unnamed), or
+    None."""
+    top = list(top_level(b))
+    keys = [i for i, t in top if t in CLASS_KEYS]
+    if keys and not any(t == "(" and not b[i - 1] in SPECIFIER_CALLS
+                        for i, t in top if i > keys[0]):
+        rest = [t for t in b[keys[0] + 1:] if is_ident(t) and t not in ("final", "alignas")]
+        return rest[0] if rest else "<anon>"
+    return None
+
+
 DEFINE_RE = re.compile(r"^[ \t]*#[ \t]*define[ \t]+([A-Za-z_]\w*)", re.M)
 
 
@@ -963,7 +986,9 @@ def scan_macros(text, rel):
     directives): a macro that declares one puts a function-local static into
     every function that uses it, one per module (a warn-once macro, say). A
     static member function the macro defines is not state; the statics in its
-    body are."""
+    body are. In a class body the macro defines (told apart with the same
+    test as the walker, class_head_name), only a `static inline` data member
+    is state."""
     findings = []
     for m in DEFINE_RE.finditer(text):
         # The directive runs to the first line end not escaped by a backslash
@@ -986,11 +1011,27 @@ def scan_macros(text, rel):
         first_line = text.count("\n", 0, m.start()) + 1
         toks = tokenize(blank(body.replace("\\\n", " \n"), directives=False))
         words = [t for t, _ in toks]
+        # Per open `{`: does it open a class body? Plus the statement so far.
+        braces, stmt = [], []
         for k, (t, line) in enumerate(toks):
+            if t == "{":
+                braces.append(class_head_name(strip_class_specifiers(strip_prefix(stmt))) is not None)
+                stmt = []
+            elif t in ("}", ";"):
+                if t == "}" and braces:
+                    braces.pop()
+                stmt = []
+            else:
+                stmt.append(t)
             if t not in ("static", "thread_local") or (k and words[k - 1] in ("static", "thread_local")):
                 continue
             rest = statement_from(words, k)
             head = declaration_head(rest)
+            if braces and braces[-1]:
+                # Class scope: a static member function or a declared-only
+                # static data member is not state; `static inline` data is
+                if "inline" not in head or classify_head(head)[0] != "variable":
+                    continue
             # After `{` or `;` it opens a statement in a block, where a static
             # is always a variable (block-scope functions cannot be static);
             # elsewhere it may declare or define a (member) function.
