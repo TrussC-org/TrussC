@@ -477,6 +477,16 @@ Currently, all state is reset on reload — `setup()` runs from scratch each tim
 
 For most creative coding use cases (adjusting colors, positions, animations), this is sufficient.
 
+State that outlives the App is the exception: singletons and function-local statics in your code (or in an addon) belong to the guest library, which stays loaded after a reload, so the previous build's copy keeps any listener it has on `events()`. Drop them on `events().hotReloadUnload`, which fires before the host unloads the current build while its App is still alive (and once more at exit, after `exit`):
+
+```cpp
+unloadListener_ = events().hotReloadUnload.listen([this] {
+    // release what this build registered (the same cleanup as on exit)
+});
+```
+
+tcxImGui and tcxNodeInspector do this themselves.
+
 ### Disabling Hot Reload
 
 Comment out or delete the `TC_HOT_RELOAD` line:
