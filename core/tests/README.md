@@ -308,7 +308,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   and the listener reconnected while `disconnect()` was joining that thread.
   Destroying a client whose listener reconnects on every `onDisconnect`
   finishes without any `onDisconnect` and without reconnecting: the
-  destructor does not notify.
+  destructor does not notify. When an `onError` listener reconnects, the
+  replaced attempt reports no `onConnect(false)` (#393), through
+  `connectAsync()` and without threads; a refused `connectAsync()` with no
+  reconnect reports `onConnect(false)` exactly once.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and
