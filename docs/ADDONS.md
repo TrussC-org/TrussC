@@ -660,6 +660,13 @@ Hap video codec for fast GPU-accelerated playback.
 **Features:**
 - Hap, Hap Alpha, Hap Q codecs
 - GPU-side decompression (S3TC/DXT)
+- Audio track: PCM (`sowt`, `twos`, `fl32`, `lpcm`; 16-bit integer or 32-bit
+  float, sound description v0/v1/v2), AAC, MP3. Other PCM formats load
+  without audio and log a warning.
+- A/V sync: while the audio plays forward, the video follows the audio clock
+  and re-syncs to it when they differ by more than `getResyncThreshold()`;
+  the video drives the loop. Files without audio and reverse playback use
+  the wall clock.
 
 ### tcxImGui
 
