@@ -386,6 +386,21 @@ scale(2.0f);
 // ... draw ...
 popMatrix();
 ```
+`pushMatrix()` / `popMatrix()` is the main form. Where a pop is easy to miss
+(early returns, several exits, long blocks), the scoped form pops at the end of
+the scope instead; `scopedStyle()` does the same for `pushStyle()` / `popStyle()`:
+```cpp
+void drawItem(const Item& item) {
+    auto m = scopedMatrix();   // pushMatrix() now
+    auto s = scopedStyle();    // pushStyle() now
+    translate(item.x, item.y);
+    if (!item.visible) return; // both popped here
+    setColor(item.color);
+    drawRect(0, 0, item.w, item.h);
+}                              // ...and here
+```
+Keep the guard in a named variable: `scopedMatrix();` alone pops at once (the
+compiler warns, `[[nodiscard]]`). The guard can't be copied or moved.
 
 Pair each `pushMatrix()` / `pushStyle()` with its pop inside the same callback (`setup()`, `update()`, `draw()`, one event handler such as `keyPressed()`, `exit()`, a `runOnMainThread` job). When a callback returns, TrussC pops whatever it left pushed and logs a warning naming it (`keyPressed() ended with 1 pushMatrix() and 0 pushStyle() still open (missing pop); dropped`). So a push in `update()` with its pop in `draw()` does not work: the push is dropped at the end of `update()`. Values set without a push (`setColor()`, a bare `translate()`) carry on as before.
 
@@ -929,7 +944,7 @@ The surface (`setup`/`update`/`draw`, `drawCircle`-style calls) resembles oF, bu
 
 Mostly "drop `of`, lowercase the first letter." Common ones:
 - Drawing: `ofDrawRectangle`→`drawRect`, `ofDrawCircle`→`drawCircle`, `ofSetColor`→`setColor` (**0–1**), `ofSetLineWidth`→`setStrokeWeight`
-- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix`, `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
+- Transform: `ofPushMatrix`/`ofPopMatrix`→`pushMatrix`/`popMatrix` (scope-bound form: `auto m = scopedMatrix();`; `scopedStyle()` for `ofPushStyle`), `ofTranslate`→`translate`, `ofRotateDeg`→`rotateDeg` (default is `rotate(radians)`)
 - Math: `ofMap`→`remap`, `ofLerp`→`lerp`, `ofRandom`→`random`, `ofNoise`→`noise`
 - Queries: `ofGetWidth`/`ofGetHeight`→`getWindowWidth`/`getWindowHeight`, `ofGetMouseX`/`Y`→`getMouseX`/`getMouseY`
 - Types: `ofVec2f`/`ofVec3f`→`Vec2`/`Vec3`, `ofColor`→`Color`, `ofMesh`→`Mesh`, `ofImage`→`Image`, `ofTexture`→`Texture`, `ofFbo`→`Fbo`, `ofTrueTypeFont`→`Font`, `ofSoundPlayer`→`Sound`, `ofMatrix4x4`→`Mat4`, `ofQuaternion`→`Quaternion`
@@ -1790,6 +1805,7 @@ void pushStyle()  // Push current style (color, fill, stroke, blend) onto stack
 void resetBlendMode()  // Reset blend mode to Alpha (default)
 void resetScissor()  // Reset (disable) scissor clipping
 void resetStyle()  // Reset style to default values (white color, fill enabled, stroke disabled)
+StyleScope scopedStyle()  // pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning
 void setBlendMode(BlendMode mode)  // Set blend mode. BlendMode::Alpha (default), Add, Multiply, Screen, Subtract, Disabled. Works on the screen and inside Fbo passes alike; the mode persists until changed (it also carries into a subsequent Fbo::begin)
 void setCircleResolution(int res) ⚠️deprecated  // Deprecated alias for setCurveResolution()
 void setCurveResolution(int n)  // Set fixed curve segment count (switches off adaptive tolerance mode)
@@ -1823,6 +1839,7 @@ void rotateYDeg(float degrees)  // Rotate around Y axis (degrees)
 void rotateZ(float radians)  // Rotate around Z axis
 void rotateZDeg(float degrees)  // Rotate around Z axis (degrees)
 void scale(float s) [+2]  // Scale
+MatrixScope scopedMatrix()  // pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning
 void setMatrix(const Mat4 & mat)  // Replace the current matrix with mat (absolute - use with caution, may break camera setup)
 void translate(Vec3 pos) [+2]  // Move origin
 ```

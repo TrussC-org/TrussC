@@ -227,6 +227,7 @@ static void cover_graphics_shapes() {
 static void cover_graphics_style() {
     (void)pushStyle();
     (void)popStyle();
+    (void)scopedStyle();
     (void)resetStyle();
     (void)getColor();
     (void)fill();
@@ -530,6 +531,7 @@ static void cover_time_system() {
 static void cover_transform() {
     (void)pushMatrix();
     (void)popMatrix();
+    (void)scopedMatrix();
     (void)translate(af::val<Vec3>());
     (void)translate(af::val<float>(), af::val<float>(), af::val<float>());
     (void)translate(af::val<float>(), af::val<float>());

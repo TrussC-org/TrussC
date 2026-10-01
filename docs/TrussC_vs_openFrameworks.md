@@ -303,7 +303,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofFill` | `fill()` |  |
 | `ofNoFill` | `noFill()` |  |
 | `ofPopStyle` | `popStyle()` |  |
-| `ofPushStyle` | `pushStyle()` |  |
+| `ofPushStyle` | `pushStyle()` | Scope-bound form: auto s = scopedStyle(); |
 | `ofEnableBlendMode` | `setBlendMode(mode)` |  |
 | `ofSetColor` | `setColor(r, g, b, a)` | Range 0-1 instead of 0-255 |
 | `ofSetFrameRate` | `setFps(fps)` |  |
@@ -315,7 +315,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofPopMatrix` | `popMatrix()` |  |
-| `ofPushMatrix` | `pushMatrix()` |  |
+| `ofPushMatrix` | `pushMatrix()` | Scope-bound form: auto m = scopedMatrix(); |
 | `ofRotateRad` | `rotate(radians)` | Always radians (not degrees like oF default) |
 | `ofRotateDeg` | `rotateDeg(degrees)` |  |
 | `ofScale` | `scale(s)` |  |
