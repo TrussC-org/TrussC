@@ -34,7 +34,6 @@
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
 #endif
 #include <cstdlib>
-#include <cstring>
 
 namespace trussc {
 
@@ -977,15 +976,13 @@ namespace {
 // stdout/stderr, so writing both would print each line twice there. Xcode
 // sets OS_ACTIVITY_DT_MODE (libtrace then copies os_log to stderr) or, since
 // Xcode 15, IDE_DISABLED_OS_ACTIVITY_DT_MODE (its console reads the unified
-// log directly). Read once: a running app's environment does not change.
+// log directly). libtrace mirrors whenever OS_ACTIVITY_DT_MODE is set, whatever
+// its value ("NO", "0" and "" included; measured on macOS 26), so only its
+// presence counts. Read once: a running app's environment does not change.
 bool osLogMirroredToConsole() {
-    static const bool mirrored = [] {
-        if (std::getenv("IDE_DISABLED_OS_ACTIVITY_DT_MODE")) return true;
-        const char* dt = std::getenv("OS_ACTIVITY_DT_MODE");
-        if (!dt || !*dt) return false;
-        return std::strcmp(dt, "NO") != 0 && std::strcmp(dt, "no") != 0 &&
-               std::strcmp(dt, "0") != 0 && std::strcmp(dt, "false") != 0;
-    }();
+    static const bool mirrored =
+        std::getenv("IDE_DISABLED_OS_ACTIVITY_DT_MODE") != nullptr ||
+        std::getenv("OS_ACTIVITY_DT_MODE") != nullptr;
     return mirrored;
 }
 } // namespace

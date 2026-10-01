@@ -114,8 +114,8 @@ bool isLogNonBlocking();
 //   "[LEVEL] message" (Verbose -> debug, Notice / Warning -> default,
 //   Error -> error, Fatal -> fault). On macOS it is skipped while os_log is
 //   mirrored into the console that already shows stdout (run from Xcode:
-//   OS_ACTIVITY_DT_MODE / IDE_DISABLED_OS_ACTIVITY_DT_MODE set), so Xcode's
-//   console shows each line once.
+//   OS_ACTIVITY_DT_MODE, with any value, or IDE_DISABLED_OS_ACTIVITY_DT_MODE
+//   set), so Xcode's console shows each line once.
 // - Windows: one OutputDebugStringA call per line, "[time] [LEVEL] message".
 void writeSystemLog(const LogEventArgs& e);
 #endif
