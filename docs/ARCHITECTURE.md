@@ -17,6 +17,22 @@ A lightweight creative coding environment optimized for the AI-native and GPU-na
 - `tc::` - Core & Official Modules
 - `tcx::` - Community Addons / Extensions
 
+### How design decisions are made
+
+When a change can take more than one reasonable shape, these rules decide it.
+
+- **Think of three kinds of apps.** TrussC apps are roughly:
+  1. personal projects, where trying things quickly matters most;
+  2. long-running installations (exhibitions), where maintenance comes first: recovering with nobody on site, logs, predictable behavior;
+  3. apps distributed to others, which run on other people's machines, so safety and integrity come first.
+
+  A convenience that puts any one of these at risk is not adopted, however useful it is. If it adds no security risk to any of them, it may be adopted for convenience.
+- **Simple and predictable.** Prefer the design that can be stated in one sentence. Count complexity as a cost, even when it brings an implementation benefit. Options and automatic behavior are added later, when there is a real need.
+- **Follow existing conventions.** Before adding a mechanism, look for code that already does the same thing, and do it the same way.
+- **Fix the code, not the docs.** When the code is wrong, fix the code. A documented workaround is only a stopgap until the fix lands.
+- **No arbitrary limits.** A size or count limit needs a concrete reason, such as a file format's own limit or the range the code can represent. Don't add one just to be safe.
+- **People decide behavior and API changes.** Choices that change behavior or the API are made by a person. AI agents may lay out the options and recommend one, but they don't make the call.
+
 ---
 
 ## 2. Tech Stack
