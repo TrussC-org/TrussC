@@ -87,8 +87,13 @@ public:
     std::vector<uint8_t> toBytes() const;
     // ok is false when nesting exceeds MAX_NESTING_DEPTH, any element is
     // truncated (its size runs past the end of the data), or any nested
-    // bundle fails to parse: the whole bundle is rejected, not a part of it.
+    // message or bundle fails to parse (see OscMessage::fromBytes()): the
+    // whole bundle is rejected, not a part of it.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
+    // Same, and paddingMissing tells whether any message in the bundle ends
+    // before its zero padding to 4 bytes (it still parses, as in
+    // OscMessage::fromBytes()).
+    static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing);
 
     // -------------------------------------------------------------------------
     // Bundle detection (check if data starts with "#bundle")
@@ -110,7 +115,8 @@ public:
 
 private:
     // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
-    static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok, int depth);
+    static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
+                                      bool& paddingMissing, int depth);
 
     uint64_t timetag_;
     std::vector<Element> elements_;

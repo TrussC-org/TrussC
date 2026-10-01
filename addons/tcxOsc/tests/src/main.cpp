@@ -33,6 +33,15 @@
 //     summed since the last report
 //   - shrinking a filled queue with setBufferSize() counts and reports the
 //     discarded messages as dropped
+//
+// And the OSC 1.0 type tags (messages built byte by byte at run time):
+//   - every tag round-trips: OscMessage encodes it to its wire bytes, and
+//     those bytes decode to the same value, also all tags in one message
+//   - a tag outside OSC 1.0, fixed-size data 1 byte short, or an unpaired
+//     '[' / ']' fails the message; a damaged message fails its bundle
+//     (one onParseError, nothing delivered)
+//   - a message that ends before its last zero padding parses, is delivered,
+//     and is logged once per OscReceiver
 // =============================================================================
 
 #include <tcxOsc.h>
@@ -233,7 +242,15 @@ static bool sameMessage(const OscMessage& a, const OscMessage& b) {
             case 'f': same = a.getArgAsFloat(i) == b.getArgAsFloat(i); break;
             case 's': same = a.getArgAsString(i) == b.getArgAsString(i); break;
             case 'b': same = a.getArgAsBlob(i) == b.getArgAsBlob(i); break;
-            default:  same = a.getArgAsBool(i) == b.getArgAsBool(i); break;
+            case 'T': case 'F': same = a.getArgAsBool(i) == b.getArgAsBool(i); break;
+            case 'h': same = a.getArgAsInt64(i) == b.getArgAsInt64(i); break;
+            case 'd': same = a.getArgAsDouble(i) == b.getArgAsDouble(i); break;
+            case 't': same = a.getArgAsTimetag(i) == b.getArgAsTimetag(i); break;
+            case 'S': same = a.getArgAsSymbol(i) == b.getArgAsSymbol(i); break;
+            case 'c': same = a.getArgAsChar(i) == b.getArgAsChar(i); break;
+            case 'r': same = a.getArgAsRgba(i) == b.getArgAsRgba(i); break;
+            case 'm': same = a.getArgAsMidi(i) == b.getArgAsMidi(i); break;
+            default:  break;  // N I [ ]: the tag is the value
         }
         if (!same) return false;
     }
@@ -253,6 +270,113 @@ static OscBundle makeEveryShapeBundle() {
     return outer;
 }
 
+// ----- OSC 1.0 type tags -----------------------------------------------------
+// The message `address` with type tags `tags` and the argument bytes `args`
+// exactly as given (address and tags padded to 4 bytes, args not).
+static std::vector<uint8_t> rawMessage(const std::string& address, const std::string& tags,
+                                       const std::vector<uint8_t>& args) {
+    std::vector<uint8_t> bytes(address.begin(), address.end());
+    bytes.push_back(0);
+    while (bytes.size() % 4 != 0) bytes.push_back(0);
+    bytes.push_back(',');
+    bytes.insert(bytes.end(), tags.begin(), tags.end());
+    bytes.push_back(0);
+    while (bytes.size() % 4 != 0) bytes.push_back(0);
+    bytes.insert(bytes.end(), args.begin(), args.end());
+    return bytes;
+}
+
+// "#bundle", the immediate timetag, then each element with its size field
+static std::vector<uint8_t> rawBundle(const std::vector<std::vector<uint8_t>>& elements) {
+    std::vector<uint8_t> bytes = OscBundle().toBytes();
+    for (const auto& e : elements) {
+        appendBe32(bytes, uint32_t(e.size()));
+        bytes.insert(bytes.end(), e.begin(), e.end());
+    }
+    return bytes;
+}
+
+// One argument of each OSC 1.0 tag: how to add it, its wire bytes, and a
+// check of the parsed value at index i.
+struct TypeCase {
+    char tag;
+    void (*add)(OscMessage&);
+    std::vector<uint8_t> data;
+    bool (*check)(const OscMessage&, size_t);
+};
+
+static const std::vector<TypeCase>& typeCases() {
+    static const std::vector<TypeCase> cases = {
+        { 'i', [](OscMessage& m) { m.addInt(-2); }, { 0xFF, 0xFF, 0xFF, 0xFE },
+          [](const OscMessage& m, size_t i) { return m.getArgAsInt(i) == -2 && m.getArgAsInt64(i) == -2; } },
+        { 'f', [](OscMessage& m) { m.addFloat(1.5f); }, { 0x3F, 0xC0, 0x00, 0x00 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsFloat(i) == 1.5f && m.getArgAsDouble(i) == 1.5; } },
+        { 's', [](OscMessage& m) { m.addString("ab"); }, { 'a', 'b', 0, 0 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsString(i) == "ab"; } },
+        { 'b', [](OscMessage& m) { const uint8_t b[3] = { 9, 8, 7 }; m.addBlob(b, 3); },
+          { 0, 0, 0, 3, 9, 8, 7, 0 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsBlob(i) == std::vector<uint8_t>({ 9, 8, 7 }); } },
+        { 'T', [](OscMessage& m) { m.addBool(true); }, {},
+          [](const OscMessage& m, size_t i) { return m.getArgAsBool(i); } },
+        { 'F', [](OscMessage& m) { m.addBool(false); }, {},
+          [](const OscMessage& m, size_t i) { return !m.getArgAsBool(i); } },
+        { 'h', [](OscMessage& m) { m.addInt64(-int64_t(0x0102030405060708LL)); },
+          { 0xFE, 0xFD, 0xFC, 0xFB, 0xFA, 0xF9, 0xF8, 0xF8 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsInt64(i) == -int64_t(0x0102030405060708LL); } },
+        { 'd', [](OscMessage& m) { m.addDouble(-2.5); }, { 0xC0, 0x04, 0, 0, 0, 0, 0, 0 },
+          [](const OscMessage& m, size_t i) {
+              return m.getArgAsDouble(i) == -2.5 && m.getArgAsFloat(i) == -2.5f && m.getArgAsInt(i) == -2;
+          } },
+        { 't', [](OscMessage& m) { m.addTimetag(0x0102030405060708ULL); }, { 1, 2, 3, 4, 5, 6, 7, 8 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsTimetag(i) == 0x0102030405060708ULL; } },
+        { 'S', [](OscMessage& m) { m.addSymbol("sym"); }, { 's', 'y', 'm', 0 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsSymbol(i) == "sym" && m.getArgAsString(i) == "sym"; } },
+        { 'c', [](OscMessage& m) { m.addChar('A'); }, { 0, 0, 0, 'A' },
+          [](const OscMessage& m, size_t i) { return m.getArgAsChar(i) == 'A'; } },
+        { 'r', [](OscMessage& m) { m.addRgba({ 1, 2, 3, 4 }); }, { 1, 2, 3, 4 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsRgba(i) == osc::OscRgba{ 1, 2, 3, 4 }; } },
+        { 'm', [](OscMessage& m) { m.addMidi({ 0, 0x90, 60, 100 }); }, { 0, 0x90, 60, 100 },
+          [](const OscMessage& m, size_t i) { return m.getArgAsMidi(i) == osc::OscMidi{ 0, 0x90, 60, 100 }; } },
+        { 'N', [](OscMessage& m) { m.addNil(); }, {},
+          [](const OscMessage& m, size_t i) { return m.getArgType(i) == 'N'; } },
+        { 'I', [](OscMessage& m) { m.addImpulse(); }, {},
+          [](const OscMessage& m, size_t i) { return m.getArgType(i) == 'I'; } },
+        { '[', [](OscMessage& m) { m.addArrayBegin(); }, {},
+          [](const OscMessage& m, size_t i) { return m.getArgType(i) == '['; } },
+        { ']', [](OscMessage& m) { m.addArrayEnd(); }, {},
+          [](const OscMessage& m, size_t i) { return m.getArgType(i) == ']'; } },
+    };
+    return cases;
+}
+
+// Every tag in one message, in typeCases() order ('[' then ']' at the end
+// make an empty array), and the same message as wire bytes.
+static OscMessage makeEveryTypeMessage() {
+    OscMessage m("/types");
+    for (const TypeCase& c : typeCases()) c.add(m);
+    return m;
+}
+
+static std::vector<uint8_t> everyTypeBytes() {
+    std::string tags;
+    std::vector<uint8_t> args;
+    for (const TypeCase& c : typeCases()) {
+        tags += c.tag;
+        args.insert(args.end(), c.data.begin(), c.data.end());
+    }
+    return rawMessage("/types", tags, args);
+}
+
+// Every argument of `m` passes the typeCases() check for its tag
+static bool everyTypeMatches(const OscMessage& m) {
+    const auto& cases = typeCases();
+    if (m.getArgCount() != cases.size()) return false;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        if (m.getArgType(i) != cases[i].tag || !cases[i].check(m, i)) return false;
+    }
+    return true;
+}
+
 int main() {
     const std::string GROUP_A = "239.77.0.1";
     const std::string GROUP_B = "239.77.0.2";
@@ -262,6 +386,7 @@ int main() {
     static const int SIZE_PORTS[4] = { 17113, 18113, 19113, 27113 };  // size checks
     static const int POLL_PORTS[4] = { 17114, 18114, 19114, 27114 };  // getNextMessage() only
     static const int QUEUE_PORTS[4] = { 17115, 18115, 19115, 27115 }; // queue overflow
+    static const int TYPE_PORTS[4] = { 17116, 18116, 19116, 27116 };  // OSC 1.0 type tags
     const int LIMIT = OscBundle::MAX_NESTING_DEPTH;
 
     // Outgoing multicast interface. macOS CI runners have no multicast route on
@@ -785,6 +910,260 @@ int main() {
             check("queue: drops logged only on the polling thread", !logOffThread);
         }
         rx.close();
+    }
+
+    // ----- 10. OSC 1.0 type tags (parser) ------------------------------------
+    // Each tag round-trips: OscMessage encodes it to the expected wire bytes,
+    // and those bytes decode to the same value. Tags outside OSC 1.0, data cut
+    // short, unpaired '[' / ']' and a damaged message in a bundle fail to
+    // parse. A message that ends before its last zero padding parses, and the
+    // missing padding is reported.
+    {
+        bool ok = false;
+        bool padMissing = false;
+
+        for (const TypeCase& c : typeCases()) {
+            const std::string tag(1, c.tag);
+            // '[' and ']' are checked as a pair, at the index of the one tested
+            OscMessage m("/t");
+            if (c.tag == ']') m.addArrayBegin();
+            c.add(m);
+            if (c.tag == '[') m.addArrayEnd();
+            const std::string tags = (c.tag == '[' || c.tag == ']') ? "[]" : tag;
+            const size_t at = c.tag == ']' ? 1 : 0;
+
+            std::vector<uint8_t> expected = rawMessage("/t", tags, c.data);
+            check(("types: '" + tag + "' encodes to its wire bytes").c_str(), m.toBytes() == expected);
+
+            OscMessage parsed = OscMessage::fromBytes(expected.data(), expected.size(), ok, padMissing);
+            check(("types: '" + tag + "' decodes").c_str(),
+                  ok && !padMissing && parsed.getTypeTags() == tags &&
+                  parsed.getArgCount() == tags.size() && parsed.getArgType(at) == c.tag &&
+                  c.check(parsed, at));
+        }
+
+        // Every tag in one message, both directions
+        std::vector<uint8_t> bytes = everyTypeBytes();
+        check("types: every tag in one message encodes", makeEveryTypeMessage().toBytes() == bytes);
+        OscMessage parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("types: every tag in one message decodes", ok && everyTypeMatches(parsed));
+        check("types: a decoded message encodes to the same bytes", ok && parsed.toBytes() == bytes);
+
+        // Tags without data keep their place: each argument is at its tag's index
+        bytes = rawMessage("/p", "NI[i[h]]i",
+                           { 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 9 });
+        parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("types: arguments stay aligned with their tags",
+              ok && parsed.getArgCount() == 9 && parsed.getArgType(3) == 'i' &&
+              parsed.getArgAsInt(3) == 7 && parsed.getArgType(5) == 'h' &&
+              parsed.getArgAsInt64(5) == 8 && parsed.getArgType(8) == 'i' && parsed.getArgAsInt(8) == 9);
+
+        // Tags that are not OSC 1.0 tags
+        bytes = rawMessage("/p", "iui", { 0, 0, 0, 1, 0, 0, 0, 2 });
+        OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("types: unknown tag between known ones fails", !ok);
+        bytes = rawMessage("/p", "x", {});
+        OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("types: unknown tag alone fails", !ok);
+
+        // Fixed-size argument data 1 byte short, for each such tag
+        bool allFail = true;
+        for (const TypeCase& c : typeCases()) {
+            if (c.data.empty() || c.tag == 's' || c.tag == 'S' || c.tag == 'b') continue;
+            std::vector<uint8_t> cut(c.data.begin(), c.data.end() - 1);
+            bytes = rawMessage("/p", std::string(1, c.tag), cut);
+            OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+            if (ok) {
+                allFail = false;
+                std::printf("  ('%c' with %zu of %zu bytes parsed)\n", c.tag, cut.size(), c.data.size());
+            }
+        }
+        check("types: i f h d t c r m 1 byte short fail", allFail);
+        bytes = rawMessage("/p", "S", { 's', 'y', 'm' });  // no terminating zero
+        OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("types: symbol without its terminating zero fails", !ok);
+        bytes = rawMessage("/p", "Si", { 's', 'y', 'm', 0 });  // no data for the int
+        OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+        check("types: int with no data after a symbol fails", !ok);
+
+        // '[' and ']' must pair up
+        bool unpairedFail = true;
+        for (const char* tags : { "]", "[", "[[]", "[]]", "][" }) {
+            bytes = rawMessage("/p", tags, {});
+            OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+            unpairedFail = unpairedFail && !ok;
+        }
+        check("types: unpaired '[' or ']' fails", unpairedFail);
+
+        // A damaged message inside a bundle fails the whole bundle, also one
+        // nesting level down
+        const std::vector<uint8_t> good = rawMessage("/ok", "i", { 0, 0, 0, 1 });
+        const std::vector<std::vector<uint8_t>> damaged = {
+            rawMessage("/p", "iui", { 0, 0, 0, 1, 0, 0, 0, 2 }),  // unknown tag
+            rawMessage("/p", "h", { 0, 0, 0, 0 }),                // int64 data short
+            rawMessage("/p", "[i", { 0, 0, 0, 1 }),               // '[' not closed
+            { 'x', 0, 0, 0 },                                     // not a message
+        };
+        bool bundleFails = true;
+        for (const auto& bad : damaged) {
+            bytes = rawBundle({ good, bad, good });
+            OscBundle b = OscBundle::fromBytes(bytes.data(), bytes.size(), ok);
+            bundleFails = bundleFails && !ok && b.getElementCount() == 0;
+            bytes = rawBundle({ good, rawBundle({ bad }) });
+            OscBundle::fromBytes(bytes.data(), bytes.size(), ok);
+            bundleFails = bundleFails && !ok;
+        }
+        check("types: a damaged message fails its bundle", bundleFails);
+        bytes = rawBundle({ good, everyTypeBytes() });
+        OscBundle b = OscBundle::fromBytes(bytes.data(), bytes.size(), ok, padMissing);
+        check("types: a bundle with every tag parses",
+              ok && !padMissing && b.getElementCount() == 2 && everyTypeMatches(b.getMessageAt(1)));
+
+        // Zero padding missing at the end of a message: parses, reported
+        struct PadCase { const char* name; std::vector<uint8_t> bytes; };
+        const std::vector<PadCase> padCases = {
+            { "after a string",    rawMessage("/p", "s", { 'a', 'b', 'c', 'd', 'e', 0 }) },
+            { "after a symbol",    rawMessage("/p", "S", { 'a', 0 }) },
+            { "after a blob",      rawMessage("/p", "b", { 0, 0, 0, 5, 1, 2, 3, 4, 5 }) },
+            { "after type tags",   { '/', 'p', 0, 0, ',', 0 } },
+            { "after the address", { '/', 'a', 'b', 'c', 'd', 0 } },
+        };
+        for (const PadCase& pc : padCases) {
+            OscMessage::fromBytes(pc.bytes.data(), pc.bytes.size(), ok, padMissing);
+            check(("padding: missing " + std::string(pc.name) + ": parses, reported").c_str(),
+                  ok && padMissing);
+        }
+        parsed = OscMessage::fromBytes(padCases[0].bytes.data(), padCases[0].bytes.size(), ok);
+        check("padding: string before the missing padding is intact",
+              ok && parsed.getArgAsString(0) == "abcde");
+        parsed = OscMessage::fromBytes(padCases[2].bytes.data(), padCases[2].bytes.size(), ok);
+        check("padding: blob before the missing padding is intact",
+              ok && parsed.getArgAsBlob(0) == std::vector<uint8_t>({ 1, 2, 3, 4, 5 }));
+        bytes = rawMessage("/p", "s", { 'a', 'b', 'c', 'd', 'e', 0, 0, 0 });
+        OscMessage::fromBytes(bytes.data(), bytes.size(), ok, padMissing);
+        check("padding: full padding is not reported", ok && !padMissing);
+        bytes = rawBundle({ good, padCases[0].bytes });
+        b = OscBundle::fromBytes(bytes.data(), bytes.size(), ok, padMissing);
+        check("padding: missing in a bundle's message: parses, reported",
+              ok && padMissing && b.getElementCount() == 2 &&
+              b.getMessageAt(1).getArgAsString(0) == "abcde");
+        bytes = rawBundle({ good, good });
+        OscBundle::fromBytes(bytes.data(), bytes.size(), ok, padMissing);
+        check("padding: padded bundle is not reported", ok && !padMissing);
+    }
+
+    // ----- 11. OSC 1.0 type tags through OscReceiver -------------------------
+    // Same sync scheme as section 5. Every tag is delivered; an unknown tag or
+    // a damaged message in a bundle is one onParseError with nothing
+    // delivered; missing padding is delivered and logged once per receiver.
+    {
+        std::mutex logMtx;
+        size_t padLogs = 0;
+        tc::EventListener logListener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& e) {
+            if (e.message.find("[tcxOsc]") == std::string::npos) return;
+            if (e.message.find("zero padding") == std::string::npos) return;
+            std::lock_guard<std::mutex> lock(logMtx);
+            ++padLogs;
+        });
+        auto padLogCount = [&] {
+            std::lock_guard<std::mutex> lock(logMtx);
+            return padLogs;
+        };
+
+        const std::vector<uint8_t> good = rawMessage("/ok", "i", { 0, 0, 0, 1 });
+        const std::vector<uint8_t> unknownTag = rawMessage("/p", "iui", { 0, 0, 0, 1, 0, 0, 0, 2 });
+        const std::vector<uint8_t> noPad = rawMessage("/p", "s", { 'a', 'b', 'c', 'd', 'e', 0 });
+
+        // The checks for one receiver; logsBefore is the padding warning
+        // count from earlier receivers.
+        auto runReceiver = [&](OscReceiver& rx, int port, size_t logsBefore, const char* label) {
+            std::mutex mtx;
+            int messages = 0, errors = 0, bundles = 0, syncSeen = 0;
+            OscMessage last;
+            tc::EventListener msgListener = rx.onMessageReceived.listen([&](OscMessage& m) {
+                std::lock_guard<std::mutex> lock(mtx);
+                if (m.getAddress() == "/sync") { syncSeen = m.getArgAsInt(0); return; }
+                ++messages;
+                last = m;
+            });
+            tc::EventListener errListener = rx.onParseError.listen([&](std::string&) {
+                std::lock_guard<std::mutex> lock(mtx);
+                ++errors;
+            });
+            tc::EventListener bundleListener = rx.onBundleReceived.listen([&](OscBundle&) {
+                std::lock_guard<std::mutex> lock(mtx);
+                ++bundles;
+            });
+            tc::UdpSocket raw;
+            int token = 0;
+            auto deliver = [&](const std::vector<uint8_t>& packet) {
+                {
+                    std::lock_guard<std::mutex> lock(mtx);
+                    messages = errors = bundles = 0;
+                }
+                ++token;
+                raw.sendTo("127.0.0.1", port, packet.data(), packet.size());
+                OscMessage sync("/sync");
+                sync.addInt(token);
+                std::vector<uint8_t> syncBytes = sync.toBytes();
+                for (int i = 0; i < 80; ++i) {
+                    if (i % 10 == 0) raw.sendTo("127.0.0.1", port, syncBytes.data(), syncBytes.size());
+                    sleepMs(25);
+                    std::lock_guard<std::mutex> lock(mtx);
+                    if (syncSeen == token) return true;
+                }
+                return false;
+            };
+            auto name = [&](const char* what) { return std::string("types: rx") + label + ": " + what; };
+
+            bool got = deliver(everyTypeBytes());
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check(name("every tag delivered intact").c_str(),
+                      got && messages == 1 && errors == 0 && everyTypeMatches(last));
+            }
+            got = deliver(unknownTag);
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check(name("unknown tag: one onParseError, nothing delivered").c_str(),
+                      got && errors == 1 && messages == 0);
+            }
+            got = deliver(rawBundle({ good, unknownTag, good }));
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check(name("damaged message in bundle: one onParseError, nothing").c_str(),
+                      got && errors == 1 && messages == 0 && bundles == 0);
+            }
+            check(name("no padding warning yet").c_str(), padLogCount() == logsBefore);
+            got = deliver(noPad);
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check(name("missing padding: delivered").c_str(),
+                      got && messages == 1 && errors == 0 && last.getArgAsString(0) == "abcde");
+            }
+            check(name("missing padding: warning logged").c_str(), padLogCount() == logsBefore + 1);
+            got = deliver(rawBundle({ good, noPad }));
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                check(name("missing padding in a bundle: delivered").c_str(),
+                      got && messages == 2 && errors == 0 && bundles == 1);
+            }
+            check(name("missing padding again: no second warning").c_str(),
+                  padLogCount() == logsBefore + 1);
+        };
+
+        OscReceiver rx1;
+        const int port1 = bindFirstFree(rx1, TYPE_PORTS);
+        check("types: receiver bound", port1 != 0);
+        if (port1 != 0) runReceiver(rx1, port1, 0, "1");
+        rx1.close();
+
+        // A second receiver warns once too (once per receiver)
+        OscReceiver rx2;
+        const int port2 = bindFirstFree(rx2, TYPE_PORTS);
+        check("types: second receiver bound", port2 != 0);
+        if (port2 != 0) runReceiver(rx2, port2, 1, "2");
+        rx2.close();
     }
 
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);

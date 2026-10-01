@@ -76,6 +76,7 @@ namespace sha1 {
 WebSocketClient::WebSocketClient() {}
 
 WebSocketClient::~WebSocketClient() {
+    *alive_ = false;
     disconnect();
 }
 
@@ -148,6 +149,10 @@ void WebSocketClient::disconnect() {
 #endif
     state_ = State::Disconnected;
     receiveBuffer_.clear();
+    // A partial fragmented message must not leak into the next connection
+    fragmentBuffer_.clear();
+    fragmentOpcode_ = 0;
+    ++connection_;
 }
 
 void WebSocketClient::setupClient(bool useTls) {
@@ -278,6 +283,28 @@ void WebSocketClient::processFrame() {
             headerSize = 10;
         }
 
+        // Size and fragmentation checks need only the header, so a bad frame
+        // fails the connection before its payload is buffered. The size check
+        // comes first, so headerSize + payloadLen below cannot overflow.
+        bool isData = (opcode == 0x0 || opcode == 0x1 || opcode == 0x2);
+        uint64_t alreadyBuffered = (opcode == 0x0) ? fragmentBuffer_.size() : 0;
+        if (payloadLen > maxMessageSize_ ||
+            (isData && payloadLen > maxMessageSize_ - alreadyBuffered)) {
+            failConnection(1009, "WebSocket message too big: " +
+                           std::to_string(alreadyBuffered + payloadLen) +
+                           " bytes, limit is " + std::to_string(maxMessageSize_));
+            return;
+        }
+        if (opcode == 0x0 && fragmentOpcode_ == 0) {
+            failConnection(1002, "WebSocket protocol error: unexpected continuation frame");
+            return;
+        }
+        if ((opcode == 0x1 || opcode == 0x2) && fragmentOpcode_ != 0) {
+            failConnection(1002, "WebSocket protocol error: new message started "
+                                 "before the fragmented message finished");
+            return;
+        }
+
         uint8_t maskingKey[4] = {0, 0, 0, 0};
         if (masked) {
             if (receiveBuffer_.size() < headerSize + 4) return;
@@ -300,24 +327,41 @@ void WebSocketClient::processFrame() {
         // Remove processed frame from buffer
         receiveBuffer_.erase(receiveBuffer_.begin(), receiveBuffer_.begin() + headerSize + payloadLen);
 
-        // Handle Opcode
+        // Handle Opcode. A message may be split into a Text/Binary frame with
+        // FIN=0 and continuation frames (opcode 0), the last with FIN=1
+        // (RFC 6455 5.4); it is delivered once, on FIN, with the first frame's
+        // type. Control frames may arrive between fragments and are handled
+        // as usual without touching the message in progress.
+        int messageOpcode = 0;
         if (opcode == 0x1 || opcode == 0x2) { // Text or Binary
-            WebSocketEventArgs args;
-            args.isBinary = (opcode == 0x2);
-            args.data = payload;
-            if (!args.isBinary) {
-                args.message.assign(payload.begin(), payload.end());
+            if (fin) {
+                messageOpcode = opcode;
+            } else {
+                fragmentBuffer_ = std::move(payload);
+                fragmentOpcode_ = opcode;
             }
-            onMessage.notify(args);
+        } else if (opcode == 0x0) { // Continuation
+            fragmentBuffer_.insert(fragmentBuffer_.end(), payload.begin(), payload.end());
+            if (fin) {
+                messageOpcode = fragmentOpcode_;
+                payload = std::move(fragmentBuffer_);
+                fragmentBuffer_.clear();
+                fragmentOpcode_ = 0;
+            }
         } else if (opcode == 0x8) { // Close
             disconnect();
         } else if (opcode == 0x9) { // Ping
             sendPong(payload);       // RFC 6455 5.5.2/5.5.3: reply, echoing the payload
         }
 
-        if (!fin) {
-            // Continuation frame handling needed for full implementation
-            logWarning() << "WebSocket: Continuation frames not yet fully supported";
+        if (messageOpcode != 0) {
+            WebSocketEventArgs args;
+            args.isBinary = (messageOpcode == 0x2);
+            if (!args.isBinary) {
+                args.message.assign(payload.begin(), payload.end());
+            }
+            args.data = std::move(payload);
+            onMessage.notify(args);
         }
     }
 #endif
@@ -416,6 +460,26 @@ bool WebSocketClient::sendControl(uint8_t opcode, const char* data, size_t len) 
 #else
     (void)opcode; (void)data; (void)len;
     return false;
+#endif
+}
+
+void WebSocketClient::failConnection(uint16_t statusCode, const std::string& reason) {
+#ifndef __EMSCRIPTEN__
+    // Close goes out first: sendControl() only sends while the state is Open.
+    const char status[2] = {(char)((statusCode >> 8) & 0xFF), (char)(statusCode & 0xFF)};
+    sendControl(0x08, status, 2);
+
+    // onError fires before disconnect(), which fires onClose synchronously.
+    // A listener may disconnect, reconnect or destroy the client (#262).
+    std::shared_ptr<bool> alive = alive_;
+    unsigned connection = connection_;
+    TcpErrorEventArgs err;
+    err.message = reason;
+    onError.notify(err);
+    if (!*alive || connection_ != connection) return;
+    disconnect();
+#else
+    (void)statusCode; (void)reason;
 #endif
 }
 

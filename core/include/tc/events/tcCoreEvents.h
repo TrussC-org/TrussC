@@ -22,6 +22,14 @@ public:
     Event<void> onRender;          // After sokol_gl flush, render pass still active
     Event<void> afterFrame;        // After present() (swapchain committed, outside any pass)
     Event<void> exit;             // On app exit
+    // Hot reload only: the host is about to unload the current guest
+    // generation (its App is still alive). Fired on each reload, and when the
+    // host unloads the last generation at exit (after `exit`). Code in the
+    // guest with state that outlives the App (function-local statics,
+    // singletons) drops its listeners on the host's events here: a guest
+    // image stays loaded, so nothing else removes them. Never fired in a
+    // normal (non hot reload) build.
+    Event<void> hotReloadUnload;
 
     // Exit request (can be cancelled)
     Event<ExitRequestEventArgs> exitRequested;  // Set args.cancel = true to cancel
