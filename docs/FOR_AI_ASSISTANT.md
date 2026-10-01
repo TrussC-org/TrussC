@@ -1586,6 +1586,8 @@ Reverse (string → value): `toInt(s)` / `toInt64(s)` / `toFloat(s)` / `toDouble
 
 Use the level functions `logVerbose / logNotice / logWarning / logError / logFatal` (stream style: `logNotice("Module") << "msg"`), not `cout` — stdout is reserved (MCP). Levels live in `enum class LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }`. They are safe to call from any thread (each line lands whole in the console and the log file). sokol's own messages go through the logger too, as `[sg]` / `[sapp]` / `[sgl]` / `[simgui]` lines; its info messages are Verbose, hidden by default.
 
+Each output has its own level (default Notice; `LogLevel::Silent` turns it off): the console (`setConsoleLogLevel`), the log file (`setFileLogLevel`) and the OS log on macOS (os_log) and Windows (OutputDebugStringW) (`setSystemLogLevel`; on iOS and Android the OS log is the console). `setLogLevel(level)` sets all three at once; a later per-output call wins. `onLog` listeners get every line whatever the levels.
+
 ### How do I log a warning only once? (OnceGate)
 
 Gate the log line with a `OnceGate`, not a `static bool warned` flag. `isFirstTime()` returns true the first time; with an interval (constructor argument, seconds) it returns true again once that much time has passed since the last true. It works with any level (you write the line yourself, and nothing is built while the gate is closed) and is thread-safe and lock-free. The gate object is the key: a `static` one per call site, or a member for once per object:
@@ -2138,6 +2140,8 @@ void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
 bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+void setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
+void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
@@ -2454,9 +2458,9 @@ int AudioEngine::getBufferSize() const  // Current device buffer size in frames 
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
+std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
-AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread load. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
-std::vector<AudioVoiceInfo> AudioEngine::getVoices()  // Snapshot of the voices currently playing or paused (AudioVoiceInfo: slot, file, streaming, position, duration, volume, pan, speed, loop, paused, level). Voices left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
+AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
 bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
@@ -2497,12 +2501,7 @@ void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV heade
 ```cpp
 ```
 
-### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / load describe the recent output.
-
-```cpp
-```
-
-### AudioVoiceInfo — One active voice as reported by AudioEngine::getVoices(): a copy taken under the engine lock, so later changes to the voice are not reflected.
+### AudioStats — Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output.
 
 ```cpp
 ```
@@ -3103,18 +3102,21 @@ LoadResult LoadResult::success()  // Make a success result (static)
 ```cpp
 ```
 
-### Logger — Logging core with console and file output and an onLog event; access the global instance via getLogger()
+### Logger — Logging core with console, file and system (OS log) output, each with its own level, and an onLog event; access the global instance via getLogger()
 
 ```cpp
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
 std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)
+LogLevel Logger::getSystemLogLevel() const  // Get the current system (OS log) level
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
 bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+void Logger::setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
+void Logger::setSystemLogLevel(LogLevel level)  // Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows
 ```
 
 ### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
@@ -3544,6 +3546,11 @@ const char * Platform::name()  // Short platform name: "web" / "macos" / "ios" /
 ```
 
 ### PlayingSound — A single live mixer voice returned by AudioEngine::play(). Its fields are the real-time playback state the audio thread reads each callback (volume / pan / speed / loop / playing / paused / mixMode / position) plus the channel routing snapshots. Most fields are atomics so the UI thread can mutate them while the audio thread plays; set them directly.
+
+```cpp
+```
+
+### PlayingSoundInfo — One playing (or paused) sound as reported by AudioEngine::getPlayingSounds(): a copy taken under the engine lock, so later changes to the playback are not reflected.
 
 ```cpp
 ```
@@ -4460,7 +4467,7 @@ enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku)
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
 enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
 enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown.
-enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
+enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off.
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |

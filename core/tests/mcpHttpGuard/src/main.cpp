@@ -18,6 +18,11 @@
 //
 // The main thread pumps mcp::processHttpQueue() the way the frame loop does;
 // the requests run on a worker with a deadline.
+//
+// Also guards the port line (#311): once the server has bound its port it
+// logs "[MCP] HTTP server listening on http://HOST:PORT/mcp" through the
+// Logger at Notice, exactly once, with the actual (here OS-assigned) port, so
+// the line reaches onLog listeners and the log file, not only stderr.
 // =============================================================================
 
 #include <TrussC.h>
@@ -25,8 +30,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <fstream>
+#include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 using namespace std;
 using namespace tc;
@@ -66,6 +76,19 @@ int main() {
         check("empty header -> no match", !bearerTokenMatches("", kToken));
     }
 
+    // Capture the Logger's lines (onLog runs on the logging thread, here the
+    // server thread) and send them to a log file too.
+    mutex logMutex;
+    vector<pair<LogLevel, string>> logLines;
+    EventListener logListener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        lock_guard<mutex> lock(logMutex);
+        logLines.emplace_back(e.level, e.message);
+    });
+    const fs::path logPath = fs::temp_directory_path() /
+        ("trussc_mcpHttpGuard_" +
+         to_string(chrono::steady_clock::now().time_since_epoch().count()) + ".log");
+    check("log file opened", setLogFile(logPath));
+
     mcp::startHttpServer(0, "localhost", kToken);
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {
@@ -75,6 +98,51 @@ int main() {
     check("server bound to a port", port > 0);
     if (port <= 0) return 1;
     const string p = to_string(port);
+
+    // The port line: logged by the server thread right after it stores the
+    // port, so wait for it.
+    {
+        const string portLine = "[MCP] HTTP server listening on http://localhost:" + p + "/mcp";
+        vector<pair<LogLevel, string>> found;
+        auto lineDeadline = chrono::steady_clock::now() + chrono::seconds(5);
+        while (found.empty() && chrono::steady_clock::now() < lineDeadline) {
+            this_thread::sleep_for(chrono::milliseconds(10));
+            lock_guard<mutex> lock(logMutex);
+            for (auto& line : logLines) {
+                if (line.second.find("HTTP server listening on") != string::npos) {
+                    found.push_back(line);
+                }
+            }
+        }
+        // A moment more, so a duplicate line would show up too.
+        this_thread::sleep_for(chrono::milliseconds(100));
+        {
+            lock_guard<mutex> lock(logMutex);
+            found.clear();
+            for (auto& line : logLines) {
+                if (line.second.find("HTTP server listening on") != string::npos) {
+                    found.push_back(line);
+                }
+            }
+        }
+        check("port line goes through the Logger, once", found.size() == 1,
+              to_string(found.size()) + " line(s)");
+        check("port line text is \"" + portLine + "\"",
+              !found.empty() && found[0].second == portLine,
+              found.empty() ? "" : found[0].second);
+        check("port line is a Notice",
+              !found.empty() && found[0].first == LogLevel::Notice);
+
+        closeLogFile();
+        ifstream in(logPath);
+        stringstream text;
+        text << in.rdbuf();
+        in.close();
+        check("port line lands in the log file",
+              text.str().find("[NOTICE] " + portLine + "\n") != string::npos, text.str());
+        error_code ec;
+        fs::remove(logPath, ec);
+    }
 
     atomic<bool> done{false};
     thread worker([&] {
@@ -156,6 +224,7 @@ int main() {
     }
     worker.join();
     mcp::stopHttpServer();
+    logListener.disconnect();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

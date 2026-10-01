@@ -291,6 +291,13 @@ endif()
         # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
         # per build dramatically shortens reload turnaround.
         target_precompile_headers(guest PRIVATE <TrussC.h>)
+        # TrussC.h includes the generated shader headers (tc/gpu/shaders/
+        # *.glsl.h). The guest does not link TrussC, so without this it would
+        # not wait for them, and a first build on a fresh tree could compile
+        # the PCH before they exist.
+        if(TARGET TrussC_shaders)
+            add_dependencies(guest TrussC_shaders)
+        endif()
         # Linux/GCC: disable STB_GNU_UNIQUE bindings for the Guest. GCC's
         # default -fgnu-unique-symbols marks Meyer's singletons (inline
         # function static locals like `static Foo& instance(){ static Foo f; }`)

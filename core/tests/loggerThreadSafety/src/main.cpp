@@ -22,6 +22,11 @@
 //     info to Fatal / Error / Warning / Verbose (Verbose is hidden by
 //     default), logs "[tag] message", or "[tag] id:<item> line:<line>" when
 //     sokol passes no message.
+//   - Each output has its own level (#311): console, file and system all
+//     default to Notice; setLogLevel() overwrites the three, a later
+//     per-output call wins; the file and the console filter by their own
+//     level while onLog listeners get every line. (The system output itself,
+//     os_log / OutputDebugStringW, is not written on Linux.)
 //   - POSIX, in a forked child each: a panic is written to the log file and
 //     then handed to slog_func, which aborts; a panic while another thread
 //     holds the Logger's lock does not wait for it (the line goes to stderr);
@@ -441,9 +446,86 @@ static void testSokolBridge() {
     fs::remove(f, ec);
 }
 
+// ---------------------------------------------------------------------------
+// 6. Per-output levels and setLogLevel() (#311).
+// ---------------------------------------------------------------------------
+static void testLevels() {
+    Logger lg;
+    check("levels: console, file and system default to Notice",
+          lg.getConsoleLogLevel() == LogLevel::Notice &&
+          lg.getFileLogLevel() == LogLevel::Notice &&
+          lg.getSystemLogLevel() == LogLevel::Notice);
+
+    lg.setSystemLogLevel(LogLevel::Error);
+    check("levels: setSystemLogLevel() sets only the system level",
+          lg.getSystemLogLevel() == LogLevel::Error &&
+          lg.getConsoleLogLevel() == LogLevel::Notice &&
+          lg.getFileLogLevel() == LogLevel::Notice);
+
+    lg.setLogLevel(LogLevel::Warning);
+    check("levels: setLogLevel() overwrites console, file and system",
+          lg.getConsoleLogLevel() == LogLevel::Warning &&
+          lg.getFileLogLevel() == LogLevel::Warning &&
+          lg.getSystemLogLevel() == LogLevel::Warning);
+
+    lg.setFileLogLevel(LogLevel::Verbose);
+    lg.setSystemLogLevel(LogLevel::Silent);
+    check("levels: a later per-output call wins",
+          lg.getConsoleLogLevel() == LogLevel::Warning &&
+          lg.getFileLogLevel() == LogLevel::Verbose &&
+          lg.getSystemLogLevel() == LogLevel::Silent);
+
+    // The levels gate the outputs: the file takes Verbose, the console
+    // (std::cout / std::cerr captured) only Warning and up, onLog everything.
+    const fs::path f = tempFile("levels.log");
+    lg.setLogFile(f);
+    ostringstream out, err;
+    vector<LogLevel> seen;
+    {
+        EventListener l = lg.onLog.listen([&](LogEventArgs& e) { seen.push_back(e.level); });
+        streambuf* oldOut = cout.rdbuf(out.rdbuf());
+        streambuf* oldErr = cerr.rdbuf(err.rdbuf());
+        lg.log(LogLevel::Verbose, "levels verbose");
+        lg.log(LogLevel::Notice, "levels notice");
+        lg.log(LogLevel::Warning, "levels warning");
+        cout.rdbuf(oldOut);
+        cerr.rdbuf(oldErr);
+    }
+    lg.closeFile();
+    const vector<string> lines = readLines(f);
+    check("levels: the file (Verbose) gets all three lines",
+          lines.size() == 3 &&
+          contains(lines, "] [VERBOSE] levels verbose") &&
+          contains(lines, "] [NOTICE] levels notice") &&
+          contains(lines, "] [WARNING] levels warning"));
+    const vector<string> console = splitLines(out.str() + err.str());
+    check("levels: the console (Warning) gets only the warning",
+          console.size() == 1 && contains(console, "] [WARNING] levels warning"));
+    check("levels: onLog listeners get every line, whatever the levels", seen.size() == 3);
+    error_code ec;
+    fs::remove(f, ec);
+
+    // The free functions act on getLogger(); restore its levels afterwards.
+    Logger& g = getLogger();
+    const LogLevel oldConsole = g.getConsoleLogLevel();
+    const LogLevel oldFile = g.getFileLogLevel();
+    const LogLevel oldSystem = g.getSystemLogLevel();
+    setLogLevel(LogLevel::Error);
+    const bool allSet = g.getConsoleLogLevel() == LogLevel::Error &&
+                        g.getFileLogLevel() == LogLevel::Error &&
+                        g.getSystemLogLevel() == LogLevel::Error;
+    setSystemLogLevel(LogLevel::Verbose);
+    const bool systemSet = g.getSystemLogLevel() == LogLevel::Verbose &&
+                           g.getConsoleLogLevel() == LogLevel::Error;
+    g.setConsoleLogLevel(oldConsole);
+    g.setFileLogLevel(oldFile);
+    g.setSystemLogLevel(oldSystem);
+    check("levels: free setLogLevel / setSystemLogLevel use getLogger()", allSet && systemSet);
+}
+
 #ifdef LOGGER_TEST_FORK
 // ---------------------------------------------------------------------------
-// 6. POSIX: panics, each in a forked child (they abort).
+// 7. POSIX: panics, each in a forked child (they abort).
 // ---------------------------------------------------------------------------
 static string readText(const fs::path& p) {
     ifstream in(p, ios::binary);
@@ -580,6 +662,7 @@ int main() {
     testOpenCloseRace();
     testReentrantListener();
     testSokolBridge();
+    testLevels();
 #ifdef LOGGER_TEST_FORK
     testPanicForwards();
     testPanicDoesNotWaitForLock();
