@@ -18,6 +18,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <climits>
 #include <cstdint>
@@ -32,6 +33,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -392,7 +395,9 @@ static void checkLargeBuffers() {
     }
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) { g_logs.push_back(e); });
 
     printf("sizeof(size_t) = %zu\n", sizeof(size_t));

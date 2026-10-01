@@ -25,12 +25,15 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <string>
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -39,7 +42,9 @@ static void check(const char* name, bool ok) {
     if (!ok) ++g_fail;
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // Count the "[Screenshot]" warnings/errors the calls below log.
     int screenshotWarnings = 0;
     int screenshotErrors = 0;
