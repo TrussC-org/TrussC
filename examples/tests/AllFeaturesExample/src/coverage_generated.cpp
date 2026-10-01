@@ -617,9 +617,9 @@ static void cover_utility() {
     (void)toJsonString(af::val<const Json>(), af::val<int>());
     (void)parseXml(af::val<const std::string>());
     (void)getVersion();
-    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
+    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)nodeToJson(af::val<Node>(), af::val<int>());
 }
 
@@ -2075,6 +2075,14 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
     }
 };
 
+struct Cover_OnceGate : af::Scope<OnceGate> {
+    static void run() {
+        (void)OnceGate();
+        (void)OnceGate(af::val<double>());
+        (void)af::val<OnceGate>().isFirstTime();
+    }
+};
+
 struct Cover_Path : af::Scope<Path> {
     static void run() {
         (void)Path();
@@ -3487,6 +3495,7 @@ void af::coverGenerated() {
     af_generated::Cover_NetworkInterface::run();
     af_generated::Cover_Node::run();
     af_generated::Cover_Node__HitResult::run();
+    af_generated::Cover_OnceGate::run();
     af_generated::Cover_Path::run();
     af_generated::Cover_Pixels::run();
     af_generated::Cover_Platform::run();

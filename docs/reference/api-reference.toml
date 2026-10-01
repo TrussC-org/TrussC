@@ -3739,9 +3739,9 @@ description.ja = "平行光源に設定"
 description.ko = "방향성 조명으로 설정"
 
 ["Light::setIesProfile"]
-description.en = "Attach IES photometric profile for angular intensity"
-description.ja = "IES配光profileを設定"
-description.ko = "IES 배광 프로파일을 설정"
+description.en = "Attach IES photometric profile for angular intensity (currently one IES slot: only the first registered light with a profile uses it; further ones log a one-time warning)"
+description.ja = "IES配光profileを設定（現在IESスロットは1つ: profile付きで登録された最初のlightだけが使い、2灯目以降は1回だけ警告を出す）"
+description.ko = "IES 배광 프로파일을 설정 (현재 IES 슬롯은 1개: 프로파일이 있는 첫 번째 등록 조명만 사용하며, 그 이후 조명은 경고를 한 번 출력)"
 
 ["Light::setIntensity"]
 description.en = "Set light intensity multiplier"
@@ -3759,9 +3759,9 @@ description.ja = "点光源に設定"
 description.ko = "점 광원으로 설정"
 
 ["Light::setProjectionTexture"]
-description.en = "Set texture for projector-style light (gobo)"
-description.ja = "projector投影用texture（gobo）を設定"
-description.ko = "프로젝터 투영용 텍스처 (고보)를 설정"
+description.en = "Set texture for projector-style light (gobo) (currently one projector slot: only the first registered Spot light with a texture projects it; further ones light as plain spots and log a one-time warning)"
+description.ja = "projector投影用texture（gobo）を設定（現在projectorスロットは1つ: texture付きで登録された最初のSpot lightだけが投影し、2灯目以降は通常のspotとして照らし1回だけ警告を出す）"
+description.ko = "프로젝터 투영용 텍스처 (고보)를 설정 (현재 프로젝터 슬롯은 1개: 텍스처가 있는 첫 번째 등록 Spot 조명만 투영하며, 그 이후 조명은 일반 스포트로 비추고 경고를 한 번 출력)"
 
 ["Light::setProjectorAspect"]
 description.en = "Set projector aspect ratio"
@@ -8593,11 +8593,11 @@ related = ["Shader::setTexture", "Mat4", "Vec3"]
 
 ["Sound"]
 category = "sound"
-keywords = ["audio", "player", "sfx", "music", "of sound player"]
+keywords = ["audio", "player", "sfx", "music", "of sound player", "lifetime", "voice", "scope"]
 of = ["ofSoundPlayer"]
-description.en = "Audio playback"
-description.ja = "オーディオ再生"
-description.ko = "오디오 재생"
+description.en = "Audio playback. A Sound plays only while it, or a copy of it, is alive: copies share the voice, and when the last handle is destroyed or overwritten the voice stops (looping or one-shot) and its slot is freed. Keep Sound objects alive (e.g. as members) to play overlapping one-shots."
+description.ja = "オーディオ再生。Sound は自身かそのコピーが生きている間だけ鳴る: コピーはボイスを共有し、最後のハンドルが破棄または上書きされるとボイスは止まり (ループでもワンショットでも)、スロットが空く。ワンショットを重ねて鳴らすときは Sound オブジェクトを生かしておく (メンバーにするなど)"
+description.ko = "오디오 재생. Sound 는 자신 또는 그 복사본이 살아 있는 동안에만 재생된다: 복사본은 보이스를 공유하고, 마지막 핸들이 파괴되거나 덮어쓰이면 보이스가 정지하고 (루프든 원샷이든) 슬롯이 비워진다. 원샷을 겹쳐 재생하려면 Sound 객체를 살려 둔다 (멤버로 두는 등)"
 of_category = "audio-types"
 related = ["AudioEngine", "SoundBuffer"]
 
@@ -8813,10 +8813,10 @@ description.ko = "음량을 설정 (0.0-1.0)"
 
 ["Sound::stop"]
 category = "sound"
-keywords = ["halt", "end", "reset", "rewind"]
-description.en = "Stop audio"
-description.ja = "音声を停止"
-description.ko = "오디오 정지"
+keywords = ["halt", "end", "reset", "rewind", "release", "close"]
+description.en = "Stop audio and release the voice (a streamed voice also closes its decoder and file). Copies that share the voice see it stopped."
+description.ja = "音声を停止してボイスを解放する (ストリームのボイスはデコーダとファイルも閉じる)。ボイスを共有するコピーからも停止して見える"
+description.ko = "오디오를 정지하고 보이스를 해제한다 (스트리밍 보이스는 디코더와 파일도 닫는다). 보이스를 공유하는 복사본에서도 정지로 보인다"
 
 ["SoundBuffer"]
 keywords = ["audio buffer", "pcm ram", "sfx", "waveform", "procedural audio"]
@@ -12970,9 +12970,9 @@ related = ["asin", "atan2"]
 ["addLight"]
 category = "graphics_lighting"
 keywords = ["lamp", "illuminate", "directional", "point light", "ofLight"]
-description.en = "Add a light to the scene"
-description.ja = "シーンにlightを追加"
-description.ko = "씬에 조명을 추가"
+description.en = "Add a light to the scene (up to 8 lights per window; a light added past 8 is not registered, with a one-time warning)"
+description.ja = "シーンにlightを追加（1ウィンドウ最大8灯。9灯目以降は登録されず、1回だけ警告を出す）"
+description.ko = "씬에 조명을 추가 (창당 최대 8개. 8개를 넘어 추가한 조명은 등록되지 않으며 경고를 한 번 출력)"
 related = ["Light", "LightType", "setMaterial", "setEnvironment"]
 
 ["alertDialog"]
@@ -15652,6 +15652,60 @@ description.en = "Print to console"
 description.ja = "コンソールに出力"
 description.ko = "콘솔에 출력"
 related = ["logWarning", "logError", "setConsoleLogLevel"]
+
+["OnceGate"]
+category = "utility"
+keywords = ["warn once", "log once", "once", "rate limit", "throttle", "suppress", "repeat", "deduplicate"]
+description.en = "Gate for a log line (or anything else): isFirstTime() is true the first time, and with an interval, again once that much time has passed since the last true"
+description.ja = "ログ出力などのゲート：isFirstTime() は初回だけ true。間隔を指定すると、前回 true からその時間が経つと再び true"
+description.ko = "로그 출력 등의 게이트: isFirstTime()은 처음에만 true. 간격을 지정하면 마지막 true 이후 그 시간이 지나면 다시 true"
+details.en = '''
+`static OnceGate warned; if (warned.isFirstTime()) logWarning("Fbo") << "...";`
+logs the warning only the first time. Pass an interval in seconds to the
+constructor to make it true again once that much time has passed since the
+last true: `static OnceGate underrun{5.0};` logs at most once per 5 seconds.
+The gate object is the key: a `static` one per call site, or a member for
+once per object (`class Foo { OnceGate notWaitedWarned_; };`). Works with any
+log level, since the caller writes the line, and nothing is built while the
+gate is closed. Thread-safe and lock-free: when several threads call it at
+once, exactly one gets true. constexpr-constructible and trivially
+destructible, so a `static` gate still works during static destruction. Not
+copyable, not movable. Use it instead of a `static bool warned` flag.
+'''
+details.ja = '''
+`static OnceGate warned; if (warned.isFirstTime()) logWarning("Fbo") << "...";`
+で警告を初回だけ出す。コンストラクタに秒数の間隔を渡すと、前回 true を返して
+からその時間が経つと再び true になる：`static OnceGate underrun{5.0};` は最大
+5秒に1回だけ出す。ゲートのオブジェクトそのものがキーになる。呼び出し箇所ごとに
+`static` で1つ置くか、オブジェクトごとに1回ならメンバにする
+（`class Foo { OnceGate notWaitedWarned_; };`）。ログ行は呼び出し側が書くので
+どのログレベルにも使え、ゲートが閉じている間は何も組み立てない。スレッドセーフ
+でロックを使わない：複数スレッドが同時に呼んでも true を受け取るのはちょうど
+1つ。constexpr で構築でき、デストラクタは trivial なので、`static` のゲートは
+静的オブジェクトの破棄中でも使える。コピーもムーブもできない。`static bool
+warned` フラグの代わりに使う。
+'''
+details.ko = '''
+`static OnceGate warned; if (warned.isFirstTime()) logWarning("Fbo") << "...";`
+로 경고를 처음 한 번만 출력한다. 생성자에 초 단위 간격을 넘기면 마지막으로
+true를 반환한 뒤 그 시간이 지나면 다시 true가 된다: `static OnceGate underrun{5.0};`
+는 최대 5초에 한 번 출력한다. 게이트 객체 자체가 키다. 호출 위치마다 `static`
+으로 하나 두거나, 객체마다 한 번이면 멤버로 둔다
+(`class Foo { OnceGate notWaitedWarned_; };`). 로그 줄은 호출 측이 쓰므로 어떤
+로그 레벨에도 쓸 수 있고, 게이트가 닫혀 있는 동안은 아무것도 만들지 않는다.
+스레드 안전하며 락을 쓰지 않는다: 여러 스레드가 동시에 호출해도 true를 받는
+것은 정확히 하나. constexpr로 생성할 수 있고 소멸자가 trivial하므로 `static`
+게이트는 정적 객체 소멸 중에도 쓸 수 있다. 복사도 이동도 할 수 없다.
+`static bool warned` 플래그 대신 사용한다.
+'''
+related = ["OnceGate::isFirstTime", "logWarning", "logError"]
+
+["OnceGate::isFirstTime"]
+keywords = ["once", "first time", "warn once"]
+description.en = "True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false"
+description.ja = "初回は true。間隔を指定した場合は、前回 true からその時間が経つと再び true。それ以外は false"
+description.ko = "처음에는 true. 간격을 지정한 경우 마지막 true 이후 그 시간이 지나면 다시 true. 그 밖에는 false"
+related = ["OnceGate"]
 
 ["logVerbose"]
 category = "utility"
