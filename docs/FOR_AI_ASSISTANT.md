@@ -2106,6 +2106,8 @@ void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
 bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+void setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
+void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
 void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
@@ -3071,18 +3073,21 @@ LoadResult LoadResult::success()  // Make a success result (static)
 ```cpp
 ```
 
-### Logger — Logging core with console and file output and an onLog event; access the global instance via getLogger()
+### Logger — Logging core with console, file and system (OS log) output, each with its own level, and an onLog event; access the global instance via getLogger()
 
 ```cpp
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
 std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)
+LogLevel Logger::getSystemLogLevel() const  // Get the current system (OS log) level
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
 bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+void Logger::setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
+void Logger::setSystemLogLevel(LogLevel level)  // Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows
 ```
 
 ### Mat3 — 3x3 matrix for 2D affine / homography transforms (row-major). Includes static factories and a homography solver
@@ -4422,7 +4427,7 @@ enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku)
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
 enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
 enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown.
-enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal; Silent disables logging.
+enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off.
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |

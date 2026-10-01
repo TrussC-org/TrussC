@@ -562,8 +562,10 @@ static void cover_utility() {
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)logLevelToString(af::val<LogLevel>());
     (void)getLogger();
+    (void)setLogLevel(af::val<LogLevel>());
     (void)setConsoleLogLevel(af::val<LogLevel>());
     (void)setFileLogLevel(af::val<LogLevel>());
+    (void)setSystemLogLevel(af::val<LogLevel>());
     (void)setLogFile(af::val<const fs::path>());
     (void)closeLogFile();
     (void)logAt(af::val<LogLevel>());
@@ -1677,12 +1679,15 @@ struct Cover_Logger : af::Scope<Logger> {
         (void)Logger();
         (void)af::val<Logger>().onLog;
         (void)af::val<Logger>().log(af::val<LogLevel>(), af::val<const std::string>());
+        (void)af::val<Logger>().setLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().setConsoleLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().getConsoleLogLevel();
         (void)af::val<Logger>().setLogFile(af::val<const fs::path>());
         (void)af::val<Logger>().closeFile();
         (void)af::val<Logger>().setFileLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().getFileLogLevel();
+        (void)af::val<Logger>().setSystemLogLevel(af::val<LogLevel>());
+        (void)af::val<Logger>().getSystemLogLevel();
         (void)af::val<Logger>().getLogFilePath();
         (void)af::val<Logger>().isFileOpen();
     }
