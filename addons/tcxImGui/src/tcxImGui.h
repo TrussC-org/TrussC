@@ -59,8 +59,28 @@ public:
                 simgui_tc_set_context(simguiCtx_);
                 simgui_render();
                 renderPending_ = false;
+            } else {
+                // No imgui frame in this window frame: the values the MCP
+                // tools queued for this context are settled now (swapFrames()
+                // settles them when imgui runs).
+                detail::settleWithoutImGuiFrame(imguiCtx_);
             }
         }, 1000);
+
+        // A value the MCP tools wrote into this context's widgets whose check
+        // frame does not come in time (this window renders very slowly, or
+        // stopped) is settled from the main window's afterFrame, before
+        // tc::mcp's timeout drain there (BeforeApp), whichever window this is.
+        {
+            auto& wctx = tc::internal::currentWindowContext();
+            tc::CoreEvents* mainEvents = wctx.isMain ? &tc::events()
+                                                     : tc::internal::mainWindowContext().coreEvents;
+            if (mainEvents) {
+                overdueListener_ = mainEvents->afterFrame.listen([this]() {
+                    detail::settleOverdueValues(imguiCtx_);
+                }, tc::EventPriority::BeforeApp);
+            }
+        }
 
         // Listen to rawEvent for input handling
         eventListener_ = tc::events().rawEvent.listen([this](const sapp_event& ev) {
@@ -131,6 +151,7 @@ public:
         if (!initialized_) return;
         exitListener_ = {};
         renderListener_ = {};
+        overdueListener_ = {};
         eventListener_ = {};
         mousePressConsume_ = {};
         mouseReleaseConsume_ = {};
@@ -214,6 +235,7 @@ private:
     bool renderPending_ = false;
     tc::EventListener exitListener_;
     tc::EventListener renderListener_;
+    tc::EventListener overdueListener_;   // on the main window's afterFrame
     tc::EventListener eventListener_;
 
     // Input arbitration: consume listeners (BeforeApp) + pointer-gesture capture.
