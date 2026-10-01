@@ -108,10 +108,22 @@ struct TcpSendChannel {
     std::atomic<bool> open{true};
 
     // The send path gave up on this client (a timeout truncated a payload).
-    // The receive thread does the removal: the writer must never tear down the
-    // client it is running for, or it would end up joining itself.
+    // The receive thread does the removal.
     std::atomic<bool> dropped{false};
 };
+
+// Test hook, not a user setting: stop(), on the thread that has just joined
+// the accept thread, calls fn before it disconnects the clients and joins
+// their threads, so a test can hold it there. Applies to every TcpServer; an
+// empty fn (the default) removes it. State lives in tcTcpServer.cpp.
+void setTcpServerStopHookForTests(std::function<void()> fn);
+
+// Test hook, not a user setting: stop(), on a thread that has just taken the
+// accept thread out of the server, calls fn before it waits for that thread
+// to end, so a test can tell that another stop() arrives only after that.
+// Applies to every TcpServer; an empty fn (the default) removes it. State
+// lives in tcTcpServer.cpp.
+void setTcpServerAcceptTakenHookForTests(std::function<void()> fn);
 
 } // namespace internal
 
@@ -190,6 +202,26 @@ public:
     // Deliver::Main copies the payload and runs the listener at the start of
     // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the
     // firing thread — fastest, but you handle the synchronization.
+    //
+    // onClientConnect fires on the accept thread, and so do onError for
+    // server-level failures (accept() failing, a thread that cannot be started
+    // for a new client) and onClientDisconnect for a client whose receive
+    // thread could not start. Those server-level failures reach onError at
+    // most once every 5 s for each kind while they persist; the log counts
+    // the rest. onReceive and onClientDisconnect otherwise fire on that
+    // client's receive thread, and onSendComplete, and onError for a queued
+    // send that failed, on its writer thread.
+    //
+    // An inline listener on any of these threads may call stop(),
+    // disconnectClient() (for its own client or any other) and
+    // disconnectAllClients(). There they disconnect and return without
+    // waiting for any of the server's threads, since such a thread may be
+    // waiting for the caller in turn. Those threads are joined later: by the
+    // server once they have ended, by the next stop() or start() on another
+    // thread, or by the destructor. stop() on the accept thread closes the
+    // listening socket before it returns, and the accept thread disconnects
+    // every client once the listener returns. start() cannot be called from
+    // such a listener (see start()).
     // -------------------------------------------------------------------------
     Event<TcpClientConnectEventArgs> onClientConnect;       // On client connect
     Event<TcpServerReceiveEventArgs> onReceive;             // On data receive
@@ -204,6 +236,10 @@ public:
     // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpServer();
+
+    // Stops the server and waits for all of its threads, including those a
+    // listener's stop() or disconnect left running. Must not run on one of
+    // the server's own threads (in a listener).
     ~TcpServer();
 
     // Copy prohibited
@@ -214,10 +250,37 @@ public:
     // Server management
     // -------------------------------------------------------------------------
 
-    // Start server (listen on specified port)
-    bool start(int port, int maxClients = 10);
+    // Start server (listen on specified port).
+    //
+    // maxClients caps how many clients can be connected at once (0 =
+    // unlimited, the default). A connection that arrives while the server is
+    // full is closed right away and a warning is logged, at most once every few
+    // seconds however many arrive. A slot frees up as soon as a client
+    // disconnects. The listen backlog is a fixed value, independent of
+    // maxClients.
+    //
+    // It calls stop() first, which also joins any thread a listener's stop()
+    // left running. When a stop() on another thread is still tearing the
+    // previous session down (waiting for the accept thread, disconnecting the
+    // clients or joining their threads), start() waits for that stop() to
+    // finish too, so none of it reaches the restarted server. It cannot be called from an inline listener on one of
+    // the server's own threads: on the accept thread (onClientConnect, see
+    // Events above) or on a client's receive or writer thread (onReceive,
+    // onSendComplete, onClientDisconnect, onError from those threads), it logs
+    // an error and returns false without stopping anything.
+    bool start(int port, int maxClients = 0);
 
-    // Stop server
+    // Stop server. Returns once the accept thread and every client thread have
+    // ended and every client is disconnected. When two threads call it at
+    // once, only one of them waits for the accept thread.
+    //
+    // From an inline listener on one of the server's own threads (see Events
+    // above) it waits for no thread and returns at once: on a client's receive
+    // or writer thread it disconnects every client first, and on the accept
+    // thread it closes the listening socket, leaving the clients to the
+    // accept thread once the listener returns. The threads are joined by the
+    // next stop() or start() on another thread, or the destructor.
+    // isRunning() is false as soon as it is called.
     void stop();
 
     // Whether server is running
@@ -227,10 +290,15 @@ public:
     // Client management
     // -------------------------------------------------------------------------
 
-    // Disconnect specified client
+    // Disconnect specified client. Returns once that client's threads have
+    // ended; from an inline listener on one of the server's own threads (see
+    // Events above), for its own client or any other, it returns without
+    // waiting for them.
     void disconnectClient(int clientId);
 
-    // Disconnect all clients
+    // Disconnect all clients. Waits for their threads like disconnectClient(),
+    // except in an inline listener on one of the server's own threads. A
+    // client that connects while it runs may stay connected.
     void disconnectAllClients();
 
     // Number of connected clients
@@ -311,23 +379,63 @@ private:
     void clientThreadFunc(int clientId);
     void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
     void notifyError(const std::string& msg, int code = 0, int clientId = -1);
-    void removeClient(int clientId);
+    // Unregister the client and shut its channel, joining nothing (the
+    // server's own threads use it). False if the client was already gone.
+    bool removeClient(int clientId);
+
+    // Join the client threads (receive and writer) that have ended. Called
+    // from the accept loop, which wakes in short slices, so a finished thread
+    // is reclaimed promptly rather than held until stop(). The only join on
+    // one of the server's own threads: a finished thread waits for nothing.
+    void reapClientThreads();
+
+    // Join every client thread whose client is no longer registered. Never
+    // called on one of the server's own threads.
+    void joinClientThreads();
+
+    // Shut down the listening socket, or (andClose) close it for good.
+    // Guarded by listenSocketMutex_; a no-op once it is closed.
+    void releaseListenSocket(bool andClose);
+
+    // Disconnect every client without joining any of its threads; they stay
+    // registered for whoever joins them. The accept thread does this on its
+    // way out, and so do stop() and disconnectAllClients() on the server's own
+    // threads.
+    void shutAllClients();
 
 #ifdef _WIN32
     SOCKET serverSocket_ = INVALID_SOCKET;
 #else
     int serverSocket_ = -1;
 #endif
+    // Serializes shutting down and closing serverSocket_ between the accept
+    // thread and a stop() on another thread
+    std::mutex listenSocketMutex_;
 
     int port_ = 0;
-    int maxClients_ = 10;
+    int maxClients_ = 0;   // 0 = unlimited; read only by the accept thread
 
     std::thread acceptThread_;
+    // Guards acceptThread_ itself, so two threads calling stop() at once never
+    // both join it. Held only to move the thread in or out, never to join.
+    std::mutex acceptThreadMutex_;
+    // How many stop() calls are tearing the server down (joining an accept
+    // thread they moved out, disconnecting the clients and joining their
+    // threads, or on a client thread only disconnecting them), and the signal
+    // that one of them has finished; start() waits until none is left. Both
+    // guarded by acceptThreadMutex_.
+    int stopsInProgress_ = 0;
+    std::condition_variable stopsDone_;
     std::atomic<bool> running_{false};
 
     std::unordered_map<int, TcpServerClient> clients_;
     std::unordered_map<int, std::thread> clientThreads_;
     std::unordered_map<int, std::thread> clientWriters_;
+
+    // Ids of receive threads and writers that have returned and still need
+    // joining. Guarded by clientsMutex_; drained by reapClientThreads().
+    std::vector<int> finishedClientThreads_;
+    std::vector<int> finishedWriters_;
 
     // Shared: every send() looks a channel up through here, and so does every
     // getClientCount() a draw loop makes. Those are reads, and readers of a
@@ -358,10 +466,11 @@ private:
     void completeSend(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch,
                       const internal::TcpSendItem& item, SendError error, size_t bytesSent);
 
-    // Refuse further sends, wake everything waiting on the channel, shut the
-    // socket down and join the writer. The writer closes the descriptor itself,
-    // on its way out.
-    void closeChannel(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch);
+    // Refuse further sends, wake everything waiting on the channel and shut
+    // the socket down. The writer drains the queue and closes the descriptor
+    // itself, on its way out. False if the channel was already closed (or
+    // null).
+    bool shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
 };
 
 } // namespace trussc

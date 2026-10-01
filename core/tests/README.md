@@ -321,6 +321,66 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
+  client that leaves (closes or resets) are joined while the server runs,
+  not held until `stop()` (on Linux the address space stays flat over 200
+  clients; an unjoined thread leaves `/proc/self/task` but keeps its stack
+  mapped), and joined by an idle server too, with no later connection to
+  prompt it; `start(port, N)` closes connections beyond N, logs one warning per
+  burst and hands a freed slot to the next client; `start(port)` has no limit.
+  Listeners that tear down from their own thread: `disconnectClient()` of its
+  own client in `onReceive` (destroying the server then waits for that
+  thread), `stop()` in `onReceive`, and `stop()` in `onClientConnect` on the
+  accept thread, which closes the listening socket before it returns (the old
+  port refuses connections; on Linux, where `shutdown()` alone already does
+  that, the socket's descriptor must be gone too), where `start()` is
+  refused, and after which the accept thread disconnects the client once the
+  listener returns. A listener's teardown waits for none of the server's
+  threads, and the server's destruction waits for all of them: `stop()` in
+  `onError` after a send timed out mid-payload (the receive thread removes
+  the client meanwhile) returns and a later `start()` works (SKIP where the
+  send is not cut mid-payload, as Winsock may take the whole payload in one
+  `send()`);
+  `disconnectClient()` of its own client, or `stop()`, in `onSendComplete`,
+  with the server destroyed while that listener still runs (the destruction
+  waits for the writer); two `onReceive` listeners disconnecting each
+  other's client both return; two `onReceive`, or two `onSendComplete`,
+  listeners each calling `disconnectAllClients()` both return and the
+  server keeps running; and `disconnectAllClients()` on another
+  thread, while a client connects, returns and leaves that client
+  connected. `stop()` on several threads at once returns on all of
+  them: from `onClientConnect` on the accept thread while another client's
+  thread is parked in `onReceive` or `onSendComplete` and calls it too
+  (either one first); from two clients' `onReceive`, or two `onSendComplete`;
+  from a plain thread together with `onSendComplete` (the listener calls it
+  while the stop hook holds the plain one after its accept-thread join, and
+  the plain one returns only once that listener is done); from
+  `onClientConnect` once a plain thread's `stop()` has taken the accept
+  thread and waits for it (ordered by
+  `internal::setTcpServerAcceptTakenHookForTests()`; the listener's `stop()`
+  still closes the listening socket before it returns); and from two plain threads while the
+  accept thread is held in a listener (neither throws). Every client ends up
+  disconnected. `start()` while another thread's `stop()` is still waiting
+  for the accept thread waits for it too, and the restarted server accepts
+  clients; so does `start()` while that `stop()` has joined the accept thread
+  but not yet disconnected the clients (held there by
+  `internal::setTcpServerStopHookForTests()`), and a client of the restarted
+  server stays connected with no `onClientDisconnect`. `start()` from
+  `onReceive` is refused and the server keeps running. A watchdog turns a
+  hang there into a FAIL line and a non-zero exit.
+  Linux only, in forked children: failing `accept()` calls (descriptors
+  exhausted under a low `RLIMIT_NOFILE`) back off instead of spinning, log
+  once and reach `onError` again after the 5 s interval if they persist; a
+  thread that cannot start closes that connection and reports it through
+  `onError` instead of ending the process — the writer under `RLIMIT_NPROC`,
+  the receive thread through a `pthread_create` wrapper in the test binary
+  that fails one chosen call (the client is announced, then disconnected, and
+  that is reported even right after a different failure; the accept thread
+  does not wait for that client's writer, whose listener waits for the
+  disconnect); and when the
+  accept thread cannot start, `start()` returns false, reports it once and
+  leaves nothing listening, and a later `start()` on that port works. Each
+  server binds a port the OS just handed out, not a fixed one.
 - `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
   reference, so the App can't register itself from its constructor, and the
   code that creates it through a `shared_ptr` does. `runApp()`'s setup

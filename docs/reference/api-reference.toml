@@ -9415,11 +9415,17 @@ details = "The payload is buffered once and shared by every client's queue, not 
 description.en = "Disconnect all clients"
 description.ja = "全クライアントを切断"
 description.ko = "모든 클라이언트를 연결 해제"
+details.en = "Waits for the clients' threads like disconnectClient(), except in an inline listener on one of the server's own threads, where it disconnects them and returns without waiting. A client that connects while it runs may stay connected."
+details.ja = "disconnectClient() と同じくクライアントのスレッドの終了を待つ。ただしサーバ自身のスレッド上のインラインリスナーでは、切断だけして待たずに戻る。実行中に接続してきたクライアントは接続されたまま残ることがある。"
+details.ko = "disconnectClient()와 마찬가지로 클라이언트 스레드의 종료를 기다린다. 단, 서버 자신의 스레드에서 실행되는 인라인 리스너에서는 연결만 해제하고 기다리지 않고 반환한다. 실행 중에 접속한 클라이언트는 연결된 채로 남을 수 있다."
 
 ["TcpServer::disconnectClient"]
 description.en = "Disconnect a specific client"
 description.ja = "指定クライアントを切断"
 description.ko = "특정 클라이언트를 연결 해제"
+details.en = "Returns once that client's receive and writer threads have ended; the writer first completes whatever is still queued. It may be called from any listener, for its own client or any other: in an inline listener on one of the server's own threads (accept, receive or writer) it disconnects the client and returns without waiting, since such a thread may be waiting for the caller in turn. Those threads are joined later, by the server once they have ended, by the next stop() or start() on another thread, or by the destructor."
+details.ja = "そのクライアントの受信スレッドと送信スレッドが終わってから戻る。送信スレッドはキューに残っている分を先に完了させる。どのリスナーからでも、自分のクライアントにも他のクライアントにも呼べる。サーバ自身のスレッド（accept、受信、送信）上のインラインリスナーでは、クライアントを切断して待たずに戻る。そのスレッドが逆に呼び出し元を待っていることがあるからだ。それらのスレッドは後で join される。終わった時点でサーバが、あるいは別のスレッドでの次の stop() か start()、またはデストラクタが join する。"
+details.ko = "그 클라이언트의 수신 스레드와 송신 스레드가 끝난 뒤에 반환한다. 송신 스레드는 큐에 남은 것을 먼저 완료한다. 어떤 리스너에서든, 자기 클라이언트든 다른 클라이언트든 호출할 수 있다. 서버 자신의 스레드(accept, 수신, 송신)에서 실행되는 인라인 리스너에서는 클라이언트 연결을 해제하고 기다리지 않고 반환한다. 그 스레드가 반대로 호출한 쪽을 기다리고 있을 수 있기 때문이다. 그 스레드들은 나중에 join된다. 끝난 시점에 서버가, 또는 다른 스레드에서의 다음 stop()이나 start(), 혹은 소멸자가 join한다."
 
 ["TcpServer::getClient"]
 description.en = "Client info (nullptr if not found)"
@@ -9474,6 +9480,9 @@ description.ko = "클라이언트 연결 해제 시 발생"
 description.en = "Fired on a server or per-client error"
 description.ja = "サーバまたはクライアント単位のエラー時に発火"
 description.ko = "서버 또는 클라이언트별 오류 시 발생"
+details.en = "Server-level failures (accept() failing, a thread that cannot be started for a new client) fire on the accept thread, at most once every 5 seconds for each kind while they persist; the log counts the ones in between. An inline listener there may call stop() but not start(); stop() there closes the listening socket and returns before the clients are disconnected, which the accept thread does once the listener returns. Listen with Deliver::Main when the listener touches app state."
+details.ja = "サーバ単位の失敗（accept() の失敗、新しいクライアント用のスレッドが起動できない）は accept スレッドで発火し、続いている間は種類ごとに 5 秒に 1 回まで。その間の回数はログが数える。そこでのインラインリスナーは stop() を呼べるが start() は呼べない。そこでの stop() は待ち受けソケットを閉じ、クライアントが切断される前に戻る（切断はリスナーが戻った後に accept スレッドが行う）。リスナーがアプリの状態に触れるなら Deliver::Main で listen する。"
+details.ko = "서버 단위 실패(accept() 실패, 새 클라이언트용 스레드를 시작할 수 없음)는 accept 스레드에서 발생하며, 지속되는 동안 종류별로 5초에 한 번까지다. 그 사이의 횟수는 로그가 센다. 그곳의 인라인 리스너는 stop()은 호출할 수 있지만 start()는 호출할 수 없다. 그곳에서의 stop()은 대기 소켓을 닫고 클라이언트 연결이 해제되기 전에 반환한다(연결 해제는 리스너가 반환된 뒤 accept 스레드가 수행한다). 리스너가 앱 상태를 건드린다면 Deliver::Main으로 listen한다."
 
 ["TcpServer::onReceive"]
 description.en = "Fired when data is received from a client"
@@ -9523,14 +9532,21 @@ description.ja = "受信バッファサイズを設定"
 description.ko = "수신 버퍼 크기를 설정"
 
 ["TcpServer::start"]
-description.en = "Start listening on a port"
-description.ja = "ポートで待ち受けを開始"
-description.ko = "포트에서 수신 대기를 시작"
+description.en = "Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)"
+description.ja = "ポートで待ち受けを開始。maxClients で同時接続数に上限を付ける（0 = 無制限、既定）"
+description.ko = "포트에서 수신 대기를 시작. maxClients로 동시 접속 수를 제한 (0 = 무제한, 기본값)"
+keywords = ["listen", "port", "max clients", "connection limit"]
+details.en = "With maxClients above 0, a connection that arrives while that many clients are connected is closed right away and a warning is logged, at most once every few seconds however many arrive; a slot frees up as soon as a client disconnects. The default of 0 accepts any number of clients. The listen backlog is a fixed value and does not depend on maxClients. The receive and writer threads of clients that leave are joined while the server runs, and a failing accept() is retried with a short back-off rather than in a tight loop. start() calls stop() first, which also joins any thread a listener's stop() left running, and when a stop() on another thread is still tearing the previous session down (waiting for the previous accept thread to end, disconnecting the clients or joining their threads), it waits for that stop() to finish too, so none of it reaches the restarted server. It cannot be called from an inline listener on one of the server's own threads: on the accept thread (onClientConnect, and onError or onClientDisconnect for server-level failures) or on a client's receive or writer thread (onReceive, onSendComplete, onClientDisconnect, onError from those threads) it logs an error and returns false without stopping anything."
+details.ja = "maxClients が 0 より大きい場合、その数のクライアントが接続している間に届いた接続はすぐに閉じられ、警告がログに出る（何件届いても数秒に 1 回まで）。クライアントが切断すればすぐに枠が空く。既定の 0 ではクライアント数に上限はない。listen のバックログは固定値で、maxClients には依存しない。去ったクライアントの受信スレッドと送信スレッドはサーバの動作中に join され、失敗した accept() は間を置かずに繰り返すのではなく、短いバックオフを挟んで再試行される。start() は最初に stop() を呼び（リスナーの stop() が残したスレッドもここで join される）、別のスレッドの stop() が前のセッションをまだ片付けている（前の accept スレッドの終了を待っている、クライアントを切断している、またはそのスレッドを join している）なら、その stop() が終わるまで待つので、片付けが再開後のサーバに及ぶことはない。サーバ自身のスレッド上のインラインリスナーからは呼べない。accept スレッド上（onClientConnect、およびサーバ単位の失敗での onError や onClientDisconnect）や、クライアントの受信スレッド・送信スレッド上（onReceive、onSendComplete、onClientDisconnect、それらのスレッドからの onError）では、エラーをログに出して false を返し、何も停止しない。"
+details.ko = "maxClients가 0보다 크면, 그 수만큼의 클라이언트가 접속해 있는 동안 도착한 연결은 즉시 닫히고 경고가 로그에 남는다(몇 개가 도착하든 몇 초에 한 번까지). 클라이언트가 연결을 끊으면 곧바로 자리가 빈다. 기본값 0은 클라이언트 수를 제한하지 않는다. listen 백로그는 고정값이며 maxClients에 의존하지 않는다. 떠난 클라이언트의 수신 스레드와 송신 스레드는 서버가 동작하는 동안 join되며, 실패한 accept()는 쉴 새 없이 반복하지 않고 짧은 백오프를 두고 재시도된다. start()는 먼저 stop()을 호출하며(리스너의 stop()이 남긴 스레드도 여기서 join된다), 다른 스레드의 stop()이 이전 세션을 아직 정리하고 있다면(이전 accept 스레드의 종료를 기다리거나, 클라이언트 연결을 해제하거나, 그 스레드를 join하는 중이라면) 그 stop()이 끝날 때까지 기다리므로, 그 정리가 다시 시작된 서버에 미치지 않는다. 서버 자신의 스레드에서 실행되는 인라인 리스너에서는 호출할 수 없다. accept 스레드(onClientConnect, 그리고 서버 단위 실패에 대한 onError나 onClientDisconnect)나 클라이언트의 수신 스레드·송신 스레드(onReceive, onSendComplete, onClientDisconnect, 그 스레드들에서의 onError)에서는 오류를 로그에 남기고 false를 반환하며, 아무것도 정지하지 않는다."
 
 ["TcpServer::stop"]
 description.en = "Stop the server"
 description.ja = "サーバを停止"
 description.ko = "서버를 정지"
+details.en = "Returns once the accept thread and every client thread have ended and every client is disconnected; the destructor waits for all of them the same way. The server must not be destroyed from one of its own listeners (on the accept, receive or writer thread): destroy it from another thread, or after the listener has returned (for example from a Deliver::Main listener). When two threads call stop() at once, only one of them waits for the accept thread. It may be called from any listener: in an inline listener on one of the server's own threads it waits for no thread and returns at once, since such a thread may be waiting for the caller in turn. On a client's receive or writer thread (onReceive, onSendComplete, onClientDisconnect, onError from those threads) it disconnects every client first. On the accept thread (onClientConnect, and onError or onClientDisconnect for server-level failures) it closes the listening socket, and the accept thread disconnects the clients once the listener returns. The threads are joined by the next stop() or start() on another thread, or by the destructor. isRunning() is false as soon as stop() is called."
+details.ja = "accept スレッドと全クライアントのスレッドが終わり、全クライアントが切断されてから戻る。デストラクタも同じようにそれらすべてを待つ。サーバ自身のリスナー（accept スレッド、受信スレッド、送信スレッド上）でサーバを破棄してはならない。別のスレッドから、またはリスナーが戻った後に（たとえば Deliver::Main のリスナーから）破棄する。2 つのスレッドが同時に stop() を呼んだ場合、accept スレッドを待つのはその一方だけ。どのリスナーからでも呼べる。サーバ自身のスレッド上のインラインリスナーでは、どのスレッドも待たずにすぐ戻る。そのスレッドが逆に呼び出し元を待っていることがあるからだ。クライアントの受信スレッド・送信スレッド上（onReceive、onSendComplete、onClientDisconnect、それらのスレッドからの onError）では、先に全クライアントを切断する。accept スレッド上（onClientConnect、およびサーバ単位の失敗での onError や onClientDisconnect）では待ち受けソケットを閉じ、クライアントの切断はリスナーが戻った後に accept スレッドが行う。スレッドは別のスレッドでの次の stop() か start()、またはデストラクタが join する。isRunning() は stop() が呼ばれた時点で false になる。"
+details.ko = "accept 스레드와 모든 클라이언트 스레드가 끝나고 모든 클라이언트 연결이 해제된 뒤에 반환한다. 소멸자도 같은 방식으로 그 전부를 기다린다. 서버 자신의 리스너(accept 스레드, 수신 스레드, 송신 스레드)에서 서버를 파괴해서는 안 된다. 다른 스레드에서, 또는 리스너가 반환된 뒤에(예를 들어 Deliver::Main 리스너에서) 파괴한다. 두 스레드가 동시에 stop()을 호출하면 accept 스레드를 기다리는 것은 그중 하나뿐이다. 어떤 리스너에서든 호출할 수 있다. 서버 자신의 스레드에서 실행되는 인라인 리스너에서는 어떤 스레드도 기다리지 않고 바로 반환한다. 그 스레드가 반대로 호출한 쪽을 기다리고 있을 수 있기 때문이다. 클라이언트의 수신 스레드·송신 스레드(onReceive, onSendComplete, onClientDisconnect, 그 스레드들에서의 onError)에서는 먼저 모든 클라이언트 연결을 해제한다. accept 스레드(onClientConnect, 그리고 서버 단위 실패에 대한 onError나 onClientDisconnect)에서는 대기 소켓을 닫고, 클라이언트 연결 해제는 리스너가 반환된 뒤 accept 스레드가 수행한다. 스레드들은 다른 스레드에서의 다음 stop()이나 start(), 또는 소멸자가 join한다. isRunning()은 stop()이 호출된 시점에 false가 된다."
 
 ["TcpServerClient"]
 keywords = ["connected client", "peer", "remote socket", "client handle"]
