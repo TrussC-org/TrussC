@@ -577,7 +577,7 @@ private:
         }
 
         // Build sample list
-        if (!buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk)) {
+        if (!buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk, timeToSample)) {
             markTrackDamaged(track, "stsz", "sample sizes add up to more than the file size");
         }
     }
@@ -737,26 +737,38 @@ private:
     bool buildSamples(MovTrack& track,
                       const SampleSizes& sampleSizes,
                       const std::vector<uint64_t>& chunkOffsets,
-                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
+                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk,
+                      const std::vector<std::pair<uint32_t, uint32_t>>& timeToSample) {
 
         if (sampleSizes.count == 0 || chunkOffsets.empty() || sampleToChunk.empty()) {
             return true;
         }
 
+        // The sample count is at most the 'stsz' count and, when 'stts' was
+        // read, the number of samples it times (its entry counts summed). In a
+        // valid file the two are equal; 'stts' entries are bounded by its atom
+        // size, which a constant-size 'stsz' count is not.
+        uint64_t limit = sampleSizes.count;
+        if (!timeToSample.empty()) {
+            uint64_t timed = 0;
+            for (const auto& entry : timeToSample) timed += entry.first;
+            if (timed < limit) limit = timed;
+        }
+
         // First pass: how many samples the 'stsc' / 'stco' layout places,
-        // capped at the 'stsz' count
+        // capped at the limit above
         uint64_t placed = 0;
         {
             size_t stscIndex = 0;
             for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size() &&
-                                        placed < sampleSizes.count; chunkIndex++) {
+                                        placed < limit; chunkIndex++) {
                 while (stscIndex + 1 < sampleToChunk.size() &&
                        chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
                     stscIndex++;
                 }
                 placed += sampleToChunk[stscIndex].second;
             }
-            if (placed > sampleSizes.count) placed = sampleSizes.count;
+            if (placed > limit) placed = limit;
         }
         track.samples.reserve(static_cast<size_t>(placed));
 
@@ -774,7 +786,7 @@ private:
             uint32_t samplesInChunk = sampleToChunk[stscIndex].second;
             uint64_t offset = chunkOffsets[chunkIndex];
 
-            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < sampleSizes.count; i++) {
+            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < placed; i++) {
                 MovSample sample;
                 sample.offset = offset;
                 sample.size = sampleSizes.at(sampleIndex);
