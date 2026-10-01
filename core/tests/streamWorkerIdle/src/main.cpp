@@ -20,8 +20,8 @@
 //   every audioOut block holds the full level (refills are on time: no gap),
 //   also at speed 10, where the ring holds ~34 ms.
 // - With no stream playing, the worker polls every 50 ms, not 5 ms (#550):
-//   its passes over ~1 s (internal::streamWorkerPassesForTests()) stay well
-//   under the ~200 of a 5 ms poll, and a stream resumed after such an idle
+//   its passes per second of wall time (internal::streamWorkerPassesForTests()
+//   over the measured window) stay well under the ~200/s of a 5 ms poll, and a stream resumed after such an idle
 //   pause plays without a gap (the mixer wakes the worker back to 5 ms).
 // - A seek request on a playing stream is heard within a bound well under
 //   the ring's length (the worker wakes for it; the mean is printed for
@@ -79,9 +79,10 @@ constexpr int kRate = 48000;   // engine rate = file rate: no resampling
 // Bound on the process CPU use while the main thread sleeps, in cores.
 constexpr double kMaxCores = 0.25;
 
-// Bound on the worker's passes over ~1 s while no stream plays: its idle poll
-// is 50 ms (~20 passes); the 5 ms poll it used before #550 made ~200.
-constexpr uint64_t kMaxIdlePasses = 60;
+// Bound on the worker's passes per second of wall time while no stream plays:
+// its idle poll is 50 ms (~20/s); the 5 ms poll it used before #550 made ~200/s.
+// A rate, not a count: a slow runner can stretch the ~1 s window (#527).
+constexpr double kMaxIdlePassesPerSec = 60.0;
 
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }
 
@@ -231,15 +232,21 @@ TC_CORE_TEST_MAIN() {
         }
         check("the short stream plays to its end", ended);
         sleepMs(500);   // past the worker's switch to its idle poll
+        const auto w0 = chrono::steady_clock::now();
         const uint64_t p0 = internal::streamWorkerPassesForTests();
         const double idle = measureCores(1000);
         const uint64_t idlePasses = internal::streamWorkerPassesForTests() - p0;
-        printf("  idle after the stream ended: %s, %llu worker passes in ~1 s\n",
-               fmt(idle, "cores").c_str(), (unsigned long long)idlePasses);
+        const double idleSec = chrono::duration<double>(chrono::steady_clock::now() - w0).count();
+        // Passes per second of the window as it actually lasted (#527).
+        const double idleRate = idleSec > 0.0 ? (double)idlePasses / idleSec : 0.0;
+        char rateDetail[96];
+        snprintf(rateDetail, sizeof(rateDetail), "%llu passes in %.3f s = %.1f /s",
+                 (unsigned long long)idlePasses, idleSec, idleRate);
+        printf("  idle after the stream ended: %s, %s\n", fmt(idle, "cores").c_str(), rateDetail);
         check("idle after a stream ended: the process uses well under one core",
               idle < kMaxCores, fmt(idle, "cores"));
         check("idle after a stream ended: the worker polls slowly",
-              idlePasses < kMaxIdlePasses, to_string(idlePasses) + " passes");
+              idleRate < kMaxIdlePassesPerSec, rateDetail);
     }
 
     // --- one stream playing --------------------------------------------------------
