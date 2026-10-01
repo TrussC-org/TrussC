@@ -862,6 +862,8 @@ inline void fill(ForwardIt first, ForwardIt last, const T &value) {
 }
 
 // --- distance ---
+// TrussC patch: constexpr, as fast_float calls this from a
+// FASTFLOAT_CONSTEXPR20 function (newer MSVC rejects it otherwise).
 template <typename It>
 inline constexpr typename conditional<true, long long, It>::type
 distance(It first, It last) {
@@ -7121,8 +7123,10 @@ static bool exportGroupsToShape(shape_t *shape, const PrimGroup &prim_group,
           size_t vi2 = size_t(i2.v_idx);
           size_t vi3 = size_t(i3.v_idx);
 
-          if (((3 * vi0 + 2) >= v.size()) || ((3 * vi1 + 2) >= v.size()) ||
-              ((3 * vi2 + 2) >= v.size()) || ((3 * vi3 + 2) >= v.size())) {
+          // TrussC patch: size_t-safe comparison (compares indices by
+          // division).
+          if ((vi0 >= v.size() / 3) || (vi1 >= v.size() / 3) ||
+              (vi2 >= v.size() / 3) || (vi3 >= v.size() / 3)) {
             // Invalid triangle.
             // FIXME(syoyo): Is it ok to simply skip this invalid triangle?
             if (warn) {
@@ -7224,7 +7228,9 @@ static bool exportGroupsToShape(shape_t *shape, const PrimGroup &prim_group,
             bool valid_poly = true;
             for (size_t k = 0; k < npolys; ++k) {
               size_t vi = size_t(face.vertex_indices[k].v_idx);
-              if ((3 * vi + 2) >= v.size()) {
+              // TrussC patch: size_t-safe comparison (compares indices by
+              // division).
+              if (vi >= v.size() / 3) {
                 valid_poly = false;
                 break;
               }
@@ -7309,7 +7315,9 @@ static bool exportGroupsToShape(shape_t *shape, const PrimGroup &prim_group,
             i0 = face.vertex_indices[k];
             size_t vi0 = size_t(i0.v_idx);
 
-            assert(((3 * vi0 + 2) < v.size()));
+            // TrussC patch: size_t-safe comparison (compares indices by
+            // division).
+            assert(vi0 < v.size() / 3);
 
             real_t v0x = v[vi0 * 3 + 0];
             real_t v0y = v[vi0 * 3 + 1];
@@ -7373,8 +7381,10 @@ static bool exportGroupsToShape(shape_t *shape, const PrimGroup &prim_group,
             size_t vi1 = size_t(i1.v_idx);
             size_t vi2 = size_t(i2.v_idx);
 
-            if (((3 * vi0 + 2) >= v.size()) || ((3 * vi1 + 2) >= v.size()) ||
-                ((3 * vi2 + 2) >= v.size())) {
+            // TrussC patch: size_t-safe comparison (compares indices by
+            // division).
+            if ((vi0 >= v.size() / 3) || (vi1 >= v.size() / 3) ||
+                (vi2 >= v.size() / 3)) {
               // Invalid triangle.
               // FIXME(syoyo): Is it ok to simply skip this invalid triangle?
               continue;
@@ -7452,8 +7462,9 @@ static bool exportGroupsToShape(shape_t *shape, const PrimGroup &prim_group,
             for (size_t k = 0; k < 3; k++) {
               ind[k] = remainingFace.vertex_indices[(guess_vert + k) % npolys];
               size_t vi = size_t(ind[k].v_idx);
-              if (((vi * 3 + axes[0]) >= v.size()) ||
-                  ((vi * 3 + axes[1]) >= v.size())) {
+              // TrussC patch: size_t-safe comparison (compares indices by
+              // division; v holds whole xyz triples).
+              if (vi >= v.size() / 3) {
                 // ???
                 vx[k] = static_cast<real_t>(0.0);
                 vy[k] = static_cast<real_t>(0.0);
@@ -7499,8 +7510,9 @@ static bool exportGroupsToShape(shape_t *shape, const PrimGroup &prim_group,
 
               size_t ovi = size_t(remainingFace.vertex_indices[idx].v_idx);
 
-              if (((ovi * 3 + axes[0]) >= v.size()) ||
-                  ((ovi * 3 + axes[1]) >= v.size())) {
+              // TrussC patch: size_t-safe comparison (compares indices by
+              // division).
+              if (ovi >= v.size() / 3) {
                 // std::cout << "???1\n";
                 // ???
                 continue;
