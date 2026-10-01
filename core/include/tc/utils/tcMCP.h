@@ -679,6 +679,20 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
 
     svr = std::make_unique<httplib::Server>();
 
+    // A fixed port that is already in use fails to bind and is reported below.
+    // POSIX: SO_REUSEADDR only, as TcpServer does. Windows: SO_EXCLUSIVEADDRUSE
+    // only, so a port another socket holds fails to bind.
+    svr->set_socket_options([](socket_t sock) {
+#ifdef _WIN32
+        BOOL opt = TRUE;
+        setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&opt), sizeof(opt));
+#else
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+    });
+
     // POST /mcp — JSON-RPC requests. No CORS header: MCP clients are native and
     // ignore CORS, while a wildcard origin would let any web page in the user's
     // browser drive the local server. (OPTIONS preflight handler dropped too.)

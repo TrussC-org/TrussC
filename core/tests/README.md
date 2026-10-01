@@ -332,6 +332,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `hotReloadLifecycle/` — *(hot reload host/guest build)* the real
+  `GuestLibrary` loads, runs and unloads the guest several times (see the
+  header of `src/main.cpp` for every check). `events().hotReloadUnload` fires
+  once per unload, while the guest's App is still the main window's root, and
+  a guest singleton's listeners on the host's events (tcxNodeInspector's
+  toggle key) are gone after each unload (#416). `--reload-check` (needs a
+  display and cmake, not run in CI) reloads the windowed host twice with
+  tcxNodeInspector attached: the host's listener counts stay those of the
+  first generation (the Hierarchy is drawn once), and a press away from the
+  panels is not taken by a previous generation's tcxImGui.
 - `hotReloadScan/` — *(standalone, plain CMake)* the configure step and the
   pre-build check decide "does this project use hot reload" the same way:
   `tc_hot_reload_scan()` finds `TC_HOT_RELOAD` in any `.cpp` under `src/` and
@@ -386,6 +396,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   replaced attempt reports no `onConnect(false)` (#393), through
   `connectAsync()` and without threads; a refused `connectAsync()` with no
   reconnect reports `onConnect(false)` exactly once.
+- `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
+  (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
+  `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also
+  reports a port that is already in use: on a fixed port another server
+  listens on, `mcp::startHttpServer()` fails to bind, logs exactly one
+  "Failed to bind" error through the Logger, and the other server keeps
+  answering every request.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and

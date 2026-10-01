@@ -4,8 +4,10 @@
 //  - at compile time it emits the extern "C" create/destroy factories the
 //    host's GuestLibrary resolves via dlsym/GetProcAddress
 #include "tcApp.h"
-#include <tcxImGui.h>   // guest-side addon include (addons.make)
+#include <tcxImGui.h>   // guest-side addon includes (addons.make)
+#include <tcxNodeInspector.h>
 using namespace tcx;
+using tcx::nodeinspector::NodeInspector;
 
 TC_HOT_RELOAD(tcApp)
 
@@ -15,19 +17,16 @@ void tcApp::setup() {
     audioInHooksInSetup = (long)AudioEngine::getInstance().audioIn.listenerCount();
     if (cycleOnly) return;
     setWindowTitle("hotReloadLifecycle");
-    imguiSetup();
+    // Draws its Hierarchy panel at (10, 10) every frame from an onRender
+    // listener, through tcxImGui (set up by attach()).
+    NodeInspector::attach();
 }
 
 void tcApp::draw() {
     clear(0.12f);
-
-    imguiBegin();
-    ImGui::Begin("Hot reload");
-    ImGui::Text("Edit src/tcApp.cpp and save to reload");
-    ImGui::Text("ticks: %d", ticks_);
-    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
-    ImGui::End();
-    imguiEnd();
+    setColor(0.9f);
+    drawBitmapString("Edit src/tcApp.cpp and save to reload", 280, 30);
+    drawBitmapString("ticks: " + to_string(ticks_), 280, 50);
 }
 
 void tcApp::exit() {
@@ -112,6 +111,10 @@ bool tcApp::attachApp(Window& window, std::shared_ptr<App> app) {
 // The guard as guest code reads it: the host's release must show here.
 bool tcApp::seesAttached(const App* app) {
     return trussc::internal::attachedApps().count(app) != 0;
+}
+
+void tcApp::useInspectorToggleKey() {
+    NodeInspector::setToggleKey(KEY_F1);
 }
 
 // make_shared runs here, in the guest: the node's control block (and the code
