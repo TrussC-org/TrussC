@@ -436,7 +436,9 @@ Reference for oF users finding equivalent features in TrussC.
 
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
-| `-` | `MainThreadRunner::run(func)` | Execute on main thread |
-| `ofThread` | `std::thread + MainThreadRunner` | Safe sync |
+| `-` | `runOnMainThread(func)` | Execute on the main thread |
+| `ofScopedLock` | `std::lock_guard / std::scoped_lock` |  |
+| `ofMutex` | `std::mutex` | TrussC has no wrapper; use std::mutex |
+| `ofThread` | `Thread` | Subclass and override threadedFunction(); startThread() / waitForThread() |
 
 <!-- AUTO-GENERATED-END -->
