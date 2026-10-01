@@ -204,7 +204,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   after a second meanwhile) and goes on once it returns; an App runs once:
   `Window::setApp()` refuses an App whose window closed (one error, the
   window keeps its App, no hook comes back, no second `setup()`) and any App
-  on a window that is not open;
+  on a window that is not open, and `setApp(nullptr)` removes the window
+  App's hook;
   `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
   flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
   while another thread calls `stop()` still ends up in the WAV and in
@@ -232,7 +233,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   secondary window's App (setup on the window's first tick), whose `setup()`
   allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
   has returned and no hook is subscribed while it runs; afterwards there is
-  exactly one hook each, also after more ticks or a move to another window;
+  exactly one hook each, also after more ticks, and `setApp(nullptr)` removes
+  them;
   an App that is constructed but never run gets no callbacks; the App's
   `audioOut()` still runs before the default-priority listeners its `setup()`
   subscribed (the order the constructor subscription gave); the attach is
@@ -613,3 +615,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
+- `windowSetApp/` — an App ends when it leaves its window (#318), on the real
+  `AudioEngine` over miniaudio's null backend: `Window::setApp(other)` and
+  `setApp(nullptr)` run the outgoing App's `exit()` and then `cleanup()`, once
+  each, and detach its `audioOut()` / `audioIn()` (not called again); the
+  incoming App's `setup()` runs on the window's next tick; attaching the
+  swapped-out App again is refused with one error and the window keeps its
+  App; an App whose `cleanup()` already ran is not ended twice. Also from the
+  App's own `update()`, from its `setup()` (the swapped-out App gets no audio
+  hooks), and for an App added with `addChild()` and destroyed (its hooks go
+  with `cleanupTree()`). Not covered: the frame-boundary timing of a swap
+  (#315) and a native window.
