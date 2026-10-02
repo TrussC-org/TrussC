@@ -269,9 +269,9 @@ public:
 
         std::error_code ec;
         if (!std::filesystem::exists(path, ec)) {
-            logError("Pixels") << "file not found: " << internal::pathToUtf8(path);
+            logError("Pixels") << "file not found: " << path;
             return LoadResult::fail(LoadError::FileNotFound,
-                                    "file not found: " + internal::pathToUtf8(path));
+                                    "file not found: " + internal::pathToDisplayUtf8(path));
         }
         int w, h, channels;
         unsigned char* loaded = stbi_load(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 4);
@@ -305,9 +305,9 @@ public:
 
         std::error_code ec;
         if (!std::filesystem::exists(path, ec)) {
-            logError("Pixels") << "file not found: " << internal::pathToUtf8(path);
+            logError("Pixels") << "file not found: " << path;
             return LoadResult::fail(LoadError::FileNotFound,
-                                    "file not found: " + internal::pathToUtf8(path));
+                                    "file not found: " + internal::pathToDisplayUtf8(path));
         }
         int w, h, channels;
         float* loaded = stbi_loadf(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 3);

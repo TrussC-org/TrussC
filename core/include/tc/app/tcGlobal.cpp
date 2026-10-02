@@ -857,7 +857,7 @@ bool Logger::setLogFile(const fs::path& path) {
     // An absolute path skips getDataPath(), so it never reads the data path
     // state (unlocked, and written by the first call on Apple).
     const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
-    const std::string pathUtf8 = internal::pathToUtf8(resolved);
+    const std::string pathUtf8 = internal::pathToDisplayUtf8(resolved);
 
     // "" or "logs/": fail before creating any folder (the current log stays
     // open, as with the failures below).

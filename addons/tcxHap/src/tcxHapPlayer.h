@@ -118,16 +118,16 @@ public:
 
         std::error_code ec;
         if (!tc::fs::exists(path, ec)) {
-            tc::logError("HapPlayer") << "file not found: " << tc::internal::pathToUtf8(path);
+            tc::logError("HapPlayer") << "file not found: " << path;
             return tc::LoadResult::fail(tc::LoadError::FileNotFound,
-                "file not found: " + tc::internal::pathToUtf8(path));
+                "file not found: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         // Parse MOV file
         if (!movParser_.open(path)) {
             tc::logError("HapPlayer") << "Failed to open: " << path;
             return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
-                "failed to parse MOV: " + tc::internal::pathToUtf8(path));
+                "failed to parse MOV: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         const auto& info = movParser_.getInfo();
