@@ -53,6 +53,7 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 
     std::error_code ec;
     if (!fs::exists(path, ec)) {
+        logError("SoundBuffer") << "file not found: " << pathStr;
         return LoadResult::fail(LoadError::FileNotFound,
                                 "file not found: " + pathStr);
     }

@@ -490,7 +490,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         iosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("ios");
         iosPreset["generator"] = "Xcode";
         iosPreset["cacheVariables"]["CMAKE_SYSTEM_NAME"] = "iOS";
-        iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "15.0";
+        iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "16.3";
         if (!trusscDir.empty()) {
             iosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
         }

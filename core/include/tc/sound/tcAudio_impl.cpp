@@ -22,7 +22,7 @@
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
 #define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
+#include "tc/sound/tcAudioDeviceInternal.h"
 
 #include "tc/sound/tcSound.h"
 #include "tc/utils/tcFile.h"
@@ -76,6 +76,10 @@ std::atomic<bool> g_mixerLagReleased{false};
 // Read by internal::lastStreamSeekPointsForTests(): the seek points of the
 // stream decoder opened last.
 std::atomic<uint32_t> g_lastStreamSeekPoints{0};
+
+// Read by internal::streamWorkerPassesForTests(): the StreamWorker's passes.
+std::atomic<uint64_t> g_streamWorkerPasses{0};
+
 const ma_backend kNullBackend = ma_backend_null;
 
 // ma_context_init with miniaudio's default backend order for the platform,
@@ -89,6 +93,18 @@ ma_result initContext(ma_context* ctx) {
 } // namespace
 
 namespace internal {
+bool openedDeviceIsDefault(const ma_device_id* selectedID,
+                           const ma_device_info* infos, ma_uint32 count) {
+    // Some backends leave playback.id zeroed when opening the default.
+    if (!selectedID) return true;
+    for (ma_uint32 i = 0; i < count; ++i) {
+        if (std::memcmp(&infos[i].id, selectedID, sizeof(ma_device_id)) == 0) {
+            return infos[i].isDefault != 0;
+        }
+    }
+    return false;
+}
+
 void setNullAudioBackendForTests(bool on) {
     g_nullBackendForTests.store(on, std::memory_order_relaxed);
 }
@@ -109,6 +125,10 @@ void setStreamFaultForTests(StreamFaultForTests fault) {
 
 uint32_t lastStreamSeekPointsForTests() {
     return g_lastStreamSeekPoints.load(std::memory_order_relaxed);
+}
+
+uint64_t streamWorkerPassesForTests() {
+    return g_streamWorkerPasses.load(std::memory_order_relaxed);
 }
 } // namespace internal
 
@@ -507,6 +527,10 @@ struct StreamInstance {
 
     // Worker only.
     uint64_t seekServedSeq = 0;   // last request the worker took
+    // Under the worker's mutex: whether the worker has looked at this
+    // stream, and the read position it saw then (its poll interval, #550).
+    bool workerSeen = false;
+    uint64_t workerSeenReadFrame = 0;
     // The stream ended on an error (set with endOfStream, cleared by the
     // next seek request, which retries). The worker decodes nothing more
     // for it until then. The mixer ends a non-looping voice once the ring
@@ -634,6 +658,10 @@ struct StreamInstance {
 
 } // namespace internal
 
+#if defined(_WIN32) && !defined(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002   // Windows SDK 10.0.17134+
+#endif
+
 // Implementation detail: the rest of this TU refers to StreamInstance
 // unqualified. (This is a .cpp, not a public header.)
 using internal::StreamInstance;
@@ -644,15 +672,28 @@ using internal::StreamInstance;
 // requests (#280).
 //
 // It sleeps while there is no such work (#447): its wait ends on stop, when
-// some stream needs work (hasWork()), or after 5 ms, and it runs a pass at
-// every timeout too, so a refill is never more than 5 ms late. A
-// registration, a seek request and stop() notify it. The mixer notifies it
-// once per seek it applies (the ring then turns from full of old data to
-// empty at once, and the worker can only write the new data after that),
-// and when a callback takes a ring below half full. It does not notify at
-// each refill threshold: a ring that is due a refill (room for 1024 frames
-// of 16384) still holds ~320 ms at 48 kHz, so the timeout picks it up in
-// time. A disposed stream leaves the list at the worker's next look.
+// some stream needs work (hasWork()), or after the poll interval, and it
+// runs a pass at every timeout too. The poll is 5 ms while a stream is live
+// (the mixer drained a ring, or a seek was pending, within the last
+// kIdleAfter), so a refill is never more than 5 ms late, and 50 ms
+// otherwise (#550), so an idle app does not wake the worker 200 times a
+// second. A registration, a seek request and stop() notify it. The mixer
+// notifies it once per seek it applies (the ring then turns from full of
+// old data to empty at once, and the worker can only write the new data
+// after that), when a callback takes a ring below half full, and when it
+// drains a ring while the worker is on its idle poll (a voice that starts,
+// resumes or leaves speed 0); that wait also ends when it sees a ring
+// drained. It does not notify at each refill threshold: a ring that is due
+// a refill (room for 1024 frames of 16384) still holds ~320 ms at 48 kHz,
+// so the timeout picks it up in time. A disposed stream leaves the list at
+// the worker's next look.
+//
+// On Windows the timed wait is a high-resolution waitable timer (Windows 10
+// 1803+, as in internal::HeadlessSleeper and the sokol run loop, #488), so
+// the 5 ms poll is 5 ms and not the 15.6 ms system timer tick that
+// condition_variable::wait_for rounds it to. The worker then waits on the
+// timer and an auto-reset event that the notifications set; without the
+// timer it falls back to the condition variable.
 // ---------------------------------------------------------------------------
 class StreamWorker {
 public:
@@ -671,7 +712,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         streams_.push_back(std::move(w));
         ensureRunningLocked();
-        cv_.notify_one();
+        signal();
     }
 
     void shutdown() {
@@ -679,6 +720,7 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             stop_ = true;
             cv_.notify_all();
+            signalEvent();
         }
         if (thread_.joinable()) thread_.join();
     }
@@ -689,19 +731,92 @@ public:
     // between its check and its wait. Do not call it under the engine lock.
     void wake() {
         { std::lock_guard<std::mutex> lock(mutex_); }
-        cv_.notify_one();
+        signal();
     }
 
     // The mixer emptied a stream's ring (it applied a seek) or took it below
     // half full. From the audio callback, so without the lock (the worker
     // can hold it while it closes a stream's file): a wakeup that comes
-    // between the worker's check and its wait is lost, and the 5 ms timeout
-    // covers it.
-    void wakeFromMixer() { cv_.notify_one(); }
+    // between the worker's check and its wait is lost (not on Windows with
+    // the timer: the event keeps it), and the poll covers it.
+    void wakeFromMixer() { signal(); }
+
+    // The mixer drained a stream's ring. From the audio callback, without
+    // the lock: one atomic load while the worker is on its 5 ms poll. On
+    // the idle poll, wake the worker once so that it switches to the 5 ms
+    // poll now rather than up to 50 ms later (a lost wakeup is covered by
+    // the half-full wake and then the 50 ms poll).
+    void noteDrainedFromMixer() {
+        if (idlePoll_.load(std::memory_order_relaxed)
+            && idlePoll_.exchange(false, std::memory_order_relaxed)) {
+            signal();
+        }
+    }
 
 private:
-    StreamWorker() = default;
+    StreamWorker() {
+#ifdef _WIN32
+        // nullptr before Windows 10 1803, which rejects the flag: the
+        // worker then waits on cv_ as elsewhere.
+        timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                        TIMER_MODIFY_STATE | SYNCHRONIZE);
+        if (timer_) {
+            event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // auto-reset
+            if (!event_) {
+                CloseHandle(timer_);
+                timer_ = nullptr;
+            }
+        }
+#endif
+    }
     ~StreamWorker() = default;   // never called (see getInstance())
+
+    // The poll while a stream is live, and while none is.
+    static constexpr std::chrono::milliseconds kLivePoll{5};
+    static constexpr std::chrono::milliseconds kIdlePoll{50};
+    // A stream stays live this long after the worker last saw its ring
+    // drained or a seek pending: longer than the callback period, so a
+    // device that calls back every 10-20 ms keeps the 5 ms poll between
+    // its callbacks.
+    static constexpr std::chrono::milliseconds kIdleAfter{250};
+
+    // End the worker's wait.
+    void signal() {
+        cv_.notify_one();
+        signalEvent();
+    }
+
+    void signalEvent() {
+#ifdef _WIN32
+        if (event_) SetEvent(event_);
+#endif
+    }
+
+    // Wait until pred() or for `timeout`, like cv_.wait_for(lock, timeout,
+    // pred). On Windows on the high-resolution timer (see the class comment).
+    template <class Pred>
+    void waitFor(std::unique_lock<std::mutex>& lock, std::chrono::milliseconds timeout,
+                 Pred pred) {
+#ifdef _WIN32
+        if (timer_) {
+            if (pred()) return;
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)timeout.count() * 10000;   // relative, 100 ns units
+            if (SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE)) {
+                HANDLE handles[2] = {event_, timer_};
+                while (true) {
+                    lock.unlock();
+                    const DWORD r = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+                    lock.lock();
+                    if (r == WAIT_OBJECT_0 + 1) return;   // timed out: run a pass
+                    if (r != WAIT_OBJECT_0) break;        // the wait failed: cv_ below
+                    if (pred()) return;
+                }
+            }
+        }
+#endif
+        cv_.wait_for(lock, timeout, pred);
+    }
 
     struct Stopper {
         StreamWorker& worker;
@@ -909,15 +1024,63 @@ private:
         return work;
     }
 
+    // Whether a stream was live since the last look: its ring was drained
+    // (its read position moved) or a seek on it is pending. Also true for a
+    // stream the worker sees for the first time. Updates what the worker
+    // saw. Under mutex_.
+    bool anyLiveLocked() {
+        bool live = false;
+        for (auto& w : streams_) {
+            auto sp = w.lock();
+            if (!sp) continue;
+            StreamInstance& s = *sp;
+            const uint64_t r = s.readFrame.load(std::memory_order_acquire);
+            if (!s.workerSeen || r != s.workerSeenReadFrame
+                || s.seekRequestSeq.load(std::memory_order_acquire)
+                       != s.seekAppliedSeq.load(std::memory_order_acquire)) {
+                live = true;
+            }
+            s.workerSeen = true;
+            s.workerSeenReadFrame = r;
+        }
+        return live;
+    }
+
+    // The idle wait's extra predicate: a ring was drained since the last
+    // look. Under mutex_.
+    bool anyDrainedLocked() const {
+        for (auto& w : streams_) {
+            auto sp = w.lock();
+            if (sp && sp->workerSeen
+                && sp->readFrame.load(std::memory_order_acquire) != sp->workerSeenReadFrame) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void run() {
         std::vector<std::shared_ptr<StreamInstance>> live;
         std::unique_lock<std::mutex> lock(mutex_);
+        auto lastLive = std::chrono::steady_clock::now();
         while (true) {
-            // Sleep until a stream has work, or for at most 5 ms: the pass
-            // below then runs anyway (see the class comment).
-            cv_.wait_for(lock, std::chrono::milliseconds(5),
-                         [this] { return stop_.load() || anyWorkLocked(); });
+            // Sleep until a stream has work, or for at most the poll: the
+            // pass below then runs anyway (see the class comment).
+            const auto now = std::chrono::steady_clock::now();
+            if (anyLiveLocked()) lastLive = now;
+            if (now - lastLive < kIdleAfter) {
+                idlePoll_.store(false, std::memory_order_relaxed);
+                waitFor(lock, kLivePoll, [this] { return stop_.load() || anyWorkLocked(); });
+            } else {
+                // Before the wait's first look, so that a drain after it
+                // notifies (see noteDrainedFromMixer()).
+                idlePoll_.store(true, std::memory_order_relaxed);
+                waitFor(lock, kIdlePoll, [this] {
+                    return stop_.load() || anyWorkLocked() || anyDrainedLocked();
+                });
+            }
             if (stop_.load()) break;
+            g_streamWorkerPasses.fetch_add(1, std::memory_order_relaxed);
 
             // Snapshot strong refs while holding the lock, then drop the
             // lock for the actual decode work (which calls into miniaudio
@@ -945,6 +1108,12 @@ private:
     std::vector<std::weak_ptr<StreamInstance>> streams_;
     std::atomic<bool> stop_{false};   // written under mutex_; refillOne() polls it
     bool running_ = false;            // under mutex_
+    // The worker is on its idle poll; the mixer clears it when it wakes it.
+    std::atomic<bool> idlePoll_{false};
+#ifdef _WIN32
+    HANDLE timer_ = nullptr;   // high-resolution waitable timer, or nullptr
+    HANDLE event_ = nullptr;   // auto-reset; set with timer_
+#endif
 };
 
 // ---------------------------------------------------------------------------
@@ -1308,11 +1477,13 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
 
     stream->readFrame.store(readFrame, std::memory_order_release);
     stream->subFrame = subFrame;
+    if (readFrame != readStart) StreamWorker::getInstance().noteDrainedFromMixer();
 
     // This callback took the ring below half full: wake the worker rather
-    // than wait for its poll (which a coarse system timer, 15.6 ms on
-    // Windows, stretches), e.g. at a high speed. Once per crossing, so a
-    // ring that stays low (the end of the file) does not notify again.
+    // than wait for its poll (which a coarse system timer stretches, 15.6 ms
+    // on Windows without the high-resolution timer), e.g. at a high speed,
+    // or for its 50 ms idle poll. Once per crossing, so a ring that stays
+    // low (the end of the file) does not notify again.
     // Signed: after an underrun at speed > 1 readFrame can be past it.
     constexpr int64_t kLowWater = (int64_t)(StreamInstance::RING_FRAMES / 2);
     if ((int64_t)(writeFrame - readStart) >= kLowWater
@@ -1625,25 +1796,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
     }
     args.maxPolyphony = (int)playingSounds_.size();
 
-    // Determine whether the opened device is the OS default by comparing
-    // its device ID against the isDefault flag from the playback device
-    // enumeration. We compare ma_device_id by raw bytes because its
-    // contents vary by backend (CoreAudio uses UID strings, WASAPI uses
-    // wide strings, ALSA uses device strings, etc.).
-    args.isDefaultDevice = false;
+    // Use the selection ID: playback.id may be zeroed for the default.
     {
         ma_device_info* infos = nullptr;
         ma_uint32 count = 0;
-        if (ma_context_get_devices(ctxArg, &infos, &count,
-                                    NULL, NULL) == MA_SUCCESS) {
-            for (ma_uint32 i = 0; i < count; ++i) {
-                if (std::memcmp(&infos[i].id, &device->playback.id,
-                                sizeof(ma_device_id)) == 0) {
-                    args.isDefaultDevice = (infos[i].isDefault != 0);
-                    break;
-                }
-            }
+        if (deviceIDPtr && ma_context_get_devices(ctxArg, &infos, &count,
+                                                NULL, NULL) != MA_SUCCESS) {
+            infos = nullptr;
+            count = 0;
         }
+        args.isDefaultDevice = internal::openedDeviceIsDefault(deviceIDPtr, infos, count);
     }
 
     diag_->deviceIsDefault = args.isDefaultDevice;

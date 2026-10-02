@@ -183,7 +183,10 @@ void QuadWarp::save(const std::string& path) {
     }
     json["quadwarp"]["dst"] = dstArr;
 
-    tc::saveJson(json, path); // Correct API: saveJson(json, path)
+    if (!tc::saveJson(json, path)) {
+        tc::logError("QuadWarp") << "Cannot save to " << path;
+        return;
+    }
     tc::logNotice("QuadWarp") << "Saved to " << path;
 }
 

@@ -1704,7 +1704,7 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 
 All file-path parameters take `fs::path` (`std::filesystem::path`) — string literals and `std::string` convert implicitly, so just write `img.load("photo.png")` as always. `getDataPath()` also returns `fs::path`; join paths with `/` (`getDataPath("save") / "shot.png"`), not string concatenation. `setDataPathRoot()` accepts absolute roots on Windows (`C:/data`) too.
 
-The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`, `Xml::save`, `Pixels::save` / `Image::save`, `setLogFile`) resolve a relative path against `getDataPath()`, use an absolute path as given, and create a missing parent folder (as `saveScreenshot()` and the recorders do). When the folder cannot be created or the file cannot be opened, they return false. All of them log the reason, except that `Pixels::save` / `Image::save` log only when the path has no file name or the folder cannot be created (a failed image write just returns false).
+The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`, `Xml::save`, `Pixels::save` / `Image::save`, `setLogFile`) resolve a relative path against `getDataPath()`, use an absolute path as given, and create a missing parent folder (as `saveScreenshot()` and the recorders do). When the folder cannot be created or the file cannot be opened, they return false and log the reason. `saveTextFile`, `appendToFile`, `saveJson` and `Pixels::save` also check writing and closing the file, logging an error and returning false on failure. `saveJson` serializes first and writes in binary mode (LF on every platform); `Pixels::save` encodes in memory first. A serialization or encoding error leaves an existing file untouched. These saves write in place: a crash, power loss or full disk during writing can leave the file truncated. Apps needing crash-safe saves must handle them themselves, for example by writing a new file and renaming it.
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
 
@@ -2194,7 +2194,7 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened
+bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails
 bool createDirectory(const fs::path & path)  // Create directory (and parents)
 bool directoryExists(const fs::path & path)  // Check if directory exists
 bool fileExists(const fs::path & path)  // Check if file exists
@@ -2216,8 +2216,8 @@ std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
 std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
 bool removeFile(const fs::path & path)  // Remove file
-bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false.
-bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened
+bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it.
+bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it
 void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
 fs::path utf8ToPath(std::string_view utf8)  // Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later).
@@ -3156,7 +3156,7 @@ float & Mat4::at(int row, int col) [+1]  // Access the element at (row, col)
 Mat4 Mat4::fromHomography(const Mat3 & h)  // Build a Mat4 from a 3x3 homography (for 2D projection)
 Mat4 Mat4::frustum(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an asymmetric perspective (frustum) projection matrix
 Mat4 Mat4::identity()  // Create an identity matrix
-Mat4 Mat4::inverted() const  // Get inverse matrix
+Mat4 Mat4::inverted() const  // Get inverse matrix (identity when |det| < 1e-10, including valid tiny scales; use tryInvert for a relative check)
 Mat4 Mat4::lookAt(const Vec3 & eye, const Vec3 & target, const Vec3 & up)  // Create a view matrix
 Mat4 Mat4::ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an orthographic projection matrix
 Mat4 Mat4::perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Create a perspective projection matrix
@@ -3167,6 +3167,7 @@ Mat4 Mat4::rotateZ(float radians)  // Create Z-axis rotation matrix
 Mat4 Mat4::scale(float sx, float sy, float sz) [+2]  // Create a scaling matrix
 Mat4 Mat4::translate(float tx, float ty, float tz) [+1]  // Create a translation matrix
 Mat4 Mat4::transposed() const  // Get transposed matrix
+bool Mat4::tryInvert(Mat4 & out) const  // Checked inverse: writes the inverse to out and returns true, or returns false (out unchanged) when the matrix is degenerate, e.g. an axis scaled to 0. The test is relative to the matrix scale, so small but valid scales still invert
 ```
 
 ### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible)
@@ -3535,7 +3536,7 @@ void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned
+bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it
 void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
