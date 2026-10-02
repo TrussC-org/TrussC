@@ -22,7 +22,7 @@
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
 #define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
+#include "tc/sound/tcAudioDeviceInternal.h"
 
 #include "tc/sound/tcSound.h"
 #include "tc/utils/tcFile.h"
@@ -93,6 +93,18 @@ ma_result initContext(ma_context* ctx) {
 } // namespace
 
 namespace internal {
+bool openedDeviceIsDefault(const ma_device_id* selectedID,
+                           const ma_device_info* infos, ma_uint32 count) {
+    // Some backends leave playback.id zeroed when opening the default.
+    if (!selectedID) return true;
+    for (ma_uint32 i = 0; i < count; ++i) {
+        if (std::memcmp(&infos[i].id, selectedID, sizeof(ma_device_id)) == 0) {
+            return infos[i].isDefault != 0;
+        }
+    }
+    return false;
+}
+
 void setNullAudioBackendForTests(bool on) {
     g_nullBackendForTests.store(on, std::memory_order_relaxed);
 }
@@ -1784,25 +1796,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
     }
     args.maxPolyphony = (int)playingSounds_.size();
 
-    // Determine whether the opened device is the OS default by comparing
-    // its device ID against the isDefault flag from the playback device
-    // enumeration. We compare ma_device_id by raw bytes because its
-    // contents vary by backend (CoreAudio uses UID strings, WASAPI uses
-    // wide strings, ALSA uses device strings, etc.).
-    args.isDefaultDevice = false;
+    // Use the selection ID: playback.id may be zeroed for the default.
     {
         ma_device_info* infos = nullptr;
         ma_uint32 count = 0;
-        if (ma_context_get_devices(ctxArg, &infos, &count,
-                                    NULL, NULL) == MA_SUCCESS) {
-            for (ma_uint32 i = 0; i < count; ++i) {
-                if (std::memcmp(&infos[i].id, &device->playback.id,
-                                sizeof(ma_device_id)) == 0) {
-                    args.isDefaultDevice = (infos[i].isDefault != 0);
-                    break;
-                }
-            }
+        if (deviceIDPtr && ma_context_get_devices(ctxArg, &infos, &count,
+                                                NULL, NULL) != MA_SUCCESS) {
+            infos = nullptr;
+            count = 0;
         }
+        args.isDefaultDevice = internal::openedDeviceIsDefault(deviceIDPtr, infos, count);
     }
 
     diag_->deviceIsDefault = args.isDefaultDevice;
