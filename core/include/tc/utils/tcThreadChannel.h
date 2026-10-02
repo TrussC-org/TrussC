@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include <queue>
+#include <vector>
+#include <utility>
 #include <condition_variable>
 #include <chrono>
 #include <cstddef>
@@ -124,11 +126,15 @@ public:
     }
 
     // Receive everything queued right now (non-blocking), in FIFO order.
-    // Takes the lock once and moves the whole queue into `out` (its previous
-    // contents are discarded). Values sent after this call stay queued for the
-    // next receive. Returns the number of values received (0 if the channel is
-    // closed or empty).
-    size_t receiveAll(std::queue<T>& out) {
+    // Under the lock it only swaps the queue with an empty one; the values are
+    // moved into the returned vector after the lock is released, so senders
+    // wait only for the swap. Values sent after this call stay queued for the
+    // next receive. Returns an empty vector if the channel is empty or closed.
+    //
+    //   for (auto& msg : channel.receiveAll()) {
+    //       handle(msg);
+    //   }
+    std::vector<T> receiveAll() {
         std::queue<T> taken;
         {
             std::unique_lock<std::mutex> lock(mutex_);
@@ -136,8 +142,13 @@ public:
                 taken.swap(queue_);
             }
         }
-        out.swap(taken);   // previous contents of `out` are destroyed outside the lock
-        return out.size();
+        std::vector<T> out;
+        out.reserve(taken.size());
+        while (!taken.empty()) {
+            out.push_back(std::move(taken.front()));
+            taken.pop();
+        }
+        return out;
     }
 
     // ---------------------------------------------------------------------------

@@ -37,7 +37,7 @@
 #if !defined(__EMSCRIPTEN__)
 #include "tcThreadChannel.h" // ThreadChannel<T>
 #include <atomic>
-#include <queue>
+#include <vector>
 #endif
 
 namespace trussc {
@@ -86,12 +86,12 @@ inline void runOnMainThread(std::function<void()> fn) {
 // other threads while the drain runs is deferred to the next call.
 namespace internal {
 inline void drainMainThreadQueue() {
-    std::queue<std::function<void()>> batch;
-    mainThreadQueuePendingCount().store(mainThreadQueue().receiveAll(batch),
-                                        std::memory_order_relaxed);
-    while (!batch.empty()) {
-        std::function<void()> fn = std::move(batch.front());
-        batch.pop();
+    std::vector<std::function<void()>> batch = mainThreadQueue().receiveAll();
+    mainThreadQueuePendingCount().store(batch.size(), std::memory_order_relaxed);
+    for (auto& slot : batch) {
+        // Move out so each closure (and what it captured) is released right
+        // after it runs, not at the end of the drain.
+        std::function<void()> fn = std::move(slot);
         if (fn) fn();
     }
 }

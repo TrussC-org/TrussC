@@ -24,7 +24,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
-#include <queue>
 #include <thread>
 #include <vector>
 
@@ -281,18 +280,20 @@ TC_CORE_TEST_MAIN() {
         ThreadChannel<int> ch;
         for (int i = 0; i < 5; ++i) ch.send(i);
         check("ThreadChannel::size counts queued values", ch.size() == 5 && !ch.empty());
-        queue<int> out;
-        out.push(99);   // previous contents are replaced
-        size_t n = ch.receiveAll(out);
+        vector<int> out = ch.receiveAll();
         bool inOrder = out.size() == 5;
-        for (int i = 0; inOrder && i < 5; ++i) { inOrder = out.front() == i; out.pop(); }
-        check("ThreadChannel::receiveAll: returns every value, FIFO", n == 5 && inOrder);
+        for (int i = 0; inOrder && i < 5; ++i) inOrder = out[i] == i;
+        check("ThreadChannel::receiveAll: returns every value, FIFO", inOrder);
         check("ThreadChannel::receiveAll: channel empty afterwards", ch.size() == 0 && ch.empty());
-        check("ThreadChannel::receiveAll: 0 when empty", ch.receiveAll(out) == 0 && out.empty());
+        check("ThreadChannel::receiveAll: empty vector when empty", ch.receiveAll().empty());
+        ch.send(7);
+        ch.send(8);
+        vector<int> again = ch.receiveAll();
+        check("ThreadChannel::receiveAll: later sends come in the next call, FIFO",
+              again.size() == 2 && again[0] == 7 && again[1] == 8);
         ch.send(1);
         ch.close();
-        out.push(99);
-        check("ThreadChannel::receiveAll: 0 when closed", ch.receiveAll(out) == 0 && out.empty());
+        check("ThreadChannel::receiveAll: empty vector when closed", ch.receiveAll().empty());
     }
 
     // --- 6. drainMainThreadQueue runs what was queued at its start ---

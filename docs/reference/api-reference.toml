@@ -10310,9 +10310,9 @@ description.ko = "값을 받음(블로킹): 데이터가 도착할 때까지 대
 
 ["ThreadChannel::receiveAll"]
 keywords = ["drain", "batch", "swap", "snapshot", "take all"]
-description.en = "Receive everything queued right now without blocking: takes the lock once and moves the whole queue into out (a std::queue<T>; its previous contents are discarded), in FIFO order. Values sent afterwards stay queued for the next receive. Returns the number of values received (0 if the channel is empty or closed)."
-description.ja = "今キューにあるものをブロックせずにすべて受け取る: ロックを1回だけ取り、キュー全体を out（std::queue<T>。元の中身は破棄される）に FIFO 順のまま移す。その後に send された値は次の受信まで残る。受け取った値の数を返す（空またはチャンネルが閉じていれば 0）"
-description.ko = "지금 큐에 있는 것을 블로킹 없이 모두 받음: 락을 한 번만 잡고 큐 전체를 out(std::queue<T>. 기존 내용은 폐기됨)으로 FIFO 순서 그대로 옮김. 그 뒤에 send된 값은 다음 수신까지 남음. 받은 값의 개수를 반환(비어 있거나 채널이 닫혀 있으면 0)"
+description.en = "Receive everything queued right now without blocking and return it as a std::vector<T> in FIFO order, e.g. for (auto& msg : channel.receiveAll()) handle(msg);. Under the lock it only swaps the queue with an empty one; the values are moved into the vector after the lock is released, so other threads wait only for the swap. Values sent afterwards stay queued for the next receive. Returns an empty vector if the channel is empty or closed."
+description.ja = "今キューにあるものをブロックせずにすべて受け取り、FIFO 順の std::vector<T> で返す（例: for (auto& msg : channel.receiveAll()) handle(msg);）。ロック中はキューを空のキューと入れ替えるだけで、値を vector に移すのはロックを放した後なので、他のスレッドが待つのは入れ替えの間だけ。その後に send された値は次の受信まで残る。空またはチャンネルが閉じていれば空の vector を返す"
+description.ko = "지금 큐에 있는 것을 블로킹 없이 모두 받아 FIFO 순서의 std::vector<T>로 반환(예: for (auto& msg : channel.receiveAll()) handle(msg);). 락 안에서는 큐를 빈 큐와 바꾸기만 하고, 값을 vector로 옮기는 것은 락을 놓은 뒤이므로 다른 스레드는 교체하는 동안만 기다림. 그 뒤에 send된 값은 다음 수신까지 남음. 비어 있거나 채널이 닫혀 있으면 빈 vector 반환"
 related = ["ThreadChannel::tryReceive", "ThreadChannel::size"]
 
 ["ThreadChannel::send"]
