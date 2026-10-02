@@ -2001,9 +2001,9 @@ description.ko = "줌 감도를 설정"
 
 ["Environment"]
 keywords = ["ibl", "skybox", "hdr"]
-description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)"
-description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）"
-description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT)"
+description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "light-types"
 related = ["setEnvironment", "getEnvironment", "Light", "Material", "Fbo"]
 details = '''
@@ -2040,9 +2040,9 @@ description.ja = "environment mapが読み込み済みか確認"
 description.ko = "환경맵이 로드되었는지 확인"
 
 ["Environment::loadFromHDR"]
-description.en = "Load environment from HDR image file"
-description.ja = "HDR画像からIBL environment mapを生成"
-description.ko = "HDR 이미지에서 IBL 환경맵을 생성"
+description.en = "Load environment from HDR image file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "HDR画像からIBL environment mapを生成。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "HDR 이미지에서 IBL 환경맵을 생성. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 
 ["Environment::loadProcedural"]
 description.en = "Generate a simple procedural sky environment"
@@ -2614,9 +2614,9 @@ description.ko = "줄 바꿈이 활성화되었는지 확인"
 ["Font::load"]
 category = "font"
 keywords = ["open", "read", "file"]
-description.en = "Load font file"
-description.ja = "フォントファイルを読み込む"
-description.ko = "폰트 파일을 로드"
+description.en = "Load a font file or a system font name. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins."
+description.ja = "フォントファイルまたはシステムフォント名を読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う"
+description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용"
 
 ["Font::resetLineHeight"]
 keywords = ["line height", "default", "leading"]
@@ -3098,9 +3098,9 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
@@ -4425,9 +4425,9 @@ description.ko = "전치 행렬을 얻음"
 ["Material"]
 keywords = ["pbr", "shader surface", "metallic", "roughness", "gltf"]
 of = ["ofMaterial"]
-description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
-description.ja = "PBR material（metallic-roughness、glTF 2.0互換）"
-description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환)"
+description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR material（metallic-roughness、glTF 2.0互換）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "material-types"
 related = ["setMaterial", "calculateLighting", "Light", "Mesh", "Environment"]
 
@@ -6748,9 +6748,9 @@ description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
 related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
-description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`)."
-description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)"
-description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`)"
+description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Image::load", "Texture::allocate"]
 
 ["Pixels::loadFromMemory"]
@@ -6761,9 +6761,9 @@ description.ko = "메모리의 이미지를 CPU 메모리로 디코딩. GPU를 �
 ["Pixels::loadHDR"]
 category = "graphics_pixels"
 keywords = ["float", "radiance"]
-description.en = "Load an HDR (.hdr) image into a float pixel buffer"
-description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む"
-description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드"
+description.en = "Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Pixels::loadPlatform", "Pixels::isFloat"]
 
 ["Pixels::loadPlatform"]
@@ -8720,9 +8720,19 @@ description.ko = "일시정지 상태인지 확인"
 ["Sound::isPlaying"]
 category = "sound"
 keywords = ["active", "running", "status"]
-description.en = "Check if playing"
-description.ja = "再生中か確認"
-description.ko = "재생 중인지 확인"
+description.en = "Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically."
+description.ja = "再生中か確認（一時停止中は false）。デコーダの失敗で停止したストリームは、バッファ内の音声を再生し終えるとループ中でも false になる。エラーは一度ログに記録され、TrussC は自動で再試行しない。"
+description.ko = "재생 중인지 확인 (일시정지 중에는 false). 디코더 오류로 중단된 스트림은 버퍼의 오디오를 재생한 뒤 반복 재생 중에도 멈춘다. 오류는 한 번 기록되며 TrussC는 자동으로 재시도하지 않는다."
+details.en = '''
+For a long-running app that expects continuous music, check `isPlaying()` while the sound is not intentionally paused or stopped. If it becomes false, schedule a reload with `loadStream()` and call `play()` only if loading succeeds. Check the play result too. The app chooses when to retry, including after another load or play failure.
+'''
+details.ja = '''
+長時間動作するアプリで音楽を継続再生する場合は、意図的に一時停止・停止していないときに `isPlaying()` を確認する。false になったらアプリ側で `loadStream()` による再読み込みを予定し、読み込みが成功した場合だけ `play()` を呼ぶ。再生開始の結果も確認する。再読み込みや再生開始が失敗した場合も含め、再試行のタイミングはアプリが決める。
+'''
+details.ko = '''
+장시간 실행되는 앱에서 음악을 계속 재생하려면 의도적으로 일시정지하거나 정지하지 않은 상태에서 `isPlaying()`을 확인한다. false가 되면 앱에서 `loadStream()`으로 다시 로드할 시점을 정하고, 로드가 성공했을 때만 `play()`를 호출한다. 재생 시작 결과도 확인한다. 다시 로드하거나 재생을 시작하는 데 실패한 경우를 포함해 재시도 시점은 앱이 결정한다.
+'''
+related = ["Sound::loadStream", "Sound::play", "Sound::isPaused"]
 
 ["Sound::isStreaming"]
 category = "sound"
@@ -8734,9 +8744,9 @@ description.ko = "loadStream()으로 로드되었으면 true"
 ["Sound::load"]
 category = "sound"
 keywords = ["open", "read", "file"]
-description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)"
-description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）"
-description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지)"
+description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 
 ["Sound::loadFromBuffer"]
 description.en = "Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr."
@@ -8746,9 +8756,9 @@ description.ko = "미리 생성한 SoundBuffer (ChipSound나 절차적 파형 �
 ["Sound::loadStream"]
 category = "sound"
 keywords = ["streaming", "disk", "music"]
-description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count."
-description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数"
-description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수"
+description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Sound::isStreaming"]
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
@@ -12376,9 +12386,9 @@ description.ko = "일시정지 또는 재개"
 ["VideoPlayerBase::setResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend."
-description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定。ズレがこの値を超えるとフレーム送りではなくシークで同期。0で無効。デフォルト: 0.5秒。主にLinux(FFmpeg)で有効"
-description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크하는 값을 설정. 드리프트가 이 값을 초과하면 프레임 추적 대신 시크로 동기화. 0이면 비활성. 기본값: 0.5초. 주로 Linux(FFmpeg)에서 유효"
+description.en = "Set the maximum video/audio drift before hard re-sync (video seeks to the audio position). Set to 0 or negative to disable hard re-sync. Default: 0.5s. Affects the Linux (FFmpeg) backend and tcxHap's HapPlayer. HapPlayer advances by wall-clock dt * speed and slews toward playing audio with a 0.25s time constant; slewing remains enabled when hard re-sync is disabled."
+description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定（映像を音声位置へシーク）。0以下でハードリシンクを無効化。デフォルト: 0.5秒。Linux(FFmpeg)とtcxHapのHapPlayerで有効。HapPlayerは壁時計のdt * speedで進み、再生中の音声位置へ時定数0.25秒で徐々に補正する。ハードリシンクを無効にしても、この補正は続く"
+description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크(비디오를 오디오 위치로 시크)하는 값을 설정. 0 이하면 하드 리싱크를 비활성화. 기본값: 0.5초. Linux(FFmpeg)와 tcxHap의 HapPlayer에서 유효. HapPlayer는 벽시계 dt * speed로 진행하며 재생 중인 오디오 위치로 0.25초 시정수로 서서히 보정한다. 하드 리싱크를 비활성화해도 이 보정은 유지된다"
 related = ["VideoPlayerBase::getResyncThreshold"]
 
 ["VideoPlayerBase::setSpeed"]
@@ -14608,9 +14618,9 @@ related = ["setCurveTolerance"]
 category = "file"
 keywords = ["resource", "asset", "resolve"]
 of = ["ofToDataPath"]
-description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged."
-description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る"
-description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨"
+description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread."
+description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。データディレクトリの基準部分だけを字句的に正規化し、ファイル名の構成要素は保つ。どのスレッドから呼んでもよい"
+description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 데이터 디렉터리 기준 부분만 어휘적으로 정규화하고 파일 이름의 구성 요소는 유지. 어느 스레드에서 호출해도 됨"
 related = ["getDataPathRoot", "getAbsolutePath", "joinPath"]
 
 ["getDataPathRoot"]
@@ -16523,17 +16533,17 @@ related = ["getCurveTolerance", "setCurveResolution", "drawBezier", "drawCurve"]
 ["setDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is."
-description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる"
-description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨"
+description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup())."
+description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる。ファイルを読み込むスレッドを開始する前に呼ぶ (例: setup() 内)"
+description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨. 파일을 로드하는 스레드를 시작하기 전에 호출 (예: setup() 안)"
 related = ["getDataPathRoot", "setDataPathToResources", "getDataPath"]
 
 ["setDataPathToResources"]
 category = "file"
 keywords = ["bundle", "macos", "app"]
-description.en = "Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms."
-description.ja = "配布用にデータパスルートをmacOSアプリバンドルのContents/Resources/dataフォルダに向ける。macOS以外のプラットフォームでは何もしない"
-description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음"
+description.en = "Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup())."
+description.ja = "配布用にデータパスルートをmacOSアプリバンドルのContents/Resources/dataフォルダに向ける。macOS以外のプラットフォームでは何もしない。ファイルを読み込むスレッドを開始する前に呼ぶ (例: setup() 内)"
+description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음. 파일을 로드하는 스레드를 시작하기 전에 호출 (예: setup() 안)"
 related = ["setDataPathRoot", "getExecutableDir"]
 
 ["setDefaultScreenFov"]

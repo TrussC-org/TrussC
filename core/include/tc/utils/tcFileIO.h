@@ -31,6 +31,11 @@ namespace trussc {
 
 namespace fs = std::filesystem;
 
+// Resolve a relative path against the data folder; absolute paths pass
+// through. Defined in tcUtils.h (included by TrussC.h); declared here so the
+// loaders in headers that tcUtils.h itself includes (Sound, Pixels) can call it.
+inline fs::path getDataPath(const fs::path& filename);
+
 // Convert a path to UTF-8 bytes. On POSIX the native encoding already is
 // UTF-8; on Windows the native encoding is UTF-16, so go through u8string().
 // Exact or nothing: on Windows it throws for a name that is not valid UTF-16

@@ -583,13 +583,12 @@ struct StreamInstance {
     // stream, and the read position it saw then (its poll interval, #550).
     bool workerSeen = false;
     uint64_t workerSeenReadFrame = 0;
-    // The stream ended on an error (set with endOfStream, cleared by the
-    // next seek request, which retries). The worker decodes nothing more
-    // for it until then. The mixer ends a non-looping voice once the ring
-    // has drained; a looping one stays playing but silent (what
-    // isPlaying() should say then is #448). Also set by the re-init
-    // migration, before the worker sees the instance (see halt()).
-    bool halted = false;
+    // The stream ended on an error (published with endOfStream, cleared by
+    // an explicit seek request). The worker decodes nothing more for it
+    // until then. The mixer ends the voice once the ring has drained,
+    // including looping voices. Also set by the re-init migration before
+    // registration. Atomic because the mixer reads it too (see halt()).
+    std::atomic<bool> halted{false};
     // The decoder returned no frames on a non-looping stream: nothing more
     // to read until a seek request, or until the loop flag is set and the
     // worker starts the file over. Unlike endOfStream it is cleared when the
@@ -672,12 +671,12 @@ struct StreamInstance {
 
     // The stream cannot go on: the worker decodes nothing more for it until
     // the next seek request. The mixer drains what the ring holds; then a
-    // non-looping voice ends and a looping one plays on silently (#448).
+    // voice ends, whether looping or not.
     // Logged as an error once per halt: the audio stops for a reason the
     // app cannot see otherwise. The worker, or the re-init migration before
-    // it registers the instance (halted is the worker's field).
+    // it registers the instance. endOfStream publishes halted to the mixer.
     void halt(const std::string& why) {
-        halted = true;
+        halted.store(true, std::memory_order_relaxed);
         endOfStream.store(true, std::memory_order_release);
         logError("SoundStream") << pathUtf8 << ": " << why << "; the stream ends here";
     }
@@ -940,7 +939,7 @@ private:
 
     // Whether the decoder can give more frames (after any seek is taken).
     static bool readable(const StreamInstance& s) {
-        if (s.halted) return false;
+        if (s.halted.load(std::memory_order_relaxed)) return false;
         if (g_streamFault.load(std::memory_order_relaxed)
                 == (int)internal::StreamFaultForTests::SeekRefillStalls) {
             return false;   // test: serve seeks, but hold back decoded frames
@@ -950,7 +949,7 @@ private:
 
     // The wait predicate's test for one stream: a seek to take, or a ring
     // with room for a chunk that the decoder can fill. The worker thread,
-    // under mutex_ (seekServedSeq, halted and decoderAtEnd are the worker's;
+    // under mutex_ (seekServedSeq and decoderAtEnd are the worker's;
     // the rest are atomics or fixed before registration).
     static bool hasWork(const StreamInstance& s) {
         if (!serviceable(s)) return false;
@@ -975,7 +974,7 @@ private:
                 s.clampSeekTarget(s.seekTargetFrame.load(std::memory_order_relaxed));
             const uint64_t frame = (uint64_t)target;
             s.seekServedSeq = req;
-            s.halted = false;
+            s.halted.store(false, std::memory_order_relaxed);
             s.decoderAtEnd = false;
             const ma_result sr = seekDecoder(s, frame);
             // Publish before writing any post-seek data (see the section
@@ -1462,7 +1461,7 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
         // Need both readFrame and readFrame+1 for interpolation.
         if (readFrame + 1 >= writeFrame) {
             if (!stream->endOfStream.load(std::memory_order_acquire)
-                || sound.loop.load()) {
+                || (sound.loop.load() && !stream->halted.load(std::memory_order_relaxed))) {
                 // Underrun: emit nothing for this output frame, give the
                 // worker a chance to catch up. subFrame state preserved.
                 if (stream->playbackStarted) ++underruns;
