@@ -906,6 +906,25 @@ Logger& getLogger() {
     return logger;
 }
 
+// Shared by the deferred queue, native file writers and MCP path reporting.
+std::filesystem::path internal::resolveScreenshotPath(const std::filesystem::path& path) {
+    auto resolved = path.is_absolute() ? path : getDataPath(path);
+    const auto ext = toLower(getFileExtension(resolved));
+    const bool common = ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp";
+    const bool mac = Platform::isMacOS() &&
+                     (ext == "tiff" || ext == "tif" || ext == "gif");
+    const bool win = Platform::isWindows() && ext == "tga";
+    if (!common && !mac && !win) {
+        resolved += ".png";
+        const char* formats = Platform::isMacOS() ? "png, jpg/jpeg, bmp, tiff/tif, gif" :
+                              Platform::isWindows() ? "png, jpg/jpeg, bmp, tga" :
+                                                      "png, jpg/jpeg, bmp";
+        logWarning("Screenshot") << "Unsupported or missing extension; saving PNG to "
+                                 << internal::pathToUtf8(resolved) << ". Supported formats: " << formats;
+    }
+    return resolved;
+}
+
 // Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
 // (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
 bool Logger::setLogFile(const fs::path& path) {

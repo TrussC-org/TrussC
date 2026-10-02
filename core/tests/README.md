@@ -427,6 +427,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   platforms without hot reload (web / Android / iOS) even with the macro in
   source (#329). The end-to-end build of a macro app as a normal app is
   `examples/tests/HotReloadFallback`, built by the daily sweeps.
+- `screenshotExtension/` — unknown or missing screenshot extensions append
+  `.png`, warn with the actual path and supported formats, and report that
+  path in the queue and MCP reply (#455). Supported formats preserve the
+  requested spelling. `--screen` (needs a display, e.g. Xvfb) also checks the
+  deferred PNG/JPEG/BMP files, direct file capture and absence of duplicate
+  suffixes. The default run needs no GPU.
 - `screenshotContract/` — *(also on web)* the screenshot APIs report what they
   actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
   nothing is queued or created, and each API warns once. Native:
