@@ -260,6 +260,9 @@ namespace internal {
     };
     SglBudget& sglBudget();
 
+    // Shared, rate-limited matrix stack error report for screen and FBO contexts.
+    void reportSglStackErrors(sgl_error_t err);
+
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
     // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan

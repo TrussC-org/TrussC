@@ -388,23 +388,10 @@ void ensureSwapchainPass() {
     }
 }
 
-void present() {
-    if (headless::isActive()) return;
-
-    // Final pass of the frame — nothing suspends it, so no preserve hint
-    // (keeps the normal one-pass frame's store behavior unchanged).
-    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
-        beginSwapchainPassInternal(false);
-    }
-
-    internal::flushDeferredShaderDraws();
-
-    events().onRender.notify();
-
-    sgl_error_t err = sgl_error();
+namespace internal {
+void reportSglStackErrors(sgl_error_t err) {
     // Matrix stack errors (#232): TrussC keeps its push/pop balanced per node
-    // and per frame, so what reaches sokol_gl is nesting deeper than its fixed
-    // stack (64), or a raw sgl_push/pop_matrix mismatch. Reported once, then
+    // and per frame. FBO contexts are reset at begin() (#327). Reported once, then
     // at most every 5 s — the flags are cleared again at sg_commit().
     if (err.stack_overflow || err.stack_underflow) {
         static std::chrono::steady_clock::time_point lastReport{};
@@ -419,6 +406,24 @@ void present() {
                 << "; transforms past that point are wrong this frame";
         }
     }
+}
+} // namespace internal
+
+void present() {
+    if (headless::isActive()) return;
+
+    // Final pass of the frame — nothing suspends it, so no preserve hint
+    // (keeps the normal one-pass frame's store behavior unchanged).
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
+        beginSwapchainPassInternal(false);
+    }
+
+    internal::flushDeferredShaderDraws();
+
+    events().onRender.notify();
+
+    sgl_error_t err = sgl_error();
+    internal::reportSglStackErrors(err);
     if (err.vertices_full || err.commands_full) {
         auto& budget = internal::sglBudget();
         int newVerts = budget.maxVertices * 4;
