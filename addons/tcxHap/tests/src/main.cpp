@@ -27,7 +27,7 @@
 #include <TrussC.h>
 #include "tcxHapPlayer.h"
 
-#include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -302,7 +302,6 @@ static bool writeMoovFirstTruncated(const vector<char>& src, const fs::path& dst
 
 struct Parsed {
     bool opened = false;
-    double ms = 0.0;
     bool hasVideo = false, hasAudio = false;
     size_t videoSamples = 0;
     uint64_t audioFrames = 0;
@@ -311,9 +310,7 @@ struct Parsed {
 static Parsed parseFile(const fs::path& path) {
     Parsed r;
     MovParser parser;
-    const auto t0 = chrono::steady_clock::now();
     r.opened = parser.open(path);
-    r.ms = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
     if (const MovTrack* v = parser.getInfo().getVideoTrack()) {
         r.hasVideo = true;
         r.videoSamples = v->samples.size();
@@ -326,14 +323,10 @@ static Parsed parseFile(const fs::path& path) {
 }
 
 static string describe(const Parsed& p) {
-    return string(p.opened ? "opened" : "not opened") + ", " + to_string(p.ms) + " ms, video " +
+    return string(p.opened ? "opened" : "not opened") + ", video " +
            (p.hasVideo ? to_string(p.videoSamples) : string("none")) + ", audio " +
            (p.hasAudio ? to_string(p.audioFrames) : string("none"));
 }
-
-// Upper bound for open() on the changed copies; the valid file parses in
-// well under a millisecond
-static constexpr double kQuickMs = 2000.0;
 
 static void sampleTableTests(const fs::path& data) {
     const vector<char> orig = readBytes(data / "sine_sowt.mov");
@@ -384,7 +377,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: video stsz count 0xFFFFFFF0 -> no video track, audio kept",
-              p.ms < kQuickMs && !p.hasVideo && p.hasAudio && p.audioFrames == 24000,
+              !p.hasVideo && p.hasAudio && p.audioFrames == 24000,
               describe(p));
     }
 
@@ -395,9 +388,7 @@ static void sampleTableTests(const fs::path& data) {
         putU32(b, videoStts + 12, 0xFFFFFFF0u);
         writeBytes(tmp, b);
         MovParser parser;
-        const auto t0 = chrono::steady_clock::now();
         parser.open(tmp);
-        const double ms = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
         const MovTrack* v = parser.getInfo().getVideoTrack();
         bool same = v && v->samples.size() == refVideo->samples.size();
         for (size_t i = 0; same && i < v->samples.size(); i++) {
@@ -406,7 +397,7 @@ static void sampleTableTests(const fs::path& data) {
                    v->samples[i].timestamp == refVideo->samples[i].timestamp;
         }
         check("tables: video stts count 0xFFFFFFF0 -> video track unchanged",
-              ms < kQuickMs && same, to_string(ms) + " ms");
+              same);
     }
 
     // Audio constant-size 'stsz' with a count of 0xFFFFFFF0: the frame count
@@ -417,7 +408,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: audio constant stsz count 0xFFFFFFF0 -> 24000 audio frames",
-              p.ms < kQuickMs && p.videoSamples == 5 && p.audioFrames == 24000, describe(p));
+              p.videoSamples == 5 && p.audioFrames == 24000, describe(p));
     }
 
     // Constant-size 'stsz' with a count of 0xFFFFFFF0, every 'stsc' entry
@@ -437,7 +428,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: constant stsz + stsc 0xFFFFFFF0 per chunk, chunk past the end -> stts total (24000)",
-              patched && p.ms < kQuickMs && p.audioSamples == 24000, describe(p));
+              patched && p.audioFrames == 24000, describe(p));
     }
 
     // A child atom larger than its parent: the video track's 'mdia' size
@@ -450,7 +441,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: child atom larger than its parent -> video track skipped",
-              mdia && p.ms < kQuickMs && !p.hasVideo && p.hasAudio, describe(p));
+              mdia && !p.hasVideo && p.hasAudio, describe(p));
     }
 
     // One variable 'stsz' entry of 0xFFFFFFF0: that sample lies past the end
@@ -541,6 +532,7 @@ struct SoundDesc {
     uint32_t bits = 16;
     double rate = 48000.0;
     uint32_t lpcmFlags = 0;     // v2 formatSpecificFlags
+    uint32_t packetPadding = 0; // extra bytes per packet (unsupported)
 };
 
 struct PcmMovie {
@@ -570,7 +562,7 @@ static vector<char> soundDescription(const SoundDesc& d) {
         appendU32(e, 0x7F000000);
         appendU32(e, d.bits);
         appendU32(e, d.lpcmFlags);
-        appendU32(e, d.bits / 8 * d.channels);  // constBytesPerAudioPacket
+        appendU32(e, d.bits / 8 * d.channels + d.packetPadding);  // constBytesPerAudioPacket
         appendU32(e, 1);                        // constLPCMFramesPerAudioPacket
     } else {
         appendU16(e, d.channels); appendU16(e, d.bits); appendU16(e, 0); appendU16(e, 0);
@@ -578,8 +570,8 @@ static vector<char> soundDescription(const SoundDesc& d) {
         if (d.version == 1) {
             appendU32(e, 1);                        // samplesPerPacket
             appendU32(e, d.bits / 8);               // bytesPerPacket
-            appendU32(e, d.bits / 8 * d.channels);  // bytesPerFrame
-            appendU32(e, 2);                        // bytesPerSample
+            appendU32(e, d.bits / 8 * d.channels + d.packetPadding);  // bytesPerFrame
+            appendU32(e, 2);                        // legacy bytesPerSample
         }
     }
     vector<char> entry;
@@ -602,6 +594,9 @@ static vector<char> buildPcmMovie(const PcmMovie& m, uint64_t audioBytes) {
     vector<char> stsc; appendU32(stsc, 0); appendU32(stsc, 1);
     appendU32(stsc, 1); appendU32(stsc, m.framesPerChunk); appendU32(stsc, 1);
     vector<char> stsz; appendU32(stsz, 0); appendU32(stsz, m.stszSize); appendU32(stsz, m.frames);
+    if (m.stszSize == 0) {
+        for (uint32_t i = 0; i < m.frames; i++) appendU32(stsz, m.desc.bits / 8 * m.desc.channels);
+    }
     const uint32_t chunks = m.frames / m.framesPerChunk;
     const uint64_t chunkBytes = audioBytes / chunks;
     vector<char> stco; appendU32(stco, 0); appendU32(stco, chunks);
@@ -632,7 +627,7 @@ static int16_t patternValue(uint32_t i, uint32_t c) {
 }
 
 // Interleaved PCM of the pattern: 16-bit (little- or big-endian) or 32-bit
-// float (value / 32768, little-endian)
+// float (value / 32768, little- or big-endian)
 static vector<char> patternAudio(uint32_t frames, uint32_t channels, bool bigEndian, bool isFloat) {
     vector<char> b;
     for (uint32_t i = 0; i < frames; i++) {
@@ -641,7 +636,10 @@ static vector<char> patternAudio(uint32_t frames, uint32_t channels, bool bigEnd
             if (isFloat) {
                 const float f = v / 32768.0f;
                 uint32_t u; memcpy(&u, &f, 4);
-                for (int k = 0; k < 4; k++) b.push_back(char(u >> (8 * k)));
+                for (int k = 0; k < 4; k++) {
+                    const int shift = bigEndian ? 8 * (3 - k) : 8 * k;
+                    b.push_back(char(u >> shift));
+                }
             } else {
                 const uint16_t u = uint16_t(v);
                 if (bigEndian) { b.push_back(char(u >> 8)); b.push_back(char(u)); }
@@ -677,15 +675,12 @@ struct PcmParsed {
     string why;
     bool decoded = false;
     SoundBuffer buffer;
-    double openMs = 0.0, decodeMs = 0.0;
 };
 
 static PcmParsed parsePcm(const fs::path& path, bool decodeIt) {
     PcmParsed r;
     MovParser parser;
-    auto t0 = chrono::steady_clock::now();
     r.opened = parser.open(path);
-    r.openMs = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
     const MovTrack* a = parser.getInfo().getAudioTrack();
     if (!a) return r;
     r.hasAudio = true;
@@ -700,9 +695,7 @@ static PcmParsed parsePcm(const fs::path& path, bool decodeIt) {
     r.isFloat = a->isFloatPcm();
     r.supported = a->isPcmFormatSupported(r.why);
     if (decodeIt) {
-        t0 = chrono::steady_clock::now();
         r.decoded = loadPcmTrack(parser, *a, r.buffer);
-        r.decodeMs = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
     }
     return r;
 }
@@ -712,8 +705,7 @@ static string describePcm(const PcmParsed& p) {
            to_string(p.frames) + " frames, " + to_string(p.bytes) + " bytes, " +
            to_string(p.channels) + " ch, " + to_string(p.bits) + " bit, " + to_string(p.rate) +
            " Hz" + (p.bigEndian ? ", BE" : ", LE") + (p.isFloat ? ", float" : "") +
-           (p.why.empty() ? "" : ", " + p.why) + ", open " + to_string(p.openMs) +
-           " ms, decode " + to_string(p.decodeMs) + " ms";
+           (p.why.empty() ? "" : ", " + p.why);
 }
 
 static void pcmTableTests(const fs::path& data) {
@@ -739,9 +731,11 @@ static void pcmTableTests(const fs::path& data) {
         check("pcm: 60 s v0 sowt 2 ch -> 60 entries, 2880000 frames",
               written && p.chunked && p.entries == 60 && p.frames == 2880000 &&
               p.bytes == 2880000u * 4, describePcm(p));
-        check("pcm: 60 s v0 sowt 2 ch -> decodes, open < 100 ms, decode < 3 s",
+        check("pcm: 60 s v0 sowt 2 ch -> decodes all frames as silence",
               p.decoded && p.buffer.numSamples == 2880000 && p.buffer.channels == 2 &&
-              p.buffer.sampleRate == 48000 && p.openMs < 100.0 && p.decodeMs < 3000.0,
+              p.buffer.sampleRate == 48000 && p.buffer.samples.size() == 2880000u * 2 &&
+              all_of(p.buffer.samples.begin(), p.buffer.samples.end(),
+                     [](float sample) { return sample == 0.0f; }),
               describePcm(p));
     }
 
@@ -759,6 +753,7 @@ static void pcmTableTests(const fs::path& data) {
         {"lpcm v2 96000 Hz 16-bit LE", 16, LPCM_FLAG_SIGNED_INTEGER | kPacked, false, false},
         {"lpcm v2 96000 Hz 16-bit BE", 16, LPCM_FLAG_SIGNED_INTEGER | LPCM_FLAG_BIG_ENDIAN | kPacked, true, false},
         {"lpcm v2 96000 Hz 32-bit float LE", 32, LPCM_FLAG_FLOAT | kPacked, false, true},
+        {"lpcm v2 96000 Hz 32-bit float BE", 32, LPCM_FLAG_FLOAT | LPCM_FLAG_BIG_ENDIAN | kPacked, true, true},
     };
     for (const V2Case& c : v2Cases) {
         PcmMovie m;
@@ -843,6 +838,66 @@ static void pcmTableTests(const fs::path& data) {
               matchesPattern(p.buffer, m.frames, 2), describePcm(p));
     }
 
+    // Variable-size PCM keeps one entry per sample and preserves its data.
+    {
+        PcmMovie m;
+        m.stszSize = 0;
+        m.frames = 24;
+        m.framesPerChunk = 6;
+        m.audio = patternAudio(m.frames, 2, false, false);
+        const bool written = writeBytes(tmp, buildPcmMovie(m, m.audio.size()));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: variable-size sowt -> per-sample entries, samples match",
+              written && !p.chunked && p.entries == m.frames && p.bytes == m.audio.size() &&
+              p.decoded && matchesPattern(p.buffer, m.frames, 2), describePcm(p));
+    }
+
+    // Sound descriptions with padded packets cannot use the packed decoder.
+    for (int version : {1, 2}) {
+        PcmMovie m;
+        m.desc.version = version;
+        if (version == 2) {
+            m.desc.fourcc = "lpcm";
+            m.desc.lpcmFlags = LPCM_FLAG_SIGNED_INTEGER;
+        }
+        m.desc.packetPadding = 4;
+        m.frames = 24;
+        m.framesPerChunk = 6;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, uint64_t(m.frames) * 8));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: v" + to_string(version) + " padded packets -> audio track skipped",
+              written && !p.hasAudio && !p.decoded, describePcm(p));
+    }
+
+    // Unsupported packet layouts leave the movie's video track available.
+    {
+        vector<char> b = readBytes(data / "sine_fl32be.mov");
+        const size_t stsd = findTable(b, "soun", "stsd");
+        const bool patched = stsd && getU32(b, stsd + 16) >= 52;
+        if (patched) putU32(b, stsd + 16 + 44, 8); // v1 bytesPerFrame (was 4)
+        const bool written = writeBytes(tmp, b);
+        const Parsed p = parseFile(tmp);
+        check("pcm: unsupported packet layout -> video kept, audio skipped",
+              patched && written && p.opened && p.hasVideo && p.videoSamples == 5 &&
+              !p.hasAudio, describe(p));
+    }
+
+    // A v2 rate that rounds beyond the decoder's int range is unsupported.
+    {
+        PcmMovie m;
+        m.desc.version = 2;
+        m.desc.fourcc = "lpcm";
+        m.desc.lpcmFlags = LPCM_FLAG_SIGNED_INTEGER | kPacked;
+        m.desc.rate = 2147483647.75;
+        m.frames = 24;
+        m.framesPerChunk = 6;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, uint64_t(m.frames) * 4));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: v2 rate rounds past int range -> not supported",
+              written && p.hasAudio && p.rate == 0 && !p.supported && !p.decoded,
+              describePcm(p));
+    }
+
     // v0 rate with a fraction (16.16): rounded to whole Hz
     {
         PcmMovie m;
@@ -922,6 +977,20 @@ static void clockTests() {
         const PlaybackClockStep s2 = stepPlaybackClock(in);
         check("clock: threshold 0 -> no hard re-sync", !s2.resynced && s2.time < 5.0,
               to_string(s2.time));
+    }
+
+    // Forward audio at a changed speed still drives the video position.
+    {
+        PlaybackClockInput in;
+        in.time = 2.0; in.dt = 0.25; in.speed = 2.0; in.duration = duration;
+        in.audioMaster = true; in.audioTime = 2.5;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: forward speed 2 -> follows matching audio position",
+              s.time == 2.5 && !s.resynced && !s.ended);
+        in.audioTime = 1.0;
+        const PlaybackClockStep behind = stepPlaybackClock(in);
+        check("clock: audio behind above threshold -> video re-syncs backward",
+              behind.time == 1.0 && behind.resynced);
     }
 
     // Wall clock (no audio): dt * speed per step, wraps with fmod

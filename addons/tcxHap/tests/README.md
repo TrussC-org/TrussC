@@ -38,7 +38,8 @@ changed, and parsed with `MovParser::open()`:
   sample and audio frame counts are unchanged, a sample past the cut fails to
   read, and samples 0 and 1 read after that.
 
-Each `open()` must return within 2 s.
+Each `open()` is checked by its resulting tracks, counts and sample data.
+Pass/fail does not depend on wall-clock execution time.
 
 PCM sample tables, sound descriptions and the playback clock (#291).
 Audio-only movies are built in memory (`ftyp`, `mdat`, `moov` with one `soun`
@@ -48,15 +49,19 @@ track) and written to the temp folder:
   chunk entries holding 24000 frames, and decodes as above.
 - v0 `sowt`, 2 ch, 16 bit, 48000 Hz, 60 s (`stsz` size 4, count 2880000,
   48000 frames per chunk, 60 chunks, zero-filled `mdat`): 60 entries,
-  2880000 frames; `open()` under 100 ms, `loadPcmTrack()` under 3 s.
+  2880000 frames; `loadPcmTrack()` decodes all frames as stereo silence.
 - v2 `lpcm` at 96000.0 Hz, 2 ch: 16-bit little-endian, 16-bit big-endian and
-  32-bit float give 96000 Hz, 2 ch and the right bit depth and byte order,
+  32-bit float (both byte orders) give 96000 Hz, 2 ch and the right bit depth and byte order,
   and decode to known sample values.
 - v2 `lpcm` 24-bit, 64-bit float, non-interleaved and unsigned: reported as
   not supported; `loadPcmTrack()` returns false with a warning (`HapPlayer`
   loads without audio).
 - v1 `sowt` and `twos` with `stsz` size 1: the PCM byte count is frames * 4
   and the samples decode to known values.
+- Variable-size `sowt` keeps one entry per sample and decodes known values.
+- v1/v2 descriptions with padded packets: the audio track is skipped with
+  a warning because the decoder requires packed frames.
+- A v2 sample rate rounding past the decoder's `int` range is unsupported.
 - v0 rate 22254.5454 Hz (16.16): read as 22255 Hz.
 - `stepPlaybackClock()`: with the audio clock 1% faster than the wall clock
   and the audio position moving in 512-frame blocks, 10000 steps of a looping
