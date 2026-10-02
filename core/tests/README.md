@@ -125,7 +125,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
-  main thread, and `Node::destroy()` is safe from any thread.
+  main thread, and `Node::destroy()` is safe from any thread. Each frame's drain
+  runs only what was queued when it started, in order and nothing dropped, so
+  frames keep starting while a worker keeps the queue non-empty (#397); the
+  count is the one `tc_get_health` reports (`ThreadChannel::receiveAll`).
 - `threadLifecycle/` — destroying a `tc::Thread` never calls `std::terminate`
   (#257): not after its worker returned on its own, not after only
   `stopThread()`, not right after `startThread()` (the worker skips

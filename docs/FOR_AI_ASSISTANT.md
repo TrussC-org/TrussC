@@ -2142,7 +2142,7 @@ Json parseJson(const std::string & str)  // Parse a JSON string into a Json obje
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain.
-void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame
+void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame. Each frame runs, in order, what was queued when its drain started; work queued during the drain runs in the next frame. Nothing is dropped and there is no limit (a callback may edit the tree or free something); the tc_get_health MCP tool reports the count as mainQueuePending. Code that may queue faster than the app runs it, and can drop values, keeps its own bounded or latest-value buffer
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
 bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
@@ -4058,11 +4058,12 @@ void Thread::yield()  // Yield execution to other threads.
 ```cpp
 void ThreadChannel::clear()  // Clear the queue, discarding all pending values.
 void ThreadChannel::close()  // Close the channel, waking all waiting threads. After closing, send/receive return false.
-bool ThreadChannel::empty() const  // Whether the queue is empty (approximate).
+bool ThreadChannel::empty() const  // Whether the queue is empty. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns.
 bool ThreadChannel::isClosed() const  // Whether the channel has been closed.
 bool ThreadChannel::receive(T & value)  // Receive a value (blocking): waits until data arrives, writing it into value. Returns false if the channel is closed.
+std::vector<T> ThreadChannel::receiveAll()  // Receive everything queued right now without blocking and return it as a std::vector<T> in FIFO order, e.g. for (auto& msg : channel.receiveAll()) handle(msg);. Under the lock it only swaps the queue with an empty one; the values are moved into the vector after the lock is released, so other threads wait only for the swap. Values sent afterwards stay queued for the next receive. Returns an empty vector if the channel is empty or closed.
 bool ThreadChannel::send(const T & value) [+1]  // Send a value onto the queue (copy or move overload). Returns false if the channel is closed (with the move overload the value is invalidated even on failure).
-size_t ThreadChannel::size() const  // Number of queued values (approximate).
+size_t ThreadChannel::size() const  // Number of queued values. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns.
 bool ThreadChannel::tryReceive(T & value) [+1]  // Receive a value without blocking, or waiting at most timeoutMs milliseconds (timeout overload). Returns false immediately/after the timeout if no data.
 ```
 

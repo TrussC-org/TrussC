@@ -2,8 +2,11 @@
 
 #include <mutex>
 #include <queue>
+#include <vector>
+#include <utility>
 #include <condition_variable>
 #include <chrono>
+#include <cstddef>
 
 namespace trussc {
 
@@ -122,6 +125,32 @@ public:
         return false;
     }
 
+    // Receive everything queued right now (non-blocking), in FIFO order.
+    // Under the lock it only swaps the queue with an empty one; the values are
+    // moved into the returned vector after the lock is released, so senders
+    // wait only for the swap. Values sent after this call stay queued for the
+    // next receive. Returns an empty vector if the channel is empty or closed.
+    //
+    //   for (auto& msg : channel.receiveAll()) {
+    //       handle(msg);
+    //   }
+    std::vector<T> receiveAll() {
+        std::queue<T> taken;
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (!closed_) {
+                taken.swap(queue_);
+            }
+        }
+        std::vector<T> out;
+        out.reserve(taken.size());
+        while (!taken.empty()) {
+            out.push_back(std::move(taken.front()));
+            taken.pop();
+        }
+        return out;
+    }
+
     // ---------------------------------------------------------------------------
     // Control
     // ---------------------------------------------------------------------------
@@ -145,13 +174,17 @@ public:
     // State
     // ---------------------------------------------------------------------------
 
-    // Whether queue is empty (approximate)
+    // Whether queue is empty. Takes the lock; other threads may send or
+    // receive right after it returns.
     bool empty() const {
+        std::unique_lock<std::mutex> lock(mutex_);
         return queue_.empty();
     }
 
-    // Queue size (approximate)
+    // Queue size. Takes the lock; other threads may send or receive right
+    // after it returns.
     size_t size() const {
+        std::unique_lock<std::mutex> lock(mutex_);
         return queue_.size();
     }
 
@@ -162,7 +195,7 @@ public:
 
 private:
     std::queue<T> queue_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable condition_;
     bool closed_;
 };

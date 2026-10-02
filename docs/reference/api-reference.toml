@@ -10300,9 +10300,9 @@ description.ja = "チャンネルを閉じ、待機中のすべてのスレッ�
 description.ko = "채널을 닫고 대기 중인 모든 스레드를 깨움. 닫은 후에는 send/receive가 false 반환"
 
 ["ThreadChannel::empty"]
-description.en = "Whether the queue is empty (approximate)."
-description.ja = "キューが空かどうか（概算）"
-description.ko = "큐가 비어 있는지 여부(근사값)"
+description.en = "Whether the queue is empty. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns."
+description.ja = "キューが空かどうか。ロックを取るので、他のスレッドが send している間でも安全に呼べる。戻った直後に他のスレッドが send / receive することはある"
+description.ko = "큐가 비어 있는지 여부. 락을 잡으므로 다른 스레드가 send하는 동안에도 안전하게 호출할 수 있음. 반환 직후 다른 스레드가 send / receive할 수는 있음"
 
 ["ThreadChannel::isClosed"]
 description.en = "Whether the channel has been closed."
@@ -10314,15 +10314,22 @@ description.en = "Receive a value (blocking): waits until data arrives, writing 
 description.ja = "値を受け取る（ブロッキング）: データが到着するまで待ち、value に書き込む。チャンネルが閉じていれば false を返す"
 description.ko = "값을 받음(블로킹): 데이터가 도착할 때까지 대기하여 value에 씀. 채널이 닫혀 있으면 false 반환"
 
+["ThreadChannel::receiveAll"]
+keywords = ["drain", "batch", "swap", "snapshot", "take all"]
+description.en = "Receive everything queued right now without blocking and return it as a std::vector<T> in FIFO order, e.g. for (auto& msg : channel.receiveAll()) handle(msg);. Under the lock it only swaps the queue with an empty one; the values are moved into the vector after the lock is released, so other threads wait only for the swap. Values sent afterwards stay queued for the next receive. Returns an empty vector if the channel is empty or closed."
+description.ja = "今キューにあるものをブロックせずにすべて受け取り、FIFO 順の std::vector<T> で返す（例: for (auto& msg : channel.receiveAll()) handle(msg);）。ロック中はキューを空のキューと入れ替えるだけで、値を vector に移すのはロックを放した後なので、他のスレッドが待つのは入れ替えの間だけ。その後に send された値は次の受信まで残る。空またはチャンネルが閉じていれば空の vector を返す"
+description.ko = "지금 큐에 있는 것을 블로킹 없이 모두 받아 FIFO 순서의 std::vector<T>로 반환(예: for (auto& msg : channel.receiveAll()) handle(msg);). 락 안에서는 큐를 빈 큐와 바꾸기만 하고, 값을 vector로 옮기는 것은 락을 놓은 뒤이므로 다른 스레드는 교체하는 동안만 기다림. 그 뒤에 send된 값은 다음 수신까지 남음. 비어 있거나 채널이 닫혀 있으면 빈 vector 반환"
+related = ["ThreadChannel::tryReceive", "ThreadChannel::size"]
+
 ["ThreadChannel::send"]
 description.en = "Send a value onto the queue (copy or move overload). Returns false if the channel is closed (with the move overload the value is invalidated even on failure)."
 description.ja = "キューに値を送る（コピー版またはムーブ版オーバーロード）。チャンネルが閉じていれば false を返す（ムーブ版では失敗時でも値は無効化される）"
 description.ko = "큐에 값을 보냄(복사 또는 이동 오버로드). 채널이 닫혀 있으면 false 반환(이동 오버로드에서는 실패 시에도 값이 무효화됨)"
 
 ["ThreadChannel::size"]
-description.en = "Number of queued values (approximate)."
-description.ja = "キューに入っている値の数（概算）"
-description.ko = "큐에 들어 있는 값의 개수(근사값)"
+description.en = "Number of queued values. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns."
+description.ja = "キューに入っている値の数。ロックを取るので、他のスレッドが send している間でも安全に呼べる。戻った直後に他のスレッドが send / receive することはある"
+description.ko = "큐에 들어 있는 값의 개수. 락을 잡으므로 다른 스레드가 send하는 동안에도 안전하게 호출할 수 있음. 반환 직후 다른 스레드가 send / receive할 수는 있음"
 
 ["ThreadChannel::tryReceive"]
 description.en = "Receive a value without blocking, or waiting at most timeoutMs milliseconds (timeout overload). Returns false immediately/after the timeout if no data."
@@ -16242,9 +16249,9 @@ related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps"]
 ["runOnMainThread"]
 category = "utility"
 keywords = ["main thread", "marshal", "queue", "dispatch", "sync"]
-description.en = "Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame"
-description.ja = "コールバックをメイン（シーン）スレッドで実行。既にメインなら即時、そうでなければ次フレームにキュー"
-description.ko = "콜백을 메인(씬) 스레드에서 실행. 이미 메인이면 즉시, 아니면 다음 프레임으로 큐잉"
+description.en = "Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame. Each frame runs, in order, what was queued when its drain started; work queued during the drain runs in the next frame. Nothing is dropped and there is no limit (a callback may edit the tree or free something); the tc_get_health MCP tool reports the count as mainQueuePending. Code that may queue faster than the app runs it, and can drop values, keeps its own bounded or latest-value buffer"
+description.ja = "コールバックをメイン（シーン）スレッドで実行。既にメインなら即時、そうでなければ次フレームにキュー。各フレームは、ドレイン開始時点でキューにあったものを順番に実行する。ドレイン中にキューされたものは次のフレームで実行される。何も捨てず、上限もない（コールバックはツリーを編集したり何かを解放したりしうる）。その数は MCP ツール tc_get_health が mainQueuePending として返す。アプリが処理するより速くキューしうるコードで、値を捨ててよいものは、自前で上限付きのバッファか最新値だけのバッファを持つ"
+description.ko = "콜백을 메인(씬) 스레드에서 실행. 이미 메인이면 즉시, 아니면 다음 프레임으로 큐잉. 각 프레임은 드레인 시작 시점에 큐에 있던 것을 순서대로 실행한다. 드레인 중에 큐잉된 것은 다음 프레임에 실행된다. 아무것도 버리지 않고 상한도 없다(콜백이 트리를 편집하거나 무언가를 해제할 수 있으므로). 그 개수는 MCP 도구 tc_get_health가 mainQueuePending으로 보고한다. 앱이 처리하는 것보다 빠르게 큐잉할 수 있고 값을 버려도 되는 코드는 자체적으로 상한이 있는 버퍼나 최신값 버퍼를 둔다"
 related = ["isMainThread", "Node::callAfterAsync"]
 
 ["sameSubnet"]
