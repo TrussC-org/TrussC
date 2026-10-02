@@ -708,6 +708,49 @@ int main() {
 
     // ----- textures -------------------------------------------------------------
     {
+        // Put a valid image outside the model folder and a different-sized
+        // image at the appended path, so selecting the outside file is visible.
+        fs::path modelDir = g_dir / "absolute-uri-model";
+        fs::create_directories(modelDir);
+        fs::path outside = fs::absolute(g_dir / utf8ToPath("外部テクスチャ.png"));
+        check("absolute image uri: fixture path is absolute", outside.is_absolute());
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        }
+        check("absolute image uri: outside PNG saved", bool(pixels.save(outside)));
+        if (!outside.has_root_name()) {
+            fs::path inside = modelDir / outside.relative_path();
+            fs::create_directories(inside.parent_path());
+            pixels.allocate(1, 1, 4);
+            pixels.setColor(0, 0, Color(0, 1, 0, 1));
+            check("absolute image uri: model-folder PNG saved", bool(pixels.save(inside)));
+        }
+        GltfBuilder b = texturedTriangle(Json{{"uri", pathToUtf8(outside)}}.dump());
+        fs::path modelPath = modelDir / "model.gltf";
+        ofstream(modelPath, ios::binary) << b.json();
+        GltfModel m;
+        WarningCounter warnings;
+        bool loaded = m.load(pathToUtf8(modelPath));
+        check("absolute image uri: geometry loads",
+              loaded && m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3);
+        const Texture* texture = loaded && m.getNodeCount() == 1
+                               ? m.getNode(0).material.getBaseColorTexture() : nullptr;
+        if (!outside.has_root_name()) {
+            check("absolute image uri: uses image under model folder",
+                  texture && texture->getWidth() == 1 && texture->getHeight() == 1 &&
+                  warnings.count == 0);
+        } else {
+            // On Windows, appending a drive-qualified URI puts its colon in
+            // a path component, so the image is skipped rather than loaded.
+            check("absolute image uri: appended drive path is skipped",
+                  !texture && warnings.count > 0);
+        }
+        check("absolute image uri: outside image is not selected",
+              !texture || texture->getWidth() != 2 || texture->getHeight() != 2);
+    }
+    {
         // The image lives in a buffer without a uri, so the buffer has no
         // data. The texture is skipped; the mesh loads.
         GltfBuilder b = triangle();
