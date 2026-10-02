@@ -5,6 +5,8 @@
 #pragma once
 
 #include "tc/network/tcTcpClient.h"
+#include <atomic>
+#include <chrono>
 #include <string>
 
 // Forward declarations (don't expose mbedtls headers)
@@ -13,6 +15,10 @@ struct mbedtls_ssl_config;
 struct mbedtls_x509_crt;
 struct mbedtls_ctr_drbg_context;
 struct mbedtls_entropy_context;
+
+namespace tcx::websocket {
+class WebSocketClient;
+}
 
 namespace tcx::tls {
 
@@ -30,8 +36,9 @@ public:
 
     // Disconnects without onDisconnect and returns once every thread of the
     // client has ended, one that a listener's connect() or disconnect() let
-    // go of included. Must not run on one of those threads (an inline
-    // listener): see TcpClient's Events comment.
+    // go of included. On the receive thread itself (an inline listener that
+    // destroys the client) it detaches that thread instead, which then stops
+    // without reading the client (#262); see TcpClient's Events comment.
     ~TlsClient() override;
 
     // Non-copyable
@@ -53,6 +60,14 @@ public:
 
     // Set hostname verification (default is connection host)
     void setHostname(const std::string& hostname);
+
+    // Time allowed for the TLS handshake, in seconds, counted from the moment
+    // the TCP connection is up. Default 15. 0 = no deadline. When it runs
+    // out, the connection is closed and the client fires onError and then
+    // onConnect(false) with the message "TLS handshake timeout". The TCP
+    // connect before it is not covered: the OS times that out. Applies to the
+    // next connect().
+    void setHandshakeTimeout(float seconds);
 
     // -------------------------------------------------------------------------
     // Connection Management (override TcpClient)
@@ -87,6 +102,13 @@ public:
     std::string getTlsVersion() const;
 
 private:
+    // WebSocketClient counts its 101 deadline from getTcpConnectTime().
+    friend class tcx::websocket::WebSocketClient;
+
+    // When the TCP connection of the current attempt came up. Only valid on
+    // the thread that fires onConnect (the handshake thread).
+    std::chrono::steady_clock::time_point getTcpConnectTime() const { return handshakeStart_; }
+
     // mbedTLS context (PIMPL pattern)
     struct TlsContext;
     TlsContext* ctx_ = nullptr;
@@ -101,6 +123,24 @@ private:
     // are lazily loaded on first handshake (OS store, then bundled fallback).
     bool caUserProvided_ = false;
     bool caAutoLoadAttempted_ = false;
+
+    // Default for setHandshakeTimeout(), in seconds. Why 15:
+    //  - The OS never times out a peer that accepted the TCP connection and
+    //    then stays silent (a hung server, a captive portal, a middlebox), so
+    //    without a deadline the handshake waits forever and no event fires.
+    //  - A TLS handshake is a few round trips and normally finishes in well
+    //    under a few seconds, even on slow links.
+    //  - The value is deliberately generous: a too-short timeout broke
+    //    Schannel renegotiation in tcxCurl (commit a3b79116). A longer value
+    //    only delays noticing a stalled server.
+    // The TCP connect stage has an OS timeout of its own and is left to it.
+    static constexpr float defaultHandshakeTimeout_ = 15.0f;
+
+    // setHandshakeTimeout()'s value. Atomic: read by the receive thread.
+    std::atomic<float> handshakeTimeout_{defaultHandshakeTimeout_};
+    // When the TCP connection came up (the handshake deadline counts from
+    // here). Written and read by the thread that runs the handshake.
+    std::chrono::steady_clock::time_point handshakeStart_;
 
     // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
     // client") if the client was connected. The destructor passes false.
@@ -120,8 +160,18 @@ private:
     // Free and re-initialise the SSL context and config
     void resetSslContext();
 
-    // Perform TLS handshake
-    bool performHandshake();
+    // One handshake step. Stopped: the handshake failed and was reported
+    // (or a local disconnect() ended it); the calling thread must stop
+    // without reading the client again, since a listener may have destroyed
+    // it.
+    enum class HandshakeStep { Done, InProgress, Stopped };
+    HandshakeStep performHandshake(const AliveToken& alive);
+
+    // Tear the handshake down and report it: onError(error), then
+    // onConnect(false, connectMessage) unless a listener started a newer
+    // attempt. Returns false (the calling thread stops); see performHandshake().
+    bool failHandshake(const std::string& error, const std::string& connectMessage,
+                       int code, const AliveToken& alive);
 
     // Lazy-load a trust anchor set on first handshake when the user hasn't
     // provided one explicitly. Tries the OS trust store first, then falls back
@@ -129,11 +179,13 @@ private:
     // success and an error if no CAs could be loaded.
     void ensureDefaultCAsLoaded();
 
-    // Receive thread (for TLS)
-    void tlsReceiveThreadFunc(unsigned generation);
+    // Receive thread (for TLS). alive: its own copy of alive_.
+    void tlsReceiveThreadFunc(unsigned generation, AliveToken alive);
 
-    // processNetwork()'s work, for the receive thread of that generation
-    void processNetworkImpl(unsigned generation);
+    // processNetwork()'s work, for the receive thread of that generation.
+    // Returns false when the calling thread must stop without reading the
+    // client again (see TcpClient::processNetworkStep()).
+    bool processNetworkImpl(unsigned generation, const AliveToken& alive);
 
     std::thread tlsReceiveThread_;
 
@@ -152,21 +204,24 @@ private:
     // after a failed handshake (performHandshake() tears the failed
     // connection down before it notifies them).
     //
+    // A listener on the receive thread may also destroy the client: the
+    // thread checks its copy of alive_ after each notification, and after
+    // onDisconnect and a failed handshake's onError / onConnect(false) it
+    // stops without reading the client at all (#262).
+    //
     // Not covered: the reconnect itself. connect() on the receive thread
     // lets go of that thread (tlsKeptThreads_ keeps it) and then, on it,
     // creates the socket, resolves the host, connects (blocking) and starts
     // the new receive thread. A disconnect() called on the receive thread
     // lets go of it the same way. The next connect() or disconnect() on
     // another thread, or the destructor, joins it, but socket_ is not
-    // atomic. So, as for TcpClient (see its Events comment): until #261 /
-    // #262 land, do not call disconnect() on the client from another thread
+    // atomic. So, as for TcpClient (see its Events comment): until #261
+    // lands, do not call disconnect() on the client from another thread
     // until the listener's call has returned. connect(), connectAsync(),
     // disconnect() and the destructor can wait for a listener still running
     // on one of the client's threads. Do not call them while holding a lock
     // that such a listener takes: the call and the listener would wait for
-    // each other forever. And do not destroy the client on one of its own
-    // threads (in an inline listener): the destructor detaches that thread,
-    // which then returns into the destroyed client.
+    // each other forever.
     std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()

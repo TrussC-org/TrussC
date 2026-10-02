@@ -3908,6 +3908,7 @@ bool TcpClient::isConnected() const  // Whether currently connected
 bool TcpClient::isUsingThread() const  // Whether threading is in use
 void TcpClient::notifyError(const std::string & msg, int code = 0)  // Report an error (message + code) from a derived class.
 void TcpClient::processNetwork()  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
+bool TcpClient::processNetworkStep(const AliveToken & alive)  // processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client.
 bool TcpClient::send(const void * data, size_t size) [+2]  // Send data to the server
 void TcpClient::setBlocking(bool blocking)  // Set blocking mode
 void TcpClient::setReceiveBufferSize(size_t size)  // Set the receive buffer size

@@ -9354,15 +9354,17 @@ listener that calls `disconnect()` there is in the same position. The client
 keeps that thread and joins it from another thread: the next `connect()` or
 `disconnect()` returns only once the thread has ended (the rest of the
 listener and of its receive loop), and so does the destructor. Until
-#261 / #262 land, do not call `disconnect()` on the client from another
+#261 lands, do not call `disconnect()` on the client from another
 thread until the listener's call has returned.
 
-Do not destroy the client from one of its own listeners (on the receive or
-connect thread). The destructor cannot join the thread it runs on: it
-detaches it, and the thread then returns from the listener into the
-destroyed client, which is undefined behavior. Destroy it from another
-thread, or after the listener has returned (for example from a
-`Deliver::Main` listener). `connect()`, `connectAsync()`, `disconnect()` and
+A listener on the receive thread may also destroy the client (an owner that
+replaces it, as `WebSocketClient::connect()` does). The destructor cannot
+join the thread it runs on and detaches it; once the notification returns,
+the thread sees that the client is gone and stops without reading it (#262).
+Do not destroy the client from a listener on the connect thread of
+`connectAsync()`: that thread returns into the destroyed client, which is
+undefined behavior. Destroy it from another thread, or after the listener
+has returned (for example from a `Deliver::Main` listener). `connect()`, `connectAsync()`, `disconnect()` and
 the destructor can wait for a listener still running on one of the client's
 threads. Do not call them while holding a lock that such a listener takes:
 the call and the listener would wait for each other forever. Reconnecting
@@ -9408,14 +9410,16 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 そのスレッドを手元に置いておき、別のスレッドから join する：次の
 `connect()` か `disconnect()` は、そのスレッドが終わってから（リスナーの
 残りと受信ループを抜けるまで）戻り、デストラクタも同じように待つ。
-#261 / #262 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
+#261 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
 `disconnect()` を呼ばないこと。
 
-クライアントを自分のリスナー（受信スレッドや接続スレッドの上）から破棄
-しないこと。デストラクタは自分が動いているスレッドを join できないので
-detach し、そのスレッドはリスナーから破棄済みのクライアントへ戻る。これは
-未定義動作になる。別のスレッドから、またはリスナーが返ったあと（たとえば
-`Deliver::Main` のリスナーから）破棄すること。`connect()`、`connectAsync()`、
+受信スレッドのリスナーはクライアントを破棄してもよい（`WebSocketClient::connect()`
+のように、持ち主がクライアントを置き換える場合）。デストラクタは自分が動いて
+いるスレッドを join できないので detach する。通知が戻ると、そのスレッドは
+クライアントがもうないことを確かめ、クライアントを読まずに止まる（#262）。
+`connectAsync()` の接続スレッドのリスナーからは破棄しないこと：そのスレッドは
+破棄済みのクライアントへ戻り、未定義動作になる。別のスレッドから、または
+リスナーが返ったあと（たとえば `Deliver::Main` のリスナーから）破棄すること。`connect()`、`connectAsync()`、
 `disconnect()`、デストラクタは、クライアントのスレッドの上でまだ動いている
 リスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを
 呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。
@@ -9461,14 +9465,16 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 클라이언트는 그 스레드를 보관해 두었다가 다른 스레드에서 join한다: 다음
 `connect()`나 `disconnect()`는 그 스레드가 끝난 뒤에(리스너의 나머지와 수신
 루프를 빠져나올 때까지) 반환하며, 소멸자도 같은 방식으로 기다린다.
-#261 / #262가 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
+#261이 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
 `disconnect()`를 호출하지 말 것.
 
-클라이언트를 자신의 리스너(수신 스레드나 연결 스레드 위)에서 파괴하지 말 것.
-소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는
-리스너에서 이미 파괴된 클라이언트로 돌아간다. 이는 정의되지 않은 동작이다.
-다른 스레드에서, 또는 리스너가 반환된 뒤에(예: `Deliver::Main` 리스너에서)
-파괴할 것. `connect()`, `connectAsync()`, `disconnect()`와 소멸자는
+수신 스레드의 리스너는 클라이언트를 파괴해도 된다(`WebSocketClient::connect()`
+처럼 소유자가 클라이언트를 교체하는 경우). 소멸자는 자신이 실행 중인 스레드를
+join할 수 없어 detach한다. 알림이 반환되면 그 스레드는 클라이언트가 이미
+없음을 확인하고 클라이언트를 읽지 않고 멈춘다(#262). `connectAsync()`의 연결
+스레드 위의 리스너에서는 파괴하지 말 것: 그 스레드는 이미 파괴된 클라이언트로
+돌아가며, 이는 정의되지 않은 동작이다. 다른 스레드에서, 또는 리스너가 반환된
+뒤에(예: `Deliver::Main` 리스너에서) 파괴할 것. `connect()`, `connectAsync()`, `disconnect()`와 소멸자는
 클라이언트의 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런
 리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를
 영원히 기다리게 된다. 위 예처럼 메인 스레드에서 재연결하면 모두 피할 수 있다.
@@ -18769,6 +18775,12 @@ description.ko = "이 플랫폼 비디오 플레이어의 setLoopImpl 구현."
 description.en = "Report an error (message + code) from a derived class."
 description.ja = "派生クラスからエラー（メッセージ＋コード）を通知する。"
 description.ko = "파생 클래스에서 에러(메시지 + 코드)를 통지한다."
+
+["TcpClient::processNetworkStep"]
+description.en = "processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client."
+description.ja = "processNetwork() の処理本体（派生クラスと受信スレッド用）。呼び出し側スレッドがクライアントに二度と触れずに止まるべきとき false を返す: 接続の終了を通知した場合、またはリスナーがクライアントを破棄した場合。"
+description.ko = "processNetwork()의 처리 본체(파생 클래스와 수신 스레드용). 호출한 스레드가 클라이언트를 다시 읽지 않고 멈춰야 할 때 false를 반환한다: 연결 종료를 통지했거나 리스너가 클라이언트를 파괴한 경우."
+keywords = ["receive thread", "destroy", "listener", "lifetime"]
 
 ["ChipSoundBundle::Entry::note"]
 description.en = "The chip-synth note for this bundle entry."
