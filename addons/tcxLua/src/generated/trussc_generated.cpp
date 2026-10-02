@@ -334,8 +334,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("saveTextFile", [](const fs::path & path, const std::string & content) { return trussc::saveTextFile(path, content); });
     lua->set_function("appendToFile", [](const fs::path & path, const std::string & content) { return trussc::appendToFile(path, content); });
     lua->set_function("getVersion", []() { return trussc::getVersion(); });
-    lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
-    lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("getGlobalMouseX", []() { return trussc::getGlobalMouseX(); });
     lua->set_function("getGlobalMouseY", []() { return trussc::getGlobalMouseY(); });
     lua->set_function("getGlobalPMouseX", []() { return trussc::getGlobalPMouseX(); });
@@ -780,6 +778,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float t, trussc::EaseType type, trussc::EaseMode mode) { return trussc::ease(t, type, mode); },
         [](float t, const trussc::EaseFunction & fn, trussc::EaseMode mode) { return trussc::ease(t, fn, mode); }
     ));
+    lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
+    lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("isOverlayHovered", []() { return trussc::isOverlayHovered(); });
     lua->set_function("isOverlayFocused", []() { return trussc::isOverlayFocused(); });
     lua->set_function("getSelectedNode", []() { return trussc::getSelectedNode(); });

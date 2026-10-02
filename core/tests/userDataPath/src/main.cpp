@@ -176,6 +176,14 @@ static void checkPlatformFolders(const fs::path& sandbox) {
           samePath(getUserDataPath(), sandbox / "local" / app) &&
           fs::is_directory(sandbox / "local" / app));
 
+    // Reading the OS root must not silently select a different folder for
+    // a long environment value. No filesystem write is needed for this check.
+    fs::path longLocal = sandbox;
+    for (int i = 0; i < 100; ++i) longLocal /= "segment";
+    setEnv("LOCALAPPDATA", longLocal);
+    check("Windows: a long LOCALAPPDATA is preserved",
+          samePath(internal::platformUserDataRoot(), longLocal / app));
+
     setEnv("TMP", sandbox / "tmp");
     setEnv("TEMP", sandbox / "tmp");
     internal::resetUserDataPathForTests();
@@ -359,10 +367,30 @@ TC_CORE_TEST_MAIN() {
     {
         setUserDataPathRoot(bundle / "Contents" / "UserData");
         LogCapture cap;
-        const bool ok = saveTextFile(getUserDataPath("inside.txt"), "x");
+        const fs::path target = getUserDataPath("inside.txt");
+        check("getUserDataPath(inside the bundle): does not create its root",
+              !fs::exists(target.parent_path()) && cap.errors.empty());
+        const bool ok = saveTextFile(target, "x");
         check("setUserDataPathRoot(inside the bundle): writes still refused",
               !ok && cap.errors.size() == 1 &&
-              !fs::exists(bundle / "Contents" / "UserData" / "inside.txt"));
+              !fs::exists(target.parent_path()));
+    }
+
+    // A refused log destination must keep the existing log open, with the
+    // refusal and later messages recorded there.
+    {
+        const fs::path logPath = userRoot / "active.log";
+        check("setLogFile: opens a user data log", setLogFile(logPath));
+        LogCapture cap;
+        check("setLogFile: bundle refusal keeps the current log open",
+              !setLogFile(bundleData / "refused.log") && cap.errors.size() == 1 &&
+              getLogger().isFileOpen() && samePath(getLogger().getLogFilePath(), logPath));
+        logError("userDataPath") << "after bundle refusal";
+        closeLogFile();
+        const string text = loadTextFile(logPath);
+        check("setLogFile: current log contains the refusal and later messages",
+              text.find("getUserDataPath(") != string::npos &&
+              text.find("after bundle refusal") != string::npos);
     }
 
     // Outside a bundle (no bundle set): relative writes into the data folder work

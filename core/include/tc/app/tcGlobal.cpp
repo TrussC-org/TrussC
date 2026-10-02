@@ -1313,9 +1313,16 @@ UserPathState& userPathState() {
     return *state;
 }
 
+fs::path appBundlePath();
+bool isInsideFolder(const fs::path& p, const fs::path& folder);
+
 // Create `root` unless it is the folder created last time. Logged outside
 // the state mutex (an onLog listener may ask for a path again).
 fs::path ensureFolder(const fs::path& root, fs::path UserPathState::*created) {
+    // Resolving a user root inside the bundle must not modify the bundle
+    // itself. Return the path; the writer reports the refusal once.
+    const fs::path bundle = appBundlePath();
+    if (!bundle.empty() && isInsideFolder(root, bundle)) return root;
     auto& s = userPathState();
     {
         std::lock_guard<std::mutex> lock(s.mutex);

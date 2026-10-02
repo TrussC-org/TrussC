@@ -207,11 +207,15 @@ fs::path appFolderName() {
 
 // An environment variable as a path (wide, so non-ASCII names survive)
 fs::path envPath(const wchar_t* name) {
-    wchar_t buf[MAX_PATH * 2] = { 0 };
-    const DWORD cap = (DWORD)(sizeof(buf) / sizeof(buf[0]));
-    DWORD n = GetEnvironmentVariableW(name, buf, cap);
-    if (n == 0 || n >= cap) return {};
-    return fs::path(buf);
+    DWORD cap = GetEnvironmentVariableW(name, nullptr, 0);
+    while (cap > 0) {
+        std::vector<wchar_t> buf(cap);
+        const DWORD n = GetEnvironmentVariableW(name, buf.data(), cap);
+        if (n == 0) return {};
+        if (n < cap) return fs::path(buf.data());
+        cap = n;   // the variable grew between the size query and the read
+    }
+    return {};
 }
 } // namespace
 
@@ -226,10 +230,15 @@ fs::path internal::platformUserDataRoot() {
 }
 
 fs::path internal::platformTempRoot() {
-    wchar_t buf[MAX_PATH + 1] = { 0 };
-    DWORD n = GetTempPathW(MAX_PATH + 1, buf);   // %TMP%, else %TEMP%, ...
-    fs::path base = (n > 0 && n <= MAX_PATH) ? fs::path(buf) : fs::path(L"C:\\Windows\\Temp");
-    return base / appFolderName();
+    DWORD cap = GetTempPathW(0, nullptr);   // %TMP%, else %TEMP%, ...
+    while (cap > 0) {
+        std::vector<wchar_t> buf(cap);
+        const DWORD n = GetTempPathW(cap, buf.data());
+        if (n == 0) break;
+        if (n < cap) return fs::path(buf.data()) / appFolderName();
+        cap = n + 1;
+    }
+    return fs::path(L"C:\\Windows\\Temp") / appFolderName();
 }
 
 fs::path internal::platformAppBundlePath() {
