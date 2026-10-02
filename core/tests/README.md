@@ -2,7 +2,8 @@
 
 Headless **behavioral regression tests** for the TrussC core. Each test's
 entry (`TC_CORE_TEST_MAIN`, see below) returns non-zero on failure. CI builds and runs every `core/tests/*/`
-here (`build_all.py --core-tests-only`); a non-zero exit fails the job. This is
+here (`build_all.py --core-tests-only`), except tests marked `daily-only`;
+a non-zero exit fails the job. This is
 the same convention bundled addons use (`addons/*/tests/`).
 
 This is the *behavioral* tier — it complements, and does not replace, the
@@ -99,6 +100,20 @@ cd ../clipSpace && ../allCoreTests/bin/allCoreTests clipSpace   # run one
 Arguments after the name go to the test, e.g. `allCoreTests fontSfntCheck
 --dump font.ttf`. An unknown name prints the usage and exits 2. Build it in
 Release: `entryStacks` and `scopedStack` skip in a debug build.
+
+The batch runner prints each test process's wall time and a summary sorted
+from slowest to fastest, across combined, own-binary and standalone unit
+tests. Build time is excluded; timing is informational, never a pass/fail
+threshold.
+
+A `daily-only` marker file in `core/tests/<name>/` skips that test's run on
+PRs. `build_all.py --core-tests-only --include-daily` includes it in the
+daily workflow. This applies to both test shapes and web runs. Combined
+daily-only tests remain compiled into `allCoreTests`; its full `--list` is
+checked against every combined test directory before runs are selected, so
+an unregistered test still fails the sweep. Do not comment out or delete
+tests to reduce run time. Which tests move to daily-only requires an owner
+Decision after reviewing measured times.
 
 ### Also on web (`web-test` marker)
 
