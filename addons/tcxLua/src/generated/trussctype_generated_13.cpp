@@ -97,43 +97,38 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         "typing", sol::var(trussc::Beep::typing),
         "notify", sol::var(trussc::Beep::notify),
         "sweep", sol::var(trussc::Beep::sweep));
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
     {
-        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
-        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
-        t["channels"] = &trussc::AudioSettings::channels;
-        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
-        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
-        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
     }
     {
-        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate",
-            sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>(),
-            sol::call_constructor, sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>());
-        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["id"] = &trussc::TouchPoint::id;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["changed"] = &trussc::TouchPoint::changed;
     }
-    {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-        t["altitude"] = &trussc::Location::altitude;
-        t["accuracy"] = &trussc::Location::accuracy;
-    }
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
-    {
-        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
-        t["data"] = &trussc::TcpReceiveEventArgs::data;
-    }
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

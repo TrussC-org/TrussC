@@ -76,43 +76,44 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
     }
     {
-        sol::usertype<trussc::ScrollBar> t = lua->new_usertype<trussc::ScrollBar>("ScrollBar");
-        t["getBarColor"] = &trussc::ScrollBar::getBarColor;
-        t["setBarColor"] = &trussc::ScrollBar::setBarColor;
-        t["getBarWidth"] = &trussc::ScrollBar::getBarWidth;
-        t["setBarWidth"] = &trussc::ScrollBar::setBarWidth;
-        t["getMargin"] = &trussc::ScrollBar::getMargin;
-        t["setMargin"] = &trussc::ScrollBar::setMargin;
-        t["getOffset"] = &trussc::ScrollBar::getOffset;
-        t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
-    }
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
-    {
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream",
-            sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>(),
-            sol::call_constructor, sol::constructors<trussc::LogStream(trussc::LogLevel), trussc::LogStream(trussc::LogLevel, const std::string &)>());
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
     }
     {
-        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
-        t["data"] = &trussc::UdpReceiveEventArgs::data;
-        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
-        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["super"] = &trussc::KeyEventArgs::super;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
     }
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
-        t["name"] = &trussc::AudioDeviceInfo::name;
-        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+    }
+    {
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifndef _MSC_VER
