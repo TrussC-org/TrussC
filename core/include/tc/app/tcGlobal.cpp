@@ -29,6 +29,8 @@
 // generated desc into every translation unit. The shader handle is exposed via
 // internal::sglPremultShader().
 #include "tc/gpu/shaders/sglPremult.glsl.h"
+// Same, from core/shaders/sglCoverage.glsl: internal::sglCoverageShader().
+#include "tc/gpu/shaders/sglCoverage.glsl.h"
 
 #ifdef __APPLE__
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
@@ -117,6 +119,7 @@ void setup() {
     internal::active2D(BlendMode::Subtract);
     internal::active2D(BlendMode::Disabled);
     internal::activePremult();
+    internal::activeCoverage2D();
     internal::activeClear();
     internal::active3D();
 }
@@ -168,6 +171,18 @@ sg_shader sglPremultShader() {
     return shd;
 }
 
+// Coverage sgl shader (core/shaders/sglCoverage.glsl), bound by the
+// activeCoverage2D() pipeline that draws the TrueType glyph atlas: the atlas is
+// R8 (coverage in R), and this shader uses R as alpha. Same ABI and lifetime as
+// sglPremultShader() above. Returns {0} if sokol isn't ready yet.
+sg_shader sglCoverageShader() {
+    static sg_shader shd = {};
+    if (shd.id == SG_INVALID_ID && sg_isvalid()) {
+        shd = sg_make_shader(tc_sglcov_coverage_shader_desc(sg_query_backend()));
+    }
+    return shd;
+}
+
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
     auto& budget = sglBudget();
     logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
@@ -209,6 +224,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     active2D(BlendMode::Subtract);
     active2D(BlendMode::Disabled);
     activePremult();
+    activeCoverage2D();
     activeClear();
     active3D();
     internal::currentWindowContext().currentTarget = prevTarget;
@@ -1072,6 +1088,10 @@ namespace internal {
 ThreadChannel<std::function<void()>>& mainThreadQueue() {
     static ThreadChannel<std::function<void()>> q;
     return q;
+}
+std::atomic<size_t>& mainThreadQueuePendingCount() {
+    static std::atomic<size_t> n{0};
+    return n;
 }
 #endif
 
