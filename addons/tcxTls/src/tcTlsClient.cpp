@@ -146,6 +146,9 @@ TlsClient::TlsClient() {
 }
 
 TlsClient::~TlsClient() {
+    // A receive thread whose listener is destroying this client checks this
+    // once the notification returns, and stops without reading the client
+    *alive_ = false;
     // Disconnect without onDisconnect: a listener that reconnects would
     // reconnect a client that is going away.
     disconnectImpl(false);
@@ -202,6 +205,10 @@ void TlsClient::setVerifyNone() {
 
 void TlsClient::setHostname(const std::string& hostname) {
     hostname_ = hostname;
+}
+
+void TlsClient::setHandshakeTimeout(float seconds) {
+    handshakeTimeout_ = seconds > 0.0f ? seconds : 0.0f;
 }
 
 // =============================================================================
@@ -408,15 +415,20 @@ bool TlsClient::connect(const std::string& host, int port) {
         // TCP Connected immediately
         running_ = true;
         handshakePending_ = true;
+        handshakeStart_ = std::chrono::steady_clock::now();
         logNotice() << "TCP connected to " << host << ":" << port << ", starting TLS handshake...";
     }
 
     if (running_) {
         if (useThread_) {
-            // Thread mode: wait for TCP then handshake
-            setBlocking(true);
+            // Thread mode: the TCP connect above was blocking, so the
+            // handshake is next. It runs on a non-blocking socket and waits
+            // for data in short slices (processNetworkImpl()), so its
+            // deadline is checked while the peer stays silent. The socket
+            // goes back to blocking once the handshake is done.
+            setBlocking(false);
             tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this,
-                                            generation);
+                                            generation, alive_);
         } else {
             // Register update listener for async connect/handshake/recv
             updateListener_ = events().update.listen(this, &TlsClient::processNetwork);
@@ -426,7 +438,7 @@ bool TlsClient::connect(const std::string& host, int port) {
     return true;
 }
 
-bool TlsClient::performHandshake() {
+TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
     int ret;
 
     // Initialize SSL configuration if not already done
@@ -439,7 +451,7 @@ bool TlsClient::performHandshake() {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
             notifyError(std::string("TLS config failed: ") + errBuf, ret);
-            return false;
+            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
         }
 
         // Certificate verification settings.
@@ -467,7 +479,7 @@ bool TlsClient::performHandshake() {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
             notifyError(std::string("TLS setup failed: ") + errBuf, ret);
-            return false;
+            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
         }
 
         // Set hostname (SNI)
@@ -477,7 +489,7 @@ bool TlsClient::performHandshake() {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
             notifyError(std::string("TLS hostname set failed: ") + errBuf, ret);
-            return false;
+            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
         }
 
         // Set BIO callbacks
@@ -491,53 +503,92 @@ bool TlsClient::performHandshake() {
     // Perform handshake step
     ret = mbedtls_ssl_handshake(&ctx_->ssl);
     if (ret == 0) {
-        return true; // Handshake complete
+        return HandshakeStep::Done;
     } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
-        return false; // In progress
+        return HandshakeStep::InProgress;
     } else {
-        // A local disconnect() on another thread shut the socket down under
-        // the handshake. It cleared running_ first and tears the connection
-        // down itself: only a failure this thread ran into is handled here.
-        if (!running_.exchange(false)) return false;
-
         char errBuf[256];
         mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-
-        // Tear the connection down before telling anyone: a listener that
-        // reconnects from onError or onConnect runs inline, and a teardown
-        // after it returned would take its new connection down. Not
-        // disconnect(), which on this thread lets go of it. teardown()
-        // leaves the thread joinable, so disconnect() and the destructor
-        // still wait for it; only a listener's own connect() or disconnect()
-        // lets go of it (the client keeps it for a later join).
-        teardown();
-        notifyError(std::string("TLS handshake failed: ") + errBuf, ret);
-
-        // An onError listener may have started a newer attempt. That attempt
-        // reports its own result: this one is not reported once the client
-        // is connected or connecting again (running_ is set for every
-        // attempt in progress, the pending connect and the handshake too).
-        if (!connected_ && !running_) {
-            tc::TcpConnectEventArgs args;
-            args.success = false;
-            args.message = std::string("TLS Handshake failed: ") + errBuf;
-            onConnect.notify(args);
-        }
-        return false;
+        failHandshake(std::string("TLS handshake failed: ") + errBuf,
+                      std::string("TLS Handshake failed: ") + errBuf, ret, alive);
+        return HandshakeStep::Stopped;
     }
+}
+
+bool TlsClient::failHandshake(const std::string& error, const std::string& connectMessage,
+                              int code, const AliveToken& alive) {
+    // A local disconnect() on another thread shut the socket down under
+    // the handshake. It cleared running_ first and tears the connection
+    // down itself: only a failure this thread ran into is handled here.
+    if (!running_.exchange(false)) return false;
+
+    // Tear the connection down before telling anyone: a listener that
+    // reconnects from onError or onConnect runs inline, and a teardown
+    // after it returned would take its new connection down. Not
+    // disconnect(), which on this thread lets go of it. teardown() leaves
+    // the thread joinable, so disconnect() and the destructor still wait
+    // for it; only a listener's own connect() or disconnect() lets go of it
+    // (the client keeps it for a later join).
+    teardown();
+    notifyError(error, code);
+
+    // An onError listener may have destroyed the client (an owner that
+    // replaces it, as WebSocketClient::connect() does)
+    if (!*alive) return false;
+
+    // An onError listener may have started a newer attempt. That attempt
+    // reports its own result: this one is not reported once the client
+    // is connected or connecting again (running_ is set for every
+    // attempt in progress, the pending connect and the handshake too).
+    if (!connected_ && !running_) {
+        tc::TcpConnectEventArgs args;
+        args.success = false;
+        args.message = connectMessage;
+        // The caller stops after this without reading the client: an
+        // onConnect listener may destroy it too
+        onConnect.notify(args);
+    }
+    return false;
 }
 
 void TlsClient::processNetwork() {
     // Without threads (driven by the update event) no generation is started;
-    // the current one is this call's.
-    processNetworkImpl(tlsReceiveGeneration_);
+    // the current one is this call's. The result is not needed: a stop means
+    // the connection ended and the update listener is gone. The token is
+    // copied first: a listener may destroy the client.
+    AliveToken alive = alive_;
+    processNetworkImpl(tlsReceiveGeneration_, alive);
+}
+
+// Wait until the socket has data to read, for at most ms milliseconds
+static void waitReadable(
+#ifdef _WIN32
+    SOCKET fd,
+#else
+    int fd,
+#endif
+    int ms) {
+#ifdef _WIN32
+    if (fd == INVALID_SOCKET) return;
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    struct timeval tv = {0, ms * 1000};
+    select(0, &readfds, NULL, NULL, &tv);
+#else
+    if (fd < 0) return;
+    struct pollfd pfd;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    poll(&pfd, 1, ms);
+#endif
 }
 
 // generation: the receive thread's own (the generation it was started with)
-void TlsClient::processNetworkImpl(unsigned generation) {
+bool TlsClient::processNetworkImpl(unsigned generation, const AliveToken& alive) {
     // A thread whose connection was replaced does nothing more, not even
     // the pending connect or the handshake of the new one
-    if (!running_ || tlsReceiveGeneration_ != generation) return;
+    if (!running_ || tlsReceiveGeneration_ != generation) return true;
 
     // 1. Handle TCP connection pending
     if (connectPending_) {
@@ -557,34 +608,54 @@ void TlsClient::processNetworkImpl(unsigned generation) {
 #endif
             connectPending_ = false;
             handshakePending_ = true;
+            handshakeStart_ = std::chrono::steady_clock::now();
             logNotice() << "TCP connected (async), starting TLS handshake...";
         } else {
-            return; // Still connecting
+            return true; // Still connecting
         }
     }
 
     // 2. Handle TLS handshake pending
     if (handshakePending_) {
-        if (performHandshake()) {
-            handshakePending_ = false;
-            connected_ = true;
-            
-            logNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
-                          << " [" << getTlsVersion() << ", " << getCipherSuite() << "]";
-
-            tc::TcpConnectEventArgs args;
-            args.success = true;
-            args.message = "TLS Connected";
-            onConnect.notify(args);
-        } else {
-            return; // Still handshaking, or failed (torn down inside)
+        // The deadline counts from the TCP connect (setHandshakeTimeout()).
+        // The peer may have accepted the connection and then said nothing.
+        const float timeout = handshakeTimeout_;
+        if (timeout > 0.0f &&
+            std::chrono::steady_clock::now() - handshakeStart_ >=
+                std::chrono::duration<float>(timeout)) {
+            return failHandshake("TLS handshake timeout", "TLS handshake timeout", 0, alive);
         }
+
+        HandshakeStep step = performHandshake(alive);
+        if (step == HandshakeStep::Stopped) return false;
+        if (step == HandshakeStep::InProgress) {
+            // With threads the socket is non-blocking during the handshake:
+            // wait for the peer's data in short slices, so the deadline above
+            // is checked again even when nothing arrives
+            if (useThread_) waitReadable(socket_, 50);
+            return true;
+        }
+
+        handshakePending_ = false;
+        // With threads, back to blocking reads for the connection
+        if (useThread_) setBlocking(true);
+        connected_ = true;
+
+        logNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
+                      << " [" << getTlsVersion() << ", " << getCipherSuite() << "]";
+
+        tc::TcpConnectEventArgs args;
+        args.success = true;
+        args.message = "TLS Connected";
+        onConnect.notify(args);
+        // An onConnect listener may have destroyed the client
+        if (!*alive) return false;
     }
 
     // A listener on onConnect above may have reconnected and waited for the
     // new connection: connected_ is then the new connection's, and the new
     // receive thread owns tlsRecvBuf_. Stop before touching it.
-    if (!connected_ || tlsReceiveGeneration_ != generation) return;
+    if (!connected_ || tlsReceiveGeneration_ != generation) return true;
 
     // 3. Handle data receive. The buffer is this client's own: every
     // client's receive thread runs this at the same time.
@@ -606,6 +677,9 @@ void TlsClient::processNetworkImpl(unsigned generation) {
             args.data.assign(reinterpret_cast<char*>(tlsRecvBuf_.data()),
                             reinterpret_cast<char*>(tlsRecvBuf_.data()) + ret);
             onReceive.notify(args);
+            // An onReceive listener may have destroyed the client (an owner
+            // that replaces it from a close it handles inline, say)
+            if (!*alive) return false;
             if (!useThread_) break;
         } else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY) {
             // Connection closed. Report it only if this thread is the one
@@ -619,7 +693,11 @@ void TlsClient::processNetworkImpl(unsigned generation) {
                 tc::TcpDisconnectEventArgs args;
                 args.reason = "Connection closed by remote";
                 args.wasClean = true;
+                // This thread stops here, decided before notifying: a
+                // listener may destroy, disconnect or reconnect the client,
+                // so nothing of it is read after the notification (#262).
                 onDisconnect.notify(args);
+                return false;
             }
             break;
         } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -633,11 +711,14 @@ void TlsClient::processNetworkImpl(unsigned generation) {
                 tc::TcpDisconnectEventArgs args;
                 args.reason = std::string("TLS error: ") + errBuf;
                 args.wasClean = false;
+                // As above: stop without reading the client again
                 onDisconnect.notify(args);
+                return false;
             }
             break;
         }
     }
+    return true;
 }
 
 void TlsClient::disconnect() {
@@ -761,14 +842,17 @@ bool TlsClient::send(const std::string& message) {
 // =============================================================================
 // TLS Receive Thread
 // =============================================================================
-void TlsClient::tlsReceiveThreadFunc(unsigned generation) {
+void TlsClient::tlsReceiveThreadFunc(unsigned generation, AliveToken alive) {
     // running_ alone cannot end this loop when a listener on this thread
     // reconnects: connect() lets go of this thread (the client keeps it for
     // a later join), starts the new connection's own, and running_ is true
     // again for that one. The generation says which
     // thread is current (processNetwork()'s receive loop checks it as well).
+    // processNetworkImpl() returns false once it reported the end of the
+    // connection or of the handshake, or a listener destroyed the client:
+    // the thread then ends without reading the client again.
     while (running_ && tlsReceiveGeneration_ == generation) {
-        processNetworkImpl(generation);
+        if (!processNetworkImpl(generation, alive)) return;
         if (running_ && tlsReceiveGeneration_ == generation) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

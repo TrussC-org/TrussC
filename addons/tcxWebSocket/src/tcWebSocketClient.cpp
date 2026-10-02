@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <random>
 #include <cstring>
+#include <cstdio>
 
 using namespace std;
 using namespace tc;
@@ -130,6 +131,11 @@ bool WebSocketClient::connect(const std::string& url) {
     state_ = State::Connecting;
     setupClient(useTls_);
 
+    // The 101 deadline is checked on the main thread
+    if (!timeoutListener_.isConnected()) {
+        timeoutListener_ = events().update.listen(this, &WebSocketClient::checkHandshakeTimeout);
+    }
+
     client_->connectAsync(host_, port_);
     return true;
 #endif
@@ -143,8 +149,15 @@ void WebSocketClient::disconnect() {
         wsHandle_ = 0;
     }
 #else
+    awaitingUpgrade_ = false;
     if (client_) {
+        // An onClose listener may reconnect or destroy this object from
+        // inside this call (it fires onDisconnect, which fires onClose). The
+        // state below then belongs to the new connection, or is gone.
+        std::shared_ptr<bool> alive = alive_;
+        unsigned connection = connection_;
         client_->disconnect();
+        if (!*alive || connection_ != connection) return;
     }
 #endif
     state_ = State::Disconnected;
@@ -167,6 +180,10 @@ void WebSocketClient::setupClient(bool useTls) {
         } else if (!tlsCaPem_.empty()) {
             tls->setCACertificate(tlsCaPem_);
         }
+        tls->setHandshakeTimeout(handshakeTimeout_);
+        // Replacing client_ may destroy the previous client on its own
+        // receive thread (connect() from an onClose or onError listener);
+        // that thread then stops without touching it again (#262).
         client_ = std::move(tls);
     } else {
         client_ = std::make_unique<TcpClient>();
@@ -184,20 +201,69 @@ void WebSocketClient::setupClient(bool useTls) {
 void WebSocketClient::handleTcpConnect(TcpConnectEventArgs& args) {
 #ifndef __EMSCRIPTEN__
     if (args.success) {
+        // The 101 deadline counts from the TCP connect (#262). For ws:// that
+        // is now. For wss:// it is when TlsClient's TCP connection came up,
+        // so the TLS handshake and the 101 share one deadline instead of
+        // getting one each. This runs on the thread that ran the handshake,
+        // which is where getTcpConnectTime() may be read.
+        auto start = std::chrono::steady_clock::now();
+        if (auto* tls = dynamic_cast<TlsClient*>(client_.get())) start = tls->getTcpConnectTime();
+        upgradeStartNs_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            start.time_since_epoch()).count();
+        awaitingUpgrade_ = true;
         sendHandshake();
     } else {
         state_ = State::Disconnected;
+        // TlsClient's handshake deadline ran out: like the 101 timeout,
+        // onError and then onClose. Any other failed connect reports onError.
+        const bool timedOut = (args.message == "TLS handshake timeout");
+        std::shared_ptr<bool> alive = alive_;
+        unsigned connection = connection_;
         TcpErrorEventArgs err;
         err.message = "TCP Connection failed: " + args.message;
         onError.notify(err);
+        // An onError listener may have reconnected or destroyed the client
+        if (!timedOut || !*alive || connection_ != connection) return;
+        onClose.notify();
     }
 #endif
 }
 
 void WebSocketClient::handleTcpDisconnect(TcpDisconnectEventArgs& args) {
 #ifndef __EMSCRIPTEN__
+    // The server closed before the 101: the wait is over. Otherwise the
+    // main thread's deadline check would still fire onError and
+    // disconnect() after this onClose.
+    awaitingUpgrade_ = false;
     state_ = State::Disconnected;
     onClose.notify();
+#endif
+}
+
+void WebSocketClient::checkHandshakeTimeout() {
+#ifndef __EMSCRIPTEN__
+    if (!awaitingUpgrade_) return;
+    const float timeout = handshakeTimeout_;
+    if (timeout <= 0.0f) return;
+    const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - upgradeStartNs_ < static_cast<int64_t>(timeout * 1e9)) return;
+    // The 101 may arrive on the receive thread at the same moment: only one
+    // side ends the wait
+    if (!awaitingUpgrade_.exchange(false)) return;
+
+    // onError first, then disconnect(), which fires onClose. A listener may
+    // reconnect or destroy the client (as in failConnection()).
+    std::shared_ptr<bool> alive = alive_;
+    unsigned connection = connection_;
+    char seconds[32];
+    snprintf(seconds, sizeof(seconds), "%g", timeout);
+    TcpErrorEventArgs err;
+    err.message = std::string("WebSocket handshake timeout: no 101 response within ") +
+                  seconds + " s of the TCP connect";
+    onError.notify(err);
+    if (!*alive || connection_ != connection) return;
+    disconnect();
 #endif
 }
 
@@ -243,10 +309,18 @@ void WebSocketClient::handleRawReceive(TcpReceiveEventArgs& args) {
 
 void WebSocketClient::processHandshake(const std::string& header) {
 #ifndef __EMSCRIPTEN__
+    // The handshake timeout on the main thread may have ended the wait
+    // already; it closes the connection
+    if (!awaitingUpgrade_.exchange(false)) return;
     if (header.find("101 Switching Protocols") != std::string::npos) {
         state_ = State::Open;
+        std::shared_ptr<bool> alive = alive_;
+        unsigned connection = connection_;
         onOpen.notify();
-        
+        // An onOpen listener may have disconnected, reconnected or
+        // destroyed the client
+        if (!*alive || connection_ != connection) return;
+
         // If there's more data in buffer, process it as a frame
         if (!receiveBuffer_.empty()) {
             processFrame();
@@ -349,7 +423,10 @@ void WebSocketClient::processFrame() {
                 fragmentOpcode_ = 0;
             }
         } else if (opcode == 0x8) { // Close
+            // disconnect() fires onClose, whose listener may reconnect or
+            // destroy the client: nothing is read after it
             disconnect();
+            return;
         } else if (opcode == 0x9) { // Ping
             sendPong(payload);       // RFC 6455 5.5.2/5.5.3: reply, echoing the payload
         }
@@ -361,7 +438,12 @@ void WebSocketClient::processFrame() {
                 args.message.assign(payload.begin(), payload.end());
             }
             args.data = std::move(payload);
+            std::shared_ptr<bool> alive = alive_;
+            unsigned connection = connection_;
             onMessage.notify(args);
+            // An onMessage listener may have disconnected, reconnected or
+            // destroyed the client
+            if (!*alive || connection_ != connection) return;
         }
     }
 #endif
