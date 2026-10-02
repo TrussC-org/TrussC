@@ -105,62 +105,57 @@ public:
     bool isVirtual() const { return virtual_; }
 
     // -------------------------------------------------------------------------
-    // Channel voice messages (channel: 1-16)
+    // Sending
     // -------------------------------------------------------------------------
-    void sendNoteOn(int channel, int pitch, int velocity) {
-        send3(0x90, channel, pitch, velocity);
+    // All send helpers return true when libremidi accepts the message. A closed
+    // port, empty message or backend error logs a warning and returns false.
+    // Success does not guarantee delivery to the receiving device.
+
+    // Channel voice messages (channel: 1-16).
+    bool sendNoteOn(int channel, int pitch, int velocity) {
+        return send3(0x90, channel, pitch, velocity);
     }
-    void sendNoteOff(int channel, int pitch, int velocity = 0) {
-        send3(0x80, channel, pitch, velocity);
+    bool sendNoteOff(int channel, int pitch, int velocity = 0) {
+        return send3(0x80, channel, pitch, velocity);
     }
-    void sendControlChange(int channel, int control, int value) {
-        send3(0xB0, channel, control, value);
+    bool sendControlChange(int channel, int control, int value) {
+        return send3(0xB0, channel, control, value);
     }
-    void sendProgramChange(int channel, int program) {
-        send2(0xC0, channel, program);
+    bool sendProgramChange(int channel, int program) {
+        return send2(0xC0, channel, program);
     }
-    void sendAftertouch(int channel, int pressure) {
-        send2(0xD0, channel, pressure);
+    bool sendAftertouch(int channel, int pressure) {
+        return send2(0xD0, channel, pressure);
     }
-    void sendPolyAftertouch(int channel, int pitch, int pressure) {
-        send3(0xA0, channel, pitch, pressure);
+    bool sendPolyAftertouch(int channel, int pitch, int pressure) {
+        return send3(0xA0, channel, pitch, pressure);
     }
     // value: 14-bit (0-16383, center 8192).
-    void sendPitchBend(int channel, int value) {
-        if (!midiOut_) return;
+    bool sendPitchBend(int channel, int value) {
         value = clamp14(value);
-        midiOut_->send_message(static_cast<unsigned char>(0xE0 | chanBits(channel)),
-                               static_cast<unsigned char>(value & 0x7F),
-                               static_cast<unsigned char>((value >> 7) & 0x7F));
+        return send3(0xE0, channel, value & 0x7F, (value >> 7) & 0x7F);
     }
     // Raw 7-bit lsb/msb form (each 0-127).
-    void sendPitchBend(int channel, unsigned char lsb, unsigned char msb) {
-        if (!midiOut_) return;
-        midiOut_->send_message(static_cast<unsigned char>(0xE0 | chanBits(channel)),
-                               static_cast<unsigned char>(lsb & 0x7F),
-                               static_cast<unsigned char>(msb & 0x7F));
+    bool sendPitchBend(int channel, unsigned char lsb, unsigned char msb) {
+        return send3(0xE0, channel, lsb & 0x7F, msb & 0x7F);
     }
 
     // -------------------------------------------------------------------------
     // Raw / system
     // -------------------------------------------------------------------------
     // Send a full system-exclusive dump (caller includes 0xF0 ... 0xF7).
-    void sendSysex(const std::vector<unsigned char>& bytes) { sendBytes(bytes); }
+    bool sendSysex(const std::vector<unsigned char>& bytes) { return sendBytes(bytes); }
 
     // Send a single raw MIDI byte (e.g. a real-time message like 0xF8 clock).
-    void sendMidiByte(unsigned char byte) {
-        if (!midiOut_) return;
-        midiOut_->send_message(&byte, 1);
-    }
+    bool sendMidiByte(unsigned char byte) { return sendRaw(&byte, 1); }
 
     // Send arbitrary raw bytes verbatim.
-    void sendBytes(const std::vector<unsigned char>& bytes) {
-        if (!midiOut_ || bytes.empty()) return;
-        midiOut_->send_message(bytes.data(), bytes.size());
+    bool sendBytes(const std::vector<unsigned char>& bytes) {
+        return sendRaw(bytes.data(), bytes.size());
     }
 
     // Send a pre-built MidiMessage.
-    void send(const MidiMessage& msg) { sendBytes(msg.bytes); }
+    bool send(const MidiMessage& msg) { return sendBytes(msg.bytes); }
 
 private:
     static unsigned char chanBits(int channel) {
@@ -172,16 +167,37 @@ private:
     static int clamp7(int v) { return v < 0 ? 0 : (v > 127 ? 127 : v); }
     static int clamp14(int v) { return v < 0 ? 0 : (v > 16383 ? 16383 : v); }
 
-    void send2(unsigned char status, int channel, int d1) {
-        if (!midiOut_) return;
-        midiOut_->send_message(static_cast<unsigned char>(status | chanBits(channel)),
-                               static_cast<unsigned char>(clamp7(d1)));
+    bool send2(unsigned char status, int channel, int d1) {
+        const unsigned char bytes[] = {
+            static_cast<unsigned char>(status | chanBits(channel)),
+            static_cast<unsigned char>(clamp7(d1))};
+        return sendRaw(bytes, sizeof(bytes));
     }
-    void send3(unsigned char status, int channel, int d1, int d2) {
-        if (!midiOut_) return;
-        midiOut_->send_message(static_cast<unsigned char>(status | chanBits(channel)),
-                               static_cast<unsigned char>(clamp7(d1)),
-                               static_cast<unsigned char>(clamp7(d2)));
+    bool send3(unsigned char status, int channel, int d1, int d2) {
+        const unsigned char bytes[] = {
+            static_cast<unsigned char>(status | chanBits(channel)),
+            static_cast<unsigned char>(clamp7(d1)),
+            static_cast<unsigned char>(clamp7(d2))};
+        return sendRaw(bytes, sizeof(bytes));
+    }
+
+    bool sendRaw(const unsigned char* bytes, size_t size) {
+        if (!midiOut_) {
+            trussc::logWarning("tcxMidiOut") << "send_message failed: no output port is open";
+            return false;
+        }
+        if (size == 0) {
+            trussc::logWarning("tcxMidiOut") << "send_message failed: empty message";
+            return false;
+        }
+        auto err = midiOut_->send_message(bytes, size);
+        if (err != stdx::error{}) {
+            auto message = err.message();
+            trussc::logWarning("tcxMidiOut") << "send_message failed: "
+                << std::string(message.data(), message.size());
+            return false;
+        }
+        return true;
     }
 
     bool openOutputPort(const libremidi::output_port& port, int index) {

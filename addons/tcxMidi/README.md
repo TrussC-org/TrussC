@@ -80,7 +80,17 @@ Raise `setBufferSize()` if you see it.
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
 `sendControlChange`, `sendProgramChange`, `sendAftertouch`,
 `sendPolyAftertouch`, `sendPitchBend` (14-bit, or raw `lsb,msb`), `sendSysex`,
-`sendMidiByte`, `sendBytes`, `send(MidiMessage)`.
+`sendMidiByte`, `sendBytes`, `send(MidiMessage)`. All send helpers return `bool`:
+`true` when libremidi accepts the message, `false` with a warning when no output
+port is open, the message is empty, or the backend reports an error. `true` does
+not guarantee delivery to the device. Existing calls may ignore the result;
+explicit member-function pointers must use a `bool` return type.
+
+```cpp
+if (!out.sendNoteOn(1, 60, 100)) {
+    // The send failed; the warning log includes the reason.
+}
+```
 
 **`MidiMessage`** — `bytes`, `deltatime` (seconds since previous event),
 `portName`, `portNum`, plus `getStatus()`, `getChannel()` (1-16), predicates
