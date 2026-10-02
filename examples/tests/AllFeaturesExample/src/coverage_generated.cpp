@@ -1855,6 +1855,7 @@ struct Cover_Mesh : af::Scope<Mesh> {
         (void)af::val<Mesh>().drawNoLightingWithTexture(af::val<const Texture>());
         (void)af::val<Mesh>().drawWireframe();
         (void)af::val<Mesh>().markGpuDirty();
+        (void)af::val<Mesh>().getDataRevision();
         (void)af::val<Mesh>().uploadToGpu();
         (void)af::val<Mesh>().drawGpuPbr();
         (void)af::val<Mesh>().drawGpuPoints();

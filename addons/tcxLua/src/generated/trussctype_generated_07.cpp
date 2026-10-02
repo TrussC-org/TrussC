@@ -138,8 +138,10 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["ok"] = &trussc::SendResult::ok;
     }
     {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["t"] = &trussc::Ray::Hit::t;
+        t["point"] = &trussc::Ray::Hit::point;
     }
 }
 #ifndef _MSC_VER

@@ -72,6 +72,10 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["targetFps"] = &trussc::HeadlessSettings::targetFps;
         t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
+    {
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

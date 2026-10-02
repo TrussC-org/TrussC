@@ -3231,6 +3231,7 @@ void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
+uint64_t Mesh::getDataRevision() const  // Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only.
 sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
 int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
 sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
@@ -3256,7 +3257,7 @@ bool Mesh::hasNormals() const  // Check if mesh has normals
 bool Mesh::hasTangents() const  // Whether the mesh has tangents
 bool Mesh::hasTexCoords() const  // Check if mesh has texture coordinates
 bool Mesh::hasValidTexCoords() const  // Check if texture coordinates match vertex count
-void Mesh::markGpuDirty() const  // Mark GPU buffers stale after editing data in place
+void Mesh::markGpuDirty() const  // Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this.
 Mesh & Mesh::rotateX(float radians)  // Rotate mesh around X axis
 Mesh & Mesh::rotateY(float radians)  // Rotate mesh around Y axis
 Mesh & Mesh::rotateZ(float radians)  // Rotate mesh around Z axis
