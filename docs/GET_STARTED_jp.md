@@ -23,9 +23,13 @@ C++20 + sokol で構築されており、シンプルに書けてクロスプラ
 
 | OS | コンパイラ |
 |----|----------|
-| macOS | Xcode Command Line Tools (`xcode-select --install`) |
+| macOS 14+ (Sonoma) | Xcode Command Line Tools (`xcode-select --install`) |
+| iOS 16.3+ | macOS 上の Xcode（iOS SDK） |
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ または Clang 10+ |
+
+iOS の最低バージョンは、浮動小数点の `std::format` が使える 16.3 です。
+既存の iOS プロジェクトには `trusscli update` でこのデプロイメントターゲットを適用できます。
 
 **CMake** も必要です。インストールしてください（入れない場合、ビルドが通らないことがあります）:
 ```bash
