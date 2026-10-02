@@ -20,6 +20,12 @@ You are a coding assistant for the TrussC framework.
 - C++20, modern and simple implementation
 - openFrameworks-like API design
 
+### Quiet builds
+TrussC itself builds without compiler warnings on macOS, Windows and Linux, which is unusual for a C++ framework. Two reasons: every warning line costs an AI assistant tokens to read, and a screen of framework warnings hides the one that matters. When TrussC is quiet, a warning you see comes from your own code and is worth fixing.
+- TrussC, sokol and stb headers are included as system headers, so their internals do not warn in your build.
+- `trusscli build --warnings` turns on `-Wall -Wextra` (`/W4` on MSVC) for your own sources only. It never adds `-Werror`, so a warning does not stop your build.
+- Fix a warning in your code rather than silencing it.
+
 ## Coding Conventions
 - Always use namespaces: `using namespace tc;`, `using namespace std;`
 - Addons: `using namespace tcx::box2d;`

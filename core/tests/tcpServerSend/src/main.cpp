@@ -92,7 +92,7 @@ static void check(const char* name, bool ok) {
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
+    thread worker([done, fn = std::move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
     while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
@@ -674,7 +674,7 @@ TC_CORE_TEST_MAIN() {
         s7.send(readerId, string("C"));            // sync, must not overtake A and B
         s7.sendAsync(readerId, string("D"));
         vector<char> tail{'E'};
-        s7.sendAsync(readerId, move(tail));       // the move overload
+        s7.sendAsync(readerId, std::move(tail));       // the move overload
 
         string got;
         while (got.size() < 5) {
