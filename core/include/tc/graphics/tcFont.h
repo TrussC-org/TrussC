@@ -9,10 +9,11 @@
 // - FontAtlasManager: Atlas management (multi-atlas, dynamic expansion)
 // - Font: User-facing class
 //
-// TODO: Memory optimization
-// - Currently uses RGBA8 (4bytes/pixel)
-// - Could reduce to 1/4 with R8 (1byte/pixel) + custom shader
-// - Requires direct sokol_gfx usage with shader swizzle
+// Atlas pages are R8: one byte of glyph coverage per texel, on the CPU and on
+// the GPU. They are drawn with internal::activeCoverage2D(), whose shader
+// (core/shaders/sglCoverage.glsl) uses R as alpha. A page starts at 256x256 and
+// doubles up to the GPU's max 2D image size, capped at 8192x8192 (4096x4096
+// when the limit cannot be queried); after that a new page is added.
 // =============================================================================
 
 #include <string>
@@ -174,6 +175,8 @@ public:
     sg_image getTexture() const { return texture_; }
     sg_view getView() const { return view_; }
     bool isTextureValid() const { return textureValid_; }
+    // CPU copy of the page: width * height bytes, glyph coverage per texel.
+    const std::vector<uint8_t>& getPixels() const { return pixels_; }
 
 private:
     friend class FontAtlasManager;
@@ -191,7 +194,7 @@ private:
     bool textureDirty_ = false;
 
     // CPU-side pixel data (for expansion/update)
-    std::vector<uint8_t> pixels_;  // RGBA
+    std::vector<uint8_t> pixels_;  // R8: glyph coverage, one byte per texel
 };
 
 // ---------------------------------------------------------------------------
@@ -877,7 +880,7 @@ private:
         atlas.currentX_ = GLYPH_PADDING;
         atlas.currentY_ = GLYPH_PADDING;
         atlas.rowHeight_ = 0;
-        atlas.pixels_.resize(atlas.width_ * atlas.height_ * 4, 0);
+        atlas.pixels_.resize((size_t)atlas.width_ * atlas.height_, 0);
         atlas.textureDirty_ = true;
 
         atlases_.push_back(std::move(atlas));
@@ -899,13 +902,13 @@ private:
                        << " to " << newWidth << "x" << newHeight;
 
         // Create new buffer
-        std::vector<uint8_t> newPixels(newWidth * newHeight * 4, 0);
+        std::vector<uint8_t> newPixels((size_t)newWidth * newHeight, 0);
 
         // Copy old data
         for (int y = 0; y < atlas.height_; y++) {
-            memcpy(newPixels.data() + y * newWidth * 4,
-                   atlas.pixels_.data() + y * atlas.width_ * 4,
-                   atlas.width_ * 4);
+            memcpy(newPixels.data() + (size_t)y * newWidth,
+                   atlas.pixels_.data() + (size_t)y * atlas.width_,
+                   atlas.width_);
         }
 
         // Update UV coordinates (only for glyphs in this atlas)
@@ -1118,17 +1121,11 @@ private:
                                   glyphIndex);
         }
 
-        // Copy to atlas (RGBA)
+        // Copy to atlas (R8 coverage)
         for (int y = 0; y < glyphHeight; y++) {
-            for (int x = 0; x < glyphWidth; x++) {
-                int srcIdx = y * glyphWidth + x;
-                int dstIdx = ((destY + y) * atlas.width_ + (destX + x)) * 4;
-                uint8_t alpha = glyphBitmap[srcIdx];
-                atlas.pixels_[dstIdx + 0] = 255;    // R
-                atlas.pixels_[dstIdx + 1] = 255;    // G
-                atlas.pixels_[dstIdx + 2] = 255;    // B
-                atlas.pixels_[dstIdx + 3] = alpha;  // A
-            }
+            memcpy(atlas.pixels_.data() + (size_t)(destY + y) * atlas.width_ + destX,
+                   glyphBitmap.data() + (size_t)y * glyphWidth,
+                   glyphWidth);
         }
 
         // Set glyph info
@@ -1221,7 +1218,7 @@ private:
         sg_image_desc img_desc = {};
         img_desc.width = atlas.width_;
         img_desc.height = atlas.height_;
-        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.pixel_format = SG_PIXELFORMAT_R8;   // coverage, drawn by activeCoverage2D()
         // immutable (default) - can set initial data
         img_desc.data.mip_levels[0].ptr = atlas.pixels_.data();
         img_desc.data.mip_levels[0].size = atlas.pixels_.size();
@@ -1229,10 +1226,10 @@ private:
         // Optional mip chain: without it, glyphs minified on screen (far/small
         // text, non-HiDPI displays) alias and shimmer under motion — MSAA can't
         // fix in-texture minification. sokol never auto-generates mipmaps, so we
-        // build the chain on the CPU here. Glyph texels are white (RGB=255) with
-        // coverage in A, so every mip keeps RGB=255 and box-averages only alpha;
-        // that avoids the dark colour fringe straight-alpha RGBA averaging would
-        // produce and keeps minified glyphs clean. (GLYPH_PADDING=2 means very
+        // build the chain on the CPU here. Texels hold coverage only (the colour
+        // comes from the vertex colour in the coverage shader), so each mip
+        // box-averages coverage; there is no colour channel to darken at glyph
+        // edges, and minified glyphs stay clean. (GLYPH_PADDING=2 means very
         // coarse mips bleed slightly between neighbours, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
@@ -1257,15 +1254,14 @@ private:
             img_desc.num_mipmaps = numMips;
             for (int level = 1; level < numMips; ++level) {
                 int cw = std::max(1, pw / 2), ch = std::max(1, ph / 2);
-                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch * 4);
+                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch);
                 for (int y = 0; y < ch; ++y) {
                     for (int x = 0; x < cw; ++x) {
                         int x0 = x * 2, y0 = y * 2;
                         int x1 = std::min(x0 + 1, pw - 1), y1 = std::min(y0 + 1, ph - 1);
-                        int a = (prev[(y0 * pw + x0) * 4 + 3] + prev[(y0 * pw + x1) * 4 + 3]
-                               + prev[(y1 * pw + x0) * 4 + 3] + prev[(y1 * pw + x1) * 4 + 3] + 2) / 4;
-                        uint8_t* d = &dst[(static_cast<size_t>(y) * cw + x) * 4];
-                        d[0] = 255; d[1] = 255; d[2] = 255; d[3] = static_cast<uint8_t>(a);
+                        int a = (prev[y0 * pw + x0] + prev[y0 * pw + x1]
+                               + prev[y1 * pw + x0] + prev[y1 * pw + x1] + 2) / 4;
+                        dst[static_cast<size_t>(y) * cw + x] = static_cast<uint8_t>(a);
                     }
                 }
                 lowerMips.push_back(std::move(dst));
@@ -1989,9 +1985,10 @@ protected:
             const internal::AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
             if (!atlas.isTextureValid()) continue;
 
-            // Accumulating Fill2D for the active target (swapchain or FBO). Unifies
-            // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
-            internal::loadPipeline(internal::activeFill2D());
+            // Coverage pipeline for the active target (swapchain or FBO): the
+            // Alpha blend of activeFill2D() (dst alpha accumulates) with a shader
+            // that reads the R8 atlas's R channel as alpha.
+            internal::loadPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
             sgl_texture(atlas.getView(), pickSampler());
 
@@ -2861,8 +2858,8 @@ private:
     static inline int defaultOversample_ = 1;
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
-    // Shared GPU resources. The TTF draw path loads the active per-target 2D
-    // fill pipeline (internal::activeFill2D()) at draw time, so the font class
+    // Shared GPU resources. The TTF draw path loads the active per-target
+    // coverage pipeline (internal::activeCoverage2D()) at draw time, so the font class
     // only needs its own samplers: internal::fontSamplers(), one pair per
     // process, lazily created by initResources().
 

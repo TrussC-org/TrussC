@@ -348,6 +348,10 @@ font.setOversampling(2);              // this font (1–4, default 1)
 Font::setDefaultOversampling(2);      // every font loaded afterwards
 ```
 
+For scale: atlas pages store one byte (coverage) per texel. A page starts at
+256² and doubles as glyphs are added, up to the GPU's maximum 2D texture size
+capped at 8192² (64 MB); after that the font adds another page.
+
 Worth it for small text — at 9–13 px it buys +15 to +20% for an atlas that
 was tiny to begin with. Rarely worth it above ~24 px, where the gain falls
 to a few percent and the atlas is already large. If you only draw big text,
@@ -2808,7 +2812,7 @@ void Font::forEachGlyphVertical(const std::string & text, float x, float y, Dire
 Direction Font::getAlignH() const  // Get current horizontal text alignment
 Direction Font::getAlignV() const  // Get current vertical text alignment
 float Font::getAscent() const  // Get the font ascent (distance from baseline to top)
-const internal::AtlasState * Font::getAtlas(size_t index) const  // Return the atlas page at the given index for debug visualization, or nullptr if out of range.
+const internal::AtlasState * Font::getAtlas(size_t index) const  // Return the atlas page at the given index for debug visualization, or nullptr if out of range. Pages are single-channel R8 textures holding glyph coverage in R, so drawing a page's view with the normal pipeline shows it in red.
 size_t Font::getAtlasCount() const  // Get number of atlas pages
 size_t Font::getAtlasMemoryUsage() const  // Get atlas memory usage in bytes (alias of getMemoryUsage)
 Rect Font::getBBox(const std::string & text) const  // Get the bounding box of the text (top-left origin)
@@ -2824,7 +2828,7 @@ bool Font::getLatinHyphenation() const  // Check if Latin hyphenation is enabled
 float Font::getLineHeight() const  // Get line height
 size_t Font::getLoadedGlyphCount() const  // Get number of loaded glyphs
 float Font::getMaxLineLength() const  // Get the current wrap length
-size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes
+size_t Font::getMemoryUsage() const  // Get atlas memory usage in bytes (one byte per atlas texel: width x height summed over the pages)
 bool Font::getMipmaps() const  // Return whether the glyph atlas is allowed to build mipmaps.
 int Font::getOversampling() const  // Return the oversampling factor this font rasterizes with (1 = off).
 sg_sampler Font::getSampler()  // Return the shared sokol-gfx sampler used for atlas rendering (advanced interop).
