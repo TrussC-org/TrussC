@@ -18,7 +18,7 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getGridFit"] = &trussc::Font::getGridFit;
         t["setMipmaps"] = &trussc::Font::setMipmaps;
         t["getMipmaps"] = &trussc::Font::getMipmaps;
-        t["load"] = &trussc::Font::load;
+        t["load"] = sol::overload([](trussc::Font& self, const fs::path & nameOrPath, int size) { return self.load(nameOrPath, size); }, [](trussc::Font& self, const fs::path & nameOrPath, int size, int faceIndex) { return self.load(nameOrPath, size, faceIndex); });
         t["isLoaded"] = &trussc::Font::isLoaded;
         t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
         t["getAlignH"] = &trussc::Font::getAlignH;
@@ -66,81 +66,78 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getTotalCacheMemoryUsage"] = &trussc::Font::getTotalCacheMemoryUsage;
     }
     {
-        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
-        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
-        t["hasTexture"] = &trussc::HasTexture::hasTexture;
-        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
-        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
-        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
-        t["setFilter"] = &trussc::HasTexture::setFilter;
-        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
-        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
-        t["setWrapU"] = &trussc::HasTexture::setWrapU;
-        t["setWrapV"] = &trussc::HasTexture::setWrapV;
-        t["setWrap"] = &trussc::HasTexture::setWrap;
-        t["getWrapU"] = &trussc::HasTexture::getWrapU;
-        t["getWrapV"] = &trussc::HasTexture::getWrapV;
-        t["save"] = &trussc::HasTexture::save;
+        sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter",
+            sol::constructors<trussc::FileWriter()>(),
+            sol::call_constructor, sol::constructors<trussc::FileWriter()>());
+        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
+        t["close"] = &trussc::FileWriter::close;
+        t["isOpen"] = &trussc::FileWriter::isOpen;
+        t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
+        t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
+        t["flush"] = &trussc::FileWriter::flush;
     }
     {
-        sol::usertype<trussc::MouseMoveEventArgs> t = lua->new_usertype<trussc::MouseMoveEventArgs>("MouseMoveEventArgs");
-        t["x"] = &trussc::MouseMoveEventArgs::x;
-        t["y"] = &trussc::MouseMoveEventArgs::y;
-        t["deltaX"] = &trussc::MouseMoveEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseMoveEventArgs::deltaY;
-        t["shift"] = &trussc::MouseMoveEventArgs::shift;
-        t["ctrl"] = &trussc::MouseMoveEventArgs::ctrl;
-        t["alt"] = &trussc::MouseMoveEventArgs::alt;
-        t["super"] = &trussc::MouseMoveEventArgs::super;
-        t["pos"] = &trussc::MouseMoveEventArgs::pos;
-        t["globalPos"] = &trussc::MouseMoveEventArgs::globalPos;
-        t["delta"] = &trussc::MouseMoveEventArgs::delta;
-        t["globalDelta"] = &trussc::MouseMoveEventArgs::globalDelta;
-        t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
-        t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
+        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
+        t["slot"] = &trussc::PlayingSoundInfo::slot;
+        t["path"] = &trussc::PlayingSoundInfo::path;
+        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
+        t["paused"] = &trussc::PlayingSoundInfo::paused;
+        t["loop"] = &trussc::PlayingSoundInfo::loop;
+        t["position"] = &trussc::PlayingSoundInfo::position;
+        t["duration"] = &trussc::PlayingSoundInfo::duration;
+        t["volume"] = &trussc::PlayingSoundInfo::volume;
+        t["pan"] = &trussc::PlayingSoundInfo::pan;
+        t["speed"] = &trussc::PlayingSoundInfo::speed;
+        t["level"] = &trussc::PlayingSoundInfo::level;
+    }
+    lua->new_usertype<trussc::Beep>("Beep",
+        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
+        "ping", sol::var(trussc::Beep::ping),
+        "success", sol::var(trussc::Beep::success),
+        "complete", sol::var(trussc::Beep::complete),
+        "coin", sol::var(trussc::Beep::coin),
+        "error", sol::var(trussc::Beep::error),
+        "warning", sol::var(trussc::Beep::warning),
+        "cancel", sol::var(trussc::Beep::cancel),
+        "click", sol::var(trussc::Beep::click),
+        "typing", sol::var(trussc::Beep::typing),
+        "notify", sol::var(trussc::Beep::notify),
+        "sweep", sol::var(trussc::Beep::sweep));
+    {
+        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs",
+            sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>());
+        t["level"] = &trussc::LogEventArgs::level;
+        t["message"] = &trussc::LogEventArgs::message;
+        t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
     {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["name"] = &trussc::Platform::name;
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
     }
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["endGroup"] = &trussc::Reflector::endGroup;
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
     }
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["format"] = &trussc::AudioRecordSettings::format;
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+        t["altitude"] = &trussc::Location::altitude;
+        t["accuracy"] = &trussc::Location::accuracy;
+    }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
+    {
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifndef _MSC_VER

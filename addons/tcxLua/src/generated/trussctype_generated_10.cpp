@@ -83,70 +83,52 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["xy"] = &trussc::IVec3::xy;
     }
     {
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
+        t["build"] = &trussc::ChipSoundBundle::build;
     }
     {
-        sol::usertype<trussc::RectNodeButton> t = lua->new_usertype<trussc::RectNodeButton>("RectNodeButton",
-            sol::constructors<trussc::RectNodeButton()>(),
-            sol::call_constructor, sol::constructors<trussc::RectNodeButton()>());
-        t["normalColor"] = &trussc::RectNodeButton::normalColor;
-        t["hoverColor"] = &trussc::RectNodeButton::hoverColor;
-        t["pressColor"] = &trussc::RectNodeButton::pressColor;
-        t["label"] = &trussc::RectNodeButton::label;
-        t["isPressed"] = &trussc::RectNodeButton::isPressed;
-        t["draw"] = &trussc::RectNodeButton::draw;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector",
+            sol::constructors<trussc::JsonReadReflector(trussc::Json)>(),
+            sol::call_constructor, sol::constructors<trussc::JsonReadReflector(trussc::Json)>());
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
     }
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled));
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
     {
-        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
-        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
-        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
-        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
-        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
-        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
-        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
-        t["name"] = &trussc::GraphicsBackend::name;
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate",
+            sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>(),
+            sol::call_constructor, sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>());
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
     }
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
     {
-        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
-        t["members"] = &trussc::JsonWriteReflector::members;
-        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
-        t["derived"] = &trussc::JsonWriteReflector::derived;
-        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
-    }
-    {
-        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
-        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
-        t["channels"] = &trussc::AudioInBuffer::channels;
-        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
-        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
-    }
-    {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["success"] = &trussc::FileDialogResult::success;
-    }
-    {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["message"] = &trussc::UdpErrorEventArgs::message;
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-    }
-    {
-        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
-        t["hit"] = &trussc::Ray::Hit::hit;
-        t["t"] = &trussc::Ray::Hit::t;
-        t["point"] = &trussc::Ray::Hit::point;
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
 }
 #ifndef _MSC_VER
