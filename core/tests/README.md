@@ -267,6 +267,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   move keeps the moved voice playing), a paused voice is released too, and a
   streamed voice closes its file on `stop()` and when its last handle goes
   away (checked through `/proc/self/fd` on Linux).
+- `streamSeekRepeat/` — daily-only repetition of the exhausted non-looping
+  stream's pending seek to frame 0 (#582), 50 times on the null audio backend.
+  It checks that target audio returns after the worker stall is released.
+  Failures here and in `streamSeek/` report the voice's playing state and
+  position, seek request/served/published/applied sequences, end-of-stream
+  and decoder-end flags, and worker pass count.
 - `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
   read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
   measured on `audioOut` with files of DC levels: `setPosition()` moves the

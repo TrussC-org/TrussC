@@ -70,6 +70,7 @@
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcStreamSeekDiagnostics.h"
 
 #include <atomic>
 #include <chrono>
@@ -542,16 +543,18 @@ TC_CORE_TEST_MAIN() {
                           ", isPlaying " + (playing ? "true" : "false");
         }
         check("pending: it is still playing early in the file (position < 0.2)", early,
-              earlyDetail);
+              early ? earlyDetail : earlyDetail + ", " + streamSeekFailureState(n, g_level.load()));
         if (early) {
             internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
             n.setPosition(0.0f);
             sleepMs(400);  // longer than what the ring held
+            const bool playing = n.isPlaying();
             check("pending: a non-looping stream does not end at the old data's end",
-                  n.isPlaying());
+                  playing, playing ? "" : streamSeekFailureState(n, g_level.load()));
             internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+            const bool heard = waitLevel(0.5f);
             check("pending: then it plays from the target (level 0.5)",
-                  waitLevel(0.5f), to_string(g_level.load()));
+                  heard, heard ? "" : streamSeekFailureState(n, g_level.load()));
         }
         n.stop();
     }
