@@ -70,6 +70,7 @@ public:
         if (!isUrl) {
             std::error_code ec;
             if (!fs::exists(resolvedPath, ec)) {
+                logError("VideoPlayer") << "file not found: " << internal::pathToUtf8(resolvedPath);
                 return LoadResult::fail(LoadError::FileNotFound,
                                         "file not found: " + internal::pathToUtf8(resolvedPath));
             }

@@ -33,9 +33,10 @@ public:
     // client's disconnect work), so what is left here is the calling thread
     // at most: a client destroyed on one of its own threads (in a listener).
     // That thread cannot join itself and is detached, as before: it returns
-    // into the destroyed client once the listener returns, which is undefined
-    // behavior (the client classes document it). Anything else still kept is
-    // joined.
+    // into the destroyed client once the listener returns, so the client
+    // must not read itself on it then (TcpClient's and TlsClient's receive
+    // threads check their alive_ token, #262; the client classes document
+    // the rest). Anything else still kept is joined.
     ~KeptThreads() {
         joinOthers();
         std::lock_guard<std::mutex> lock(mutex_);

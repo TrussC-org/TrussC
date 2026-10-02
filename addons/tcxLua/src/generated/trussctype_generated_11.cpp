@@ -82,67 +82,59 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
     {
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
+        t["build"] = &trussc::ChipSoundBundle::build;
     }
     {
-        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
-        t["buffer"] = &trussc::PlayingSound::buffer;
-        t["volume"] = &trussc::PlayingSound::volume;
-        t["pan"] = &trussc::PlayingSound::pan;
-        t["speed"] = &trussc::PlayingSound::speed;
-        t["loop"] = &trussc::PlayingSound::loop;
-        t["playing"] = &trussc::PlayingSound::playing;
-        t["paused"] = &trussc::PlayingSound::paused;
-        t["mixMode"] = &trussc::PlayingSound::mixMode;
-        t["positionF"] = &trussc::PlayingSound::positionF;
-        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector",
+            sol::constructors<trussc::JsonReadReflector(trussc::Json)>(),
+            sol::call_constructor, sol::constructors<trussc::JsonReadReflector(trussc::Json)>());
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
     }
     {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["success"] = &trussc::LoadResult::success;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
     }
     {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
-        t["id"] = &trussc::TouchEventArgs::id;
+        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
+        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
+        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
+        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
-        t["id"] = &trussc::TouchPoint::id;
-        t["x"] = &trussc::TouchPoint::x;
-        t["y"] = &trussc::TouchPoint::y;
-        t["pressure"] = &trussc::TouchPoint::pressure;
-        t["changed"] = &trussc::TouchPoint::changed;
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+    }
+    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
+        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
+        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
+        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    {
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["success"] = &trussc::TcpConnectEventArgs::success;
+        t["message"] = &trussc::TcpConnectEventArgs::message;
     }
     {
-        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
-        t["getId"] = &trussc::TcpServerClient::getId;
-        t["getHost"] = &trussc::TcpServerClient::getHost;
-        t["getPort"] = &trussc::TcpServerClient::getPort;
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

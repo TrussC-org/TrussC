@@ -125,7 +125,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
-  main thread, and `Node::destroy()` is safe from any thread.
+  main thread, and `Node::destroy()` is safe from any thread. Each frame's drain
+  runs only what was queued when it started, in order and nothing dropped, so
+  frames keep starting while a worker keeps the queue non-empty (#397); the
+  count is the one `tc_get_health` reports (`ThreadChannel::receiveAll`).
 - `threadLifecycle/` — destroying a `tc::Thread` never calls `std::terminate`
   (#257): not after its worker returned on its own, not after only
   `stopThread()`, not right after `startThread()` (the worker skips
@@ -200,6 +203,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  A missing `.wav` / `.ogg` / stream / image, and on Linux, macOS and
+  Windows a missing `.m4a` / video (`VideoPlayer::load()`), fails with
+  `FileNotFound` and logs one Error naming the path (#359).
   `SoundBuffer::mixFrom()` counts its offset in frames and refuses (logs)
   channel mismatches and ends past what a buffer holds. Decoders size buffers
   from what decodes: a FLAC or Ogg Vorbis stream (`src/vorbisTone.cpp`) whose
@@ -260,6 +266,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   core (the worker used to spin a whole core); while it plays, every
   `audioOut` block holds the file's full DC level (no gap), also at speed 10;
   and a seek on a playing stream is heard within 100 ms (the mean is printed).
+  With no stream playing the worker polls every 50 ms, not 5 ms (#550): its
+  passes over ~1 s (`internal::streamWorkerPassesForTests()`) stay under 60,
+  and a stream resumed after such an idle pause plays without a gap.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
@@ -404,6 +413,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   replaced attempt reports no `onConnect(false)` (#393), through
   `connectAsync()` and without threads; a refused `connectAsync()` with no
   reconnect reports `onConnect(false)` exactly once.
+- `tcpClientSelfDestroy/` — a `TcpClient` destroyed by a listener on its own
+  receive thread (#262): an owner replaces the `unique_ptr<TcpClient>` that
+  holds the client from an inline `onDisconnect` listener (peer closed, peer
+  reset) and from an inline `onReceive` listener, 50 times each, and connects
+  the new client every round; the destroyed clients' receive threads end
+  (counted on Linux). The receive thread must not read the client after
+  such a notification, which a plain build rarely shows: build it with
+  AddressSanitizer (`-DCMAKE_CXX_FLAGS=-fsanitize=address`) to check that.
 - `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
   (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
   `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also
@@ -652,6 +669,26 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `fontAtlasLimit/` — glyphs larger than an atlas page (#404). A glyph whose
+  box does not fit the largest page is rasterized at a lower resolution that
+  fits (a lower integer oversampling, or a raster scale below 1) and keeps
+  its size and offset in final pixels; a glyph that fits keeps its
+  oversampling. A font whose bounding box at the loaded size and oversampling
+  exceeds the page logs exactly one warning, naming the size, oversampling
+  and page limit, and no further warning over many lookups; the atlas page
+  count and memory stay the same over many simulated frames, and
+  `clearAtlas()` rasterizes the glyph again. Headless (page limit 4096); the
+  font is built at runtime.
+- `fontAtlasR8/` — TrueType glyph atlas pages are R8, one byte of coverage
+  per texel (#293): `getMemoryUsage()` is the sum of width × height over the
+  pages, and after 300 glyphs grow a page through several doubling steps
+  every glyph still has full coverage at its UV centre and nothing lies
+  outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
+  not run in CI) draws 150 new glyphs into an Fbo in one frame, one
+  `drawString()` each, and checks that the page texture is
+  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` colour,
+  and a minified draw builds and samples the R8 mip chain. The font is
+  built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
