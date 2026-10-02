@@ -2125,8 +2125,9 @@ namespace internal {
 // permission). The rare failure of the deferred write itself (permission/disk
 // after the directory check) is reported via logError("Screenshot").
 // Relative paths resolve against the data path. The format comes from the
-// extension (case-insensitive): png/jpg/bmp; macOS also writes tiff/gif,
-// Windows also tga, and iOS only png/jpg.
+// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
+// Windows also tga. Unsupported or missing extensions append .png and warn
+// with the actual destination and supported formats.
 //
 // Web: not implemented (no canvas readback). Always returns false (nothing is
 // queued or written) and warns once, pointing to the browser's own screenshot
@@ -2140,7 +2141,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
     return internal::captureWindowToFile(path);
 #else
     // Resolve relative paths up front so the deferred worker gets an absolute one.
-    std::filesystem::path resolved = getDataPath(path);   // absolute passes through
+    std::filesystem::path resolved = internal::resolveScreenshotPath(path);
 
     // Auto-create the parent directory (mirrors VideoRecorder). This is the
     // failure users want to catch synchronously (missing/unwritable folder).
