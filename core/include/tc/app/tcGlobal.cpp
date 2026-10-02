@@ -389,20 +389,25 @@ void ensureSwapchainPass() {
 }
 
 namespace internal {
-void reportSglStackErrors(sgl_error_t err) {
+OnceGate& sglStackErrorReportGate(bool inFbo) {
+    if (inFbo) {
+        static OnceGate gate{5.0};
+        return gate;
+    }
+    static OnceGate gate{5.0};
+    return gate;
+}
+
+void reportSglStackErrors(sgl_error_t err, bool inFbo) {
     // Matrix stack errors (#232): TrussC keeps its push/pop balanced per node
     // and per frame. FBO contexts are reset at begin() (#327). Reported once, then
-    // at most every 5 s — the flags are cleared again at sg_commit().
+    // at most every 5 s per place — the flags are cleared again at sg_commit().
     if (err.stack_overflow || err.stack_underflow) {
-        static std::chrono::steady_clock::time_point lastReport{};
-        static bool reported = false;
-        auto now = std::chrono::steady_clock::now();
-        if (!reported || now - lastReport >= std::chrono::seconds(5)) {
-            reported = true;
-            lastReport = now;
+        if (sglStackErrorReportGate(inFbo).isFirstTime()) {
             logWarning("sokol_gl") << "matrix stack "
                 << (err.stack_overflow ? "overflow (more than 64 nested pushMatrix / node levels in one frame)"
                                        : "underflow (sgl_pop_matrix without a push)")
+                << (inFbo ? " in an Fbo pass" : " on screen")
                 << "; transforms past that point are wrong this frame";
         }
     }
@@ -423,7 +428,7 @@ void present() {
     events().onRender.notify();
 
     sgl_error_t err = sgl_error();
-    internal::reportSglStackErrors(err);
+    internal::reportSglStackErrors(err, false);
     if (err.vertices_full || err.commands_full) {
         auto& budget = internal::sglBudget();
         int newVerts = budget.maxVertices * 4;

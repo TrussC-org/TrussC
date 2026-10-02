@@ -260,8 +260,9 @@ namespace internal {
     };
     SglBudget& sglBudget();
 
-    // Shared, rate-limited matrix stack error report for screen and FBO contexts.
-    void reportSglStackErrors(sgl_error_t err);
+    // Separate report gates for screen and FBO contexts, shared across modules.
+    OnceGate& sglStackErrorReportGate(bool inFbo);
+    void reportSglStackErrors(sgl_error_t err, bool inFbo);
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on

@@ -13,6 +13,8 @@ namespace {
 int failures = 0;
 bool finished = false;
 int stackWarnings = 0;
+int fboWarnings = 0;
+int screenWarnings = 0;
 
 void check(const char* name, bool ok) {
     printf("%-64s %s\n", name, ok ? "PASS" : "FAIL");
@@ -40,10 +42,19 @@ public:
             sgl_pop_matrix();  // Raw error on the FBO context, before present().
             check("FBO underflow was induced", sgl_error().stack_underflow);
             const int before = stackWarnings;
+            const int fboBefore = fboWarnings;
             first_.end();
             check("Fbo::end reports the error before present", stackWarnings > before);
+            check("FBO error message names 'in an Fbo pass'", fboWarnings == fboBefore + 1);
             errorChecked_ = true;
-            return;  // sg_commit clears the error before the leaking passes.
+            screenErrorPending_ = true;
+            return;  // draw() also induces a screen error in this frame.
+        }
+        if (screenReportPending_) {
+            check("present reports screen error after FBO error in same frame",
+                  stackWarnings > warningsBeforeScreen_);
+            check("screen error message names 'on screen'", screenWarnings == 1);
+            screenReportPending_ = false;
         }
         if (leaks_ >= 200) return;
 
@@ -60,6 +71,15 @@ public:
 
     void draw() override {
         clear(0.0f);
+        if (screenErrorPending_) {
+            screenErrorPending_ = false;
+            // Exhaust sokol_gl's 64-level stacks regardless of entry depth.
+            for (int i = 0; i < 65; ++i) sgl_pop_matrix();
+            check("screen underflow was induced", sgl_error().stack_underflow);
+            warningsBeforeScreen_ = stackWarnings;
+            screenReportPending_ = true;
+            return;  // present() reports; sg_commit clears both context errors.
+        }
         if (leakedThisFrame_) {
             leakedThisFrame_ = false;
             second_.begin(0, 0, 0, 1);
@@ -120,6 +140,9 @@ private:
     Fbo first_, second_;
     int leaks_ = 0;
     bool errorChecked_ = false;
+    bool screenErrorPending_ = false;
+    bool screenReportPending_ = false;
+    int warningsBeforeScreen_ = 0;
     bool leakedThisFrame_ = false;
     bool depthsPreserved_ = true;
     bool drawsHealthy_ = true;
@@ -131,9 +154,19 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         printf("SKIP: fboStack needs --gpu-check and a display\n");
         return 0;
     }
+    // Gate identity makes isolation deterministic even if execution pauses
+    // longer than the interval. Do not consume gates or assert elapsed time.
+    auto& fboGate = internal::sglStackErrorReportGate(true);
+    auto& screenGate = internal::sglStackErrorReportGate(false);
+    check("screen and FBO reports use separate gates", &fboGate != &screenGate);
+    check("each report place keeps its own gate",
+          &fboGate == &internal::sglStackErrorReportGate(true) &&
+          &screenGate == &internal::sglStackErrorReportGate(false));
     auto listener = getLogger().onLog.listen([](LogEventArgs& e) {
         if (e.level == LogLevel::Warning && e.message.find("matrix stack") != string::npos) {
             ++stackWarnings;
+            if (e.message.find("in an Fbo pass") != string::npos) ++fboWarnings;
+            if (e.message.find("on screen") != string::npos) ++screenWarnings;
         }
     });
     WindowSettings settings;
