@@ -47,7 +47,15 @@ void setup() {
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
-    sgdesc.pipeline_pool_size = 256;  // default 64 is too small when FBOs are used
+    // Shader and pipeline pools are fixed at sg_setup(): sg resources point
+    // into the pool arrays, so these pools cannot grow (#317). 10000 like the
+    // pools below would cost ~34 MB (shader slot ~3.4 KB) and ~12 MB
+    // (pipeline slot ~1.2 KB). 1024 shaders (~3.5 MB) leaves room for many
+    // loaded Shader objects next to TrussC's own dozen or so. 1024 pipelines
+    // (~1.2 MB) is ~200 sgl pipelines (5 sg pipelines each) plus the PBR /
+    // point / Shader pipelines per target format.
+    sgdesc.shader_pool_size = 1024;   // sokol default 32
+    sgdesc.pipeline_pool_size = 1024; // sokol default 64
     sgdesc.buffer_pool_size = 10000;  // default 128 too small with many meshes (only CPU slot table, not GPU memory)
     sgdesc.image_pool_size = 10000;
     sgdesc.view_pool_size = 10000;
@@ -76,6 +84,9 @@ void setup() {
     // Initialize sokol_gl (with memory tracking allocator)
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = internal::sokolLog;
+    // sgl pipeline slots are small (32 B); the sg pipeline pool above is the
+    // real limit, since each sgl pipeline uses 5 sg pipelines. The sgl
+    // context pool is left at the sokol_gl_tc.h default: it grows when full.
     sgldesc.pipeline_pool_size = 256;
     sgldesc.max_vertices = internal::sglBudget().maxVertices;
     sgldesc.max_commands = internal::sglBudget().maxCommands;
@@ -128,10 +139,12 @@ void setup() {
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
-    // The 2D blend / 3D / premultiplied / clear sgl pipelines now live in the
-    // swapchain and per-FBO RenderTarget caches; sgl_shutdown() below frees them
-    // all (it destroys every pipeline in every sgl context), so there is nothing
-    // to release individually here.
+    // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
+    // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
+    // global pool (sgl_destroy_context() frees only the context's own default
+    // pipeline); sgl_shutdown() below frees every context and every pipeline,
+    // so there is nothing to release individually here. A secondary window
+    // frees its own on close() (RenderTarget::release()).
 
     // Release font resources
     auto& fontAtlas = internal::bitmapFontAtlas();
@@ -190,8 +203,9 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
         << " -> " << newMaxCommands;
 
     // 1. Shutdown and re-init sokol_gl with larger buffers. sgl_shutdown()
-    //    destroys every pipeline in every sgl context (including the swapchain &
-    //    FBO RenderTarget caches), so there is nothing to destroy by hand first.
+    //    destroys every sgl context and every sgl pipeline (including the
+    //    swapchain & FBO RenderTarget caches), so there is nothing to destroy by
+    //    hand first.
     //    Font texture/sampler/view are sg resources — they survive sgl_shutdown.
     sgl_shutdown();
 

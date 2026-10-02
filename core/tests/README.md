@@ -399,6 +399,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `sglPoolLimits/` — *(standalone, dummy backend)* sokol_gl pool handling
+  in the fork (#317): `sgl_context_make_pipeline()` returns id 0 when the sg
+  pipeline pool cannot hold all of its sg pipelines, and the ones it made are
+  destroyed again (their slots are usable afterwards); `sgl_draw()` skips a
+  command recorded while a destroyed sgl pipeline was loaded and draws the
+  rest; the sgl context pool grows when full, and the current context keeps
+  its vertices, drawing and commit rewind across the grow. Backend pipeline
+  failures with nonzero FAILED handles also roll back; failure of any growth
+  allocation leaves the old pool usable and frees temporary allocations.
+  TrussC's `RenderTarget::release()` on window close and the one-time
+  warnings require separate windowed checks.
 - `hotReloadLifecycle/` — *(hot reload host/guest build)* the real
   `GuestLibrary` loads, runs and unloads the guest several times (see the
   header of `src/main.cpp` for every check). `events().hotReloadUnload` fires
