@@ -183,6 +183,11 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
     }
 
     file << content;
+    file.close();
+    if (file.fail()) {
+        logError() << "Write error: " << path;
+        return false;
+    }
     return true;
 }
 
@@ -211,6 +216,11 @@ inline bool appendToFile(const fs::path& path, const std::string& content) {
     }
 
     file << content;
+    file.close();
+    if (file.fail()) {
+        logError() << "Write error: " << path;
+        return false;
+    }
     return true;
 }
 

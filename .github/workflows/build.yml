@@ -471,13 +471,15 @@ jobs:
         if: always()
         run: ccache -s || true
 
-  # Compile-only iOS gate: AllFeaturesExample against the device SDK with code
-  # signing disabled — every documented core API compiled and linked for iOS
+  # Compile-only iOS gate: AllFeaturesExample and soundPlayerExample against
+  # the device SDK with code signing disabled — every documented core API
+  # compiled and linked for iOS
   # (the tcFileDialog attribute-order break once sat undetected for weeks
   # because nothing in CI compiled against the iOS SDK). Runtime behavior is
   # still verified on a real device by hand. (It used to be videoPlayerExample:
   # AllFeaturesExample linked tcxLua, whose generated bindings reference the
   # sync dialogs that don't compile on iOS. tcxLua is no longer in it.)
+  # soundPlayerExample also covers floating-point std::format (iOS 16.3+).
   # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
   build-ios:
     needs: changes
@@ -500,7 +502,16 @@ jobs:
           cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
+          cmake --build build-ios --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Build soundPlayerExample (iOS device SDK, unsigned)
+        run: |
+          cd examples/sound/soundPlayerExample
+          cmake -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
           cmake --build build-ios --config Release -- \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
