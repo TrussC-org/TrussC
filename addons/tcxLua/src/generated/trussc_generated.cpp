@@ -213,6 +213,15 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
     lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });
+    lua->set_function("getUserDataPath", sol::overload(
+        []() { return trussc::getUserDataPath(); },
+        [](const fs::path & path) { return trussc::getUserDataPath(path); }
+    ));
+    lua->set_function("getTempPath", sol::overload(
+        []() { return trussc::getTempPath(); },
+        [](const fs::path & path) { return trussc::getTempPath(path); }
+    ));
+    lua->set_function("setUserDataPathRoot", [](const fs::path & path) { return trussc::setUserDataPathRoot(path); });
     lua->set_function("toInt", [](const std::string & str) { return trussc::toInt(str); });
     lua->set_function("toInt64", [](const std::string & str) { return trussc::toInt64(str); });
     lua->set_function("toFloat", [](const std::string & str) { return trussc::toFloat(str); });
@@ -325,6 +334,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("saveTextFile", [](const fs::path & path, const std::string & content) { return trussc::saveTextFile(path, content); });
     lua->set_function("appendToFile", [](const fs::path & path, const std::string & content) { return trussc::appendToFile(path, content); });
     lua->set_function("getVersion", []() { return trussc::getVersion(); });
+    lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
+    lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("getGlobalMouseX", []() { return trussc::getGlobalMouseX(); });
     lua->set_function("getGlobalMouseY", []() { return trussc::getGlobalMouseY(); });
     lua->set_function("getGlobalPMouseX", []() { return trussc::getGlobalPMouseX(); });
@@ -769,8 +780,6 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float t, trussc::EaseType type, trussc::EaseMode mode) { return trussc::ease(t, type, mode); },
         [](float t, const trussc::EaseFunction & fn, trussc::EaseMode mode) { return trussc::ease(t, fn, mode); }
     ));
-    lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
-    lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("isOverlayHovered", []() { return trussc::isOverlayHovered(); });
     lua->set_function("isOverlayFocused", []() { return trussc::isOverlayFocused(); });
     lua->set_function("getSelectedNode", []() { return trussc::getSelectedNode(); });
