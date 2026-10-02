@@ -832,9 +832,15 @@ private:
     void setupOnce() {
         if (setupCalled_) return;
         setupCalled_ = true;
+        onSetupStart();
         setup();
         onSetupDone();
     }
+
+    // Framework hook, not an app callback: runs once, right before the
+    // node's first setup(). App resolves the data path root here, so file
+    // loads started from setup() (including on worker threads) see it.
+    virtual void onSetupStart() {}
 
     // Framework hook, not an app callback (apps override setup()): runs once,
     // right after the node's first setup() has returned. App attaches its

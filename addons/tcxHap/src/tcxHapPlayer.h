@@ -218,11 +218,14 @@ public:
     // Load / Close
     // =========================================================================
 
-    tc::LoadResult load(const tc::fs::path& path) override {
+    // Relative paths resolve via getDataPath, like VideoPlayer::load.
+    tc::LoadResult load(const tc::fs::path& filePath) override {
         if (initialized_) {
             close();
         }
         resetStats();
+
+        const tc::fs::path path = tc::getDataPath(filePath);   // absolute paths pass through
 
         std::error_code ec;
         if (!tc::fs::exists(path, ec)) {

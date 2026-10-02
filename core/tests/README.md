@@ -83,8 +83,8 @@ test cannot share an executable: it replaces or interposes a library
 function for the whole binary (`operator new`, `fclose`, `write`, `ioctl`,
 `pthread_create`), needs a special project shape (hot reload host/guest),
 or needs an addon. Such a test is built and run alone, as before. Today:
-`audioDiagnostics`, `hotReloadLifecycle`, `serialBaudRate`, `serialHangup`,
-`tcpServerClients`.
+`audioDiagnostics`, `dataPathLoads`, `hotReloadLifecycle`, `serialBaudRate`,
+`serialHangup`, `tcpServerClients`.
 
 ### Running tests locally
 
@@ -215,6 +215,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `dataPathLoads/` — the loaders share the same path rule (#273):
+  `Pixels::load` / `loadHDR`, `Sound::load` / `loadStream` and tcxLut's
+  `Lut3D::load` resolve a relative path against `getDataPath()` with no
+  working-directory fallback (the test moves the CWD elsewhere; a file only
+  there is not found), `Pixels::save("a.png")` then `Pixels::load("a.png")`
+  round-trips, and a UTF-8 WAV name loads. `getDataPath()` called from two
+  threads at once, before anything else, agrees with the main thread. `Lut3D`
+  is checked up to its `.cube` parse; `Font::load` needs a GPU and is not run.
+  The data-root base is normalized without changing filename components
+  (including `symlink/..`), and absolute inputs pass through unchanged (#365 P2).
 - `fileSave/` — the save helpers report write errors (#274): `saveJson`
   serializes before it opens the file, so a string that is not valid UTF-8
   returns false, logs an error and leaves the saved `{"a":1}` loadable, and it
