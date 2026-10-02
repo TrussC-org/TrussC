@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tc/utils/tcOnceGate.h"
 
 // =============================================================================
 // tcVideoPlayer.h - Video playback
@@ -59,8 +60,8 @@ public:
     void setAudioStreaming(bool streaming) {
         audioStreaming_ = streaming;
 #if defined(__APPLE__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
-        static std::atomic<bool> noticed{false};
-        if (!streaming && !noticed.exchange(true)) {
+        static OnceGate noticed;
+        if (!streaming && noticed.isFirstTime()) {
             logNotice("VideoPlayer") << "setAudioStreaming(false) has no effect on this platform; "
                                        "the native player handles audio";
         }
@@ -732,6 +733,19 @@ namespace internal {
 // Helper class for platform implementations to access protected members
 class VideoPlayerPlatformAccess {
 public:
+#if defined(__linux__) && !defined(__ANDROID__)
+    // Exercise the real Linux decoder/clock in headless regression tests,
+    // without creating textures or uploading frames to a GPU.
+    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
+        player.setUseHwAccel(false);
+        if (!player.loadPlatform(path)) return false;
+        player.initialized_ = true;
+        return true;
+    }
+    static void playHeadlessForTests(VideoPlayer& player) { player.playPlatform(); }
+    static void updateHeadlessForTests(VideoPlayer& player) { player.updatePlatform(); }
+    static void stopAudioForTests(VideoPlayer& player);
+#endif
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;
         player.height_ = h;

@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcOnceGate.h"
 
 // Linux-only miniaudio backend for audio inside video containers. Included by
 // tcAudio_impl.cpp after miniaudio; never decoded on the audio callback thread.
@@ -30,6 +31,12 @@ struct FFmpegAudio {
     bool exactLength = false;
     std::vector<float> samples;
     size_t offset = 0;
+    OnceGate corruptPacketWarned;
+
+    void warnCorruptPacket() {
+        if (corruptPacketWarned.isFirstTime())
+            logWarning("FFmpegAudio") << "Dropping corrupt audio packet; continuing playback";
+    }
 
     ~FFmpegAudio() {
         av_packet_free(&packet);
@@ -106,6 +113,13 @@ struct FFmpegAudio {
                 if (offset < samples.size()) return MA_SUCCESS;
                 continue;
             }
+            if (r == AVERROR_INVALIDDATA) {
+                // The decoder consumed corrupt input. Drain any remaining
+                // output, then feed the next packet without flushing history.
+                av_frame_unref(frame);
+                warnCorruptPacket();
+                continue;
+            }
             if (r != AVERROR(EAGAIN)) return MA_ERROR;
             if (!pending && !demuxEnd) {
                 for (;;) {
@@ -122,6 +136,12 @@ struct FFmpegAudio {
             if (demuxEnd && draining) return MA_ERROR;
             r = avcodec_send_packet(codec, pending ? packet : nullptr);
             if (r == AVERROR(EAGAIN)) continue; // retain packet while draining
+            if (r == AVERROR_INVALIDDATA && pending) {
+                av_packet_unref(packet);
+                pending = false;
+                warnCorruptPacket();
+                continue;
+            }
             if (r < 0) return MA_ERROR;
             if (pending) { av_packet_unref(packet); pending = false; }
             else draining = true;

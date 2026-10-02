@@ -9,6 +9,7 @@ extern "C" {
 #include <condition_variable>
 #include <cstdio>
 #include <mutex>
+#include <thread>
 #include <vector>
 #include <unistd.h>
 #endif
@@ -26,7 +27,7 @@ float sample(int frame) { return 0.25f + 0.25f * frame / kFrames; }
 
 // Runtime Matroska fixture: PCM needs no encoder. Each packet has an exact
 // millisecond timestamp; the ramp exposes missing/duplicated boundary samples.
-bool fixture(const tc::fs::path& path, bool audio) {
+bool fixture(const tc::fs::path& path, bool audio, bool corrupt = false) {
     AVFormatContext* f = nullptr;
     if (avformat_alloc_output_context2(&f, nullptr, "matroska", path.c_str()) < 0) return false;
     AVStream* st = avformat_new_stream(f, nullptr);
@@ -46,9 +47,16 @@ bool fixture(const tc::fs::path& path, bool audio) {
     AVPacket* pkt = av_packet_alloc();
     if (ok && audio) {
         for (int first = 0; first < kFrames && ok; first += 480) {
-            av_new_packet(pkt, 480 * 2 * sizeof(float));
-            float* p = reinterpret_cast<float*>(pkt->data);
-            for (int i = 0; i < 480; ++i) p[2*i] = p[2*i+1] = sample(first+i);
+            if (corrupt && first == 1920) {
+                // Too short for one stereo PCM frame: the real decoder
+                // returns AVERROR_INVALIDDATA, between valid ramp packets.
+                av_new_packet(pkt, 1);
+                pkt->data[0] = 0;
+            } else {
+                av_new_packet(pkt, 480 * 2 * sizeof(float));
+                float* p = reinterpret_cast<float*>(pkt->data);
+                for (int i = 0; i < 480; ++i) p[2*i] = p[2*i+1] = sample(first+i);
+            }
             pkt->stream_index = st->index;
             pkt->pts = pkt->dts = av_rescale_q(first, AVRational{1, kRate}, st->time_base);
             pkt->duration = av_rescale_q(480, AVRational{1, kRate}, st->time_base);
@@ -67,6 +75,105 @@ bool fixture(const tc::fs::path& path, bool audio) {
     if (f->pb) avio_closep(&f->pb);
     avformat_free_context(f);
     return ok;
+}
+
+// A real 0.3-second FFV1/PCM clip for headless video EOF/clock tests.
+bool videoFixture(const tc::fs::path& path) {
+    AVFormatContext* f = nullptr;
+    if (avformat_alloc_output_context2(&f, nullptr, "matroska", path.c_str()) < 0) return false;
+    const AVCodec* encoder = avcodec_find_encoder(AV_CODEC_ID_FFV1);
+    AVCodecContext* c = encoder ? avcodec_alloc_context3(encoder) : nullptr;
+    if (!c) { avformat_free_context(f); return false; }
+    c->width = c->height = 16;
+    c->pix_fmt = AV_PIX_FMT_YUV420P;
+    c->time_base = AVRational{1, 100};
+    c->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    bool ok = avcodec_open2(c, encoder, nullptr) >= 0;
+    AVStream* video = avformat_new_stream(f, nullptr);
+    video->time_base = c->time_base;
+    video->avg_frame_rate = AVRational{100, 1};
+    ok = ok && avcodec_parameters_from_context(video->codecpar, c) >= 0;
+    AVStream* audio = avformat_new_stream(f, nullptr);
+    audio->time_base = AVRational{1, kRate};
+    audio->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+    audio->codecpar->codec_id = AV_CODEC_ID_PCM_F32LE;
+    audio->codecpar->sample_rate = kRate;
+    audio->codecpar->bits_per_coded_sample = 32;
+    audio->codecpar->block_align = 8;
+    av_channel_layout_default(&audio->codecpar->ch_layout, 2);
+    ok = ok && avio_open(&f->pb, path.c_str(), AVIO_FLAG_WRITE) >= 0;
+    ok = ok && avformat_write_header(f, nullptr) >= 0;
+    AVFrame* frame = av_frame_alloc();
+    AVPacket* packet = av_packet_alloc();
+    frame->format = c->pix_fmt;
+    frame->width = frame->height = 16;
+    ok = ok && av_frame_get_buffer(frame, 0) >= 0;
+    auto drain = [&] {
+        while (avcodec_receive_packet(c, packet) == 0) {
+            av_packet_rescale_ts(packet, c->time_base, video->time_base);
+            packet->stream_index = video->index;
+            packet->duration = av_rescale_q(1, c->time_base, video->time_base);
+            if (av_interleaved_write_frame(f, packet) < 0) ok = false;
+            av_packet_unref(packet);
+        }
+    };
+    for (int i = 0; i < 30 && ok; ++i) {
+        av_frame_make_writable(frame);
+        for (int plane = 0; plane < 3; ++plane)
+            for (int y = 0; y < (plane ? 8 : 16); ++y)
+                std::memset(frame->data[plane] + y * frame->linesize[plane],
+                            plane ? 128 : 32 + i * 4, plane ? 8 : 16);
+        frame->pts = i;
+        ok = avcodec_send_frame(c, frame) >= 0;
+        drain();
+        av_new_packet(packet, 480 * 2 * sizeof(float));
+        float* p = reinterpret_cast<float*>(packet->data);
+        for (int j = 0; j < 480 * 2; ++j) p[j] = 0.25f;
+        packet->stream_index = audio->index;
+        packet->pts = packet->dts = av_rescale_q(i * 480, AVRational{1, kRate}, audio->time_base);
+        packet->duration = av_rescale_q(480, AVRational{1, kRate}, audio->time_base);
+        ok = ok && av_interleaved_write_frame(f, packet) >= 0;
+        av_packet_unref(packet);
+    }
+    if (ok) { ok = avcodec_send_frame(c, nullptr) >= 0; drain(); }
+    if (ok) ok = av_write_trailer(f) >= 0;
+    av_packet_free(&packet);
+    av_frame_free(&frame);
+    avcodec_free_context(&c);
+    if (f->pb) avio_closep(&f->pb);
+    avformat_free_context(f);
+    return ok;
+}
+
+void stoppedAudioLoop(const tc::fs::path& path, bool streaming) {
+    using Access = tc::internal::VideoPlayerPlatformAccess;
+    tc::VideoPlayer player;
+    player.setAudioStreaming(streaming);
+    const bool loaded = Access::loadHeadlessForTests(player, path);
+    check(streaming ? "headless streaming video loads" : "headless preload video loads", loaded);
+    if (!loaded) return;
+    player.setLoop(true);
+    Access::playHeadlessForTests(player);
+    check("video audio voice starts", !tc::AudioEngine::getInstance().getPlayingSounds().empty());
+    Access::stopAudioForTests(player);
+    check("video audio voice stopped", tc::AudioEngine::getInstance().getPlayingSounds().empty());
+    bool reachedTail = false, wrapped = false, advanced = false, restarted = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!advanced && std::chrono::steady_clock::now() < deadline) {
+        Access::updateHeadlessForTests(player);
+        const int frame = player.getCurrentFrame();
+        if (!wrapped && frame >= 20) reachedTail = true;
+        if (reachedTail && frame < 5) wrapped = true;
+        if (wrapped) {
+            restarted |= !tc::AudioEngine::getInstance().getPlayingSounds().empty();
+            advanced = frame >= 10;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    check(streaming ? "stopped stream: video wraps and advances past EOF"
+                    : "stopped preload: video wraps and advances past EOF", advanced);
+    check("video EOF restarts stopped audio", restarted);
+    player.close();
 }
 // AAC/MP4 exercises codec priming and tail padding, which PCM lacks.
 bool aacFixture(const tc::fs::path& path) {
@@ -236,7 +343,37 @@ TC_CORE_TEST_MAIN() {
         check("AAC loops repeat every sample without padding or gaps", exact);
     }
     aac.stop();
+    engine.waitForAudioCallbacks();
+
+    check("corrupt PCM fixture", fixture(dir / "corrupt.mkv", true, true));
+    Sound corrupt;
+    check("corrupt audio stream opens", (bool)internal::loadFFmpegAudioStream(dir / "corrupt.mkv", corrupt));
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        heard.clear();
+        started = false;
+    }
+    // Loop so the mixer's two-sample interpolation can consume the last
+    // valid sample too, and exercise recovery repeatedly on one decoder.
+    corrupt.setLoop(true);
+    check("corrupt audio plays", corrupt.play());
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        constexpr size_t validFrames = kFrames - 480;
+        bool complete = cv.wait_for(lock, std::chrono::seconds(5), [&] { return heard.size() >= validFrames * 3; });
+        bool exact = complete;
+        for (size_t i = 0; i < validFrames * 3 && exact; ++i) {
+            const size_t sourceFrame = i % validFrames;
+            exact = std::abs(heard[i] - sample(sourceFrame < 1920 ? sourceFrame : sourceFrame + 480)) < 0.00001f;
+            if (!exact) std::printf("corrupt PCM mismatch at %zu: %.8f\n", i, heard[i]);
+        }
+        check("audio preserves every valid sample before and after corrupt packet", exact);
+    }
+    corrupt.stop();
     listener.disconnect();
+    check("video/audio loop fixture", videoFixture(dir / "video.mkv"));
+    stoppedAudioLoop(dir / "video.mkv", true);
+    stoppedAudioLoop(dir / "video.mkv", false);
     engine.shutdown();
     std::error_code ec;
     fs::remove_all(dir, ec);

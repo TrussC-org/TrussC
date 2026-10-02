@@ -549,10 +549,13 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
     // Target PTS: use audio as master clock when available (no drift).
-    // Fall back to wall clock for audio-less videos.
+    // Fall back to wall clock when audio is absent or its voice has stopped.
     double targetPts;
-    if (audioSound_.isLoaded()) {
+    if (audioSound_.isPlaying()) {
         targetPts = audioSound_.getPosition();
+        // Keep a wall-clock anchor ready in case the audio voice stops.
+        if (speed_ > 0.0f)
+            playbackStartTime_ = av_gettime_relative() / 1000000.0 - targetPts / speed_;
         // The stream worker pre-fills across EOF; eager voices wrap in the
         // mixer. Follow their clock without resetting audio at video EOF.
         if (isLoop_ && targetPts < lastAudioPts_) {
@@ -616,7 +619,7 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     // Check if finished
     if (frameQueue_.empty() && isFinished_) {
         if (isLoop_) {
-            if (audioSound_.isLoaded()) {
+            if (audioSound_.isPlaying()) {
                 // Both stream and eager voices loop in the mixer. Wait for
                 // the audio clock to wrap, then seek only the video above.
                 cv_.notify_all();
@@ -624,6 +627,12 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
             }
             seekToTime(0.0);
             playbackStartTime_ = av_gettime_relative() / 1000000.0;
+            if (audioSound_.isLoaded()) {
+                // Recover a stopped voice at the video loop boundary.
+                audioSound_.play();
+                audioSound_.setPosition(0.0f);
+                lastAudioPts_ = 0.0;
+            }
             isFinished_ = false;
             cv_.notify_all();
         } else {
@@ -950,7 +959,7 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         return false;
     }
 
-    // Grow only as frames decode; container duration is not an allocation size.
+    // Duration is only a hint, bounded by what the file plausibly decodes to.
     std::vector<float> samples;
 
     AVFrame* frame = av_frame_alloc();
@@ -967,6 +976,20 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
 
     // Set when growing the buffer fails; decoding stops and the load fails.
     bool outOfMemory = false;
+    try {
+        if (duration_ > 0) {
+            const double statedFrames = duration_ * engineSampleRate * 1.05;
+            const uint64_t frames = statedFrames < 1.8e19
+                ? static_cast<uint64_t>(statedFrames) : ~uint64_t{0};
+            std::error_code sizeEc;
+            const uintmax_t fileBytes = fs::file_size(filePath_, sizeEc);
+            samples.reserve(internal::decodeReserveSamples(
+                frames, 2, sizeEc ? 0 : static_cast<uint64_t>(fileBytes),
+                internal::kReserveSamplesPerInputByte, samples.max_size()));
+        }
+    } catch (const std::exception&) {
+        outOfMemory = true;
+    }
     auto appendConverted = [&](int nbIn) {
         int outN = av_rescale_rnd(
             swr_get_delay(swr, audioCtx->sample_rate) + nbIn,
@@ -1267,6 +1290,11 @@ protected:
 };
 
 namespace trussc {
+
+void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player) {
+    if (player.platformHandle_)
+        static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->audioSound_.stop();
+}
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     auto impl = new TCVideoPlayerImpl();
