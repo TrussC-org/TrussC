@@ -14601,9 +14601,9 @@ related = ["getDataPathRoot", "getAbsolutePath", "joinPath"]
 ["getDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Get the current data path root as fs::path."
-description.ja = "現在のデータパスルートを fs::path で取得"
-description.ko = "현재 데이터 경로 루트를 fs::path로 얻음"
+description.en = "Get the current data path root as fs::path. Unless explicitly set, Apple platforms choose one existing folder on first use, in order: <exe>/data (iOS), <exe>/../Resources/data (macOS release), <exe>/../../../data (macOS development). The choice is kept for the process; missing files never fall back to another folder. Only the release workflow copies bin/data into the macOS bundle; normal builds keep using bin/data."
+description.ja = "現在のデータパスルートを fs::path で取得。明示的に設定しない場合、Apple では最初の使用時に存在するフォルダを <exe>/data（iOS）、<exe>/../Resources/data（macOS 配布）、<exe>/../../../data（macOS 開発）の順で一つ選ぶ。この選択はプロセス中保持され、見つからないファイルを別フォルダで探すことはない。macOS バンドルに bin/data をコピーするのはリリース workflow のみで、通常のビルドでは bin/data を使う"
+description.ko = "현재 데이터 경로 루트를 fs::path로 얻음. 명시적으로 설정하지 않으면 Apple에서는 최초 사용 시 존재하는 폴더를 <exe>/data(iOS), <exe>/../Resources/data(macOS 배포), <exe>/../../../data(macOS 개발) 순으로 하나 선택한다. 이 선택은 프로세스 동안 유지되며, 없는 파일을 다른 폴더에서 찾지 않는다. macOS 번들에 bin/data를 복사하는 것은 릴리스 workflow뿐이며 일반 빌드에서는 bin/data를 사용한다"
 related = ["setDataPathRoot", "getDataPath"]
 
 ["getDay"]

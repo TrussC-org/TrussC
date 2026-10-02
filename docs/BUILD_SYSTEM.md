@@ -301,6 +301,48 @@ int main() {
 ### Data Folder
 Place assets (images, fonts, sounds) in `bin/data/`.
 This path is automatically resolved at runtime via `tc::getDataPath()`.
+On Apple platforms, the first use chooses one existing folder relative to the
+executable: `data` (iOS), then `../Resources/data` (macOS release bundle), then
+`../../../data` (macOS development). An explicit `setDataPathRoot()` overrides
+this probe. The selected folder stays fixed for the process; a missing file
+never falls back to an asset outside the bundle. `setDataPathToResources()`
+continues to explicitly select `Contents/Resources/data`.
+
+The reusable [release workflow](../.github/workflows/release.yml) copies
+`bin/data` into `Contents/Resources/data` before signing a macOS app, and beside
+the executable on Windows and Linux. Normal macOS builds do not copy data into
+the bundle, so development continues to use `bin/data`.
+
+### Release Packages
+
+App repositories can call `.github/workflows/release.yml`. `trussc-ref` takes
+priority over the app's `.trussc-version`; without either, the workflow selects
+the latest GitHub release from `trussc-repository`. The actual ref, tag and commit
+for each platform are recorded in the release notes. This default follows new
+TrussC releases; pin a tag or commit when a rebuild must use a fixed version.
+
+Packages build with `RelWithDebInfo`, reject hot reload, and use `macos-15`,
+`windows-2025` and `ubuntu-24.04` runner images. macOS packages are arm64 only,
+with a deployment target and `LSMinimumSystemVersion` of 14.0. Signing uses
+hardened runtime, timestamps, and camera/microphone entitlements by default;
+`entitlements` replaces the defaults with an app-specific plist relative to
+`project-path`. Nested code is signed before the app, followed by the DMG.
+Data inside the signed bundle is part of the signature; changing it invalidates
+the signature.
+
+The Windows zip uses the dynamic MSVC runtime (`/MD`). Target machines need the
+Microsoft Visual C++ 2015–2022 Redistributable (x64) installed separately; the
+zip does not install or bundle it.
+
+Matching PDB, dSYM and Linux debug files are uploaded as separate symbol
+artifacts and release assets, outside the user packages. Keep them for crash
+analysis. On Linux the packaged executable contains a GNU debug link; extract
+the matching `.debug` file beside it (or into a `.debug` subdirectory) for GDB.
+
+`publish: false` builds and verifies packages without creating a GitHub Release.
+`project-path` defaults to `.`; the weekly package check uses `cursorExample`
+with its data folder and ad-hoc signing (`sign-identity: '-'`). Ad-hoc signing
+skips certificate import, notarization and stapling, and uses no timestamp.
 
 ### App Icon
 Place icon files in the `icon/` folder:

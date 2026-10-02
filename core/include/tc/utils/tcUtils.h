@@ -39,8 +39,9 @@ namespace internal {
     //
     // Its compile-time default is "data", or "../../../data" on Apple. On Apple
     // the true root differs by bundle layout and is chosen at runtime (see
-    // resolveDataPathRootOnce): macOS keeps data in bin/data/ reached via
-    // ../../../ from Contents/MacOS/, while iOS uses a FLAT bundle with data/
+    // resolveDataPathRootOnce): macOS releases use Contents/Resources/data,
+    // development uses bin/data/ reached via ../../../ from Contents/MacOS/,
+    // while iOS uses a FLAT bundle with data/
     // right next to the executable. Existence, not a preprocessor macro, is the
     // source of truth (TARGET_OS_* proved unreliable in the iOS build, and the
     // runtime probe also runs too early in _setup_cb to see a valid executable
@@ -63,27 +64,33 @@ inline void setDataPathRoot(const fs::path& path) {
 }
 
 namespace internal {
-// One-shot: pick the Apple bundle layout by probing which data/ exists next to
-// the executable. Skipped if the user set the root explicitly. No-op elsewhere.
-inline void resolveDataPathRootOnce() {
-#ifdef __APPLE__
-    auto& state = dataPathState();
+// Kept platform-independent so the Apple folder selection can be tested
+// headlessly with temporary bundle layouts on every platform.
+inline void resolveAppleDataPathRootOnce(DataPathState& state, const fs::path& exe) {
     if (state.probed || state.userSet) return;
-    fs::path exe = getExecutableDir();
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
     if (exe.empty() || exe == fs::path("/")) return;
     state.probed = true;
     std::error_code ec;
-    // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
-    // next to the executable). macOS dev has no Contents/MacOS/data, so it
-    // correctly falls through to the ../../../data (bin/data) layout.
-    if (std::filesystem::exists(exe / "data", ec)) {
+    // Choose one folder, never fall back per file. Release data is covered by
+    // the bundle signature; normal macOS builds only have bin/data.
+    if (fs::is_directory(exe / "data", ec)) {
         state.root = "data";            // iOS flat bundle / distributed
-    } else if (std::filesystem::exists(exe / "../../../data", ec)) {
+    } else if (fs::is_directory(exe / "../Resources/data", ec)) {
+        state.root = "../Resources/data"; // macOS release bundle
+    } else if (fs::is_directory(exe / "../../../data", ec)) {
         state.root = "../../../data";   // macOS dev / bin layout
     }
     // else: keep the compile-time default
+}
+
+// One-shot Apple bundle probe; an explicit root wins. No-op elsewhere.
+inline void resolveDataPathRootOnce() {
+#ifdef __APPLE__
+    auto& state = dataPathState();
+    if (state.probed || state.userSet) return;
+    resolveAppleDataPathRootOnce(state, getExecutableDir());
 #endif
 }
 } // namespace internal
