@@ -44,6 +44,7 @@
 
 // Headless mode state (must be included early for graphics skip checks)
 #include "tc/app/tcHeadlessState.h"
+#include "tc/app/tcGpuFrame.h"
 
 // Platform-specific headers for memory usage
 #if defined(__APPLE__)
@@ -169,6 +170,9 @@ enum class TextureWrap {
 // a Windows hot reload guest DLL would get its own copy of an inline variable
 // (docs/ARCHITECTURE.md, "One instance per process").
 namespace internal {
+    // Shared frame-end tail for drawn and non-drawing ticks (#332).
+    void endGpuFrame();
+
     // Bitmap font GPU state.
     struct BitmapFontAtlas {
         sg_image   texture = {};
@@ -2695,6 +2699,11 @@ namespace internal {
                 loop.redrawCount--;
             }
         } else {
+            // Offscreen passes/uploads also need a frame boundary, including
+            // work recorded by event handlers before this tick (#332).
+            if (tc_internal_gpu_frame_has_work()) {
+                internal::endGpuFrame();
+            }
             // Skip Present when not drawing (prevent double-buffer flickering)
             sapp_skip_present();
         }
