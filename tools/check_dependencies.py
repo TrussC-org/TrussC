@@ -5,7 +5,7 @@ docs/LICENSE.md, "Third-Party Libraries", is the one list of third-party code
 in TrussC and the version the build uses (#407). This script compares every
 row with what the repo actually fetches or vendors:
 
-  - every `FetchContent_Declare` in a tracked CMakeLists.txt / *.cmake has a
+  - every `FetchContent_Declare` in a tracked or unignored CMakeLists.txt / *.cmake has a
     row whose "Pinned / vendored in" cell names that file and whose upstream
     is the fetched repository;
   - that row's version equals the declaration's `GIT_TAG`, or the tag in its
@@ -120,6 +120,16 @@ NO_SOURCE = {
     "luajit-cmake": "vendored CMake scripts without a version line; the commit is recorded only in the list",
 }
 
+# Copies without a version extractor still need a row and the correct path.
+# Provenance files live outside some listed paths, so name the actual copy.
+VENDORED_PATHS = {
+    "sokol": "core/include/sokol/",
+    "tinyobjloader": "addons/tcxObj/src/tiny_obj_loader.h",
+    "earcut.hpp": "core/include/earcut/earcut.hpp",
+    "sokol_imgui.h": "addons/tcxImGui/src/sokol_imgui.h",
+    "luajit-cmake": "addons/tcxLua/luajit-cmake/",
+}
+
 
 # --------------------------------------------------------------------------
 # Parsing
@@ -216,11 +226,12 @@ def tag_from_url(url):
 def tracked_cmake_files(root):
     try:
         out = subprocess.run(
-            ["git", "-C", root, "ls-files", "--", "*CMakeLists.txt", "*.cmake"],
-            check=True, capture_output=True, text=True).stdout.split("\n")
+            ["git", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard",
+             "-z", "--", "*CMakeLists.txt", "*.cmake"],
+            check=True, capture_output=True, text=True).stdout.split("\0")
         files = [f for f in out if f]
         if files:
-            return files
+            return sorted(set(files))
     except (OSError, subprocess.CalledProcessError):
         pass
     files = []
@@ -234,27 +245,62 @@ def tracked_cmake_files(root):
 
 def parse_fetch_declares(text):
     """(name, {KEY: value}, line) for every FetchContent_Declare( ... )."""
-    out = []
-    for m in re.finditer(r"FetchContent_Declare\s*\(", text):
-        depth, i = 1, m.end()
-        while i < len(text) and depth:
-            if text[i] == "(":
-                depth += 1
-            elif text[i] == ")":
-                depth -= 1
-            i += 1
-        body = re.sub(r"#[^\n]*", "", text[m.end():i - 1])
-        tokens = body.split()
-        if not tokens:
+    # Tokenize before looking for commands: comments and quoted/bracket
+    # arguments can contain command names, '#' and parentheses literally.
+    rx = re.compile(
+        r'(?P<bracket>#?\[(?P<eq>=*)\[.*?\](?P=eq)\])'
+        r'|(?P<comment>#[^\n]*)|(?P<quoted>"(?:\\.|[^"\\])*")'
+        r'|(?P<word>[^\s()"#]+)|(?P<paren>[()])', re.S)
+    tokens = []
+    for m in rx.finditer(text):
+        value, kind = m.group(), m.lastgroup
+        if kind == "comment" or (kind == "bracket" and value.startswith("#")):
             continue
+        if kind == "quoted":
+            value = value[1:-1]
+        elif kind == "bracket":
+            width = len(m.group("eq")) + 2
+            value = value[width:-width]
+        tokens.append((value, kind, m.start()))
+    out = []
+    i = 0
+    while i + 1 < len(tokens):
+        value, kind, position = tokens[i]
+        if kind != "word" or value.lower() != "fetchcontent_declare" or tokens[i + 1][:2] != ("(", "paren"):
+            i += 1
+            continue
+        line = text[:position].count("\n") + 1
+        depth, i, body = 1, i + 2, []
+        while i < len(tokens) and depth:
+            value, kind, _ = tokens[i]
+            if (value, kind) == ("(", "paren"):
+                depth += 1
+            elif (value, kind) == (")", "paren"):
+                depth -= 1
+            if depth:
+                body.append(value)
+            i += 1
+        if depth or not body:
+            raise ValueError("line %d: incomplete FetchContent_Declare" % line)
         args = {}
+        keywords = [v.upper() for v in body]
         for k in ("GIT_REPOSITORY", "GIT_TAG", "URL"):
-            if k in tokens:
-                j = tokens.index(k)
-                if j + 1 < len(tokens):
-                    args[k] = tokens[j + 1].strip('"')
-        out.append((tokens[0], args, text[:m.start()].count("\n") + 1))
+            if k in keywords:
+                j = keywords.index(k)
+                if j + 1 < len(body):
+                    args[k] = body[j + 1]
+        out.append((body[0], args, line))
     return out
+
+
+def same_upstream(url, row):
+    slug = github_slug(url)
+    if slug:
+        return slug == row["slug"]
+    # Non-GitHub sources must match too; an unknown host is not a wildcard.
+    upstream = row["upstream"].rstrip("/").removesuffix(".git")
+    source = url.rstrip("/").removesuffix(".git")
+    return bool(upstream) and (source == upstream or source.startswith(upstream + "/"))
 
 
 def read(root, rel):
@@ -283,24 +329,43 @@ def check(root, rows):
             if not os.path.exists(os.path.join(root, p.rstrip("/"))):
                 err(r, "path %s does not exist" % p)
 
+    # A real but unrelated path must not satisfy a known vendored row.
+    vendored_paths = dict(VENDORED_PATHS)
+    vendored_paths.update({name: sources[0][0] for name, sources in VENDORED_VERSIONS.items()})
+    for name, path in vendored_paths.items():
+        r = by_name.get(name)
+        if r is None:
+            errors.append("%s: no row for %s (vendored in %s)" % (LIST_FILE, name, path))
+        elif not any(path.rstrip("/") == p.rstrip("/") or
+                     (os.path.isdir(os.path.join(root, p)) and path.startswith(p.rstrip("/") + "/"))
+                     for p in r["paths"]):
+            err(r, '"Pinned / vendored in" does not include %s' % path)
+
     # FetchContent declarations.
-    fetched_files = set()
+    fetched_rows = set()
     for f in tracked_cmake_files(root):
         try:
             text = read(root, f)
         except OSError:
             continue
-        for name, args, line in parse_fetch_declares(text):
-            fetched_files.add(f)
+        try:
+            declarations = parse_fetch_declares(text)
+        except ValueError as e:
+            errors.append("%s: %s" % (f, e))
+            continue
+        for name, args, line in declarations:
             url = args.get("GIT_REPOSITORY") or args.get("URL") or ""
-            slug = github_slug(url)
-            match = [r for r in rows if f in r["paths"] and (slug is None or r["slug"] == slug)]
+            match = [r for r in rows if f in r["paths"] and same_upstream(url, r)]
             where = "%s:%d: FetchContent_Declare(%s)" % (f, line, name)
             if not match:
                 errors.append("%s has no row in %s (a row naming `%s` with upstream %s)"
                               % (where, LIST_FILE, f, url or "?"))
                 continue
+            if len(match) > 1:
+                errors.append("%s matches multiple rows in %s" % (where, LIST_FILE))
+                continue
             r = match[0]
+            fetched_rows.add((r["name"], f))
             checked.add(r["name"])
             if "GIT_TAG" in args:
                 pinned = args["GIT_TAG"]
@@ -314,7 +379,8 @@ def check(root, rows):
                 if pinned != r["branch"]:
                     err(r, "list says branch `%s`, %s fetches `%s`" % (r["branch"], where, pinned))
             elif r["commit"] and not r["version"]:
-                if not (pinned.startswith(r["commit"]) or r["commit"].startswith(pinned)):
+                if not re.fullmatch(r"[0-9a-f]{7,40}", pinned) or not (
+                        pinned.startswith(r["commit"]) or r["commit"].startswith(pinned)):
                     err(r, "list says commit %s, %s fetches %s" % (r["commit"], where, pinned))
             elif r["version"]:
                 if normalize_tag(pinned) != r["version"]:
@@ -325,9 +391,9 @@ def check(root, rows):
     # A row naming a CMakeLists.txt has a declaration in it.
     for r in rows:
         for p in r["paths"]:
-            if (p.endswith("CMakeLists.txt") or p.endswith(".cmake")) and p not in fetched_files \
+            if (p.endswith("CMakeLists.txt") or p.endswith(".cmake")) and (r["name"], p) not in fetched_rows \
                     and os.path.exists(os.path.join(root, p)):
-                err(r, "%s has no FetchContent_Declare" % p)
+                err(r, "%s has no matching FetchContent_Declare" % p)
 
     # Vendored version lines.
     for name, sources in VENDORED_VERSIONS.items():

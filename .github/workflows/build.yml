@@ -572,7 +572,9 @@ jobs:
 
       - name: third-party list check (docs/LICENSE.md vs the build)
         if: always()
-        run: python3 tools/check_dependencies.py
+        run: |
+          python3 -m unittest discover -s tools/tests -p test_dependencies.py -v
+          python3 tools/check_dependencies.py
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,

@@ -2,8 +2,7 @@
 """Report third-party libraries that have something newer upstream.
 
 Run weekly by .github/workflows/upstream-check.yml (#407). Reads the one
-third-party list, docs/LICENSE.md "Third-Party Libraries" (through
-tools/check_dependencies.py), and asks each upstream:
+third-party list, docs/LICENSE.md "Third-Party Libraries", and asks each upstream:
 
   - a row with a release version: the newest release tag
     (`git ls-remote --tags`: `v1.2.3`, `1.2.3`, or the prefix UPSTREAM
@@ -19,7 +18,8 @@ tools/check_dependencies.py), and asks each upstream:
 It needs no token: only public git and raw file reads. It never changes a
 version and never fails because of an upstream: an upstream that cannot be
 reached is listed under "Could not check". The workflow posts the report to
-one tracking issue when the set of entries with something newer changes;
+one tracking issue when the set of library names with something newer changes;
+incomplete checks are summarized without replacing the last complete report;
 --fingerprint writes the key it compares.
 
 Usage: python3 tools/check_upstream_versions.py [--body FILE] [--fingerprint FILE]
@@ -33,9 +33,9 @@ import subprocess
 import sys
 import urllib.request
 
-sys.dont_write_bytecode = True  # no tools/__pycache__ in the checkout
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import check_dependencies as deps  # noqa: E402
+sys.dont_write_bytecode = True  # the shared inventory parser only reads files
+from check_dependencies import LIST_FILE, parse_list
+
 
 # How to ask each upstream, by row name. Rows not listed here use the
 # default for their Version cell: release tags for a version, the branch tip
@@ -87,7 +87,7 @@ def raw(slug, ref, path):
 def latest_release(row, cfg):
     url = "https://github.com/%s.git" % row["slug"]
     best = None
-    tag_rx = re.compile("^" + cfg.get("tag_prefix", "v?") + r"(\d+(?:[._]\d+)*)([a-z]?)$")
+    tag_rx = re.compile("^" + (re.escape(cfg["tag_prefix"]) if "tag_prefix" in cfg else "v?") + r"(\d+(?:[._]\d+)*)([a-z]?)$")
     for _sha, ref in ls_remote(url, tags=True):
         tag = ref[len("refs/tags/"):]
         m = tag_rx.match(tag)
@@ -128,7 +128,9 @@ def commit_changes(row, cfg):
 
 def file_version(row, cfg):
     text = raw(row["slug"], "HEAD", cfg["file"]).decode("utf-8", "replace")
-    v = deps._macros(*cfg["macros"])(text)
+    parts = [re.search(r"^\s*#\s*define\s+" + re.escape(m) + r"\s+(\d+)", text, re.M)
+             for m in cfg["macros"]]
+    v = ".".join(m.group(1) for m in parts) if all(parts) else None
     if v is None:
         raise RuntimeError("no version macros in upstream " + cfg["file"])
     if version_key(v) and version_key(row["version"]) and version_key(v) > version_key(row["version"]):
@@ -175,7 +177,10 @@ def main():
     ap.add_argument("--body", help="write the Markdown report here (default: stdout)")
     ap.add_argument("--fingerprint", help="write the key of the set of entries with something newer here")
     a = ap.parse_args()
-    rows = deps.load(os.path.abspath(a.root))
+    with open(os.path.join(os.path.abspath(a.root), LIST_FILE), encoding="utf-8") as f:
+        rows = parse_list(f.read())
+    if not rows or len({r["name"] for r in rows}) != len(rows):
+        raise ValueError("third-party inventory is empty or has duplicate names")
 
     newer, skipped, failed = [], [], []
     for row in rows:
@@ -188,27 +193,29 @@ def main():
             failed.append((row, text))
         print("%-16s %-8s %s" % (row["name"], state, text or ""), file=sys.stderr)
 
-    key_src = "\n".join(sorted("%s|%s|%s" % (r["name"], current_text(r), t) for r, t in newer))
-    key = hashlib.sha256(key_src.encode()).hexdigest()[:16] if newer else "none"
+    key_src = "\n".join(sorted(r["name"] for r, _text in newer))
+    key = "incomplete" if failed else (hashlib.sha256(key_src.encode()).hexdigest()[:16] if newer else "none")
 
     list_url = "%s/%s/blob/main/%s#third-party-libraries" % (
         os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
-        os.environ.get("GITHUB_REPOSITORY", "TrussC-org/TrussC"), deps.LIST_FILE)
+        os.environ.get("GITHUB_REPOSITORY", "TrussC-org/TrussC"), LIST_FILE)
     out = []
     if newer:
         out.append(("Upstream has something newer for these entries of the third-party list "
                     "([docs/LICENSE.md](%s)). "
                     "Read the upstream release notes before updating; a pull request that updates "
-                    "one changes its row in the list too (`tools/check_dependencies.py`).\n") % list_url)
+                    "one changes its row in the list too.\n") % list_url)
         out.append("| Library | In TrussC | Upstream | Pinned / vendored in |")
         out.append("|---|---|---|---|")
         for r, t in newer:
             out.append("| %s | %s | %s | %s |" % (r["name"], current_text(r), t,
                                                 ", ".join("`%s`" % p for p in r["paths"])))
+    elif failed:
+        out.append("No newer versions were found among reachable upstreams. The check is incomplete.")
     else:
         out.append(("Every checked entry of the third-party list "
                     "([docs/LICENSE.md](%s)) "
-                    "is at its newest upstream release.") % list_url)
+                    "has no newer upstream release or changes to its tracked files.") % list_url)
     if failed:
         out.append("\n**Could not check** (retried next week):\n")
         out += ["- %s: %s" % (r["name"], t) for r, t in failed]
