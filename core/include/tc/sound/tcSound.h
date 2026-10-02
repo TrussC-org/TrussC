@@ -959,6 +959,12 @@ namespace internal {
     // has none (not an MP3). tcAudio_impl.cpp.
     uint32_t lastStreamSeekPointsForTests();
 
+    // Test hook: the number of passes the StreamWorker has run since the
+    // process started (one per wakeup: a notify or the end of its wait), so
+    // a headless test can count how often it wakes (core/tests/streamWorkerIdle).
+    // tcAudio_impl.cpp.
+    uint64_t streamWorkerPassesForTests();
+
     // Seek a voice (Sound::setPosition()). `frame` counts the voice's
     // positionF units: source frames for an eager voice, engine-rate frames
     // for a stream. An eager voice moves at once (positionF is written
