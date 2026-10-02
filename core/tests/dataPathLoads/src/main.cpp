@@ -23,8 +23,9 @@
 
 #include <TrussC.h>
 #include <tcLut.h>
+#include "../../common/tcCoreTest.h"
 
-#include <atomic>
+#include <barrier>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -34,6 +35,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok) {
@@ -85,14 +88,15 @@ struct ErrorCapture {
     }
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // --- getDataPath from two threads before anything else -----------------
     {
-        atomic<int> ready{0};
+        barrier ready(2);
         fs::path a, b, rootA, rootB;
         auto worker = [&ready](fs::path& out, fs::path& root) {
-            ready.fetch_add(1);
-            while (ready.load() < 2) {}   // start both calls together
+            ready.arrive_and_wait();   // start both calls together
             out = getDataPath("x.png");
             root = getDataPathRoot();
         };
@@ -114,6 +118,18 @@ int main() {
     const fs::path cwd = sandbox / "cwd";
     fs::create_directories(data);
     fs::create_directories(cwd);
+    // #365 P2: normalize the data root, preserving the caller's filename.
+    const fs::path filename = "symlink/../asset.wav";
+    const fs::path relativeRoot = "unused/../data";
+    setDataPathRoot(relativeRoot);
+    check("getDataPath: relative root is normalized, filename is preserved",
+          getDataPath(filename) == getExecutableDir() / "data" / filename);
+    setDataPathRoot(sandbox / "unused/../data");
+    check("getDataPath: absolute root is normalized, filename is preserved",
+          getDataPath(filename) == data / filename);
+    const fs::path absoluteInput = data / "symlink/../asset.wav";
+    check("getDataPath: absolute input passes through unchanged",
+          getDataPath(absoluteInput) == absoluteInput);
     setDataPathRoot(data);
     // A relative path that went through the CWD would land here instead
     fs::current_path(cwd);
@@ -134,6 +150,26 @@ int main() {
 
         Pixels abs;
         check("Pixels::load: absolute path used as given", abs.load(data / "a.png").ok());
+
+        Pixels workerPixels;
+        LoadResult workerResult;
+        thread worker([&] { workerResult = workerPixels.load("a.png"); });
+        worker.join();
+        check("Pixels::load: a worker thread reads from the data folder",
+              workerResult.ok() && workerPixels.getWidth() == 4 &&
+              workerPixels.getColor(1, 2).r > 0.99f);
+
+#ifndef _WIN32
+        // The filename's .. follows the symlink at the filesystem boundary.
+        // Normalizing the full path would incorrectly look in data/ instead.
+        fs::create_directories(sandbox / "target/child");
+        fs::create_directory_symlink(sandbox / "target/child", data / "symlink");
+        fs::copy_file(data / "a.png", sandbox / "target/outside.png");
+        Pixels symlinkPixels;
+        check("Pixels::load: filename symlink/.. keeps filesystem semantics",
+              symlinkPixels.load("symlink/../outside.png").ok() &&
+              symlinkPixels.getWidth() == 4);
+#endif
 
         // Only in the CWD: not found (no CWD fallback)
         fs::copy_file(data / "a.png", cwd / "cwdOnly.png", ec);

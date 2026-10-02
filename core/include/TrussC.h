@@ -2392,9 +2392,9 @@ namespace internal {
 
         setup();
 
-        // The Apple data path root is chosen lazily on first getDataPath() use
-        // (resolveDataPathRootOnce in tcUtils.h) — probing here is too early to
-        // see a valid executable path on iOS.
+        // App's pre-setup hook resolves the data path root right before its
+        // setup() runs. getDataPath() also probes on an earlier call; probing
+        // here is too early to see a valid executable path on iOS.
 
         // Start console input thread (enabled by default)
         // To disable, call console::stop() in setup()
