@@ -94,11 +94,15 @@ public:
         ibuf_ = other.ibuf_;
         gpuVertexCount_ = other.gpuVertexCount_;
         gpuIndexCount_ = other.gpuIndexCount_;
-        dataRevision_ = other.dataRevision_;
-        gpuRevision_ = other.gpuRevision_;
+        // Assignment changes this mesh even when both objects have the same
+        // revision. Preserve the transferred buffers' clean/stale state.
+        const bool gpuClean = other.gpuRevision_ == other.dataRevision_;
+        const bool pointsClean = other.pointGpuRevision_ == other.dataRevision_;
+        markChanged();
+        gpuRevision_ = gpuClean ? dataRevision_ : dataRevision_ - 1;
         pbuf_ = other.pbuf_;
         gpuPointCount_ = other.gpuPointCount_;
-        pointGpuRevision_ = other.pointGpuRevision_;
+        pointGpuRevision_ = pointsClean ? dataRevision_ : dataRevision_ - 1;
         other.vbuf_ = {};
         other.ibuf_ = {};
         other.gpuVertexCount_ = 0;
@@ -363,7 +367,6 @@ public:
 
     Mesh& translate(const Vec3& offset) {
         translate(offset.x, offset.y, offset.z);
-        markChanged();
         return *this;
     }
 
@@ -454,13 +457,11 @@ public:
 
     Mesh& scale(float s) {
         scale(s, s, s);
-        markChanged();
         return *this;
     }
 
     Mesh& scale(const Vec3& s) {
         scale(s.x, s.y, s.z);
-        markChanged();
         return *this;
     }
 
@@ -495,7 +496,10 @@ public:
 
     /// Append another mesh to this mesh
     Mesh& append(const Mesh& other) {
-        if (other.vertices_.empty()) return *this;
+        if (other.vertices_.empty()) {
+            markChanged();
+            return *this;
+        }
 
         unsigned int baseIndex = static_cast<unsigned int>(vertices_.size());
 
@@ -1056,6 +1060,8 @@ public:
     // revision is recorded at upload time (separately for the PBR buffers and
     // the Points buffer); a draw re-uploads when the recorded revision differs
     // from the current one. markGpuDirty() is not needed after normal edits.
+    // If a mutable reference is kept across draws, call markGpuDirty() after
+    // later writes through it: only fetching the reference bumps the revision.
 
     // Force a re-upload on the next GpuPbr / GpuPoints draw.
     void markGpuDirty() const { markChanged(); }

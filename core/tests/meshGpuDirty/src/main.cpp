@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <utility>
 
@@ -63,9 +64,147 @@ static void expectSame(const char* name, const function<void(Mesh&)>& op) {
     check(name, m.getDataRevision() == before);
 }
 
+// Optional render regression: no timing assumptions, one draw callback, with
+// synchronous FBO readback after each edit. Run under Xvfb on Linux.
+class GpuCheckApp : public App {
+public:
+    void setup() override { fbo_.allocate(96, 96); }
+
+    void draw() override {
+        setColor(1.0f);
+        setPointStyle(PointStyle::Square);
+        setPointSize(12.0f);
+        Mesh points;
+        points.setMode(PrimitiveMode::Points);
+        points.addVertex(20, 30, 0).addColor(1, 0, 0);
+        const auto initial = render(points);
+        const auto firstBuffer = points.getGpuPointBuffer();
+        check("gpu: Points buffer is valid",
+              sg_query_buffer_state(firstBuffer) == SG_RESOURCESTATE_VALID);
+        check("gpu: Points initially render", hasInk(initial));
+        check("gpu: unchanged Points retain pixels and buffer",
+              render(points) == initial && points.getGpuPointBuffer().id == firstBuffer.id);
+        points.clear();
+        points.addVertex(68, 30, 0).addColor(1, 0, 0);
+        const auto rebuilt = render(points);
+        check("gpu: same-size Points rebuild changes rendered pixels",
+              hasInk(rebuilt) && rebuilt != initial);
+        check("gpu: same-size Points rebuild replaces buffer",
+              points.getGpuPointBuffer().id != firstBuffer.id && points.getGpuPointCount() == 1);
+        points.getColors()[0] = Color(0, 1, 0);
+        const auto recolored = render(points);
+        check("gpu: getter color edit changes rendered Points",
+              hasInk(recolored) && recolored != rebuilt);
+        points.translate(-48, 0, 0);
+        const auto translated = render(points);
+        check("gpu: translation changes rendered Points",
+              hasInk(translated) && translated != recolored);
+        auto pointBuffer = points.getGpuPointBuffer();
+        points.markGpuDirty();
+        check("gpu: markGpuDirty re-uploads unchanged Points",
+              render(points) == translated && points.getGpuPointBuffer().id != pointBuffer.id);
+
+        Mesh triangles;
+        triangles.addVertex(18, 18, 0).addVertex(42, 18, 0).addVertex(18, 42, 0);
+        triangles.addNormals({Vec3(0, 0, 1), Vec3(0, 0, 1), Vec3(0, 0, 1)});
+        triangles.addTriangle(0, 1, 2);
+        Material material;
+        material.setBaseColor(1, 0, 0).setEmissive(1, 0, 0);
+        setMaterial(material);
+        const auto originalTriangle = render(triangles);
+        const auto triangleBuffer = triangles.getGpuVertexBuffer();
+        check("gpu: PBR vertex and index buffers are valid",
+              sg_query_buffer_state(triangleBuffer) == SG_RESOURCESTATE_VALID &&
+              sg_query_buffer_state(triangles.getGpuIndexBuffer()) == SG_RESOURCESTATE_VALID);
+        check("gpu: PBR triangle initially renders", hasInk(originalTriangle));
+        (void)as_const(triangles).getVertices();
+        check("gpu: const read and unchanged PBR retain buffer",
+              render(triangles) == originalTriangle &&
+              triangles.getGpuVertexBuffer().id == triangleBuffer.id);
+        triangles.rotateZ(0.3f);
+        const auto rotated = render(triangles);
+        check("gpu: rotation changes rendered PBR triangle",
+              hasInk(rotated) && rotated != originalTriangle);
+        check("gpu: rotation replaces PBR vertex buffer",
+              triangles.getGpuVertexBuffer().id != triangleBuffer.id);
+        triangles.getVertices()[0].x += 12;
+        const auto edited = render(triangles);
+        check("gpu: getter vertex edit changes rendered PBR triangle",
+              hasInk(edited) && edited != rotated);
+        auto normalBuffer = triangles.getGpuVertexBuffer();
+        triangles.setNormal(0, Vec3(0, 1, 0));
+        render(triangles);
+        check("gpu: setNormal re-uploads PBR buffers",
+              triangles.getGpuVertexBuffer().id != normalBuffer.id);
+        clearMaterial();
+
+        // Uploading one path must not mark the other path current.
+        triangles.uploadPointsToGpu();
+        triangles.translate(1, 0, 0);
+        triangles.uploadToGpu();
+        auto pbrBuffer = triangles.getGpuVertexBuffer();
+        triangles.uploadPointsToGpu();
+        pointBuffer = triangles.getGpuPointBuffer();
+        triangles.uploadToGpu();
+        triangles.uploadPointsToGpu();
+        check("gpu: PBR and Points independently reuse current revisions",
+              triangles.getGpuVertexBuffer().id == pbrBuffer.id &&
+              triangles.getGpuPointBuffer().id == pointBuffer.id);
+
+        Mesh destination = makeMesh(3);
+        const auto movedPbr = triangles.getGpuVertexBuffer();
+        const auto movedPoints = triangles.getGpuPointBuffer();
+        const auto beforeMove = destination.getDataRevision();
+        destination = std::move(triangles);
+        destination.uploadToGpu();
+        destination.uploadPointsToGpu();
+        check("gpu: move assignment preserves clean transferred buffers",
+              destination.getDataRevision() != beforeMove &&
+              destination.getGpuVertexBuffer().id == movedPbr.id &&
+              destination.getGpuPointBuffer().id == movedPoints.id);
+        destination.translate(1, 0, 0);
+        Mesh dirtyDestination;
+        dirtyDestination = std::move(destination);
+        dirtyDestination.uploadToGpu();
+        dirtyDestination.uploadPointsToGpu();
+        check("gpu: move assignment preserves stale transferred buffers",
+              dirtyDestination.getGpuVertexBuffer().id != movedPbr.id &&
+              dirtyDestination.getGpuPointBuffer().id != movedPoints.id);
+
+        exitApp();
+    }
+
+private:
+    vector<unsigned char> render(const Mesh& mesh) {
+        fbo_.begin(0, 0, 0, 0);
+        mesh.draw();
+        fbo_.end();
+        vector<unsigned char> pixels(96 * 96 * 4);
+        check("gpu: FBO readback succeeds", fbo_.readPixels(pixels.data()));
+        return pixels;
+    }
+
+    static bool hasInk(const vector<unsigned char>& pixels) {
+        for (size_t i = 3; i < pixels.size(); i += 4) {
+            if (pixels[i] != 0) return true;
+        }
+        return false;
+    }
+
+    Fbo fbo_;
+};
+
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && strcmp(argv[1], "--gpu-check") == 0) {
+        WindowSettings settings;
+        settings.setSize(96, 96);
+        settings.setHighDpi(false);
+        runApp<GpuCheckApp>(settings);
+        printf("meshGpuDirty --gpu-check: %s (%d failures)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail);
+        return g_fail ? 1 : 0;
+    }
     printf("=== meshGpuDirty (#267) ===\n");
 
     // Same-size rebuild: clear() then re-add the same 100 vertices.
@@ -117,7 +256,37 @@ TC_CORE_TEST_MAIN() {
     expectChange("scale(Vec3)",         [](Mesh& m) { m.scale(Vec3(2, 2, 2)); });
     expectChange("transform",           [](Mesh& m) { m.transform(Mat4::translate(1, 0, 0)); });
     expectChange("append",              [](Mesh& m) { m.append(makeMesh(3)); });
+    expectChange("append empty mesh",   [](Mesh& m) { m.append(Mesh()); });
     expectChange("markGpuDirty",        [](Mesh& m) { m.markGpuDirty(); });
+
+    // Assignment must invalidate observers even if the source has the same
+    // revision but different contents.
+    {
+        Mesh destination = makeMesh(3);
+        Mesh source = makeMesh(3);
+        destination.translate(1, 0, 0);
+        source.translate(2, 0, 0);
+        const uint64_t before = destination.getDataRevision();
+        check("move assignment starts with equal revisions",
+              before == source.getDataRevision());
+        destination = std::move(source);
+        check("move assignment changes destination revision",
+              destination.getDataRevision() != before);
+        check("move assignment transfers different vertex data",
+              as_const(destination).getVertices()[0].x == 2.0f);
+    }
+    expectChange("copy assignment", [](Mesh& m) {
+        const Mesh source = makeMesh(3);
+        m = source;
+    });
+
+    // Merely fetching mutable storage (without writing) also invalidates.
+    expectChange("mutable read getVertices",  [](Mesh& m) { (void)m.getVertices(); });
+    expectChange("mutable read getColors",    [](Mesh& m) { (void)m.getColors(); });
+    expectChange("mutable read getNormals",   [](Mesh& m) { (void)m.getNormals(); });
+    expectChange("mutable read getIndices",   [](Mesh& m) { (void)m.getIndices(); });
+    expectChange("mutable read getTexCoords", [](Mesh& m) { (void)m.getTexCoords(); });
+    expectChange("mutable read getTangents",  [](Mesh& m) { (void)m.getTangents(); });
 
     // Non-const getters mark the mesh changed (writes through the reference).
     expectChange("non-const getVertices",  [](Mesh& m) { m.getVertices()[0].x += 1.0f; });

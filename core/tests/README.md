@@ -185,7 +185,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `translate` / `rotateX/Y/Z` / `scale` / `transform`, `append`, `setMode`),
   every non-const getter and `markGpuDirty()` change `getDataRevision()`,
   also for a `clear()` followed by re-adding the same vertex count; const
-  getters and other const reads leave it unchanged. Plain `main()`, no GPU.
+  getters and other const reads leave it unchanged. Uses `TC_CORE_TEST_MAIN`
+  in allCoreTests; the default run is headless. With `--gpu-check`, FBO
+  readback checks Points rebuilds/colors/translations and PBR rotations and
+  vertex edits, plus independent buffer caching and move assignment.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
