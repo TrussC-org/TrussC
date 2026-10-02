@@ -1,8 +1,10 @@
 // =============================================================================
-// tcxCurl tests - headless behavioral test for HttpClient (no window).
+// tcxCurl tests-curl - headless behavioral test for HttpClient (no window).
+// Links libcurl, unlike the curl-free ../tests.
 //
-// Built and run by CI via examples/build_all.py --addon-tests-only (exit 0 =
-// pass, non-zero = fail). Locally: trusscli run -p . from this directory.
+// Built and run by the daily CI via examples/build_all.py --addon-tests-only
+// --include-daily (daily-only marker; exit 0 = pass, non-zero = fail).
+// Locally: trusscli run -p . from this directory.
 //
 // The HTTPS peer is a small Python http.server (GET and POST answer 200) on
 // 127.0.0.1, port chosen by the OS (port 0). Its key and self-signed

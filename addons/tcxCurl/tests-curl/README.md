@@ -1,6 +1,8 @@
-# tcxCurl tests
+# tcxCurl tests-curl
 
-Headless console test (no window) for `HttpClient`.
+Headless console test (no window) for `HttpClient` over a real TLS
+connection. It links tcxCurl (libcurl), so it is kept apart from the
+curl-free `../tests` and carries a `daily-only` marker.
 
 The HTTPS peer is a small Python `http.server` on 127.0.0.1 (port chosen by
 the OS). Its key and self-signed certificate are made with `openssl req` at
@@ -22,8 +24,9 @@ On Linux the PEM must be taken. On other platforms, if the system libcurl
 cannot take a PEM from memory, the request must fail with an error naming
 `setTlsCACertificate`; the test prints a NOTE line.
 
-CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
-push/PR; a non-zero exit fails the job. Run it locally with:
+CI builds and runs this in the daily workflow
+(`examples/build_all.py --addon-tests-only --include-daily`); the per-PR lane
+skips it. A non-zero exit fails the job. Run it locally with:
 
 ```bash
 trusscli run -p .          # from this directory
