@@ -921,15 +921,14 @@ static void pcmTableTests(const fs::path& data) {
 static void clockTests() {
     const double dt = 1.0 / 60.0;
     const double duration = 10.0;
-    const double threshold = 0.5;
 
-    // Audio master, the audio clock 1% faster than the wall clock, the audio
-    // position advancing in 512-frame mixer blocks at 48 kHz, a 10 s video
-    // looping for 10000 steps: the video stays within the threshold of the
-    // audio without a hard re-sync
-    auto runDrift = [&](bool irregular, double& maxDiff, int& resyncs, int& wraps) {
+    // Audio advances 1% faster than the supplied wall-clock deltas, in
+    // 512-frame mixer blocks. Video must equal that position on every step,
+    // including repeated positions and loop boundaries.
+    auto runDrift = [&](bool irregular, int& wraps) {
         double t = 0.0, audioExact = 0.0;
-        maxDiff = 0.0; resyncs = 0; wraps = 0;
+        bool exact = true;
+        wraps = 0;
         const double block = 512.0 / 48000.0;
         for (int i = 0; i < 10000; i++) {
             // Irregular deltas: alternately 0 and two frames
@@ -938,59 +937,51 @@ static void clockTests() {
             const double audioPos = floor(audioExact / block) * block;
             PlaybackClockInput in;
             in.time = t; in.dt = d; in.speed = 1.0; in.duration = duration; in.loop = true;
-            in.audioMaster = true; in.audioTime = audioPos; in.resyncThreshold = threshold;
-            const PlaybackClockStep s = stepPlaybackClock(in);
-            t = s.time;
-            if (s.resynced) resyncs++;
-            if (s.wrapped) {
+            in.audioMaster = true; in.audioTime = audioPos;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            const bool shouldWrap = audioPos >= duration;
+            const double expected = shouldWrap ? fmod(audioPos, duration) : audioPos;
+            exact = exact && step.time == expected && step.wrapped == shouldWrap && !step.ended;
+            t = step.time;
+            if (step.wrapped) {
                 // HapPlayer moves the audio to the wrapped time
                 wraps++;
                 audioExact = t;
-            } else {
-                maxDiff = max(maxDiff, fabs(t - audioPos));
             }
         }
+        return exact;
     };
-    double maxDiff = 0.0;
-    int resyncs = 0, wraps = 0;
-    runDrift(false, maxDiff, resyncs, wraps);
-    check("clock: audio 1% fast, 10000 steps -> |video - audio| < threshold, no re-sync",
-          maxDiff < threshold && resyncs == 0 && wraps >= 16,
-          "max " + to_string(maxDiff) + " s, " + to_string(resyncs) + " re-syncs, " +
-          to_string(wraps) + " wraps");
-    check("clock: audio 1% fast -> |video - audio| stays under 20 ms", maxDiff < 0.02,
-          "max " + to_string(maxDiff) + " s");
-    runDrift(true, maxDiff, resyncs, wraps);
-    check("clock: irregular deltas, 10000 steps -> |video - audio| < threshold, no re-sync",
-          maxDiff < threshold && resyncs == 0, "max " + to_string(maxDiff) + " s, " +
-          to_string(resyncs) + " re-syncs");
+    int wraps = 0;
+    const bool regularExact = runDrift(false, wraps);
+    check("clock: audio 1% fast, 10000 steps -> video equals audio position (wrapped)",
+          regularExact && wraps == 16, to_string(wraps) + " wraps");
+    const bool irregularExact = runDrift(true, wraps);
+    check("clock: irregular deltas, 10000 steps -> video equals audio position (wrapped)",
+          irregularExact && wraps == 16, to_string(wraps) + " wraps");
 
-    // Hard re-sync: the audio position 2 s ahead of the video
+    // Direct audio time is independent of dt, speed scaling and drift size.
     {
         PlaybackClockInput in;
-        in.time = 3.0; in.dt = dt; in.duration = duration; in.loop = true;
-        in.audioMaster = true; in.audioTime = 5.0; in.resyncThreshold = threshold;
-        const PlaybackClockStep s = stepPlaybackClock(in);
-        check("clock: difference above the threshold -> video set to the audio position",
-              s.resynced && s.time == 5.0, to_string(s.time));
-        in.resyncThreshold = 0.0;
-        const PlaybackClockStep s2 = stepPlaybackClock(in);
-        check("clock: threshold 0 -> no hard re-sync", !s2.resynced && s2.time < 5.0,
-              to_string(s2.time));
-    }
-
-    // Forward audio at a changed speed still drives the video position.
-    {
-        PlaybackClockInput in;
-        in.time = 2.0; in.dt = 0.25; in.speed = 2.0; in.duration = duration;
-        in.audioMaster = true; in.audioTime = 2.5;
-        const PlaybackClockStep s = stepPlaybackClock(in);
-        check("clock: forward speed 2 -> follows matching audio position",
-              s.time == 2.5 && !s.resynced && !s.ended);
+        in.time = 3.0; in.dt = dt; in.duration = duration;
+        in.audioMaster = true; in.audioTime = 5.0;
+        check("clock: audio ahead -> video equals audio position",
+              stepPlaybackClock(in).time == 5.0);
+        in.dt = 0.0;
+        check("clock: zero delta -> video still equals audio position",
+              stepPlaybackClock(in).time == 5.0);
+        in.time = 5.0; in.dt = 0.25;
+        check("clock: repeated audio position -> video stays at audio position",
+              stepPlaybackClock(in).time == 5.0);
+        in.audioTime = 5.01;
+        check("clock: small audio advance -> video equals audio position",
+              stepPlaybackClock(in).time == in.audioTime);
         in.audioTime = 1.0;
-        const PlaybackClockStep behind = stepPlaybackClock(in);
-        check("clock: audio behind above threshold -> video re-syncs backward",
-              behind.time == 1.0 && behind.resynced);
+        check("clock: audio behind -> video equals audio position",
+              stepPlaybackClock(in).time == 1.0);
+        in.speed = 2.0; in.audioTime = 2.25;
+        const PlaybackClockStep step = stepPlaybackClock(in);
+        check("clock: forward speed 2 -> audio position used without speed scaling",
+              step.time == 2.25 && !step.wrapped && !step.ended);
     }
 
     // Wall clock (no audio): dt * speed per step, wraps with fmod
@@ -1003,7 +994,7 @@ static void clockTests() {
             in.time = t; in.dt = 0.25; in.speed = 1.5; in.duration = duration; in.loop = true;
             const PlaybackClockStep s = stepPlaybackClock(in);
             const double expected = fmod(t + 0.375, duration);
-            exact = exact && s.time == expected && !s.resynced;
+            exact = exact && s.time == expected;
             if (s.wrapped) wrapsWall++;
             t = s.time;
         }

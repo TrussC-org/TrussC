@@ -65,10 +65,11 @@ track) and written to the temp folder:
 - v0 rate 22254.5454 Hz (16.16): read as 22255 Hz.
 - `stepPlaybackClock()`: with the audio clock 1% faster than the wall clock
   and the audio position moving in 512-frame blocks, 10000 steps of a looping
-  10 s video keep |video - audio| under 20 ms (threshold 0.5 s) without a
-  hard re-sync, also with irregular frame deltas; a difference above the
-  threshold sets the video to the audio position; without audio, and in
-  reverse, time moves by dt * speed and wraps at the ends.
+  10 s video equal the audio position exactly (modulo the duration at loop
+  boundaries), also with irregular frame deltas. Zero deltas, repeated audio
+  positions, small advances, forward/backward jumps and speed 2 all use the
+  audio position directly. Without audio, and in reverse, time moves by
+  dt * speed and wraps at the ends.
 
 To check `MovParser` against ffmpeg's own output (not part of the test), for
 example:

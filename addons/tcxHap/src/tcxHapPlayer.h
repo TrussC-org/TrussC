@@ -94,13 +94,10 @@ inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuff
 // Pure function (no player state), so the clock can be checked headless.
 //
 // - Wall clock: time advances by dt * speed. Used for files without audio,
-//   for reverse playback (speed <= 0), and while the audio is not playing.
-// - Audio master (audioMaster true): time advances by dt * speed and is then
-//   pulled toward the audio position (audioTime), closing the difference
-//   with a time constant of kAudioSlewSeconds, so the video follows the
-//   audio clock without stepping at the mixer's buffer size. When the
-//   difference is above resyncThreshold (> 0), time is set to the audio
-//   position (hard re-sync).
+//   and for reverse or zero-speed playback (speed <= 0).
+// - Audio master (audioMaster true): time is the audio position (audioTime),
+//   as in the Linux VideoPlayer. HAP frames are randomly addressable, so
+//   there is no decoder catch-up or threshold-based seek to perform.
 // - The loop boundary is handled here (the video side): passing the end (or
 //   the start in reverse) wraps when loop is true and sets wrapped; the
 //   caller then moves the audio to the new time. Without loop, ended is set.
@@ -112,31 +109,17 @@ struct PlaybackClockInput {
     bool loop = false;
     bool audioMaster = false;
     double audioTime = 0.0;        // audio position (s), when audioMaster
-    double resyncThreshold = 0.5;  // <= 0: no hard re-sync
 };
 
 struct PlaybackClockStep {
     double time = 0.0;
-    bool resynced = false;
     bool wrapped = false;
     bool ended = false;
 };
 
-constexpr double kAudioSlewSeconds = 0.25;
-
 inline PlaybackClockStep stepPlaybackClock(const PlaybackClockInput& in) {
     PlaybackClockStep out;
-    double t = in.time + in.dt * in.speed;
-
-    if (in.audioMaster) {
-        const double diff = in.audioTime - t;
-        if (in.resyncThreshold > 0.0 && std::abs(diff) > in.resyncThreshold) {
-            t = in.audioTime;
-            out.resynced = true;
-        } else if (in.dt > 0.0) {
-            t += diff * std::min(1.0, in.dt / kAudioSlewSeconds);
-        }
-    }
+    double t = in.audioMaster ? in.audioTime : in.time + in.dt * in.speed;
 
     if (in.duration > 0.0) {
         if (t >= in.duration) {
@@ -340,16 +323,15 @@ public:
         if (playing_ && !paused_) {
             frameNew_ = false;
 
-            // Audio is the master clock while it plays forward
+            // Audio is the master clock whenever loaded and speed is positive
             PlaybackClockInput in;
             in.time = playbackTime_;
             in.dt = tc::getDeltaTime();
             in.speed = speed_;
             in.duration = duration_;
             in.loop = loop_;
-            in.audioMaster = hasAudio_ && speed_ > 0 && audioPlayer_.isPlaying();
+            in.audioMaster = hasAudio_ && speed_ > 0;
             in.audioTime = in.audioMaster ? audioPlayer_.getPosition() : 0.0;
-            in.resyncThreshold = getResyncThreshold();
             const PlaybackClockStep step = stepPlaybackClock(in);
             playbackTime_ = step.time;
 
