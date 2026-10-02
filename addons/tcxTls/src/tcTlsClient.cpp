@@ -301,9 +301,10 @@ void TlsClient::ensureDefaultCAsLoaded() {
 // Connection Management
 // =============================================================================
 bool TlsClient::connect(const std::string& host, int port) {
+    if (!prepareConnect()) return false;
     // Disconnect if already connected
     if (connected_ || running_ || connectPending_ || handshakePending_) {
-        disconnect();
+        disconnectImpl(true, false);
     }
 
     // Release what is left before starting over.
@@ -349,84 +350,16 @@ bool TlsClient::connect(const std::string& host, int port) {
     // thread (or, without threads, next to the update event).
     const unsigned generation = ++tlsReceiveGeneration_;
 
-    // Create socket
-    socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#ifdef _WIN32
-    if (socket_ == INVALID_SOCKET) {
-        notifyError("Failed to create socket", WSAGetLastError());
-        return false;
-    }
-#else
-    if (socket_ < 0) {
-        notifyError("Failed to create socket", errno);
-        return false;
-    }
-#endif
-
-    // A send racing the peer's close must fail, not raise SIGPIPE
-    tc::internal::setNoSigpipe(socket_);
-
-    // Set non-blocking if not using threads
-    if (!useThread_) {
-        setBlocking(false);
-    }
-
-    // Resolve hostname
-    struct addrinfo hints, *result;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    std::string portStr = std::to_string(port);
-    int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
-    if (ret != 0) {
-        // Clean up before notifying: an onError listener that reconnects
-        // must not have its new socket closed after it returns
-        closeSocket();
-        notifyError("Failed to resolve host: " + host, ret);
-        return false;
-    }
-
-    // TCP connection
-    ret = ::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen));
-    freeaddrinfo(result);
-
-    remoteHost_ = host;
-    remotePort_ = port;
     handshakeStarted_ = false;
-
-    if (ret == SOCKET_ERROR) {
-        int err = SOCKET_ERROR_CODE;
-#ifdef _WIN32
-        if (err == WSAEWOULDBLOCK) {
-#else
-        if (err == EINPROGRESS) {
-#endif
-            // Async connection started
-            connectPending_ = true;
-            running_ = true;
-        } else {
-            // Clean up before notifying (see above)
-            closeSocket();
-            notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
-            return false;
-        }
-    } else {
-        // TCP Connected immediately
-        running_ = true;
+    if (!connectSocket(host, port)) return false;
+    if (!connectPending_) {
         handshakePending_ = true;
         handshakeStart_ = std::chrono::steady_clock::now();
-        logNotice() << "TCP connected to " << host << ":" << port << ", starting TLS handshake...";
     }
 
     if (running_) {
         if (useThread_) {
-            // Thread mode: the TCP connect above was blocking, so the
-            // handshake is next. It runs on a non-blocking socket and waits
-            // for data in short slices (processNetworkImpl()), so its
-            // deadline is checked while the peer stays silent. The socket
-            // goes back to blocking once the handshake is done.
-            setBlocking(false);
+            // TCP connect, handshake, reads and writes stay non-blocking.
             tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this,
                                             generation, alive_);
         } else {
@@ -501,7 +434,11 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
     }
 
     // Perform handshake step
-    ret = mbedtls_ssl_handshake(&ctx_->ssl);
+    {
+        std::scoped_lock lock(socketMutex_, tlsMutex_);
+        if (!running_ || socket_ == INVALID_SOCKET) return HandshakeStep::Stopped;
+        ret = mbedtls_ssl_handshake(&ctx_->ssl);
+    }
     if (ret == 0) {
         return HandshakeStep::Done;
     } else if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -540,7 +477,7 @@ bool TlsClient::failHandshake(const std::string& error, const std::string& conne
     // reports its own result: this one is not reported once the client
     // is connected or connecting again (running_ is set for every
     // attempt in progress, the pending connect and the handshake too).
-    if (!connected_ && !running_) {
+    if (!connected_ && !running_ && !isConnecting()) {
         tc::TcpConnectEventArgs args;
         args.success = false;
         args.message = connectMessage;
@@ -560,59 +497,25 @@ void TlsClient::processNetwork() {
     processNetworkImpl(tlsReceiveGeneration_, alive);
 }
 
-// Wait until the socket has data to read, for at most ms milliseconds
-static void waitReadable(
-#ifdef _WIN32
-    SOCKET fd,
-#else
-    int fd,
-#endif
-    int ms) {
-#ifdef _WIN32
-    if (fd == INVALID_SOCKET) return;
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(fd, &readfds);
-    struct timeval tv = {0, ms * 1000};
-    select(0, &readfds, NULL, NULL, &tv);
-#else
-    if (fd < 0) return;
-    struct pollfd pfd;
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    poll(&pfd, 1, ms);
-#endif
-}
-
 // generation: the receive thread's own (the generation it was started with)
 bool TlsClient::processNetworkImpl(unsigned generation, const AliveToken& alive) {
+    if (!processSendQueue(alive)) return false;
     // A thread whose connection was replaced does nothing more, not even
     // the pending connect or the handshake of the new one
     if (!running_ || tlsReceiveGeneration_ != generation) return true;
 
     // 1. Handle TCP connection pending
     if (connectPending_) {
-        // Re-use TcpClient's connect check logic (simplified here for brevity, 
-        // ideally we'd have a shared checkConnect() method)
-#ifdef _WIN32
-        struct fd_set writefds;
-        FD_ZERO(&writefds);
-        FD_SET(socket_, &writefds);
-        struct timeval tv = {0, 0};
-        if (select(0, NULL, &writefds, NULL, &tv) > 0) {
-#else
-        struct pollfd pfd;
-        pfd.fd = socket_;
-        pfd.events = POLLOUT;
-        if (poll(&pfd, 1, 0) > 0) {
-#endif
-            connectPending_ = false;
-            handshakePending_ = true;
-            handshakeStart_ = std::chrono::steady_clock::now();
-            logNotice() << "TCP connected (async), starting TLS handshake...";
-        } else {
-            return true; // Still connecting
+        int error = 0;
+        int state = checkPendingConnect(0, error);
+        if (state == -2) return true;
+        if (state < 0) return failHandshake("TCP connection failed or timed out", "Connection failed", error, alive);
+        if (state == 0) {
+            if (useThread_) waitClientSocket(false, 50);
+            return true;
         }
+        handshakePending_ = true;
+        handshakeStart_ = std::chrono::steady_clock::now();
     }
 
     // 2. Handle TLS handshake pending
@@ -632,13 +535,13 @@ bool TlsClient::processNetworkImpl(unsigned generation, const AliveToken& alive)
             // With threads the socket is non-blocking during the handshake:
             // wait for the peer's data in short slices, so the deadline above
             // is checked again even when nothing arrives
-            if (useThread_) waitReadable(socket_, 50);
+            if (useThread_) waitClientSocket(false, 50);
             return true;
         }
 
+        if (!running_ || tlsReceiveGeneration_ != generation || !*alive) return false;
         handshakePending_ = false;
-        // With threads, back to blocking reads for the connection
-        if (useThread_) setBlocking(true);
+        startSendChannel();
         connected_ = true;
 
         logNotice() << "TLS connected to " << remoteHost_ << ":" << remotePort_
@@ -670,7 +573,12 @@ bool TlsClient::processNetworkImpl(unsigned generation, const AliveToken& alive)
     // context and tlsRecvBuf_ with it. It is the thread's own, passed in, not
     // read here: onConnect above may already have reconnected.
     while (connected_ && tlsReceiveGeneration_ == generation) {
-        int ret = mbedtls_ssl_read(&ctx_->ssl, tlsRecvBuf_.data(), tlsRecvBuf_.size());
+        int ret;
+        {
+            std::scoped_lock lock(socketMutex_, tlsMutex_);
+            if (!running_ || socket_ == INVALID_SOCKET) break;
+            ret = mbedtls_ssl_read(&ctx_->ssl, tlsRecvBuf_.data(), tlsRecvBuf_.size());
+        }
 
         if (ret > 0) {
             tc::TcpReceiveEventArgs args;
@@ -690,6 +598,7 @@ bool TlsClient::processNetworkImpl(unsigned generation, const AliveToken& alive)
             // over while disconnect() is still joining this thread.
             if (running_.exchange(false)) {
                 connected_ = false;
+                if (!processSendQueue(alive)) return false;
                 tc::TcpDisconnectEventArgs args;
                 args.reason = "Connection closed by remote";
                 args.wasClean = true;
@@ -706,6 +615,7 @@ bool TlsClient::processNetworkImpl(unsigned generation, const AliveToken& alive)
             // Error. As above: one caused by a local disconnect() is its to report
             if (running_.exchange(false)) {
                 connected_ = false;
+                if (!processSendQueue(alive)) return false;
                 char errBuf[256];
                 mbedtls_strerror(ret, errBuf, sizeof(errBuf));
                 tc::TcpDisconnectEventArgs args;
@@ -726,15 +636,18 @@ void TlsClient::disconnect() {
 }
 
 // disconnect() with notify, the destructor without
-void TlsClient::disconnectImpl(bool notify) {
+void TlsClient::disconnectImpl(bool notify, bool stopConnect) {
+    if (stopConnect) stopConnectThread();
     running_ = false;
     connectPending_ = false;
     handshakePending_ = false;
     updateListener_.disconnect();
 
-    // Send TLS close notification
+    stopSendChannel();
+    // A non-blocking best-effort close notification, after the writer ends.
     if (ctx_ && connected_) {
-        mbedtls_ssl_close_notify(&ctx_->ssl);
+        std::scoped_lock lock(socketMutex_, tlsMutex_);
+        if (socket_ != INVALID_SOCKET) mbedtls_ssl_close_notify(&ctx_->ssl);
     }
 
     closeSocket();
@@ -744,6 +657,10 @@ void TlsClient::disconnectImpl(bool notify) {
     // what earlier calls kept.
     tlsKeptThreads_.release(tlsReceiveThread_);
     tlsKeptThreads_.joinOthers();
+    // A handshake that finished as cancellation arrived may have published
+    // its writer after the first close. With the reader joined, no new writer
+    // can appear; stop it before resetting/freeing the SSL context.
+    closeSocket();
 
     // Fully reset SSL context and config (for reconnection). Before the
     // notification below: a listener that reconnects from it starts a new
@@ -765,23 +682,12 @@ void TlsClient::disconnectImpl(bool notify) {
 
 // Shut down and close the socket, if there is one
 void TlsClient::closeSocket() {
-#ifdef _WIN32
-    if (socket_ != INVALID_SOCKET) {
-        shutdown(socket_, SD_BOTH);
-        closesocket(socket_);
-        socket_ = INVALID_SOCKET;
-    }
-#else
-    if (socket_ >= 0) {
-        shutdown(socket_, SHUT_RDWR);
-        close(socket_);
-        socket_ = -1;
-    }
-#endif
+    closeClientSocket();
 }
 
 // Free and re-initialise the SSL context and config (for the next connection)
 void TlsClient::resetSslContext() {
+    std::lock_guard<std::mutex> lock(tlsMutex_);
     if (ctx_) {
         mbedtls_ssl_free(&ctx_->ssl);
         mbedtls_ssl_config_free(&ctx_->conf);
@@ -804,31 +710,24 @@ void TlsClient::teardown() {
 // =============================================================================
 // Data Send/Receive
 // =============================================================================
+bool TlsClient::isConnecting() const {
+    return TcpClient::isConnecting() || handshakePending_;
+}
+
+int TlsClient::writeSendStep(const void* data, size_t size, bool& forWrite, int& error) {
+    std::scoped_lock lock(socketMutex_, tlsMutex_);
+    if (!connected_ || socket_ == INVALID_SOCKET) return -2;
+    int ret = mbedtls_ssl_write(&ctx_->ssl, static_cast<const unsigned char*>(data), size);
+    if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
+        forWrite = ret == MBEDTLS_ERR_SSL_WANT_WRITE;
+        return -1;
+    }
+    if (ret < 0) { error = ret; return -2; }
+    return ret;
+}
+
 bool TlsClient::send(const void* data, size_t size) {
-    if (!connected_) {
-        notifyError("Not connected");
-        return false;
-    }
-
-    std::lock_guard<std::mutex> lock(sendMutex_);
-
-    const unsigned char* ptr = static_cast<const unsigned char*>(data);
-    size_t remaining = size;
-
-    while (remaining > 0) {
-        int ret = mbedtls_ssl_write(&ctx_->ssl, ptr, remaining);
-        if (ret < 0) {
-            if (ret == MBEDTLS_ERR_SSL_WANT_WRITE || ret == MBEDTLS_ERR_SSL_WANT_READ) continue;
-            char errBuf[256];
-            mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS send failed: ") + errBuf, ret);
-            return false;
-        }
-        ptr += ret;
-        remaining -= ret;
-    }
-
-    return true;
+    return TcpClient::send(data, size);
 }
 
 bool TlsClient::send(const std::vector<char>& data) {
@@ -854,7 +753,7 @@ void TlsClient::tlsReceiveThreadFunc(unsigned generation, AliveToken alive) {
     while (running_ && tlsReceiveGeneration_ == generation) {
         if (!processNetworkImpl(generation, alive)) return;
         if (running_ && tlsReceiveGeneration_ == generation) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            waitClientSocket(false, 50);
         }
     }
 }

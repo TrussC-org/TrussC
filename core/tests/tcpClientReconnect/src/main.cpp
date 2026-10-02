@@ -791,11 +791,11 @@ static void scenario() {
         int threadsAfterBye = -1;
         waitFor(1000, [&] {
             threadsAfterBye = countEntries("/proc/self/task");
-            return threadsAfterBye <= threadsBaseline + 1;
+            return threadsAfterBye <= threadsBaseline + 2;
         });
-        printf("  (threads: %d before connect(), %d after; one receive thread expected)\n",
+        printf("  (threads: %d before connect(), %d after; one receive and one writer thread expected)\n",
                threadsBaseline, threadsAfterBye);
-        check("bye, reconnect: the old receive thread stopped", threadsAfterBye <= threadsBaseline + 1);
+        check("bye, reconnect: the old receive thread stopped", threadsAfterBye <= threadsBaseline + 2);
 #else
         printf("%-60s %s\n", "bye, reconnect: the old receive thread stopped", "SKIP (counted on Linux)");
 #endif
@@ -1069,11 +1069,15 @@ static void scenario() {
             return ok;
         };
 #ifdef __linux__
-        // Counted right after each call returns, with no grace period: a
-        // thread the call joined is gone by then
+        // pthread_join has returned, but Linux may briefly still expose the
+        // exited task in /proc. Check retirement, not that snapshot's timing.
         const int kcBaseline = countEntries("/proc/self/task");
         auto threadsAre = [&](const char* name, int expected) {
-            const int n = countEntries("/proc/self/task");
+            int n = -1;
+            waitFor(1000, [&] {
+                n = countEntries("/proc/self/task");
+                return n == expected;
+            });
             printf("  (threads: %d, %d expected)\n", n, expected);
             check(name, n == expected);
         };
@@ -1087,7 +1091,7 @@ static void scenario() {
         if (g_fail) bail();
         check("kept thread: the next connect() waits for it",
               kc->connect("127.0.0.1", port) && kcListenerDone);
-        threadsAre("kept thread: after connect(), its receive thread only", kcBaseline + 1);
+        threadsAre("kept thread: after connect(), its receive and writer threads only", kcBaseline + 2);
         rawsocket_t kp = acceptWithin(listener, 2000);
         if (kp != kNoSocket) TC_CLOSE(kp);
         if (g_fail) bail();
