@@ -253,7 +253,7 @@ TC_CORE_TEST_MAIN() {
         auto sub = make_shared<SetupAllocApp>();
         OpenWindow win, other;
         win.setApp(sub);
-        win.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(win);   // the frame boundary
         this_thread::sleep_for(chrono::milliseconds(50));
         check("window App: setApp() alone subscribes nothing",
               engine.audioOut.listenerCount() == outBase && p.callsBeforeSetup.load() == 0,
@@ -283,9 +283,9 @@ TC_CORE_TEST_MAIN() {
         // Moved to another window without closing (no cleanup()): it is
         // already set up, so it stays subscribed once.
         win.setApp(nullptr);
-        win.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(win);   // the frame boundary
         other.setApp(sub);
-        other.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(other);   // the frame boundary
         tickWindow(other);
         check("window App moved to another window: no second hook, no second setup()",
               other.getApp() == sub && engine.audioOut.listenerCount() == outBase + 1 &&
@@ -297,7 +297,7 @@ TC_CORE_TEST_MAIN() {
         sub->cleanup();
         internal::detachAppAudio(*sub);
         other.setApp(nullptr);
-        other.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(other);   // the frame boundary
         other.native_ = nullptr;
         check("window App: closing its window removes both hooks",
               engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase);

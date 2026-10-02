@@ -12717,22 +12717,6 @@ keywords = ["internal"]
 hide = true
 keywords = ["internal"]
 
-["Window::applyPendingApp"]
-hide = true
-keywords = ["internal"]
-
-["Window::endApp"]
-hide = true
-keywords = ["internal"]
-
-["Window::teardown"]
-hide = true
-keywords = ["internal"]
-
-["Window::closeRequested"]
-hide = true
-keywords = ["internal"]
-
 ["Window::drawTreeNow"]
 hide = true
 keywords = ["internal"]

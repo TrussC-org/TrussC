@@ -27,6 +27,8 @@ namespace trussc {
 class Window;
 
 namespace internal {
+class WindowRequestAccess;   // friend of Window, defined after it
+
 // Open-window registry (creation order, secondaries only — the main window is
 // not a Window object). Non-inline storage in tcGlobal.cpp so the hot-reload
 // host and guest see ONE list. Used by the MCP window-targeting tools.
@@ -162,22 +164,6 @@ public:
 
     internal::WindowContext& context() { return ctx_; }
 
-    // --- requests (used by the platform glue; not user API) ---
-    // Applies a pending setApp() at a frame boundary: the platform glue calls
-    // it through internal::WindowDispatchScope, at the start and end of each
-    // of this window's ticks and events. Does nothing while one of them is
-    // running.
-    void applyPendingApp();
-    // Ends the window's App: drops a pending setApp() (logged when it held an
-    // App), detaches the App from the window, then runs its exit() /
-    // cleanup() and detaches its audio hooks. Part of the platform teardown.
-    void endApp();
-    // The platform teardown: destroys the native window right away, fires
-    // events().exit, then endApp(). Runs when the backend closes the window
-    // (close_cb) and in ~Window().
-    void teardown();
-    bool closeRequested() const { return closeRequested_; }
-
     // --- tree driving (called by the platform glue; friend access to Node) ---
     // The root is locked once per call, so it stays alive for the whole call
     // even if a handler detaches the window's App (setApp(nullptr)).
@@ -253,7 +239,44 @@ public:
 private:
     // setApp()'s checks; logs the reason and returns false when refused.
     bool canAttach(const std::shared_ptr<App>& app) const;
+
+    // --- requests (framework only, at the frame boundary; not user API) ---
+    // Reached through internal::WindowRequestAccess, so they stay out of the
+    // public API (and the script bindings generated from it).
+    // Applies a pending setApp() at a frame boundary: the platform glue calls
+    // it through internal::WindowDispatchScope, at the start and end of each
+    // of this window's ticks and events. Does nothing while one of them is
+    // running.
+    void applyPendingApp();
+    // Ends the window's App: drops a pending setApp() (logged when it held an
+    // App), detaches the App from the window, then runs its exit() /
+    // cleanup() and detaches its audio hooks. Part of the platform teardown.
+    void endApp();
+    // The platform teardown: destroys the native window right away, fires
+    // events().exit, then endApp(). Runs when the backend closes the window
+    // (close_cb) and in ~Window().
+    void teardown();
+    bool closeRequested() const { return closeRequested_; }
+
+    friend class internal::WindowRequestAccess;
 };
+
+namespace internal {
+// Framework access to Window's request handling (platform glue, the frame
+// boundary, shutdown, tests), the way VideoPlayerPlatformAccess opens
+// VideoPlayer to its platform code.
+class WindowRequestAccess {
+public:
+    static void applyPendingApp(Window& w) { w.applyPendingApp(); }
+    static void endApp(Window& w) { w.endApp(); }
+    static void teardown(Window& w) { w.teardown(); }
+    static bool closeRequested(const Window& w) { return w.closeRequested(); }
+};
+
+// Test hook: a headless test has no platform glue, so it applies a pending
+// setApp() itself, standing in for the frame boundary.
+inline void applyPendingAppForTests(Window& w) { WindowRequestAccess::applyPendingApp(w); }
+}
 
 namespace internal {
 // The secondary Window whose context is currently active (during its
@@ -304,7 +327,7 @@ inline bool routeToggleFullscreenToWindow() {
 }
 inline void closeRequestedWindowsAtShutdown() {
     for (Window* w : openWindows()) {
-        if (w->closeRequested()) w->teardown();
+        if (WindowRequestAccess::closeRequested(*w)) WindowRequestAccess::teardown(*w);
     }
 }
 inline bool routeIsFullscreenFromWindow(bool& out) {
@@ -441,12 +464,12 @@ namespace internal {
 struct WindowDispatchScope {
     Window& w;
     explicit WindowDispatchScope(Window& win) : w(win) {
-        w.applyPendingApp();
+        WindowRequestAccess::applyPendingApp(w);
         ++w.dispatchDepth_;
     }
     ~WindowDispatchScope() {
         --w.dispatchDepth_;
-        w.applyPendingApp();
+        WindowRequestAccess::applyPendingApp(w);
     }
     WindowDispatchScope(const WindowDispatchScope&) = delete;
     WindowDispatchScope& operator=(const WindowDispatchScope&) = delete;

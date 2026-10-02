@@ -285,7 +285,7 @@ void windowClosed(sapp_window swin, void* user) {
     trussc::Window* win = static_cast<trussc::Window*>(user);
     // The backend's safe point (close button, or a close() request landing):
     // never inside this window's tick or events.
-    if (win) win->teardown();   // tears down native + app state
+    if (win) trussc::internal::WindowRequestAccess::teardown(*win);   // native + app state
 }
 
 } // namespace

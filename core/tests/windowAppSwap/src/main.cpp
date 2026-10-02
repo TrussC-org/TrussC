@@ -65,7 +65,7 @@ struct OpenWindow : Window {
     void landClose() {
         native_ = nullptr;
         closeRequested_ = false;
-        endApp();
+        internal::WindowRequestAccess::endApp(*this);
     }
     ~OpenWindow() { if (native_) landClose(); }
 };
@@ -391,7 +391,7 @@ TC_CORE_TEST_MAIN() {
         check("... setApp() after close() logs an error at the call",
               count(errors, "this window is closing") == closingErrors + 1);
         check("... until the close lands: still open, same App, close requested",
-              win.isOpen() && win.getApp().get() == old && win.closeRequested());
+              win.isOpen() && win.getApp().get() == old && internal::WindowRequestAccess::closeRequested(win));
         tick(win);
         check("... ticks before the close lands keep the App (no exit() yet)",
               oldC.exits == 0 && win.getApp().get() == old);
@@ -412,7 +412,7 @@ TC_CORE_TEST_MAIN() {
         check("close() in keyPressed(): still open after it, the key reached the child",
               rec.isOpenAfter && rec.getAppSame && rec.childRunsAfter == 1 && !rec.appGone);
         win.close();
-        check("... a second close() is the same request", win.closeRequested() && win.isOpen());
+        check("... a second close() is the same request", internal::WindowRequestAccess::closeRequested(win) && win.isOpen());
         win.landClose();
         check("... the close: exit() / cleanup() once",
               c.exits == 1 && c.cleanups == 1 && rec.appGone);
@@ -452,7 +452,7 @@ TC_CORE_TEST_MAIN() {
               count(errors, "this window is closed") == closedErrors + 2);
         check("... exit() / cleanup() ran once; the window stays empty",
               c.exits == 1 && c.cleanups == 1 && win.getApp() == nullptr &&
-              otherC.setups == 0 && !win.closeRequested());
+              otherC.setups == 0 && !internal::WindowRequestAccess::closeRequested(win));
         check("... nothing left in the double-attach guard", attached.empty());
     }
 

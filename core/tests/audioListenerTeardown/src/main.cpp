@@ -413,7 +413,7 @@ TC_CORE_TEST_MAIN() {
         Window closedWin;
 
         first.setApp(sub);
-        first.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(first);   // the frame boundary
         tickWindow(first);
         const bool firstAudio = waitFor([&] { return sub->audioCalls.load() > 0; }, 2000);
         check("a new App attached to an open window: setup() once, audioOut() called, one hook",
@@ -426,7 +426,7 @@ TC_CORE_TEST_MAIN() {
         sub->cleanup();
         internal::detachAppAudio(*sub);
         first.setApp(nullptr);
-        first.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(first);   // the frame boundary
         first.native_ = nullptr;
         const int callsAtClose = sub->audioCalls.load();
         this_thread::sleep_for(chrono::milliseconds(50));
@@ -436,11 +436,11 @@ TC_CORE_TEST_MAIN() {
         // The cleaned-up App on another open window, which already shows an App
         // (subscribed on this first tick).
         second.setApp(keeper);
-        second.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(second);   // the frame boundary
         tickWindow(second);
         const size_t cleanupErrors = countErrors("already ran cleanup()");
         second.setApp(sub);
-        second.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(second);   // the frame boundary
         tickWindow(second);
         this_thread::sleep_for(chrono::milliseconds(50));
         check("setApp() refuses an App whose cleanup() ran: one error",
@@ -454,22 +454,22 @@ TC_CORE_TEST_MAIN() {
         // A window that is not open: a closed one never runs close() again.
         const size_t closedErrors = countErrors("this window is closed");
         closedWin.setApp(stray);
-        closedWin.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(closedWin);   // the frame boundary
         check("setApp() on a window that is not open is refused: one error",
               countErrors("this window is closed") == closedErrors + 1);
         check("... the window stays empty", closedWin.getApp() == nullptr);
         first.setApp(stray);   // closed above
-        first.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(first);   // the frame boundary
         check("... also one that was open before", first.getApp() == nullptr &&
               countErrors("this window is closed") == closedErrors + 2);
         second.setApp(nullptr);
-        second.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(second);   // the frame boundary
         second.setApp(stray);   // the refusals left it free to attach
-        second.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(second);   // the frame boundary
         check("the refused App can still go to an open window",
               second.getApp() == stray && engine.audioOut.listenerCount() == hooks + 1);
         second.setApp(nullptr);
-        second.applyPendingApp();   // the frame boundary
+        internal::applyPendingAppForTests(second);   // the frame boundary
 
         // keeper still has its hook (it was set up on second's tick): detach
         // and wait before it goes, so the audio thread (still running) cannot
