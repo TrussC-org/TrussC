@@ -1095,6 +1095,77 @@ std::atomic<size_t>& mainThreadQueuePendingCount() {
 }
 #endif
 
+AsyncScheduler::AsyncScheduler() {
+#ifdef _WIN32
+    // Same convention as HeadlessSleeper: Windows before 10 1803 rejects
+    // the high-resolution flag, leaving the condition-variable fallback.
+    timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                    TIMER_MODIFY_STATE | SYNCHRONIZE);
+    if (timer_) {
+        taskEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!taskEvent_) closeWaitHandles();
+    }
+#endif
+    try {
+        worker_ = std::thread([this] { run(); });
+    } catch (...) {
+        closeWaitHandles();
+        throw;
+    }
+}
+
+AsyncScheduler::~AsyncScheduler() {
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        stop_ = true;
+        wakeWorker();
+    }
+    if (worker_.joinable()) worker_.join();
+    closeWaitHandles();
+}
+
+void AsyncScheduler::closeWaitHandles() {
+#ifdef _WIN32
+    if (timer_) CloseHandle((HANDLE)timer_);
+    if (taskEvent_) CloseHandle((HANDLE)taskEvent_);
+    timer_ = taskEvent_ = nullptr;
+#endif
+}
+
+void AsyncScheduler::wakeWorker() {
+#ifdef _WIN32
+    if (taskEvent_) SetEvent((HANDLE)taskEvent_);
+#endif
+    cv_.notify_all();
+}
+
+void AsyncScheduler::waitUntil(std::unique_lock<std::mutex>& lk, Clock::time_point when) {
+#ifdef _WIN32
+    if (timer_) {
+        const auto remaining = when - Clock::now();
+        if (remaining <= Clock::duration::zero()) return;
+        // Relative, rounded up to 100 ns; a zero due time would mean an
+        // absolute deadline in the past. The timer is armed under mtx_, so
+        // changes after unlocking leave the auto-reset event signaled.
+        using TimerTick = std::chrono::duration<int64_t, std::ratio<1, 10000000>>;
+        LARGE_INTEGER due;
+        due.QuadPart = -std::chrono::ceil<TimerTick>(remaining).count();
+        if (SetWaitableTimer((HANDLE)timer_, &due, 0, nullptr, nullptr, FALSE)) {
+            HANDLE handles[] = {(HANDLE)taskEvent_, (HANDLE)timer_};
+            lk.unlock();
+            const DWORD result = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+            lk.lock();
+            if (result == WAIT_OBJECT_0 || result == WAIT_OBJECT_0 + 1) return;
+        }
+        // Disable a failed native wait and re-evaluate the task list before
+        // falling back: notifications could have arrived while unlocked.
+        closeWaitHandles();
+        return;
+    }
+#endif
+    cv_.wait_until(lk, when);
+}
+
 AsyncScheduler& AsyncScheduler::get() {
     static AsyncScheduler instance;
     return instance;
