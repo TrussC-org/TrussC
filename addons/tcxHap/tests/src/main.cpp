@@ -497,7 +497,10 @@ static void sampleTableTests(const fs::path& data) {
     fs::remove(tmp, ec);
 }
 
+int runVideoTests();
+
 int main() {
+    g_fail += runVideoTests();
     const fs::path data = fs::path(getDataPath(""));
     printf("data: %s\n", data.string().c_str());
 

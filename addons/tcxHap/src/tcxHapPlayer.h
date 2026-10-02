@@ -20,15 +20,38 @@
 #include "tcxHapDecoder.h"
 #include "ycocg.glsl.h"
 #include "impl/bcdec.h"
+#include "impl/tcxHapRgba.h"
 
 namespace tcx::hap {
 
 // Uniform structs for YCoCg shader
 struct YCoCgVsParams {
-    float screenSize[2];
-    float _pad[2];
+    float mvp[16];
 };
 
+
+namespace detail {
+
+struct YCoCgDrawData {
+    YCoCgVsParams uniforms;
+    tc::ShaderVertex vertices[4];
+};
+
+inline YCoCgDrawData makeYCoCgDrawData(float x, float y, float w, float h,
+                                      const tc::Mat4& projection, const tc::Mat4& view,
+                                      const tc::Mat4& model, const tc::Color& color) {
+    YCoCgDrawData data = {};
+    // Mat4 is row-major; shader uniforms use column-major matrices.
+    const tc::Mat4 mvp = (projection * view * model).transposed();
+    std::memcpy(data.uniforms.mvp, mvp.m, sizeof(data.uniforms.mvp));
+    data.vertices[0] = {x, y, 0, 0, 0, color.r, color.g, color.b, color.a};
+    data.vertices[1] = {x + w, y, 0, 1, 0, color.r, color.g, color.b, color.a};
+    data.vertices[2] = {x + w, y + h, 0, 1, 1, color.r, color.g, color.b, color.a};
+    data.vertices[3] = {x, y + h, 0, 0, 1, color.r, color.g, color.b, color.a};
+    return data;
+}
+
+} // namespace detail
 
 // ---------------------------------------------------------------------------
 // loadPcmTrack - read a PCM audio track and decode it into a SoundBuffer
@@ -761,49 +784,19 @@ private:
 
         switch (hapFormat_) {
             case HapFormat::DXT1:
-                // BC1: 8 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc1(src, blockDst, dstPitch);
-                        src += BCDEC_BC1_BLOCK_SIZE;
-                    }
-                }
+                detail::decodeRgbaBlocks(src, dst, width_, height_, BCDEC_BC1_BLOCK_SIZE, bcdec_bc1);
                 break;
 
             case HapFormat::DXT5:
-                // BC3: 16 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc3(src, blockDst, dstPitch);
-                        src += BCDEC_BC3_BLOCK_SIZE;
-                    }
-                }
-                break;
-
             case HapFormat::YCoCgDXT5:
-                // BC3 + YCoCg color transform: 16 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc3(src, blockDst, dstPitch);
-                        src += BCDEC_BC3_BLOCK_SIZE;
-                    }
+                detail::decodeRgbaBlocks(src, dst, width_, height_, BCDEC_BC3_BLOCK_SIZE, bcdec_bc3);
+                if (hapFormat_ == HapFormat::YCoCgDXT5) {
+                    convertYCoCgToRgb();
                 }
-                // Convert YCoCg to RGB
-                convertYCoCgToRgb();
                 break;
 
             case HapFormat::BC7:
-                // BC7: 16 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc7(src, blockDst, dstPitch);
-                        src += BCDEC_BC7_BLOCK_SIZE;
-                    }
-                }
+                detail::decodeRgbaBlocks(src, dst, width_, height_, BCDEC_BC7_BLOCK_SIZE, bcdec_bc7);
                 break;
 
             case HapFormat::RGTC1:
@@ -945,32 +938,16 @@ private:
             return;
         }
 
-        // Setup uniforms
-        YCoCgVsParams vsParams = {};
-        vsParams.screenSize[0] = static_cast<float>(tc::getWindowWidth());
-        vsParams.screenSize[1] = static_cast<float>(tc::getWindowHeight());
+        const auto& context = tc::internal::currentWindowContext();
+        const auto data = detail::makeYCoCgDrawData(x, y, w, h,
+            context.currentProjectionMatrix, context.currentViewMatrix, tc::getMatrix(), tc::getColor());
 
-        // Draw with shader
         tc::pushShader(ycocgShader_);
-
-        // Bind texture and sampler
         ycocgShader_.setTexture(0, texture_.getView(), texture_.getSampler());
-
-        // Set vertex shader uniforms
-        ycocgShader_.setUniform(0, &vsParams, sizeof(vsParams));
-
-        // Create textured quad vertices directly for shader
-        tc::ShaderVertex verts[4];
-        // Top-left
-        verts[0] = {x, y, 0, 0.0f, 0.0f, 1, 1, 1, 1};
-        // Top-right
-        verts[1] = {x + w, y, 0, 1.0f, 0.0f, 1, 1, 1, 1};
-        // Bottom-right
-        verts[2] = {x + w, y + h, 0, 1.0f, 1.0f, 1, 1, 1, 1};
-        // Bottom-left
-        verts[3] = {x, y + h, 0, 0.0f, 1.0f, 1, 1, 1, 1};
-
-        ycocgShader_.submitVertices(verts, 4, tc::PrimitiveType::Quads);
+        ycocgShader_.setUniform(0, &data.uniforms, sizeof(data.uniforms));
+        // submitVertices snapshots a pipeline matching the current render target.
+        // Keep positions in model space: the shader applies the full MVP once.
+        ycocgShader_.submitVertices(data.vertices, 4, tc::PrimitiveType::Quads);
 
         tc::popShader();
     }
