@@ -49,14 +49,15 @@ int main() {
     });
     tc::setConsoleLogLevel(tc::LogLevel::Silent);
     MidiOut out;
+    const size_t closedLogged = warnings.size();
     for (const auto& item : cases) {
         const size_t sent = libremidi::test::sends;
-        const size_t logged = warnings.size();
         check(!item.send(out), std::string(item.name) + ": closed returns false");
         check(libremidi::test::sends == sent, "closed does not reach backend");
-        check(warnings.size() == logged + 1, "closed logs warning");
+        check(warnings.size() == closedLogged + 1, "closed helpers share one warning");
     }
     check(out.openVirtualPort("send test"), "open mock virtual port");
+    bool firstBackendFailure = true;
     for (const auto& item : cases) {
         const size_t logged = warnings.size();
         const size_t sent = libremidi::test::sends;
@@ -68,9 +69,10 @@ int main() {
         libremidi::test::failSend = true;
         check(!item.send(out), std::string(item.name) + ": backend failure returns false");
         check(libremidi::test::sends == sent + 2, "failure attempted exactly once");
-        check(warnings.size() == logged + 1 &&
+        check(warnings.size() == logged + (firstBackendFailure ? 1 : 0) &&
               warnings.back().find("injected send error") != std::string::npos,
-              "backend failure logs reason once");
+              "backend helpers share one warning, even across successful sends");
+        firstBackendFailure = false;
         check(out.isOpen(), "send failure preserves open state");
     }
     libremidi::test::failSend = false;
@@ -79,8 +81,8 @@ int main() {
     check(!out.sendBytes({}), "empty bytes return false");
     check(!out.sendSysex({}), "empty sysex returns false");
     check(!out.send(MidiMessage{}), "empty message returns false");
-    check(libremidi::test::sends == sent && warnings.size() == logged + 3,
-          "empty sends warn without reaching backend");
+    check(libremidi::test::sends == sent && warnings.size() == logged + 1,
+          "empty helpers share one warning without reaching backend");
     check(out.sendNoteOn(1, 60, 100), "success after failure");
     out.closePort();
     check(!out.sendMidiByte(0xF8), "send after close returns false");
@@ -99,6 +101,76 @@ int main() {
     out.sendMidiByte(0xF8);
     out.sendBytes({0xFA});
     out.send(MidiMessage({0xFC}));
+
+    // Count real logger warning events: clock traffic must not flood the log.
+    auto checkFlood = [&](const std::function<bool()>& send,
+                          const std::string& reason, bool reachesBackend) {
+        const size_t beforeWarnings = warnings.size();
+        const size_t beforeSends = libremidi::test::sends;
+        bool allFailed = true;
+        for (int i = 0; i < 100; ++i) {
+            if (send()) allFailed = false;
+        }
+        check(allFailed, reason + ": all 100 failures return false");
+        check(warnings.size() == beforeWarnings + 1,
+              reason + ": exactly one warning for 100 failures");
+        check(warnings.size() > beforeWarnings &&
+              warnings.back().find(reason) != std::string::npos,
+              reason + ": first warning includes reason text");
+        check(libremidi::test::sends == beforeSends + (reachesBackend ? 100 : 0),
+              reason + ": backend call count");
+    };
+    MidiOut flood;
+    auto closedFlood = [&](MidiOut& o) {
+        checkFlood([&] { return o.sendMidiByte(0xF8); }, "no output port is open", false);
+    };
+    auto openFlood = [&](MidiOut& o) {
+        checkFlood([&] { return o.sendBytes({}); }, "empty message", false);
+        libremidi::test::failSend = true;
+        checkFlood([&] { return o.sendMidiByte(0xF8); }, "injected send error", true);
+        libremidi::test::failSend = false;
+    };
+    closedFlood(flood);
+    MidiOut otherClosed;
+    closedFlood(otherClosed);
+    const size_t independentClosedWarnings = warnings.size();
+    check(!flood.sendMidiByte(0xF8), "first closed object still returns false");
+    check(warnings.size() == independentClosedWarnings,
+          "second closed object does not reset first object's gate");
+    flood.closePort();
+    closedFlood(flood); // Closing an already closed port also resets the gate.
+    check(!flood.openPort(-1), "invalid index open fails");
+    closedFlood(flood);
+    check(!flood.openPort("missing output"), "unmatched name open fails");
+    closedFlood(flood);
+
+    const std::vector<std::function<bool()>> reopen = {
+        [&] { return flood.openPort(0); },
+        [&] { return flood.openPort("test output"); },
+        [&] { return flood.openVirtualPort("flood test"); },
+    };
+    for (const auto& open : reopen) {
+        check(open(), "open for repeated failure test");
+        openFlood(flood);
+        check(open(), "reopen without explicit close");
+        openFlood(flood); // Both reasons produce one more warning after reopening.
+        flood.closePort();
+        closedFlood(flood);
+    }
+    // Gates belong to each output, even while another has exhausted its gates.
+    check(flood.openVirtualPort("first output"), "open first independent output");
+    openFlood(flood);
+    MidiOut independent;
+    closedFlood(independent);
+    check(independent.openVirtualPort("second output"), "open second independent output");
+    openFlood(independent);
+    const size_t independentOpenWarnings = warnings.size();
+    check(!flood.sendBytes({}), "first object's empty send still returns false");
+    libremidi::test::failSend = true;
+    check(!flood.sendMidiByte(0xF8), "first object's backend failure still returns false");
+    libremidi::test::failSend = false;
+    check(warnings.size() == independentOpenWarnings,
+          "opening second object does not reset first object's gates");
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

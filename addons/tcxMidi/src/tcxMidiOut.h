@@ -13,11 +13,13 @@
 #include "tcxMidiMessage.h"
 
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"
 
 #include <libremidi/libremidi.hpp>
 #include "tcxMidiApi.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -50,6 +52,7 @@ public:
     // Open / close
     // -------------------------------------------------------------------------
     bool openPort(int index) {
+        sendWarnings_.emplace();
         libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_output_ports();
         if (index < 0 || index >= static_cast<int>(ports.size())) {
@@ -61,6 +64,7 @@ public:
     }
 
     bool openPort(const std::string& nameContains) {
+        sendWarnings_.emplace();
         libremidi::observer obs{{}, libremidi::observer_configuration_for(platformMidiApi())};
         auto ports = obs.get_output_ports();
         for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
@@ -90,6 +94,7 @@ public:
     }
 
     void closePort() {
+        sendWarnings_.emplace();
         if (midiOut_) {
             midiOut_->close_port();
             midiOut_.reset();
@@ -108,7 +113,8 @@ public:
     // Sending
     // -------------------------------------------------------------------------
     // All send helpers return true when libremidi accepts the message. A closed
-    // port, empty message or backend error logs a warning and returns false.
+    // port, empty message or backend error returns false. Warnings are logged
+    // once per reason each time the port is opened; closing also resets them.
     // Success does not guarantee delivery to the receiving device.
 
     // Channel voice messages (channel: 1-16).
@@ -183,18 +189,22 @@ private:
 
     bool sendRaw(const unsigned char* bytes, size_t size) {
         if (!midiOut_) {
-            trussc::logWarning("tcxMidiOut") << "send_message failed: no output port is open";
+            if (sendWarnings_->portClosed.isFirstTime())
+                trussc::logWarning("tcxMidiOut") << "send_message failed: no output port is open";
             return false;
         }
         if (size == 0) {
-            trussc::logWarning("tcxMidiOut") << "send_message failed: empty message";
+            if (sendWarnings_->emptyMessage.isFirstTime())
+                trussc::logWarning("tcxMidiOut") << "send_message failed: empty message";
             return false;
         }
         auto err = midiOut_->send_message(bytes, size);
         if (err != stdx::error{}) {
-            auto message = err.message();
-            trussc::logWarning("tcxMidiOut") << "send_message failed: "
-                << std::string(message.data(), message.size());
+            if (sendWarnings_->backendError.isFirstTime()) {
+                auto message = err.message();
+                trussc::logWarning("tcxMidiOut") << "send_message failed: "
+                    << std::string(message.data(), message.size());
+            }
             return false;
         }
         return true;
@@ -216,6 +226,13 @@ private:
         return true;
     }
 
+    struct SendWarnings {
+        trussc::OnceGate portClosed;
+        trussc::OnceGate emptyMessage;
+        trussc::OnceGate backendError;
+    };
+    // OnceGate is not assignable; emplace recreates all gates without allocation.
+    std::optional<SendWarnings> sendWarnings_{std::in_place};
     std::unique_ptr<libremidi::midi_out> midiOut_;
     std::string name_;
     int  portNumber_ = -1;

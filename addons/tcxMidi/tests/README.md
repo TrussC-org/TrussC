@@ -25,7 +25,11 @@ presets, build directories and binaries are ignored by the project `.gitignore`.
 Checks every public send helper (including both pitch bend overloads) for
 success, backend failure and a closed port; verifies warning severity and error
 text, unchanged MIDI bytes/clamping, empty messages, and recovery after an error
-or explicit close/reopen. Existing calls ignoring the result also compile.
+or explicit close/reopen. For each failure reason, 100 consecutive failures
+return false with exactly one warning; reopening by index, name or virtual port
+allows one more warning per reason. Closing and failed open attempts reset the
+gates too, and separate MidiOut objects have independent gates.
+Existing calls ignoring the result also compile.
 The harness uses a plain `main()` without starting the TrussC app loop.
 
 The double does not verify native backend error generation or physical delivery.

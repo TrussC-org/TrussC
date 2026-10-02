@@ -82,8 +82,10 @@ Raise `setBufferSize()` if you see it.
 `sendPolyAftertouch`, `sendPitchBend` (14-bit, or raw `lsb,msb`), `sendSysex`,
 `sendMidiByte`, `sendBytes`, `send(MidiMessage)`. All send helpers return `bool`:
 `true` when libremidi accepts the message, `false` with a warning when no output
-port is open, the message is empty, or the backend reports an error. `true` does
-not guarantee delivery to the device. Existing calls may ignore the result;
+port is open, the message is empty, or the backend reports an error. Warnings are
+logged once per reason each time the port is opened. Closing also resets the
+warning gates. `true` does not guarantee delivery to the device.
+Existing calls may ignore the result;
 explicit member-function pointers must use a `bool` return type.
 
 ```cpp
