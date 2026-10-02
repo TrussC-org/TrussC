@@ -360,8 +360,9 @@ bool TlsClient::connect(const std::string& host, int port) {
     if (running_) {
         if (useThread_) {
             // TCP connect, handshake, reads and writes stay non-blocking.
-            tlsReceiveThread_ = std::thread(&TlsClient::tlsReceiveThreadFunc, this,
-                                            generation, alive_);
+            tlsKeptThreads_.start(tlsReceiveThread_, [this, generation, alive = alive_] {
+                tlsReceiveThreadFunc(generation, alive);
+            });
         } else {
             // Register update listener for async connect/handshake/recv
             updateListener_ = events().update.listen(this, &TlsClient::processNetwork);

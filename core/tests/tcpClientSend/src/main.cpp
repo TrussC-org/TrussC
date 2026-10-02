@@ -2,7 +2,73 @@
 #include "../../common/tcCoreTest.h"
 
 namespace {
+struct PausedWriterClient : ProbeClient {
+    using TcpClient::stopConnectThread;
+    mutex gateMutex;
+    condition_variable gateCv;
+    bool entered = false;
+    bool released = false;
+
+    int writeSendStep(const void* data, size_t size, bool& forWrite, int& error) override {
+        {
+            unique_lock<mutex> lock(gateMutex);
+            entered = true;
+            gateCv.notify_all();
+            gateCv.wait(lock, [&] { return released; });
+        }
+        return TcpClient::writeSendStep(data, size, forWrite, error);
+    }
+    bool writerPaused() {
+        lock_guard<mutex> lock(gateMutex);
+        return entered;
+    }
+    void releaseWriter() {
+        { lock_guard<mutex> lock(gateMutex); released = true; }
+        gateCv.notify_all();
+    }
+};
+
 void scenario() {
+    // Keep an owned send active so the borrowed send stays in the queue.
+    // Stopping the connect worker must remove queued bytes before waking the
+    // sender, even while the writer cannot drain the closed channel.
+    {
+        RawListener listener(8, true);
+        PausedWriterClient client;
+        client.setSendTimeout(0);
+        client.setSendAsyncBufferSize(0);
+        atomic<int> completions{0};
+        auto complete = client.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+            check("cancelled send reports disconnection", e.error == SendError::Disconnected);
+            ++completions;
+        });
+        check("queued cancellation connect", client.connect("127.0.0.1", listener.port));
+        TestSocket peer = listener.acceptPeer();
+        const size_t activeBytes = 64 * 1024 * 1024;
+        check("owned send queues before borrowed send", client.sendAsync(vector<char>(activeBytes, 'x')).ok());
+        check("writer pauses on active owned bytes", until([&] { return client.writerPaused(); }));
+        atomic<bool> returned{false}, failed{false};
+        thread sender([&] {
+            {
+                string borrowed(4096, 'b');
+                failed = !client.send(borrowed);
+            } // The borrowed buffer is freed before returned is published.
+            returned = true;
+        });
+        check("borrowed send stays queued", until([&] {
+            return client.getSendAsyncPendingBytes() == activeBytes + 4096;
+        }));
+        check("another owned send queues", client.sendAsync(string("tail")).ok());
+        client.stopConnectThread();
+        check("queued borrowed sender returns failure", until([&] { return returned.load(); }) && failed);
+        sender.join();
+        check("cancelled queue bytes removed before writer resumes", client.getSendAsyncPendingBytes() == activeBytes);
+        check("removed send completions wait for the writer", completions == 0);
+        client.releaseWriter();
+        client.disconnect();
+        check("active send completes and pending bytes reach zero", completions == 3 && client.getSendAsyncPendingBytes() == 0);
+        if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
+    }
     for (bool threads : {true, false}) for (bool async : {false, true}) {
         RawListener listener(8, true);
         ProbeClient client;

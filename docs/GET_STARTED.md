@@ -298,6 +298,7 @@ Running an app unattended for days or weeks (exhibitions, signage) needs a few m
 For a network peer that may power off, set `client.setConnectTimeout(5)` before
 using `connectAsync()`. The default keeps the OS TCP timeout (about 127 seconds
 on Linux), so a reconnect loop can wait about a minute before trying again.
+In installations, connect by IP address so nothing waits for DNS.
 Repeated `connectAsync()` calls to the same pending host and port do nothing;
 `isConnecting()` shows that attempt. Use `sendAsync()` in the frame loop so a
 peer that stops reading does not stall rendering. The default send timeout is

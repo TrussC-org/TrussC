@@ -1152,6 +1152,10 @@ TC_CORE_TEST_MAIN() {
         return -1;
 #endif
     };
+    // Sanitizers may start a persistent helper on the first thread creation.
+    // Include runtime helpers in the baseline, while still detecting leaked
+    // client threads after the scenario.
+    std::thread([] {}).join();
     // Before the scenario: the threads the process starts with
     const int threadsAtStart = countThreads();
 

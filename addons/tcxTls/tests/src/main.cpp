@@ -1435,6 +1435,11 @@ int main() {
         check("psa_crypto_init()", false);
         bail();
     }
+#ifdef __linux__
+    // Include persistent sanitizer/runtime helpers in the thread baseline.
+    std::thread([] {}).join();
+    const int threadsAtStart = countEntries("/proc/self/task");
+#endif
     g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
@@ -1450,10 +1455,10 @@ int main() {
     int threadsAtExit = -1;
     waitFor(1000, [&] {
         threadsAtExit = countEntries("/proc/self/task");
-        return threadsAtExit == 1;
+        return threadsAtExit <= threadsAtStart;
     });
-    printf("  (threads when main() returns: %d)\n", threadsAtExit);
-    check("no thread is left when main() returns", threadsAtExit == 1);
+    printf("  (threads: %d when main() started, %d when it returns)\n", threadsAtStart, threadsAtExit);
+    check("no thread is left when main() returns", threadsAtStart > 0 && threadsAtExit > 0 && threadsAtExit <= threadsAtStart);
 #else
     printf("%-60s %s\n", "no thread is left when main() returns", "SKIP (counted on Linux)");
 #endif

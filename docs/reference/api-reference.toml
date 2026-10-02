@@ -19171,9 +19171,9 @@ description.ko = "TCP 연결 또는 TLS 핸드셰이크 진행 중인지"
 description.en = "Set the TCP connect deadline in seconds; default 0 uses the OS deadline"
 description.ja = "TCP 接続期限を秒で設定。既定の 0 は OS の期限に任せる"
 description.ko = "TCP 연결 기한을 초로 설정. 기본 0은 OS 기한 사용"
-details.en = "The deadline covers TCP connect, not DNS resolution or the TLS handshake. Default 0 preserves the OS SYN timeout (roughly 21 seconds on Windows, 127 on Linux). For installations whose peer device may power off, setConnectTimeout(5) lets a reconnect loop attempt again sooner; waiting for the Linux OS deadline can delay recovery by about a minute. Cancellation works even with 0. Applies to the current pending connect as well as later attempts."
-details.ja = "期限は TCP 接続だけに適用し、DNS 解決や TLS ハンドシェイクを含まない。既定の 0 は OS の SYN タイムアウト（Windows 約21秒、Linux 約127秒）を保つ。相手機器の電源が切れる展示では setConnectTimeout(5) にすると次の再試行を早く始められる。Linux の OS の期限を待つと復旧が約1分遅れることがある。0 でもキャンセル可能。現在保留中の接続と次の試行に適用。"
-details.ko = "기한은 TCP 연결에만 적용되며 DNS 해석이나 TLS 핸드셰이크는 포함하지 않는다. 기본 0은 OS SYN 타임아웃(Windows 약21초, Linux 약127초)을 유지한다. 상대 장치가 꺼질 수 있는 설치에서는 setConnectTimeout(5)로 다음 재시도를 빨리 시작할 수 있다. Linux OS 기한을 기다리면 복구가 약1분 늦어질 수 있다. 0에서도 취소 가능. 현재 대기 연결과 이후 시도에 적용."
+details.en = "The deadline covers TCP connect, not DNS resolution or the TLS handshake. In installations, connect by IP address so nothing waits for DNS. Default 0 preserves the OS SYN timeout (roughly 21 seconds on Windows, 127 on Linux). For installations whose peer device may power off, setConnectTimeout(5) lets a reconnect loop attempt again sooner; waiting for the Linux OS deadline can delay recovery by about a minute. Cancellation works even with 0. Applies to the current pending connect as well as later attempts."
+details.ja = "期限は TCP 接続だけに適用し、DNS 解決や TLS ハンドシェイクを含まない。展示では IP アドレスで接続し、DNS を待たないようにする。既定の 0 は OS の SYN タイムアウト（Windows 約21秒、Linux 約127秒）を保つ。相手機器の電源が切れる展示では setConnectTimeout(5) にすると次の再試行を早く始められる。Linux の OS の期限を待つと復旧が約1分遅れることがある。0 でもキャンセル可能。現在保留中の接続と次の試行に適用。"
+details.ko = "기한은 TCP 연결에만 적용되며 DNS 해석이나 TLS 핸드셰이크는 포함하지 않는다. 설치 환경에서는 IP 주소로 연결하여 DNS를 기다리지 않도록 한다. 기본 0은 OS SYN 타임아웃(Windows 약21초, Linux 약127초)을 유지한다. 상대 장치가 꺼질 수 있는 설치에서는 setConnectTimeout(5)로 다음 재시도를 빨리 시작할 수 있다. Linux OS 기한을 기다리면 복구가 약1분 늦어질 수 있다. 0에서도 취소 가능. 현재 대기 연결과 이후 시도에 적용."
 
 ["TcpClient::setSendTimeout"]
 description.en = "Set the idle send timeout in seconds; default 60, 0 waits forever"

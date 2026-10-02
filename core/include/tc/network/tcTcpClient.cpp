@@ -85,6 +85,9 @@ void cancelQueuedSends(internal::TcpSendChannel& ch) {
 // =============================================================================
 struct TcpClient::ClientSendChannel : internal::TcpSendChannel {
     internal::TcpSendItem active;
+    // Cancellation releases payloads/waiters immediately; the writer retains
+    // only IDs so completion events still run on its thread.
+    std::deque<uint64_t> cancelledSendIds;
     bool hasActive = false;
     bool threaded = false;
     bool draining = false;
@@ -208,8 +211,9 @@ bool TcpClient::connect(const std::string& host, int port) {
     if (running_) {
         if (useThread_) {
             // Both reader and writer use non-blocking sockets.
-            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this, generation,
-                                         alive_);
+            keptThreads_.start(receiveThread_, [this, generation, alive = alive_] {
+                receiveThreadFunc(generation, alive);
+            });
         } else {
             // Register update listener
             updateListener_ = events().update.listen(this, &TcpClient::processNetwork);
@@ -228,6 +232,7 @@ bool TcpClient::prepareConnect() {
 
 void TcpClient::stopConnectThread() {
     connectCancelled_ = true;
+    std::deque<internal::TcpSendItem> cancelled;
     // A connect listener (WebSocket's HTTP request, for example) may be
     // waiting in send(). Cut that wait too before joining the connect worker.
     if (auto ch = sendChannel()) {
@@ -236,8 +241,13 @@ void TcpClient::stopConnectThread() {
             ch->open = false;
             // Queued borrowed bytes are not in use. An active item is woken
             // by its writer only after its non-blocking I/O step has ended.
-            for (const auto& item : ch->queue) finishWaiter(item, SendError::Disconnected, 0);
+            cancelled.swap(ch->queue);
+            for (const auto& item : cancelled) {
+                ch->pendingBytes -= item.size;
+                ch->cancelledSendIds.push_back(item.id);
+            }
         }
+        for (const auto& item : cancelled) finishWaiter(item, SendError::Disconnected, 0);
         ch->queued.notify_all();
         ch->room.notify_all();
     }
@@ -375,7 +385,9 @@ void TcpClient::connectAsync(const std::string& host, int port) {
     const unsigned attempt = ++connectAttempt_;
     asyncConnecting_ = true; // Published before the worker can start.
     if (useThread_) {
-        connectThread_ = std::thread(&TcpClient::connectThreadFunc, this, host, port, attempt);
+        keptThreads_.start(connectThread_, [this, host, port, attempt] {
+            connectThreadFunc(host, port, attempt);
+        });
     } else {
         connectThreadFunc(host, port, attempt);
     }
@@ -637,15 +649,34 @@ bool TcpClient::drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, b
         ClientSendChannel& channel;
         ~DrainGuard() { channel.draining = false; }
     } guard{*ch};
+    std::deque<uint64_t> cancelledSendIds;
+    auto reportCancelled = [&] {
+        for (uint64_t id : cancelledSendIds) {
+            if (!*alive) break;
+            TcpSendCompleteEventArgs args;
+            args.sendId = id;
+            args.error = SendError::Disconnected;
+            onSendComplete.notify(args);
+        }
+    };
     if (!ch->hasActive) {
-        std::lock_guard<std::mutex> lock(ch->mutex);
-        if (ch->queue.empty()) return false;
-        ch->active = std::move(ch->queue.front());
-        ch->queue.pop_front();
-        ch->hasActive = true;
-        ch->written = 0;
-        ch->timeout = *alive ? sendTimeout_.load() : 0.0f;
-        ch->progress = std::chrono::steady_clock::now();
+        {
+            std::lock_guard<std::mutex> lock(ch->mutex);
+            if (ch->queue.empty()) {
+                cancelledSendIds.swap(ch->cancelledSendIds);
+            } else {
+                ch->active = std::move(ch->queue.front());
+                ch->queue.pop_front();
+                ch->hasActive = true;
+                ch->written = 0;
+                ch->timeout = *alive ? sendTimeout_.load() : 0.0f;
+                ch->progress = std::chrono::steady_clock::now();
+            }
+        }
+        if (!ch->hasActive) {
+            reportCancelled();
+            return !cancelledSendIds.empty();
+        }
     }
     auto& item = ch->active;
     SendError outcome = SendError::None;
@@ -682,6 +713,7 @@ bool TcpClient::drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, b
     {
         std::lock_guard<std::mutex> lock(ch->mutex);
         ch->pendingBytes -= finished.size;
+        cancelledSendIds.swap(ch->cancelledSendIds);
         if (failed) {
             ch->open = false;
             cancelled.swap(ch->queue);
@@ -718,6 +750,7 @@ bool TcpClient::drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, b
     };
     report(finished, outcome, written);
     for (const auto& item : cancelled) report(item, SendError::Disconnected, 0);
+    reportCancelled();
     return true;
 }
 
@@ -730,7 +763,7 @@ void TcpClient::writerThreadFunc(std::shared_ptr<ClientSendChannel> ch, AliveTok
         {
             std::unique_lock<std::mutex> lock(ch->mutex);
             ch->queued.wait(lock, [&] { return !ch->open || !ch->queue.empty(); });
-            if (ch->queue.empty()) break;
+            if (ch->queue.empty() && ch->cancelledSendIds.empty()) break;
         }
         drainSendChannel(ch, true, alive);
         if (!*alive) { cancelQueuedSends(*ch); return; }
