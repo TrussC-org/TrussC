@@ -25,6 +25,12 @@
 include("${CMAKE_CURRENT_LIST_DIR}/trussc_shaders.cmake")
 
 macro(trussc_app)
+    # Keep the binary deployment target and Info.plist minimum consistent,
+    # including manual macOS builds that do not use the generated preset.
+    if(APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "14.0" CACHE STRING "Minimum macOS version" FORCE)
+    endif()
+
     # Set default build type to RelWithDebInfo
     if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)

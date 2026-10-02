@@ -105,6 +105,79 @@ TC_CORE_TEST_MAIN() {
     fs::remove_all(sandbox, ec);
     fs::create_directories(sandbox);
 
+    // Apple data folders (#285): exercise the production probe on a fake
+    // bundle on every OS. It selects a folder once, not a folder per file.
+    {
+        const fs::path bin = sandbox / "bundle-layout";
+        const fs::path exe = bin / "MyApp.app/Contents/MacOS";
+        const fs::path resources = exe / "../Resources/data";
+        fs::create_directories(exe);
+        fs::create_directories(bin / "data");
+        { std::ofstream out(bin / "data/outside-only.txt"); out << "outside"; }
+
+        internal::DataPathState dev{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(dev, exe);
+        check("Apple probe: dev bin/data used without Resources/data",
+              dev.probed && dev.root == "../../../data");
+
+        fs::create_directories(resources);
+        internal::DataPathState release{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(release, exe);
+        check("Apple probe: Resources/data wins over dev bin/data",
+              release.probed && release.root == "../Resources/data");
+
+        // getDataPath must keep the chosen folder even for a missing file.
+        auto& live = internal::dataPathState();
+        // DataPathState holds a mutex and an atomic: save and restore by field.
+        const fs::path savedRoot = live.root;
+        const bool savedUserSet = live.userSet;
+        const bool savedProbed = live.probed.load();
+        live.userSet = release.userSet;
+        live.probed.store(release.probed.load());
+        live.root = (exe / release.root).lexically_normal();
+        check("Apple probe: no per-file fallback to outside-only asset",
+              getDataPath("outside-only.txt") == live.root / "outside-only.txt" &&
+              !fs::exists(getDataPath("outside-only.txt")) &&
+              fs::exists(bin / "data/outside-only.txt"));
+        live.root = savedRoot;
+        live.userSet = savedUserSet;
+        live.probed.store(savedProbed);
+
+        fs::remove_all(resources);
+        internal::resolveAppleDataPathRootOnce(release, exe);
+        check("Apple probe: selected root is latched after folder removal",
+              release.root == "../Resources/data");
+        fs::create_directories(resources);
+        internal::resolveAppleDataPathRootOnce(dev, exe);
+        check("Apple probe: dev root is latched after bundle data appears",
+              dev.root == "../../../data");
+
+        fs::create_directories(exe / "data");
+        internal::DataPathState flat{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(flat, exe);
+        check("Apple probe: flat data wins over both macOS folders",
+              flat.root == "data");
+
+        internal::DataPathState custom{"custom", true};
+        internal::resolveAppleDataPathRootOnce(custom, exe);
+        check("Apple probe: explicit root bypasses selection",
+              custom.root == "custom" && !custom.probed);
+        internal::DataPathState early{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(early, {});
+        internal::resolveAppleDataPathRootOnce(early, "/");
+        check("Apple probe: unavailable executable path does not latch", !early.probed);
+        internal::resolveAppleDataPathRootOnce(early, exe);
+        check("Apple probe: retries after executable path becomes available",
+              early.probed && early.root == "data");
+
+        fs::remove_all(exe / "data");
+        { std::ofstream out(exe / "data"); out << "not a folder"; }
+        internal::DataPathState notFolder{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(notFolder, exe);
+        check("Apple probe: regular file named data is not selected",
+              notFolder.root == "../Resources/data");
+    }
+
     // --- 1. data-path root + getDataPath composition ---
     {
         setDataPathRoot(sandbox);

@@ -41,8 +41,9 @@ namespace internal {
     //
     // Its compile-time default is "data", or "../../../data" on Apple. On Apple
     // the true root differs by bundle layout and is chosen at runtime (see
-    // resolveDataPathRootOnce): macOS keeps data in bin/data/ reached via
-    // ../../../ from Contents/MacOS/, while iOS uses a FLAT bundle with data/
+    // resolveDataPathRootOnce): macOS releases use Contents/Resources/data,
+    // development uses bin/data/ reached via ../../../ from Contents/MacOS/,
+    // while iOS uses a FLAT bundle with data/
     // right next to the executable. Existence, not a preprocessor macro, is the
     // source of truth (TARGET_OS_* proved unreliable in the iOS build, and the
     // runtime probe also runs too early in _setup_cb to see a valid executable
@@ -70,9 +71,34 @@ inline void setDataPathRoot(const fs::path& path) {
 }
 
 namespace internal {
-// One-shot: pick the Apple bundle layout by probing which data/ exists next to
-// the executable. Skipped if the user set the root explicitly. Elsewhere it
-// only sets the flag.
+// Pick the Apple bundle layout for exe: the flat data/ next to the
+// executable (iOS, distributed), then the release bundle's Resources/data,
+// then the development bin/data. One folder is chosen, never a fallback per
+// file. Skipped if the user set the root explicitly. Kept platform-independent
+// so tests can run it on temporary bundle layouts; resolveDataPathRootOnce()
+// calls it under probeMutex.
+inline void resolveAppleDataPathRootOnce(DataPathState& state, const fs::path& exe) {
+    if (state.probed.load(std::memory_order_acquire) || state.userSet) return;
+    // Don't latch until the executable path is actually available — early on
+    // iOS it can be empty/"/", which would resolve the checks against the CWD.
+    // The next call retries.
+    if (exe.empty() || exe == fs::path("/")) return;
+    std::error_code ec;
+    // Release data is covered by the bundle signature; normal macOS builds
+    // only have bin/data.
+    if (fs::is_directory(exe / "data", ec)) {
+        state.root = "data";            // iOS flat bundle / distributed
+    } else if (fs::is_directory(exe / "../Resources/data", ec)) {
+        state.root = "../Resources/data"; // macOS release bundle
+    } else if (fs::is_directory(exe / "../../../data", ec)) {
+        state.root = "../../../data";   // macOS dev / bin layout
+    }
+    // else: keep the compile-time default
+    state.probed.store(true, std::memory_order_release);
+}
+
+// One-shot: pick the Apple bundle layout (above). Skipped if the user set the
+// root explicitly. Elsewhere it only sets the flag.
 // Safe to call from any thread: the probe runs once, under probeMutex; later
 // calls only read the atomic flag.
 inline void resolveDataPathRootOnce() {
@@ -87,22 +113,7 @@ inline void resolveDataPathRootOnce() {
         state.probed.store(true, std::memory_order_release);
         return;
     }
-    fs::path exe = getExecutableDir();
-    // Don't latch until the executable path is actually available — early on
-    // iOS it can be empty/"/", which would resolve the checks against the CWD.
-    // The next call retries.
-    if (exe.empty() || exe == fs::path("/")) return;
-    std::error_code ec;
-    // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
-    // next to the executable). macOS dev has no Contents/MacOS/data, so it
-    // correctly falls through to the ../../../data (bin/data) layout.
-    if (std::filesystem::exists(exe / "data", ec)) {
-        state.root = "data";            // iOS flat bundle / distributed
-    } else if (std::filesystem::exists(exe / "../../../data", ec)) {
-        state.root = "../../../data";   // macOS dev / bin layout
-    }
-    // else: keep the compile-time default
-    state.probed.store(true, std::memory_order_release);
+    resolveAppleDataPathRootOnce(state, getExecutableDir());
 #endif
 }
 
