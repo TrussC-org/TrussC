@@ -1073,6 +1073,10 @@ ThreadChannel<std::function<void()>>& mainThreadQueue() {
     static ThreadChannel<std::function<void()>> q;
     return q;
 }
+std::atomic<size_t>& mainThreadQueuePendingCount() {
+    static std::atomic<size_t> n{0};
+    return n;
+}
 #endif
 
 AsyncScheduler& AsyncScheduler::get() {

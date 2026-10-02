@@ -753,6 +753,9 @@ TLS/SSL communication support (mbedTLS).
 - Server certificate verification **required by default** (see [SECURITY.md](SECURITY.md))
 - Custom CA bundle via `setCACertificate()` / `setCACertificateFile()`
 - Dev-only opt-out via `setVerifyNone()` (don't ship)
+- Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s, counted
+  from the TCP connect; `0` = none). On expiry: `onError`, then
+  `onConnect(false)` with "TLS handshake timeout"
 
 ### tcxWebSocket
 
@@ -765,3 +768,8 @@ WebSocket client and server.
 - For `wss://`: TLS cert verification **on by default**. Use
   `setTlsVerifyNone()` or `setTlsCACertificate(pem)` on the client if needed
   (see [SECURITY.md](SECURITY.md))
+- Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s), one
+  deadline counted from the TCP connect that covers the TLS handshake and the
+  server's `101`. On expiry: `onError`, then `onClose`
+- Events fire on the client's network threads; use `Deliver::Main` for
+  listeners that touch the scene or GPU (see `tcWebSocketClient.h`)

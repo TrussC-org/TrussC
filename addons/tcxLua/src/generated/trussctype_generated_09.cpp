@@ -68,56 +68,60 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
     }
     {
-        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
-        t["codec"] = &trussc::VideoRecordSettings::codec;
-        t["fps"] = &trussc::VideoRecordSettings::fps;
-        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
-        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
-        t["duration"] = &trussc::VideoRecordSettings::duration;
-        t["audio"] = &trussc::VideoRecordSettings::audio;
-        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
-        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
-        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
+        sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
+        t["droppedPlays"] = &trussc::AudioStats::droppedPlays;
+        t["droppedPolyphonyLimit"] = &trussc::AudioStats::droppedPolyphonyLimit;
+        t["droppedStreamLimit"] = &trussc::AudioStats::droppedStreamLimit;
+        t["droppedDecoderError"] = &trussc::AudioStats::droppedDecoderError;
+        t["droppedNotRunning"] = &trussc::AudioStats::droppedNotRunning;
+        t["clippedSamples"] = &trussc::AudioStats::clippedSamples;
+        t["peak"] = &trussc::AudioStats::peak;
+        t["rms"] = &trussc::AudioStats::rms;
+        t["cpuUsage"] = &trussc::AudioStats::cpuUsage;
+        t["cpuUsagePeak"] = &trussc::AudioStats::cpuUsagePeak;
     }
-    lua->new_usertype<trussc::Orientation>("Orientation",
-        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
-        "Portrait", sol::var(trussc::Orientation::Portrait),
-        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
-        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
-        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
-        "Landscape", sol::var(trussc::Orientation::Landscape),
-        "All", sol::var(trussc::Orientation::All),
-        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
     {
-        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader",
-            sol::constructors<trussc::FullscreenShader()>(),
-            sol::call_constructor, sol::constructors<trussc::FullscreenShader()>());
-        t["draw"] = &trussc::FullscreenShader::draw;
+        sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",
+            sol::constructors<trussc::SoundStream()>(),
+            sol::call_constructor, sol::constructors<trussc::SoundStream()>());
+        t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
+        t["getDuration"] = &trussc::SoundStream::getDuration;
+        t["getPath"] = &trussc::SoundStream::getPath;
+        t["getMaxPolyphony"] = &trussc::SoundStream::getMaxPolyphony;
     }
-    lua->new_usertype<trussc::TcyMode>("TcyMode",
-        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
-        "Rotate", sol::var(trussc::TcyMode::Rotate),
-        "Upright", sol::var(trussc::TcyMode::Upright),
-        "Combine", sol::var(trussc::TcyMode::Combine));
     {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
+        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs",
+            sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>(),
+            sol::call_constructor, sol::constructors<trussc::LogEventArgs(trussc::LogLevel, const std::string &)>());
+        t["level"] = &trussc::LogEventArgs::level;
+        t["message"] = &trussc::LogEventArgs::message;
+        t["timestamp"] = &trussc::LogEventArgs::timestamp;
+    }
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
+    {
+        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
+        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
+        t["host"] = &trussc::TcpClientConnectEventArgs::host;
+        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+    }
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    {
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["message"] = &trussc::TcpErrorEventArgs::message;
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
+    }
+    {
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifndef _MSC_VER
