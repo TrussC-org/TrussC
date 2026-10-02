@@ -165,7 +165,6 @@ struct AudioDiagnostics {
     std::atomic<uint64_t> underrunFrames{0};
     std::atomic<uint64_t> unreportedUnderruns{0};
     std::atomic<uint64_t> voicesStoppedByReinit{0};
-    std::atomic<uint64_t> unreportedReinitStops{0};
     // Steady-clock nanoseconds, anchored before the device starts and
     // updated only when a mix callback has finished. Readers need no lock.
     std::atomic<int64_t> lastCallbackFinished{0};
@@ -185,7 +184,6 @@ struct AudioDiagnostics {
     std::chrono::steady_clock::time_point lastDropLog[kDropReasons]{};
     std::chrono::steady_clock::time_point lastUnderrunLog{};
     std::chrono::steady_clock::time_point lastStallLog{};
-    std::chrono::steady_clock::time_point lastReinitLog{};
     bool wasStalled = false;
     uint64_t unreportedStalls = 0;
     bool     deviceIsDefault = false;   // set by init()
@@ -195,7 +193,7 @@ struct AudioDiagnostics {
         // (steady_clock's epoch is not guaranteed to be far in the past).
         const auto longAgo = std::chrono::steady_clock::now() - kReportInterval;
         for (auto& t : lastDropLog) t = longAgo;
-        lastUnderrunLog = lastStallLog = lastReinitLog = longAgo;
+        lastUnderrunLog = lastStallLog = longAgo;
     }
 
     static int64_t clockNow() {
@@ -357,8 +355,6 @@ void AudioEngine::reportDiagnostics(bool force) {
     };
     reportCount(d.unreportedUnderruns, d.lastUnderrunLog, "SoundStream",
                 " stream underrun frames since the last report (decoder fell behind)");
-    reportCount(d.unreportedReinitStops, d.lastReinitLog, "AudioEngine",
-                " stream voices stopped by re-init since the last report (decoder could not reopen)");
 
     for (int r = 0; r < AudioDiagnostics::kDropReasons; ++r) {
         if (d.unreportedDrops[r].load(std::memory_order_relaxed) == 0) continue;
@@ -612,7 +608,7 @@ struct StreamInstance {
     // Only touched by the mixer (audio callback thread) — single-writer, no
     // atomicity needed.
     double subFrame = 0.0;
-    bool playbackStarted = false; // mixer only; initial decoder wait is not an underrun
+    bool playbackStarted = false; // mixer only; initial/seek refill waits are not underruns
 
     StreamInstance() : ring(RING_FRAMES * CHANNELS, 0.0f) {}
 
@@ -945,6 +941,10 @@ private:
     // Whether the decoder can give more frames (after any seek is taken).
     static bool readable(const StreamInstance& s) {
         if (s.halted) return false;
+        if (g_streamFault.load(std::memory_order_relaxed)
+                == (int)internal::StreamFaultForTests::SeekRefillStalls) {
+            return false;   // test: serve seeks, but hold back decoded frames
+        }
         return !s.decoderAtEnd || s.looping.load(std::memory_order_acquire);
     }
 
@@ -1433,6 +1433,7 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
         const uint64_t current = stream->readFrame.load(std::memory_order_relaxed);
         stream->readFrame.store(std::max(base, current), std::memory_order_release);
         stream->subFrame = 0.0;
+        stream->playbackStarted = false; // wait for the first post-seek decoded frame
         sound.positionF = stream->seekPublishedTarget.load(std::memory_order_relaxed);
         const uint64_t servedSeq = stream->seekPublishedSeq.load(std::memory_order_relaxed);
         stream->seekAppliedEpoch.store(epoch, std::memory_order_release);
@@ -1980,7 +1981,9 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
                 : newStream->openDecoder(*src, (ma_uint32)newRate);
             if (r != MA_SUCCESS) {
                 diag_->voicesStoppedByReinit.fetch_add(1, std::memory_order_relaxed);
-                diag_->unreportedReinitStops.fetch_add(1, std::memory_order_relaxed);
+                logWarning("AudioEngine") << "stream playback migration failed for "
+                                          << internal::pathToUtf8(src->getPath())
+                                          << " (result=" << (int)r << "); stopping the playback";
                 slot->playing = false;
                 // The voice ends here and keeps its position at the old rate
                 // (positionRateHz_ stays). The request dies with the stream,

@@ -952,10 +952,12 @@ namespace internal {
     // the stream's ring is written; the mixer then waits right there (up to
     // 50 ms) until the worker has served the seek and reached the stream's
     // end (an audio thread preempted at that point).
+    // SeekRefillStalls lets the worker serve seeks but holds back decoded
+    // frames, including after the mixer has applied the seek.
     // Otherwise only the worker's refill is affected, not loadStream() or
     // play(). State lives in tcAudio_impl.cpp.
     enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls,
-                                     ReopenFails, MixerLags };
+                                     ReopenFails, MixerLags, SeekRefillStalls };
     void setStreamFaultForTests(StreamFaultForTests fault);
 
     // Test hook: the number of seek points in the seek table of the stream

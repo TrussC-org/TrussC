@@ -200,10 +200,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   true with the expected bytes.
 - `audioHealth/` — audio health diagnostics (#302) on miniaudio's null
   backend: counts silent output frames after a stream starts, excludes startup,
-  pauses, pending seeks and normal ends; reports stalled callbacks with zero
+  pauses, pending seeks, refill waits after applied seeks and normal ends; reports stalled callbacks with zero
   meters and voice levels; counts stream decoder reopen failures on live re-init
-  separately from dropped plays. Checks MCP fields, main-thread warning summaries,
-  and shutdown flushing. Uses callback gates and condition-based waits.
+  separately from dropped plays. Checks MCP fields, main-thread underrun/stall
+  warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
+  Uses callback gates and condition-based waits.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an

@@ -120,11 +120,13 @@ TC_CORE_TEST_MAIN() {
 
     CallbackGate gate;
     atomic<bool> exactSilentBlock{false};
+    atomic<bool> lastBlockSilent{false};
     uint64_t previousUnderruns = 0; // callback-owned
     auto out = engine.audioOut.listen([&](AudioOutBuffer& b) {
         const auto n = engine.getStats().underrunFrames;
         bool silent = true;
         for (int i = 0; i < b.frameCount * b.channels; ++i) silent = silent && b.data[i] == 0;
+        lastBlockSilent = silent;
         if (silent && n - previousUnderruns == uint64_t(b.frameCount)) exactSilentBlock = true;
         previousUnderruns = n;
         gate.visit();
@@ -159,9 +161,31 @@ TC_CORE_TEST_MAIN() {
     gate.resume();
     check("pending seek callback parked", gate.park());
     check("pending seek silence is excluded", engine.getStats().underrunFrames == underruns);
+    // Unlike getPosition(), the inspection snapshot reads the mixer's
+    // positionF, so reaching the target proves the seek has been applied.
+    internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekRefillStalls);
+    gate.resume();
+    check("mixer applies the seek before any refill", waitFor([&] {
+        const auto playing = engine.getPlayingSounds();
+        return playing.size() == 1 && playing[0].position == 1.0f;
+    }));
+    check("applied seek callback parked", gate.park());
+    check("applied seek refill silence is excluded",
+          lastBlockSilent && engine.getStats().underrunFrames == underruns);
+    gate.resume();
+    check("next unfilled seek callback parked", gate.park());
+    check("continued seek refill silence is excluded",
+          lastBlockSilent && engine.getStats().underrunFrames == underruns);
+    stream.setSpeed(1);
     internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
     gate.resume();
+    check("playback resumes after seek refill", waitFor([&] { return stream.getPosition() > 1; }));
+    internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
+    stream.setSpeed(10);
+    check("starvation after seek playback is counted again",
+          waitFor([&] { return engine.getStats().underrunFrames > underruns; }));
     stream.stop();
+    internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
     const auto streamUnderruns = engine.getStats().underrunFrames;
 
     // A sustained nonzero voice lets stale meter values be distinguished from zero.
@@ -203,9 +227,12 @@ TC_CORE_TEST_MAIN() {
     check("failed migration stops the voice and counts it separately",
           !migrated.isPlaying() && after.voicesStoppedByReinit == before.voicesStoppedByReinit + 1
           && after.droppedPlays == before.droppedPlays && after.underrunFrames == before.underrunFrames);
-    check("migration warning is deferred to main-thread pump", countWarnings("stream voices stopped by re-init") == 0);
+    const string migrationWarning = "stream playback migration failed for " + internal::pathToUtf8(path)
+        + " (result=-20); stopping the playback"; // MA_IO_ERROR from ReopenFails
+    check("migration logs the failed path and result during init", countWarnings(migrationWarning) == 1);
     internal::pumpAudioDiagnostics();
-    check("pump reports re-init stops", countWarnings("stream voices stopped by re-init") == 1);
+    check("pump adds no migration summary or duplicate",
+          countWarnings("stream voices stopped by re-init") == 0 && countWarnings(migrationWarning) == 1);
     check("MCP reports the re-init counter", audioState().value("voicesStoppedByReinit", uint64_t(0)) == after.voicesStoppedByReinit);
     internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
     migrated.stop();
@@ -220,19 +247,18 @@ TC_CORE_TEST_MAIN() {
     gate.resume();
     ending.stop();
 
-    // Queue another failure and leave it for the shutdown flush, regardless
-    // of whether the report interval has elapsed on this machine.
+    // Each failed voice logs during init(), even inside the report interval.
     check("second migration stream starts", migrated.play());
     migrated.pause();
     internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
     settings.sampleRate = 48000;
     check("second live re-init succeeds", engine.init(settings));
-    const auto beforeExit = countWarnings("stream voices stopped by re-init");
+    check("second migration also logs its path and result during init", countWarnings(migrationWarning) == 2);
     out.disconnect();
     engine.waitForAudioCallbacks();
     engine.shutdown();
-    check("shutdown flushes a queued re-init warning",
-          countWarnings("stream voices stopped by re-init") == beforeExit + 1);
+    check("shutdown adds no migration summary or duplicate",
+          countWarnings("stream voices stopped by re-init") == 0 && countWarnings(migrationWarning) == 2);
     after = engine.getStats();
     check("shutdown retains counts and clears stall/meters", !after.stalled && after.peak == 0
           && after.voicesStoppedByReinit == 2 && after.underrunFrames >= underruns);

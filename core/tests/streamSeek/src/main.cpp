@@ -1038,19 +1038,18 @@ TC_CORE_TEST_MAIN() {
         // for the mixer running ahead.
         const auto t0 = chrono::steady_clock::now();
         const float before = a.getPosition();
-        const size_t warned = countLogs(LogLevel::Warning, "stream voices stopped by re-init");
+        const size_t warned = countLogs(LogLevel::Warning, "stream playback migration failed");
         const auto statsBefore = engine.getStats();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
         const bool restarted = reinitAt(otherRate());
         const float elapsedSec = chrono::duration<float>(chrono::steady_clock::now() - t0).count();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("reopen fails: the engine restarts", restarted);
-        internal::flushAudioDiagnostics();
-        check("reopen fails: both voices end with an aggregated warning",
+        check("reopen fails: both voices end with a warning",
               !a.isPlaying() && !b.isPlaying() &&
               engine.getStats().voicesStoppedByReinit == statsBefore.voicesStoppedByReinit + 2 &&
               engine.getStats().droppedPlays == statsBefore.droppedPlays &&
-              countLogs(LogLevel::Warning, "stream voices stopped by re-init") == warned + 1,
+              countLogs(LogLevel::Warning, "stream playback migration failed") == warned + 2,
               lastLog(LogLevel::Warning));
         const float after = a.getPosition();
         check("reopen fails: getPosition() carries over",

@@ -514,9 +514,9 @@ description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상�
 related = ["AudioEngine::getStats", "PlayingSoundInfo"]
 
 ["AudioStats::underrunFrames"]
-description.en = "Cumulative silent output frames per streaming voice because the decoder fell behind. A new voice's wait before its first decoded frame, pauses, pending seeks and a normal end are excluded. Warnings are aggregated on the main thread at most once per two seconds, with remaining counts flushed at exit."
-description.ja = "デコーダーが遅れてストリーム再生が無音になった出力フレーム数の累計 (再生インスタンスごと)。新しい再生の最初のデコード待ち、一時停止、処理待ちのシーク、正常な終端は含まない。警告はメインスレッドで2秒に最大1回集約し、終了時に残りを報告する"
-description.ko = "디코더가 늦어 스트림 재생이 무음이 된 출력 프레임 수 누계 (재생 인스턴스별). 새 재생의 첫 디코딩 대기, 일시 정지, 처리 대기 중인 탐색, 정상 종료는 제외한다. 경고는 메인 스레드에서 2초에 최대 한 번 집계하며 종료 시 나머지를 보고한다"
+description.en = "Cumulative silent output frames per streaming voice because the decoder fell behind. A new voice's wait before its first decoded frame, pauses, pending seeks, refill waits after an applied seek and a normal end are excluded. Warnings are aggregated on the main thread at most once per two seconds, with remaining counts flushed at exit."
+description.ja = "デコーダーが遅れてストリーム再生が無音になった出力フレーム数の累計 (再生インスタンスごと)。新しい再生の最初のデコード待ち、一時停止、処理待ちのシーク、シーク適用後のデータ補充待ち、正常な終端は含まない。警告はメインスレッドで2秒に最大1回集約し、終了時に残りを報告する"
+description.ko = "디코더가 늦어 스트림 재생이 무음이 된 출력 프레임 수 누계 (재생 인스턴스별). 새 재생의 첫 디코딩 대기, 일시 정지, 처리 대기 중인 탐색, 탐색 적용 후 데이터 보충 대기, 정상 종료는 제외한다. 경고는 메인 스레드에서 2초에 최대 한 번 집계하며 종료 시 나머지를 보고한다"
 
 ["AudioStats::stalled"]
 description.en = "True while the engine is running but no mix callback has finished for max(250 ms, four granted device periods). Master meters, CPU usage meters and playing-sound levels read zero while stalled. Clears when a callback finishes or the device stops; the main thread reports stall episodes with rate-limited warnings."
@@ -524,9 +524,9 @@ description.ja = "エンジン動作中にミックスコールバックが max(
 description.ko = "엔진 동작 중 믹스 콜백이 max(250 ms, 디바이스가 실제 부여한 4주기) 동안 완료되지 않으면 true. 이 상태에서는 마스터 미터, CPU 사용률 미터, 재생 인스턴스 레벨이 0이다. 콜백 완료 또는 디바이스 정지로 해제되며 메인 스레드가 발생을 간격 제한 경고로 보고한다"
 
 ["AudioStats::voicesStoppedByReinit"]
-description.en = "Cumulative streaming voices stopped because a live sample-rate re-init could not reopen their decoder. Separate from droppedPlays: these voices had already started successfully. Reported by the main-thread diagnostics pump and at exit with rate-limited warnings."
-description.ja = "動作中のサンプルレート再初期化でデコーダーを開き直せず停止したストリーム再生インスタンスの累計。再生開始は成功していたため droppedPlays とは別に数える。メインスレッドの診断ポンプと終了時に間隔制限付きの警告で報告する"
-description.ko = "동작 중 샘플 레이트 재초기화에서 디코더를 다시 열 수 없어 정지한 스트림 재생 인스턴스 누계. 재생 시작은 성공했으므로 droppedPlays 와 별도로 센다. 메인 스레드 진단 펌프와 종료 시 간격 제한 경고로 보고한다"
+description.en = "Cumulative streaming voices stopped because a live sample-rate re-init could not reopen their decoder. Separate from droppedPlays: these voices had already started successfully. Each failure keeps the existing warning with its file path and decoder result on the thread calling init(); this counter adds no summary warning."
+description.ja = "動作中のサンプルレート再初期化でデコーダーを開き直せず停止したストリーム再生インスタンスの累計。再生開始は成功していたため droppedPlays とは別に数える。各失敗は init() を呼んだスレッドでファイルパスとデコーダーの結果値を含む既存の警告を出す。このカウンタによる集約警告は追加しない"
+description.ko = "동작 중 샘플 레이트 재초기화에서 디코더를 다시 열 수 없어 정지한 스트림 재생 인스턴스 누계. 재생 시작은 성공했으므로 droppedPlays 와 별도로 센다. 각 실패는 init() 을 호출한 스레드에서 파일 경로와 디코더 결과 값을 포함하는 기존 경고를 남긴다. 이 카운터는 요약 경고를 추가하지 않는다"
 
 ["AudioStats::clippedSamples"]
 description.en = "Output samples beyond +/-1.0 that the final clamp cut off (counted per channel sample)."
