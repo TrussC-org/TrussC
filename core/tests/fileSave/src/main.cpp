@@ -1,7 +1,7 @@
 // =============================================================================
 // fileSave — the save helpers report write errors (#274)
 //
-// Headless, plain main(), exit code = pass/fail.
+// Headless, registered in allCoreTests; exit code = pass/fail.
 //
 // - saveJson serializes before it opens the file: after {"a":1} is saved, a
 //   saveJson with a string that is not valid UTF-8 returns false, logs an
