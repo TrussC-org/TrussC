@@ -204,6 +204,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the first Spot light with a projection texture and the single IES slot to
   the first light with a profile (among the first 8), and flags a further
   projector or IES light that gets no slot (the PBR draw warns once from it).
+- `meshGpuDirty/` — the `Mesh` data revision that decides GPU re-uploads
+  (#267): every mutator (`clear()` / `clearXxx()`, `add*`, `setNormal`,
+  `translate` / `rotateX/Y/Z` / `scale` / `transform`, `append`, `setMode`),
+  every non-const getter and `markGpuDirty()` change `getDataRevision()`,
+  also for a `clear()` followed by re-adding the same vertex count; const
+  getters and other const reads leave it unchanged. Uses `TC_CORE_TEST_MAIN`
+  in allCoreTests; the default run is headless. With `--gpu-check`, FBO
+  readback checks Points rebuilds/colors/translations and PBR rotations and
+  vertex edits, plus independent buffer caching and move assignment.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a

@@ -65,6 +65,7 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["drawNoLightingWithTexture"] = &trussc::Mesh::drawNoLightingWithTexture;
         t["drawWireframe"] = &trussc::Mesh::drawWireframe;
         t["markGpuDirty"] = &trussc::Mesh::markGpuDirty;
+        t["getDataRevision"] = &trussc::Mesh::getDataRevision;
         t["uploadToGpu"] = &trussc::Mesh::uploadToGpu;
         t["drawGpuPbr"] = &trussc::Mesh::drawGpuPbr;
         t["drawGpuPoints"] = &trussc::Mesh::drawGpuPoints;
