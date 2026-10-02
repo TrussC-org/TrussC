@@ -2,7 +2,8 @@
 
 Headless **behavioral regression tests** for the TrussC core. Each test's
 entry (`TC_CORE_TEST_MAIN`, see below) returns non-zero on failure. CI builds and runs every `core/tests/*/`
-here (`build_all.py --core-tests-only`); a non-zero exit fails the job. This is
+here (`build_all.py --core-tests-only`), except tests marked `daily-only`;
+a non-zero exit fails the job. This is
 the same convention bundled addons use (`addons/*/tests/`).
 
 This is the *behavioral* tier — it complements, and does not replace, the
@@ -82,8 +83,8 @@ test cannot share an executable: it replaces or interposes a library
 function for the whole binary (`operator new`, `fclose`, `write`, `ioctl`,
 `pthread_create`), needs a special project shape (hot reload host/guest),
 or needs an addon. Such a test is built and run alone, as before. Today:
-`audioDiagnostics`, `hotReloadLifecycle`, `serialBaudRate`, `serialHangup`,
-`tcpServerClients`.
+`audioDiagnostics`, `dataPathLoads`, `hotReloadLifecycle`, `serialBaudRate`,
+`serialHangup`, `tcpServerClients`.
 
 ### Running tests locally
 
@@ -99,6 +100,20 @@ cd ../clipSpace && ../allCoreTests/bin/allCoreTests clipSpace   # run one
 Arguments after the name go to the test, e.g. `allCoreTests fontSfntCheck
 --dump font.ttf`. An unknown name prints the usage and exits 2. Build it in
 Release: `entryStacks` and `scopedStack` skip in a debug build.
+
+The batch runner prints each test process's wall time and a summary sorted
+from slowest to fastest, across combined, own-binary and standalone unit
+tests. Build time is excluded; timing is informational, never a pass/fail
+threshold.
+
+A `daily-only` marker file in `core/tests/<name>/` skips that test's run on
+PRs. `build_all.py --core-tests-only --include-daily` includes it in the
+daily workflow. This applies to both test shapes and web runs. Combined
+daily-only tests remain compiled into `allCoreTests`; its full `--list` is
+checked against every combined test directory before runs are selected, so
+an unregistered test still fails the sweep. Do not comment out or delete
+tests to reduce run time. Which tests move to daily-only requires an owner
+Decision after reviewing measured times.
 
 ### Also on web (`web-test` marker)
 
@@ -123,6 +138,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
 ## Tests
 
+- `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
+  replay (#271): pre-append overflow detection, growth on the next sokol frame,
+  32-bit relative indices, multiple passes, and captured-resource lifetime.
+  Standalone CMake unit test with a plain `int main()`; run in Debug and Release.
+- `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
+  `allCoreTests shaderStreamDraws --gpu-check` (OpenGL Core display required)
+  also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
+  passes, checks the growth warning, and exercises Shader moves/clear with
+  a pending swapchain draw. On Linux, run it with Xvfb.
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
   main thread, and `Node::destroy()` is safe from any thread. Each frame's drain
@@ -191,6 +215,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `dataPathLoads/` — the loaders share the same path rule (#273):
+  `Pixels::load` / `loadHDR`, `Sound::load` / `loadStream` and tcxLut's
+  `Lut3D::load` resolve a relative path against `getDataPath()` with no
+  working-directory fallback (the test moves the CWD elsewhere; a file only
+  there is not found), `Pixels::save("a.png")` then `Pixels::load("a.png")`
+  round-trips, and a UTF-8 WAV name loads. `getDataPath()` called from two
+  threads at once, before anything else, agrees with the main thread. `Lut3D`
+  is checked up to its `.cube` parse; `Font::load` needs a GPU and is not run.
+  The data-root base is normalized without changing filename components
+  (including `symlink/..`), and absolute inputs pass through unchanged (#365 P2).
 - `fileSave/` — the save helpers report write errors (#274): `saveJson`
   serializes before it opens the file, so a string that is not valid UTF-8
   returns false, logs an error and leaves the saved `{"a":1}` loadable, and it

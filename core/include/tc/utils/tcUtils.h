@@ -12,6 +12,8 @@
 #include <chrono>
 #include <memory>
 #include <filesystem>
+#include <atomic>
+#include <mutex>
 #include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
 #include "../sound/tcSound.h"
 
@@ -45,11 +47,13 @@ namespace internal {
     // right next to the executable. Existence, not a preprocessor macro, is the
     // source of truth (TARGET_OS_* proved unreliable in the iOS build, and the
     // runtime probe also runs too early in _setup_cb to see a valid executable
-    // path — so it happens lazily on first use).
+    // path — so it happens right before the App's setup(), or on the first
+    // getDataPath() call if that comes earlier, from any thread).
     struct DataPathState {
         fs::path root;
-        bool userSet = false;  // user called setDataPathRoot()
-        bool probed = false;   // lazy Apple probe done
+        bool userSet = false;            // user called setDataPathRoot()
+        std::atomic<bool> probed{false}; // root final (Apple probe done or skipped)
+        std::mutex probeMutex;           // guards the probe and setDataPathRoot()
     };
     DataPathState& dataPathState();
 }
@@ -57,24 +61,31 @@ namespace internal {
 // Set the data path root
 // If relative, resolved relative to executable directory
 // If absolute, used as-is (fs::path::is_absolute — handles "C:/..." on Windows too)
+// Call it before starting threads that load files (e.g. in setup()): loaders
+// read the root without a lock.
 inline void setDataPathRoot(const fs::path& path) {
     auto& state = internal::dataPathState();
+    std::lock_guard<std::mutex> lock(state.probeMutex);
     state.root = path;
     state.userSet = true;  // explicit choice wins over the probe
 }
 
 namespace internal {
-// Kept platform-independent so the Apple folder selection can be tested
-// headlessly with temporary bundle layouts on every platform.
+// Pick the Apple bundle layout for exe: the flat data/ next to the
+// executable (iOS, distributed), then the release bundle's Resources/data,
+// then the development bin/data. One folder is chosen, never a fallback per
+// file. Skipped if the user set the root explicitly. Kept platform-independent
+// so tests can run it on temporary bundle layouts; resolveDataPathRootOnce()
+// calls it under probeMutex.
 inline void resolveAppleDataPathRootOnce(DataPathState& state, const fs::path& exe) {
-    if (state.probed || state.userSet) return;
+    if (state.probed.load(std::memory_order_acquire) || state.userSet) return;
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
+    // The next call retries.
     if (exe.empty() || exe == fs::path("/")) return;
-    state.probed = true;
     std::error_code ec;
-    // Choose one folder, never fall back per file. Release data is covered by
-    // the bundle signature; normal macOS builds only have bin/data.
+    // Release data is covered by the bundle signature; normal macOS builds
+    // only have bin/data.
     if (fs::is_directory(exe / "data", ec)) {
         state.root = "data";            // iOS flat bundle / distributed
     } else if (fs::is_directory(exe / "../Resources/data", ec)) {
@@ -83,45 +94,69 @@ inline void resolveAppleDataPathRootOnce(DataPathState& state, const fs::path& e
         state.root = "../../../data";   // macOS dev / bin layout
     }
     // else: keep the compile-time default
+    state.probed.store(true, std::memory_order_release);
 }
 
-// One-shot Apple bundle probe; an explicit root wins. No-op elsewhere.
+// One-shot: pick the Apple bundle layout (above). Skipped if the user set the
+// root explicitly. Elsewhere it only sets the flag.
+// Safe to call from any thread: the probe runs once, under probeMutex; later
+// calls only read the atomic flag.
 inline void resolveDataPathRootOnce() {
-#ifdef __APPLE__
     auto& state = dataPathState();
-    if (state.probed || state.userSet) return;
+    if (state.probed.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lock(state.probeMutex);
+    if (state.probed.load(std::memory_order_relaxed)) return;
+#ifndef __APPLE__
+    state.probed.store(true, std::memory_order_release);  // nothing to probe
+#else
+    if (state.userSet) {
+        state.probed.store(true, std::memory_order_release);
+        return;
+    }
     resolveAppleDataPathRootOnce(state, getExecutableDir());
 #endif
+}
+
+// The root after resolveDataPathRootOnce(). Until the probe has latched (the
+// executable path was not available yet) it is read under probeMutex, since
+// another thread may be probing.
+inline fs::path currentDataPathRoot() {
+    resolveDataPathRootOnce();
+    auto& state = dataPathState();
+    if (state.probed.load(std::memory_order_acquire)) return state.root;
+    std::lock_guard<std::mutex> lock(state.probeMutex);
+    return state.root;
 }
 } // namespace internal
 
 // Get the data path root
 inline fs::path getDataPathRoot() {
-    internal::resolveDataPathRootOnce();
-    return internal::dataPathState().root;
+    return internal::currentDataPathRoot();
 }
 
 // Get data path for a filename
 // - If filename is absolute, return as-is (like oF)
 // - Otherwise, resolved relative to executable directory + dataPathRoot
+// - Normalize only that base; preserve filename components (including symlink/..).
+// Safe to call from any thread (e.g. Pixels::load on a worker).
 inline fs::path getDataPath(const fs::path& filename) {
-    internal::resolveDataPathRootOnce();
     if (!filename.empty() && filename.is_absolute()) {
         return filename;
     }
 
-    const fs::path& root = internal::dataPathState().root;
+    const fs::path root = internal::currentDataPathRoot();
     if (root.is_absolute()) {
-        return root / filename;
+        return root.lexically_normal() / filename;
     } else {
         // Relative root: resolve relative to executable directory
-        return getExecutableDir() / root / filename;
+        return (getExecutableDir() / root).lexically_normal() / filename;
     }
 }
 
 // For macOS bundle distribution: Set data path to Resources folder
 // Will reference xxx.app/Contents/Resources/data/
 // No-op on non-macOS platforms
+// Like setDataPathRoot(), call it before starting threads that load files.
 TC_PLATFORMS("macos,ios") inline void setDataPathToResources() {
     #ifdef __APPLE__
     setDataPathRoot("../Resources/data/");

@@ -697,6 +697,10 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+`HapPlayer::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
+there is no working-directory fallback.
+
 **Features:**
 - Hap, Hap Alpha, Hap Q codecs
 - GPU-side decompression (S3TC/DXT)
@@ -723,6 +727,10 @@ Dear ImGui integration.
 ### tcxLut
 
 3D LUT (Look-Up Table) color grading.
+
+`Lut3D::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `Image::load()`. Absolute paths pass through;
+there is no working-directory fallback.
 
 **Features:**
 - Load .cube LUT files

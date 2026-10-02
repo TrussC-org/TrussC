@@ -42,7 +42,11 @@
 
 namespace trussc {
 
+class Environment;
+
 namespace internal {
+
+void clearEnvironmentFromAllContexts(Environment* environment);
 
 // Shared baking resources (pipelines, quad buffer), lazily created on the
 // first bake (Environment::ensureBakeResources).
@@ -73,6 +77,7 @@ public:
     Environment() = default;
 
     ~Environment() {
+        internal::clearEnvironmentFromAllContexts(this);
         release();
     }
 

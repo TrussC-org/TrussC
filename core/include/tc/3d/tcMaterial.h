@@ -24,6 +24,12 @@ class Texture;  // forward declare (full definition in tcTexture.h, included lat
 class Material {
 public:
     Material() = default;
+    ~Material();
+
+    Material(const Material&) = default;
+    Material& operator=(const Material&) = default;
+    Material(Material&&) = default;
+    Material& operator=(Material&&) = default;
 
     // --- baseColor ---
     Material& setBaseColor(const Color& c) { baseColor_ = c; return *this; }
@@ -222,5 +228,8 @@ private:
     const Texture* emissiveTex_ = nullptr;
     const Texture* occlusionTex_ = nullptr;
 };
+
+namespace internal { void clearMaterialFromAllContexts(Material* material); }
+inline Material::~Material() { internal::clearMaterialFromAllContexts(this); }
 
 } // namespace trussc

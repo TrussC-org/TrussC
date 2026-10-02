@@ -565,6 +565,10 @@ jobs:
         if: always()
         run: python3 tools/check_core_logging.py
 
+      - name: core test runner regression checks
+        if: always()
+        run: python3 tools/test_core_test_runner.py
+
       - name: release workflow offline tests
         if: always()
         run: python3 tools/tests/test_release_workflow.py -v
