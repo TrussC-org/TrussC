@@ -40,7 +40,7 @@
 #include <nlohmann/json.hpp>
 
 #ifdef TCX_HTTP_CURL
-#include <curl/curl.h>
+#include "tcCurlTlsInternal.h"
 #endif
 
 namespace tcx::curl {
@@ -490,13 +490,7 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     // image generation, where the server then requests renegotiation) fail with
     // "SSL/TLS connection timeout". CURLOPT_TIMEOUT already bounds the whole
     // operation, so the connect phase stays bounded without breaking renegotiation.
-#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
-    // Windows curl is built against Schannel, which already verifies against the
-    // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
-    // suspenders: if the backend is ever swapped (e.g. an OpenSSL build), it makes
-    // curl use the OS trust store instead of failing with "SSL connect error".
-    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
-#endif
+    detail::applyTlsDefaults(curl);
     if (followRedirects_) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
@@ -571,6 +565,7 @@ inline HttpResponse HttpClient::uploadFile(const std::string& path, const std::s
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 600L);  // 10 min for large RAW files
+    detail::applyTlsDefaults(curl);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
