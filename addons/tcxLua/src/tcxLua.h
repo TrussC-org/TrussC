@@ -3,6 +3,7 @@
 #include "sol/sol.hpp"
 #include "tcxLuaPathAdapter.h"  // sol2 <-> std::filesystem::path (Lua string) conversion; must precede any path binding TU
 #include "TrussC.h"
+#include <fstream>
 
 // namespace tcx::lua {
 
@@ -74,13 +75,33 @@ public:
     /// @return true if the file loaded and ran. false on a missing file, a syntax
     ///         error or a runtime error (logged).
     static bool runFile(sol::state& lua, const std::filesystem::path& path) {
-        sol::protected_function_result result = lua.safe_script_file(path.string(), sol::script_pass_on_error);
-        if (!result.valid()) {
-            sol::error err = result;
+        try {
+            const auto fullPath = trussc::getDataPath(path);
+            std::error_code ec;
+            const auto size = std::filesystem::file_size(fullPath, ec);
+            // loadTextFile returns an empty string on failure as well as for an
+            // empty file. Check readability separately so empty scripts work.
+            std::ifstream readable(fullPath, std::ios::binary);
+            if (ec || !readable.is_open()) {
+                trussc::logError("tcxLua") << "Cannot read file: " << trussc::pathToUtf8(path);
+                return false;
+            }
+            const auto text = trussc::loadTextFile(path);
+            if (text.size() != size) {
+                trussc::logError("tcxLua") << "Cannot read complete file: " << trussc::pathToUtf8(path);
+                return false;
+            }
+            auto result = lua.safe_script(text, sol::script_pass_on_error, "@" + trussc::pathToUtf8(path));
+            if (!result.valid()) {
+                sol::error err = result;
+                trussc::logError("tcxLua") << err.what();
+                return false;
+            }
+            return true;
+        } catch (const std::exception& err) {
             trussc::logError("tcxLua") << err.what();
             return false;
         }
-        return true;
     }
 
 protected:

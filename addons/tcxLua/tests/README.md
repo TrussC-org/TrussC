@@ -9,7 +9,10 @@ Error-contained entry points (`tcxLua::call` / `tcxLua::runFile`):
   runtime `error()`, an index of nil, a nil function, a non-function value and
   `string.char(340)` in `call`, each return `false` without throwing; the state
   stays usable afterwards;
-- a valid file and a valid call return `true`, and call arguments arrive.
+- syntax-error messages contain the file name; missing/unreadable files log an
+  error, while empty files and files under Japanese paths load successfully;
+- a valid file and a valid call return `true`, and call arguments arrive;
+- repeated failing calls each log an error;
 - the bundled `sketch.lua` accepts ordinary keys and ignores Shift / arrow keys;
 - sol2's default script error handler still throws `sol::error`.
 

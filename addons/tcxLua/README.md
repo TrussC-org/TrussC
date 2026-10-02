@@ -46,7 +46,7 @@ load it again to recover.
 ```cpp
 auto lua = tcxLua().getLuaState();
 
-tcxLua::runFile(*lua, getDataPath("sketch.lua"));  // safe_script_file with sol::script_pass_on_error
+tcxLua::runFile(*lua, getDataPath("sketch.lua"));  // loadTextFile + safe_script with sol::script_pass_on_error
 tcxLua::call(*lua, "setup");                       // calls through sol::protected_function
 tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
 ```
@@ -55,14 +55,19 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
   call raised an error. When `fn` is nil (the script does not define it),
   nothing is called and nothing is logged; it also returns `false`.
 - `tcxLua::runFile(sol::state&, const fs::path&)` returns `false` for a missing
-  file, a syntax error or an error while the file runs.
+  or unreadable file, a syntax error or an error while the file runs. Files are
+  read through `loadTextFile`, supporting Unicode paths on Windows, and Lua
+  diagnostics include the UTF-8 file name.
 - Both also work on the Web, where C++ exceptions cannot be caught.
 
 sol2's own defaults are unchanged: on an error, `lua->safe_script(...)` and
 `safe_script_file(...)` without `sol::script_pass_on_error` throw `sol::error`,
 and so does a direct call such as `(*lua)["draw"]()` in Release builds. An
-uncaught exception ends the app. The examples
-`exampleFileReload` and `exampleLiveUpdate` use the helpers.
+uncaught exception ends the app.
+
+`exampleFileReload` uses the helpers. `exampleLiveUpdate` uses protected calls
+and logs runtime errors once per compiled expression with `OnceGate`; it keeps
+trying each frame, and editing the expression resets the log gate.
 
 ## Threads
 

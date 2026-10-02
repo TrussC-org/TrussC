@@ -37,6 +37,7 @@ void tcApp::update() {
     // the expression is valid again.
     if (script != compiledScript) {
         compiledScript = script;
+        stepErrorLogged.emplace();
         auto result = lua.safe_script("function step() x, y = " + script + " end", sol::script_pass_on_error);
         if (!result.valid()) {
             sol::error err = result;
@@ -45,8 +46,21 @@ void tcApp::update() {
         }
     }
 
-    // A runtime error is logged and the app keeps running; a nil `step` is skipped.
-    tcxLua::call(lua, "step");
+    // Keep trying each frame, but log only once for this compiled expression.
+    // The shared call helper logs every failure, so gate the example's own
+    // protected call here instead.
+    sol::object target = lua["step"];
+    if (target.get_type() == sol::type::function) {
+        sol::protected_function step = target;
+        auto result = step();
+        if (!result.valid() && stepErrorLogged->isFirstTime()) {
+            sol::error err = result;
+            logError("tcxLua") << err.what();
+        }
+    } else if (target.get_type() != sol::type::lua_nil && target.get_type() != sol::type::none
+               && stepErrorLogged->isFirstTime()) {
+        logError("tcxLua") << "step: expected a Lua function";
+    }
 
     auto&& _x = lua["x"];
     auto&& _y = lua["y"];
