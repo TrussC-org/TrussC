@@ -643,6 +643,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `fontAtlasLimit/` — glyphs larger than an atlas page (#404). A glyph whose
+  box does not fit the largest page is rasterized at a lower resolution that
+  fits (a lower integer oversampling, or a raster scale below 1) and keeps
+  its size and offset in final pixels; a glyph that fits keeps its
+  oversampling. A font whose bounding box at the loaded size and oversampling
+  exceeds the page logs exactly one warning, naming the size, oversampling
+  and page limit, and no further warning over many lookups; the atlas page
+  count and memory stay the same over many simulated frames, and
+  `clearAtlas()` rasterizes the glyph again. Headless (page limit 4096); the
+  font is built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
