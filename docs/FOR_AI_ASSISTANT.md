@@ -3156,7 +3156,7 @@ float & Mat4::at(int row, int col) [+1]  // Access the element at (row, col)
 Mat4 Mat4::fromHomography(const Mat3 & h)  // Build a Mat4 from a 3x3 homography (for 2D projection)
 Mat4 Mat4::frustum(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an asymmetric perspective (frustum) projection matrix
 Mat4 Mat4::identity()  // Create an identity matrix
-Mat4 Mat4::inverted() const  // Get inverse matrix
+Mat4 Mat4::inverted() const  // Get inverse matrix (identity when |det| < 1e-10, including valid tiny scales; use tryInvert for a relative check)
 Mat4 Mat4::lookAt(const Vec3 & eye, const Vec3 & target, const Vec3 & up)  // Create a view matrix
 Mat4 Mat4::ortho(float left, float right, float bottom, float top, float nearPlane, float farPlane)  // Create an orthographic projection matrix
 Mat4 Mat4::perspective(float fovY, float aspect, float nearPlane, float farPlane)  // Create a perspective projection matrix
@@ -3167,6 +3167,7 @@ Mat4 Mat4::rotateZ(float radians)  // Create Z-axis rotation matrix
 Mat4 Mat4::scale(float sx, float sy, float sz) [+2]  // Create a scaling matrix
 Mat4 Mat4::translate(float tx, float ty, float tz) [+1]  // Create a translation matrix
 Mat4 Mat4::transposed() const  // Get transposed matrix
+bool Mat4::tryInvert(Mat4 & out) const  // Checked inverse: writes the inverse to out and returns true, or returns false (out unchanged) when the matrix is degenerate, e.g. an axis scaled to 0. The test is relative to the matrix scale, so small but valid scales still invert
 ```
 
 ### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible)
