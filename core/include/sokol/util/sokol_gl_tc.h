@@ -3070,11 +3070,23 @@ static sgl_context _sgl_make_ctx_id(uint32_t ctx_id) {
     return ctx;
 }
 
+/* [TrussC fork] Unlike the setup allocator, a failed grow must leave existing
+   contexts usable and return id 0 to the caller, rather than panic on allocation. */
+static void* _sgl_try_malloc_clear(size_t size) {
+    void* ptr = _sgl.desc.allocator.alloc_fn
+        ? _sgl.desc.allocator.alloc_fn(size, _sgl.desc.allocator.user_data)
+        : malloc(size);
+    if (ptr) {
+        memset(ptr, 0, size);
+    }
+    return ptr;
+}
+
 /* [TrussC fork] Double the context pool when it is full (TrussC's auto-grow
    policy for fixed-capacity buffers). Contexts are referenced by id (the
    commit listener stores the slot id), so moving them is safe; the only
    context pointer held across sgl_make_context() is _sgl.cur_ctx, which is
-   looked up again. Returns false when the pool is at its maximum size. */
+   looked up again. Returns false on allocation failure or at the maximum size. */
 static bool _sgl_grow_context_pool(void) {
     _sgl_pool_t* pool = &_sgl.context_pool.pool;
     const int old_num = pool->size - 1;     // slot 0 is reserved
@@ -3086,9 +3098,15 @@ static bool _sgl_grow_context_pool(void) {
         return false;
     }
     const int new_size = new_num + 1;
-    uint32_t* gen_ctrs = (uint32_t*) _sgl_malloc_clear(sizeof(uint32_t) * (size_t)new_size);
-    int* free_queue = (int*) _sgl_malloc_clear(sizeof(int) * (size_t)new_num);
-    _sgl_context_t* contexts = (_sgl_context_t*) _sgl_malloc_clear(sizeof(_sgl_context_t) * (size_t)new_size);
+    uint32_t* gen_ctrs = (uint32_t*) _sgl_try_malloc_clear(sizeof(uint32_t) * (size_t)new_size);
+    int* free_queue = (int*) _sgl_try_malloc_clear(sizeof(int) * (size_t)new_num);
+    _sgl_context_t* contexts = (_sgl_context_t*) _sgl_try_malloc_clear(sizeof(_sgl_context_t) * (size_t)new_size);
+    if (!gen_ctrs || !free_queue || !contexts) {
+        if (gen_ctrs) _sgl_free(gen_ctrs);
+        if (free_queue) _sgl_free(free_queue);
+        if (contexts) _sgl_free(contexts);
+        return false;
+    }
     memcpy(gen_ctrs, pool->gen_ctrs, sizeof(uint32_t) * (size_t)pool->size);
     memcpy(contexts, _sgl.context_pool.contexts, sizeof(_sgl_context_t) * (size_t)pool->size);
     int queue_top = pool->queue_top;

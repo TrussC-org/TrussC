@@ -279,6 +279,9 @@ context pool grows like the buffers in 11.
   with the old and new size is logged (`SGL_LOGITEM_CONTEXT_POOL_GROWN`,
   message built with `snprintf` through `_sgl_log_msg()`; `<stdio.h>` added).
   Contexts are referenced by id, so moving them is safe.
+  Growth allocations are fallible: on allocation failure, temporary arrays
+  are freed, the old pool and current context stay intact, and context
+  creation returns id 0 so TrussC can warn once without retrying.
 - `_SGL_DEFAULT_CONTEXT_POOL_SIZE`: 4 -> 8 (start size; reason next to it).
 
 Regression test: `core/tests/sglPoolLimits` (dummy backend).
