@@ -425,6 +425,10 @@ target_link_directories(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARIES})
 ```
 
+### Bundle Identifier (macOS / iOS)
+
+On macOS and iOS the app's bundle identifier defaults to `com.trussc.<project name>`. Set your own one in `local.cmake` before you distribute the app, e.g. `set(TC_BUNDLE_ID "com.example.myApp")`. `trussc_app()` reads `TC_BUNDLE_ID` after including `local.cmake` and uses it for `CFBundleIdentifier` in the generated Info.plist and for the Xcode `PRODUCT_BUNDLE_IDENTIFIER` setting, so it survives `trusscli update`. macOS keys privacy permissions and user defaults by this identifier, so two apps with the same project name and the default identifier share them. Other platforms ignore `TC_BUNDLE_ID`.
+
 ### `local.cmake` vs Addons
 
 | | `local.cmake` | Addon (`addons.make`) |
