@@ -151,9 +151,22 @@ static void notFlaggedFnPtrParam(int (*cb)(int));
 static void notFlaggedDefaultParam(Registry* reg = nullptr);
 static std::string notFlaggedStdPtrParam(std::string* out);
 static int notFlaggedRegistryParam(Registry* reg);
+// Template arguments are not expressions: a function type or sizeof / true there
+inline void notFlaggedFnTypeParam(const std::function<void(const std::string&)>& h);
+static void notFlaggedCallbackParam(std::function<void()> cb);
+template <class T> inline void notFlaggedSizeofArg(std::aligned_storage_t<sizeof(T)>& s);
+inline void notFlaggedBoolArg(std::bool_constant<true> t);
+// A snake_case name (an inner `_`, not all caps) or any name before `&` is a
+// type, and so is FILE; a lowercase name before `*` stays an operand
+inline void notFlaggedCTypeParam(sapp_event* e);
+inline void notFlaggedLowerRefParam(json& j);
+static void notFlaggedFileParam(FILE* f);
+constexpr int count = 2, scale = 3;
+inline std::vector<int> lowerProductInit(count * scale);                 // expect: fx::lowerProductInit
 namespace {
 std::string anonDirectInit(kDefaultText);                                // expect: fx::anonDirectInit
 int notFlaggedAnonFnDecl(int count);
+void notFlaggedAnonCTypeParam(lua_State* L);
 }
 
 // --- A base class named by decltype
@@ -271,6 +284,12 @@ struct LambdaMember {
 #define FX_NOT_FLAGGED_STATIC_API static
 #define FX_NOT_FLAGGED_CONSTEXPR() do { static constexpr int k = 1; (void)k; } while (0)
 #define FX_NOT_FLAGGED_CAST(x) static_cast<int>(x)
+// A class body in a macro: only a `static inline` data member is state, and
+// the statics in a member function's body
+#define FX_NOT_FLAGGED_CLASS_MEMBERS(T) struct T { static T& get(); static int declaredOnly; };
+#define FX_CLASS_ACCESSOR(T) struct T { static T& get() { static T inst; return inst; } };  // expect: FX_CLASS_ACCESSOR::inst
+#define FX_CLASS_INLINE_MEMBER(T) struct T { static inline int perModule = 0; };  // expect: FX_CLASS_INLINE_MEMBER::perModule
+#define FX_NOT_FLAGGED_CALLBACK_DECL static void setCb(std::function<void()> cb);
 
 // --- A friend operator<< must not open a template bracket that hides what follows
 struct Streamable {
