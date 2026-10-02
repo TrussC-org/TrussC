@@ -190,6 +190,19 @@ optional optimization rather than a correctness requirement.
 WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
 bind groups / descriptor sets; growing them is much more invasive).
 
+### Upload-only frame synchronization (Metal)
+
+**Purpose:** End frames on ticks that record offscreen work or uploads without
+drawing the screen (#332). A commit without a pass must participate in the
+in-flight semaphore before rotating uniform slots or collecting resources.
+
+**Changes (marked `[TrussC modification]`):**
+- `_sg_mtl_ensure_command_buffer()` shares the first-pass command-buffer creation,
+  semaphore wait and completion-handler signal with `_sg_mtl_commit()`.
+- `_sg_mtl_commit()` creates and commits an empty command buffer when no pass
+  created one. Existing pass frames reuse their command buffer and semaphore
+  slot. Retained/unretained-reference settings remain respected.
+
 ---
 
 ## sokol_glue.h
