@@ -868,6 +868,9 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
         (void)af::val<AudioStats>().rms;
         (void)af::val<AudioStats>().cpuUsage;
         (void)af::val<AudioStats>().cpuUsagePeak;
+        (void)af::val<AudioStats>().underrunFrames;
+        (void)af::val<AudioStats>().stalled;
+        (void)af::val<AudioStats>().voicesStoppedByReinit;
     }
 };
 

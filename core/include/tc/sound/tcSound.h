@@ -862,7 +862,7 @@ struct PlayingSoundInfo {
     float       pan = 0.0f;
     float       speed = 1.0f;
     float       level = 0.0f;       // peak of this playback's output in the last callback
-                                    // (linear, 1.0 = full scale; 0 while paused)
+                                    // (linear, 1.0 = full scale; 0 while paused or stalled)
 };
 
 // ---------------------------------------------------------------------------
@@ -881,24 +881,28 @@ struct AudioStats {
 
     uint64_t clippedSamples = 0;       // output samples beyond +/-1.0 that were hard-clipped
 
-    // Meters: 0 while no device is running (before init, after shutdown).
+    // Meters: 0 while no device is running or callbacks are stalled.
     float peak = 0.0f;                 // master output peak over the last ~100 ms (linear, before clipping)
     float rms = 0.0f;                  // master output RMS over the same window
     // Fraction of audio-thread time: mix time / audio time, averaged over
     // ~0.5 s. 1.0 means the callback took as long as the audio it produced.
     float cpuUsage = 0.0f;
     float cpuUsagePeak = 0.0f;         // worst single callback in that window (> 1 = a dropout)
+
+    uint64_t underrunFrames = 0;       // silent output frames per stream voice after playback began
+    bool stalled = false;             // running, but no callback finished for max(250 ms, 4 periods)
+    uint64_t voicesStoppedByReinit = 0; // stream voices whose decoder could not reopen at the new rate
 };
 
 // Engine diagnostics state (counters, meters, report timers). Defined in
 // tcAudio_impl.cpp so the audio-thread accumulators stay out of this header.
 namespace internal {
     struct AudioDiagnostics;
-    // Log the dropped plays that were only counted: drops off the main
+    // Log diagnostics that were only counted: drops off the main
     // thread, and repeats inside the rate limit. Rate limited. Called once
     // per frame by the app loop on the main thread.
     void pumpAudioDiagnostics();
-    // Same, ignoring the rate limit, so no counted drop is left unlogged:
+    // Same, ignoring the rate limit, so no counted diagnostic is left unlogged:
     // the exit paths call it (AudioEngine::shutdown(), runHeadlessApp()).
     // Main thread.
     void flushAudioDiagnostics();
@@ -1363,7 +1367,7 @@ private:
     // Streaming mix path: full implementation in tcAudio_impl.cpp where
     // StreamInstance / ma_decoder types are visible. Declared here, body
     // is out-of-line.
-    static void mixStreamVoice(PlayingSound& sound, SoundStream& src,
+    void mixStreamVoice(PlayingSound& sound, SoundStream& src,
                                float* buffer, int num_frames, int num_channels);
 
     // Re-init helper: rate-adjust active voices so they keep playing from

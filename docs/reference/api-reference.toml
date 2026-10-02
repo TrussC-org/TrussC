@@ -280,9 +280,9 @@ description.ko = "현재 엔진 출력 샘플레이트 (Hz). init() 전에는 �
 ["AudioEngine::getStats"]
 category = "audioengine"
 keywords = ["diagnostics", "dropped", "clipping", "peak", "rms", "cpu usage", "cpu load", "health"]
-description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
-description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの CPU 使用率。atomic を読むだけなので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
-description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 CPU 사용률. atomic 만 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
+description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; stream underrun frames, stalled callbacks and voices stopped by re-init; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Reads atomics and a steady clock, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
+description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、ストリームの underrun フレーム数、コールバックの停止状態、再初期化で停止した再生数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの CPU 使用率。atomic と単調時計を読むので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
+description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 스트림 underrun 프레임 수, 콜백 정지 상태, 재초기화로 정지한 재생 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 CPU 사용률. atomic 과 단조 시계를 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
 related = ["AudioStats", "AudioEngine::getPlayingSounds", "Sound::play"]
 
 ["AudioEngine::init"]
@@ -507,11 +507,26 @@ description.ja = "エンジン出力サンプルレート (Hz、0 = エンジン
 description.ko = "엔진 출력 샘플레이트 (Hz, 0 = 엔진 기본값 48000)"
 
 ["AudioStats"]
-keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu usage", "cpu load", "meter"]
+keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu usage", "cpu load", "meter", "underrun", "stall", "re-init"]
 description.en = "Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output."
 description.ja = "AudioEngine::getStats() が返すオーディオエンジンの健全性カウンタとメーター。カウンタはプロセス起動からの累計 (再初期化でも消えない)。peak / rms / cpuUsage は直近の出力を表す"
 description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상태 카운터와 미터. 카운터는 프로세스 시작 이후 누계 (재초기화해도 유지). peak / rms / cpuUsage 는 최근 출력을 나타낸다"
 related = ["AudioEngine::getStats", "PlayingSoundInfo"]
+
+["AudioStats::underrunFrames"]
+description.en = "Cumulative silent output frames per streaming voice because the decoder fell behind. A new voice's wait before its first decoded frame, pauses, pending seeks and a normal end are excluded. Warnings are aggregated on the main thread at most once per two seconds, with remaining counts flushed at exit."
+description.ja = "デコーダーが遅れてストリーム再生が無音になった出力フレーム数の累計 (再生インスタンスごと)。新しい再生の最初のデコード待ち、一時停止、処理待ちのシーク、正常な終端は含まない。警告はメインスレッドで2秒に最大1回集約し、終了時に残りを報告する"
+description.ko = "디코더가 늦어 스트림 재생이 무음이 된 출력 프레임 수 누계 (재생 인스턴스별). 새 재생의 첫 디코딩 대기, 일시 정지, 처리 대기 중인 탐색, 정상 종료는 제외한다. 경고는 메인 스레드에서 2초에 최대 한 번 집계하며 종료 시 나머지를 보고한다"
+
+["AudioStats::stalled"]
+description.en = "True while the engine is running but no mix callback has finished for max(250 ms, four granted device periods). Master meters, CPU usage meters and playing-sound levels read zero while stalled. Clears when a callback finishes or the device stops; the main thread reports stall episodes with rate-limited warnings."
+description.ja = "エンジン動作中にミックスコールバックが max(250 ms, デバイスが実際に与えた4周期) の間完了しなければ true。停止状態ではマスターメーター、CPU 使用率メーター、再生インスタンスのレベルは0。コールバックの完了またはデバイス停止で解除される。メインスレッドが停止の発生を間隔制限付きの警告で報告する"
+description.ko = "엔진 동작 중 믹스 콜백이 max(250 ms, 디바이스가 실제 부여한 4주기) 동안 완료되지 않으면 true. 이 상태에서는 마스터 미터, CPU 사용률 미터, 재생 인스턴스 레벨이 0이다. 콜백 완료 또는 디바이스 정지로 해제되며 메인 스레드가 발생을 간격 제한 경고로 보고한다"
+
+["AudioStats::voicesStoppedByReinit"]
+description.en = "Cumulative streaming voices stopped because a live sample-rate re-init could not reopen their decoder. Separate from droppedPlays: these voices had already started successfully. Reported by the main-thread diagnostics pump and at exit with rate-limited warnings."
+description.ja = "動作中のサンプルレート再初期化でデコーダーを開き直せず停止したストリーム再生インスタンスの累計。再生開始は成功していたため droppedPlays とは別に数える。メインスレッドの診断ポンプと終了時に間隔制限付きの警告で報告する"
+description.ko = "동작 중 샘플 레이트 재초기화에서 디코더를 다시 열 수 없어 정지한 스트림 재생 인스턴스 누계. 재생 시작은 성공했으므로 droppedPlays 와 별도로 센다. 메인 스레드 진단 펌프와 종료 시 간격 제한 경고로 보고한다"
 
 ["AudioStats::clippedSamples"]
 description.en = "Output samples beyond +/-1.0 that the final clamp cut off (counted per channel sample)."
@@ -520,16 +535,16 @@ description.ko = "최종 클램프에서 잘린 ±1.0 을 넘는 출력 샘플 �
 
 ["AudioStats::cpuUsage"]
 keywords = ["cpu usage", "cpu load", "audio thread", "dropout", "overrun"]
-description.en = "Fraction of audio-thread time: time spent mixing the playing sounds and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio. 1.0 means the callback took as long as the audio it produced (0.25 = a quarter of the time budget). 0 while the engine is not running."
-description.ja = "オーディオスレッドの時間の割合: 再生中のサウンドと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均。1.0 はコールバックが生成した音と同じだけの時間がかかったことを表す (0.25 = 時間予算の 4 分の 1)。エンジン停止中は 0"
-description.ko = "오디오 스레드 시간의 비율: 재생 중인 사운드와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균. 1.0 은 콜백이 생성한 오디오만큼의 시간이 걸렸다는 뜻 (0.25 = 시간 예산의 4 분의 1). 엔진이 정지 상태면 0"
+description.en = "Fraction of audio-thread time: time spent mixing the playing sounds and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio. 1.0 means the callback took as long as the audio it produced (0.25 = a quarter of the time budget). 0 while the engine is not running or callbacks are stalled."
+description.ja = "オーディオスレッドの時間の割合: 再生中のサウンドと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均。1.0 はコールバックが生成した音と同じだけの時間がかかったことを表す (0.25 = 時間予算の 4 分の 1)。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "오디오 스레드 시간의 비율: 재생 중인 사운드와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균. 1.0 은 콜백이 생성한 오디오만큼의 시간이 걸렸다는 뜻 (0.25 = 시간 예산의 4 분의 1). 엔진 또는 콜백이 정지 상태면 0"
 related = ["AudioStats::cpuUsagePeak"]
 
 ["AudioStats::cpuUsagePeak"]
 keywords = ["cpu usage", "peak", "dropout", "overrun"]
-description.en = "CPU usage of the worst single callback in the same window; above 1 the callback took longer than the audio it produced (a dropout). 0 while the engine is not running."
-description.ja = "同じ区間で最も重かったコールバック 1 回の CPU 使用率。1 を超えたらコールバックが生成した音より長くかかった (音切れ)。エンジン停止中は 0"
-description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 CPU 사용률. 1 을 넘으면 콜백이 생성한 오디오보다 오래 걸린 것 (끊김). 엔진이 정지 상태면 0"
+description.en = "CPU usage of the worst single callback in the same window; above 1 the callback took longer than the audio it produced (a dropout). 0 while the engine is not running or callbacks are stalled."
+description.ja = "同じ区間で最も重かったコールバック 1 回の CPU 使用率。1 を超えたらコールバックが生成した音より長くかかった (音切れ)。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 CPU 사용률. 1 을 넘으면 콜백이 생성한 오디오보다 오래 걸린 것 (끊김). 엔진 또는 콜백이 정지 상태면 0"
 related = ["AudioStats::cpuUsage"]
 
 ["AudioStats::droppedDecoderError"]
@@ -559,14 +574,14 @@ description.ja = "SoundStream が既に maxPolyphony 本の再生を持ってい
 description.ko = "SoundStream 이 이미 maxPolyphony 개의 재생을 갖고 있어 버려진 재생 수. 스트리밍 Sound 의 복사본에서만 발생 (단일 Sound 는 이전 재생을 먼저 정지)"
 
 ["AudioStats::peak"]
-description.en = "Master output peak over the last ~100 ms, linear (1.0 = full scale). Measured before the clamp, so a value above 1 shows how far the mix overshoots. 0 while the engine is not running."
-description.ja = "直近約 100 ms のマスター出力のピーク (リニア、1.0 = フルスケール)。クランプ前に測るので、1 を超えた値はミックスのはみ出し量を示す。エンジン停止中は 0"
-description.ko = "최근 약 100 ms 의 마스터 출력 피크 (선형, 1.0 = 풀 스케일). 클램프 전에 측정하므로 1 을 넘는 값은 믹스가 얼마나 넘쳤는지를 보여준다. 엔진이 정지 상태면 0"
+description.en = "Master output peak over the last ~100 ms, linear (1.0 = full scale). Measured before the clamp, so a value above 1 shows how far the mix overshoots. 0 while the engine is not running or callbacks are stalled."
+description.ja = "直近約 100 ms のマスター出力のピーク (リニア、1.0 = フルスケール)。クランプ前に測るので、1 を超えた値はミックスのはみ出し量を示す。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "최근 약 100 ms 의 마스터 출력 피크 (선형, 1.0 = 풀 스케일). 클램프 전에 측정하므로 1 을 넘는 값은 믹스가 얼마나 넘쳤는지를 보여준다. 엔진 또는 콜백이 정지 상태면 0"
 
 ["AudioStats::rms"]
-description.en = "Master output RMS over the same ~100 ms window, linear. 0 while the engine is not running."
-description.ja = "同じ約 100 ms 区間のマスター出力の RMS (リニア)。エンジン停止中は 0"
-description.ko = "같은 약 100 ms 구간의 마스터 출력 RMS (선형). 엔진이 정지 상태면 0"
+description.en = "Master output RMS over the same ~100 ms window, linear. 0 while the engine is not running or callbacks are stalled."
+description.ja = "同じ約 100 ms 区間のマスター出力の RMS (リニア)。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "같은 약 100 ms 구간의 마스터 출력 RMS (선형). 엔진 또는 콜백이 정지 상태면 0"
 
 ["AxisMode"]
 description.en = "Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children)."
@@ -7011,9 +7026,9 @@ description.ja = "ソースの長さ (秒)"
 description.ko = "소스 길이 (초)"
 
 ["PlayingSoundInfo::level"]
-description.en = "Peak absolute value of this playback's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, and while the engine is not running."
-description.ja = "直近のオーディオコールバックでのこの再生の出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中と、エンジン停止中は 0"
-description.ko = "최근 오디오 콜백에서 이 재생 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 그리고 엔진이 정지 상태일 때는 0"
+description.en = "Peak absolute value of this playback's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, while the engine is not running, or while callbacks are stalled."
+description.ja = "直近のオーディオコールバックでのこの再生の出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中、エンジン停止中、コールバックが停止状態なら 0"
+description.ko = "최근 오디오 콜백에서 이 재생 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 엔진 정지 중, 또는 콜백 정지 상태일 때는 0"
 
 ["PlayingSoundInfo::loop"]
 description.en = "Loop flag of the playback."
