@@ -224,8 +224,9 @@ public:
 
     /// Set the maximum allowed video/audio drift (in seconds) before a hard
     /// re-sync (video seeks to the audio position). Set to 0 or negative to
-    /// disable. Primarily affects the Linux (FFmpeg) backend; tcxHap's
-    /// HapPlayer uses the audio position directly with random frame access.
+    /// disable hard re-sync. Affects the Linux (FFmpeg) backend and tcxHap's
+    /// HapPlayer, which slews wall-clock time toward playing audio and uses
+    /// this threshold for hard re-sync. Slewing remains enabled when <= 0.
     /// Other platforms delegate sync to their native framework.
     /// Default: 0.5s
     virtual void setResyncThreshold(float seconds) { resyncThreshold_ = seconds; }

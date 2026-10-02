@@ -921,14 +921,15 @@ static void pcmTableTests(const fs::path& data) {
 static void clockTests() {
     const double dt = 1.0 / 60.0;
     const double duration = 10.0;
+    const double threshold = 0.5;
 
-    // Audio advances 1% faster than the supplied wall-clock deltas, in
-    // 512-frame mixer blocks. Video must equal that position on every step,
-    // including repeated positions and loop boundaries.
-    auto runDrift = [&](bool irregular, int& wraps) {
+    // Audio master, the audio clock 1% faster than the wall clock, the audio
+    // position advancing in 512-frame mixer blocks at 48 kHz, a 10 s video
+    // looping for 10000 steps: the video stays within the threshold of the
+    // audio without a hard re-sync
+    auto runDrift = [&](bool irregular, double& maxDiff, int& resyncs, int& wraps) {
         double t = 0.0, audioExact = 0.0;
-        bool exact = true;
-        wraps = 0;
+        maxDiff = 0.0; resyncs = 0; wraps = 0;
         const double block = 512.0 / 48000.0;
         for (int i = 0; i < 10000; i++) {
             // Irregular deltas: alternately 0 and two frames
@@ -937,51 +938,119 @@ static void clockTests() {
             const double audioPos = floor(audioExact / block) * block;
             PlaybackClockInput in;
             in.time = t; in.dt = d; in.speed = 1.0; in.duration = duration; in.loop = true;
-            in.audioMaster = true; in.audioTime = audioPos;
-            const PlaybackClockStep step = stepPlaybackClock(in);
-            const bool shouldWrap = audioPos >= duration;
-            const double expected = shouldWrap ? fmod(audioPos, duration) : audioPos;
-            exact = exact && step.time == expected && step.wrapped == shouldWrap && !step.ended;
-            t = step.time;
-            if (step.wrapped) {
+            in.audioMaster = true; in.audioTime = audioPos; in.resyncThreshold = threshold;
+            const PlaybackClockStep s = stepPlaybackClock(in);
+            t = s.time;
+            if (s.resynced) resyncs++;
+            if (s.wrapped) {
                 // HapPlayer moves the audio to the wrapped time
                 wraps++;
                 audioExact = t;
+            } else {
+                maxDiff = max(maxDiff, fabs(t - audioPos));
             }
         }
-        return exact;
     };
-    int wraps = 0;
-    const bool regularExact = runDrift(false, wraps);
-    check("clock: audio 1% fast, 10000 steps -> video equals audio position (wrapped)",
-          regularExact && wraps == 16, to_string(wraps) + " wraps");
-    const bool irregularExact = runDrift(true, wraps);
-    check("clock: irregular deltas, 10000 steps -> video equals audio position (wrapped)",
-          irregularExact && wraps == 16, to_string(wraps) + " wraps");
+    double maxDiff = 0.0;
+    int resyncs = 0, wraps = 0;
+    runDrift(false, maxDiff, resyncs, wraps);
+    check("clock: audio 1% fast, 10000 steps -> |video - audio| < threshold, no re-sync",
+          maxDiff < threshold && resyncs == 0 && wraps >= 16,
+          "max " + to_string(maxDiff) + " s, " + to_string(resyncs) + " re-syncs, " +
+          to_string(wraps) + " wraps");
+    check("clock: audio 1% fast -> |video - audio| stays under 20 ms", maxDiff < 0.02,
+          "max " + to_string(maxDiff) + " s");
+    runDrift(true, maxDiff, resyncs, wraps);
+    check("clock: irregular deltas, 10000 steps -> |video - audio| < threshold, no re-sync",
+          maxDiff < threshold && resyncs == 0, "max " + to_string(maxDiff) + " s, " +
+          to_string(resyncs) + " re-syncs");
 
-    // Direct audio time is independent of dt, speed scaling and drift size.
+    // A continuous clock 1% faster than wall time converges to a small,
+    // stable lag. Check the initial transient and the final 60-step error range.
     {
         PlaybackClockInput in;
-        in.time = 3.0; in.dt = dt; in.duration = duration;
-        in.audioMaster = true; in.audioTime = 5.0;
-        check("clock: audio ahead -> video equals audio position",
-              stepPlaybackClock(in).time == 5.0);
-        in.dt = 0.0;
-        check("clock: zero delta -> video still equals audio position",
-              stepPlaybackClock(in).time == 5.0);
-        in.time = 5.0; in.dt = 0.25;
-        check("clock: repeated audio position -> video stays at audio position",
-              stepPlaybackClock(in).time == 5.0);
-        in.audioTime = 5.01;
-        check("clock: small audio advance -> video equals audio position",
-              stepPlaybackClock(in).time == in.audioTime);
+        in.dt = dt; in.audioMaster = true;
+        double earlyError = 0.0, lateMin = 1.0, lateMax = 0.0;
+        bool resynced = false;
+        for (int i = 1; i <= 600; ++i) {
+            in.audioTime = i * dt * 1.01;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            in.time = step.time;
+            resynced = resynced || step.resynced;
+            const double error = fabs(step.time - in.audioTime);
+            if (i == 1) earlyError = error;
+            if (i > 540) {
+                lateMin = min(lateMin, error);
+                lateMax = max(lateMax, error);
+            }
+        }
+        check("clock: audio clock 1% fast -> converges to stable lag below 3 ms",
+              !resynced && lateMax < 0.003 && lateMax - lateMin < 1e-9 &&
+              earlyError < lateMin * 0.1,
+              "lag " + to_string(lateMax) + " s, range " + to_string(lateMax - lateMin));
+    }
+
+    // Device-period positions at 48 kHz: supply exact deltas, no real time.
+    // Include one buffer of mixed-audio lead. Repeated audio positions must
+    // still advance video time every refresh, with increments below 20 ms.
+    for (int bufferFrames : {2048, 480}) {
+        const double period = bufferFrames / 48000.0;
+        PlaybackClockInput in;
+        in.dt = dt; in.audioMaster = true;
+        double minAdvance = 1.0, maxAdvance = 0.0;
+        int repeats = 0, updates = 0;
+        bool smooth = true;
+        for (int i = 1; i <= 10000; ++i) {
+            const double audioPosition = (floor(i * dt / period) + 1.0) * period;
+            if (audioPosition == in.audioTime) ++repeats;
+            else ++updates;
+            in.audioTime = audioPosition;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            const double advance = step.time - in.time;
+            minAdvance = min(minAdvance, advance);
+            maxAdvance = max(maxAdvance, advance);
+            smooth = smooth && advance > 0.0 && advance < 0.020 &&
+                     !step.resynced && !step.wrapped && !step.ended;
+            in.time = step.time;
+        }
+        check("clock: coarse " + to_string(bufferFrames) +
+              "-frame audio positions -> video advances every 60 Hz step below 20 ms",
+              smooth && updates > 0 && (bufferFrames != 2048 || repeats > 0),
+              "min " + to_string(minAdvance) + " s, max " + to_string(maxAdvance) +
+              " s, " + to_string(repeats) + " repeated positions");
+    }
+
+    // Hard re-sync: the audio position 2 s ahead of the video
+    {
+        PlaybackClockInput in;
+        in.time = 3.0; in.dt = dt; in.duration = duration; in.loop = true;
+        in.audioMaster = true; in.audioTime = 5.0; in.resyncThreshold = threshold;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: difference above the threshold -> video set to the audio position",
+              s.resynced && s.time == 5.0, to_string(s.time));
+        in.resyncThreshold = 0.0;
+        const PlaybackClockStep s2 = stepPlaybackClock(in);
+        check("clock: threshold 0 -> slew without hard re-sync",
+              !s2.resynced && s2.time > in.time + in.dt && s2.time < 5.0,
+              to_string(s2.time));
+        in.resyncThreshold = -1.0;
+        const PlaybackClockStep s3 = stepPlaybackClock(in);
+        check("clock: negative threshold -> slew without hard re-sync",
+              !s3.resynced && s3.time == s2.time);
+    }
+
+    // Forward audio at a changed speed still drives the video position.
+    {
+        PlaybackClockInput in;
+        in.time = 2.0; in.dt = 0.25; in.speed = 2.0; in.duration = duration;
+        in.audioMaster = true; in.audioTime = 2.5;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: forward speed 2 -> follows matching audio position",
+              s.time == 2.5 && !s.resynced && !s.ended);
         in.audioTime = 1.0;
-        check("clock: audio behind -> video equals audio position",
-              stepPlaybackClock(in).time == 1.0);
-        in.speed = 2.0; in.audioTime = 2.25;
-        const PlaybackClockStep step = stepPlaybackClock(in);
-        check("clock: forward speed 2 -> audio position used without speed scaling",
-              step.time == 2.25 && !step.wrapped && !step.ended);
+        const PlaybackClockStep behind = stepPlaybackClock(in);
+        check("clock: audio behind above threshold -> video re-syncs backward",
+              behind.time == 1.0 && behind.resynced);
     }
 
     // Synthetic 2-second audio in a 5-second video. Its position remains at
@@ -1033,10 +1102,12 @@ static void clockTests() {
                   exact && step.time == 0.0 && step.wrapped &&
                   audioPlaying && audioPosition == 0.0 &&
                   audioRestarts == 1 && audioSeeks == 1);
+            in.dt = 0.125;
             audioPosition = 0.25;
             const PlaybackClockStep resumed = updateClock();
-            check("clock: shorter audio after wrap -> playing audio is master again",
-                  resumed.time == 0.25 && !resumed.wrapped && !resumed.ended &&
+            check("clock: shorter audio after wrap -> clock slews toward playing audio again",
+                  resumed.time == 0.1875 && !resumed.resynced &&
+                  !resumed.wrapped && !resumed.ended &&
                   audioRestarts == 1 && audioSeeks == 1);
         }
     }
@@ -1051,7 +1122,7 @@ static void clockTests() {
             in.time = t; in.dt = 0.25; in.speed = 1.5; in.duration = duration; in.loop = true;
             const PlaybackClockStep s = stepPlaybackClock(in);
             const double expected = fmod(t + 0.375, duration);
-            exact = exact && s.time == expected;
+            exact = exact && s.time == expected && !s.resynced;
             if (s.wrapped) wrapsWall++;
             t = s.time;
         }

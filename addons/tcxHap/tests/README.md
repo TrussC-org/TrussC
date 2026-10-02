@@ -65,14 +65,21 @@ track) and written to the temp folder:
 - v0 rate 22254.5454 Hz (16.16): read as 22255 Hz.
 - `stepPlaybackClock()`: with the audio clock 1% faster than the wall clock
   and the audio position moving in 512-frame blocks, 10000 steps of a looping
-  10 s video equal the audio position exactly (modulo the duration at loop
-  boundaries), also with irregular frame deltas. Zero deltas, repeated audio
-  positions, small advances, forward/backward jumps and speed 2 all use the
-  audio position directly. Without audio, and in reverse, time moves by
-  dt * speed and wraps at the ends.
+  10 s video stay within 20 ms of audio without hard re-sync; irregular
+  frame deltas also stay below the re-sync threshold. A continuous 1% faster
+  audio clock converges to a stable lag below 3 ms. Wall-clock `dt * speed`
+  slews toward audio with a
+  0.25 s time constant; larger differences trigger hard re-sync according
+  to the threshold. A nonpositive threshold disables only hard re-sync.
+  Forward speed 2 follows audio; without audio, and in reverse, time moves
+  by `dt * speed` and wraps at the ends.
+- Coarse audio positions update every 2048/48000 s (42.7 ms) or 480/48000 s
+  (10 ms), including one buffer of mixed-audio lead. Over 10000 supplied
+  `dt = 1/60` steps, video time increases every step by less than 20 ms,
+  without hard re-sync. The 2048-frame case includes repeated positions.
 - Synthetic 2 s audio in a 5 s video: when audio stops at 2 s, supplied
   0.5 s deltas carry video to its end. With looping, video wraps to 0 s,
-  restarts and resyncs the synthetic audio, then follows its position again.
+  restarts and resyncs the synthetic audio, then slews toward it again.
   No wall-clock bounds or audio device are used.
 
 To check `MovParser` against ffmpeg's own output (not part of the test), for

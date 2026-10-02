@@ -93,11 +93,27 @@ inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuff
 // ---------------------------------------------------------------------------
 // Pure function (no player state), so the clock can be checked headless.
 //
-// - Wall clock: time advances by dt * speed. Used when audio is not playing,
-//   and for reverse or zero-speed playback (speed <= 0).
-// - Audio master (audioMaster true): time is the audio position (audioTime),
-//   as in the Linux VideoPlayer. HAP frames are randomly addressable, so
-//   there is no decoder catch-up or threshold-based seek to perform.
+// - Wall clock: time advances by dt * speed. Used for files without audio,
+//   for reverse playback (speed <= 0), and while the audio is not playing.
+// - Audio master (audioMaster true): time advances by dt * speed and is then
+//   pulled toward the audio position (audioTime), closing the difference
+//   with a time constant of kAudioSlewSeconds, so the video follows the
+//   audio clock without stepping at the mixer's buffer size. When the
+//   difference is above resyncThreshold (> 0), time is set to the audio
+//   position (hard re-sync).
+//
+// Sound::getPosition() returns positionF (in seconds), written back by the
+// mixer once per audio callback (one device period), without interpolation.
+// At speed 1 it steps by bufferSize / sampleRate: 2048 frames at 48 kHz is
+// 42.7 ms. Using it directly as the video clock makes 60 fps content advance
+// 0,0,2,0,0,3,... frames per 60 Hz refresh at that buffer size, and 1,2,0,...
+// even at ~10 ms periods. positionF is also the mixed position, ahead of what
+// is heard by at least one device buffer. Slewing smooths these coarse steps;
+// it does not compensate for the output latency.
+// kAudioSlewSeconds = 0.25: at 60 Hz each update closes 1/15 of the gap, so
+// even a full 42.7 ms step moves the video by under 3 ms per frame, while a
+// steady offset is still ~98% closed within a second.
+//
 // - The loop boundary is handled here (the video side): passing the end (or
 //   the start in reverse) wraps when loop is true and sets wrapped; the
 //   caller then moves the audio to the new time. Without loop, ended is set.
@@ -109,17 +125,31 @@ struct PlaybackClockInput {
     bool loop = false;
     bool audioMaster = false;
     double audioTime = 0.0;        // audio position (s), when audioMaster
+    double resyncThreshold = 0.5;  // <= 0: no hard re-sync
 };
 
 struct PlaybackClockStep {
     double time = 0.0;
+    bool resynced = false;
     bool wrapped = false;
     bool ended = false;
 };
 
+constexpr double kAudioSlewSeconds = 0.25;
+
 inline PlaybackClockStep stepPlaybackClock(const PlaybackClockInput& in) {
     PlaybackClockStep out;
-    double t = in.audioMaster ? in.audioTime : in.time + in.dt * in.speed;
+    double t = in.time + in.dt * in.speed;
+
+    if (in.audioMaster) {
+        const double diff = in.audioTime - t;
+        if (in.resyncThreshold > 0.0 && std::abs(diff) > in.resyncThreshold) {
+            t = in.audioTime;
+            out.resynced = true;
+        } else if (in.dt > 0.0) {
+            t += diff * std::min(1.0, in.dt / kAudioSlewSeconds);
+        }
+    }
 
     if (in.duration > 0.0) {
         if (t >= in.duration) {
@@ -323,7 +353,7 @@ public:
         if (playing_ && !paused_) {
             frameNew_ = false;
 
-            // Playing audio is the master clock at positive speed. After a
+            // Slew wall time toward playing audio at positive speed. After a
             // shorter audio track ends, wall time carries the video to its end.
             PlaybackClockInput in;
             in.time = playbackTime_;
@@ -333,6 +363,7 @@ public:
             in.loop = loop_;
             in.audioMaster = hasAudio_ && speed_ > 0 && audioPlayer_.isPlaying();
             in.audioTime = in.audioMaster ? audioPlayer_.getPosition() : 0.0;
+            in.resyncThreshold = getResyncThreshold();
             const PlaybackClockStep step = stepPlaybackClock(in);
             playbackTime_ = step.time;
 
