@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <memory>
 #include <cstring>
+#include <cmath>
 
 namespace tcx::hap {
 
@@ -57,6 +58,12 @@ constexpr uint32_t FOURCC_FL32 = 0x666C3332; // 'fl32' - 32-bit float
 constexpr uint32_t FOURCC_MP3  = 0x2E6D7033; // '.mp3' - MP3
 constexpr uint32_t FOURCC_MP4A = 0x6D703461; // 'mp4a' - AAC
 
+// formatSpecificFlags of a version 2 'lpcm' sound description
+constexpr uint32_t LPCM_FLAG_FLOAT          = 1u << 0;
+constexpr uint32_t LPCM_FLAG_BIG_ENDIAN     = 1u << 1;
+constexpr uint32_t LPCM_FLAG_SIGNED_INTEGER = 1u << 2;
+constexpr uint32_t LPCM_FLAG_NON_INTERLEAVED = 1u << 5;
+
 // -----------------------------------------------------------------------------
 // Sample (frame) information
 // -----------------------------------------------------------------------------
@@ -88,9 +95,19 @@ struct MovTrack {
     // True when the sound description has an 'enda' atom set to 1 (in its
     // 'wave' extension), i.e. the PCM samples are little-endian
     bool endaLittleEndian = false;
+    // Sound description version (0, 1 or 2)
+    uint16_t soundVersion = 0;
+    // formatSpecificFlags of a version 2 sound description ('lpcm': see
+    // LPCM_FLAG_*)
+    uint32_t lpcmFlags = 0;
 
-    // Sample table
+    // Sample table. For a PCM track whose 'stsz' gives one constant size,
+    // each entry is a whole chunk (pcmChunked is true; an entry holds
+    // size / getPcmFrameBytes() audio frames). Otherwise one entry per sample.
     std::vector<MovSample> samples;
+    bool pcmChunked = false;
+    // Audio frames in samples (when pcmChunked)
+    uint64_t pcmFrameCount = 0;
 
     bool isVideo() const { return handlerType == HANDLER_VIDE; }
     bool isAudio() const { return handlerType == HANDLER_SOUN; }
@@ -120,13 +137,63 @@ struct MovTrack {
     bool isBigEndianPcm() const {
         // 'twos' is always big-endian. 'fl32' is big-endian by default in
         // QuickTime and little-endian only with an 'enda' atom set to 1.
+        // 'lpcm' carries its byte order in the format flags.
         if (codecFourCC == FOURCC_TWOS) return true;
         if (codecFourCC == FOURCC_FL32) return !endaLittleEndian;
+        if (codecFourCC == FOURCC_LPCM) return (lpcmFlags & LPCM_FLAG_BIG_ENDIAN) != 0;
         return false;
     }
 
     bool isFloatPcm() const {
+        if (codecFourCC == FOURCC_LPCM) return (lpcmFlags & LPCM_FLAG_FLOAT) != 0;
         return codecFourCC == FOURCC_FL32;
+    }
+
+    // Bits per channel sample of a PCM track ('fl32' is always 32)
+    int getPcmBits() const {
+        if (codecFourCC == FOURCC_FL32) return 32;
+        return bitsPerSample;
+    }
+
+    // Bytes per PCM frame (all channels), or 0 when the description does not
+    // give 8 to 64 bits per channel in whole bytes. Used in place of the
+    // 'stsz' size for constant-size PCM tracks.
+    uint32_t getPcmFrameBytes() const {
+        if (!isPcm()) return 0;
+        const int bits = getPcmBits();
+        if (bits <= 0 || bits > 64 || bits % 8 != 0 || channels == 0) return 0;
+        return static_cast<uint32_t>(bits / 8) * channels;
+    }
+
+    // Whether the PCM format can be decoded (16-bit signed integer or 32-bit
+    // float, interleaved, at least one channel, a sample rate above 0).
+    // Otherwise why says what is not supported.
+    bool isPcmFormatSupported(std::string& why) const {
+        if (!isPcm()) { why = "not a PCM codec"; return false; }
+        if (soundVersion > 2) {
+            why = "sound description version " + std::to_string(soundVersion);
+            return false;
+        }
+        if (codecFourCC == FOURCC_LPCM) {
+            if (soundVersion != 2) { why = "'lpcm' needs a version 2 sound description"; return false; }
+            if (lpcmFlags & LPCM_FLAG_NON_INTERLEAVED) { why = "non-interleaved 'lpcm'"; return false; }
+            const bool isFloat = (lpcmFlags & LPCM_FLAG_FLOAT) != 0;
+            if (isFloat && bitsPerSample != 32) {
+                why = std::to_string(bitsPerSample) + "-bit float";
+                return false;
+            }
+            if (!isFloat && !(lpcmFlags & LPCM_FLAG_SIGNED_INTEGER)) {
+                why = "unsigned integer samples";
+                return false;
+            }
+        }
+        const int bits = getPcmBits();
+        if (bits != 16 && bits != 32) { why = std::to_string(bits) + "-bit samples"; return false; }
+        if (bits == 32 && !isFloatPcm()) { why = "32-bit integer samples"; return false; }
+        if (bits == 16 && isFloatPcm()) { why = "16-bit float samples"; return false; }
+        if (channels == 0) { why = "0 channels"; return false; }
+        if (sampleRate == 0) { why = "sample rate 0"; return false; }
+        return true;
     }
 
     double getDurationSeconds() const {
@@ -242,6 +309,26 @@ public:
 
         return file_.good();
     }
+
+    // Whether a sample lies fully inside the file
+    bool isSampleInFile(const MovTrack& track, size_t sampleIndex) const {
+        if (sampleIndex >= track.samples.size()) return false;
+        const auto& sample = track.samples[sampleIndex];
+        return sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size;
+    }
+
+    // Read a sample into dst, which must hold the sample's size. Returns
+    // false for a sample that does not lie fully inside the file.
+    bool readSampleTo(const MovTrack& track, size_t sampleIndex, uint8_t* dst) {
+        if (!isSampleInFile(track, sampleIndex)) return false;
+        const auto& sample = track.samples[sampleIndex];
+        file_.clear();
+        file_.seekg(sample.offset);
+        file_.read(reinterpret_cast<char*>(dst), sample.size);
+        return file_.good();
+    }
+
+    uint64_t getFileSize() const { return fileSize_; }
 
     // Static helper to check if file is HAP without full parse
     static bool isHapFile(const std::string& path) {
@@ -603,25 +690,77 @@ private:
                 track.width = readU16();
                 track.height = readU16();
             } else if (track.isAudio()) {
-                uint16_t version = readU16();
-                file_.seekg(2, std::ios::cur);  // revision
-                file_.seekg(4, std::ios::cur);  // vendor
-                track.channels = readU16();
-                track.bitsPerSample = readU16();
-                file_.seekg(2, std::ios::cur);  // compression id
-                file_.seekg(2, std::ios::cur);  // packet size
-                track.sampleRate = readU16();   // Only integer part
-                file_.seekg(2, std::ios::cur);  // Fixed point fraction
-
-                // Extension atoms follow the version-specific fields
-                uint64_t extStart = static_cast<uint64_t>(file_.tellg());
-                if (version == 1) extStart += 16;
-                else if (version == 2) extStart += 36;
-                uint64_t entryEnd = entryStart + entrySize;
-                if (entrySize >= 8 && extStart < entryEnd && entryEnd <= fileSize_) {
-                    parseSoundExtensions(track, extStart, entryEnd);
-                }
+                parseSoundDescription(track, entryStart, entrySize);
             }
+        }
+    }
+
+    // Sound description (QuickTime SoundDescription v0 / v1 / v2). The
+    // stream is at the version field.
+    void parseSoundDescription(MovTrack& track, uint64_t entryStart, uint32_t entrySize) {
+        const uint16_t version = readU16();
+        file_.seekg(2, std::ios::cur);  // revision
+        file_.seekg(4, std::ios::cur);  // vendor
+        track.soundVersion = version;
+        track.channels = readU16();
+        track.bitsPerSample = readU16();
+        file_.seekg(2, std::ios::cur);  // compression id
+        file_.seekg(2, std::ios::cur);  // packet size
+        // 16.16 fixed point, rounded to whole Hz
+        const uint64_t rateFixed = readU32();
+        track.sampleRate = static_cast<uint32_t>((rateFixed + 0x8000) >> 16);
+
+        if (version == 1) {
+            const uint32_t samplesPerPacket = readU32();
+            const uint32_t bytesPerPacket = readU32();  // per channel
+            const uint32_t bytesPerFrame = readU32();   // all channels per packet
+            // Legacy bytesPerSample is 2 even for ffmpeg's 32-bit float
+            // entries; bytesPerPacket/bytesPerFrame describe the storage.
+            readU32();
+            std::string why;
+            if (track.isPcmFormatSupported(why) &&
+                (samplesPerPacket == 0 ||
+                 uint64_t(bytesPerPacket) != uint64_t(samplesPerPacket) * track.getPcmBits() / 8 ||
+                 uint64_t(bytesPerFrame) != uint64_t(samplesPerPacket) * track.getPcmFrameBytes())) {
+                markTrackDamaged(track, "stsd", "PCM packet layout is not supported");
+                return;
+            }
+        } else if (version == 2) {
+            // In v2 the v0 fields above hold fixed values; the real ones follow
+            file_.seekg(4, std::ios::cur);  // sizeOfStructOnly
+            const uint64_t rateBits = readU64();
+            const uint32_t numChannels = readU32();
+            file_.seekg(4, std::ios::cur);  // always 0x7F000000
+            const uint32_t bitsPerChannel = readU32();
+            track.lpcmFlags = readU32();
+            const uint32_t bytesPerPacket = readU32();
+            const uint32_t framesPerPacket = readU32();
+
+            double rate = 0.0;
+            std::memcpy(&rate, &rateBits, sizeof(rate));
+            // The decoder accepts an int sample rate; reject rates whose
+            // rounded value cannot be represented by it.
+            const double roundedRate = std::round(rate);
+            track.sampleRate = (std::isfinite(roundedRate) && roundedRate >= 1.0 &&
+                                roundedRate <= 2147483647.0)
+                ? static_cast<uint32_t>(roundedRate) : 0;
+            track.channels = numChannels <= 0xFFFF ? static_cast<uint16_t>(numChannels) : 0;
+            track.bitsPerSample = bitsPerChannel <= 0xFFFF ? static_cast<uint16_t>(bitsPerChannel) : 0;
+            std::string why;
+            if (track.isPcmFormatSupported(why) &&
+                (framesPerPacket == 0 ||
+                 uint64_t(bytesPerPacket) != uint64_t(framesPerPacket) * track.getPcmFrameBytes())) {
+                markTrackDamaged(track, "stsd", "PCM packet layout is not supported");
+                return;
+            }
+        }
+
+        // Extension atoms follow the version-specific fields
+        uint64_t extStart = 0;
+        if (!position(extStart)) return;
+        uint64_t entryEnd = entryStart + entrySize;
+        if (entrySize >= 8 && extStart < entryEnd && entryEnd <= fileSize_) {
+            parseSoundExtensions(track, extStart, entryEnd);
         }
     }
 
@@ -755,6 +894,14 @@ private:
             if (timed < limit) limit = timed;
         }
 
+        // Constant-size PCM: one entry per chunk, with the same frame limit
+        // as the per-sample path.
+        const uint32_t pcmFrameBytes = track.isAudio() ? track.getPcmFrameBytes() : 0;
+        if (pcmFrameBytes > 0 && sampleSizes.constantSize != 0) {
+            return buildPcmChunks(track, pcmFrameBytes, static_cast<uint32_t>(limit),
+                                  chunkOffsets, sampleToChunk);
+        }
+
         // First pass: how many samples the 'stsc' / 'stco' layout places,
         // capped at the limit above
         uint64_t placed = 0;
@@ -807,8 +954,71 @@ private:
         return true;
     }
 
+    // Sample table of a constant-size PCM track: one entry per chunk, sized
+    // samplesInChunk * frameBytes; a chunk larger than 4 GiB is split into
+    // several entries of whole frames ('stsz' gives the size of one frame; the
+    // frame size from the sound description is used in its place, as each
+    // 'stsz' sample is one PCM frame). At most frameCount frames are placed.
+    // Returns false when the entries inside the file add up to more than the
+    // file size.
+    bool buildPcmChunks(MovTrack& track, uint32_t frameBytes, uint32_t frameCount,
+                        const std::vector<uint64_t>& chunkOffsets,
+                        const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
+        const uint64_t maxEntryFrames = std::max<uint64_t>(1, UINT32_MAX / frameBytes);
+        uint64_t framesLeft = frameCount;
+        uint64_t bytesInFile = 0;
+        size_t stscIndex = 0;
+
+        for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size() && framesLeft > 0;
+             chunkIndex++) {
+            while (stscIndex + 1 < sampleToChunk.size() &&
+                   chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
+                stscIndex++;
+            }
+            uint64_t framesInChunk = std::min<uint64_t>(sampleToChunk[stscIndex].second, framesLeft);
+            framesLeft -= framesInChunk;
+            uint64_t offset = chunkOffsets[chunkIndex];
+
+            while (framesInChunk > 0) {
+                const uint64_t frames = std::min(framesInChunk, maxEntryFrames);
+                MovSample sample;
+                sample.offset = offset;
+                sample.size = static_cast<uint32_t>(frames * frameBytes);
+                offset += sample.size;
+                framesInChunk -= frames;
+
+                if (sample.size <= fileSize_ && sample.offset <= fileSize_ - sample.size) {
+                    bytesInFile += sample.size;
+                    if (bytesInFile > fileSize_) {
+                        track.samples.clear();
+                        return false;
+                    }
+                }
+                track.samples.push_back(sample);
+                track.pcmFrameCount += frames;
+            }
+        }
+        track.pcmChunked = true;
+        return true;
+    }
+
     void buildSampleTimestamps(MovTrack& track) {
         if (track.samples.empty() || track.timescale == 0) return;
+
+        if (track.pcmChunked) {
+            // Chunk entries: time from the frames before each entry
+            const uint32_t frameBytes = track.getPcmFrameBytes();
+            if (frameBytes == 0 || track.sampleRate == 0) return;
+            uint64_t frames = 0;
+            for (auto& sample : track.samples) {
+                const uint64_t n = sample.size / frameBytes;
+                sample.timestamp = static_cast<double>(frames) / track.sampleRate;
+                sample.duration = static_cast<uint32_t>(
+                    static_cast<double>(n) * track.timescale / track.sampleRate);
+                frames += n;
+            }
+            return;
+        }
 
         // For now, assume constant frame rate (simplified)
         double frameDuration = track.getDurationSeconds() / track.samples.size();
