@@ -298,6 +298,7 @@ public:
         // Reset counters so the next FBO using this shared context starts clean.
         // Buffers stay allocated at their current (possibly grown) size — no
         // allocation or deallocation overhead between sequential FBO draws.
+        internal::reportSglStackErrors(sgl_context_error(shared.context), true);
         sgl_tc_context_reset(shared.context);
 
         // Switch back to default context
@@ -862,6 +863,7 @@ private:
 
         // Switch to shared FBO context and ensure buffers are allocated
         sgl_set_context(shared.context);
+        sgl_tc_reset_matrix_stacks();
         sgl_tc_context_ensure_buffers(shared.context);
         sgl_defaults();
 
