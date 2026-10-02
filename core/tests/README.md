@@ -656,6 +656,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `NotoSansCJKsc-Regular` / `NotoSansCJKjp-Regular`, and their outlines of
   U+9AA8 differ (SKIP when Noto Sans CJK is not installed). The system-name
   check on Windows (`MS PGothic`) and macOS is manual.
+- `fontAtlasLimit/` — glyphs larger than an atlas page (#404). A glyph whose
+  box does not fit the largest page is rasterized at a lower resolution that
+  fits (a lower integer oversampling, or a raster scale below 1) and keeps
+  its size and offset in final pixels; a glyph that fits keeps its
+  oversampling. A font whose bounding box at the loaded size and oversampling
+  exceeds the page logs exactly one warning, naming the size, oversampling
+  and page limit, and no further warning over many lookups; the atlas page
+  count and memory stay the same over many simulated frames, and
+  `clearAtlas()` rasterizes the glyph again. Headless (page limit 4096); the
+  font is built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
