@@ -39,6 +39,8 @@ void tcApp::update() {
         compiledScript = script;
         auto result = lua.safe_script("function step() x, y = " + script + " end", sol::script_pass_on_error);
         if (!result.valid()) {
+            sol::error err = result;
+            logError("tcxLua") << err.what();
             lua["step"] = sol::lua_nil;
         }
     }

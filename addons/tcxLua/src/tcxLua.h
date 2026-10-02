@@ -56,11 +56,15 @@ public:
         if (target.get_type() == sol::type::lua_nil || target.get_type() == sol::type::none) {
             return false;
         }
+        if (target.get_type() != sol::type::function) {
+            trussc::logError("tcxLua") << fn << ": expected a Lua function";
+            return false;
+        }
         sol::protected_function f = target;
         sol::protected_function_result result = f(std::forward<Args>(args)...);
         if (!result.valid()) {
             sol::error err = result;
-            trussc::logError("tcxLua") << fn << ": " << err.what();
+            trussc::logError("tcxLua") << err.what();
             return false;
         }
         return true;

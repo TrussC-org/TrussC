@@ -105,6 +105,22 @@ int main() {
     check("Node().callEvery ~= nil", luaBool("Node().callEvery ~= nil"));
     check("Node().cancelTimer ~= nil", luaBool("Node().cancelTimer ~= nil"));
 
+    // Exercise the bundled sketch's guard, rather than a copy of it.
+    fs::path sketch = fs::path(__FILE__).parent_path().parent_path().parent_path() /
+        "exampleFileReload/bin/data/sketch.lua";
+    checkNoThrow("bundled sketch: loads", true, [&] { return tcxLua::runFile(L, sketch); });
+    checkNoThrow("bundled sketch: Shift is ignored", true, [&] { return tcxLua::call(L, "keyPressed", 340); });
+    checkNoThrow("bundled sketch: arrow is ignored", true, [&] { return tcxLua::call(L, "keyPressed", 262); });
+    checkNoThrow("bundled sketch: ordinary key works", true, [&] { return tcxLua::call(L, "keyPressed", 65); });
+
+    bool defaultHandlerThrows = false;
+    try {
+        L.safe_script("error('default handler is unchanged')");
+    } catch (const sol::error&) {
+        defaultHandlerThrows = true;
+    }
+    check("sol2 default script error still throws", defaultHandlerThrows);
+
     std::error_code ec;
     fs::remove_all(dir, ec);
 

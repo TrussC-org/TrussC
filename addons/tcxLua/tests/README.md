@@ -10,6 +10,8 @@ Error-contained entry points (`tcxLua::call` / `tcxLua::runFile`):
   `string.char(340)` in `call`, each return `false` without throwing; the state
   stays usable afterwards;
 - a valid file and a valid call return `true`, and call arguments arrive.
+- the bundled `sketch.lua` accepts ordinary keys and ignores Shift / arrow keys;
+- sol2's default script error handler still throws `sol::error`.
 
 Lua `Node` surface (`TC_LUA_SKIP`):
 

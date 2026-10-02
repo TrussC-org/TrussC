@@ -9,137 +9,68 @@ using namespace std;
 #endif
 void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
     {
-        sol::usertype<trussc::Node> t = lua->new_usertype<trussc::Node>("Node",
-            sol::constructors<trussc::Node()>(),
-            sol::call_constructor, sol::constructors<trussc::Node()>());
-        t["localMatrixChanged"] = &trussc::Node::localMatrixChanged;
-        t["setup"] = &trussc::Node::setup;
-        t["update"] = &trussc::Node::update;
-        t["draw"] = &trussc::Node::draw;
-        t["cleanup"] = &trussc::Node::cleanup;
-        t["addChild"] = sol::overload([](trussc::Node& self, trussc::Node::Ptr child) { return self.addChild(child); }, [](trussc::Node& self, trussc::Node::Ptr child, bool keepGlobalPosition) { return self.addChild(child, keepGlobalPosition); });
-        t["insertChild"] = sol::overload([](trussc::Node& self, size_t index, trussc::Node::Ptr child) { return self.insertChild(index, child); }, [](trussc::Node& self, size_t index, trussc::Node::Ptr child, bool keepGlobalPosition) { return self.insertChild(index, child, keepGlobalPosition); });
-        t["removeChild"] = &trussc::Node::removeChild;
-        t["removeAllChildren"] = &trussc::Node::removeAllChildren;
-        t["onChildAdded"] = &trussc::Node::onChildAdded;
-        t["onChildRemoved"] = &trussc::Node::onChildRemoved;
-        t["getParent"] = &trussc::Node::getParent;
-        t["getChildren"] = &trussc::Node::getChildren;
-        t["getChildCount"] = &trussc::Node::getChildCount;
-        t["getChildIndex"] = &trussc::Node::getChildIndex;
-        t["moveToFront"] = &trussc::Node::moveToFront;
-        t["moveToBack"] = &trussc::Node::moveToBack;
-        t["isActive"] = &trussc::Node::isActive;
-        t["setActive"] = &trussc::Node::setActive;
-        t["isVisible"] = &trussc::Node::isVisible;
-        t["setVisible"] = &trussc::Node::setVisible;
-        t["getActive"] = &trussc::Node::getActive;
-        t["getVisible"] = &trussc::Node::getVisible;
-        t["setIsActive"] = &trussc::Node::setIsActive;
-        t["setIsVisible"] = &trussc::Node::setIsVisible;
-        t["destroy"] = &trussc::Node::destroy;
-        t["isDead"] = &trussc::Node::isDead;
-        t["enableEvents"] = &trussc::Node::enableEvents;
-        t["disableEvents"] = &trussc::Node::disableEvents;
-        t["isEventsEnabled"] = &trussc::Node::isEventsEnabled;
-        t["isMouseOver"] = &trussc::Node::isMouseOver;
-        t["setName"] = &trussc::Node::setName;
-        t["getName"] = &trussc::Node::getName;
-        t["hasName"] = &trussc::Node::hasName;
-        t["getTypeName"] = &trussc::Node::getTypeName;
-        t["getDisplayName"] = &trussc::Node::getDisplayName;
-        t["getInstanceId"] = &trussc::Node::getInstanceId;
-        t["findByInstanceId"] = &trussc::Node::findByInstanceId;
-        t["getPos"] = &trussc::Node::getPos;
-        t["getX"] = &trussc::Node::getX;
-        t["getY"] = &trussc::Node::getY;
-        t["getZ"] = &trussc::Node::getZ;
-        t["setPos"] = sol::overload([](trussc::Node& self, const trussc::Vec3 & pos) { return self.setPos(pos); }, [](trussc::Node& self, float x, float y) { return self.setPos(x, y); }, [](trussc::Node& self, float x, float y, float z) { return self.setPos(x, y, z); });
-        t["setX"] = &trussc::Node::setX;
-        t["setY"] = &trussc::Node::setY;
-        t["setZ"] = &trussc::Node::setZ;
-        t["getQuaternion"] = &trussc::Node::getQuaternion;
-        t["setQuaternion"] = &trussc::Node::setQuaternion;
-        t["getEuler"] = &trussc::Node::getEuler;
-        t["setEuler"] = sol::overload([](trussc::Node& self, const trussc::Vec3 & euler) { return self.setEuler(euler); }, [](trussc::Node& self, float pitch, float yaw, float roll) { return self.setEuler(pitch, yaw, roll); });
-        t["getEulerDeg"] = &trussc::Node::getEulerDeg;
-        t["setEulerDeg"] = &trussc::Node::setEulerDeg;
-        t["getRot"] = &trussc::Node::getRot;
-        t["setRot"] = &trussc::Node::setRot;
-        t["getRotDeg"] = &trussc::Node::getRotDeg;
-        t["setRotDeg"] = &trussc::Node::setRotDeg;
-        t["getScale"] = &trussc::Node::getScale;
-        t["getScaleX"] = &trussc::Node::getScaleX;
-        t["getScaleY"] = &trussc::Node::getScaleY;
-        t["getScaleZ"] = &trussc::Node::getScaleZ;
-        t["setScale"] = sol::overload([](trussc::Node& self, const trussc::Vec3 & s) { return self.setScale(s); }, [](trussc::Node& self, float uniform) { return self.setScale(uniform); }, [](trussc::Node& self, float sx, float sy) { return self.setScale(sx, sy); }, [](trussc::Node& self, float sx, float sy, float sz) { return self.setScale(sx, sy, sz); });
-        t["setScaleX"] = &trussc::Node::setScaleX;
-        t["setScaleY"] = &trussc::Node::setScaleY;
-        t["setScaleZ"] = &trussc::Node::setScaleZ;
-        t["getLocalMatrix"] = &trussc::Node::getLocalMatrix;
-        t["getGlobalMatrix"] = &trussc::Node::getGlobalMatrix;
-        t["getGlobalMatrixInverse"] = &trussc::Node::getGlobalMatrixInverse;
-        t["globalToLocal"] = [](trussc::Node& self, const trussc::Vec3 & global) { return self.globalToLocal(global); };
-        t["getGlobalPos"] = &trussc::Node::getGlobalPos;
-        t["setGlobalPos"] = sol::overload([](trussc::Node& self, const trussc::Vec3 & global) { return self.setGlobalPos(global); }, [](trussc::Node& self, float x, float y) { return self.setGlobalPos(x, y); }, [](trussc::Node& self, float x, float y, float z) { return self.setGlobalPos(x, y, z); });
-        t["localToGlobal"] = [](trussc::Node& self, const trussc::Vec3 & local) { return self.localToGlobal(local); };
-        t["getMouseX"] = &trussc::Node::getMouseX;
-        t["getMouseY"] = &trussc::Node::getMouseY;
-        t["getPMouseX"] = &trussc::Node::getPMouseX;
-        t["getPMouseY"] = &trussc::Node::getPMouseY;
-        t["findHitNode"] = &trussc::Node::findHitNode;
-        t["findHitNodeFromScreen"] = &trussc::Node::findHitNodeFromScreen;
-        t["getCameraContext"] = &trussc::Node::getCameraContext;
-        t["setCameraContext"] = &trussc::Node::setCameraContext;
-        t["getModTypeNames"] = &trussc::Node::getModTypeNames;
-        t["getMods"] = &trussc::Node::getMods;
-        t["getModByTypeName"] = &trussc::Node::getModByTypeName;
-        t["callAfter"] = &trussc::Node::callAfter;
-        t["callEvery"] = &trussc::Node::callEvery;
-        t["callEveryCatchUp"] = &trussc::Node::callEveryCatchUp;
-        t["cancelTimer"] = &trussc::Node::cancelTimer;
-        t["cancelAllTimers"] = &trussc::Node::cancelAllTimers;
+        sol::usertype<trussc::Path> t = lua->new_usertype<trussc::Path>("Path",
+            sol::constructors<trussc::Path(), trussc::Path(const std::vector<trussc::Vec2> &), trussc::Path(const std::vector<trussc::Vec3> &)>(),
+            sol::call_constructor, sol::constructors<trussc::Path(), trussc::Path(const std::vector<trussc::Vec2> &), trussc::Path(const std::vector<trussc::Vec3> &)>(),
+            sol::meta_function::index, [](const trussc::Path& a, int b){ return a[b]; });
+        t["addVertex"] = sol::overload([](trussc::Path& self, float x, float y) { return self.addVertex(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.addVertex(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & v) { return self.addVertex(v); }, [](trussc::Path& self, const trussc::Vec3 & v) { return self.addVertex(v); });
+        t["addVertices"] = sol::overload([](trussc::Path& self, const std::vector<trussc::Vec2> & verts) { return self.addVertices(verts); }, [](trussc::Path& self, const std::vector<trussc::Vec3> & verts) { return self.addVertices(verts); });
+        t["getVertices"] = [](trussc::Path& self) -> decltype(auto) { return self.getVertices(); };
+        t["size"] = &trussc::Path::size;
+        t["empty"] = &trussc::Path::empty;
+        t["clear"] = &trussc::Path::clear;
+        t["moveTo"] = sol::overload([](trussc::Path& self, float x, float y) { return self.moveTo(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.moveTo(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & p) { return self.moveTo(p); }, [](trussc::Path& self, const trussc::Vec3 & p) { return self.moveTo(p); });
+        t["getNumSubpaths"] = &trussc::Path::getNumSubpaths;
+        t["getSubpathRange"] = &trussc::Path::getSubpathRange;
+        t["isSubpathClosed"] = &trussc::Path::isSubpathClosed;
+        t["lineTo"] = sol::overload([](trussc::Path& self, float x, float y) { return self.lineTo(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.lineTo(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & p) { return self.lineTo(p); }, [](trussc::Path& self, const trussc::Vec3 & p) { return self.lineTo(p); });
+        t["bezierTo"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & cp1, const trussc::Vec3 & cp2, const trussc::Vec3 & to, int resolution) { return self.bezierTo(cp1, cp2, to, resolution); }, [](trussc::Path& self, float cx1, float cy1, float cx2, float cy2, float x, float y, int resolution) { return self.bezierTo(cx1, cy1, cx2, cy2, x, y, resolution); }, [](trussc::Path& self, const trussc::Vec2 & cp1, const trussc::Vec2 & cp2, const trussc::Vec2 & to, int resolution) { return self.bezierTo(cp1, cp2, to, resolution); });
+        t["quadBezierTo"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & cp, const trussc::Vec3 & to, int resolution) { return self.quadBezierTo(cp, to, resolution); }, [](trussc::Path& self, float cx, float cy, float x, float y, int resolution) { return self.quadBezierTo(cx, cy, x, y, resolution); }, [](trussc::Path& self, const trussc::Vec2 & cp, const trussc::Vec2 & to, int resolution) { return self.quadBezierTo(cp, to, resolution); });
+        t["curveTo"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & to, int resolution) { return self.curveTo(to, resolution); }, [](trussc::Path& self, float x, float y) { return self.curveTo(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.curveTo(x, y, z); }, [](trussc::Path& self, float x, float y, float z, int resolution) { return self.curveTo(x, y, z, resolution); }, [](trussc::Path& self, const trussc::Vec2 & to, int resolution) { return self.curveTo(to, resolution); });
+        t["arc"] = sol::overload([](trussc::Path& self, const trussc::Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd, clockwise); }, [](trussc::Path& self, const trussc::Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise, int circleResolution) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd, clockwise, circleResolution); }, [](trussc::Path& self, float x, float y, float radiusX, float radiusY, float angleBegin, float angleEnd) { return self.arc(x, y, radiusX, radiusY, angleBegin, angleEnd); }, [](trussc::Path& self, float x, float y, float radiusX, float radiusY, float angleBegin, float angleEnd, int circleResolution) { return self.arc(x, y, radiusX, radiusY, angleBegin, angleEnd, circleResolution); }, [](trussc::Path& self, const trussc::Vec2 & center, float radiusX, float radiusY, float angleBegin, float angleEnd) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec2 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, int circleResolution) { return self.arc(center, radiusX, radiusY, angleBegin, angleEnd, circleResolution); }, [](trussc::Path& self, const trussc::Vec3 & center, float radius, float angleBegin, float angleEnd) { return self.arc(center, radius, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec3 & center, float radius, float angleBegin, float angleEnd, bool clockwise) { return self.arc(center, radius, angleBegin, angleEnd, clockwise); }, [](trussc::Path& self, float x, float y, float radius, float angleBegin, float angleEnd) { return self.arc(x, y, radius, angleBegin, angleEnd); }, [](trussc::Path& self, float x, float y, float radius, float angleBegin, float angleEnd, bool clockwise) { return self.arc(x, y, radius, angleBegin, angleEnd, clockwise); }, [](trussc::Path& self, const trussc::Vec2 & center, float radius, float angleBegin, float angleEnd) { return self.arc(center, radius, angleBegin, angleEnd); }, [](trussc::Path& self, const trussc::Vec2 & center, float radius, float angleBegin, float angleEnd, bool clockwise) { return self.arc(center, radius, angleBegin, angleEnd, clockwise); });
+        t["close"] = &trussc::Path::close;
+        t["setClosed"] = &trussc::Path::setClosed;
+        t["isClosed"] = &trussc::Path::isClosed;
+        t["reverseWinding"] = sol::overload([](trussc::Path& self, size_t i) -> decltype(auto) { return self.reverseWinding(i); }, [](trussc::Path& self) -> decltype(auto) { return self.reverseWinding(); });
+        t["draw"] = &trussc::Path::draw;
+        t["buildFillTriangles"] = &trussc::Path::buildFillTriangles;
+        t["drawFill"] = &trussc::Path::drawFill;
+        t["toFillMesh"] = &trussc::Path::toFillMesh;
+        t["drawStroke"] = &trussc::Path::drawStroke;
+        t["getBounds"] = &trussc::Path::getBounds;
+        t["getPerimeter"] = &trussc::Path::getPerimeter;
     }
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown));
     {
-        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
-        t["date"] = &trussc::BuildInfo::date;
-        t["time"] = &trussc::BuildInfo::time;
-        t["dateTime"] = &trussc::BuildInfo::dateTime;
-        t["timestamp"] = &trussc::BuildInfo::timestamp;
-        t["year"] = &trussc::BuildInfo::year;
-        t["month"] = &trussc::BuildInfo::month;
-        t["day"] = &trussc::BuildInfo::day;
-        t["hour"] = &trussc::BuildInfo::hour;
-        t["minute"] = &trussc::BuildInfo::minute;
-        t["second"] = &trussc::BuildInfo::second;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["id"] = &trussc::TouchPoint::id;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["changed"] = &trussc::TouchPoint::changed;
     }
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
     lua->new_usertype<trussc::WritingMode>("WritingMode",
         sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
         "Horizontal", sol::var(trussc::WritingMode::Horizontal),
         "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
-        t["note"] = &trussc::ChipSoundBundle::Entry::note;
-        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
 }
 #ifndef _MSC_VER
