@@ -555,8 +555,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
   closed window. The tick / event bracket is the glue's
   `internal::WindowDispatchScope`; build with `-fsanitize=address` for the
-  memory side. Not covered: the native close (`sapp_window_request_close()`
-  landing through `close_cb` on X11 / Win32 / macOS), a manual check.
+  memory side. The optional Linux/X11 harness in `windowAppSwap/native/`
+  exercises native update/draw/key requests, borderless close, immediate Window
+  destruction and reentrant shutdown (see `windowAppSwap/README.md`). Native
+  Win32 / macOS close paths still need separate checks.
 - `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
   client that leaves (closes or resets) are joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200

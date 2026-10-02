@@ -326,8 +326,19 @@ inline bool routeToggleFullscreenToWindow() {
     return true;
 }
 inline void closeRequestedWindowsAtShutdown() {
-    for (Window* w : openWindows()) {
-        if (WindowRequestAccess::closeRequested(*w)) WindowRequestAccess::teardown(*w);
+    // exit() / cleanup() can destroy another Window or request another close.
+    // Re-read the registry after each teardown; never retain a snapshot of
+    // raw Window pointers across user code, and drain requests added by it.
+    for (;;) {
+        Window* requested = nullptr;
+        for (Window* w : openWindows()) {
+            if (WindowRequestAccess::closeRequested(*w)) {
+                requested = w;
+                break;
+            }
+        }
+        if (!requested) return;
+        WindowRequestAccess::teardown(*requested);
     }
 }
 inline bool routeIsFullscreenFromWindow(bool& out) {

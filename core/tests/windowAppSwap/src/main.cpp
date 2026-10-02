@@ -236,8 +236,8 @@ TC_CORE_TEST_MAIN() {
 
     // --- a request from outside a tick ------------------------------------------
     {
-        OpenWindow win;
         Counts c;
+        OpenWindow win;
         auto app = make_shared<CountingApp>(c);
         win.setApp(app);
         check("setApp() outside a tick: getApp() unchanged until the boundary",
@@ -247,11 +247,74 @@ TC_CORE_TEST_MAIN() {
               win.getApp() == app && attached.count(app.get()) && c.setups == 1 && c.updates == 1);
     }
 
+    // Probes above each Window outlive its teardown, including App destruction.
+    // --- nullptr is a pending release, not the absence of a request ------------
+    {
+        Counts c;
+        OpenWindow win;
+        auto app = make_shared<CountingApp>(c);
+        win.setApp(app);
+        tick(win);
+        win.setApp(nullptr);
+        check("setApp(nullptr): current App stays until the boundary", win.getApp() == app);
+        tick(win);
+        check("... boundary releases the App and its attachment guard",
+              win.getApp() == nullptr && !attached.count(app.get()));
+    }
+
+    // --- requests cannot land inside a nested event / tick --------------------
+    {
+        Counts oldC, nextC;
+        OpenWindow win;
+        auto old = make_shared<CountingApp>(oldC);
+        auto next = make_shared<CountingApp>(nextC);
+        win.setApp(old);
+        tick(win);
+        {
+            internal::WindowDispatchScope outer(win);
+            win.setApp(next);
+            pressKey(win, 'Q');
+            check("nested event: pending swap stays pending inside the outer tick",
+                  win.getApp() == old);
+        }
+        check("... the outer boundary applies the swap", win.getApp() == next);
+    }
+
+    // --- apply-time validation also rejects an App ended since the request ----
+    {
+        Counts c;
+        OpenWindow win;
+        auto app = make_shared<CountingApp>(c);
+        const size_t errs = count(errors, "already ran cleanup()");
+        win.setApp(app);
+        app->cleanup();
+        internal::detachAppAudio(*app);   // marks the lifecycle as ended
+        tick(win);
+        check("App ended after request: apply refuses it and logs the reason",
+              !win.getApp() && c.setups == 0 &&
+              count(errors, "already ran cleanup()") == errs + 1);
+    }
+
+    // --- a request dies with its window, without running the pending App ------
+    {
+        Counts c;
+        weak_ptr<App> pending;
+        {
+            OpenWindow win;
+            auto app = make_shared<CountingApp>(c);
+            pending = app;
+            win.setApp(app);
+        }
+        check("destroyed Window releases its pending App without setup / exit / cleanup",
+              pending.expired() && c.destroyed == 1 && c.setups == 0 &&
+              c.exits == 0 && c.cleanups == 0 && attached.empty());
+    }
+
     // --- setApp() from the App's own update(), the window its only owner -------
     {
-        OpenWindow win;
         Counts oldC, nextC;
         Record rec;
+        OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
         weak_ptr<App> nextWeak;
         old->onUpdate = [&] {
@@ -276,9 +339,9 @@ TC_CORE_TEST_MAIN() {
 
     // --- setApp() from the App's own keyPressed() --------------------------------
     {
-        OpenWindow win;
         Counts oldC, nextC;
         Record rec;
+        OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
         old->onKey = [&] { win.setApp(make_shared<CountingApp>(nextC)); };
         pressKey(win, 'Q');
@@ -292,9 +355,9 @@ TC_CORE_TEST_MAIN() {
 
     // --- setApp() from a child's update() and onKeyPress() -----------------------
     {
-        OpenWindow win;
         Counts oldC, nextC;
         Record rec;
+        OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
         bool goneInside = true;
         old->watcher->onUpdate = [&] {
@@ -308,9 +371,9 @@ TC_CORE_TEST_MAIN() {
         check("... the swap landed when the tick ended", rec.appGone && win.getApp());
     }
     {
-        OpenWindow win;
         Counts oldC, nextC;
         Record rec;
+        OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
         bool goneInside = true;
         old->watcher->onKey = [&] {
@@ -326,9 +389,9 @@ TC_CORE_TEST_MAIN() {
 
     // --- two setApp() before one boundary: the last wins -------------------------
     {
-        OpenWindow win;
         Counts oldC, firstC, lastC;
         Record rec;
+        OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
         weak_ptr<App> firstWeak, lastWeak;
         old->onUpdate = [&] {
@@ -351,8 +414,8 @@ TC_CORE_TEST_MAIN() {
 
     // --- the window's own App requested again cancels a pending swap -------------
     {
-        OpenWindow win;
         Counts c, otherC;
+        OpenWindow win;
         auto app = make_shared<CountingApp>(c);
         win.setApp(app);
         tick(win);
@@ -366,9 +429,9 @@ TC_CORE_TEST_MAIN() {
 
     // --- close() from the App's own update(), with a setApp() in the same frame --
     {
-        OpenWindow win;
         Counts oldC, nextC;
         Record rec;
+        OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
         const size_t dropWarnings = count(warnings, "close() was requested");
         const size_t closingErrors = count(errors, "this window is closing");
@@ -403,9 +466,9 @@ TC_CORE_TEST_MAIN() {
 
     // --- close() from the App's own keyPressed() ---------------------------------
     {
-        OpenWindow win;
         Counts c;
         Record rec;
+        OpenWindow win;
         SwappingApp* app = attachSwapping(win, c, rec);
         app->onKey = [&] { win.close(); };
         pressKey(win, 'Q');
@@ -420,8 +483,8 @@ TC_CORE_TEST_MAIN() {
 
     // --- the same new App requested on two windows -------------------------------
     {
-        OpenWindow a, b;
         Counts c;
+        OpenWindow a, b;
         auto app = make_shared<CountingApp>(c);
         const size_t errs = count(errors, "already drives another window");
         a.setApp(app);
@@ -438,8 +501,8 @@ TC_CORE_TEST_MAIN() {
 
     // --- setApp() / close() from the App's own exit() and cleanup() -------------
     {
-        OpenWindow win;
         Counts c, otherC;
+        OpenWindow win;
         auto app = make_shared<ExitRequestApp>(c, win);
         app->other = make_shared<CountingApp>(otherC);
         win.setApp(app);
