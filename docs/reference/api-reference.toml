@@ -4317,9 +4317,9 @@ description.ko = "단위 행렬을 생성"
 related = ["Mat4"]
 
 ["Mat4::inverted"]
-description.en = "Get inverse matrix (identity when the matrix is not invertible; use tryInvert to check)"
-description.ja = "逆行列を取得 (逆行列が存在しない場合は単位行列。判定が必要なら tryInvert を使う)"
-description.ko = "역행렬을 얻음 (역행렬이 없으면 단위 행렬. 판정이 필요하면 tryInvert 사용)"
+description.en = "Get inverse matrix (identity when |det| < 1e-10, including valid tiny scales; use tryInvert for a relative check)"
+description.ja = "逆行列を取得 (|det| < 1e-10 なら単位行列。有効でも小さいスケールを含む。相対判定には tryInvert を使う)"
+description.ko = "역행렬을 얻음 (|det| < 1e-10이면 단위 행렬. 유효하지만 작은 스케일도 포함. 상대 판정에는 tryInvert 사용)"
 related = ["Mat4::tryInvert"]
 
 ["Mat4::lookAt"]

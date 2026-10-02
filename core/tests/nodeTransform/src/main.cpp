@@ -89,14 +89,19 @@ static void testReparent() {
     auto p = make_shared<Probe>(true);
     p->setPos(10, 10); p->setSize(50, 50);
     a->addChild(p);
+    auto leaf = make_shared<Node>();
+    leaf->setPos(5, 7);
+    p->addChild(leaf);
     drv.setRoot(root);
 
     check("p global pos under A is (10,10)", near2(p->getGlobalPos(), 10, 10));
+    check("descendant global pos under A is (15,17)", near2(leaf->getGlobalPos(), 15, 17));
 
     // addChild moves p to B
     b->addChild(p);
     check("addChild: global pos follows new parent (310,210)",
           near2(p->getGlobalPos(), 310, 210));
+    check("addChild: descendant cache follows new parent", near2(leaf->getGlobalPos(), 315, 217));
     check("addChild: globalToLocal uses new parent",
           near2(p->globalToLocal(Vec3(320, 220, 0)), 10, 10));
     drv.press(320, 220);
@@ -107,26 +112,31 @@ static void testReparent() {
     // removeChild: no parent, global == local
     b->removeChild(p);
     check("removeChild: global pos equals local pos", near2(p->getGlobalPos(), 10, 10));
+    check("removeChild: descendant cache follows detached node", near2(leaf->getGlobalPos(), 15, 17));
 
     // insertChild back under B
     p->getGlobalPos();   // fill the cache
     b->insertChild(0, p);
     check("insertChild: global pos follows new parent (310,210)",
           near2(p->getGlobalPos(), 310, 210));
+    check("insertChild: descendant cache follows new parent", near2(leaf->getGlobalPos(), 315, 217));
 
     // removeAllChildren
     p->getGlobalPos();
     b->removeAllChildren();
     check("removeAllChildren: global pos equals local pos",
           near2(p->getGlobalPos(), 10, 10));
+    check("removeAllChildren: descendant cache follows detached node", near2(leaf->getGlobalPos(), 15, 17));
 
     // sweepDeadChildren
     b->addChild(p);
     check("re-added under B (310,210)", near2(p->getGlobalPos(), 310, 210));
+    leaf->getGlobalMatrix();
     p->destroy();
     drv.tick();   // updateTree() sweeps dead children
     check("sweepDeadChildren: global pos equals local pos",
           near2(p->getGlobalPos(), 10, 10));
+    check("sweepDeadChildren: descendant cache follows detached node", near2(leaf->getGlobalPos(), 15, 17));
 
     // keepGlobalPosition where the computed local pos equals the current one:
     // q at local (10,10) under C(50,50) is global (60,60); D sits at (50,50)
@@ -148,6 +158,23 @@ static void testReparent() {
     d->setPos(100, 0);
     check("keepGlobalPosition: global follows new parent after it moves",
           near2(q->getGlobalPos(), 160, 60));
+
+    // Equal local positions can still produce different global matrices.
+    // Warm both caches before moving to a parent rotated around the same origin.
+    c->addChild(q);
+    q->setPos(0, 0);
+    auto qLeaf = make_shared<Node>(); qLeaf->setPos(10, 0);
+    q->addChild(qLeaf);
+    q->getGlobalMatrix();
+    check("keepGlobalPosition: warm descendant cache before rotation", near2(qLeaf->getGlobalPos(), 60, 50));
+    auto rotatedParent = make_shared<Node>();
+    rotatedParent->setPos(50, 50); rotatedParent->setRot(QUARTER_TAU);
+    root->addChild(rotatedParent);
+    rotatedParent->addChild(q, true);
+    check("keepGlobalPosition: setPos sees unchanged local origin", near2(q->getPos(), 0, 0));
+    check("keepGlobalPosition: global matrix immediately uses rotation",
+          near2(q->localToGlobal(Vec3(10, 0, 0)), 50, 60));
+    check("keepGlobalPosition: descendant cache immediately uses rotation", near2(qLeaf->getGlobalPos(), 50, 60));
 }
 
 static void testScaleZero() {
@@ -180,6 +207,14 @@ static void testScaleZero() {
     drv.press(420, 310);
     drv.press(510, 405);
     check("scale 1e-6: btn not hit", btn->pressCount == 1);
+
+    auto tiny = make_shared<Probe>(true);
+    tiny->setPos(200, 100); tiny->setSize(80, 40); tiny->setScale(1e-6f);
+    root->addChild(tiny);
+    drv.press(200, 100);
+    check("uniform scale 1e-6: tiny area remains pickable", tiny->pressCount == 1);
+    drv.press(210, 105);
+    check("uniform scale 1e-6: nearby point misses tiny area", tiny->pressCount == 1);
 
     btn->setScale(1);
     drv.press(510, 405);
@@ -239,6 +274,23 @@ static void testTryInvert() {
     Vec3 back = out * Vec3(100.0005f, 100.0005f, 0);
     check("tryInvert: small-scale inverse maps back correctly",
           std::abs(back.x - 0.5f) < 0.05f && std::abs(back.y - 0.5f) < 0.05f);
+
+    for (float scale : {1e-6f, 1e-15f, 1e15f, 1e20f}) {
+        Mat4 scaled = Mat4::scale(scale, scale, scale);
+        bool invertible = scaled.tryInvert(out);
+        Mat4 product = scaled * out;
+        bool identity = invertible;
+        for (int k = 0; k < 16; k++)
+            identity = identity && std::abs(product.m[k] - (k % 5 == 0 ? 1.0f : 0.0f)) < 1e-5f;
+        char label[100];
+        std::snprintf(label, sizeof(label), "tryInvert: uniform scale %g has a valid inverse", scale);
+        check(label, identity);
+    }
+
+    check("inverted(): keeps absolute cutoff for valid tiny scale",
+          [] { Mat4 i = Mat4::scale(1e-6f, 1e-6f, 1e-6f).inverted(); Mat4 e;
+               for (int k = 0; k < 16; k++) if (i.m[k] != e.m[k]) return false;
+               return true; }());
 
     check("inverted(): still returns identity on singular",
           [] { Mat4 i = Mat4::scale(0, 0, 0).inverted(); Mat4 e;
