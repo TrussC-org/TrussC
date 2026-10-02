@@ -5,7 +5,7 @@
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 //
 // Each case writes a small .obj to a temp directory and loads it with
-// ObjLoader. No materials or textures, so nothing needs a graphics context.
+// ObjLoader. Texture cases use the dummy GPU backend, without a window.
 //
 // It checks that ObjLoader validates face indices before reading:
 //   - valid faces load as before: positive and relative (negative) indices,
@@ -122,9 +122,59 @@ static bool onlyPentaVertices(const Mesh& mesh) {
 }
 
 int main() {
+    sg_desc graphics = {};
+    sg_setup(&graphics);
     g_dir = fs::temp_directory_path() /
-            ("tcxObj-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
+            utf8ToPath("tcxObj-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
+
+    // ----- UTF-8 model, material and texture paths ----------------------------
+    {
+        fs::path oldRoot = getDataPathRoot();
+        setDataPathRoot(g_dir);
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        }
+        check("UTF-8 fixture: PNG saved", bool(pixels.save(g_dir / utf8ToPath("テクスチャ.png"))));
+        ofstream(g_dir / utf8ToPath("材質.mtl"), ios::binary)
+            << "newmtl red\nKd 1 0 0\nmap_Kd テクスチャ.png\n";
+        ofstream(g_dir / utf8ToPath("三角.obj"), ios::binary)
+            << "mtllib 材質.mtl\n" << TRI_V
+            << "vt 0 0\nvt 1 0\nvt 0 1\nusemtl red\nf 1/1 2/2 3/3\n";
+        ObjLoader loader;
+        bool loaded = loader.load(utf8ToPath("三角.obj"));
+        check("UTF-8 OBJ: triangle and material loaded",
+              loaded && loader.getNumGroups() == 1 && loader.getMesh().getNumIndices() == 3);
+        bool textured = loaded && loader.getNumGroups() == 1 && loader.getGroups()[0].hasTexture;
+        check("UTF-8 OBJ: texture pixels loaded",
+              textured && loader.getGroups()[0].texture.getWidth() == 2 &&
+              loader.getGroups()[0].texture.getColor(0, 0).r == 1.0f);
+        if (textured) {
+            auto& group = loader.getGroups()[0];
+            tcx::obj::ObjExporter exporter;
+            exporter.addMesh(group.mesh, "triangle", group.texture);
+            check("UTF-8 OBJ: export relative Japanese filename",
+                  exporter.save(utf8ToPath("モデル.obj")));
+            ifstream obj(g_dir / utf8ToPath("モデル.obj"), ios::binary);
+            string line;
+            bool utf8Mtl = false;
+            while (getline(obj, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (line == "mtllib モデル.mtl") utf8Mtl = true;
+            }
+            check("UTF-8 OBJ: mtllib contains UTF-8 bytes", utf8Mtl);
+            ObjLoader roundTrip;
+            bool reloaded = roundTrip.load(utf8ToPath("モデル.obj"));
+            check("UTF-8 OBJ: export loads with its texture",
+                  reloaded && roundTrip.getNumGroups() == 1 &&
+                  roundTrip.getGroups()[0].mesh.getNumIndices() == 3 &&
+                  roundTrip.getGroups()[0].hasTexture &&
+                  roundTrip.getGroups()[0].texture.getColor(0, 0).r == 1.0f);
+        }
+        setDataPathRoot(oldRoot);
+    }
 
     // ----- valid faces load as before -----------------------------------------
     {
@@ -254,6 +304,7 @@ int main() {
     error_code ec;
     fs::remove_all(g_dir, ec);
 
+    sg_shutdown();
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

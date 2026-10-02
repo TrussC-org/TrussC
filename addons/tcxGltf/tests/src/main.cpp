@@ -6,7 +6,7 @@
 //
 // Each case writes a small .gltf (buffer embedded as a base64 data URI) or
 // .glb (JSON and BIN chunks) to a temp directory and loads it with GltfModel.
-// No texture is ever created, so nothing needs a graphics context.
+// Texture cases use the dummy GPU backend; no window or device is needed.
 //
 // It checks that GltfModel validates model data before reading it:
 //   - valid models (indexed, non-indexed, node hierarchy, sparse, GLB) load
@@ -232,7 +232,7 @@ static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, Gl
                      string* lastWarning = nullptr, bool asGlb = false) {
     fs::path p = asGlb ? writeGlb(b) : writeGltf(b);
     WarningCounter warnings;
-    bool ok = model.load(p.string());
+    bool ok = model.load(pathToUtf8(p));
     if (expectOk) {
         check(name + ": loads", ok && model.isLoaded());
     } else {
@@ -262,9 +262,46 @@ static bool vecNear(const Vec3& v, float x, float y, float z) {
 }
 
 int main() {
+    sg_desc graphics = {};
+    sg_setup(&graphics);
     g_dir = fs::temp_directory_path() /
-            ("tcxGltf-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
+            utf8ToPath("tcxGltf-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
+
+    // ----- UTF-8 paths, with embedded and external buffers --------------------
+    {
+        fs::path oldRoot = getDataPathRoot();
+        setDataPathRoot(g_dir);
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        for (int y = 0; y < 2; ++y) {
+            for (int x = 0; x < 2; ++x) pixels.setColor(x, y, Color(1, 0, 0, 1));
+        }
+        check("UTF-8 glTF fixture: PNG saved",
+              bool(pixels.save(g_dir / utf8ToPath("テクスチャ.png"))));
+        GltfBuilder b = texturedTriangle(R"({"uri":"テクスチャ.png"})");
+        for (bool external : {false, true}) {
+            string json = b.json();
+            if (external) {
+                string embedded = "data:application/octet-stream;base64," + base64(b.bin);
+                json.replace(json.find(embedded), embedded.size(), "頂点.bin");
+                ofstream(g_dir / utf8ToPath("頂点.bin"), ios::binary)
+                    .write(reinterpret_cast<const char*>(b.bin.data()), (streamsize)b.bin.size());
+            }
+            fs::path fileName = utf8ToPath(external ? "外部.gltf" : "埋込.gltf");
+            ofstream(g_dir / fileName, ios::binary) << json;
+            GltfModel m;
+            WarningCounter warnings;
+            bool loaded = m.load(pathToUtf8(fileName));
+            string name = external ? "UTF-8 glTF external buffer" : "UTF-8 glTF data URI buffer";
+            check(name + ": geometry loads without warnings",
+                  loaded && warnings.count == 0 && m.getNodeCount() == 1 &&
+                  m.getNode(0).mesh.getNumVertices() == 3 && m.getNode(0).mesh.getNumIndices() == 3);
+            check(name + ": external texture loads",
+                  loaded && m.getNodeCount() == 1 && m.getNode(0).material.hasBaseColorTexture());
+        }
+        setDataPathRoot(oldRoot);
+    }
 
     // A count too large to address on 64-bit
     const string HUGE_COUNT = "4611686018427387905";
@@ -567,7 +604,7 @@ int main() {
                       R"({"attributes":{"NORMAL":2},"indices":1})";
         GltfModel m;
         WarningCounter warnings;
-        bool ok = m.load(writeGltf(b).string());
+        bool ok = m.load(pathToUtf8(writeGltf(b)));
         check("two primitives without positions: loads, one node",
               ok && m.isLoaded() && m.getNodeCount() == 1);
         check("two primitives without positions: one warning with the count",
@@ -842,10 +879,10 @@ int main() {
     // ----- a failed load after a good one leaves the model empty ---------------
     {
         GltfModel m;
-        bool first = m.load(writeGltf(triangle()).string());
+        bool first = m.load(pathToUtf8(writeGltf(triangle())));
         GltfBuilder bad = triangle();
         bad.accessors[0] = accessorJson(0, CT_FLOAT, "4", "VEC3");
-        bool second = m.load(writeGltf(bad).string());
+        bool second = m.load(pathToUtf8(writeGltf(bad)));
         check("reload: good then rejected leaves the model empty",
               first && !second && !m.isLoaded() && m.getNodeCount() == 0);
     }
@@ -853,6 +890,7 @@ int main() {
     error_code ec;
     fs::remove_all(g_dir, ec);
 
+    sg_shutdown();
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

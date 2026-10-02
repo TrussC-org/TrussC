@@ -68,14 +68,14 @@ public:
     bool load(const fs::path& path) {
         std::ifstream file(path);
         if (!file) {
-            logError() << "Lut3D: failed to open " << path.string();
+            logError() << "Lut3D: failed to open " << path;
             return false;
         }
 
         std::string line;
         int size = 0;
         std::vector<float> data;
-        title_ = path.stem().string();
+        title_ = pathToUtf8(path.stem());
 
         // Parse .cube file
         while (std::getline(file, line)) {
@@ -525,7 +525,7 @@ inline void generatePastel(float* data, int size) {
 inline bool saveCube(const fs::path& path, const float* data, int size, const std::string& title = "") {
     std::ofstream file(path);
     if (!file) {
-        logError() << "lut::saveCube: failed to open " << path.string();
+        logError() << "lut::saveCube: failed to open " << path;
         return false;
     }
 

@@ -253,12 +253,10 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
         // glTF uris are UTF-8: utf8ToPath() converts them without going
         // through the Windows code page, and on Windows it throws for bytes
         // that are not valid UTF-8. Only that image is skipped then. The uri
-        // is appended as before (baseDir + "/" + uri), not with operator/,
-        // which would let an absolute uri replace baseDir.
+        // is resolved relative to the model's directory.
         fs::path imgPath = baseDir;
         try {
-            imgPath += "/";
-            imgPath += utf8ToPath(uri);
+            imgPath = baseDir / utf8ToPath(uri);
         } catch (const system_error& e) {
             logWarning() << "[GltfModel] skipped an image whose uri is not a valid path ("
                          << e.what() << ")";
@@ -461,7 +459,7 @@ bool GltfModel::load(const string& path) {
     size_t skippedPrimitives = 0;
     try {
         fs::path resolvedPath = getDataPath(path);
-        resolved = resolvedPath.string();
+        resolved = pathToUtf8(resolvedPath);
 
         // Parse with cgltf. The parsed data is freed on every path out of
         // this block, including an exception.

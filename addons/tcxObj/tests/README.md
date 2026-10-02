@@ -16,7 +16,12 @@ validated before they are read:
   tinyobjloader's warning, and ear clipping of the pentagon never reads the
   missing vertex (AddressSanitizer builds check this); ObjLoader then skips
   the triangles that use it;
-- a normal index in a file with no normals is ignored, as before.
+- a normal index in a file with no normals is ignored, as before;
+- a Japanese-named folder, OBJ, MTL and PNG load together; exporting
+  `モデル.obj` writes a UTF-8 `mtllib` name and loads again with its texture.
+
+Texture cases use sokol's dummy graphics backend (no window or GPU). On
+Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it
