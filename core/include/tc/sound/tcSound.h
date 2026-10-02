@@ -717,8 +717,8 @@ struct PlayingSound {
     // installs new versions via internal::sharedStore and the
     // audio thread reads via internal::sharedLoad each callback.
     // The shim type auto-switches between C++20
-    // std::atomic<std::shared_ptr<T>> and the deprecated free-function
-    // atomic API based on __cpp_lib_atomic_shared_ptr.
+    // std::atomic<std::shared_ptr<T>> and a small lock-based class based
+    // on __cpp_lib_atomic_shared_ptr.
     //
     // null map  → use mixMode rules
     // non-null  → map is the source of truth
