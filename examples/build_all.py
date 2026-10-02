@@ -152,17 +152,25 @@ def find_addon_tests(root_dir, include_daily=False):
     # A harness with a `daily-only` marker file is heavy to build (e.g. tcxTls
     # fetches and builds mbedTLS) and runs only with include_daily, which the
     # daily workflow passes; the per-PR lane skips it.
+    # An addon may also ship tests-<name>/ next to tests/, e.g. a daily-only
+    # harness that needs a heavy dependency the per-PR tests/ avoids
+    # (tcxCurl: tests/ is curl-free, tests-curl/ links libcurl).
     addons_dir = os.path.join(root_dir, "addons")
     test_paths = []
     if os.path.exists(addons_dir):
         for addon in sorted(os.listdir(addons_dir)):
-            tdir = os.path.join(addons_dir, addon, "tests")
-            if not (os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src"))):
+            addon_dir = os.path.join(addons_dir, addon)
+            if not os.path.isdir(addon_dir):
                 continue
-            if not include_daily and os.path.isfile(os.path.join(tdir, "daily-only")):
-                Colors.print(f"Skipping {os.path.relpath(tdir, root_dir)} (daily-only; pass --include-daily)", Colors.YELLOW)
-                continue
-            test_paths.append(tdir)
+            names = sorted(n for n in os.listdir(addon_dir) if n == "tests" or n.startswith("tests-"))
+            for name in names:
+                tdir = os.path.join(addon_dir, name)
+                if not (os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src"))):
+                    continue
+                if not include_daily and os.path.isfile(os.path.join(tdir, "daily-only")):
+                    Colors.print(f"Skipping {os.path.relpath(tdir, root_dir)} (daily-only; pass --include-daily)", Colors.YELLOW)
+                    continue
+                test_paths.append(tdir)
     return test_paths
 
 # core/tests/allCoreTests: one app that holds every combinable core test (see
@@ -227,7 +235,8 @@ def find_core_unit_tests(root_dir, include_daily=False):
     return test_paths
 
 def find_test_binary(test_dir, platform_info):
-    # trusscli names the binary after the project dir. addons/*/tests -> "tests";
+    # trusscli names the binary after the project dir. addons/*/tests -> "tests"
+    # (addons/*/tests-<name> -> "tests-<name>");
     # core/tests/<name> -> "<name>". On macOS a TrussC app is
     # <name>.app/Contents/MacOS/<name>; on Windows <name>.exe. Search the tree.
     base = os.path.basename(os.path.normpath(test_dir))
