@@ -209,6 +209,112 @@ namespace detail {
         }
         return out;
     }
+
+    // --- setVerbose() output, without libcurl ---
+    // HttpClient::debugCallback maps curl_infotype to VerboseKind and writes
+    // what formatVerbose() appends to stderr. Kept here, outside the
+    // TCX_HTTP_CURL block, so tests can replay callback sequences.
+    enum class VerboseKind { Text, HeaderIn, HeaderOut };
+
+    // Per-request state (CURLOPT_DEBUGDATA). A large request header block can
+    // reach the callback in several pieces, splitting a line (and a
+    // credential value) between calls: the unterminated tail waits here
+    // until the rest arrives, so every line is redacted whole.
+    struct VerboseState {
+        std::string pendingHeaderOut;
+        // A tail was printed before its line was complete (see
+        // flushPendingHeaderOut): the start of the next piece is the rest of
+        // that line, possibly a credential value, and is hidden.
+        bool maskNextLine = false;
+    };
+
+    // Appends a block of debug output, redacted, with the prefix on each line.
+    inline void appendVerbose(std::string& out, const char* prefix, std::string_view block) {
+        std::string text = redactCredentialHeaders(block);
+        size_t pos = 0;
+        while (pos < text.size()) {
+            size_t nl = text.find('\n', pos);
+            size_t next = (nl == std::string::npos) ? text.size() : nl + 1;
+            out += prefix;
+            out.append(text, pos, next - pos);
+            pos = next;
+        }
+        if (!text.empty() && text.back() != '\n') out += '\n';
+    }
+
+    // A request header block that ended mid-line (curl caps very large header
+    // output, or the request was restarted): append what there is, redacted,
+    // say it was cut, and hide the rest of that line if it shows up later.
+    inline void flushPendingHeaderOut(VerboseState& state, std::string& out, bool maskRest = true) {
+        if (state.pendingHeaderOut.empty()) return;
+        appendVerbose(out, "> ", state.pendingHeaderOut);
+        out += "* (request header output ended mid-line)\n";
+        state.pendingHeaderOut.clear();
+        state.maskNextLine = maskRest;
+    }
+
+    // setVerbose() output for one debug callback, like `curl -v`: info text
+    // (TLS handshake lines included), request and response headers, one
+    // prefix per line, credentials redacted. Appends to out.
+    inline void formatVerbose(VerboseState* state, VerboseKind kind, std::string_view chunk,
+                              std::string& out) {
+        const char* prefix = kind == VerboseKind::Text     ? "* "
+                           : kind == VerboseKind::HeaderIn ? "< "
+                                                           : "> ";
+        if (kind == VerboseKind::Text && state) {
+            // The request that a pending tail belonged to is over. After
+            // "Connection died" curl may still flush that request's remaining
+            // bytes, so the rest of the cut line stays hidden; by "Issue
+            // another request" they are discarded.
+            if (chunk.rfind("Connection died, retrying", 0) == 0) {
+                flushPendingHeaderOut(*state, out, true);
+            } else if (chunk.rfind("Issue another request to this URL", 0) == 0) {
+                flushPendingHeaderOut(*state, out, false);
+                state->maskNextLine = false;  // also when "Connection died" armed it
+            }
+        }
+        if (kind == VerboseKind::Text && isProxyEchoLine(chunk)) {
+            // One echo per chunk: a value containing a newline stays masked.
+            // Only curl's own trailing '\n' is dropped; a CR/LF inside the
+            // value must not move the end-of-line checks.
+            size_t eol = chunk.size();
+            if (eol > 0 && chunk[eol - 1] == '\n') --eol;
+            appendVerbose(out, prefix, redactProxyEchoLine(chunk, eol));
+            return;
+        }
+        if (kind == VerboseKind::Text && isAuthUserLine(chunk)) {
+            // Same for the user name curl authenticates as: it is URL-decoded,
+            // so it may contain a newline.
+            size_t eol = chunk.size();
+            if (eol > 0 && chunk[eol - 1] == '\n') --eol;
+            appendVerbose(out, prefix, redactAuthUserLine(chunk, eol));
+            return;
+        }
+        if (kind == VerboseKind::HeaderOut && state) {
+            // Header pieces keep arriving after the response has started
+            // (curl 8.7+ finishes sending them), so a tail is only flushed at
+            // the end of the transfer or when curl restarts the request.
+            std::string block = std::move(state->pendingHeaderOut);
+            state->pendingHeaderOut.clear();
+            block.append(chunk);
+            if (state->maskNextLine) {
+                size_t nl = block.find('\n');
+                if (nl == std::string::npos) return;  // still inside that line
+                block.replace(0, nl, "<redacted>");
+                state->maskNextLine = false;
+            }
+            size_t lastNl = block.rfind('\n');
+            if (lastNl == std::string::npos) {
+                state->pendingHeaderOut = std::move(block);
+                return;
+            }
+            state->pendingHeaderOut = block.substr(lastNl + 1);
+            block.resize(lastNl + 1);
+            appendVerbose(out, prefix, block);
+            return;
+        }
+        appendVerbose(out, prefix, chunk);
+    }
 } // namespace detail
 
 // HTTP client
@@ -382,109 +488,32 @@ private:
         return totalSize;
     }
 
-    // Per-request state for debugCallback (CURLOPT_DEBUGDATA). A large request
-    // header block can reach the callback in several pieces, splitting a line
-    // (and a credential value) between calls: the unterminated tail waits here
-    // until the rest arrives, so every line is redacted whole.
-    struct VerboseState {
-        std::string pendingHeaderOut;
-        // A tail was printed before its line was complete (see
-        // flushPendingHeaderOut): the start of the next piece is the rest of
-        // that line, possibly a credential value, and is hidden.
-        bool maskNextLine = false;
-    };
-
-    // setVerbose() output, like `curl -v`: info text (TLS handshake lines
-    // included), request and response headers, one prefix per line,
-    // credentials redacted.
+    // setVerbose() output: detail::formatVerbose() builds the text, written
+    // to stderr here.
     static int debugCallback(CURL*, curl_infotype type, char* data, size_t size, void* userp) {
-        const char* prefix = nullptr;
+        detail::VerboseKind kind;
         switch (type) {
-            case CURLINFO_TEXT:       prefix = "* "; break;
-            case CURLINFO_HEADER_IN:  prefix = "< "; break;
-            case CURLINFO_HEADER_OUT: prefix = "> "; break;
+            case CURLINFO_TEXT:       kind = detail::VerboseKind::Text; break;
+            case CURLINFO_HEADER_IN:  kind = detail::VerboseKind::HeaderIn; break;
+            case CURLINFO_HEADER_OUT: kind = detail::VerboseKind::HeaderOut; break;
             default: return 0;  // bodies and TLS records (not shown by CURLOPT_VERBOSE either)
         }
-        std::string_view chunk(data, size);
-        auto* state = static_cast<VerboseState*>(userp);
-        if (type == CURLINFO_TEXT && state) {
-            // The request that a pending tail belonged to is over. After
-            // "Connection died" curl may still flush that request's remaining
-            // bytes, so the rest of the cut line stays hidden; by "Issue
-            // another request" they are discarded.
-            if (chunk.rfind("Connection died, retrying", 0) == 0) {
-                flushPendingHeaderOut(*state, true);
-            } else if (chunk.rfind("Issue another request to this URL", 0) == 0) {
-                flushPendingHeaderOut(*state, false);
-                state->maskNextLine = false;  // also when "Connection died" armed it
-            }
-        }
-        if (type == CURLINFO_TEXT && detail::isProxyEchoLine(chunk)) {
-            // One echo per chunk: a value containing a newline stays masked.
-            // Only curl's own trailing '\n' is dropped; a CR/LF inside the
-            // value must not move the end-of-line checks.
-            size_t eol = chunk.size();
-            if (eol > 0 && chunk[eol - 1] == '\n') --eol;
-            printVerbose(prefix, detail::redactProxyEchoLine(chunk, eol));
-            return 0;
-        }
-        if (type == CURLINFO_TEXT && detail::isAuthUserLine(chunk)) {
-            // Same for the user name curl authenticates as: it is URL-decoded,
-            // so it may contain a newline.
-            size_t eol = chunk.size();
-            if (eol > 0 && chunk[eol - 1] == '\n') --eol;
-            printVerbose(prefix, detail::redactAuthUserLine(chunk, eol));
-            return 0;
-        }
-        if (type == CURLINFO_HEADER_OUT && state) {
-            // Header pieces keep arriving after the response has started
-            // (curl 8.7+ finishes sending them), so a tail is only flushed at
-            // the end of the transfer or when curl restarts the request.
-            std::string block = std::move(state->pendingHeaderOut);
-            state->pendingHeaderOut.clear();
-            block.append(chunk);
-            if (state->maskNextLine) {
-                size_t nl = block.find('\n');
-                if (nl == std::string::npos) return 0;  // still inside that line
-                block.replace(0, nl, "<redacted>");
-                state->maskNextLine = false;
-            }
-            size_t lastNl = block.rfind('\n');
-            if (lastNl == std::string::npos) {
-                state->pendingHeaderOut = std::move(block);
-                return 0;
-            }
-            state->pendingHeaderOut = block.substr(lastNl + 1);
-            block.resize(lastNl + 1);
-            printVerbose(prefix, block);
-            return 0;
-        }
-        printVerbose(prefix, chunk);
+        std::string out;
+        detail::formatVerbose(static_cast<detail::VerboseState*>(userp), kind,
+                              std::string_view(data, size), out);
+        writeVerbose(out);
         return 0;
     }
 
-    // A request header block that ended mid-line (curl caps very large header
-    // output, or the request was restarted): print what there is, redacted,
-    // say it was cut, and hide the rest of that line if it shows up later.
-    static void flushPendingHeaderOut(VerboseState& state, bool maskRest = true) {
-        if (state.pendingHeaderOut.empty()) return;
-        printVerbose("> ", state.pendingHeaderOut);
-        std::fputs("* (request header output ended mid-line)\n", stderr);
-        state.pendingHeaderOut.clear();
-        state.maskNextLine = maskRest;
+    // End of the transfer: a request header tail still waiting is printed.
+    static void flushPendingHeaderOut(detail::VerboseState& state) {
+        std::string out;
+        detail::flushPendingHeaderOut(state, out);
+        writeVerbose(out);
     }
 
-    // Prints a block of debug output, redacted, with the prefix on each line.
-    static void printVerbose(const char* prefix, std::string_view block) {
-        std::string text = detail::redactCredentialHeaders(block);
-        size_t pos = 0;
-        while (pos < text.size()) {
-            size_t nl = text.find('\n', pos);
-            size_t next = (nl == std::string::npos) ? text.size() : nl + 1;
-            std::fprintf(stderr, "%s%.*s", prefix, static_cast<int>(next - pos), text.data() + pos);
-            pos = next;
-        }
-        if (!text.empty() && text.back() != '\n') std::fputc('\n', stderr);
+    static void writeVerbose(const std::string& text) {
+        if (!text.empty()) std::fwrite(text.data(), 1, text.size(), stderr);
     }
 #endif
 };
@@ -528,7 +557,7 @@ inline HttpResponse HttpClient::request(const std::string& method, const std::st
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, 30L);
     curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, 15L);
-    VerboseState verboseState;
+    detail::VerboseState verboseState;
     if (verbose_) {
         curl_easy_setopt(curl, CURLOPT_DEBUGFUNCTION, debugCallback);
         curl_easy_setopt(curl, CURLOPT_DEBUGDATA, &verboseState);

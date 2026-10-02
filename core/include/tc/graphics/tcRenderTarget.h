@@ -43,6 +43,11 @@ inline std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
 // Returns {0} before sokol is up — sgl then falls back to its built-in shader.
 sg_shader sglPremultShader();
 
+// Coverage sgl shader handle (defined in tcGlobal.cpp, built from
+// core/shaders/sglCoverage.glsl): samples a single-channel texture and uses R as
+// alpha. Bound by pipeDescCoverage2D() for the R8 TrueType glyph atlas.
+sg_shader sglCoverageShader();
+
 // --- Role blend/depth specs (the blend tables formerly duplicated in tcGlobal.cpp).
 // Pixel format / sample count / depth format are left at defaults on purpose: sgl
 // fills them from the target's context, so the same desc is correct for swapchain
@@ -131,6 +136,14 @@ inline sg_pipeline_desc pipeDescPremult(bool depthTest = false) {
         d.depth.write_enabled = true;
         d.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     }
+    return d;
+}
+
+// Single-channel coverage texture (the R8 TrueType glyph atlas): the Alpha blend
+// of pipeDesc2D with sglCoverageShader(), which turns the R channel into alpha.
+inline sg_pipeline_desc pipeDescCoverage2D(bool depthTest = false) {
+    sg_pipeline_desc d = pipeDesc2D(BlendMode::Alpha, depthTest);
+    d.shader = sglCoverageShader();
     return d;
 }
 

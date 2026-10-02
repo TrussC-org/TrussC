@@ -1,302 +1,335 @@
 // =============================================================================
-// tcxCurl tests - headless behavioral test for HttpClient (no window).
+// tcxCurl tests - headless console test (no window), no libcurl needed.
 //
-// Built and run by CI via examples/build_all.py --addon-tests-only (exit 0 =
-// pass, non-zero = fail). Locally: trusscli run -p . from this directory.
+// Built and run by CI on every push/PR across macOS / Windows / Linux via
+// examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 //
-// The HTTPS peer is a small Python http.server (GET and POST answer 200) on
-// 127.0.0.1, port chosen by the OS (port 0). Its key and self-signed
-// certificate are made by `openssl req` at startup in a temporary directory,
-// so nothing leaves the machine and no key is committed. Without an `openssl`
-// or Python command on PATH the test prints SKIP and passes.
+// tcxCurl.h is included by relative path and tcxCurl is not listed in
+// addons.make, so TCX_HTTP_CURL stays undefined: only the curl-free code in
+// tcx::curl::detail is compiled. That is the code behind setVerbose():
+//   - redactCredentialLine(): credential headers (HTTP/1 lines and the
+//     [HTTP/2] / h2h3 / h2 info lines), curl's echo of an environment proxy
+//     (lines curl cut at 2047 chars, at 2043 + "...", and error lines at
+//     255 chars), and the user name on "Proxy/Server auth using" lines
+//   - formatVerbose() / flushPendingHeaderOut(): recorded debug callback
+//     sequences replayed, including a request header block split inside a
+//     credential line, "Connection died, retrying", "Issue another request
+//     to this URL" and a tail that never completes
 //
-// setTlsCACertificate() (#401):
-//   - without a CA, a request to the self-signed server fails (the OS default
-//     store does not hold it);
-//   - with the server's certificate as the CA, get() and uploadFile() return
-//     200;
-//   - with another self-signed certificate, or text that is not a PEM, the
-//     request fails: verification stays on;
-//   - an empty string goes back to the OS default store, and the request
-//     fails again.
-// On Linux the PEM must be taken. Elsewhere the system libcurl may not take
-// a PEM from memory; then the request must fail with an error naming
-// setTlsCACertificate, and the test says so.
+// The fake secrets below must never appear in the output. The expected
+// strings follow curl's line formats; a curl upgrade that changes a format
+// has to update both tcxCurl.h and these cases.
 // =============================================================================
 
-#include <TrussC.h>
-#include <tcxCurl.h>
+#include "../../src/tcxCurl.h"
 
-#include <chrono>
 #include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
-#include <thread>
+#include <utility>
 #include <vector>
 
-#ifdef _WIN32
-    #include <windows.h>
-#else
-    #include <sys/wait.h>
-    #include <fcntl.h>
-    #include <signal.h>
-    #include <unistd.h>
-#endif
+using namespace tcx::curl::detail;
+using std::string;
 
-using namespace std;
-namespace fs = std::filesystem;
-
-static int g_failures = 0;
-
-static void check(const string& what, bool ok, const string& detail = "") {
-    printf("  [%s] %s%s%s\n", ok ? "PASS" : "FAIL", what.c_str(),
-           detail.empty() ? "" : " -- ", detail.c_str());
-    if (!ok) ++g_failures;
+static int g_pass = 0, g_fail = 0;
+static void check(const string& name, bool ok) {
+    std::printf("%-64s %s\n", name.c_str(), ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    ok ? ++g_pass : ++g_fail;
 }
 
-static string readFile(const fs::path& p) {
-    ifstream f(p, ios::binary);
-    stringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
-
-static int run(const string& cmd) {
-#ifdef _WIN32
-    // cmd.exe strips one pair of outer quotes.
-    return std::system(("\"" + cmd + "\"").c_str());
-#else
-    return std::system(cmd.c_str());
-#endif
-}
-
-static string quoted(const fs::path& p) { return "\"" + p.string() + "\""; }
-
-#ifdef _WIN32
-static const char* kNull = "NUL";
-#else
-static const char* kNull = "/dev/null";
-#endif
-
-// The Python HTTPS server as a child process, stopped in the destructor.
-struct TlsServer {
-#ifdef _WIN32
-    PROCESS_INFORMATION pi{};
-    bool started = false;
-#else
-    pid_t pid = -1;
-#endif
-
-    bool start(const string& python, const fs::path& script, const fs::path& cert,
-               const fs::path& key, const fs::path& portFile) {
-#ifdef _WIN32
-        string cmd = python + " " + quoted(script) + " " + quoted(cert) + " " + quoted(key) +
-                     " " + quoted(portFile);
-        STARTUPINFOA si{};
-        si.cb = sizeof(si);
-        vector<char> buf(cmd.begin(), cmd.end());
-        buf.push_back('\0');
-        started = CreateProcessA(nullptr, buf.data(), nullptr, nullptr, FALSE,
-                                 CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) != 0;
-        return started;
-#else
-        pid = fork();
-        if (pid < 0) return false;
-        if (pid == 0) {
-            int devnull = open("/dev/null", O_RDWR);
-            if (devnull >= 0) {
-                dup2(devnull, 0);
-                dup2(devnull, 1);
-                dup2(devnull, 2);
-            }
-            string s = script.string(), c = cert.string(), k = key.string(), p = portFile.string();
-            execlp(python.c_str(), python.c_str(), s.c_str(), c.c_str(), k.c_str(), p.c_str(),
-                   (char*)nullptr);
-            _exit(127);
-        }
-        return true;
-#endif
+// Prints both strings on a mismatch so a failure shows what changed.
+static void checkEq(const string& name, const string& got, const string& want) {
+    check(name, got == want);
+    if (got != want) {
+        std::printf("    got:  [%s]\n    want: [%s]\n", got.c_str(), want.c_str());
     }
+}
 
-    ~TlsServer() {
-#ifdef _WIN32
-        if (started) {
-            TerminateProcess(pi.hProcess, 0);
-            WaitForSingleObject(pi.hProcess, 5000);
-            CloseHandle(pi.hProcess);
-            CloseHandle(pi.hThread);
-        }
-#else
-        if (pid > 0) {
-            kill(pid, SIGTERM);
-            int status = 0;
-            waitpid(pid, &status, 0);
-        }
-#endif
-    }
+static bool contains(const string& s, const string& part) {
+    return s.find(part) != string::npos;
+}
+
+// ---------------------------------------------------------------------------
+// Replaying debug callbacks
+// ---------------------------------------------------------------------------
+
+struct Step {
+    VerboseKind kind;
+    string data;
 };
+static Step text(string s) { return {VerboseKind::Text, std::move(s)}; }
+static Step out(string s) { return {VerboseKind::HeaderOut, std::move(s)}; }
+static Step in(string s) { return {VerboseKind::HeaderIn, std::move(s)}; }
 
-static const char* kServerScript = R"PY(import http.server, os, ssl, sys
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def answer(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n:
-            self.rfile.read(n)
-        body = b"ok"
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-    do_GET = answer
-    do_POST = answer
-    def log_message(self, *args):
-        pass
-
-cert, key, port_file = sys.argv[1], sys.argv[2], sys.argv[3]
-server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ctx.load_cert_chain(cert, key)
-server.socket = ctx.wrap_socket(server.socket, server_side=True)
-with open(port_file + ".tmp", "w") as f:
-    f.write(str(server.server_address[1]))
-os.replace(port_file + ".tmp", port_file)
-server.serve_forever()
-)PY";
-
-static bool makeSelfSigned(const fs::path& dir, const string& name, const fs::path& cfg) {
-    string cmd = "openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=localhost"
-                 " -config " + quoted(cfg) + " -extensions v3" +
-                 " -keyout " + quoted(dir / (name + "-key.pem")) +
-                 " -out " + quoted(dir / (name + ".pem")) +
-                 " > " + kNull + " 2>&1";
-    return run(cmd) == 0 && fs::exists(dir / (name + ".pem"));
+// Feeds the steps through formatVerbose() like curl's debug callback would,
+// then the end-of-transfer flush HttpClient::request() does.
+static string replay(const std::vector<Step>& steps, bool endFlush = true) {
+    VerboseState state;
+    string result;
+    for (const auto& s : steps) formatVerbose(&state, s.kind, s.data, result);
+    if (endFlush) flushPendingHeaderOut(state, result);
+    return result;
 }
 
-static void testCaCertificate(const fs::path& dir, const string& python) {
-    fs::path cfg = dir / "openssl.cnf";
-    {
-        ofstream f(cfg);
-        f << "[req]\n"
-             "distinguished_name = dn\n"
-             "[dn]\n"
-             "[v3]\n"
-             "basicConstraints = critical,CA:TRUE\n"
-             "keyUsage = critical,digitalSignature,keyEncipherment,keyCertSign\n"
-             "subjectKeyIdentifier = hash\n"
-             "subjectAltName = DNS:localhost,IP:127.0.0.1\n";
+// Same, with every HeaderOut step cut into pieces of `piece` bytes.
+static string replayPieces(const std::vector<Step>& steps, size_t piece) {
+    std::vector<Step> split;
+    for (const auto& s : steps) {
+        if (s.kind != VerboseKind::HeaderOut) {
+            split.push_back(s);
+            continue;
+        }
+        for (size_t i = 0; i < s.data.size(); i += piece) {
+            split.push_back(out(s.data.substr(i, piece)));
+        }
     }
-    fs::path uploadPath = dir / "upload.txt";
-    {
-        ofstream f(uploadPath);
-        f << "hello\n";
-    }
-    {
-        ofstream f(dir / "server.py");
-        f << kServerScript;
-    }
-
-    bool made = makeSelfSigned(dir, "server", cfg) && makeSelfSigned(dir, "other", cfg);
-    check("openssl made two self-signed certificates", made);
-    if (!made) return;
-    string serverPem = readFile(dir / "server.pem");
-    string otherPem = readFile(dir / "other.pem");
-
-    fs::path portFile = dir / "port.txt";
-    TlsServer server;
-    bool started = server.start(python, dir / "server.py", dir / "server.pem",
-                                dir / "server-key.pem", portFile);
-    int port = 0;
-    for (int i = 0; started && i < 200 && port == 0; ++i) {
-        if (fs::exists(portFile)) port = atoi(readFile(portFile).c_str());
-        if (port == 0) this_thread::sleep_for(chrono::milliseconds(50));
-    }
-    check("HTTPS server listens on 127.0.0.1", port > 0, to_string(port));
-    if (port <= 0) return;
-
-    tcx::curl::HttpClient http;
-    http.setBaseUrl("https://127.0.0.1:" + to_string(port));
-    http.setTimeout(10);
-
-    auto res = http.get("/");
-    check("no CA: get() fails", !res.error.empty() && res.statusCode == 0, res.error);
-    auto up = http.uploadFile("/", uploadPath.string());
-    check("no CA: uploadFile() fails", !up.error.empty() && up.statusCode == 0, up.error);
-
-    http.setTlsCACertificate(serverPem);
-    res = http.get("/");
-    bool notTaken = res.error.find("setTlsCACertificate") != string::npos;
-#ifdef __linux__
-    bool allowNotTaken = false;
-#else
-    bool allowNotTaken = true;
-#endif
-    if (notTaken && allowNotTaken) {
-        printf("  [NOTE] this libcurl does not take a CA PEM: %s\n", res.error.c_str());
-        check("server's certificate as CA: get() fails with a setTlsCACertificate error",
-              res.statusCode == 0);
-        up = http.uploadFile("/", uploadPath.string());
-        check("server's certificate as CA: uploadFile() fails with a setTlsCACertificate error",
-              up.statusCode == 0 && up.error.find("setTlsCACertificate") != string::npos, up.error);
-    } else {
-        check("server's certificate as CA: get() returns 200",
-              res.error.empty() && res.statusCode == 200,
-              res.error.empty() ? to_string(res.statusCode) : res.error);
-        up = http.uploadFile("/", uploadPath.string());
-        check("server's certificate as CA: uploadFile() returns 200",
-              up.error.empty() && up.statusCode == 200,
-              up.error.empty() ? to_string(up.statusCode) : up.error);
-
-        http.setTlsCACertificate(otherPem);
-        res = http.get("/");
-        check("another certificate as CA: get() fails", !res.error.empty() && res.statusCode == 0,
-              res.error);
-        up = http.uploadFile("/", uploadPath.string());
-        check("another certificate as CA: uploadFile() fails",
-              !up.error.empty() && up.statusCode == 0, up.error);
-
-        http.setTlsCACertificate("not a certificate");
-        res = http.get("/");
-        check("text that is not a PEM as CA: get() fails",
-              !res.error.empty() && res.statusCode == 0, res.error);
-    }
-
-    http.setTlsCACertificate("");
-    res = http.get("/");
-    check("empty CA (OS default store): get() fails", !res.error.empty() && res.statusCode == 0,
-          res.error);
+    return replay(split);
 }
 
 int main() {
-    setvbuf(stdout, nullptr, _IONBF, 0);
-    printf("tcxCurl tests\n");
+    const string SECRET = "TOPSECRET42";
 
-    if (run(string("openssl version > ") + kNull + " 2>&1") != 0) {
-        printf("  [SKIP] no openssl command on PATH: setTlsCACertificate not tested\n");
-        return 0;
-    }
-    string python;
-    for (const char* name : {"python3", "python"}) {
-        if (run(string(name) + " -c \"import ssl\" > " + kNull + " 2>&1") == 0) {
-            python = name;
-            break;
+    // --- HTTP/1 request header lines ----------------------------------------
+    {
+        const char* names[] = {
+            "Authorization", "AUTHORIZATION", "authorization", "AuThOrIzAtIoN",
+            "Proxy-Authorization", "PROXY-AUTHORIZATION", "proxy-Authorization",
+            "X-Api-Key", "X-API-KEY", "x-api-key",
+            "Api-Key", "API-KEY", "api-key",
+        };
+        for (const char* n : names) {
+            string line = string(n) + ": Bearer " + SECRET + "\r\n";
+            checkEq(string("header masked: ") + n, redactCredentialLine(line),
+                    string(n) + ": <redacted>\r\n");
         }
-    }
-    if (python.empty()) {
-        printf("  [SKIP] no Python with ssl on PATH: setTlsCACertificate not tested\n");
-        return 0;
+        checkEq("header without a value masked", redactCredentialLine("Authorization:" + SECRET + "\n"),
+                "Authorization: <redacted>\n");
+        checkEq("other header kept", redactCredentialLine("X-Request-Id: abc123\r\n"),
+                "X-Request-Id: abc123\r\n");
+        checkEq("header name only as a prefix kept", redactCredentialLine("Authorization-Hint: abc\r\n"),
+                "Authorization-Hint: abc\r\n");
+
+        string block = "GET /v1 HTTP/1.1\r\nHost: example.com\r\nauthorization: Bearer " + SECRET +
+                       "\r\nX-API-Key: " + SECRET + "\r\nAccept: */*\r\n\r\n";
+        string got = redactCredentialHeaders(block);
+        checkEq("header block: each credential line masked", got,
+                "GET /v1 HTTP/1.1\r\nHost: example.com\r\nauthorization: <redacted>\r\n"
+                "X-API-Key: <redacted>\r\nAccept: */*\r\n\r\n");
     }
 
-    fs::path dir = fs::temp_directory_path() /
-                   ("tcxcurl-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
-    fs::create_directories(dir);
-    testCaCertificate(dir, python);
-    std::error_code ec;
-    fs::remove_all(dir, ec);
+    // --- HTTP/2 and HTTP/3 info lines ---------------------------------------
+    {
+        checkEq("[HTTP/2] value with ']' masked to the last ']'",
+                redactCredentialLine("[HTTP/2] [1] [authorization: a]b]\n"),
+                "[HTTP/2] [1] [authorization: <redacted>]\n");
+        checkEq("[HTTP/2] bearer token masked",
+                redactCredentialLine("[HTTP/2] [3] [Authorization: Bearer " + SECRET + "]\n"),
+                "[HTTP/2] [3] [Authorization: <redacted>]\n");
+        checkEq("[HTTP/3] x-api-key masked",
+                redactCredentialLine("[HTTP/3] [0] [x-api-key: " + SECRET + "]\n"),
+                "[HTTP/3] [0] [x-api-key: <redacted>]\n");
+        checkEq("h2h3 form masked",
+                redactCredentialLine("h2h3 [authorization: Bearer " + SECRET + "]\n"),
+                "h2h3 [authorization: <redacted>]\n");
+        checkEq("h2 form masked",
+                redactCredentialLine("h2 [proxy-authorization: Basic " + SECRET + "]\n"),
+                "h2 [proxy-authorization: <redacted>]\n");
+        checkEq("[HTTP/2] other header kept",
+                redactCredentialLine("[HTTP/2] [1] [user-agent: x/1.0]\n"),
+                "[HTTP/2] [1] [user-agent: x/1.0]\n");
+    }
 
-    printf("%s (%d failure%s)\n", g_failures ? "FAIL" : "PASS", g_failures, g_failures == 1 ? "" : "s");
-    return g_failures ? 1 : 0;
+    // --- Proxy echo lines ----------------------------------------------------
+    {
+        const string uses = "Uses proxy env variable https_proxy == '";
+
+        checkEq("proxy echo with userinfo masked",
+                redactCredentialLine(uses + "http://user:" + SECRET + "@proxy:3128'\n"),
+                uses + "<redacted>'\n");
+        checkEq("proxy echo, upper-case variable, masked",
+                redactCredentialLine("Uses proxy env variable HTTPS_PROXY == 'http://u:" + SECRET + "@p'\n"),
+                "Uses proxy env variable HTTPS_PROXY == '<redacted>'\n");
+        checkEq("proxy echo without '@' kept readable",
+                redactCredentialLine(uses + "http://proxy.local:3128'\n"),
+                uses + "http://proxy.local:3128'\n");
+        checkEq("proxy echo with a quote in the password masked",
+                redactCredentialLine(uses + "http://u:ab'" + SECRET + "@p:1'\n"),
+                uses + "<redacted>'\n");
+        checkEq("no_proxy line kept",
+                redactCredentialLine("Uses proxy env variable no_proxy == 'localhost,127.0.0.1'\n"),
+                "Uses proxy env variable no_proxy == 'localhost,127.0.0.1'\n");
+        checkEq("NO_PROXY line kept",
+                redactCredentialLine("Uses proxy env variable NO_PROXY == 'a@b,example.com'\n"),
+                "Uses proxy env variable NO_PROXY == 'a@b,example.com'\n");
+        check("no_proxy / NO_PROXY are not proxy echo lines",
+              !isProxyEchoLine("Uses proxy env variable no_proxy == 'x'") &&
+              !isProxyEchoLine("Uses proxy env variable NO_PROXY == 'x'"));
+
+        // curl <= 8.12 (8.5 on Ubuntu 24.04) cuts the line at 2047 chars with
+        // no "...". The password has a quote exactly at the cut, and the '@'
+        // comes after it, so the kept part looks like a complete value.
+        string head = uses + "http://user:";
+        string cut2047 = head + string(2046 - head.size(), 'S') + "'";
+        check("2047-char line built as intended", cut2047.size() == 2047 && cut2047.back() == '\'');
+        string got = redactCredentialLine(cut2047 + "\n");
+        checkEq("cut at 2047 with a quote at the cut: value masked", got, uses + "<redacted>\n");
+        check("cut at 2047: no password characters left", !contains(got, "SSSS"));
+
+        // Same without the trailing newline (eol == size)
+        got = redactCredentialLine(cut2047);
+        checkEq("cut at 2047, no newline: value masked", got, uses + "<redacted>");
+
+        // One char shorter, ending in the closing quote, no '@': a complete
+        // value without userinfo, kept readable.
+        string full2046 = head + string(2045 - head.size(), 'h') + "'";
+        checkEq("complete 2046-char value without '@' kept",
+                redactCredentialLine(full2046 + "\n"), full2046 + "\n");
+
+        // curl 8.13+: 2043 chars + "..."
+        string cut2043 = head + string(2043 - head.size(), 'S') + "...";
+        check("2043 + \"...\" line built as intended", cut2043.size() == 2046);
+        got = redactCredentialLine(cut2043 + "\n");
+        checkEq("cut at 2043 + \"...\": value masked", got, uses + "<redacted>\n");
+        check("cut at 2043: no password characters left", !contains(got, "SSSS"));
+
+        // Error lines are cut at 255 chars. A quote inside the password makes
+        // the kept part look closed; the '@' is past the cut.
+        const string uns = "Unsupported proxy syntax in '";
+        checkEq("unsupported proxy with userinfo masked",
+                redactCredentialLine(uns + "http://user:" + SECRET + "@host': bad port\n"),
+                uns + "<redacted>': bad port\n");
+        checkEq("unsupported proxy without '@' kept",
+                redactCredentialLine(uns + "http://host:99999': bad port\n"),
+                uns + "http://host:99999': bad port\n");
+        string uhead = uns + "http://user:SS'";
+        string cut255 = uhead + string(255 - uhead.size(), 'S');
+        check("255-char error line built as intended", cut255.size() == 255);
+        got = redactCredentialLine(cut255 + "\n");
+        checkEq("error line cut at 255 with a quote inside: value masked", got, uns + "<redacted>\n");
+        check("cut at 255: no password characters left", !contains(got, "SS"));
+        string uopen = uns + "http://user:" + string(200, 'S');
+        got = redactCredentialLine(uopen + "\n");
+        checkEq("error line without a closing quote: value masked", got, uns + "<redacted>\n");
+    }
+
+    // --- Auth user lines -----------------------------------------------------
+    {
+        checkEq("proxy auth user masked",
+                redactCredentialLine("Proxy auth using Basic with user '" + SECRET + "'\n"),
+                "Proxy auth using Basic with user '<redacted>'\n");
+        checkEq("server auth user masked",
+                redactCredentialLine("Server auth using Digest with user 'a'" + SECRET + "'\n"),
+                "Server auth using Digest with user '<redacted>'\n");
+        checkEq("auth user line without a quote masked after the scheme",
+                redactCredentialLine("Server auth using Basic " + SECRET + "\n"),
+                "Server auth using <redacted>\n");
+    }
+
+    // --- Replayed callback sequences ----------------------------------------
+    {
+        const string req = "GET /v1 HTTP/1.1\r\nHost: example.com\r\nAuthorization: Bearer " + SECRET +
+                           "\r\nAccept: */*\r\n\r\n";
+        const string reqOut = "> GET /v1 HTTP/1.1\r\n> Host: example.com\r\n> Authorization: <redacted>\r\n"
+                              "> Accept: */*\r\n> \r\n";
+
+        checkEq("replay: whole header block", replay({out(req)}), reqOut);
+
+        // Split inside the credential value
+        size_t cutAt = req.find(SECRET) + 4;
+        string got = replay({out(req.substr(0, cutAt)), out(req.substr(cutAt))});
+        checkEq("replay: block split inside the credential", got, reqOut);
+
+        bool allSame = true;
+        for (size_t piece = 1; piece <= 9; ++piece) {
+            string g = replayPieces({out(req)}, piece);
+            if (g != reqOut) {
+                allSame = false;
+                std::printf("    piece %zu: [%s]\n", piece, g.c_str());
+            }
+        }
+        check("replay: block split into 1..9-byte pieces", allSame);
+
+        // Prefixes per kind, and text/header-in passed through
+        checkEq("replay: text, header in and header out prefixes",
+                replay({text("Connected to example.com (127.0.0.1) port 80\n"), out(req),
+                        in("HTTP/1.1 200 OK\r\n"), in("Content-Length: 2\r\n"), in("\r\n")}),
+                "* Connected to example.com (127.0.0.1) port 80\n" + reqOut +
+                "< HTTP/1.1 200 OK\r\n< Content-Length: 2\r\n< \r\n");
+
+        // Response headers after the request (curl 8.7+ may send the end of
+        // the request headers after the response has started)
+        size_t mid = req.find("Accept");
+        checkEq("replay: request tail after response headers",
+                replay({out(req.substr(0, mid)), in("HTTP/1.1 100 Continue\r\n"), out(req.substr(mid))}),
+                "> GET /v1 HTTP/1.1\r\n> Host: example.com\r\n> Authorization: <redacted>\r\n"
+                "< HTTP/1.1 100 Continue\r\n> Accept: */*\r\n> \r\n");
+
+        // A tail that never completes: flushed, redacted, and noted
+        string partial = "GET /v1 HTTP/1.1\r\nAuthorization: Bearer " + SECRET.substr(0, 5);
+        got = replay({out(partial)});
+        checkEq("replay: tail never completes", got,
+                "> GET /v1 HTTP/1.1\r\n> Authorization: <redacted>\n"
+                "* (request header output ended mid-line)\n");
+        check("replay: tail never completes, no secret part", !contains(got, SECRET.substr(0, 5)));
+
+        // Without the end-of-transfer flush, the tail is held back
+        checkEq("replay: tail held until the flush", replay({out(partial)}, false),
+                "> GET /v1 HTTP/1.1\r\n");
+
+        // Connection died: the pending tail is flushed before the info line,
+        // and the rest of that line, if curl still sends it, stays hidden.
+        const string rest = SECRET.substr(5) + "\r\nAccept: */*\r\n\r\n";
+        got = replay({out(partial), text("Connection died, retrying a fresh connect (retry count: 1)\n"),
+                      out(rest)});
+        checkEq("replay: connection died, rest of the cut line hidden", got,
+                "> GET /v1 HTTP/1.1\r\n> Authorization: <redacted>\n"
+                "* (request header output ended mid-line)\n"
+                "* Connection died, retrying a fresh connect (retry count: 1)\n"
+                "> <redacted>\n> Accept: */*\r\n> \r\n");
+        check("replay: connection died, no secret part", !contains(got, SECRET.substr(0, 5)) &&
+                                                          !contains(got, SECRET.substr(5)));
+
+        // The rest arriving in pieces after "Connection died"
+        got = replay({out(partial), text("Connection died, retrying a fresh connect (retry count: 1)\n"),
+                      out(SECRET.substr(5, 2)), out(SECRET.substr(7)), out("\r\n\r\n")});
+        checkEq("replay: connection died, rest in pieces hidden", got,
+                "> GET /v1 HTTP/1.1\r\n> Authorization: <redacted>\n"
+                "* (request header output ended mid-line)\n"
+                "* Connection died, retrying a fresh connect (retry count: 1)\n"
+                "> <redacted>\n> \r\n");
+
+        // Issue another request: the old tail is flushed, and the new
+        // request's first line is shown (not taken as the rest of the cut line).
+        got = replay({out(partial), text("Connection died, retrying a fresh connect (retry count: 1)\n"),
+                      text("Issue another request to this URL: 'http://example.com/v1'\n"), out(req)});
+        checkEq("replay: connection died, then another request", got,
+                "> GET /v1 HTTP/1.1\r\n> Authorization: <redacted>\n"
+                "* (request header output ended mid-line)\n"
+                "* Connection died, retrying a fresh connect (retry count: 1)\n"
+                "* Issue another request to this URL: 'http://example.com/v1'\n" + reqOut);
+
+        got = replay({out(partial), text("Issue another request to this URL: 'http://example.com/v1'\n"),
+                      out(req)});
+        checkEq("replay: another request without connection died", got,
+                "> GET /v1 HTTP/1.1\r\n> Authorization: <redacted>\n"
+                "* (request header output ended mid-line)\n"
+                "* Issue another request to this URL: 'http://example.com/v1'\n" + reqOut);
+
+        // Info lines through the callback
+        checkEq("replay: [HTTP/2] info line",
+                replay({text("[HTTP/2] [1] [authorization: Bearer " + SECRET + "]\n")}),
+                "* [HTTP/2] [1] [authorization: <redacted>]\n");
+        checkEq("replay: proxy echo with a newline in the value",
+                replay({text("Uses proxy env variable https_proxy == 'http://u:a\n" + SECRET + "@p:1'\n")}),
+                "* Uses proxy env variable https_proxy == '<redacted>'\n");
+        checkEq("replay: auth user line with a newline in the name",
+                replay({text("Proxy auth using Basic with user 'a\n" + SECRET + "'\n")}),
+                "* Proxy auth using Basic with user '<redacted>'\n");
+        checkEq("replay: text without a trailing newline gets one",
+                replay({text("Closing connection")}), "* Closing connection\n");
+    }
+
+    std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
+    return g_fail == 0 ? 0 : 1;
 }
