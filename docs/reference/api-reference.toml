@@ -12361,9 +12361,9 @@ description.ko = "일시정지 또는 재개"
 ["VideoPlayerBase::setResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend."
-description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定。ズレがこの値を超えるとフレーム送りではなくシークで同期。0で無効。デフォルト: 0.5秒。主にLinux(FFmpeg)で有効"
-description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크하는 값을 설정. 드리프트가 이 값을 초과하면 프레임 추적 대신 시크로 동기화. 0이면 비활성. 기본값: 0.5초. 주로 Linux(FFmpeg)에서 유효"
+description.en = "Set the maximum video/audio drift before hard re-sync (video seeks to the audio position). Set to 0 or negative to disable hard re-sync. Default: 0.5s. Affects the Linux (FFmpeg) backend and tcxHap's HapPlayer. HapPlayer advances by wall-clock dt * speed and slews toward playing audio with a 0.25s time constant; slewing remains enabled when hard re-sync is disabled."
+description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定（映像を音声位置へシーク）。0以下でハードリシンクを無効化。デフォルト: 0.5秒。Linux(FFmpeg)とtcxHapのHapPlayerで有効。HapPlayerは壁時計のdt * speedで進み、再生中の音声位置へ時定数0.25秒で徐々に補正する。ハードリシンクを無効にしても、この補正は続く"
+description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크(비디오를 오디오 위치로 시크)하는 값을 설정. 0 이하면 하드 리싱크를 비활성화. 기본값: 0.5초. Linux(FFmpeg)와 tcxHap의 HapPlayer에서 유효. HapPlayer는 벽시계 dt * speed로 진행하며 재생 중인 오디오 위치로 0.25초 시정수로 서서히 보정한다. 하드 리싱크를 비활성화해도 이 보정은 유지된다"
 related = ["VideoPlayerBase::getResyncThreshold"]
 
 ["VideoPlayerBase::setSpeed"]

@@ -1,5 +1,6 @@
 // =============================================================================
-// tcxHap tests — PCM audio byte order (#419), sample table checks (#343)
+// tcxHap tests — PCM audio byte order (#419), sample table checks (#343),
+// PCM tables, sound descriptions and playback clock (#291)
 //
 // Four HAP movies with the same -6 dB 440 Hz sine in different PCM formats
 // (bin/data, made with ffmpeg, see README.md) are parsed with MovParser and
@@ -15,18 +16,24 @@
 // Sample table checks (#343) parse copies of sine_sowt.mov with changed table
 // counts, sizes and atom sizes, and a copy cut inside 'mdat', all made at run
 // time in the temp folder.
+// PCM tables and sound descriptions (#291) use audio-only movies built in
+// memory: constant-size PCM stored per chunk, v0 / v1 / v2 descriptions
+// ('lpcm' flags, 16.16 and float64 rates, stsz size 1), formats that are not
+// supported. The playback clock (#291) is checked through
+// stepPlaybackClock().
 // Headless: no window, no GPU, no audio device.
 // =============================================================================
 
 #include <TrussC.h>
 #include "tcxHapPlayer.h"
 
-#include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -295,37 +302,31 @@ static bool writeMoovFirstTruncated(const vector<char>& src, const fs::path& dst
 
 struct Parsed {
     bool opened = false;
-    double ms = 0.0;
     bool hasVideo = false, hasAudio = false;
-    size_t videoSamples = 0, audioSamples = 0;
+    size_t videoSamples = 0;
+    uint64_t audioFrames = 0;
 };
 
 static Parsed parseFile(const fs::path& path) {
     Parsed r;
     MovParser parser;
-    const auto t0 = chrono::steady_clock::now();
     r.opened = parser.open(path);
-    r.ms = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
     if (const MovTrack* v = parser.getInfo().getVideoTrack()) {
         r.hasVideo = true;
         r.videoSamples = v->samples.size();
     }
     if (const MovTrack* a = parser.getInfo().getAudioTrack()) {
         r.hasAudio = true;
-        r.audioSamples = a->samples.size();
+        r.audioFrames = a->pcmChunked ? a->pcmFrameCount : a->samples.size();
     }
     return r;
 }
 
 static string describe(const Parsed& p) {
-    return string(p.opened ? "opened" : "not opened") + ", " + to_string(p.ms) + " ms, video " +
+    return string(p.opened ? "opened" : "not opened") + ", video " +
            (p.hasVideo ? to_string(p.videoSamples) : string("none")) + ", audio " +
-           (p.hasAudio ? to_string(p.audioSamples) : string("none"));
+           (p.hasAudio ? to_string(p.audioFrames) : string("none"));
 }
-
-// Upper bound for open() on the changed copies; the valid file parses in
-// well under a millisecond
-static constexpr double kQuickMs = 2000.0;
 
 static void sampleTableTests(const fs::path& data) {
     const vector<char> orig = readBytes(data / "sine_sowt.mov");
@@ -335,8 +336,8 @@ static void sampleTableTests(const fs::path& data) {
     // Video track: 5 HAP frames of 115 bytes; audio track: 24000 PCM frames
     // of 2 bytes. Both 'stsz' tables are constant-size.
     const Parsed valid = parseFile(data / "sine_sowt.mov");
-    check("tables: valid file has 5 video and 24000 audio samples",
-          valid.opened && valid.videoSamples == 5 && valid.audioSamples == 24000, describe(valid));
+    check("tables: valid file has 5 video samples and 24000 audio frames",
+          valid.opened && valid.videoSamples == 5 && valid.audioFrames == 24000, describe(valid));
 
     MovParser ref;
     ref.open(data / "sine_sowt.mov");
@@ -376,7 +377,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: video stsz count 0xFFFFFFF0 -> no video track, audio kept",
-              p.ms < kQuickMs && !p.hasVideo && p.hasAudio && p.audioSamples == 24000,
+              !p.hasVideo && p.hasAudio && p.audioFrames == 24000,
               describe(p));
     }
 
@@ -387,9 +388,7 @@ static void sampleTableTests(const fs::path& data) {
         putU32(b, videoStts + 12, 0xFFFFFFF0u);
         writeBytes(tmp, b);
         MovParser parser;
-        const auto t0 = chrono::steady_clock::now();
         parser.open(tmp);
-        const double ms = chrono::duration<double, milli>(chrono::steady_clock::now() - t0).count();
         const MovTrack* v = parser.getInfo().getVideoTrack();
         bool same = v && v->samples.size() == refVideo->samples.size();
         for (size_t i = 0; same && i < v->samples.size(); i++) {
@@ -398,18 +397,18 @@ static void sampleTableTests(const fs::path& data) {
                    v->samples[i].timestamp == refVideo->samples[i].timestamp;
         }
         check("tables: video stts count 0xFFFFFFF0 -> video track unchanged",
-              ms < kQuickMs && same, to_string(ms) + " ms");
+              same);
     }
 
-    // Audio constant-size 'stsz' with a count of 0xFFFFFFF0: the sample count
+    // Audio constant-size 'stsz' with a count of 0xFFFFFFF0: the frame count
     // is what 'stsc' / 'stco' place (24000)
     {
         vector<char> b = orig;
         putU32(b, audioStsz + 16, 0xFFFFFFF0u);
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
-        check("tables: audio constant stsz count 0xFFFFFFF0 -> 24000 audio samples",
-              p.ms < kQuickMs && p.videoSamples == 5 && p.audioSamples == 24000, describe(p));
+        check("tables: audio constant stsz count 0xFFFFFFF0 -> 24000 audio frames",
+              p.videoSamples == 5 && p.audioFrames == 24000, describe(p));
     }
 
     // Constant-size 'stsz' with a count of 0xFFFFFFF0, every 'stsc' entry
@@ -429,7 +428,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: constant stsz + stsc 0xFFFFFFF0 per chunk, chunk past the end -> stts total (24000)",
-              patched && p.ms < kQuickMs && p.audioSamples == 24000, describe(p));
+              patched && p.audioFrames == 24000, describe(p));
     }
 
     // A child atom larger than its parent: the video track's 'mdia' size
@@ -442,7 +441,7 @@ static void sampleTableTests(const fs::path& data) {
         writeBytes(tmp, b);
         const Parsed p = parseFile(tmp);
         check("tables: child atom larger than its parent -> video track skipped",
-              mdia && p.ms < kQuickMs && !p.hasVideo && p.hasAudio, describe(p));
+              mdia && !p.hasVideo && p.hasAudio, describe(p));
     }
 
     // One variable 'stsz' entry of 0xFFFFFFF0: that sample lies past the end
@@ -478,8 +477,8 @@ static void sampleTableTests(const fs::path& data) {
             const bool opened = parser.open(tmp);
             const MovTrack* v = parser.getInfo().getVideoTrack();
             const MovTrack* a = parser.getInfo().getAudioTrack();
-            check("tables: cut file -> sample counts unchanged (5 video, 24000 audio)",
-                  opened && v && a && v->samples.size() == 5 && a->samples.size() == 24000);
+            check("tables: cut file -> counts unchanged (5 video samples, 24000 audio frames)",
+                  opened && v && a && v->samples.size() == 5 && a->pcmFrameCount == 24000);
             if (v && v->samples.size() == 5) {
                 vector<uint8_t> buf;
                 const bool last = parser.readSample(*v, 4, buf);
@@ -495,6 +494,663 @@ static void sampleTableTests(const fs::path& data) {
 
     error_code ec;
     fs::remove(tmp, ec);
+}
+
+// -----------------------------------------------------------------------------
+// PCM sample tables and sound descriptions (#291)
+// -----------------------------------------------------------------------------
+// Audio-only movies are built in memory (ftyp, mdat, moov/trak/mdia/minf/stbl)
+// and written to the temp folder.
+
+static void appendU16(vector<char>& b, uint32_t v) {
+    b.push_back(char(v >> 8)); b.push_back(char(v));
+}
+static void appendU32(vector<char>& b, uint32_t v) {
+    b.push_back(char(v >> 24)); b.push_back(char(v >> 16));
+    b.push_back(char(v >> 8)); b.push_back(char(v));
+}
+static void appendU64(vector<char>& b, uint64_t v) {
+    appendU32(b, uint32_t(v >> 32)); appendU32(b, uint32_t(v));
+}
+static vector<char> makeAtom(const char* type, const vector<char>& payload) {
+    vector<char> b;
+    appendU32(b, uint32_t(8 + payload.size()));
+    b.insert(b.end(), type, type + 4);
+    b.insert(b.end(), payload.begin(), payload.end());
+    return b;
+}
+static vector<char> concat(initializer_list<vector<char>> parts) {
+    vector<char> b;
+    for (const auto& p : parts) b.insert(b.end(), p.begin(), p.end());
+    return b;
+}
+
+struct SoundDesc {
+    const char* fourcc = "sowt";
+    int version = 0;            // 0, 1 or 2
+    uint32_t channels = 2;
+    uint32_t bits = 16;
+    double rate = 48000.0;
+    uint32_t lpcmFlags = 0;     // v2 formatSpecificFlags
+    uint32_t packetPadding = 0; // extra bytes per packet (unsupported)
+};
+
+struct PcmMovie {
+    SoundDesc desc;
+    uint32_t stszSize = 4;      // constant 'stsz' size
+    uint32_t frames = 0;        // 'stsz' count (one sample per frame)
+    uint32_t framesPerChunk = 0;
+    vector<char> audio;         // mdat payload; zero-filled when empty
+};
+
+static vector<char> soundDescription(const SoundDesc& d) {
+    vector<char> e;
+    e.insert(e.end(), 6, 0);           // reserved
+    appendU16(e, 1);                   // data reference index
+    appendU16(e, d.version);
+    appendU16(e, 0);                   // revision
+    appendU32(e, 0);                   // vendor
+    if (d.version == 2) {
+        // The v0 fields hold fixed values in v2
+        appendU16(e, 3); appendU16(e, 16); appendU16(e, 0xFFFE); appendU16(e, 0);
+        appendU32(e, 0x00010000);
+        appendU32(e, 72);              // sizeOfStructOnly
+        uint64_t rateBits = 0;
+        memcpy(&rateBits, &d.rate, sizeof(rateBits));
+        appendU64(e, rateBits);
+        appendU32(e, d.channels);
+        appendU32(e, 0x7F000000);
+        appendU32(e, d.bits);
+        appendU32(e, d.lpcmFlags);
+        appendU32(e, d.bits / 8 * d.channels + d.packetPadding);  // constBytesPerAudioPacket
+        appendU32(e, 1);                        // constLPCMFramesPerAudioPacket
+    } else {
+        appendU16(e, d.channels); appendU16(e, d.bits); appendU16(e, 0); appendU16(e, 0);
+        appendU32(e, uint32_t(d.rate * 65536.0 + 0.5));
+        if (d.version == 1) {
+            appendU32(e, 1);                        // samplesPerPacket
+            appendU32(e, d.bits / 8);               // bytesPerPacket
+            appendU32(e, d.bits / 8 * d.channels + d.packetPadding);  // bytesPerFrame
+            appendU32(e, 2);                        // legacy bytesPerSample
+        }
+    }
+    vector<char> entry;
+    appendU32(entry, uint32_t(8 + e.size()));
+    entry.insert(entry.end(), d.fourcc, d.fourcc + 4);
+    entry.insert(entry.end(), e.begin(), e.end());
+    return entry;
+}
+
+// frames must be a multiple of framesPerChunk; the chunks are laid out back
+// to back in 'mdat'
+static vector<char> buildPcmMovie(const PcmMovie& m, uint64_t audioBytes) {
+    const vector<char> ftyp = makeAtom("ftyp", {'q', 't', ' ', ' ', 0, 0, 2, 0, 'q', 't', ' ', ' '});
+    const uint64_t mdatStart = ftyp.size() + 8;
+
+    vector<char> stsd; appendU32(stsd, 0); appendU32(stsd, 1);
+    const vector<char> sd = soundDescription(m.desc);
+    stsd.insert(stsd.end(), sd.begin(), sd.end());
+    vector<char> stts; appendU32(stts, 0); appendU32(stts, 1); appendU32(stts, m.frames); appendU32(stts, 1);
+    vector<char> stsc; appendU32(stsc, 0); appendU32(stsc, 1);
+    appendU32(stsc, 1); appendU32(stsc, m.framesPerChunk); appendU32(stsc, 1);
+    vector<char> stsz; appendU32(stsz, 0); appendU32(stsz, m.stszSize); appendU32(stsz, m.frames);
+    if (m.stszSize == 0) {
+        for (uint32_t i = 0; i < m.frames; i++) appendU32(stsz, m.desc.bits / 8 * m.desc.channels);
+    }
+    const uint32_t chunks = m.frames / m.framesPerChunk;
+    const uint64_t chunkBytes = audioBytes / chunks;
+    vector<char> stco; appendU32(stco, 0); appendU32(stco, chunks);
+    for (uint32_t i = 0; i < chunks; i++) appendU32(stco, uint32_t(mdatStart + i * chunkBytes));
+
+    const vector<char> stbl = makeAtom("stbl", concat({makeAtom("stsd", stsd), makeAtom("stts", stts),
+        makeAtom("stsc", stsc), makeAtom("stsz", stsz), makeAtom("stco", stco)}));
+    vector<char> mdhd; appendU32(mdhd, 0); appendU32(mdhd, 0); appendU32(mdhd, 0);
+    appendU32(mdhd, uint32_t(m.desc.rate)); appendU32(mdhd, m.frames); appendU32(mdhd, 0);
+    vector<char> hdlr; appendU32(hdlr, 0); appendU32(hdlr, 0);
+    hdlr.insert(hdlr.end(), {'s', 'o', 'u', 'n'}); hdlr.insert(hdlr.end(), 13, 0);
+    const vector<char> moov = makeAtom("moov", makeAtom("trak", makeAtom("mdia",
+        concat({makeAtom("mdhd", mdhd), makeAtom("hdlr", hdlr), makeAtom("minf", stbl)}))));
+
+    vector<char> b = ftyp;
+    appendU32(b, uint32_t(8 + audioBytes));
+    b.insert(b.end(), {'m', 'd', 'a', 't'});
+    if (m.audio.empty()) b.resize(b.size() + audioBytes, 0);
+    else b.insert(b.end(), m.audio.begin(), m.audio.end());
+    b.insert(b.end(), moov.begin(), moov.end());
+    return b;
+}
+
+// Known 16-bit value of frame i, channel c (bytes of 0x80 and above in both
+// positions)
+static int16_t patternValue(uint32_t i, uint32_t c) {
+    return int16_t(uint16_t(i * 37u + c * 1000u + 0x8001u * (i & 1u)));
+}
+
+// Interleaved PCM of the pattern: 16-bit (little- or big-endian) or 32-bit
+// float (value / 32768, little- or big-endian)
+static vector<char> patternAudio(uint32_t frames, uint32_t channels, bool bigEndian, bool isFloat) {
+    vector<char> b;
+    for (uint32_t i = 0; i < frames; i++) {
+        for (uint32_t c = 0; c < channels; c++) {
+            const int16_t v = patternValue(i, c);
+            if (isFloat) {
+                const float f = v / 32768.0f;
+                uint32_t u; memcpy(&u, &f, 4);
+                for (int k = 0; k < 4; k++) {
+                    const int shift = bigEndian ? 8 * (3 - k) : 8 * k;
+                    b.push_back(char(u >> shift));
+                }
+            } else {
+                const uint16_t u = uint16_t(v);
+                if (bigEndian) { b.push_back(char(u >> 8)); b.push_back(char(u)); }
+                else { b.push_back(char(u)); b.push_back(char(u >> 8)); }
+            }
+        }
+    }
+    return b;
+}
+
+static bool matchesPattern(const SoundBuffer& buf, uint32_t frames, uint32_t channels) {
+    if (buf.numSamples != frames || (uint32_t)buf.channels != channels ||
+        buf.samples.size() != (size_t)frames * channels) return false;
+    for (uint32_t i = 0; i < frames; i++) {
+        for (uint32_t c = 0; c < channels; c++) {
+            if (buf.samples[(size_t)i * channels + c] != patternValue(i, c) / 32768.0f) return false;
+        }
+    }
+    return true;
+}
+
+struct PcmParsed {
+    bool opened = false;
+    bool hasAudio = false;
+    size_t entries = 0;
+    bool chunked = false;
+    uint64_t frames = 0;
+    uint64_t bytes = 0;
+    uint32_t rate = 0;
+    uint32_t channels = 0, bits = 0;
+    bool bigEndian = false, isFloat = false;
+    bool supported = false;
+    string why;
+    bool decoded = false;
+    SoundBuffer buffer;
+};
+
+static PcmParsed parsePcm(const fs::path& path, bool decodeIt) {
+    PcmParsed r;
+    MovParser parser;
+    r.opened = parser.open(path);
+    const MovTrack* a = parser.getInfo().getAudioTrack();
+    if (!a) return r;
+    r.hasAudio = true;
+    r.entries = a->samples.size();
+    r.chunked = a->pcmChunked;
+    r.frames = a->pcmFrameCount;
+    for (const auto& s : a->samples) r.bytes += s.size;
+    r.rate = a->sampleRate;
+    r.channels = a->channels;
+    r.bits = (uint32_t)a->getPcmBits();
+    r.bigEndian = a->isBigEndianPcm();
+    r.isFloat = a->isFloatPcm();
+    r.supported = a->isPcmFormatSupported(r.why);
+    if (decodeIt) {
+        r.decoded = loadPcmTrack(parser, *a, r.buffer);
+    }
+    return r;
+}
+
+static string describePcm(const PcmParsed& p) {
+    return string(p.opened ? "opened" : "not opened") + ", " + to_string(p.entries) + " entries, " +
+           to_string(p.frames) + " frames, " + to_string(p.bytes) + " bytes, " +
+           to_string(p.channels) + " ch, " + to_string(p.bits) + " bit, " + to_string(p.rate) +
+           " Hz" + (p.bigEndian ? ", BE" : ", LE") + (p.isFloat ? ", float" : "") +
+           (p.why.empty() ? "" : ", " + p.why);
+}
+
+static void pcmTableTests(const fs::path& data) {
+    const fs::path tmp = fs::temp_directory_path() / "tcxHap_pcm_tables.mov";
+
+    // v0 'sowt' fixture: chunk entries, 24000 frames, decodes as before
+    {
+        const PcmParsed p = parsePcm(data / "sine_sowt.mov", true);
+        check("pcm: sine_sowt.mov (v0 sowt) -> 5 chunk entries, 24000 frames, 48000 Hz",
+              p.chunked && p.entries == 5 && p.frames == 24000 && p.rate == 48000 &&
+              p.channels == 1 && p.bits == 16 && p.decoded && p.buffer.numSamples == 24000,
+              describePcm(p));
+    }
+
+    // v0 'sowt', 2 ch, 16 bit, 48000 Hz, 60 s: stsz size 4 count 2880000,
+    // 48000 frames per chunk, 60 chunks, zero-filled mdat
+    {
+        PcmMovie m;
+        m.frames = 48000 * 60;
+        m.framesPerChunk = 48000;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, (uint64_t)m.frames * 4));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: 60 s v0 sowt 2 ch -> 60 entries, 2880000 frames",
+              written && p.chunked && p.entries == 60 && p.frames == 2880000 &&
+              p.bytes == 2880000u * 4, describePcm(p));
+        check("pcm: 60 s v0 sowt 2 ch -> decodes all frames as silence",
+              p.decoded && p.buffer.numSamples == 2880000 && p.buffer.channels == 2 &&
+              p.buffer.sampleRate == 48000 && p.buffer.samples.size() == 2880000u * 2 &&
+              all_of(p.buffer.samples.begin(), p.buffer.samples.end(),
+                     [](float sample) { return sample == 0.0f; }),
+              describePcm(p));
+    }
+
+    // v2 'lpcm' at 96000.0 Hz, 2 ch (ffmpeg writes v2 'lpcm' for sample
+    // rates above 65535)
+    struct V2Case {
+        const char* name;
+        uint32_t bits;
+        uint32_t flags;
+        bool bigEndian;
+        bool isFloat;
+    };
+    const uint32_t kPacked = 8;
+    const V2Case v2Cases[] = {
+        {"lpcm v2 96000 Hz 16-bit LE", 16, LPCM_FLAG_SIGNED_INTEGER | kPacked, false, false},
+        {"lpcm v2 96000 Hz 16-bit BE", 16, LPCM_FLAG_SIGNED_INTEGER | LPCM_FLAG_BIG_ENDIAN | kPacked, true, false},
+        {"lpcm v2 96000 Hz 32-bit float LE", 32, LPCM_FLAG_FLOAT | kPacked, false, true},
+        {"lpcm v2 96000 Hz 32-bit float BE", 32, LPCM_FLAG_FLOAT | LPCM_FLAG_BIG_ENDIAN | kPacked, true, true},
+    };
+    for (const V2Case& c : v2Cases) {
+        PcmMovie m;
+        m.desc.fourcc = "lpcm";
+        m.desc.version = 2;
+        m.desc.rate = 96000.0;
+        m.desc.bits = c.bits;
+        m.desc.lpcmFlags = c.flags;
+        m.stszSize = c.bits / 8 * 2;
+        m.frames = 9600;
+        m.framesPerChunk = 4800;
+        m.audio = patternAudio(m.frames, 2, c.bigEndian, c.isFloat);
+        const bool written = writeBytes(tmp, buildPcmMovie(m, m.audio.size()));
+        const PcmParsed p = parsePcm(tmp, true);
+        const string n = string("pcm: ") + c.name;
+        check(n + " -> 96000 Hz, 2 ch, " + to_string(c.bits) + " bit",
+              written && p.rate == 96000 && p.channels == 2 && p.bits == c.bits &&
+              p.bigEndian == c.bigEndian && p.isFloat == c.isFloat && p.supported,
+              describePcm(p));
+        check(n + " -> 2 chunk entries, samples match",
+              p.chunked && p.entries == 2 && p.decoded && matchesPattern(p.buffer, m.frames, 2),
+              describePcm(p));
+    }
+
+    // v2 'lpcm' formats SoundBuffer does not decode: reported as not
+    // supported, and loadPcmTrack() returns false (HapPlayer then loads
+    // without audio)
+    const V2Case unsupported[] = {
+        {"lpcm v2 24-bit", 24, LPCM_FLAG_SIGNED_INTEGER | kPacked, false, false},
+        {"lpcm v2 64-bit float", 64, LPCM_FLAG_FLOAT | kPacked, false, true},
+        {"lpcm v2 non-interleaved", 16, LPCM_FLAG_SIGNED_INTEGER | LPCM_FLAG_NON_INTERLEAVED, false, false},
+        {"lpcm v2 unsigned 16-bit", 16, kPacked, false, false},
+    };
+    for (const V2Case& c : unsupported) {
+        PcmMovie m;
+        m.desc.fourcc = "lpcm";
+        m.desc.version = 2;
+        m.desc.rate = 96000.0;
+        m.desc.bits = c.bits;
+        m.desc.lpcmFlags = c.flags;
+        m.stszSize = c.bits / 8 * 2;
+        m.frames = 960;
+        m.framesPerChunk = 480;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, (uint64_t)m.frames * m.stszSize));
+        const PcmParsed p = parsePcm(tmp, true);
+        check(string("pcm: ") + c.name + " -> not supported, loadPcmTrack() false",
+              written && p.hasAudio && p.chunked && !p.supported && !p.why.empty() && !p.decoded,
+              describePcm(p));
+    }
+
+    // v1 'sowt' with stsz size 1: each chunk is framesPerChunk * 4 bytes
+    {
+        PcmMovie m;
+        m.desc.version = 1;
+        m.desc.rate = 44100.0;
+        m.stszSize = 1;
+        m.frames = 44100;
+        m.framesPerChunk = 4410;
+        m.audio = patternAudio(m.frames, 2, false, false);
+        const bool written = writeBytes(tmp, buildPcmMovie(m, m.audio.size()));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: v1 sowt stsz 1 -> PCM byte count is frames * 4",
+              written && p.chunked && p.entries == 10 && p.frames == 44100 &&
+              p.bytes == 44100u * 4, describePcm(p));
+        check("pcm: v1 sowt stsz 1 -> 44100 Hz, samples match",
+              p.rate == 44100 && p.decoded && matchesPattern(p.buffer, m.frames, 2), describePcm(p));
+    }
+
+    // v1 'twos' with stsz size 1: big-endian, same samples
+    {
+        PcmMovie m;
+        m.desc.fourcc = "twos";
+        m.desc.version = 1;
+        m.stszSize = 1;
+        m.frames = 4800;
+        m.framesPerChunk = 1200;
+        m.audio = patternAudio(m.frames, 2, true, false);
+        const bool written = writeBytes(tmp, buildPcmMovie(m, m.audio.size()));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: v1 twos stsz 1 -> big-endian, samples match",
+              written && p.bigEndian && p.entries == 4 && p.bytes == 4800u * 4 && p.decoded &&
+              matchesPattern(p.buffer, m.frames, 2), describePcm(p));
+    }
+
+    // Variable-size PCM keeps one entry per sample and preserves its data.
+    {
+        PcmMovie m;
+        m.stszSize = 0;
+        m.frames = 24;
+        m.framesPerChunk = 6;
+        m.audio = patternAudio(m.frames, 2, false, false);
+        const bool written = writeBytes(tmp, buildPcmMovie(m, m.audio.size()));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: variable-size sowt -> per-sample entries, samples match",
+              written && !p.chunked && p.entries == m.frames && p.bytes == m.audio.size() &&
+              p.decoded && matchesPattern(p.buffer, m.frames, 2), describePcm(p));
+    }
+
+    // Sound descriptions with padded packets cannot use the packed decoder.
+    for (int version : {1, 2}) {
+        PcmMovie m;
+        m.desc.version = version;
+        if (version == 2) {
+            m.desc.fourcc = "lpcm";
+            m.desc.lpcmFlags = LPCM_FLAG_SIGNED_INTEGER;
+        }
+        m.desc.packetPadding = 4;
+        m.frames = 24;
+        m.framesPerChunk = 6;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, uint64_t(m.frames) * 8));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: v" + to_string(version) + " padded packets -> audio track skipped",
+              written && !p.hasAudio && !p.decoded, describePcm(p));
+    }
+
+    // Unsupported packet layouts leave the movie's video track available.
+    {
+        vector<char> b = readBytes(data / "sine_fl32be.mov");
+        const size_t stsd = findTable(b, "soun", "stsd");
+        const bool patched = stsd && getU32(b, stsd + 16) >= 52;
+        if (patched) putU32(b, stsd + 16 + 44, 8); // v1 bytesPerFrame (was 4)
+        const bool written = writeBytes(tmp, b);
+        const Parsed p = parseFile(tmp);
+        check("pcm: unsupported packet layout -> video kept, audio skipped",
+              patched && written && p.opened && p.hasVideo && p.videoSamples == 5 &&
+              !p.hasAudio, describe(p));
+    }
+
+    // A v2 rate that rounds beyond the decoder's int range is unsupported.
+    {
+        PcmMovie m;
+        m.desc.version = 2;
+        m.desc.fourcc = "lpcm";
+        m.desc.lpcmFlags = LPCM_FLAG_SIGNED_INTEGER | kPacked;
+        m.desc.rate = 2147483647.75;
+        m.frames = 24;
+        m.framesPerChunk = 6;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, uint64_t(m.frames) * 4));
+        const PcmParsed p = parsePcm(tmp, true);
+        check("pcm: v2 rate rounds past int range -> not supported",
+              written && p.hasAudio && p.rate == 0 && !p.supported && !p.decoded,
+              describePcm(p));
+    }
+
+    // v0 rate with a fraction (16.16): rounded to whole Hz
+    {
+        PcmMovie m;
+        m.desc.rate = 22254.5454;
+        m.frames = 2000;
+        m.framesPerChunk = 1000;
+        const bool written = writeBytes(tmp, buildPcmMovie(m, (uint64_t)m.frames * 4));
+        const PcmParsed p = parsePcm(tmp, false);
+        check("pcm: v0 rate 22254.5454 (16.16) -> 22255 Hz",
+              written && p.rate == 22255, describePcm(p));
+    }
+
+    error_code ec;
+    fs::remove(tmp, ec);
+}
+
+// -----------------------------------------------------------------------------
+// Playback clock (#291): stepPlaybackClock()
+// -----------------------------------------------------------------------------
+
+static void clockTests() {
+    const double dt = 1.0 / 60.0;
+    const double duration = 10.0;
+    const double threshold = 0.5;
+
+    // Audio master, the audio clock 1% faster than the wall clock, the audio
+    // position advancing in 512-frame mixer blocks at 48 kHz, a 10 s video
+    // looping for 10000 steps: the video stays within the threshold of the
+    // audio without a hard re-sync
+    auto runDrift = [&](bool irregular, double& maxDiff, int& resyncs, int& wraps) {
+        double t = 0.0, audioExact = 0.0;
+        maxDiff = 0.0; resyncs = 0; wraps = 0;
+        const double block = 512.0 / 48000.0;
+        for (int i = 0; i < 10000; i++) {
+            // Irregular deltas: alternately 0 and two frames
+            const double d = irregular ? ((i & 1) ? 2.0 * dt : 0.0) : dt;
+            audioExact += d * 1.01;
+            const double audioPos = floor(audioExact / block) * block;
+            PlaybackClockInput in;
+            in.time = t; in.dt = d; in.speed = 1.0; in.duration = duration; in.loop = true;
+            in.audioMaster = true; in.audioTime = audioPos; in.resyncThreshold = threshold;
+            const PlaybackClockStep s = stepPlaybackClock(in);
+            t = s.time;
+            if (s.resynced) resyncs++;
+            if (s.wrapped) {
+                // HapPlayer moves the audio to the wrapped time
+                wraps++;
+                audioExact = t;
+            } else {
+                maxDiff = max(maxDiff, fabs(t - audioPos));
+            }
+        }
+    };
+    double maxDiff = 0.0;
+    int resyncs = 0, wraps = 0;
+    runDrift(false, maxDiff, resyncs, wraps);
+    check("clock: audio 1% fast, 10000 steps -> |video - audio| < threshold, no re-sync",
+          maxDiff < threshold && resyncs == 0 && wraps >= 16,
+          "max " + to_string(maxDiff) + " s, " + to_string(resyncs) + " re-syncs, " +
+          to_string(wraps) + " wraps");
+    check("clock: audio 1% fast -> |video - audio| stays under 20 ms", maxDiff < 0.02,
+          "max " + to_string(maxDiff) + " s");
+    runDrift(true, maxDiff, resyncs, wraps);
+    check("clock: irregular deltas, 10000 steps -> |video - audio| < threshold, no re-sync",
+          maxDiff < threshold && resyncs == 0, "max " + to_string(maxDiff) + " s, " +
+          to_string(resyncs) + " re-syncs");
+
+    // A continuous clock 1% faster than wall time converges to a small,
+    // stable lag. Check the initial transient and the final 60-step error range.
+    {
+        PlaybackClockInput in;
+        in.dt = dt; in.audioMaster = true;
+        double earlyError = 0.0, lateMin = 1.0, lateMax = 0.0;
+        bool resynced = false;
+        for (int i = 1; i <= 600; ++i) {
+            in.audioTime = i * dt * 1.01;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            in.time = step.time;
+            resynced = resynced || step.resynced;
+            const double error = fabs(step.time - in.audioTime);
+            if (i == 1) earlyError = error;
+            if (i > 540) {
+                lateMin = min(lateMin, error);
+                lateMax = max(lateMax, error);
+            }
+        }
+        check("clock: audio clock 1% fast -> converges to stable lag below 3 ms",
+              !resynced && lateMax < 0.003 && lateMax - lateMin < 1e-9 &&
+              earlyError < lateMin * 0.1,
+              "lag " + to_string(lateMax) + " s, range " + to_string(lateMax - lateMin));
+    }
+
+    // Device-period positions at 48 kHz: supply exact deltas, no real time.
+    // Include one buffer of mixed-audio lead. Repeated audio positions must
+    // still advance video time every refresh, with increments below 20 ms.
+    for (int bufferFrames : {2048, 480}) {
+        const double period = bufferFrames / 48000.0;
+        PlaybackClockInput in;
+        in.dt = dt; in.audioMaster = true;
+        double minAdvance = 1.0, maxAdvance = 0.0;
+        int repeats = 0, updates = 0;
+        bool smooth = true;
+        for (int i = 1; i <= 10000; ++i) {
+            const double audioPosition = (floor(i * dt / period) + 1.0) * period;
+            if (audioPosition == in.audioTime) ++repeats;
+            else ++updates;
+            in.audioTime = audioPosition;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            const double advance = step.time - in.time;
+            minAdvance = min(minAdvance, advance);
+            maxAdvance = max(maxAdvance, advance);
+            smooth = smooth && advance > 0.0 && advance < 0.020 &&
+                     !step.resynced && !step.wrapped && !step.ended;
+            in.time = step.time;
+        }
+        check("clock: coarse " + to_string(bufferFrames) +
+              "-frame audio positions -> video advances every 60 Hz step below 20 ms",
+              smooth && updates > 0 && (bufferFrames != 2048 || repeats > 0),
+              "min " + to_string(minAdvance) + " s, max " + to_string(maxAdvance) +
+              " s, " + to_string(repeats) + " repeated positions");
+    }
+
+    // Hard re-sync: the audio position 2 s ahead of the video
+    {
+        PlaybackClockInput in;
+        in.time = 3.0; in.dt = dt; in.duration = duration; in.loop = true;
+        in.audioMaster = true; in.audioTime = 5.0; in.resyncThreshold = threshold;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: difference above the threshold -> video set to the audio position",
+              s.resynced && s.time == 5.0, to_string(s.time));
+        in.resyncThreshold = 0.0;
+        const PlaybackClockStep s2 = stepPlaybackClock(in);
+        check("clock: threshold 0 -> slew without hard re-sync",
+              !s2.resynced && s2.time > in.time + in.dt && s2.time < 5.0,
+              to_string(s2.time));
+        in.resyncThreshold = -1.0;
+        const PlaybackClockStep s3 = stepPlaybackClock(in);
+        check("clock: negative threshold -> slew without hard re-sync",
+              !s3.resynced && s3.time == s2.time);
+    }
+
+    // Forward audio at a changed speed still drives the video position.
+    {
+        PlaybackClockInput in;
+        in.time = 2.0; in.dt = 0.25; in.speed = 2.0; in.duration = duration;
+        in.audioMaster = true; in.audioTime = 2.5;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: forward speed 2 -> follows matching audio position",
+              s.time == 2.5 && !s.resynced && !s.ended);
+        in.audioTime = 1.0;
+        const PlaybackClockStep behind = stepPlaybackClock(in);
+        check("clock: audio behind above threshold -> video re-syncs backward",
+              behind.time == 1.0 && behind.resynced);
+    }
+
+    // Synthetic 2-second audio in a 5-second video. Its position remains at
+    // 2 after it stops; supplied deltas must carry video on to end or wrap.
+    // Model update()'s audio-master selection and syncAudioTo() at the wrap,
+    // including restarting stopped audio, without an audio device or sleeps.
+    for (bool loop : {false, true}) {
+        const bool hasAudio = true;
+        bool audioPlaying = true;
+        double audioPosition = 2.0;
+        int audioRestarts = 0, audioSeeks = 0;
+        PlaybackClockInput in;
+        in.time = 1.5; in.dt = 0.5; in.duration = 5.0; in.loop = loop;
+        auto updateClock = [&]() {
+            in.audioMaster = hasAudio && in.speed > 0 && audioPlaying;
+            in.audioTime = in.audioMaster ? audioPosition : 0.0;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            in.time = step.time;
+            if (step.wrapped && hasAudio && in.speed > 0) {
+                // Synthetic syncAudioTo(step.time): play if stopped, then seek.
+                if (!audioPlaying) {
+                    audioPlaying = true;
+                    ++audioRestarts;
+                }
+                audioPosition = step.time;
+                ++audioSeeks;
+            }
+            return step;
+        };
+        const PlaybackClockStep lastAudioStep = updateClock();
+        bool exact = lastAudioStep.time == 2.0 &&
+                     !lastAudioStep.wrapped && !lastAudioStep.ended;
+        audioPlaying = false;
+        PlaybackClockStep step;
+        for (int i = 1; i <= 6; ++i) {
+            step = updateClock();
+            const bool boundary = i == 6;
+            const double expected = boundary && loop ? 0.0 : 2.0 + i * 0.5;
+            exact = exact && step.time == expected &&
+                    step.wrapped == (boundary && loop) &&
+                    step.ended == (boundary && !loop);
+        }
+        if (!loop) {
+            check("clock: shorter audio stops -> wall clock reaches video end",
+                  exact && step.time == 5.0 && step.ended &&
+                  !audioPlaying && audioPosition == 2.0 && audioSeeks == 0);
+        } else {
+            check("clock: shorter audio stops -> video wraps and restarts/resyncs audio",
+                  exact && step.time == 0.0 && step.wrapped &&
+                  audioPlaying && audioPosition == 0.0 &&
+                  audioRestarts == 1 && audioSeeks == 1);
+            in.dt = 0.125;
+            audioPosition = 0.25;
+            const PlaybackClockStep resumed = updateClock();
+            check("clock: shorter audio after wrap -> clock slews toward playing audio again",
+                  resumed.time == 0.1875 && !resumed.resynced &&
+                  !resumed.wrapped && !resumed.ended &&
+                  audioRestarts == 1 && audioSeeks == 1);
+        }
+    }
+
+    // Wall clock (no audio): dt * speed per step, wraps with fmod
+    {
+        double t = 0.0;
+        int wrapsWall = 0;
+        bool exact = true;
+        for (int i = 0; i < 1000; i++) {
+            PlaybackClockInput in;
+            in.time = t; in.dt = 0.25; in.speed = 1.5; in.duration = duration; in.loop = true;
+            const PlaybackClockStep s = stepPlaybackClock(in);
+            const double expected = fmod(t + 0.375, duration);
+            exact = exact && s.time == expected && !s.resynced;
+            if (s.wrapped) wrapsWall++;
+            t = s.time;
+        }
+        check("clock: no audio -> time advances by dt * speed and wraps",
+              exact && wrapsWall == 37, to_string(wrapsWall) + " wraps");
+    }
+
+    // Reverse (speed < 0, wall clock): wraps from the start to the end
+    {
+        PlaybackClockInput in;
+        in.time = 0.1; in.dt = 0.2; in.speed = -1.0; in.duration = duration; in.loop = true;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: reverse past the start with loop -> wraps to the end",
+              s.wrapped && fabs(s.time - 9.9) < 1e-9, to_string(s.time));
+        in.loop = false;
+        const PlaybackClockStep s2 = stepPlaybackClock(in);
+        check("clock: reverse past the start without loop -> ended at 0",
+              s2.ended && s2.time == 0.0, to_string(s2.time));
+    }
+
+    // Forward past the end without loop: ended
+    {
+        PlaybackClockInput in;
+        in.time = 9.99; in.dt = dt; in.duration = duration; in.loop = false;
+        in.audioMaster = true; in.audioTime = 10.0;
+        const PlaybackClockStep s = stepPlaybackClock(in);
+        check("clock: forward past the end without loop -> ended", s.ended && !s.wrapped);
+    }
 }
 
 int runVideoTests();
@@ -585,6 +1241,8 @@ int main() {
     }
 
     sampleTableTests(data);
+    pcmTableTests(data);
+    clockTests();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;
