@@ -770,6 +770,7 @@ void draw() override {
 - `Light`: Directional, Point, or Spot (with cone falloff). Also supports projector texture and IES profiles
 - `Material`: presets (`Material::gold()`, silver, copper, iron, bronze, emerald, ruby; `plastic(color, roughness)`, `rubber(color)`) or custom via `setBaseColor()` / `setMetallic()` (0–1) / `setRoughness()` (0.045–1) / `setNormalMap()`. Colors are 0–1. Up to 8 lights.
 - `setMaterial()` activates PBR for all subsequent `mesh.draw()` calls until `clearMaterial()`
+- Destroying a `Material` or `Environment` automatically clears its reference from every window context; later draws use unlit rendering or no IBL, respectively.
 
 **Shadow mapping:**
 ```cpp

@@ -526,6 +526,28 @@ void removeLightFromAllContexts(Light* light) {
     }
 }
 
+// Detach destroyed lighting state before the next mesh draw. Like Light's
+// cleanup, these definitions are shared by the hot-reload host and guest.
+void clearMaterialFromAllContexts(Material* material) {
+    auto scrub = [&](WindowContext& ctx) {
+        if (ctx.currentMaterial == material) ctx.currentMaterial = nullptr;
+    };
+    scrub(mainWindowContext());
+    for (Window* w : openWindows()) {
+        if (w) scrub(w->context());
+    }
+}
+
+void clearEnvironmentFromAllContexts(Environment* environment) {
+    auto scrub = [&](WindowContext& ctx) {
+        if (ctx.currentEnvironment == environment) ctx.currentEnvironment = nullptr;
+    };
+    scrub(mainWindowContext());
+    for (Window* w : openWindows()) {
+        if (w) scrub(w->context());
+    }
+}
+
 // Declared in tcWindowContext.h. Every registered window, not only the open
 // ones: a closed Window the app still holds keeps its context, and with it
 // the hover / grab / selection it had when it closed.
