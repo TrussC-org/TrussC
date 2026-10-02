@@ -2533,9 +2533,9 @@ description.ja = "現在の折り返し長を取得"
 description.ko = "현재 줄 바꿈 길이를 얻음"
 
 ["Font::getMemoryUsage"]
-description.en = "Get atlas memory usage in bytes"
-description.ja = "アトラスのメモリ使用量（バイト）を取得"
-description.ko = "아틀라스 메모리 사용량을 바이트로 얻음"
+description.en = "Get atlas memory usage in bytes (one byte per atlas texel: width x height summed over the pages)"
+description.ja = "アトラスのメモリ使用量（バイト）を取得（アトラス 1 テクセルにつき 1 バイト。各ページの幅 x 高さの合計）"
+description.ko = "아틀라스 메모리 사용량을 바이트로 얻음 (아틀라스 텍셀당 1바이트: 각 페이지의 폭 x 높이 합계)"
 
 ["Font::getSize"]
 category = "font"
@@ -3083,14 +3083,15 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface)."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장)"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`"
+related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
-description.en = "Load image from memory. `mipmaps=true` builds a mip chain."
-description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築"
-description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성"
+description.en = "Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`."
+description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築。メインスレッド専用。バックグラウンドでのデコードは `Pixels::loadFromMemory` で"
+description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로"
 
 ["Image::mirror"]
 description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
@@ -6724,14 +6725,15 @@ description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
 related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
-description.en = "Load image from file"
-description.ja = "ファイルから画像を読み込む"
-description.ko = "파일에서 이미지를 로드"
+description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`)."
+description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)"
+description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`)"
+related = ["Image::load", "Texture::allocate"]
 
 ["Pixels::loadFromMemory"]
-description.en = "Load image from memory"
-description.ja = "メモリから画像を読み込む"
-description.ko = "메모리에서 이미지를 로드"
+description.en = "Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread."
+description.ja = "メモリ上の画像を CPU メモリにデコードする。GPU を使わないのでワーカースレッドで呼んでよい"
+description.ko = "메모리의 이미지를 CPU 메모리로 디코딩. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능"
 
 ["Pixels::loadHDR"]
 category = "graphics_pixels"
@@ -9354,15 +9356,17 @@ listener that calls `disconnect()` there is in the same position. The client
 keeps that thread and joins it from another thread: the next `connect()` or
 `disconnect()` returns only once the thread has ended (the rest of the
 listener and of its receive loop), and so does the destructor. Until
-#261 / #262 land, do not call `disconnect()` on the client from another
+#261 lands, do not call `disconnect()` on the client from another
 thread until the listener's call has returned.
 
-Do not destroy the client from one of its own listeners (on the receive or
-connect thread). The destructor cannot join the thread it runs on: it
-detaches it, and the thread then returns from the listener into the
-destroyed client, which is undefined behavior. Destroy it from another
-thread, or after the listener has returned (for example from a
-`Deliver::Main` listener). `connect()`, `connectAsync()`, `disconnect()` and
+A listener on the receive thread may also destroy the client (an owner that
+replaces it, as `WebSocketClient::connect()` does). The destructor cannot
+join the thread it runs on and detaches it; once the notification returns,
+the thread sees that the client is gone and stops without reading it (#262).
+Do not destroy the client from a listener on the connect thread of
+`connectAsync()`: that thread returns into the destroyed client, which is
+undefined behavior. Destroy it from another thread, or after the listener
+has returned (for example from a `Deliver::Main` listener). `connect()`, `connectAsync()`, `disconnect()` and
 the destructor can wait for a listener still running on one of the client's
 threads. Do not call them while holding a lock that such a listener takes:
 the call and the listener would wait for each other forever. Reconnecting
@@ -9408,14 +9412,16 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 そのスレッドを手元に置いておき、別のスレッドから join する：次の
 `connect()` か `disconnect()` は、そのスレッドが終わってから（リスナーの
 残りと受信ループを抜けるまで）戻り、デストラクタも同じように待つ。
-#261 / #262 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
+#261 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
 `disconnect()` を呼ばないこと。
 
-クライアントを自分のリスナー（受信スレッドや接続スレッドの上）から破棄
-しないこと。デストラクタは自分が動いているスレッドを join できないので
-detach し、そのスレッドはリスナーから破棄済みのクライアントへ戻る。これは
-未定義動作になる。別のスレッドから、またはリスナーが返ったあと（たとえば
-`Deliver::Main` のリスナーから）破棄すること。`connect()`、`connectAsync()`、
+受信スレッドのリスナーはクライアントを破棄してもよい（`WebSocketClient::connect()`
+のように、持ち主がクライアントを置き換える場合）。デストラクタは自分が動いて
+いるスレッドを join できないので detach する。通知が戻ると、そのスレッドは
+クライアントがもうないことを確かめ、クライアントを読まずに止まる（#262）。
+`connectAsync()` の接続スレッドのリスナーからは破棄しないこと：そのスレッドは
+破棄済みのクライアントへ戻り、未定義動作になる。別のスレッドから、または
+リスナーが返ったあと（たとえば `Deliver::Main` のリスナーから）破棄すること。`connect()`、`connectAsync()`、
 `disconnect()`、デストラクタは、クライアントのスレッドの上でまだ動いている
 リスナーを待つことがある。そのリスナーが取るロックを持ったまま、これらを
 呼ばないこと：呼び出しとリスナーが互いを待ち続け、どちらも先へ進まなくなる。
@@ -9461,14 +9467,16 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 클라이언트는 그 스레드를 보관해 두었다가 다른 스레드에서 join한다: 다음
 `connect()`나 `disconnect()`는 그 스레드가 끝난 뒤에(리스너의 나머지와 수신
 루프를 빠져나올 때까지) 반환하며, 소멸자도 같은 방식으로 기다린다.
-#261 / #262가 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
+#261이 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
 `disconnect()`를 호출하지 말 것.
 
-클라이언트를 자신의 리스너(수신 스레드나 연결 스레드 위)에서 파괴하지 말 것.
-소멸자는 자신이 실행 중인 스레드를 join할 수 없어 detach하며, 그 스레드는
-리스너에서 이미 파괴된 클라이언트로 돌아간다. 이는 정의되지 않은 동작이다.
-다른 스레드에서, 또는 리스너가 반환된 뒤에(예: `Deliver::Main` 리스너에서)
-파괴할 것. `connect()`, `connectAsync()`, `disconnect()`와 소멸자는
+수신 스레드의 리스너는 클라이언트를 파괴해도 된다(`WebSocketClient::connect()`
+처럼 소유자가 클라이언트를 교체하는 경우). 소멸자는 자신이 실행 중인 스레드를
+join할 수 없어 detach한다. 알림이 반환되면 그 스레드는 클라이언트가 이미
+없음을 확인하고 클라이언트를 읽지 않고 멈춘다(#262). `connectAsync()`의 연결
+스레드 위의 리스너에서는 파괴하지 말 것: 그 스레드는 이미 파괴된 클라이언트로
+돌아가며, 이는 정의되지 않은 동작이다. 다른 스레드에서, 또는 리스너가 반환된
+뒤에(예: `Deliver::Main` 리스너에서) 파괴할 것. `connect()`, `connectAsync()`, `disconnect()`와 소멸자는
 클라이언트의 스레드 위에서 아직 실행 중인 리스너를 기다릴 수 있다. 그런
 리스너가 잡는 락을 쥔 채로 이것들을 호출하지 말 것: 호출과 리스너가 서로를
 영원히 기다리게 된다. 위 예처럼 메인 스레드에서 재연결하면 모두 피할 수 있다.
@@ -10294,9 +10302,9 @@ description.ja = "チャンネルを閉じ、待機中のすべてのスレッ�
 description.ko = "채널을 닫고 대기 중인 모든 스레드를 깨움. 닫은 후에는 send/receive가 false 반환"
 
 ["ThreadChannel::empty"]
-description.en = "Whether the queue is empty (approximate)."
-description.ja = "キューが空かどうか（概算）"
-description.ko = "큐가 비어 있는지 여부(근사값)"
+description.en = "Whether the queue is empty. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns."
+description.ja = "キューが空かどうか。ロックを取るので、他のスレッドが send している間でも安全に呼べる。戻った直後に他のスレッドが send / receive することはある"
+description.ko = "큐가 비어 있는지 여부. 락을 잡으므로 다른 스레드가 send하는 동안에도 안전하게 호출할 수 있음. 반환 직후 다른 스레드가 send / receive할 수는 있음"
 
 ["ThreadChannel::isClosed"]
 description.en = "Whether the channel has been closed."
@@ -10308,15 +10316,22 @@ description.en = "Receive a value (blocking): waits until data arrives, writing 
 description.ja = "値を受け取る（ブロッキング）: データが到着するまで待ち、value に書き込む。チャンネルが閉じていれば false を返す"
 description.ko = "값을 받음(블로킹): 데이터가 도착할 때까지 대기하여 value에 씀. 채널이 닫혀 있으면 false 반환"
 
+["ThreadChannel::receiveAll"]
+keywords = ["drain", "batch", "swap", "snapshot", "take all"]
+description.en = "Receive everything queued right now without blocking and return it as a std::vector<T> in FIFO order, e.g. for (auto& msg : channel.receiveAll()) handle(msg);. Under the lock it only swaps the queue with an empty one; the values are moved into the vector after the lock is released, so other threads wait only for the swap. Values sent afterwards stay queued for the next receive. Returns an empty vector if the channel is empty or closed."
+description.ja = "今キューにあるものをブロックせずにすべて受け取り、FIFO 順の std::vector<T> で返す（例: for (auto& msg : channel.receiveAll()) handle(msg);）。ロック中はキューを空のキューと入れ替えるだけで、値を vector に移すのはロックを放した後なので、他のスレッドが待つのは入れ替えの間だけ。その後に send された値は次の受信まで残る。空またはチャンネルが閉じていれば空の vector を返す"
+description.ko = "지금 큐에 있는 것을 블로킹 없이 모두 받아 FIFO 순서의 std::vector<T>로 반환(예: for (auto& msg : channel.receiveAll()) handle(msg);). 락 안에서는 큐를 빈 큐와 바꾸기만 하고, 값을 vector로 옮기는 것은 락을 놓은 뒤이므로 다른 스레드는 교체하는 동안만 기다림. 그 뒤에 send된 값은 다음 수신까지 남음. 비어 있거나 채널이 닫혀 있으면 빈 vector 반환"
+related = ["ThreadChannel::tryReceive", "ThreadChannel::size"]
+
 ["ThreadChannel::send"]
 description.en = "Send a value onto the queue (copy or move overload). Returns false if the channel is closed (with the move overload the value is invalidated even on failure)."
 description.ja = "キューに値を送る（コピー版またはムーブ版オーバーロード）。チャンネルが閉じていれば false を返す（ムーブ版では失敗時でも値は無効化される）"
 description.ko = "큐에 값을 보냄(복사 또는 이동 오버로드). 채널이 닫혀 있으면 false 반환(이동 오버로드에서는 실패 시에도 값이 무효화됨)"
 
 ["ThreadChannel::size"]
-description.en = "Number of queued values (approximate)."
-description.ja = "キューに入っている値の数（概算）"
-description.ko = "큐에 들어 있는 값의 개수(근사값)"
+description.en = "Number of queued values. Takes the lock, so it is safe while other threads send; they may send or receive right after it returns."
+description.ja = "キューに入っている値の数。ロックを取るので、他のスレッドが send している間でも安全に呼べる。戻った直後に他のスレッドが send / receive することはある"
+description.ko = "큐에 들어 있는 값의 개수. 락을 잡으므로 다른 스레드가 send하는 동안에도 안전하게 호출할 수 있음. 반환 직후 다른 스레드가 send / receive할 수는 있음"
 
 ["ThreadChannel::tryReceive"]
 description.en = "Receive a value without blocking, or waiting at most timeoutMs milliseconds (timeout overload). Returns false immediately/after the timeout if no data."
@@ -16236,9 +16251,9 @@ related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps"]
 ["runOnMainThread"]
 category = "utility"
 keywords = ["main thread", "marshal", "queue", "dispatch", "sync"]
-description.en = "Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame"
-description.ja = "コールバックをメイン（シーン）スレッドで実行。既にメインなら即時、そうでなければ次フレームにキュー"
-description.ko = "콜백을 메인(씬) 스레드에서 실행. 이미 메인이면 즉시, 아니면 다음 프레임으로 큐잉"
+description.en = "Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame. Each frame runs, in order, what was queued when its drain started; work queued during the drain runs in the next frame. Nothing is dropped and there is no limit (a callback may edit the tree or free something); the tc_get_health MCP tool reports the count as mainQueuePending. Code that may queue faster than the app runs it, and can drop values, keeps its own bounded or latest-value buffer"
+description.ja = "コールバックをメイン（シーン）スレッドで実行。既にメインなら即時、そうでなければ次フレームにキュー。各フレームは、ドレイン開始時点でキューにあったものを順番に実行する。ドレイン中にキューされたものは次のフレームで実行される。何も捨てず、上限もない（コールバックはツリーを編集したり何かを解放したりしうる）。その数は MCP ツール tc_get_health が mainQueuePending として返す。アプリが処理するより速くキューしうるコードで、値を捨ててよいものは、自前で上限付きのバッファか最新値だけのバッファを持つ"
+description.ko = "콜백을 메인(씬) 스레드에서 실행. 이미 메인이면 즉시, 아니면 다음 프레임으로 큐잉. 각 프레임은 드레인 시작 시점에 큐에 있던 것을 순서대로 실행한다. 드레인 중에 큐잉된 것은 다음 프레임에 실행된다. 아무것도 버리지 않고 상한도 없다(콜백이 트리를 편집하거나 무언가를 해제할 수 있으므로). 그 개수는 MCP 도구 tc_get_health가 mainQueuePending으로 보고한다. 앱이 처리하는 것보다 빠르게 큐잉할 수 있고 값을 버려도 되는 코드는 자체적으로 상한이 있는 버퍼나 최신값 버퍼를 둔다"
 related = ["isMainThread", "Node::callAfterAsync"]
 
 ["sameSubnet"]
@@ -18089,9 +18104,9 @@ id가 `0`이다.
 '''
 
 ["Font::getAtlas"]
-description.en = "Return the atlas page at the given index for debug visualization, or nullptr if out of range."
-description.ja = "デバッグ表示用に指定インデックスのアトラスページを返す。範囲外なら nullptr。"
-description.ko = "디버그 시각화용으로 지정 인덱스의 아틀라스 페이지를 반환한다. 범위를 벗어나면 nullptr."
+description.en = "Return the atlas page at the given index for debug visualization, or nullptr if out of range. Pages are single-channel R8 textures holding glyph coverage in R, so drawing a page's view with the normal pipeline shows it in red."
+description.ja = "デバッグ表示用に指定インデックスのアトラスページを返す。範囲外なら nullptr。ページはグリフのカバレッジを R に持つ単一チャンネルの R8 テクスチャなので、ページの view を通常のパイプラインで描くと赤く表示される。"
+description.ko = "디버그 시각화용으로 지정 인덱스의 아틀라스 페이지를 반환한다. 범위를 벗어나면 nullptr. 페이지는 글리프 커버리지를 R에 담는 단일 채널 R8 텍스처이므로, 페이지의 view를 일반 파이프라인으로 그리면 빨갛게 표시된다."
 
 ["Font::getSampler"]
 description.en = "Return the shared sokol-gfx sampler used for atlas rendering (advanced interop)."
@@ -18769,6 +18784,12 @@ description.ko = "이 플랫폼 비디오 플레이어의 setLoopImpl 구현."
 description.en = "Report an error (message + code) from a derived class."
 description.ja = "派生クラスからエラー（メッセージ＋コード）を通知する。"
 description.ko = "파생 클래스에서 에러(메시지 + 코드)를 통지한다."
+
+["TcpClient::processNetworkStep"]
+description.en = "processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client."
+description.ja = "processNetwork() の処理本体（派生クラスと受信スレッド用）。呼び出し側スレッドがクライアントに二度と触れずに止まるべきとき false を返す: 接続の終了を通知した場合、またはリスナーがクライアントを破棄した場合。"
+description.ko = "processNetwork()의 처리 본체(파생 클래스와 수신 스레드용). 호출한 스레드가 클라이언트를 다시 읽지 않고 멈춰야 할 때 false를 반환한다: 연결 종료를 통지했거나 리스너가 클라이언트를 파괴한 경우."
+keywords = ["receive thread", "destroy", "listener", "lifetime"]
 
 ["ChipSoundBundle::Entry::note"]
 description.en = "The chip-synth note for this bundle entry."

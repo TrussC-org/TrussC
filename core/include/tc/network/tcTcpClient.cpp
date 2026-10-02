@@ -21,6 +21,9 @@ TcpClient::TcpClient() {
 }
 
 TcpClient::~TcpClient() {
+    // A receive thread whose listener is destroying this client checks this
+    // once the notification returns, and stops without reading the client
+    *alive_ = false;
     // Disconnect without onDisconnect: a listener that reconnects would
     // reconnect a client that is going away.
     disconnectImpl(false);
@@ -195,7 +198,8 @@ bool TcpClient::connect(const std::string& host, int port) {
         if (useThread_) {
             // Start receive thread (ensure blocking mode for thread unless explicitly set otherwise)
             setBlocking(true);
-            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this, generation);
+            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this, generation,
+                                         alive_);
         } else {
             // Register update listener
             updateListener_ = events().update.listen(this, &TcpClient::processNetwork);
@@ -336,7 +340,17 @@ bool TcpClient::send(const std::string& message) {
 // Update / Receive logic
 // =============================================================================
 void TcpClient::processNetwork() {
-    if (!running_) return;
+    // Without threads (driven by the update event) the result is not needed:
+    // a stop means the connection ended and the update listener is gone.
+    // The token is copied first: a listener may destroy the client.
+    AliveToken alive = alive_;
+    processNetworkStep(alive);
+}
+
+// processNetwork()'s work. Returns false when the caller must stop without
+// reading the client again (see the header).
+bool TcpClient::processNetworkStep(const AliveToken& alive) {
+    if (!running_) return true;
 
     // Handle pending connection
     if (connectPending_) {
@@ -357,6 +371,8 @@ void TcpClient::processNetwork() {
                 // not have its new connection torn down after it returns
                 disconnect();
                 notifyError("Connection failed", err);
+                // An onError listener may have destroyed the client
+                if (!*alive) return false;
                 // Not reported if an onError listener started a newer attempt
                 if (!connected_ && !running_ && !connectPending_) {
                     TcpConnectEventArgs args;
@@ -364,7 +380,7 @@ void TcpClient::processNetwork() {
                     args.message = "Connection failed";
                     onConnect.notify(args);
                 }
-                return;
+                return false;
             }
             if (FD_ISSET(socket_, &writefds)) {
                 connectPending_ = false;
@@ -374,6 +390,8 @@ void TcpClient::processNetwork() {
                 args.success = true;
                 args.message = "Connected";
                 onConnect.notify(args);
+                // An onConnect listener may have destroyed the client
+                if (!*alive) return false;
             }
         }
 #else
@@ -393,10 +411,14 @@ void TcpClient::processNetwork() {
                 args.success = true;
                 args.message = "Connected";
                 onConnect.notify(args);
+                // An onConnect listener may have destroyed the client
+                if (!*alive) return false;
             } else {
                 // Tear down before notifying (see the Windows branch)
                 disconnect();
                 notifyError("Connection failed", err);
+                // An onError listener may have destroyed the client
+                if (!*alive) return false;
                 // Not reported if an onError listener started a newer attempt
                 if (!connected_ && !running_ && !connectPending_) {
                     TcpConnectEventArgs args;
@@ -404,13 +426,13 @@ void TcpClient::processNetwork() {
                     args.message = "Connection failed";
                     onConnect.notify(args);
                 }
-                return;
+                return false;
             }
         }
 #endif
     }
 
-    if (!connected_) return;
+    if (!connected_) return true;
 
     // Receive data. The buffer is this client's own: every client's receive
     // thread runs this at the same time.
@@ -431,7 +453,10 @@ void TcpClient::processNetwork() {
             TcpReceiveEventArgs args;
             args.data.assign(recvBuf_.begin(), recvBuf_.begin() + received);
             onReceive.notify(args);
-            
+            // An onReceive listener may have destroyed the client (an owner
+            // that replaces it from a close it handles inline, say)
+            if (!*alive) return false;
+
             // If using threads, we might block again. 
             // If not, we should return to let the app run.
             if (!useThread_) break; 
@@ -447,7 +472,11 @@ void TcpClient::processNetwork() {
                 TcpDisconnectEventArgs args;
                 args.reason = "Connection closed by remote";
                 args.wasClean = true;
+                // This thread stops here, decided before notifying: a
+                // listener may destroy, disconnect or reconnect the client,
+                // so nothing of it is read after the notification (#262).
                 onDisconnect.notify(args);
+                return false;
             }
             break;
         } else {
@@ -461,21 +490,27 @@ void TcpClient::processNetwork() {
                 TcpDisconnectEventArgs args;
                 args.reason = "Connection error";
                 args.wasClean = false;
+                // As above: stop without reading the client again
                 onDisconnect.notify(args);
+                return false;
             }
             break;
         }
     }
+    return true;
 }
 
-void TcpClient::receiveThreadFunc(unsigned generation) {
+void TcpClient::receiveThreadFunc(unsigned generation, AliveToken alive) {
     // running_ alone cannot end this loop when a listener on this thread
     // reconnects: connect() lets go of this thread (the client keeps it for
     // a later join), starts the new connection's own, and running_ is true
     // again for that one. The generation says which thread is current
     // (processNetwork()'s receive loop checks it as well).
+    // processNetworkStep() returns false once it reported the end of the
+    // connection, or a listener destroyed the client: the thread then ends
+    // without reading the client again.
     while (running_ && receiveGeneration_ == generation) {
-        processNetwork();
+        if (!processNetworkStep(alive)) return;
         if (running_ && receiveGeneration_ == generation) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
