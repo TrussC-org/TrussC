@@ -22,8 +22,8 @@ set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
 set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(mbedtls)
 
-# Embed the Mozilla CA bundle as a generated .cpp so a trust anchor fallback
-# is available even when neither the OS trust store nor an explicit PEM is set.
+# Embed the Mozilla CA bundle as a generated .cpp: Windows adds it to ROOT,
+# and POSIX uses it as a fallback when no OS bundle file can be loaded.
 # Refresh with addons/tcxTls/scripts/update_ca_bundle.sh.
 set(_CA_BUNDLE_PEM "${CMAKE_CURRENT_SOURCE_DIR}/data/cacert.pem")
 if(NOT EXISTS "${_CA_BUNDLE_PEM}")
@@ -63,6 +63,6 @@ add_library(tc::tcxTls ALIAS ${ADDON_NAME})
 target_include_directories(${ADDON_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(${ADDON_NAME} PUBLIC TrussC PRIVATE mbedtls mbedx509 mbedcrypto)
 if(WIN32)
-    # Needed for CertOpenSystemStoreW / CertEnumCertificatesInStore fallback.
+    # Needed for CertOpenSystemStoreW / CertEnumCertificatesInStore.
     target_link_libraries(${ADDON_NAME} PRIVATE crypt32)
 endif()
