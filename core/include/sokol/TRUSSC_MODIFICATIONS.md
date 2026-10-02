@@ -7,6 +7,13 @@ Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sectio
 
 **Upstream base:** https://github.com/floooh/sokol commit `082152c` (2026-05-21)
 
+**Shader compiler:** sokol-tools-bin commit
+`11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z), the
+owner-selected master HEAD used by CI. The host hashes are recorded in
+`core/cmake/trussc_shaders.cmake`; update the commit and all five hashes together
+and check the generated shaders against these vendored headers. This compiler
+preserves the `metal_sim` and `wgsl` outputs required by TrussC.
+
 ---
 
 ## Directory Structure

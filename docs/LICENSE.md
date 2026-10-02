@@ -52,6 +52,15 @@ TrussC includes or depends on the following third-party libraries. All use permi
 | **pugixml** | 1.15 | MIT | Arseny Kapoulkine | [LICENSE.md](https://github.com/zeux/pugixml/blob/master/LICENSE.md) |
 | **cpp-httplib** | 0.18.3 | MIT | Yuji Hirose | [LICENSE](https://github.com/yhirose/cpp-httplib/blob/master/LICENSE) |
 
+### Build Tools
+
+The shader compiler **sokol-shdc** is downloaded from **sokol-tools-bin** commit
+[`11d0cf678105d614d675e6d9bd2aaf3eeff12f8c`](https://github.com/floooh/sokol-tools-bin/commit/11d0cf678105d614d675e6d9bd2aaf3eeff12f8c)
+(2026-08-29T14:15:01Z). `core/cmake/trussc_shaders.cmake` records and verifies
+SHA-256 values for all five host binaries. Updates must change the commit and
+all five hashes together. This is the owner's selected master HEAD, preserving
+the `metal_sim` and `wgsl` outputs used by TrussC.
+
 ### Addon Dependencies (Optional)
 
 These libraries are only included if you use the corresponding addon.
@@ -64,7 +73,7 @@ These libraries are only included if you use the corresponding addon.
 | **bcdec** | 0.97 | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxTcv, tcxHap | [LICENSE (in source)](https://github.com/iOrange/bcdec) |
 | **LZ4** | 1.10.0 | BSD 2-Clause | Yann Collet | tcxTcv | [LICENSE](https://github.com/lz4/lz4/blob/dev/lib/LICENSE) |
 | **Snappy** | 1.2.1 | BSD 3-Clause | Google Inc. | tcxHap | [COPYING](https://github.com/google/snappy/blob/main/COPYING) |
-| **HAP** | - | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap | [LICENSE](https://github.com/Vidvox/hap/blob/master/LICENSE) |
+| **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap | [LICENSE](https://github.com/Vidvox/hap/blob/d847f6bbd3be88575dd4ef33a877243780e3be76/LICENSE) |
 | **Lua** | 5.4.8 | MIT (v5.0 or later) | Lua.org, PUC-Rio | tcxLua | [LICENSE](https://www.lua.org/license.html) |
 | **LuaJIT** | 2.1 | MIT | Mike Pall | tcxLua | [COPYRIGHT](https://github.com/LuaJIT/LuaJIT/blob/v2.1/COPYRIGHT) |
 | **luajit-cmake** | [67637d0](https://github.com/zhaozg/luajit-cmake/commit/67637d05afadea249c2ef466ba1273db0f8bb772) (2026/3/18) | MIT | George Zhao (zhaozg) | tcxLua | [LICENSE](https://github.com/zhaozg/luajit-cmake/blob/master/LICENSE) |
