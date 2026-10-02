@@ -70,58 +70,70 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["contains"] = &trussc::Rect::contains;
         t["intersects"] = &trussc::Rect::intersects;
     }
-    lua->new_usertype<trussc::TextureFormat>("TextureFormat",
-        sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
-        "RGBA8", sol::var(trussc::TextureFormat::RGBA8),
-        "RGBA16F", sol::var(trussc::TextureFormat::RGBA16F),
-        "RGBA32F", sol::var(trussc::TextureFormat::RGBA32F),
-        "R8", sol::var(trussc::TextureFormat::R8),
-        "R16F", sol::var(trussc::TextureFormat::R16F),
-        "R32F", sol::var(trussc::TextureFormat::R32F),
-        "RG8", sol::var(trussc::TextureFormat::RG8),
-        "RG16F", sol::var(trussc::TextureFormat::RG16F),
-        "RG32F", sol::var(trussc::TextureFormat::RG32F),
-        "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
-        "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
-    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
-        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
-        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
-        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
-        "Lines", sol::var(trussc::PrimitiveMode::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
-        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
-        "Points", sol::var(trussc::PrimitiveMode::Points));
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
+        t["slot"] = &trussc::PlayingSoundInfo::slot;
+        t["path"] = &trussc::PlayingSoundInfo::path;
+        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
+        t["paused"] = &trussc::PlayingSoundInfo::paused;
+        t["loop"] = &trussc::PlayingSoundInfo::loop;
+        t["position"] = &trussc::PlayingSoundInfo::position;
+        t["duration"] = &trussc::PlayingSoundInfo::duration;
+        t["volume"] = &trussc::PlayingSoundInfo::volume;
+        t["pan"] = &trussc::PlayingSoundInfo::pan;
+        t["speed"] = &trussc::PlayingSoundInfo::speed;
+        t["level"] = &trussc::PlayingSoundInfo::level;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::Beep>("Beep",
+        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
+        "ping", sol::var(trussc::Beep::ping),
+        "success", sol::var(trussc::Beep::success),
+        "complete", sol::var(trussc::Beep::complete),
+        "coin", sol::var(trussc::Beep::coin),
+        "error", sol::var(trussc::Beep::error),
+        "warning", sol::var(trussc::Beep::warning),
+        "cancel", sol::var(trussc::Beep::cancel),
+        "click", sol::var(trussc::Beep::click),
+        "typing", sol::var(trussc::Beep::typing),
+        "notify", sol::var(trussc::Beep::notify),
+        "sweep", sol::var(trussc::Beep::sweep));
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled));
     {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["node"] = &trussc::Node::HitResult::node;
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["hit"] = &trussc::Node::HitResult::hit;
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
     }
-    lua->new_usertype<trussc::TcyMode>("TcyMode",
-        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
-        "Rotate", sol::var(trussc::TcyMode::Rotate),
-        "Upright", sol::var(trussc::TcyMode::Upright),
-        "Combine", sol::var(trussc::TcyMode::Combine));
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
+    {
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate",
+            sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>(),
+            sol::call_constructor, sol::constructors<trussc::OnceGate(), trussc::OnceGate(double)>());
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+    }
+    {
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+        t["altitude"] = &trussc::Location::altitude;
+        t["accuracy"] = &trussc::Location::accuracy;
+    }
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    {
+        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
+        t["data"] = &trussc::TcpReceiveEventArgs::data;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

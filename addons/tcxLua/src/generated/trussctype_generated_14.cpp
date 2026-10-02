@@ -91,64 +91,53 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["draw"] = &trussc::RectNode::draw;
     }
     {
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab",
-            sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>(),
-            sol::call_constructor, sol::constructors<trussc::ColorOKLab(), trussc::ColorOKLab(float, float, float), trussc::ColorOKLab(float, float, float, float)>());
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
+        sol::usertype<trussc::AudioRecorder> t = lua->new_usertype<trussc::AudioRecorder>("AudioRecorder",
+            sol::constructors<trussc::AudioRecorder()>(),
+            sol::call_constructor, sol::constructors<trussc::AudioRecorder()>());
+        t["start"] = sol::overload([](trussc::AudioRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::AudioRecorder& self, const fs::path & path, const trussc::AudioRecordSettings & settings) { return self.start(path, settings); });
+        t["stop"] = &trussc::AudioRecorder::stop;
+        t["isRecording"] = &trussc::AudioRecorder::isRecording;
+        t["getRecordedSeconds"] = &trussc::AudioRecorder::getRecordedSeconds;
+        t["getDroppedFrames"] = &trussc::AudioRecorder::getDroppedFrames;
+        t["getPath"] = &trussc::AudioRecorder::getPath;
     }
-    lua->new_usertype<trussc::Orientation>("Orientation",
-        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
-        "Portrait", sol::var(trussc::Orientation::Portrait),
-        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
-        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
-        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
-        "Landscape", sol::var(trussc::Orientation::Landscape),
-        "All", sol::var(trussc::Orientation::All),
-        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
-    lua->new_usertype<trussc::SendError>("SendError",
-        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
-        "None", sol::var(trussc::SendError::None),
-        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
-        "Disconnected", sol::var(trussc::SendError::Disconnected),
-        "Timeout", sol::var(trussc::SendError::Timeout),
-        "QueueFull", sol::var(trussc::SendError::QueueFull),
-        "NotRunning", sol::var(trussc::SendError::NotRunning));
+    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
+        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
+        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
+        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
+        "Lines", sol::var(trussc::PrimitiveMode::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
+        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
+        "Points", sol::var(trussc::PrimitiveMode::Points));
     {
-        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
-        t["members"] = &trussc::JsonWriteReflector::members;
-        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
-        t["derived"] = &trussc::JsonWriteReflector::derived;
-        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
     }
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
     {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
-    {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["message"] = &trussc::UdpErrorEventArgs::message;
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-    }
-    {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
-    }
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

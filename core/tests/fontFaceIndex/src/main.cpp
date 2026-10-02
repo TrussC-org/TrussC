@@ -16,6 +16,9 @@
 //   "Noto Sans CJK JP" give the faces of NotoSansCJK*.ttc whose PostScript
 //   names are NotoSansCJKsc-Regular / NotoSansCJKjp-Regular, and their outlines
 //   of U+9AA8 differ. SKIP when the font is not installed.
+// - --gpu-check: public Font::load() preserves face selection and rejects
+//   invalid indices; SC and JP render differently, and SC loaded by name
+//   renders identically to the corresponding file and face index.
 //
 // The fonts are built here, so the test runs the same everywhere.
 // =============================================================================
@@ -27,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -455,9 +459,100 @@ static void checkSystemFaces() {
 }
 #endif
 
+// Exercise the public loader with a real graphics context. The headless
+// checks above cannot call Font::load(), which creates GPU samplers.
+static fs::path g_ttcPath;
+static bool g_gpuCompleted = false;
+
+class FaceIndexApp : public App {
+public:
+    void setup() override {
+        check("gpu: Font::load() defaults to face 0", (bool)default_.load(g_ttcPath, 100));
+        check("gpu: Font::load() opens explicit face 0", (bool)zero_.load(g_ttcPath, 100, 0));
+        check("gpu: Font::load() opens explicit face 1", (bool)one_.load(g_ttcPath, 100, 1));
+        check("gpu: default and explicit face 0 have the same metrics",
+              closeTo(default_.getWidth("A"), zero_.getWidth("A")));
+        check("gpu: public file loader keeps the two faces' metrics separate",
+              closeTo(zero_.getWidth("A"), 60) && closeTo(one_.getWidth("A"), 90));
+        for (int index : {-1, 2}) {
+            Font invalid;
+            const int before = g_errors;
+            const LoadResult result = invalid.load(g_ttcPath, 100, index);
+            check("gpu: public loader rejects face " + to_string(index),
+                  !result && !invalid.isLoaded() && g_errors > before);
+        }
+        one_.setOversampling(2);
+        one_.setMipmaps(false);
+        check("gpu: changing raster options preserves face 1",
+              one_.isLoaded() && closeTo(one_.getWidth("A"), 90));
+        fbo_.allocate(320, 160);
+    }
+
+    void draw() override {
+        if (g_gpuCompleted) return;
+        vector<unsigned char> p0, p1;
+        const bool read0 = render(zero_, "A", p0);
+        const bool read1 = render(one_, "A", p1);
+        check("gpu: the two file faces render different glyphs",
+              read0 && read1 && p0 != p1 && hasInk(p0) && hasInk(p1));
+        check("gpu: face 1 uses an R8 atlas after changing raster options",
+              one_.getAtlasCount() > 0 && one_.getAtlas(0)->isTextureValid() &&
+              sg_query_image_desc(one_.getAtlas(0)->getTexture()).pixel_format == SG_PIXELFORMAT_R8);
+#ifdef __linux__
+        const auto scFace = internal::systemFontFace("Noto Sans CJK SC");
+        const auto jpFace = internal::systemFontFace("Noto Sans CJK JP");
+        if (!scFace.path.empty() && scFace.path == jpFace.path && scFace.index != jpFace.index) {
+            Font sc, jp, file;
+            const bool loaded = sc.load("Noto Sans CJK SC", 80) &&
+                                jp.load("Noto Sans CJK JP", 80) &&
+                                file.load(scFace.path, 80, scFace.index);
+            check("gpu: public system-name and file loaders open Noto CJK faces", loaded);
+            vector<unsigned char> scPixels, jpPixels, filePixels;
+            const string han = "\xe9\xaa\xa8\xe7\x9b\xb4\xe8\xa7\x92"; // U+9AA8 U+76F4 U+89D2
+            const bool read = loaded && render(sc, han, scPixels) &&
+                              render(jp, han, jpPixels) && render(file, han, filePixels);
+            check("gpu: SC renders differently from JP", read && scPixels != jpPixels && hasInk(scPixels));
+            check("gpu: SC name renders identically to its file and face index",
+                  read && scPixels == filePixels);
+            Font mono;
+            if (mono.load("Noto Sans Mono CJK JP", 80)) {
+                check("gpu: the system Mono face is monospaced",
+                      closeTo(mono.getWidth("iiii"), mono.getWidth("WWWW")));
+            } else {
+                printf("SKIP: Noto Sans Mono CJK JP not installed\n");
+            }
+        } else {
+            printf("SKIP: distinct Noto Sans CJK SC / JP system faces not installed\n");
+        }
+#endif
+        g_gpuCompleted = true;
+        exitApp();
+    }
+
+private:
+    bool render(Font& font, const string& text, vector<unsigned char>& pixels) {
+        fbo_.begin(0, 0, 0, 0);
+        setColor(1.0f, 0.5f, 0.25f);
+        font.drawString(text, 10, 110);
+        fbo_.end();
+        pixels.resize(320 * 160 * 4);
+        return fbo_.readPixels(pixels.data());
+    }
+
+    static bool hasInk(const vector<unsigned char>& pixels) {
+        for (size_t i = 3; i < pixels.size(); i += 4) {
+            if (pixels[i] != 0) return true;
+        }
+        return false;
+    }
+
+    Font default_, zero_, one_;
+    Fbo fbo_;
+};
+
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
         if (e.level == LogLevel::Error) {
             ++g_errors;
@@ -485,6 +580,15 @@ TC_CORE_TEST_MAIN() {
 #else
     printf("SKIP: system font face check runs on Linux; check MS PGothic / Hiragino by hand\n");
 #endif
+
+    if (argc > 1 && strcmp(argv[1], "--gpu-check") == 0) {
+        g_ttcPath = ttcPath;
+        WindowSettings settings;
+        settings.setSize(160, 160);
+        settings.setHighDpi(false);
+        runApp<FaceIndexApp>(settings);
+        check("gpu: public loader and rendering checks completed", g_gpuCompleted);
+    }
 
     fs::remove_all(dir, ec);
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,

@@ -67,10 +67,11 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
         "Horizontal", sol::var(trussc::WritingMode::Horizontal),
         "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

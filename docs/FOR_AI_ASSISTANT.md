@@ -328,9 +328,9 @@ has. For identical text on every OS, bundle the font in `data/` and load it
 by file; for a `.ttc`, pass the face index (the order of faces is part of the
 file, so it is the same face everywhere):
 ```cpp
-font.load("fonts/NotoSansCJK-Regular.ttc", 24, 2);  // face 2 of the collection
+font.load(getDataPath("fonts/NotoSansCJK-Regular.ttc"), 24, 2);  // face 2
 ```
-`faceIndex` defaults to 0. An index at or past the number of faces fails the
+`faceIndex` defaults to 0. A negative index or one at or past the number of faces fails the
 load with an error log.
 
 ### Why is my small text blurry, and how do I sharpen it?

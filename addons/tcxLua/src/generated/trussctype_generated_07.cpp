@@ -132,9 +132,10 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["getPort"] = &trussc::TcpServerClient::getPort;
     }
     {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["format"] = &trussc::AudioRecordSettings::format;
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
+        t["error"] = &trussc::SendResult::error;
+        t["id"] = &trussc::SendResult::id;
+        t["ok"] = &trussc::SendResult::ok;
     }
     {
         sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");

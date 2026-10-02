@@ -74,59 +74,63 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["intersectAABB"] = [](trussc::Ray& self, const trussc::Vec3 & boxMin, const trussc::Vec3 & boxMax) { return self.intersectAABB(boxMin, boxMax); };
         t["fromScreenPoint2D"] = sol::overload([](float screenX, float screenY) { return trussc::Ray::fromScreenPoint2D(screenX, screenY); }, [](float screenX, float screenY, float startZ) { return trussc::Ray::fromScreenPoint2D(screenX, screenY, startZ); });
     }
+    lua->new_usertype<trussc::EaseType>("EaseType",
+        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
+        "Linear", sol::var(trussc::EaseType::Linear),
+        "Quad", sol::var(trussc::EaseType::Quad),
+        "Cubic", sol::var(trussc::EaseType::Cubic),
+        "Quart", sol::var(trussc::EaseType::Quart),
+        "Quint", sol::var(trussc::EaseType::Quint),
+        "Sine", sol::var(trussc::EaseType::Sine),
+        "Expo", sol::var(trussc::EaseType::Expo),
+        "Circ", sol::var(trussc::EaseType::Circ),
+        "Back", sol::var(trussc::EaseType::Back),
+        "Elastic", sol::var(trussc::EaseType::Elastic),
+        "Bounce", sol::var(trussc::EaseType::Bounce),
+        "Custom", sol::var(trussc::EaseType::Custom));
+    lua->new_usertype<trussc::ChipSoundNote::Wave>("ChipSoundNoteWave",
+        sol::meta_function::equal_to, [](trussc::ChipSoundNote::Wave a, trussc::ChipSoundNote::Wave b){ return a == b; },
+        "Sin", sol::var(trussc::ChipSoundNote::Wave::Sin),
+        "Square", sol::var(trussc::ChipSoundNote::Wave::Square),
+        "Triangle", sol::var(trussc::ChipSoundNote::Wave::Triangle),
+        "Sawtooth", sol::var(trussc::ChipSoundNote::Wave::Sawtooth),
+        "Noise", sol::var(trussc::ChipSoundNote::Wave::Noise),
+        "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
+        "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
+    lua->new_usertype<trussc::SendError>("SendError",
+        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
+        "None", sol::var(trussc::SendError::None),
+        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
+        "Disconnected", sol::var(trussc::SendError::Disconnected),
+        "Timeout", sol::var(trussc::SendError::Timeout),
+        "QueueFull", sol::var(trussc::SendError::QueueFull),
+        "NotRunning", sol::var(trussc::SendError::NotRunning));
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
     {
-        sol::usertype<trussc::AudioRecorder> t = lua->new_usertype<trussc::AudioRecorder>("AudioRecorder",
-            sol::constructors<trussc::AudioRecorder()>(),
-            sol::call_constructor, sol::constructors<trussc::AudioRecorder()>());
-        t["start"] = sol::overload([](trussc::AudioRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::AudioRecorder& self, const fs::path & path, const trussc::AudioRecordSettings & settings) { return self.start(path, settings); });
-        t["stop"] = &trussc::AudioRecorder::stop;
-        t["isRecording"] = &trussc::AudioRecorder::isRecording;
-        t["getRecordedSeconds"] = &trussc::AudioRecorder::getRecordedSeconds;
-        t["getDroppedFrames"] = &trussc::AudioRecorder::getDroppedFrames;
-        t["getPath"] = &trussc::AudioRecorder::getPath;
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
     }
-    {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["name"] = &trussc::Platform::name;
-    }
-    {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
-    }
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
-    {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["success"] = &trussc::TcpConnectEventArgs::success;
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-    }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

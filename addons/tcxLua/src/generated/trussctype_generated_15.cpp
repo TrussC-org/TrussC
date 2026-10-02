@@ -106,39 +106,40 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["level"] = &trussc::PlayingSound::level;
     }
     {
-        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
-        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
-        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
-        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
-        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
-        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
-        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
-        t["name"] = &trussc::GraphicsBackend::name;
-    }
-    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
-        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
-        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
-        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
-        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
-        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
-        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
-    {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
+        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
+        t["x"] = &trussc::ShaderVertex::x;
+        t["y"] = &trussc::ShaderVertex::y;
+        t["z"] = &trussc::ShaderVertex::z;
+        t["u"] = &trussc::ShaderVertex::u;
+        t["v"] = &trussc::ShaderVertex::v;
+        t["r"] = &trussc::ShaderVertex::r;
+        t["g"] = &trussc::ShaderVertex::g;
+        t["b"] = &trussc::ShaderVertex::b;
+        t["a"] = &trussc::ShaderVertex::a;
     }
     {
-        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
-        t["hit"] = &trussc::Ray::Hit::hit;
-        t["t"] = &trussc::Ray::Hit::t;
-        t["point"] = &trussc::Ray::Hit::point;
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+    }
+    {
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+    }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    {
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        t["resolution"] = &trussc::CurveStyle::resolution;
     }
 }
 #ifndef _MSC_VER

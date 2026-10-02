@@ -100,34 +100,31 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
         t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
+    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
+        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
+        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
+        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
     {
-        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
-        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
-        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
-        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
+        t["node"] = &trussc::Node::HitResult::node;
+        t["distance"] = &trussc::Node::HitResult::distance;
+        t["localPoint"] = &trussc::Node::HitResult::localPoint;
+        t["hit"] = &trussc::Node::HitResult::hit;
+    }
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
+    {
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
     {
-        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
-        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
-        t["channels"] = &trussc::AudioInBuffer::channels;
-        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
-        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
-    }
-    {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["success"] = &trussc::FileDialogResult::success;
-    }
-    {
-        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
-        t["message"] = &trussc::TcpErrorEventArgs::message;
-        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
-    }
-    {
-        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
-        t["data"] = &trussc::TcpReceiveEventArgs::data;
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
     }
 }
 #ifndef _MSC_VER
