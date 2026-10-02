@@ -7,7 +7,6 @@
 #include "sokol/sokol_gfx.h"
 #include "sokol/util/sokol_gl_tc.h"
 #include "tc/app/tcGpuFrame.h"
-#include "../common/tcCoreTest.h"
 #include <cstdio>
 #include <cstring>
 
@@ -63,7 +62,7 @@ void drawOffscreen(sgl_context context, const sg_pass& pass) {
 }
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+int main() {
     sg_desc desc = {};
     desc.logger.func = logger;
     sg_setup(&desc);

@@ -3,6 +3,9 @@
 
 // Internal frame-end predicate shared by the loop and dummy-backend tests.
 // Keep this header usable from C and independent of the window/swapchain.
+// This check relies on sokol frame stats (enabled by default in sg_setup and
+// never disabled by TrussC), so an app calling sg_disable_stats() itself turns
+// the check off.
 #ifndef SOKOL_GFX_INCLUDED
 #include "../../sokol/sokol_gfx.h"
 #endif
