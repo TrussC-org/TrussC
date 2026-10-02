@@ -2904,6 +2904,7 @@ namespace internal {
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
                 // Build TouchEventArgs from sokol touchpoints
+                static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
                 TouchEventArgs touchArgs;
                 touchArgs.numTouches = ev->num_touches;
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)

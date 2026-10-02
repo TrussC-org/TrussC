@@ -439,14 +439,24 @@ action = AMotionEvent_getAction(e) & AMOTION_EVENT_ACTION_MASK;
 _sapp_init_event(type);
 num_touches = min(AMotionEvent_getPointerCount(e), SAPP_MAX_TOUCHPOINTS);  // 10568–10571
 for i in num_touches:
-    dst->identifier      = AMotionEvent_getPointerId(e, i);                // 10574 stable id
-    dst->pos_x = (AMotionEvent_getX(e,i) / window_width)  * framebuffer_width;   // 10575
-    dst->pos_y = (AMotionEvent_getY(e,i) / window_height) * framebuffer_height;  // 10576 → fb space
-    dst->android_tooltype = (sapp_android_tooltype)AMotionEvent_getToolType(e,i); // 10577
-    dst->changed = (POINTER_DOWN/UP) ? (i == pointer_index) : true;        // 10578–10583
+    src_index = i;
+    // For POINTER_DOWN/UP only: keep an overflow changed pointer in the last slot.
+    if i == SAPP_MAX_TOUCHPOINTS - 1 && pointer_index >= SAPP_MAX_TOUCHPOINTS
+        && (POINTER_DOWN/UP): src_index = pointer_index;
+    dst->identifier      = AMotionEvent_getPointerId(e, src_index);        // stable id
+    dst->pos_x = (AMotionEvent_getX(e,src_index) / window_width) * framebuffer_width;
+    dst->pos_y = (AMotionEvent_getY(e,src_index) / window_height) * framebuffer_height;
+    dst->android_tooltype = (sapp_android_tooltype)AMotionEvent_getToolType(e,src_index);
+    dst->changed = (POINTER_DOWN/UP) ? (src_index == pointer_index) : true;
 _sapp_call_event(&_sapp.event);   // 10585
 ```
-- **All active pointers** are emitted each event; `changed` marks which pointer this
+- **Up to 32 pointers** are emitted each event (`SAPP_MAX_TOUCHPOINTS = 32`,
+  matching the fixed `TouchEventArgs` array, guarded by a `static_assert` at the
+  conversion). At or below the cap, pointer order is unchanged. On overflow,
+  POINTER_DOWN/UP retains the changed pointer even when its index exceeds the cap,
+  replacing only the last slot. The backend emits `_SAPP_WARN_MSG` once when
+  the pointer count exceeds the cap, with an implementation-local once-flag.
+- `changed` marks which pointer this
   event is about (for POINTER_DOWN/UP only the indexed one changed; DOWN/MOVE/UP/CANCEL
   mark all changed). Same `identifier`+`changed` contract as iOS — TrussC's touch
   tracking in `_event_cb` (TrussC.h:2392–2440, maps to `TouchEventArgs`, `cancelled`
@@ -456,6 +466,9 @@ _sapp_call_event(&_sapp.event);   // 10585
   carry it through.
 - Positions are already framebuffer-space (multiplied by fb/window ratio), unlike iOS
   which multiplies by `dpi_scale`. Same net effect (fb pixels).
+- Manual regression check: temporarily lower both caps to 2, use 3 fingers on
+  an Android device, and lift each in turn. Every press/release must contain a
+  changed point, with one overflow warning. Restore 32 and repeat with 8 or more fingers.
 
 ---
 
