@@ -126,14 +126,20 @@ TC_CORE_TEST_MAIN() {
 
         // getDataPath must keep the chosen folder even for a missing file.
         auto& live = internal::dataPathState();
-        const auto saved = live;
-        live = release;
+        // DataPathState holds a mutex and an atomic: save and restore by field.
+        const fs::path savedRoot = live.root;
+        const bool savedUserSet = live.userSet;
+        const bool savedProbed = live.probed.load();
+        live.userSet = release.userSet;
+        live.probed.store(release.probed.load());
         live.root = (exe / release.root).lexically_normal();
         check("Apple probe: no per-file fallback to outside-only asset",
               getDataPath("outside-only.txt") == live.root / "outside-only.txt" &&
               !fs::exists(getDataPath("outside-only.txt")) &&
               fs::exists(bin / "data/outside-only.txt"));
-        live = saved;
+        live.root = savedRoot;
+        live.userSet = savedUserSet;
+        live.probed.store(savedProbed);
 
         fs::remove_all(resources);
         internal::resolveAppleDataPathRootOnce(release, exe);
