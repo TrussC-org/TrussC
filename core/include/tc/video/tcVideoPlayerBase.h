@@ -240,6 +240,14 @@ public:
     const Texture& getTexture() const override { return texture_; }
 
 protected:
+    // Reapply persistent settings once the derived player has loaded its backend.
+    // Speed is applied by play(): setting the rate can start native playback.
+    void applyCachedStateToPlatform() {
+        setLoopImpl(loop_);
+        setVolumeImpl(volume_);
+        setPanImpl(pan_);
+    }
+
     // -------------------------------------------------------------------------
     // State (accessible to derived classes)
     // -------------------------------------------------------------------------
