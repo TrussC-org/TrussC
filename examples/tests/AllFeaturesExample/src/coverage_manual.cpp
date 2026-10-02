@@ -50,6 +50,8 @@ void coverTemplates() {
     (void)ch.tryReceive(got);
     (void)ch.tryReceive(got, 1);
     (void)ch.receive(got);
+    std::vector<int> all = ch.receiveAll();
+    (void)all;
     (void)ch.empty();
     (void)ch.size();
     (void)ch.isClosed();

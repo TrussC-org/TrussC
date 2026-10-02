@@ -1729,6 +1729,7 @@ struct Cover_Mat4 : af::Scope<Mat4> {
         (void)af::val<Mat4>().operator*(af::val<const Vec4>());
         (void)af::val<Mat4>().transposed();
         (void)af::val<Mat4>().inverted();
+        (void)af::val<Mat4>().tryInvert(af::val<Mat4>());
         (void)af::val<Mat4>().lookAt(af::val<const Vec3>(), af::val<const Vec3>(), af::val<const Vec3>());
         (void)af::val<Mat4>().ortho(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mat4>().perspective(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());

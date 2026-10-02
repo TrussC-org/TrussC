@@ -67,6 +67,10 @@
 //   to the default); a later init() succeeds (#279).
 // - An init() on the null backend the test requested logs no "no usable
 //   audio backend" warning (that warning is for a fallback to it).
+// - A missing file fails with FileNotFound and logs one Error naming the
+//   path, for each loader that returns LoadResult and runs here: .wav, .ogg,
+//   a stream, .m4a and VideoPlayer::load() (Linux, macOS, Windows) and
+//   Pixels::load() / loadHDR() (#359).
 // =============================================================================
 
 #include <TrussC.h>
@@ -1124,6 +1128,50 @@ int main() {
         }
         std::error_code rmEc;
         fs::remove(notOgg, rmEc);
+    }
+
+    // A missing file: every loader that returns LoadResult fails with
+    // FileNotFound and logs one Error line naming the path (#359).
+    {
+        const fs::path missingDir = fs::temp_directory_path() / ("tc_audio_diag_" + tag + "_missing");
+        std::error_code rmEc;
+        fs::remove_all(missingDir, rmEc);
+        auto checkMissing = [&](const string& name, const fs::path& path, auto load) {
+            const string pathStr = internal::pathToUtf8(path);
+            const size_t errorsBefore = countLogs(LogLevel::Error, pathStr);
+            const LoadResult r = load(path);
+            check("missing: " + name + " fails with FileNotFound",
+                  !r && r.error == LoadError::FileNotFound, loadErrorName(r.error));
+            check("missing: " + name + " logs one Error",
+                  countLogs(LogLevel::Error, pathStr) == errorsBefore + 1, lastLog(LogLevel::Error));
+        };
+        checkMissing("SoundBuffer::loadWav()", missingDir / "a.wav",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadWav(p); });
+        checkMissing("SoundBuffer::loadOgg()", missingDir / "b.ogg",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadOgg(p); });
+        checkMissing("Sound::load() of a .wav", missingDir / "c.wav",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        checkMissing("Sound::load() of an .ogg", missingDir / "d.ogg",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        checkMissing("Sound::loadStream()", missingDir / "e.wav",
+                     [](const fs::path& p) { Sound s; return s.loadStream(p); });
+        // loadAac() is per platform (Linux, macOS / iOS, Windows), and each
+        // implementation logs the missing file itself.
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__) || defined(_WIN32)
+        checkMissing("SoundBuffer::loadAac()", missingDir / "f.m4a",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadAac(p); });
+        checkMissing("Sound::load() of an .m4a", missingDir / "g.m4a",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        // VideoPlayer::load() classifies a missing file before it reaches the
+        // platform backend, so no window or decoder is needed. The path is
+        // absolute, so getDataPath() passes it through unchanged.
+        checkMissing("VideoPlayer::load()", missingDir / "j.mp4",
+                     [](const fs::path& p) { VideoPlayer v; return v.load(p); });
+#endif
+        checkMissing("Pixels::load()", missingDir / "h.png",
+                     [](const fs::path& p) { Pixels px; return px.load(p); });
+        checkMissing("Pixels::loadHDR()", missingDir / "i.hdr",
+                     [](const fs::path& p) { Pixels px; return px.loadHDR(p); });
     }
 
     Sound gone;
