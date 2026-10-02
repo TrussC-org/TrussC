@@ -11,6 +11,8 @@
 // - internal::findFaceByPostScriptName() / findFaceInFileByPostScriptName()
 //   (the macOS / iOS face lookup) find a face by its PostScript name (name
 //   ID 6) in Windows and Mac name records, and stop at data that ends early.
+//   File lookup seeks to metadata and rejects corrupt collection/directory/
+//   name-table ranges before reading or allocating them.
 // - Linux: a system font name resolves to the face fontconfig reports
 //   (FC_INDEX). With Noto Sans CJK installed, "Noto Sans CJK SC" and
 //   "Noto Sans CJK JP" give the faces of NotoSansCJK*.ttc whose PostScript
@@ -408,7 +410,9 @@ static void checkPostScriptNames(const Bytes& ttc, const fs::path& ttcPath,
     check("findFaceByPostScriptName(): null data gives -1",
           findFaceByPostScriptName(nullptr, 0, "TcFace-One") == -1);
 
-    check("findFaceInFileByPostScriptName(): face 1 of a .ttc file",
+    check("findFaceInFileByPostScriptName(): Windows name finds face 0 by seek",
+          internal::findFaceInFileByPostScriptName(ttcPath, "TcFace-Zero") == 0);
+    check("findFaceInFileByPostScriptName(): Mac name finds face 1 by seek",
           internal::findFaceInFileByPostScriptName(ttcPath, "TcFace-One") == 1);
     check("findFaceInFileByPostScriptName(): unknown name in a .ttc file gives -1",
           internal::findFaceInFileByPostScriptName(ttcPath, "TcFace-Two") == -1);
@@ -417,6 +421,41 @@ static void checkPostScriptNames(const Bytes& ttc, const fs::path& ttcPath,
     check("findFaceInFileByPostScriptName(): a missing file gives -1",
           internal::findFaceInFileByPostScriptName(ttcPath.parent_path() / "missing.ttc",
                                                    "TcFace-One") == -1);
+
+    const fs::path corruptPath = ttcPath.parent_path() / "corrupt.ttc";
+    const auto checkCorrupt = [&](const string& name, const Bytes& corrupt) {
+        check("file seek: " + name,
+              writeFile(corruptPath, corrupt) &&
+                  internal::findFaceInFileByPostScriptName(corruptPath, "TcFace-One") == -1);
+    };
+    Bytes corrupt = ttc;
+    set32(corrupt, 8, 0xffffffffu);
+    checkCorrupt("collection offset array past EOF gives -1", corrupt);
+    corrupt = ttc;
+    set32(corrupt, 16, 0xfffffff0u);
+    checkCorrupt("corrupt face offset gives -1", corrupt);
+
+    const size_t faceStart = get32(ttc, 16);
+    corrupt = ttc;
+    corrupt[faceStart + 4] = corrupt[faceStart + 5] = 0xff;
+    checkCorrupt("table directory past EOF gives -1", corrupt);
+
+    const size_t numTables = get16(ttc, faceStart + 4);
+    for (size_t i = 0; i < numTables; i++) {
+        const size_t rec = faceStart + 12 + 16 * i;
+        if (get32(ttc, rec) != tagOf("name")) continue;
+        corrupt = ttc;
+        set32(corrupt, rec + 8, 0xfffffff0u);
+        checkCorrupt("name offset plus length cannot wrap at 32 bits", corrupt);
+        corrupt = ttc;
+        set32(corrupt, rec + 8, (uint32_t)(ttc.size() - 6));
+        checkCorrupt("name table starting in file but ending past EOF gives -1", corrupt);
+        corrupt = ttc;
+        set32(corrupt, rec + 12, 0xffffffffu);
+        checkCorrupt("corrupt name length gives -1 before allocation", corrupt);
+        break;
+    }
+    fs::remove(corruptPath);
 }
 
 // --- system font names (Linux, fontconfig) -------------------------------------

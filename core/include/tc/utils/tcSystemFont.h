@@ -64,7 +64,9 @@ int findFaceByPostScriptName(const uint8_t* data, size_t size,
 
 // The same for a font file: 0 for a single font (without reading its
 // names), the matching face of a collection, or -1 when no face of the
-// collection has that name or the file cannot be read.
+// collection has that name or the file cannot be read. Seeks to the collection
+// header, face directories and name tables; checks their ranges in 64 bits
+// against the file size without reading the whole collection.
 int findFaceInFileByPostScriptName(const fs::path& path, const std::string& postScriptName);
 
 } // namespace internal

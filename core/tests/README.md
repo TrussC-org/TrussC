@@ -684,8 +684,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   face index below 0 or at or past the number of faces fails with an error
   log. `internal::findFaceByPostScriptName()` (the macOS / iOS face lookup)
   finds a face by its PostScript name in Windows and Mac name records and
-  reads within the data. On Linux, `"Noto Sans CJK SC"` / `"Noto Sans CJK
-  JP"` resolve to the faces fontconfig reports, whose PostScript names are
+  reads within the data. The file matcher seeks to the collection header,
+  face directories and name tables; the generated fixture checks both faces
+  and rejects corrupt offsets/lengths, including 32-bit overflow. On Linux,
+  `"Noto Sans CJK SC"` / `"Noto Sans CJK JP"` resolve to the faces fontconfig
+  reports, whose PostScript names are
   `NotoSansCJKsc-Regular` / `NotoSansCJKjp-Regular`, and their outlines of
   U+9AA8 differ (SKIP when Noto Sans CJK is not installed). The system-name
   check on Windows (`MS PGothic`) and macOS is manual. `fontFaceIndex

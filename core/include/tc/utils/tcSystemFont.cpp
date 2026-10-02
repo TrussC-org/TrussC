@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <vector>
 
 namespace trussc {
@@ -104,19 +105,60 @@ int findFaceInFileByPostScriptName(const fs::path& path, const std::string& post
     if (!file) return -1;
     const std::streamoff end = file.tellg();
     if (end < 12) return -1;
-    file.seekg(0, std::ios::beg);
+    const uint64_t fileSize = static_cast<uint64_t>(end);
+    const auto inFile = [fileSize](uint64_t offset, uint64_t length) {
+        return offset <= fileSize && length <= fileSize - offset;
+    };
+    const auto readAt = [&](uint64_t offset, uint8_t* data, uint64_t length) {
+        // Check in 64 bits before seeking or narrowing to stream types.
+        if (!inFile(offset, length) ||
+            offset > static_cast<uint64_t>(std::numeric_limits<std::streamoff>::max()) ||
+            length > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+            return false;
+        }
+        file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        return static_cast<bool>(file.read(reinterpret_cast<char*>(data),
+                                           static_cast<std::streamsize>(length)));
+    };
 
-    // A single font has only face 0; only a collection is read in full.
-    uint8_t header[4] = {};
-    if (!file.read(reinterpret_cast<char*>(header), 4)) return -1;
+    // A single font has only face 0. For a collection, read only its header,
+    // face directories and name tables, never the glyph/outline data.
+    uint8_t header[12] = {};
+    if (!readAt(0, header, sizeof(header))) return -1;
     if (readU32(header, 0) != 0x74746366u) return 0;  // 'ttcf'
+    if (postScriptName.empty()) return -1;
 
-    file.seekg(0, std::ios::beg);
-    std::vector<uint8_t> data((size_t)end);
-    if (!file.read(reinterpret_cast<char*>(data.data()), (std::streamsize)data.size())) {
-        return -1;
+    const uint64_t numFonts = readU32(header, 8);
+    if (!inFile(12, 4 * numFonts)) return -1;
+    for (uint64_t i = 0; i < numFonts && i <= static_cast<uint64_t>(INT32_MAX); i++) {
+        uint8_t faceOffset[4] = {};
+        if (!readAt(12 + 4 * i, faceOffset, sizeof(faceOffset))) return -1;
+        const uint64_t fontStart = readU32(faceOffset, 0);
+        if (!readAt(fontStart, header, sizeof(header))) return -1;
+        const uint64_t directoryStart = fontStart + 12;
+        const uint64_t directoryLength = 16 * readU16(header, 4);
+        if (!inFile(directoryStart, directoryLength)) return -1;
+        if (directoryLength == 0) continue;
+        std::vector<uint8_t> directory(static_cast<size_t>(directoryLength));
+        if (!readAt(directoryStart, directory.data(), directoryLength)) return -1;
+        for (uint64_t rec = 0; rec < directoryLength; rec += 16) {
+            if (readU32(directory.data(), rec) != 0x6E616D65u) continue;  // 'name'
+            const uint64_t offset = readU32(directory.data(), rec + 8);
+            const uint64_t length = readU32(directory.data(), rec + 12);
+            if (!inFile(offset, length) || length > std::numeric_limits<size_t>::max() ||
+                length > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+                return -1;
+            }
+            if (length < 6) break;
+            std::vector<uint8_t> names(static_cast<size_t>(length));
+            if (!readAt(offset, names.data(), length)) return -1;
+            if (nameTableHasPostScriptName(names.data(), 0, length, postScriptName)) {
+                return static_cast<int>(i);
+            }
+            break;
+        }
     }
-    return findFaceByPostScriptName(data.data(), data.size(), postScriptName);
+    return -1;
 }
 
 } // namespace internal
