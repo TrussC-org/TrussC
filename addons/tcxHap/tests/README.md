@@ -70,6 +70,10 @@ track) and written to the temp folder:
   positions, small advances, forward/backward jumps and speed 2 all use the
   audio position directly. Without audio, and in reverse, time moves by
   dt * speed and wraps at the ends.
+- Synthetic 2 s audio in a 5 s video: when audio stops at 2 s, supplied
+  0.5 s deltas carry video to its end. With looping, video wraps to 0 s,
+  restarts and resyncs the synthetic audio, then follows its position again.
+  No wall-clock bounds or audio device are used.
 
 To check `MovParser` against ffmpeg's own output (not part of the test), for
 example:

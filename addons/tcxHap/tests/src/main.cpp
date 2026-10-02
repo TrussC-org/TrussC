@@ -984,6 +984,63 @@ static void clockTests() {
               step.time == 2.25 && !step.wrapped && !step.ended);
     }
 
+    // Synthetic 2-second audio in a 5-second video. Its position remains at
+    // 2 after it stops; supplied deltas must carry video on to end or wrap.
+    // Model update()'s audio-master selection and syncAudioTo() at the wrap,
+    // including restarting stopped audio, without an audio device or sleeps.
+    for (bool loop : {false, true}) {
+        const bool hasAudio = true;
+        bool audioPlaying = true;
+        double audioPosition = 2.0;
+        int audioRestarts = 0, audioSeeks = 0;
+        PlaybackClockInput in;
+        in.time = 1.5; in.dt = 0.5; in.duration = 5.0; in.loop = loop;
+        auto updateClock = [&]() {
+            in.audioMaster = hasAudio && in.speed > 0 && audioPlaying;
+            in.audioTime = in.audioMaster ? audioPosition : 0.0;
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            in.time = step.time;
+            if (step.wrapped && hasAudio && in.speed > 0) {
+                // Synthetic syncAudioTo(step.time): play if stopped, then seek.
+                if (!audioPlaying) {
+                    audioPlaying = true;
+                    ++audioRestarts;
+                }
+                audioPosition = step.time;
+                ++audioSeeks;
+            }
+            return step;
+        };
+        const PlaybackClockStep lastAudioStep = updateClock();
+        bool exact = lastAudioStep.time == 2.0 &&
+                     !lastAudioStep.wrapped && !lastAudioStep.ended;
+        audioPlaying = false;
+        PlaybackClockStep step;
+        for (int i = 1; i <= 6; ++i) {
+            step = updateClock();
+            const bool boundary = i == 6;
+            const double expected = boundary && loop ? 0.0 : 2.0 + i * 0.5;
+            exact = exact && step.time == expected &&
+                    step.wrapped == (boundary && loop) &&
+                    step.ended == (boundary && !loop);
+        }
+        if (!loop) {
+            check("clock: shorter audio stops -> wall clock reaches video end",
+                  exact && step.time == 5.0 && step.ended &&
+                  !audioPlaying && audioPosition == 2.0 && audioSeeks == 0);
+        } else {
+            check("clock: shorter audio stops -> video wraps and restarts/resyncs audio",
+                  exact && step.time == 0.0 && step.wrapped &&
+                  audioPlaying && audioPosition == 0.0 &&
+                  audioRestarts == 1 && audioSeeks == 1);
+            audioPosition = 0.25;
+            const PlaybackClockStep resumed = updateClock();
+            check("clock: shorter audio after wrap -> playing audio is master again",
+                  resumed.time == 0.25 && !resumed.wrapped && !resumed.ended &&
+                  audioRestarts == 1 && audioSeeks == 1);
+        }
+    }
+
     // Wall clock (no audio): dt * speed per step, wraps with fmod
     {
         double t = 0.0;

@@ -93,7 +93,7 @@ inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuff
 // ---------------------------------------------------------------------------
 // Pure function (no player state), so the clock can be checked headless.
 //
-// - Wall clock: time advances by dt * speed. Used for files without audio,
+// - Wall clock: time advances by dt * speed. Used when audio is not playing,
 //   and for reverse or zero-speed playback (speed <= 0).
 // - Audio master (audioMaster true): time is the audio position (audioTime),
 //   as in the Linux VideoPlayer. HAP frames are randomly addressable, so
@@ -323,14 +323,15 @@ public:
         if (playing_ && !paused_) {
             frameNew_ = false;
 
-            // Audio is the master clock whenever loaded and speed is positive
+            // Playing audio is the master clock at positive speed. After a
+            // shorter audio track ends, wall time carries the video to its end.
             PlaybackClockInput in;
             in.time = playbackTime_;
             in.dt = tc::getDeltaTime();
             in.speed = speed_;
             in.duration = duration_;
             in.loop = loop_;
-            in.audioMaster = hasAudio_ && speed_ > 0;
+            in.audioMaster = hasAudio_ && speed_ > 0 && audioPlayer_.isPlaying();
             in.audioTime = in.audioMaster ? audioPlayer_.getPosition() : 0.0;
             const PlaybackClockStep step = stepPlaybackClock(in);
             playbackTime_ = step.time;

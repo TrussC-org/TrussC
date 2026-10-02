@@ -703,10 +703,10 @@ Hap video codec for fast GPU-accelerated playback.
 - Audio track: PCM (`sowt`, `twos`, `fl32`, `lpcm`; 16-bit integer or 32-bit
   float, sound description v0/v1/v2), AAC, MP3. Other PCM formats load
   without audio and log a warning.
-- A/V sync: when audio is loaded and speed is positive, video time equals
+- A/V sync: when audio is playing and speed is positive, video time equals
   the audio position; the video drives the loop. HAP frames are randomly
-  addressable, so no decoder re-sync threshold is needed. Files without
-  audio and reverse playback use the wall clock.
+  addressable, so no decoder re-sync threshold is needed. Playback uses the
+  wall clock when audio is absent or has ended, and in reverse.
 
 ### tcxImGui
 
