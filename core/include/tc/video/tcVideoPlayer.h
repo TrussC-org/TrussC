@@ -59,9 +59,10 @@ public:
         }
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
-        // (the web backend streams straight from them). UTF-8, not
-        // path.string(): that throws on Windows for names outside the code page.
-        const std::string pathStr = pathToUtf8(path);
+        // (the web backend streams straight from them). Display conversion
+        // cannot create or hide the ASCII URL prefix, and accepts Windows
+        // names holding unpaired UTF-16 surrogates.
+        const std::string pathStr = internal::pathToDisplayUtf8(path);
         bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
         fs::path resolvedPath = isUrl ? path : getDataPath(path);
 
@@ -70,9 +71,9 @@ public:
         if (!isUrl) {
             std::error_code ec;
             if (!fs::exists(resolvedPath, ec)) {
-                logError("VideoPlayer") << "file not found: " << internal::pathToUtf8(resolvedPath);
+                logError("VideoPlayer") << "file not found: " << resolvedPath;
                 return LoadResult::fail(LoadError::FileNotFound,
-                                        "file not found: " + internal::pathToUtf8(resolvedPath));
+                                        "file not found: " + internal::pathToDisplayUtf8(resolvedPath));
             }
         }
 
@@ -80,7 +81,7 @@ public:
         if (!loadPlatform(resolvedPath)) {
             return LoadResult::fail(LoadError::DecodeFailed,
                                     "platform decoder failed to open: " +
-                                    internal::pathToUtf8(resolvedPath));
+                                    internal::pathToDisplayUtf8(resolvedPath));
         }
 
         // Remember the resolved path so instance-level frame extraction

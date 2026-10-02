@@ -4037,9 +4037,9 @@ description.ja = "現在のシステム（OS ログ）レベルを取得"
 description.ko = "현재 시스템(OS 로그) 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
-description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
-description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）"
-description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열)"
+description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display"
+description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）。Windows では対にならない UTF-16 サロゲートを表示用に U+FFFD に置き換える"
+description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열). Windows에서는 짝이 없는 UTF-16 서로게이트를 표시용 U+FFFD로 바꿈"
 
 ["Logger::isFileOpen"]
 description.en = "Check whether a log file is currently open"

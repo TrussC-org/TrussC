@@ -17,7 +17,8 @@
 //   - Windows: a missing UTF-8 activeCodePage manifest (the GetACP() check),
 //     a listDirectory that stops at an entry it cannot convert (a name
 //     holding an unpaired UTF-16 surrogate), and `log << path` or the
-//     loadJson / tcFile / Xml::load error paths throwing for such a name
+//     loadJson / tcFile / Xml / Pixels / VideoPlayer / SoundBuffer error
+//     paths or setLogFile throwing for such a name
 //     (log text must use pathToDisplayUtf8, not pathToUtf8).
 //   - every platform: `log << path` falling back to the std::ostream
 //     inserter, which quotes the path, and the UTF-16 -> UTF-8 conversion
@@ -38,6 +39,7 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -476,6 +478,77 @@ TC_CORE_TEST_MAIN() {
                 Xml xml;
                 return !xml.load(missing) && logged("XML load error: ", "e" + R + ".txt");
             });
+            checkNoThrow("Pixels::load(missing surrogate): FileNotFound, U+FFFD", [&] {
+                seen.clear();
+                Pixels pixels;
+                const LoadResult r = pixels.load(bad(L"missing", L".png"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".png") != string::npos &&
+                       logged("[Pixels] file not found: ", "missing" + R + ".png");
+            });
+            checkNoThrow("Pixels::loadHDR(missing surrogate): FileNotFound, U+FFFD", [&] {
+                seen.clear();
+                Pixels pixels;
+                const LoadResult r = pixels.loadHDR(bad(L"missing", L".hdr"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".hdr") != string::npos &&
+                       logged("[Pixels] file not found: ", "missing" + R + ".hdr");
+            });
+            checkNoThrow("VideoPlayer::load(missing surrogate): FileNotFound, U+FFFD", [&] {
+                seen.clear();
+                VideoPlayer video;
+                const LoadResult r = video.load(bad(L"missing", L".mp4"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".mp4") != string::npos &&
+                       logged("[VideoPlayer] file not found: ", "missing" + R + ".mp4");
+            });
+            checkNoThrow("SoundBuffer::load(missing surrogate WAV): failure, U+FFFD", [&] {
+                seen.clear();
+                SoundBuffer buffer;
+                const LoadResult r = buffer.load(bad(L"missing", L".wav"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".wav") != string::npos &&
+                       logged("[SoundBuffer] file not found: ", "missing" + R + ".wav");
+            });
+            checkNoThrow("SoundBuffer::load(missing surrogate OGG): failure, U+FFFD", [&] {
+                seen.clear();
+                SoundBuffer buffer;
+                const LoadResult r = buffer.load(bad(L"missing", L".ogg"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".ogg") != string::npos &&
+                       logged("[SoundBuffer] failed to open ", "missing" + R + ".ogg");
+            });
+            const fs::path logPath = bad(L"g", L".log");
+            Logger& logger = getLogger();
+            const LogLevel previousFileLevel = logger.getFileLogLevel();
+            logger.setFileLogLevel(LogLevel::Notice);
+            checkNoThrow("setLogFile(surrogate): opens, reports U+FFFD, writes", [&] {
+                if (!logger.setLogFile(logPath)) return false;
+                const bool reported = logger.isFileOpen() &&
+                    logger.getLogFilePath().find("g" + R + ".log") != string::npos;
+                logNotice() << "surrogate log marker";
+                logger.closeFile();
+                std::ifstream in(logPath, std::ios::binary);
+                const string text((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+                return reported && text.find("surrogate log marker") != string::npos;
+            });
+            checkNoThrow("setLogFile(surrogate): failure logs U+FFFD, keeps file", [&] {
+                if (!logger.setLogFile(logPath)) return false;
+                seen.clear();
+                const string previousPath = logger.getLogFilePath();
+                // A directory cannot be opened as a log file.
+                const bool failed = !logger.setLogFile(fullDir);
+                const bool kept = logger.isFileOpen() && logger.getLogFilePath() == previousPath;
+                const bool displayed = logged("Failed to open log file: ", "f" + R);
+                logger.closeFile();
+                std::ifstream in(logPath, std::ios::binary);
+                const string text((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+                return failed && kept && displayed &&
+                       text.find("Failed to open log file: ") != string::npos &&
+                       text.find("f" + R) != string::npos;
+            });
+            logger.closeFile();
+            logger.setFileLogLevel(previousFileLevel);
         }
 #endif
 
