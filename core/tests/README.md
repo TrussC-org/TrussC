@@ -138,6 +138,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
 ## Tests
 
+- `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
+  replay (#271): pre-append overflow detection, growth on the next sokol frame,
+  32-bit relative indices, multiple passes, and captured-resource lifetime.
+  Standalone CMake unit test with a plain `int main()`; run in Debug and Release.
+- `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
+  `allCoreTests shaderStreamDraws --gpu-check` (OpenGL Core display required)
+  also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
+  passes, checks the growth warning, and exercises Shader moves/clear with
+  a pending swapchain draw. On Linux, run it with Xvfb.
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
   main thread, and `Node::destroy()` is safe from any thread. Each frame's drain
