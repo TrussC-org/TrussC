@@ -92,7 +92,7 @@ static void check(const char* name, bool ok) {
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
+    thread worker([done, fn = std::move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
     while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
@@ -184,8 +184,20 @@ TC_CORE_TEST_MAIN() {
         return 1;
     }
     const int port = server.getPort();
-    check("start(0) then getPort() reports the port the OS picked", port != 0);
-    if (port == 0) return 1;
+    check("start(0) then getPort() reports the port the OS picked", port > 0);
+    if (port <= 0) return 1;
+
+    // Concurrent listeners must each get their own usable port.
+    {
+        TcpServer other;
+        const bool started = other.start(0);
+        check("another start(0) gets a distinct positive port",
+              started && other.getPort() > 0 && other.getPort() != port);
+        if (!started) return 1;
+        rawsocket_t peer = connectSilentPeer(other.getPort());
+        check("peer connects to the other OS-assigned port", peer != static_cast<rawsocket_t>(-1));
+        if (peer != static_cast<rawsocket_t>(-1)) TC_CLOSE(peer);
+    }
 
     // --- a peer that never reads -------------------------------------------
     rawsocket_t stalled = connectSilentPeer(port);
@@ -674,7 +686,7 @@ TC_CORE_TEST_MAIN() {
         s7.send(readerId, string("C"));            // sync, must not overtake A and B
         s7.sendAsync(readerId, string("D"));
         vector<char> tail{'E'};
-        s7.sendAsync(readerId, move(tail));       // the move overload
+        s7.sendAsync(readerId, std::move(tail));       // the move overload
 
         string got;
         while (got.size() < 5) {

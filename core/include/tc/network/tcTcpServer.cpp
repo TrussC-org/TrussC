@@ -326,11 +326,18 @@ bool TcpServer::start(int port, int maxClients) {
     // Report the port the socket is bound to, so start(0) gives the one the
     // OS picked
     {
-        struct sockaddr_in boundAddr;
+        struct sockaddr_in boundAddr{};
+#ifdef _WIN32
+        int boundLen = static_cast<int>(sizeof(boundAddr));
+#else
         socklen_t boundLen = sizeof(boundAddr);
-        if (::getsockname(serverSocket_, (struct sockaddr*)&boundAddr, &boundLen) == 0) {
-            port_ = ntohs(boundAddr.sin_port);
+#endif
+        if (::getsockname(serverSocket_, (struct sockaddr*)&boundAddr, &boundLen) == SOCKET_ERROR) {
+            notifyError("Failed to get bound server port", SOCKET_ERROR_CODE);
+            releaseListenSocket(true);
+            return false;
         }
+        port_ = ntohs(boundAddr.sin_port);
     }
 
     // Start listening

@@ -191,6 +191,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `fileSave/` — the save helpers report write errors (#274): `saveJson`
+  serializes before it opens the file, so a string that is not valid UTF-8
+  returns false, logs an error and leaves the saved `{"a":1}` loadable, and it
+  writes `dump()`'s bytes as they are (no CR). On Linux, `saveTextFile`,
+  `appendToFile`, `saveJson` and `Pixels::save` to `/dev/full` return false
+  and log an error; the normal saves (PNG / JPEG / BMP included) still return
+  true with the expected bytes.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -203,6 +210,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  A missing `.wav` / `.ogg` / stream / image, and on Linux, macOS and
+  Windows a missing `.m4a` / video (`VideoPlayer::load()`), fails with
+  `FileNotFound` and logs one Error naming the path (#359).
   `SoundBuffer::mixFrom()` counts its offset in frames and refuses (logs)
   channel mismatches and ends past what a buffer holds. Decoders size buffers
   from what decodes: a FLAC or Ogg Vorbis stream (`src/vorbisTone.cpp`) whose
@@ -263,6 +273,9 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   core (the worker used to spin a whole core); while it plays, every
   `audioOut` block holds the file's full DC level (no gap), also at speed 10;
   and a seek on a playing stream is heard within 100 ms (the mean is printed).
+  With no stream playing the worker polls every 50 ms, not 5 ms (#550): its
+  passes over ~1 s (`internal::streamWorkerPassesForTests()`) stay under 60,
+  and a stream resumed after such an idle pause plays without a gap.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
@@ -501,6 +514,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   0), with a warning naming it (`update() ended with 1 pushMatrix() ...`),
   rate-limited per entry point; values set outside a push carry on. Checks
   run in a release build only (headless `pushMatrix()` reaches sokol_gl).
+- `nodeTransform/` — Node global transform and picking (#264): `addChild()` /
+  `insertChild()` / `removeChild()` / `removeAllChildren()` /
+  `sweepDeadChildren()` refresh the moved node's global matrix, so
+  `getGlobalPos()`, `globalToLocal()` and the press `e.pos` use the new parent
+  right away (also with `keepGlobalPosition`); picking uses
+  `Mat4::tryInvert()`, so a node with an axis scaled to 0 and its subtree
+  (including a clipping RectNode's children) are not hit, while a tiny valid
+  scale still inverts; `tryInvert()` fails on singular matrices and leaves
+  `out` unchanged, `inverted()` still returns identity.
 - `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
   holds the hovered / grabbed / selected node weakly and dispatch holds a
   strong reference while handlers run, so a node freed by `removeChild()` /
@@ -681,6 +703,16 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   count and memory stay the same over many simulated frames, and
   `clearAtlas()` rasterizes the glyph again. Headless (page limit 4096); the
   font is built at runtime.
+- `fontAtlasR8/` — TrueType glyph atlas pages are R8, one byte of coverage
+  per texel (#293): `getMemoryUsage()` is the sum of width × height over the
+  pages, and after 300 glyphs grow a page through several doubling steps
+  every glyph still has full coverage at its UV centre and nothing lies
+  outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
+  not run in CI) draws 150 new glyphs into an Fbo in one frame, one
+  `drawString()` each, and checks that the page texture is
+  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` colour,
+  and a minified draw builds and samples the R8 mip chain. The font is
+  built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
