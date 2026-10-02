@@ -462,8 +462,18 @@ private:
                              curl_easy_strerror(rc) + ")";
             return false;
         }
-        curl_easy_setopt(curl, CURLOPT_CAINFO, static_cast<char*>(nullptr));
-        curl_easy_setopt(curl, CURLOPT_CAPATH, static_cast<char*>(nullptr));
+        rc = curl_easy_setopt(curl, CURLOPT_CAINFO, static_cast<char*>(nullptr));
+        if (rc == CURLE_OK) {
+            rc = curl_easy_setopt(curl, CURLOPT_CAPATH, static_cast<char*>(nullptr));
+            // Schannel (and other backends without CA directories) reports
+            // NOT_BUILT_IN here. There is no directory trust source to clear.
+            if (rc == CURLE_NOT_BUILT_IN) rc = CURLE_OK;
+        }
+        if (rc != CURLE_OK) {
+            response.error = std::string("setTlsCACertificate: cannot replace the default CA store (") +
+                             curl_easy_strerror(rc) + ")";
+            return false;
+        }
 #if defined(_WIN32) && defined(CURLSSLOPT_REVOKE_BEST_EFFORT)
         // No NATIVE_CA here: the PEM replaces the OS store. Revocation is
         // checked best-effort, so a certificate without a CRL/OCSP URL passes.

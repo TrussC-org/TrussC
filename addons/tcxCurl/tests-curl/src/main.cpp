@@ -10,7 +10,8 @@
 // 127.0.0.1, port chosen by the OS (port 0). Its key and self-signed
 // certificate are made by `openssl req` at startup in a temporary directory,
 // so nothing leaves the machine and no key is committed. Without an `openssl`
-// or Python command on PATH the test prints SKIP and passes.
+// or Python command on PATH the handshake checks print SKIP. The option
+// checks always run and determine the exit status.
 //
 // setTlsCACertificate() (#401):
 //   - without a CA, a request to the self-signed server fails (the OS default
@@ -27,7 +28,62 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include <curl/curl.h>
+#include <string>
+#include <type_traits>
+#include <vector>
+
+// Observe the real HttpClient call sites and inject unsupported options without
+// contacting a peer. Outside these checks the wrappers call system libcurl.
+struct TlsOptionsTrace {
+    bool enabled = false;
+    CURLoption reject = CURLOPT_LASTENTRY;
+    CURLcode rejection = CURLE_UNKNOWN_OPTION;
+    std::vector<CURLoption> options;
+    std::string pem;
+    long sslOptions = 0;
+    bool caFileCleared = false, caPathCleared = false, verificationDisabled = false;
+    bool performed = false;
+};
+static TlsOptionsTrace g_tlsTrace;
+
+template<class T>
+static CURLcode testCurlSetopt(CURL* handle, CURLoption option, T value) {
+    if (!g_tlsTrace.enabled) return curl_easy_setopt(handle, option, value);
+    g_tlsTrace.options.push_back(option);
+    if (option == g_tlsTrace.reject) return g_tlsTrace.rejection;
+#if LIBCURL_VERSION_NUM >= 0x074D00
+    if constexpr (std::is_same_v<T, curl_blob*>) {
+        if (option == CURLOPT_CAINFO_BLOB) {
+            g_tlsTrace.pem.assign(static_cast<const char*>(value->data), value->len);
+        }
+    }
+#endif
+    if constexpr (std::is_pointer_v<T>) {
+        if (option == CURLOPT_CAINFO) g_tlsTrace.caFileCleared = value == nullptr;
+        if (option == CURLOPT_CAPATH) g_tlsTrace.caPathCleared = value == nullptr;
+    }
+    if constexpr (std::is_same_v<T, long>) {
+        if (option == CURLOPT_SSL_OPTIONS) g_tlsTrace.sslOptions = value;
+        if ((option == CURLOPT_SSL_VERIFYPEER || option == CURLOPT_SSL_VERIFYHOST) && value == 0) {
+            g_tlsTrace.verificationDisabled = true;
+        }
+    }
+    return CURLE_OK;
+}
+
+static CURLcode testCurlPerform(CURL* handle) {
+    if (!g_tlsTrace.enabled) return curl_easy_perform(handle);
+    g_tlsTrace.performed = true;
+    return CURLE_ABORTED_BY_CALLBACK;
+}
+
+#undef curl_easy_setopt
+#define curl_easy_setopt testCurlSetopt
+#define curl_easy_perform testCurlPerform
 #include <tcxCurl.h>
+#undef curl_easy_setopt
+#undef curl_easy_perform
 
 #include <chrono>
 #include <cstdio>
@@ -45,7 +101,9 @@
     #include <sys/wait.h>
     #include <fcntl.h>
     #include <signal.h>
+    #include <spawn.h>
     #include <unistd.h>
+    extern char** environ;
 #endif
 
 using namespace std;
@@ -64,6 +122,78 @@ static string readFile(const fs::path& p) {
     stringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+static void testTlsOptions() {
+    const string pem = "test PEM bytes";
+    tcx::curl::HttpClient http;
+    http.setBaseUrl("https://127.0.0.1:1");
+    for (bool upload : {false, true}) {
+        string name = upload ? "uploadFile(): " : "get(): ";
+        auto request = [&] { return upload ? http.uploadFile("/", "unused.txt") : http.get("/"); };
+        auto reset = [&] { g_tlsTrace = {}; g_tlsTrace.enabled = true; };
+        auto defaultOptions = [] {
+#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
+            return static_cast<long>(CURLSSLOPT_NATIVE_CA);
+#else
+            return 0L;
+#endif
+        };
+
+        reset();
+        http.setTlsCACertificate("");
+        request();
+        const auto defaults = g_tlsTrace.options;
+        check(name + "default CA keeps existing TLS options",
+              g_tlsTrace.pem.empty() && !g_tlsTrace.caFileCleared && !g_tlsTrace.caPathCleared &&
+              g_tlsTrace.sslOptions == defaultOptions() && g_tlsTrace.performed);
+
+#if LIBCURL_VERSION_NUM >= 0x074D00
+        reset();
+        http.setTlsCACertificate(pem);
+        request();
+        check(name + "PEM replaces CA file and directory",
+              g_tlsTrace.pem == pem && g_tlsTrace.caFileCleared && g_tlsTrace.caPathCleared &&
+              !g_tlsTrace.verificationDisabled && g_tlsTrace.performed);
+#if defined(_WIN32) && defined(CURLSSLOPT_REVOKE_BEST_EFFORT)
+        check(name + "PEM keeps best-effort revocation without native CA",
+              g_tlsTrace.sslOptions == static_cast<long>(CURLSSLOPT_REVOKE_BEST_EFFORT));
+#endif
+        for (auto rejection : {CURLE_UNKNOWN_OPTION, CURLE_NOT_BUILT_IN}) {
+            for (auto option : {CURLOPT_CAINFO_BLOB, CURLOPT_CAINFO, CURLOPT_CAPATH,
+#if defined(_WIN32) && defined(CURLSSLOPT_REVOKE_BEST_EFFORT)
+                                CURLOPT_SSL_OPTIONS,
+#endif
+                               }) {
+                reset();
+                g_tlsTrace.reject = option;
+                g_tlsTrace.rejection = rejection;
+                const auto res = request();
+                if (option == CURLOPT_CAPATH && rejection == CURLE_NOT_BUILT_IN) {
+                    check(name + "backend without CA directories still accepts PEM",
+                          g_tlsTrace.pem == pem && g_tlsTrace.performed);
+                    continue;
+                }
+                check(name + "unsupported TLS option " + to_string(option) + "/" + to_string(rejection),
+                      res.statusCode == 0 && res.error.find("setTlsCACertificate") != string::npos &&
+                      !g_tlsTrace.performed, res.error);
+            }
+        }
+#else
+        reset();
+        http.setTlsCACertificate(pem);
+        const auto res = request();
+        check(name + "old curl headers reject CA PEM before transfer",
+              res.statusCode == 0 && res.error.find("setTlsCACertificate") != string::npos &&
+              !g_tlsTrace.performed, res.error);
+#endif
+        reset();
+        http.setTlsCACertificate("");
+        request();
+        check(name + "empty PEM restores default options",
+              g_tlsTrace.options == defaults && g_tlsTrace.sslOptions == defaultOptions());
+    }
+    g_tlsTrace.enabled = false;
 }
 
 static int run(const string& cmd) {
@@ -93,10 +223,10 @@ struct TlsServer {
 #endif
 
     bool start(const string& python, const fs::path& script, const fs::path& cert,
-               const fs::path& key, const fs::path& portFile) {
+               const fs::path& key, const fs::path& portFile, const fs::path& logFile) {
 #ifdef _WIN32
         string cmd = python + " " + quoted(script) + " " + quoted(cert) + " " + quoted(key) +
-                     " " + quoted(portFile);
+                     " " + quoted(portFile) + " " + quoted(logFile);
         STARTUPINFOA si{};
         si.cb = sizeof(si);
         vector<char> buf(cmd.begin(), cmd.end());
@@ -105,19 +235,30 @@ struct TlsServer {
                                  CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) != 0;
         return started;
 #else
-        pid = fork();
-        if (pid < 0) return false;
-        if (pid == 0) {
-            int devnull = open("/dev/null", O_RDWR);
-            if (devnull >= 0) {
-                dup2(devnull, 0);
-                dup2(devnull, 1);
-                dup2(devnull, 2);
-            }
-            string s = script.string(), c = cert.string(), k = key.string(), p = portFile.string();
-            execlp(python.c_str(), python.c_str(), s.c_str(), c.c_str(), k.c_str(), p.c_str(),
-                   (char*)nullptr);
-            _exit(127);
+        // No C++ work in a fork child: macOS may already have runtime threads.
+        string s = script.string(), c = cert.string(), k = key.string();
+        string p = portFile.string(), l = logFile.string();
+        char* argv[] = {const_cast<char*>(python.c_str()), s.data(), c.data(),
+                        k.data(), p.data(), l.data(), nullptr};
+        posix_spawn_file_actions_t actions;
+        if (posix_spawn_file_actions_init(&actions) != 0) return false;
+        int rc = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+        if (rc == 0) rc = posix_spawnp(&pid, python.c_str(), &actions, nullptr, argv, environ);
+        posix_spawn_file_actions_destroy(&actions);
+        if (rc != 0) pid = -1;
+        return rc == 0;
+#endif
+    }
+
+    bool isRunning() {
+#ifdef _WIN32
+        return started && WaitForSingleObject(pi.hProcess, 0) == WAIT_TIMEOUT;
+#else
+        if (pid <= 0) return false;
+        int status = 0;
+        if (waitpid(pid, &status, WNOHANG) == pid) {
+            pid = -1;  // Already reaped; don't signal a reused PID in the destructor.
+            return false;
         }
         return true;
 #endif
@@ -141,7 +282,11 @@ struct TlsServer {
     }
 };
 
-static const char* kServerScript = R"PY(import http.server, os, ssl, sys
+static const char* kServerScript = R"PY(import os, sys
+
+# Keep startup errors on every platform, including errors importing ssl.
+sys.stderr = open(sys.argv[4], "w", buffering=1)
+import http.server, socketserver, ssl
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def answer(self):
@@ -158,8 +303,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+class LoopbackServer(http.server.HTTPServer):
+    def server_bind(self):
+        # HTTPServer normally calls getfqdn(), which can wait on external DNS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
 cert, key, port_file = sys.argv[1], sys.argv[2], sys.argv[3]
-server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+server = LoopbackServer(("127.0.0.1", 0), Handler)
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ctx.load_cert_chain(cert, key)
 server.socket = ctx.wrap_socket(server.socket, server_side=True)
@@ -170,7 +322,7 @@ server.serve_forever()
 )PY";
 
 static bool makeSelfSigned(const fs::path& dir, const string& name, const fs::path& cfg) {
-    string cmd = "openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=localhost"
+    string cmd = "openssl req -x509 -sha256 -newkey rsa:2048 -nodes -days 2 -subj /CN=tcxcurl-test.invalid"
                  " -config " + quoted(cfg) + " -extensions v3" +
                  " -keyout " + quoted(dir / (name + "-key.pem")) +
                  " -out " + quoted(dir / (name + ".pem")) +
@@ -189,7 +341,7 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
              "basicConstraints = critical,CA:TRUE\n"
              "keyUsage = critical,digitalSignature,keyEncipherment,keyCertSign\n"
              "subjectKeyIdentifier = hash\n"
-             "subjectAltName = DNS:localhost,IP:127.0.0.1\n";
+             "subjectAltName = IP:127.0.0.1\n";
     }
     fs::path uploadPath = dir / "upload.txt";
     {
@@ -208,15 +360,19 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
     string otherPem = readFile(dir / "other.pem");
 
     fs::path portFile = dir / "port.txt";
+    fs::path logFile = dir / "server.log";
     TlsServer server;
     bool started = server.start(python, dir / "server.py", dir / "server.pem",
-                                dir / "server-key.pem", portFile);
+                                dir / "server-key.pem", portFile, logFile);
     int port = 0;
     for (int i = 0; started && i < 200 && port == 0; ++i) {
         if (fs::exists(portFile)) port = atoi(readFile(portFile).c_str());
+        if (port == 0 && !server.isRunning()) break;
         if (port == 0) this_thread::sleep_for(chrono::milliseconds(50));
     }
-    check("HTTPS server listens on 127.0.0.1", port > 0, to_string(port));
+    check("HTTPS server listens on 127.0.0.1", port > 0,
+          port > 0 ? to_string(port) : (started ? "server exited or did not become ready\n" + readFile(logFile)
+                                              : "could not start Python"));
     if (port <= 0) return;
 
     tcx::curl::HttpClient http;
@@ -252,6 +408,12 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
               up.error.empty() && up.statusCode == 200,
               up.error.empty() ? to_string(up.statusCode) : up.error);
 
+        http.setBaseUrl("https://localhost:" + to_string(port));
+        res = http.get("/");
+        check("trusted certificate with a different host name: get() fails",
+              !res.error.empty() && res.statusCode == 0, res.error);
+        http.setBaseUrl("https://127.0.0.1:" + to_string(port));
+
         http.setTlsCACertificate(otherPem);
         res = http.get("/");
         check("another certificate as CA: get() fails", !res.error.empty() && res.statusCode == 0,
@@ -264,21 +426,28 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
         res = http.get("/");
         check("text that is not a PEM as CA: get() fails",
               !res.error.empty() && res.statusCode == 0, res.error);
+        up = http.uploadFile("/", uploadPath.string());
+        check("text that is not a PEM as CA: uploadFile() fails",
+              !up.error.empty() && up.statusCode == 0, up.error);
     }
 
     http.setTlsCACertificate("");
     res = http.get("/");
     check("empty CA (OS default store): get() fails", !res.error.empty() && res.statusCode == 0,
           res.error);
+    up = http.uploadFile("/", uploadPath.string());
+    check("empty CA (OS default store): uploadFile() fails",
+          !up.error.empty() && up.statusCode == 0, up.error);
 }
 
 int main() {
     setvbuf(stdout, nullptr, _IONBF, 0);
     printf("tcxCurl tests\n");
+    testTlsOptions();
 
     if (run(string("openssl version > ") + kNull + " 2>&1") != 0) {
-        printf("  [SKIP] no openssl command on PATH: setTlsCACertificate not tested\n");
-        return 0;
+        printf("  [SKIP] no openssl command on PATH: HTTPS handshake checks skipped\n");
+        return g_failures ? 1 : 0;
     }
     string python;
     for (const char* name : {"python3", "python"}) {
@@ -288,8 +457,8 @@ int main() {
         }
     }
     if (python.empty()) {
-        printf("  [SKIP] no Python with ssl on PATH: setTlsCACertificate not tested\n");
-        return 0;
+        printf("  [SKIP] no Python with ssl on PATH: HTTPS handshake checks skipped\n");
+        return g_failures ? 1 : 0;
     }
 
     fs::path dir = fs::temp_directory_path() /
