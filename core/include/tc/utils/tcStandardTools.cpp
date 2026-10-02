@@ -218,7 +218,7 @@ void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting.")
+    tool("tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
         .bind(std::function<json()>([]() -> json {
             return json{{"status", "ok"},
                         {"fps", trussc::getFps()},
@@ -231,6 +231,7 @@ void registerInspectionTools() {
                         {"version", trussc::getVersion()},
                         {"pid", detail::currentPid()},
                         {"rssBytes", detail::processRssBytes()},
+                        {"mainQueuePending", trussc::internal::getMainThreadQueuePending()},
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
