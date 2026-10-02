@@ -10,6 +10,7 @@
 #include <atomic>
 #include <mutex>
 #include <functional>
+#include <memory>
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
 #include "tc/network/tcKeptThreads.h"
@@ -130,20 +131,23 @@ public:
     // connect(), connectAsync(), disconnect() and the destructor can wait
     // for a listener still running on one of the client's threads. Do not
     // call them while holding a lock that such a listener takes: the call
-    // and the listener would wait for each other forever. Until
-    // #261 / #262 land, do not call disconnect() on the client from another
-    // thread until the listener's call has returned, or the connection may
-    // complete after disconnect() has returned.
+    // and the listener would wait for each other forever. Until #261 lands,
+    // do not call disconnect() on the client from another thread until the
+    // listener's call has returned, or the connection may complete after
+    // disconnect() has returned.
     // Reconnecting from the main thread, as above, avoids all of this.
     //
-    // DESTROYING FROM A LISTENER: the destructor must not run on one of the
-    // client's own threads (an inline listener on the receive or connect
-    // thread that deletes the client or drops its last owner). That thread
-    // cannot join itself: the destructor detaches it and returns, and the
-    // thread then returns from the listener into the destroyed client
-    // (Event::notify() and the receive loop read it), which is undefined
-    // behavior. Destroy the client from another thread, or once the
-    // listener has returned (from a Deliver::Main listener, say).
+    // DESTROYING FROM A LISTENER: an inline listener on the receive thread
+    // may destroy the client (an owner that replaces it, as
+    // WebSocketClient::connect() does). That thread cannot join itself: the
+    // destructor detaches it and returns. Once a notification on the
+    // receive thread returns, the thread checks whether the client still
+    // exists before it reads the client again, and after onDisconnect (and
+    // TlsClient's onConnect(false)) it stops without reading the client at
+    // all (#262). The connect thread of connectAsync() is not covered: do
+    // not destroy the client from a listener there (it returns into the
+    // destroyed client, undefined behavior); destroy it from another thread,
+    // or once the listener has returned (from a Deliver::Main listener, say).
     //
     // onConnect(false): a failed attempt reports it from connectAsync(), from
     // a pending connect without threads, and from a failed TLS handshake (a
@@ -166,7 +170,9 @@ public:
 
     // Disconnects without onDisconnect and returns once every thread of the
     // client has ended, one that a listener's connect() or disconnect() let
-    // go of included. Must not run on one of those threads (see Events).
+    // go of included. On the receive thread itself (a listener that destroys
+    // the client) it detaches that thread instead; on the connect thread it
+    // must not run (see Events).
     virtual ~TcpClient();
 
     // Copy prohibited
@@ -235,6 +241,20 @@ protected:
     // Accessible from derived classes
     void notifyError(const std::string& msg, int code = 0);
 
+    // Set to false by the destructor. A receive thread holds its own copy:
+    // after a notification it checks this copy, not the client, to find out
+    // whether a listener destroyed the client (#262).
+    using AliveToken = std::shared_ptr<std::atomic<bool>>;
+    AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
+
+    // processNetwork()'s work. alive: the caller's copy of alive_. Returns
+    // false when the calling thread must stop at once without reading the
+    // client again: it reported the end of the connection (onDisconnect, or
+    // onConnect(false)), or a listener destroyed the client. The decision to
+    // stop is made before the notification, since its listeners may destroy,
+    // disconnect or reconnect the client.
+    bool processNetworkStep(const AliveToken& alive);
+
 #ifdef _WIN32
     SOCKET socket_ = INVALID_SOCKET;
 #else
@@ -263,7 +283,7 @@ protected:
     std::atomic<bool> connectPending_{false};
 
 private:
-    void receiveThreadFunc(unsigned generation);
+    void receiveThreadFunc(unsigned generation, AliveToken alive);
     void connectThreadFunc(const std::string& host, int port);
 
     // Close the socket and release the receive thread (connectThread_ is left alone)
@@ -297,8 +317,9 @@ private:
     // disconnect() on another thread, or the destructor, joins it, but
     // socket_ is not atomic: a disconnect() from another thread before the
     // listener's call has returned races it. Hence the rule in the Events
-    // comment above. The fix belongs to #261 (a cancellable connect) and
-    // #262.
+    // comment above. The fix belongs to #261 (a cancellable connect).
+    // Destruction by a listener on the receive thread itself is covered:
+    // see alive_.
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
