@@ -16,6 +16,10 @@ struct mbedtls_x509_crt;
 struct mbedtls_ctr_drbg_context;
 struct mbedtls_entropy_context;
 
+namespace tcx::websocket {
+class WebSocketClient;
+}
+
 namespace tcx::tls {
 
 using namespace tc;  // core types (TcpClient, ...)
@@ -65,13 +69,6 @@ public:
     // next connect().
     void setHandshakeTimeout(float seconds);
 
-    // When the TCP connection of the current attempt came up: the point the
-    // handshake deadline counts from. Read it on the thread that fires
-    // onConnect (the thread that runs the handshake), e.g. in an
-    // onConnect(true) listener; WebSocketClient counts its 101 deadline from
-    // it, so TLS and 101 share one deadline.
-    std::chrono::steady_clock::time_point getTcpConnectTime() const { return handshakeStart_; }
-
     // -------------------------------------------------------------------------
     // Connection Management (override TcpClient)
     // -------------------------------------------------------------------------
@@ -105,6 +102,13 @@ public:
     std::string getTlsVersion() const;
 
 private:
+    // WebSocketClient counts its 101 deadline from getTcpConnectTime().
+    friend class tcx::websocket::WebSocketClient;
+
+    // When the TCP connection of the current attempt came up. Only valid on
+    // the thread that fires onConnect (the handshake thread).
+    std::chrono::steady_clock::time_point getTcpConnectTime() const { return handshakeStart_; }
+
     // mbedTLS context (PIMPL pattern)
     struct TlsContext;
     TlsContext* ctx_ = nullptr;
