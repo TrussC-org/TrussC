@@ -4,6 +4,7 @@
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>
+#include <cstring>
 #include <type_traits>
 #include <utility>
 
@@ -11,6 +12,15 @@ using namespace std;
 using namespace tc;
 
 namespace {
+
+// The standalone ASan test reproduces a sketch's pre-main lighting objects.
+// Leave them registered on return from main so their destructors run AFTER
+// mainWindowContext()/the window registry have been destroyed.
+#ifndef TC_CORE_TEST_NAME
+Material staticMaterial;
+Environment staticEnvironment;
+Light staticLight;
+#endif
 
 int failures = 0;
 
@@ -26,7 +36,19 @@ static_assert(is_nothrow_move_assignable_v<Material>);
 
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+#ifdef TC_CORE_TEST_NAME
+    // Preserve the same construction/destruction order in the combined runner
+    // without adding lighting destructors to unrelated tests' processes.
+    static Material staticMaterial;
+    static Environment staticEnvironment;
+    static Light staticLight;
+#endif
+    const bool registryFirst = argc > 1 && strcmp(argv[1], "--registry-first") == 0;
+    // A null entry is ignored by openWindows(), but allocates registry storage
+    // so ASan can detect a late scan even for Material/Environment alone.
+    // Also allow reversing which of the two storages is destroyed first.
+    if (registryFirst) internal::registerWindow(nullptr);
     auto& ctx = internal::mainWindowContext();
     clearMaterial();
     clearEnvironment();
@@ -100,6 +122,17 @@ TC_CORE_TEST_MAIN() {
               ctx.activeLights.size() == 1 && ctx.activeLights.front() == &active);
     }
     check("destroyed last Light is removed", getNumLights() == 0);
+
+    if (!registryFirst) internal::registerWindow(nullptr);
+    setMaterial(staticMaterial);
+    setEnvironment(staticEnvironment);
+    addLight(staticLight);
+    check("static Material remains registered for normal exit",
+          ctx.currentMaterial == &staticMaterial);
+    check("static Environment remains registered for normal exit",
+          ctx.currentEnvironment == &staticEnvironment);
+    check("static Light remains registered for normal exit",
+          ctx.activeLights.size() == 1 && ctx.activeLights.front() == &staticLight);
 
     printf("lightingStateLifetime: %s\n", failures ? "FAILED" : "all passed");
     return failures ? 1 : 0;

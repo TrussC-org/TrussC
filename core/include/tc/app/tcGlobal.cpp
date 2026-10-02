@@ -478,10 +478,24 @@ void resumeSwapchainPass() {
 // ---------------------------------------------------------------------------
 
 namespace internal {
+namespace {
+// Main-thread-only lighting cleanup can outlive these function-local statics
+// (e.g. a sketch's global Material). Constant initialization and trivial
+// destruction keep the flag readable throughout static destruction.
+constinit bool windowStateDestroyed = false;
+
+struct WindowStateLifetimeMark {
+    ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
+};
+} // namespace
+
 // The main window's state container. Non-inline so a hot-reload guest binds
 // to the host's instance (same pattern as events()/getDefaultContext()).
 WindowContext& mainWindowContext() {
     static WindowContext ctx;
+    // Destroyed before ctx, like LoggerLifetimeMark below.
+    static WindowStateLifetimeMark lifetimeMark;
+    (void)lifetimeMark;
     return ctx;
 }
 
@@ -489,6 +503,9 @@ WindowContext& mainWindowContext() {
 // reason as mainWindowContext(). Main thread only.
 static std::vector<Window*>& windowRegistryStorage() {
     static std::vector<Window*> list;
+    // Either storage may be initialized first; stop cleanup before either dies.
+    static WindowStateLifetimeMark lifetimeMark;
+    (void)lifetimeMark;
     return list;
 }
 void registerWindow(Window* w) {
@@ -516,6 +533,7 @@ std::vector<Window*> openWindows() {
 // (declared in tcLight.h); defined here because it needs the Window registry.
 // Non-inline keeps it host/guest-shared under hot reload, same as the registry.
 void removeLightFromAllContexts(Light* light) {
+    if (windowStateDestroyed) return;
     auto scrub = [&](WindowContext& ctx) {
         auto& v = ctx.activeLights;
         v.erase(std::remove(v.begin(), v.end(), light), v.end());
@@ -529,6 +547,7 @@ void removeLightFromAllContexts(Light* light) {
 // Detach destroyed lighting state before the next mesh draw. Like Light's
 // cleanup, these definitions are shared by the hot-reload host and guest.
 void clearMaterialFromAllContexts(Material* material) {
+    if (windowStateDestroyed) return;
     auto scrub = [&](WindowContext& ctx) {
         if (ctx.currentMaterial == material) ctx.currentMaterial = nullptr;
     };
@@ -539,6 +558,7 @@ void clearMaterialFromAllContexts(Material* material) {
 }
 
 void clearEnvironmentFromAllContexts(Environment* environment) {
+    if (windowStateDestroyed) return;
     auto scrub = [&](WindowContext& ctx) {
         if (ctx.currentEnvironment == environment) ctx.currentEnvironment = nullptr;
     };
