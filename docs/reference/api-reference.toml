@@ -8705,9 +8705,19 @@ description.ko = "일시정지 상태인지 확인"
 ["Sound::isPlaying"]
 category = "sound"
 keywords = ["active", "running", "status"]
-description.en = "Check if playing"
-description.ja = "再生中か確認"
-description.ko = "재생 중인지 확인"
+description.en = "Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically."
+description.ja = "再生中か確認（一時停止中は false）。デコーダの失敗で停止したストリームは、バッファ内の音声を再生し終えるとループ中でも false になる。エラーは一度ログに記録され、TrussC は自動で再試行しない。"
+description.ko = "재생 중인지 확인 (일시정지 중에는 false). 디코더 오류로 중단된 스트림은 버퍼의 오디오를 재생한 뒤 반복 재생 중에도 멈춘다. 오류는 한 번 기록되며 TrussC는 자동으로 재시도하지 않는다."
+details.en = '''
+For a long-running app that expects continuous music, check `isPlaying()` while the sound is not intentionally paused or stopped. If it becomes false, schedule a reload with `loadStream()` and call `play()` only if loading succeeds. Check the play result too. The app chooses when to retry, including after another load or play failure.
+'''
+details.ja = '''
+長時間動作するアプリで音楽を継続再生する場合は、意図的に一時停止・停止していないときに `isPlaying()` を確認する。false になったらアプリ側で `loadStream()` による再読み込みを予定し、読み込みが成功した場合だけ `play()` を呼ぶ。再生開始の結果も確認する。再読み込みや再生開始が失敗した場合も含め、再試行のタイミングはアプリが決める。
+'''
+details.ko = '''
+장시간 실행되는 앱에서 음악을 계속 재생하려면 의도적으로 일시정지하거나 정지하지 않은 상태에서 `isPlaying()`을 확인한다. false가 되면 앱에서 `loadStream()`으로 다시 로드할 시점을 정하고, 로드가 성공했을 때만 `play()`를 호출한다. 재생 시작 결과도 확인한다. 다시 로드하거나 재생을 시작하는 데 실패한 경우를 포함해 재시도 시점은 앱이 결정한다.
+'''
+related = ["Sound::loadStream", "Sound::play", "Sound::isPaused"]
 
 ["Sound::isStreaming"]
 category = "sound"
