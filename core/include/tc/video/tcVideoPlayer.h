@@ -53,6 +53,21 @@ public:
     // Load / Close
     // =========================================================================
 
+    /// Linux: stream audio by default. Set false before load() to preload
+    /// the whole track for sample-accurate loops and seeks. Changing this
+    /// setting applies to the next load(). Native OS players ignore it.
+    void setAudioStreaming(bool streaming) {
+        audioStreaming_ = streaming;
+#if defined(__APPLE__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
+        static std::atomic<bool> noticed{false};
+        if (!streaming && !noticed.exchange(true)) {
+            logNotice("VideoPlayer") << "setAudioStreaming(false) has no effect on this platform; "
+                                       "the native player handles audio";
+        }
+#endif
+    }
+    bool isAudioStreaming() const { return audioStreaming_; }
+
     LoadResult load(const fs::path& path) override {
         if (initialized_) {
             close();
@@ -447,6 +462,7 @@ private:
 
     // HW decode preference (default on; Linux backend honors this)
     bool useHwAccel_ = true;
+    bool audioStreaming_ = true;
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
@@ -486,6 +502,7 @@ private:
         lastShownTime_   = other.lastShownTime_;
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
+        audioStreaming_ = other.audioStreaming_;
         platformHandle_  = other.platformHandle_;
         sourcePath_      = std::move(other.sourcePath_);
 

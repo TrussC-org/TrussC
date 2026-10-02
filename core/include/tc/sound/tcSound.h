@@ -612,8 +612,7 @@ private:
 // `play()` instances are allowed before the engine recycles the slot.
 //
 // Constraints (vs eager SoundBuffer):
-//   - setSpeed() is treated as 1.0 (no resampling on the fly — decoder
-//     outputs engine-rate frames).
+//   - setSpeed() supports forward playback from 0 to 10 using interpolation.
 //   - setPosition() posts a seek: the StreamWorker seeks the decoder and
 //     re-fills the ring buffer, and the audio moves once the mixer
 //     reaches the new data (~10 ms blackout, similar tradeoff to other
@@ -623,11 +622,14 @@ private:
 //     a FLAC encoded to a pipe) cannot seek, and an engine re-init at
 //     another sample rate restarts it from the beginning.
 //   - Each polyphony slot costs one open file handle + one decoder +
-//     one ring buffer (default ~16 KB).
+//     one ring buffer (16384 stereo float frames, 128 KB).
 // ---------------------------------------------------------------------------
 // Per-voice decoder + ring-buffer state. Full definition lives in
 // tcAudio_impl.cpp (where miniaudio's headers are visible).
-namespace internal { struct StreamInstance; }
+namespace internal {
+struct StreamInstance;
+class SoundStreamAccess;
+}
 
 class SoundStream : public SoundSource {
 public:
@@ -638,7 +640,7 @@ public:
     // duration. Decoders for individual voices are opened later by the
     // engine when play() is called. Fails if the file can't be
     // opened or the format is unsupported. Format is detected from
-    // extension (.wav .mp3 .flac .ogg — same as SoundBuffer::load).
+    // extension (.wav .mp3 .flac).
     LoadResult loadStream(const fs::path& path, int maxPolyphony = 1);
 
     float getDuration() const override { return duration_; }
@@ -652,7 +654,10 @@ private:
     int encodingFormatHint_ = 0;  // ma_encoding_format value, stored as int
                                   // to avoid pulling miniaudio.h into the header.
     float duration_ = 0.0f;
+    void* customBackend_ = nullptr; // static-lifetime ma_decoding_backend_vtable
+    LoadResult openStream(const fs::path& path, int maxPolyphony, int format, void* backend);
 
+    friend class internal::SoundStreamAccess;
     friend struct internal::StreamInstance;
     friend class AudioEngine;
 };
@@ -1583,7 +1588,7 @@ public:
     // doc comment above for when to prefer this over load().
     //
     // Limitations vs eager load():
-    //   - setSpeed() is ignored (decoder outputs engine-rate frames).
+    //   - setSpeed() supports forward playback from 0 to 10.
     //   - setPosition() incurs a seek + ring-buffer refill (usually
     //     ~10 ms); getPosition() reports the requested position meanwhile.
     //     A file whose length is unknown (getDuration() is 0) cannot seek,
@@ -1927,6 +1932,7 @@ private:
     std::shared_ptr<SoundSource> buffer_;
     // Points at the voice; owns (and shares with copies) its VoiceOwner.
     std::shared_ptr<PlayingSound> playing_;
+    friend class internal::SoundStreamAccess;
     float   volume_  = 1.0f;
     float   pan_     = 0.0f;
     float   speed_   = 1.0f;
@@ -2007,6 +2013,16 @@ MicInput& getMicInput();
 // Get latest samples from microphone input
 inline size_t getMicAnalysisBuffer(float* outBuffer, size_t numSamples) {
     return getMicInput().getBuffer(outBuffer, numSamples);
+}
+
+namespace internal {
+class SoundStreamAccess {
+public:
+    static LoadResult load(const fs::path& path, Sound& sound, void* backend);
+};
+#if defined(__linux__) && !defined(__ANDROID__)
+LoadResult loadFFmpegAudioStream(const fs::path& path, Sound& sound);
+#endif
 }
 
 } // namespace trussc
