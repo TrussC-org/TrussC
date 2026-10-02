@@ -3083,14 +3083,15 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface)."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장)"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`"
+related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
-description.en = "Load image from memory. `mipmaps=true` builds a mip chain."
-description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築"
-description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성"
+description.en = "Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`."
+description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築。メインスレッド専用。バックグラウンドでのデコードは `Pixels::loadFromMemory` で"
+description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로"
 
 ["Image::mirror"]
 description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
@@ -6724,14 +6725,15 @@ description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
 related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
-description.en = "Load image from file"
-description.ja = "ファイルから画像を読み込む"
-description.ko = "파일에서 이미지를 로드"
+description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`)."
+description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)"
+description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`)"
+related = ["Image::load", "Texture::allocate"]
 
 ["Pixels::loadFromMemory"]
-description.en = "Load image from memory"
-description.ja = "メモリから画像を読み込む"
-description.ko = "메모리에서 이미지를 로드"
+description.en = "Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread."
+description.ja = "メモリ上の画像を CPU メモリにデコードする。GPU を使わないのでワーカースレッドで呼んでよい"
+description.ko = "메모리의 이미지를 CPU 메모리로 디코딩. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능"
 
 ["Pixels::loadHDR"]
 category = "graphics_pixels"
