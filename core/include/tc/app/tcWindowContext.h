@@ -429,6 +429,12 @@ inline sgl_pipeline activePremult() {
     return currentWindowContext().currentTarget->pipeline(
         (depth ? 0x1000u : 0x000u) | 0x100u, pipeDescPremult(depth));
 }
+// TrueType glyph atlas (R8 coverage): Alpha blend + sglCoverageShader().
+inline sgl_pipeline activeCoverage2D() {
+    bool depth = currentWindowContext().depthTestEnabled;
+    return currentWindowContext().currentTarget->pipeline(
+        (depth ? 0x1000u : 0x000u) | 0x400u, pipeDescCoverage2D(depth));
+}
 inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDescClear()); }
 inline sgl_pipeline active3D()            { return currentWindowContext().currentTarget->pipeline(0x300u, pipeDesc3D()); }
 

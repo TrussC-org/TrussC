@@ -32,6 +32,22 @@
 //   - a frame, or fragments together, over the 64 MiB limit -> Close 1009,
 //     onError, then onClose (checked from the frame header alone)
 //   - an onError listener that disconnects -> onClose fires once
+//
+// Handshake deadline and reconnecting from the events (#262):
+//   - ws:// to a server that accepts and never answers the upgrade request,
+//     with setHandshakeTimeout(1) -> onError, then onClose, after about 1 s,
+//     and the client is Disconnected. The deadline is checked on the update
+//     event, which this test pumps as the app's frame loop would.
+//   - wss:// to a server that accepts and never speaks TLS -> the same,
+//     through TlsClient's handshake deadline
+//   - ws:// to a server that closes the connection before the 101 -> onClose
+//     only; no deadline onError after it
+//   - an inline onClose listener that calls connect() when the server drops
+//     the connection, and when it sends Close -> 20 reconnects in a row, each
+//     one reaching onOpen. connect() replaces the TcpClient whose receive
+//     thread runs the listener.
+//   - wss://: an inline onError listener that calls connect() after each
+//     failed TLS handshake -> 20 reconnects, each one reaching the server
 // =============================================================================
 
 #include <TrussC.h>
@@ -134,6 +150,7 @@ struct FakeServer {
     EventListener connectL, receiveL;
     mutex m;
     int clientId = -1;
+    int connects = 0;       // clients accepted so far
     string inbox;           // bytes from the current client
     bool handshakeDone = false;
 
@@ -141,6 +158,7 @@ struct FakeServer {
         connectL = server.onClientConnect.listen([this](TcpClientConnectEventArgs& a) {
             lock_guard<mutex> lock(m);
             clientId = a.clientId;
+            ++connects;
             inbox.clear();
             handshakeDone = false;
         });
@@ -314,6 +332,189 @@ static void checkFailure(const string& name, const vector<vector<char>>& sends, 
     fake.server.stop();
 }
 
+// Poll cond, pumping the update event as the app's frame loop would
+static bool pumpUntil(const function<bool()>& cond, int ms) {
+    return waitFor([&] {
+        events().update.notify();
+        return cond();
+    }, ms);
+}
+
+// One handshake deadline case: the server accepts and stays silent
+static void checkHandshakeTimeout(const string& name, const string& scheme) {
+    FakeServer fake;
+    if (!fake.start()) { check(name + ": server start", false); return; }
+    WebSocketClient client;
+    client.setTlsVerifyNone();
+    client.setHandshakeTimeout(1);
+    Recorder rec;
+    rec.attach(client);
+    const auto t0 = chrono::steady_clock::now();
+    check(name + ": connect()", client.connect(scheme + "://127.0.0.1:" + to_string(fake.port) + "/"));
+    check(name + ": the server accepted",
+          waitFor([&] { lock_guard<mutex> l(fake.m); return fake.connects == 1; }));
+    // Before t0 + 1 s the deadline cannot have run out: it counts from the
+    // TCP connect, which comes after t0. Pump until t0 + 500 ms (however long
+    // the wait above took), then sample the state and the time; the sample
+    // only proves something when it was taken before t0 + 1 s.
+    {
+        const auto until = t0 + chrono::milliseconds(500);
+        const auto now = chrono::steady_clock::now();
+        if (now < until) {
+            pumpUntil([] { return false; },
+                      (int)chrono::duration_cast<chrono::milliseconds>(until - now).count());
+        }
+        const bool connecting = client.getState() == WebSocketClient::State::Connecting &&
+                                rec.count("error") == 0 && rec.count("close") == 0;
+        if (chrono::steady_clock::now() < t0 + chrono::milliseconds(1000)) {
+            check(name + ": still Connecting before the deadline", connecting);
+        } else {
+            printf("    (still Connecting before the deadline: not checked, the waits above "
+                   "already took 1 s)\n");
+        }
+    }
+    const bool closed = pumpUntil([&] { return rec.count("close") >= 1; }, 5000);
+    const auto elapsed = chrono::steady_clock::now() - t0;
+    pumpUntil([] { return false; }, 100);   // let any extra event arrive
+    check(name + ": onClose within 5 s", closed);
+    check(name + ": not before the 1 s deadline", elapsed >= chrono::milliseconds(900));
+    {
+        lock_guard<mutex> l(rec.m);
+        check(name + ": events are onError then onClose",
+              rec.events == vector<string>{"error", "close"});
+        if (!rec.errors.empty()) printf("    onError: %s\n", rec.errors[0].c_str());
+    }
+    check(name + ": client is Disconnected",
+          client.getState() == WebSocketClient::State::Disconnected);
+    client.disconnect();
+    fake.server.stop();
+}
+
+// The server closes the connection before sending the 101: onClose only.
+// The deadline must not fire an extra onError (and disconnect()) afterwards.
+static void checkCloseBeforeUpgrade() {
+    const string name = "ws:// closed before 101";
+    FakeServer fake;
+    if (!fake.start()) { check(name + ": server start", false); return; }
+    WebSocketClient client;
+    client.setHandshakeTimeout(1);
+    Recorder rec;
+    rec.attach(client);
+    const auto t0 = chrono::steady_clock::now();
+    check(name + ": connect()", client.connect("ws://127.0.0.1:" + to_string(fake.port) + "/"));
+    // Wait for the upgrade request, so the client is waiting for the 101
+    const bool requested = waitFor([&] {
+        lock_guard<mutex> l(fake.m);
+        return fake.clientId >= 0 && fake.inbox.find("\r\n\r\n") != string::npos;
+    });
+    check(name + ": the server got the upgrade request", requested);
+    int id;
+    { lock_guard<mutex> l(fake.m); id = fake.clientId; }
+    fake.server.disconnectClient(id);
+    check(name + ": onClose fired",
+          pumpUntil([&] { return rec.count("close") >= 1; }, 2000));
+    // Pump past the 1 s deadline (wall clock, counted from t0, which is
+    // before the TCP connect) plus a margin for a late extra event
+    const auto until = t0 + chrono::milliseconds(1500);
+    const auto now = chrono::steady_clock::now();
+    pumpUntil([] { return false; },
+              now < until ? (int)chrono::duration_cast<chrono::milliseconds>(until - now).count() : 0);
+    pumpUntil([] { return false; }, 100);
+    {
+        lock_guard<mutex> l(rec.m);
+        check(name + ": events are onClose only (no deadline onError)",
+              rec.events == vector<string>{"close"});
+        if (!rec.errors.empty()) printf("    onError: %s\n", rec.errors[0].c_str());
+    }
+    check(name + ": client is Disconnected",
+          client.getState() == WebSocketClient::State::Disconnected);
+    client.disconnect();
+    fake.server.stop();
+}
+
+static void runHandshakeTimeoutTests() {
+    checkHandshakeTimeout("ws:// no 101", "ws");
+    checkHandshakeTimeout("wss:// no TLS handshake", "wss");
+    checkCloseBeforeUpgrade();
+}
+
+static void runReconnectFromEventTests() {
+    const int rounds = 20;
+
+    // An inline onClose listener reconnects. byCloseFrame: the server sends
+    // Close; otherwise it drops the TCP connection.
+    for (bool byCloseFrame : {false, true}) {
+        const string name = byCloseFrame ? "reconnect from onClose (Close frame)"
+                                         : "reconnect from onClose (connection dropped)";
+        FakeServer fake;
+        if (!fake.start()) { check(name + ": server start", false); return; }
+        const string url = "ws://127.0.0.1:" + to_string(fake.port) + "/";
+        WebSocketClient client;
+        Recorder rec;
+        rec.attach(client);
+        atomic<int> reconnects{0};
+        atomic<bool> stop{false};
+        EventListener rl = client.onClose.listen([&] {
+            if (stop) return;
+            ++reconnects;
+            client.connect(url);
+        });
+        bool ok = connectClient(client, fake, rec);
+        for (int i = 0; ok && i < rounds; ++i) {
+            const size_t opens = rec.count("open");
+            int id;
+            { lock_guard<mutex> l(fake.m); id = fake.clientId; }
+            if (byCloseFrame) {
+                fake.send(frame(0x88, ""));
+            } else {
+                fake.server.disconnectClient(id);
+            }
+            // The listener reconnects; the server answers the new upgrade
+            ok = waitFor([&] { lock_guard<mutex> l(fake.m); return fake.clientId != id; }) &&
+                 fake.acceptUpgrade() &&
+                 waitFor([&] { return rec.count("open") > opens && client.isConnected(); });
+        }
+        stop = true;
+        check(name + ": 20 reconnects, each reaches onOpen",
+              ok && reconnects == rounds && rec.count("open") == (size_t)rounds + 1);
+        client.disconnect();
+        fake.server.stop();
+    }
+
+    // wss://: an inline onError listener reconnects after each failed TLS
+    // handshake (the server drops the connection without speaking TLS)
+    {
+        const string name = "reconnect from onError (TLS handshake failed)";
+        FakeServer fake;
+        if (!fake.start()) { check(name + ": server start", false); return; }
+        const string url = "wss://127.0.0.1:" + to_string(fake.port) + "/";
+        WebSocketClient client;
+        client.setTlsVerifyNone();
+        Recorder rec;
+        rec.attach(client);
+        atomic<int> reconnects{0};
+        EventListener rl = client.onError.listen([&](TcpErrorEventArgs&) {
+            if (reconnects >= rounds) return;
+            ++reconnects;
+            client.connect(url);
+        });
+        bool ok = client.connect(url);
+        for (int i = 0; ok && i <= rounds; ++i) {
+            // Wait for attempt i to reach the server, then drop it
+            ok = waitFor([&] { lock_guard<mutex> l(fake.m); return fake.connects > i; });
+            if (!ok) break;
+            int id;
+            { lock_guard<mutex> l(fake.m); id = fake.clientId; }
+            fake.server.disconnectClient(id);
+        }
+        const bool allErrors = waitFor([&] { return rec.count("error") >= (size_t)rounds + 1; });
+        check(name + ": 20 reconnects, each reaches the server",
+              ok && allErrors && reconnects == rounds);
+        client.disconnect();
+        fake.server.stop();
+    }
+}
+
 static void runLoopbackTests() {
     // 1. Text in 3 fragments with a Ping between frames 2 and 3
     {
@@ -440,6 +641,9 @@ static void runLoopbackTests() {
         client.disconnect();
         fake.server.stop();
     }
+
+    runHandshakeTimeoutTests();
+    runReconnectFromEventTests();
 }
 
 int main() {
