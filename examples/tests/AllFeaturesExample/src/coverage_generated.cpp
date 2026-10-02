@@ -1276,7 +1276,7 @@ struct Cover_Font : af::Scope<Font> {
         (void)af::val<Font>().getGridFit();
         (void)af::val<Font>().setMipmaps(af::val<bool>());
         (void)af::val<Font>().getMipmaps();
-        (void)af::val<Font>().load(af::val<const fs::path>(), af::val<int>());
+        (void)af::val<Font>().load(af::val<const fs::path>(), af::val<int>(), af::val<int>());
         (void)af::val<Font>().isLoaded();
         (void)af::val<Font>().setAlign(af::val<Direction>(), af::val<Direction>());
         (void)af::val<Font>().setAlign(af::val<Direction>());

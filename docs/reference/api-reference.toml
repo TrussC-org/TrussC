@@ -2598,10 +2598,34 @@ description.ko = "줄 바꿈이 활성화되었는지 확인"
 
 ["Font::load"]
 category = "font"
-keywords = ["open", "read", "file"]
-description.en = "Load font file"
-description.ja = "フォントファイルを読み込む"
-description.ko = "폰트 파일을 로드"
+keywords = ["open", "read", "file", "ttc", "font collection", "face index", "system font name"]
+description.en = "Load font file (or system font name); faceIndex picks the face in a .ttc"
+description.ja = "フォントファイル（またはシステムフォント名）を読み込む。faceIndex で .ttc 内の書体を選ぶ"
+description.ko = "폰트 파일(또는 시스템 폰트 이름)을 로드. faceIndex로 .ttc 안의 서체를 선택"
+details.en = """
+`load(nameOrPath, size, faceIndex = 0)`. `nameOrPath` is a font file, a URL (web), or a system font name such as `"Noto Sans CJK SC"`.
+
+- `faceIndex` picks the face inside a font collection (`.ttc` / `.otc`) given as a file or URL. A single font has only face 0. An index below 0, or at or past the number of faces in the file, fails the load with an error log.
+- A system font name opens the face the OS resolves it to, including a later face of a `.ttc` (fontconfig `FC_INDEX` on Linux, DirectWrite on Windows, the CoreText font's PostScript name on macOS / iOS). `faceIndex` does not apply to a name.
+- The order of faces is part of the file, so a file and a face index load the same face on every OS. System font names depend on the fonts each OS has. For identical text on every OS, bundle the font in `data/` and load it by file and face index.
+- Each (file, face index, size) gets its own glyph atlas.
+"""
+details.ja = """
+`load(nameOrPath, size, faceIndex = 0)`。`nameOrPath` はフォントファイル、URL（Web）、または `"Noto Sans CJK SC"` のようなシステムフォント名。
+
+- `faceIndex` はファイルや URL で渡したフォントコレクション（`.ttc` / `.otc`）内の書体を選ぶ。単一フォントは書体 0 だけ。0 未満、またはファイル内の書体数以上のインデックスはエラーログを出して読み込みに失敗する。
+- システムフォント名は OS が解決した書体を開く。`.ttc` の 2 番目以降の書体も含む（Linux は fontconfig の `FC_INDEX`、Windows は DirectWrite、macOS / iOS は CoreText フォントの PostScript 名）。名前には `faceIndex` は使われない。
+- 書体の順番はファイルの一部なので、ファイルと書体インデックスの組はどの OS でも同じ書体を読み込む。システムフォント名は各 OS にあるフォントに依存する。どの OS でも同じ文字にするには、フォントを `data/` に同梱してファイルと書体インデックスで読み込む。
+- （ファイル、書体インデックス、サイズ）ごとにグリフアトラスが別に作られる。
+"""
+details.ko = """
+`load(nameOrPath, size, faceIndex = 0)`. `nameOrPath`는 폰트 파일, URL(웹), 또는 `"Noto Sans CJK SC"` 같은 시스템 폰트 이름.
+
+- `faceIndex`는 파일이나 URL로 지정한 폰트 컬렉션(`.ttc` / `.otc`) 안의 서체를 선택한다. 단일 폰트는 서체 0만 있다. 0 미만이거나 파일의 서체 수 이상인 인덱스는 에러 로그를 남기고 로드에 실패한다.
+- 시스템 폰트 이름은 OS가 해석한 서체를 연다. `.ttc`의 두 번째 이후 서체도 포함한다(Linux는 fontconfig `FC_INDEX`, Windows는 DirectWrite, macOS / iOS는 CoreText 폰트의 PostScript 이름). 이름에는 `faceIndex`가 쓰이지 않는다.
+- 서체 순서는 파일의 일부이므로 파일과 서체 인덱스의 조합은 모든 OS에서 같은 서체를 로드한다. 시스템 폰트 이름은 각 OS에 있는 폰트에 따라 달라진다. 모든 OS에서 같은 글자를 쓰려면 폰트를 `data/`에 넣고 파일과 서체 인덱스로 로드한다.
+- (파일, 서체 인덱스, 크기)마다 글리프 아틀라스가 따로 만들어진다.
+"""
 
 ["Font::resetLineHeight"]
 keywords = ["line height", "default", "leading"]
@@ -17122,8 +17146,8 @@ related = ["isStringInString", "splitString"]
 ["systemFontPath"]
 category = "font"
 keywords = ["resolve", "lookup", "find", "os font"]
-description.en = "Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub."
-description.ja = "システムフォント名（PostScript 名や family 名）をファイルパスに解決。見つからなければ空文字を返す。macOS は CoreText、Linux/Win は現状スタブ"
+description.en = "Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite."
+description.ja = "システムフォント名（PostScript 名や family 名）をファイルパスに解決。見つからなければ空文字を返す。macOS / iOS は CoreText、Linux は fontconfig、Windows は DirectWrite"
 description.ko = "시스템 폰트 이름을 파일 경로로 변환"
 related = ["listSystemFonts"]
 platform_note.en = '''

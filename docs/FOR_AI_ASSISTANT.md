@@ -321,6 +321,18 @@ Available macros: `TC_FONT_SANS`, `TC_FONT_SERIF`, `TC_FONT_MONO`,
 `TC_FONT_SANS_JA`, `TC_FONT_SERIF_JA`. Backends: CoreText (macOS/iOS),
 DirectWrite (Windows), fontconfig (Linux). Web falls back to a Noto CDN URL.
 
+A name opens the face the OS resolves it to, also when that face is a later
+one inside a font collection (`.ttc`, e.g. `"Noto Sans CJK SC"` is face 2 of
+`NotoSansCJK-Regular.ttc`). System font names depend on the fonts each OS
+has. For identical text on every OS, bundle the font in `data/` and load it
+by file; for a `.ttc`, pass the face index (the order of faces is part of the
+file, so it is the same face everywhere):
+```cpp
+font.load(getDataPath("fonts/NotoSansCJK-Regular.ttc"), 24, 2);  // face 2
+```
+`faceIndex` defaults to 0. A negative index or one at or past the number of faces fails the
+load with an error log.
+
 ### Why is my small text blurry, and how do I sharpen it?
 
 Two knobs, and they are deliberately not symmetric.
@@ -2244,7 +2256,7 @@ void shutdownAudio()  // Shut down the global AudioEngine and close the audio de
 
 ```cpp
 std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
-fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
+fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite.
 ```
 
 ### Animation
@@ -2850,7 +2862,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load font file
+LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load font file (or system font name); faceIndex picks the face in a .ttc
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.

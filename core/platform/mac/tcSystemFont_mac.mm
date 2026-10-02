@@ -31,25 +31,52 @@ std::string cfStringToStd(CFStringRef s) {
 
 } // namespace
 
-fs::path systemFontPath(const std::string& name) {
-    if (name.empty()) return "";
+internal::SystemFontFace internal::systemFontFace(const std::string& name) {
+    SystemFontFace out;
+    if (name.empty()) return out;
     CFStringRef cfName = CFStringCreateWithCString(nullptr, name.c_str(), kCFStringEncodingUTF8);
-    if (!cfName) return "";
+    if (!cfName) return out;
 
     // CTFontDescriptorCreateWithNameAndSize accepts both PostScript names and
     // family / display names — it walks the system font collection internally.
     CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(cfName, 0);
     CFRelease(cfName);
-    if (!desc) return "";
+    if (!desc) return out;
 
+    // No URL: the name did not resolve to a font file.
     CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
+
+    // CoreText gives the file but not the face inside it. The PostScript name
+    // of the font the descriptor resolves to picks the face of a collection.
+    std::string postScriptName;
+    if (url) {
+        CTFontRef font = CTFontCreateWithFontDescriptor(desc, 0.0, nullptr);
+        if (font) {
+            CFStringRef ps = CTFontCopyPostScriptName(font);
+            if (ps) {
+                postScriptName = cfStringToStd(ps);
+                CFRelease(ps);
+            }
+            CFRelease(font);
+        }
+    }
     CFRelease(desc);
-    if (!url) return "";
+    if (!url) return out;
 
     char buf[PATH_MAX] = {0};
     Boolean ok = CFURLGetFileSystemRepresentation(url, true, (UInt8*)buf, PATH_MAX);
     CFRelease(url);
-    return ok ? std::string(buf) : "";
+    if (!ok) return out;
+
+    out.path = fs::path(buf);
+    // When no face of a collection has that PostScript name, face 0 is used.
+    const int index = findFaceInFileByPostScriptName(out.path, postScriptName);
+    out.index = (index > 0) ? index : 0;
+    return out;
+}
+
+fs::path systemFontPath(const std::string& name) {
+    return internal::systemFontFace(name).path;
 }
 
 std::vector<std::string> listSystemFonts() {
