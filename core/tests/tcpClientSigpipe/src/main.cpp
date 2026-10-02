@@ -21,12 +21,13 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 
 #ifdef _WIN32
 
-int main() {
+TC_CORE_TEST_MAIN() {
     printf("SKIP: SIGPIPE does not exist on Windows\n");
     return 0;
 }
@@ -54,6 +55,8 @@ int main() {
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static atomic<int> g_fail{0};
 
@@ -88,7 +91,7 @@ static void check(const char* name, bool ok) {
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
+    thread worker([done, fn = std::move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
     while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
@@ -213,7 +216,9 @@ static void scenario() {
     ::close(listener);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // The invariant is that TcpClient does not need SIGPIPE ignored. Make sure
     // nothing in the process ignores it for us, or this test proves nothing.
     std::signal(SIGPIPE, SIG_DFL);

@@ -664,7 +664,7 @@ private:
         }
 
         // Build sample list
-        if (!buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk)) {
+        if (!buildSamples(track, sampleSizes, chunkOffsets, sampleToChunk, timeToSample)) {
             markTrackDamaged(track, "stsz", "sample sizes add up to more than the file size");
         }
     }
@@ -711,10 +711,20 @@ private:
         track.sampleRate = static_cast<uint32_t>((rateFixed + 0x8000) >> 16);
 
         if (version == 1) {
-            // samplesPerPacket, bytesPerPacket, bytesPerFrame, bytesPerSample.
-            // For PCM the frame size comes from bits and channels (see
-            // MovTrack::getPcmFrameBytes()).
-            file_.seekg(16, std::ios::cur);
+            const uint32_t samplesPerPacket = readU32();
+            const uint32_t bytesPerPacket = readU32();  // per channel
+            const uint32_t bytesPerFrame = readU32();   // all channels per packet
+            // Legacy bytesPerSample is 2 even for ffmpeg's 32-bit float
+            // entries; bytesPerPacket/bytesPerFrame describe the storage.
+            readU32();
+            std::string why;
+            if (track.isPcmFormatSupported(why) &&
+                (samplesPerPacket == 0 ||
+                 uint64_t(bytesPerPacket) != uint64_t(samplesPerPacket) * track.getPcmBits() / 8 ||
+                 uint64_t(bytesPerFrame) != uint64_t(samplesPerPacket) * track.getPcmFrameBytes())) {
+                markTrackDamaged(track, "stsd", "PCM packet layout is not supported");
+                return;
+            }
         } else if (version == 2) {
             // In v2 the v0 fields above hold fixed values; the real ones follow
             file_.seekg(4, std::ios::cur);  // sizeOfStructOnly
@@ -723,16 +733,26 @@ private:
             file_.seekg(4, std::ios::cur);  // always 0x7F000000
             const uint32_t bitsPerChannel = readU32();
             track.lpcmFlags = readU32();
-            file_.seekg(4, std::ios::cur);  // constBytesPerAudioPacket
-            file_.seekg(4, std::ios::cur);  // constLPCMFramesPerAudioPacket
+            const uint32_t bytesPerPacket = readU32();
+            const uint32_t framesPerPacket = readU32();
 
             double rate = 0.0;
             std::memcpy(&rate, &rateBits, sizeof(rate));
-            // Rates outside (0, 2^31) Hz are stored as 0 (not supported)
-            track.sampleRate = (std::isfinite(rate) && rate >= 0.5 && rate < 2147483648.0)
-                ? static_cast<uint32_t>(std::lround(rate)) : 0;
+            // The decoder accepts an int sample rate; reject rates whose
+            // rounded value cannot be represented by it.
+            const double roundedRate = std::round(rate);
+            track.sampleRate = (std::isfinite(roundedRate) && roundedRate >= 1.0 &&
+                                roundedRate <= 2147483647.0)
+                ? static_cast<uint32_t>(roundedRate) : 0;
             track.channels = numChannels <= 0xFFFF ? static_cast<uint16_t>(numChannels) : 0;
             track.bitsPerSample = bitsPerChannel <= 0xFFFF ? static_cast<uint16_t>(bitsPerChannel) : 0;
+            std::string why;
+            if (track.isPcmFormatSupported(why) &&
+                (framesPerPacket == 0 ||
+                 uint64_t(bytesPerPacket) != uint64_t(framesPerPacket) * track.getPcmFrameBytes())) {
+                markTrackDamaged(track, "stsd", "PCM packet layout is not supported");
+                return;
+            }
         }
 
         // Extension atoms follow the version-specific fields
@@ -856,33 +876,46 @@ private:
     bool buildSamples(MovTrack& track,
                       const SampleSizes& sampleSizes,
                       const std::vector<uint64_t>& chunkOffsets,
-                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk) {
+                      const std::vector<std::pair<uint32_t, uint32_t>>& sampleToChunk,
+                      const std::vector<std::pair<uint32_t, uint32_t>>& timeToSample) {
 
         if (sampleSizes.count == 0 || chunkOffsets.empty() || sampleToChunk.empty()) {
             return true;
         }
 
-        // Constant-size PCM: one entry per chunk
+        // The sample count is at most the 'stsz' count and, when 'stts' was
+        // read, the number of samples it times (its entry counts summed). In a
+        // valid file the two are equal; 'stts' entries are bounded by its atom
+        // size, which a constant-size 'stsz' count is not.
+        uint64_t limit = sampleSizes.count;
+        if (!timeToSample.empty()) {
+            uint64_t timed = 0;
+            for (const auto& entry : timeToSample) timed += entry.first;
+            if (timed < limit) limit = timed;
+        }
+
+        // Constant-size PCM: one entry per chunk, with the same frame limit
+        // as the per-sample path.
         const uint32_t pcmFrameBytes = track.isAudio() ? track.getPcmFrameBytes() : 0;
         if (pcmFrameBytes > 0 && sampleSizes.constantSize != 0) {
-            return buildPcmChunks(track, pcmFrameBytes, sampleSizes.count, chunkOffsets,
-                                  sampleToChunk);
+            return buildPcmChunks(track, pcmFrameBytes, static_cast<uint32_t>(limit),
+                                  chunkOffsets, sampleToChunk);
         }
 
         // First pass: how many samples the 'stsc' / 'stco' layout places,
-        // capped at the 'stsz' count
+        // capped at the limit above
         uint64_t placed = 0;
         {
             size_t stscIndex = 0;
             for (size_t chunkIndex = 0; chunkIndex < chunkOffsets.size() &&
-                                        placed < sampleSizes.count; chunkIndex++) {
+                                        placed < limit; chunkIndex++) {
                 while (stscIndex + 1 < sampleToChunk.size() &&
                        chunkIndex + 1 >= sampleToChunk[stscIndex + 1].first) {
                     stscIndex++;
                 }
                 placed += sampleToChunk[stscIndex].second;
             }
-            if (placed > sampleSizes.count) placed = sampleSizes.count;
+            if (placed > limit) placed = limit;
         }
         track.samples.reserve(static_cast<size_t>(placed));
 
@@ -900,7 +933,7 @@ private:
             uint32_t samplesInChunk = sampleToChunk[stscIndex].second;
             uint64_t offset = chunkOffsets[chunkIndex];
 
-            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < sampleSizes.count; i++) {
+            for (uint32_t i = 0; i < samplesInChunk && sampleIndex < placed; i++) {
                 MovSample sample;
                 sample.offset = offset;
                 sample.size = sampleSizes.at(sampleIndex);

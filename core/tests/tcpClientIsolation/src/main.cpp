@@ -17,6 +17,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -57,6 +58,8 @@
 using namespace std;
 using namespace tc;
 
+namespace {
+
 static const rawsocket_t kNoSocket = static_cast<rawsocket_t>(-1);
 
 static atomic<int> g_fail{0};
@@ -92,7 +95,7 @@ static void check(const char* name, bool ok) {
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
+    thread worker([done, fn = std::move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
     while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
@@ -229,7 +232,9 @@ static void scenario() {
     TC_CLOSE(lb);
 }
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);

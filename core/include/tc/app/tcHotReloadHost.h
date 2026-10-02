@@ -29,7 +29,6 @@ extern char** environ;
 #include <chrono>
 #include <string>
 #include <vector>
-#include <iostream>
 #include <cstdlib>
 
 namespace trussc {
@@ -39,8 +38,6 @@ namespace fs = std::filesystem;
 using std::string;
 using std::vector;
 using std::ifstream;
-using std::cout;
-using std::cerr;
 using Clock = std::chrono::steady_clock;
 
 // Function pointer types for Guest exports
@@ -82,19 +79,19 @@ struct GuestLibrary {
 #endif
         string tempPath = path + "." + std::to_string(loadCounter++) + ext;
         try { fs::copy_file(path, tempPath, fs::copy_options::overwrite_existing); }
-        catch (...) { cerr << "[HotReload] Failed to copy library to " << tempPath << "\n"; return false; }
+        catch (...) { logError("HotReload") << "Failed to copy library to " << tempPath; return false; }
 
 #ifdef _WIN32
         handle = LoadLibraryA(tempPath.c_str());
         if (!handle) {
-            cerr << "[HotReload] LoadLibrary failed (error " << GetLastError() << ")\n";
+            logError("HotReload") << "LoadLibrary failed (error " << GetLastError() << ")";
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
         createApp = (CreateAppFn)GetProcAddress(handle, "tcHotReloadCreateApp");
         destroyApp = (DestroyAppFn)GetProcAddress(handle, "tcHotReloadDestroyApp");
         if (!createApp || !destroyApp) {
-            cerr << "[HotReload] GetProcAddress failed\n";
+            logError("HotReload") << "GetProcAddress failed";
             FreeLibrary(handle);
             handle = nullptr;
             try { fs::remove(tempPath); } catch (...) {}
@@ -103,14 +100,14 @@ struct GuestLibrary {
 #else
         handle = dlopen(tempPath.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
-            cerr << "[HotReload] dlopen failed: " << dlerror() << "\n";
+            logError("HotReload") << "dlopen failed: " << dlerror();
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
         createApp = (CreateAppFn)dlsym(handle, "tcHotReloadCreateApp");
         destroyApp = (DestroyAppFn)dlsym(handle, "tcHotReloadDestroyApp");
         if (!createApp || !destroyApp) {
-            cerr << "[HotReload] dlsym failed: " << dlerror() << "\n";
+            logError("HotReload") << "dlsym failed: " << dlerror();
             dlclose(handle);
             handle = nullptr;
             try { fs::remove(tempPath); } catch (...) {}
@@ -158,6 +155,18 @@ struct GuestLibrary {
     }
 
     void unload() {
+        // Tell guest code first, while its App and node references are still
+        // valid: singletons and other statics in the guest image outlive the
+        // App and keep their listeners on the host's events until they drop
+        // them (#416). Dispatched on the main window's events, whichever
+        // window context is current.
+        if (app) {
+            internal::WindowContext*& current = internal::currentWindowCtx();
+            internal::WindowContext* prev = current;
+            current = &internal::mainWindowContext();
+            events().hotReloadUnload.notify();
+            current = prev;
+        }
         // Drop the window contexts' weak references first (hover, grab,
         // selection, the main root; #255). Releasing the last weak reference
         // to a make_shared node runs code of the module that created it, so
@@ -303,7 +312,7 @@ inline int runBuildCommand(const vector<string>& argv) {
     buf.push_back('\0');
     if (!CreateProcessA(argv[0].c_str(), buf.data(),
                         nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
-        cerr << "[HotReload] Failed to launch: " << argv[0] << "\n";
+        logError("HotReload") << "Failed to launch: " << argv[0];
         return -1;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -321,8 +330,8 @@ inline int runBuildCommand(const vector<string>& argv) {
     int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr,
                             cargv.data(), environ);
     if (err != 0) {
-        std::cerr << "[HotReload] failed to spawn '" << argv[0]
-                  << "': " << std::strerror(err) << "\n";
+        logError("HotReload") << "Failed to spawn '" << argv[0]
+                              << "': " << std::strerror(err);
         return -1;
     }
     int status = 0;
@@ -390,7 +399,7 @@ struct Host {
         }
 
         if (!fs::exists(srcDir)) {
-            cerr << "[HotReload] src/ directory not found at " << srcDir << "\n";
+            logError("HotReload") << "src/ directory not found at " << srcDir;
             return false;
         }
 
@@ -429,17 +438,17 @@ struct Host {
 
         // Initial build of the Guest
         if (!rebuildGuest()) {
-            cerr << "[HotReload] Initial Guest build failed\n";
+            logError("HotReload") << "Initial Guest build failed";
             return false;
         }
 
         // Load the Guest and create the initial App instance
         if (!guest.load(guestLibPath)) {
-            cerr << "[HotReload] Failed to load Guest library\n";
+            logError("HotReload") << "Failed to load Guest library";
             return false;
         }
         if (!guest.create()) {
-            cerr << "[HotReload] Failed to create initial App instance\n";
+            logError("HotReload") << "Failed to create initial App instance";
             return false;
         }
 

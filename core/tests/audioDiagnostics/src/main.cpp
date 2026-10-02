@@ -67,6 +67,10 @@
 //   to the default); a later init() succeeds (#279).
 // - An init() on the null backend the test requested logs no "no usable
 //   audio backend" warning (that warning is for a fallback to it).
+// - A missing file fails with FileNotFound and logs one Error naming the
+//   path, for each loader that returns LoadResult and runs here: .wav, .ogg,
+//   a stream, .m4a and VideoPlayer::load() (Linux, macOS, Windows) and
+//   Pixels::load() / loadHDR() (#359).
 // =============================================================================
 
 #include <TrussC.h>
@@ -905,10 +909,31 @@ int main() {
     settings.channels = 2;
     settings.bufferSize = 256;
     settings.maxPolyphony = 2;
+    int changedEvents = 0;
+    AudioDeviceChangedArgs changed;
+    EventListener changedSub = engine.audioDeviceChanged.listen([&](AudioDeviceChangedArgs& a) {
+        if (changedEvents++ == 0) changed = a;
+    });
     const bool started = engine.init(settings);
+    changedSub.disconnect();
     check("engine starts on the null backend", started && engine.isInitialized());
     if (!started) return 1;
     auto report = internal::audioDeviceReport(false);
+    // getBufferSize() is the requested size; the event reports the period
+    // the device runs with, in engine-rate frames.
+    check("getBufferSize() is the requested size", engine.getBufferSize() == 256,
+          to_string(engine.getBufferSize()));
+    {
+        const int expected = (report.deviceSampleRate > 0 && report.deviceSampleRate != changed.sampleRate)
+            ? (int)(((int64_t)report.periodFrames * changed.sampleRate + report.deviceSampleRate / 2)
+                    / report.deviceSampleRate)
+            : report.periodFrames;
+        check("audioDeviceChanged fires once on init", changedEvents == 1, to_string(changedEvents));
+        check("audioDeviceChanged reports the granted period in engine-rate frames",
+              changed.bufferSize > 0 && changed.bufferSize == expected && changed.sampleRate == 48000,
+              to_string(changed.bufferSize) + " vs " + to_string(expected) + " (device " +
+              to_string(report.periodFrames) + " frames at " + to_string(report.deviceSampleRate) + " Hz)");
+    }
     check("device report names the Null backend", report.backend == "Null", report.backend);
     check("device report has the granted period", report.periodFrames > 0);
     // Plumbing: the null backend's one playback device is the enumerated default.
@@ -996,9 +1021,16 @@ int main() {
 
     // --- streams: maxPolyphony drop, file path ----------------------------------
     const string tag = to_string((long long)chrono::steady_clock::now().time_since_epoch().count());
-    const fs::path wav  = fs::temp_directory_path() / ("tc_audio_diag_" + tag + ".wav");
+    // The file is reached through "<sub>/..", so its path is not in normal
+    // form: every report must show this same string, as given.
+    const fs::path wavSub = fs::temp_directory_path() / ("tc_audio_diag_" + tag + "_sub");
+    std::error_code subEc;
+    fs::create_directories(wavSub, subEc);
+    const fs::path wav  = wavSub / ".." / ("tc_audio_diag_" + tag + ".wav");
     const fs::path wav2 = fs::temp_directory_path() / ("tc_audio_diag_" + tag + "_gone.wav");
     check("test WAV files written", writeWav(wav, 2.0f, 48000) && writeWav(wav2, 1.0f, 48000));
+    check("path: the test path is not in normal form", wav != wav.lexically_normal(),
+          internal::pathToUtf8(wav));
 
     Sound s1;
     check("loadStream() succeeds", (bool)s1.loadStream(wav, 1));
@@ -1011,8 +1043,16 @@ int main() {
           countLogs(LogLevel::Warning, "maxPolyphony=1 reached for " + internal::pathToUtf8(wav)) == 1,
           lastLog(LogLevel::Warning));
     sounds = engine.getPlayingSounds();
-    check("streamed sound reports its file",
-          sounds.size() == 1 && sounds[0].streaming && sounds[0].path == wav.lexically_normal());
+    check("streamed sound reports its file as given",
+          sounds.size() == 1 && sounds[0].streaming && sounds[0].path == wav,
+          sounds.empty() ? string() : internal::pathToUtf8(sounds[0].path));
+    {
+        SoundStream sameFile;
+        check("path: getPlayingSounds() matches SoundStream::getPath() and the drop warning",
+              (bool)sameFile.loadStream(wav, 1) && sounds.size() == 1 &&
+              internal::pathToUtf8(sounds[0].path) == internal::pathToUtf8(sameFile.getPath()) &&
+              countLogs(LogLevel::Warning, "reached for " + internal::pathToUtf8(sounds[0].path)) == 1);
+    }
     s1.stop();
 
     Sound eager;
@@ -1022,7 +1062,7 @@ int main() {
     check("eager voice plays", eager.play());
     sounds = engine.getPlayingSounds();
     check("eager sound reports its file",
-          sounds.size() == 1 && !sounds[0].streaming && sounds[0].path == wav.lexically_normal());
+          sounds.size() == 1 && !sounds[0].streaming && sounds[0].path == wav);
 
     // A reused SoundBuffer: getPath() (a playing sound's "path") follows the last fill.
     {
@@ -1090,6 +1130,50 @@ int main() {
         fs::remove(notOgg, rmEc);
     }
 
+    // A missing file: every loader that returns LoadResult fails with
+    // FileNotFound and logs one Error line naming the path (#359).
+    {
+        const fs::path missingDir = fs::temp_directory_path() / ("tc_audio_diag_" + tag + "_missing");
+        std::error_code rmEc;
+        fs::remove_all(missingDir, rmEc);
+        auto checkMissing = [&](const string& name, const fs::path& path, auto load) {
+            const string pathStr = internal::pathToUtf8(path);
+            const size_t errorsBefore = countLogs(LogLevel::Error, pathStr);
+            const LoadResult r = load(path);
+            check("missing: " + name + " fails with FileNotFound",
+                  !r && r.error == LoadError::FileNotFound, loadErrorName(r.error));
+            check("missing: " + name + " logs one Error",
+                  countLogs(LogLevel::Error, pathStr) == errorsBefore + 1, lastLog(LogLevel::Error));
+        };
+        checkMissing("SoundBuffer::loadWav()", missingDir / "a.wav",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadWav(p); });
+        checkMissing("SoundBuffer::loadOgg()", missingDir / "b.ogg",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadOgg(p); });
+        checkMissing("Sound::load() of a .wav", missingDir / "c.wav",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        checkMissing("Sound::load() of an .ogg", missingDir / "d.ogg",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        checkMissing("Sound::loadStream()", missingDir / "e.wav",
+                     [](const fs::path& p) { Sound s; return s.loadStream(p); });
+        // loadAac() is per platform (Linux, macOS / iOS, Windows), and each
+        // implementation logs the missing file itself.
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__) || defined(_WIN32)
+        checkMissing("SoundBuffer::loadAac()", missingDir / "f.m4a",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadAac(p); });
+        checkMissing("Sound::load() of an .m4a", missingDir / "g.m4a",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        // VideoPlayer::load() classifies a missing file before it reaches the
+        // platform backend, so no window or decoder is needed. The path is
+        // absolute, so getDataPath() passes it through unchanged.
+        checkMissing("VideoPlayer::load()", missingDir / "j.mp4",
+                     [](const fs::path& p) { VideoPlayer v; return v.load(p); });
+#endif
+        checkMissing("Pixels::load()", missingDir / "h.png",
+                     [](const fs::path& p) { Pixels px; return px.load(p); });
+        checkMissing("Pixels::loadHDR()", missingDir / "i.hdr",
+                     [](const fs::path& p) { Pixels px; return px.loadHDR(p); });
+    }
+
     Sound gone;
     check("loadStream() of the second file", (bool)gone.loadStream(wav2, 1));
     std::error_code ec;
@@ -1107,6 +1191,9 @@ int main() {
         st = engine.getStats();
         check("tool: engine running on the Null backend",
               state.value("running", false) && state["output"].value("backend", "") == "Null");
+        check("tool: requestedBufferSize is the requested size",
+              state["output"].value("requestedBufferSize", -1) == 256 && !state["output"].contains("bufferSize"),
+              state["output"].dump());
         check("tool: dropped counts match getStats()",
               state["dropped"].value("total", (uint64_t)0) == st.droppedPlays &&
               state["dropped"].value("polyphonyLimit", (uint64_t)0) == 7 &&
@@ -1116,7 +1203,7 @@ int main() {
         check("tool: playingSounds list the playing file (UTF-8)",
               state.contains("playingSounds") && !state.contains("voices") &&
               state["playingSounds"].size() == 1 &&
-              state["playingSounds"][0].value("path", "") == internal::pathToUtf8(wav.lexically_normal()),
+              state["playingSounds"][0].value("path", "") == internal::pathToUtf8(wav),
               state.value("playingSounds", Json::array()).dump());
         check("tool: master meters and thread CPU usage present",
               state["master"].contains("peak") && state["master"].value("clippedSamples", (uint64_t)0) > 0 &&
@@ -1241,6 +1328,25 @@ int main() {
               lastLog(LogLevel::Error));
 
         check("init() called again later succeeds", engine.init(settings) && engine.isInitialized());
+
+        // Default buffer size (0 = backend default): the request stays 0,
+        // the event reports the period the device chose.
+        AudioSettings defaults = settings;
+        defaults.bufferSize = 0;
+        AudioDeviceChangedArgs reinit;
+        EventListener reinitSub = engine.audioDeviceChanged.listen([&](AudioDeviceChangedArgs& a) { reinit = a; });
+        const bool reinitOk = engine.init(defaults);
+        reinitSub.disconnect();
+        const auto defReport = internal::audioDeviceReport(false);
+        const int defExpected = (defReport.deviceSampleRate > 0 && defReport.deviceSampleRate != reinit.sampleRate)
+            ? (int)(((int64_t)defReport.periodFrames * reinit.sampleRate + defReport.deviceSampleRate / 2)
+                    / defReport.deviceSampleRate)
+            : defReport.periodFrames;
+        check("default buffer size: getBufferSize() stays 0", reinitOk && engine.getBufferSize() == 0,
+              to_string(engine.getBufferSize()));
+        check("default buffer size: audioDeviceChanged reports the period the device chose",
+              reinit.bufferSize > 0 && reinit.bufferSize == defExpected,
+              to_string(reinit.bufferSize) + " vs " + to_string(defExpected));
         engine.shutdown();
     }
 
@@ -1253,6 +1359,7 @@ int main() {
           lastLog(LogLevel::Warning));
 
     fs::remove(wav, ec);
+    fs::remove(wavSub, ec);
     logSub.disconnect();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

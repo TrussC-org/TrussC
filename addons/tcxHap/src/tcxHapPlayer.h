@@ -213,6 +213,7 @@ public:
 
         std::error_code ec;
         if (!tc::fs::exists(path, ec)) {
+            tc::logError("HapPlayer") << "file not found: " << tc::internal::pathToUtf8(path);
             return tc::LoadResult::fail(tc::LoadError::FileNotFound,
                 "file not found: " + tc::internal::pathToUtf8(path));
         }

@@ -420,6 +420,26 @@ static void sampleTableTests(const fs::path& data) {
               p.ms < kQuickMs && p.videoSamples == 5 && p.audioFrames == 24000, describe(p));
     }
 
+    // Constant-size 'stsz' with a count of 0xFFFFFFF0, every 'stsc' entry
+    // with 0xFFFFFFF0 samples per chunk, and the first chunk past the end of
+    // the file: the sample count is the 'stts' total (24000)
+    {
+        vector<char> b = orig;
+        putU32(b, audioStsz + 16, 0xFFFFFFF0u);
+        const size_t stsc = findTable(b, "soun", "stsc");
+        const size_t stco = findTable(b, "soun", "stco");
+        const bool patched = stsc && stco && getU32(b, stsc + 12) > 0 && getU32(b, stco + 12) > 0;
+        if (patched) {
+            const uint32_t entries = getU32(b, stsc + 12);
+            for (uint32_t i = 0; i < entries; i++) putU32(b, stsc + 16 + 12 * i + 4, 0xFFFFFFF0u);
+            putU32(b, stco + 16, uint32_t(b.size() + 4096));
+        }
+        writeBytes(tmp, b);
+        const Parsed p = parseFile(tmp);
+        check("tables: constant stsz + stsc 0xFFFFFFF0 per chunk, chunk past the end -> stts total (24000)",
+              patched && p.ms < kQuickMs && p.audioSamples == 24000, describe(p));
+    }
+
     // A child atom larger than its parent: the video track's 'mdia' size
     // made larger than its 'trak'. open() returns and skips the video track.
     {

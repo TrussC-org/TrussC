@@ -50,6 +50,37 @@ struct PbrDrawCommand {
     int                indexCount;
     int                vertexCount;
 };
+
+// Which registered lights get the PBR shader's single projector slot and
+// single IES slot. The projector slot goes to the first Spot light with a
+// projection texture, the IES slot to the first light with an IES profile,
+// both among the first maxLights entries (the ones the shader sees). The
+// overflow flags are set when a further light of that kind gets no slot.
+// Pure (no GPU access), so it is testable headless.
+struct PbrSpecialLightSlots {
+    int projectorIndex = -1;          // index into the light list, -1 = none
+    int iesIndex = -1;                // index into the light list, -1 = none
+    bool projectorOverflow = false;   // another projector light got no slot
+    bool iesOverflow = false;         // another IES light got no slot
+};
+
+inline PbrSpecialLightSlots selectPbrSpecialLightSlots(const std::vector<Light*>& lights) {
+    PbrSpecialLightSlots r;
+    int n = static_cast<int>(lights.size());
+    if (n > maxLights) n = maxLights;
+    for (int i = 0; i < n; ++i) {
+        const Light& L = *lights[i];
+        if (L.getType() == LightType::Spot && L.hasProjectionTexture()) {
+            if (r.projectorIndex < 0) r.projectorIndex = i;
+            else r.projectorOverflow = true;
+        }
+        if (L.hasIesProfile()) {
+            if (r.iesIndex < 0) r.iesIndex = i;
+            else r.iesOverflow = true;
+        }
+    }
+    return r;
+}
 struct DeferredPbrDraw { int layerId; PbrDrawCommand cmd; };
 // deferredPbrDraws (swapchain) is now PER-WINDOW, held in WindowContext
 // (tc/app/tcWindowContext.h) and reached via currentWindowContext(). Replayed
@@ -169,20 +200,20 @@ public:
         // Material reference (used for both normal map binding and uniform packing)
         const Material& pbrMat = *wctx.currentMaterial;
 
-        // Find the first projector-type light and the first IES-profiled light
-        int nActiveLights = static_cast<int>(activeLights.size());
-        if (nActiveLights > internal::maxLights) nActiveLights = internal::maxLights;
-        int projectorLightIdx = -1;
-        int iesLightIdx = -1;
-        for (int i = 0; i < nActiveLights; ++i) {
-            const Light& L = *activeLights[i];
-            if (projectorLightIdx < 0 &&
-                L.getType() == LightType::Spot && L.hasProjectionTexture()) {
-                projectorLightIdx = i;
-            }
-            if (iesLightIdx < 0 && L.hasIesProfile()) {
-                iesLightIdx = i;
-            }
+        // The shader has one projector slot and one IES slot: the first
+        // projector light and the first IES light get them.
+        const PbrSpecialLightSlots slots = selectPbrSpecialLightSlots(activeLights);
+        const int projectorLightIdx = slots.projectorIndex;
+        const int iesLightIdx = slots.iesIndex;
+        if (slots.projectorOverflow && projectorSlotWarned_.isFirstTime()) {
+            logWarning("TrussC") << "PBR: more than one projector light (Spot "
+                << "light with setProjectionTexture()); only the first gets the "
+                << "projector slot, the others light as plain spot lights";
+        }
+        if (slots.iesOverflow && iesSlotWarned_.isFirstTime()) {
+            logWarning("TrussC") << "PBR: more than one light with an IES "
+                << "profile; only the first gets the IES slot, the others light "
+                << "without their profile";
         }
 
         // Normal map from Material (or fallback flat normal)
@@ -837,6 +868,8 @@ private:
     // array / views / sampler / pipeline above stay shared — they are reused
     // serially across windows (see ShadowSlotState's comment).
     bool shadowOverflowWarned_{false};
+    OnceGate projectorSlotWarned_;   // a projector light got no slot
+    OnceGate iesSlotWarned_;         // an IES light got no slot
     bool shadowPointWarned_{false};
 
     // --- Fallback resources ---

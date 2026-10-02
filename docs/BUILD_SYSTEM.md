@@ -425,6 +425,10 @@ target_link_directories(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARIES})
 ```
 
+### Bundle Identifier (macOS / iOS)
+
+On macOS and iOS the app's bundle identifier defaults to `com.trussc.<project name>`. Set your own one in `local.cmake` before you distribute the app, e.g. `set(TC_BUNDLE_ID "com.example.myApp")`. `trussc_app()` reads `TC_BUNDLE_ID` after including `local.cmake` and uses it for `CFBundleIdentifier` in the generated Info.plist and for the Xcode `PRODUCT_BUNDLE_IDENTIFIER` setting, so it survives `trusscli update`. macOS keys privacy permissions and user defaults by this identifier, so two apps with the same project name and the default identifier share them. Other platforms ignore `TC_BUNDLE_ID`.
+
 ### `local.cmake` vs Addons
 
 | | `local.cmake` | Addon (`addons.make`) |
@@ -467,7 +471,7 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
-2. Old Guest is unloaded (`dlclose` / `FreeLibrary`)
+2. The old Guest's App is destroyed (`events().hotReloadUnload` fires first). Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
 3. New Guest is loaded (`dlopen` / `LoadLibrary`)
 4. A new App instance is created → `setup()` runs again
 
@@ -476,6 +480,16 @@ The Host monitors `src/` for file modifications (polling every 500ms). When a ch
 Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated, and hover, the mouse grab and the node selection (`getSelectedNode()`) start empty. This is the same model as Processing / p5.js live coding.
 
 For most creative coding use cases (adjusting colors, positions, animations), this is sufficient.
+
+State that outlives the App is the exception: singletons and function-local statics in your code (or in an addon) belong to the guest library, which stays loaded after a reload, so the previous build's copy keeps any listener it has on `events()`. Drop them on `events().hotReloadUnload`, which fires before the host unloads the current build while its App is still alive (and once more at exit, after `exit`):
+
+```cpp
+unloadListener_ = events().hotReloadUnload.listen([this] {
+    // release what this build registered (the same cleanup as on exit)
+});
+```
+
+tcxImGui and tcxNodeInspector do this themselves.
 
 ### Disabling Hot Reload
 
@@ -488,7 +502,7 @@ On the next build, cmake reconfigures back to a single static binary. The `TC_RU
 ### Limitations
 
 - **Supported platforms**: macOS (`.dylib`), Linux (`.so`), Windows (`.dll`). Wasm / iOS / Android fall back to static mode automatically.
-- **Windows guest state**: the guest DLL compiles its own copy of every header-inline variable, so framework state that host and app code share lives in the host behind non-inline functions ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)): MCP tools, events, timers, audio, recording, the main-thread queue, `setFps()` / `redraw()`, the clip / fov defaults, touch-as-mouse, the data path root, bitmap-font glyphs, the overlay (tcxImGui) queries, the debug counters behind `getNodeCount()` / `getTextureCount()` / `getFboCount()`, the current window context and the secondary windows' double-attach guard (so guest code sees the host's release when a window closes; a closed App is not attached again, so after that you attach a new App) all reach the host from a Windows guest too, and guest code sees the host's `WindowSettings::pixelPerfect` and sokol_gl budget. The GPU caches (FBO contexts and pipelines, IBL bake pipelines, font atlases and samplers) are the host's as well, so a reload reuses them instead of filling the host's sokol pools with a new set each time. What each module still keeps for itself is listed in `tools/header_state_allowlist.txt` with the reason it is harmless: warn-once flags and small derived caches (demangled type names). Addons' own header-inline state is the guest's by design.
+- **Windows guest state**: the guest DLL compiles its own copy of every header-inline variable, so framework state that host and app code share lives in the host behind non-inline functions ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)): MCP tools, events, timers, audio, recording, the main-thread queue, `setFps()` / `redraw()`, the clip / fov defaults, touch-as-mouse, the data path root, bitmap-font glyphs, the overlay (tcxImGui) queries, the debug counters behind `getNodeCount()` / `getTextureCount()` / `getFboCount()`, the current window context and the secondary windows' double-attach guard (so guest code sees the host's release when a window closes; a closed App is not attached again, so after that you attach a new App) all reach the host from a Windows guest too, and guest code sees the host's `WindowSettings::pixelPerfect` and sokol_gl budget. The GPU caches (FBO contexts and pipelines, IBL bake pipelines, font atlases and samplers) are the host's as well, so a reload reuses them instead of filling the host's sokol pools with a new set each time. What each module still keeps for itself is listed in `tools/header_state_allowlist.txt` with the reason it is harmless: small derived caches (demangled type names). Warn-once gates (`static OnceGate`) are per module too; after a reload a warning can show once more. Addons' own header-inline state is the guest's by design.
 - **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
 - **Build tool**: `trusscli build` handles hot reload state changes in one step. Raw `cmake --build` may require building twice when toggling `TC_HOT_RELOAD` on/off.
 - **Build errors**: If the code doesn't compile, the previous version keeps running. Fix the error and save again.

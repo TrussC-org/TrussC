@@ -33,6 +33,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <atomic>
 #include <chrono>
@@ -44,6 +45,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const string& name, bool ok, const string& detail = "") {
@@ -173,7 +176,9 @@ static string hooks(size_t n) { return to_string(n) + " hooks"; }
 
 // -----------------------------------------------------------------------------
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     // A wait that never ends would hang CI; fail loudly instead.
     thread([] {
         this_thread::sleep_for(chrono::seconds(60));
@@ -306,7 +311,7 @@ int main() {
             if (b.data[0] > kTag * 0.5f) ++earlyFirst; else ++earlyLater;
         });
         internal::setupNodeOnce(*app);
-        engine.waitForCallbackIdle();
+        engine.waitForAudioCallbacks();
         app->appFirst = 0;
         app->appLater = 0;
         earlyFirst = 0;
@@ -316,7 +321,7 @@ int main() {
         }, 2000);
         early.disconnect();
         app->tap.disconnect();
-        engine.waitForCallbackIdle();
+        engine.waitForAudioCallbacks();
         check("App's audioOut() runs before a default listener setup() subscribed",
               passes && app->appLater.load() == 0,
               to_string(app->appFirst.load()) + " passes with the App first, " +
@@ -352,12 +357,12 @@ int main() {
         }, internal::appAudioPriority);
         p.tagBuffer = true;
         internal::attachAppAudio(*app);
-        engine.waitForCallbackIdle();
+        engine.waitForAudioCallbacks();
         appFirst = 0;
         appLater = 0;
         const bool passes = waitFor([&] { return appFirst.load() + appLater.load() >= 10; }, 2000);
         after.disconnect();
-        engine.waitForCallbackIdle();
+        engine.waitForAudioCallbacks();
         check("attaching again adds no second hook",
               engine.audioOut.listenerCount() == outBase + 1 &&
               engine.audioIn.listenerCount() == inBase + 1,
