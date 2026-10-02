@@ -177,7 +177,7 @@ jobs:
 
       - name: Build & run core tests
         shell: bash
-        run: ./examples/build_all.py --core-tests-only --verbose
+        run: ./examples/build_all.py --core-tests-only --include-daily --verbose
 
       - name: Compiler cache stats
         if: always()
@@ -255,7 +255,7 @@ jobs:
       # web-only behaviour (#ifdef __EMSCRIPTEN__) is exercised once a day. They
       # must not touch the canvas / GPU; a non-zero exit fails the job.
       - name: Build and run core tests (Web, under node)
-        run: ./examples/build_all.py --web-only --core-tests-only --verbose
+        run: ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
 
       - name: Compiler cache stats
         if: always()
