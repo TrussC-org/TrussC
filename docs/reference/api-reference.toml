@@ -1986,9 +1986,9 @@ description.ko = "줌 감도를 설정"
 
 ["Environment"]
 keywords = ["ibl", "skybox", "hdr"]
-description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)"
-description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）"
-description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT)"
+description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "light-types"
 related = ["setEnvironment", "getEnvironment", "Light", "Material", "Fbo"]
 details = '''
@@ -4410,9 +4410,9 @@ description.ko = "전치 행렬을 얻음"
 ["Material"]
 keywords = ["pbr", "shader surface", "metallic", "roughness", "gltf"]
 of = ["ofMaterial"]
-description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
-description.ja = "PBR material（metallic-roughness、glTF 2.0互換）"
-description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환)"
+description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR material（metallic-roughness、glTF 2.0互換）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "material-types"
 related = ["setMaterial", "calculateLighting", "Light", "Mesh", "Environment"]
 
