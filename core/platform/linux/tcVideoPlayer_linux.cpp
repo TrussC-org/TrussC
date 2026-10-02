@@ -988,7 +988,7 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
                 internal::kReserveSamplesPerInputByte, samples.max_size()));
         }
     } catch (const std::exception&) {
-        outOfMemory = true;
+        // The reserve is only an estimate; a real shortage fails while growing.
     }
     auto appendConverted = [&](int nbIn) {
         int outN = av_rescale_rnd(
