@@ -3083,14 +3083,15 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
+related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
-description.en = "Load image from memory. `mipmaps=true` builds a mip chain."
-description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築"
-description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성"
+description.en = "Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`."
+description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築。メインスレッド専用。バックグラウンドでのデコードは `Pixels::loadFromMemory` で"
+description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로"
 
 ["Image::mirror"]
 description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
@@ -4316,9 +4317,10 @@ description.ko = "단위 행렬을 생성"
 related = ["Mat4"]
 
 ["Mat4::inverted"]
-description.en = "Get inverse matrix"
-description.ja = "逆行列を取得"
-description.ko = "역행렬을 얻음"
+description.en = "Get inverse matrix (identity when |det| < 1e-10, including valid tiny scales; use tryInvert for a relative check)"
+description.ja = "逆行列を取得 (|det| < 1e-10 なら単位行列。有効でも小さいスケールを含む。相対判定には tryInvert を使う)"
+description.ko = "역행렬을 얻음 (|det| < 1e-10이면 단위 행렬. 유효하지만 작은 스케일도 포함. 상대 판정에는 tryInvert 사용)"
+related = ["Mat4::tryInvert"]
 
 ["Mat4::lookAt"]
 keywords = ["view", "camera", "matrix", "eye target"]
@@ -4392,6 +4394,13 @@ description.en = "Create a translation matrix"
 description.ja = "平行移動行列を作成"
 description.ko = "이동 행렬을 생성"
 related = ["Mat4"]
+
+["Mat4::tryInvert"]
+keywords = ["inverse", "invert", "singular", "degenerate", "checked"]
+description.en = "Checked inverse: writes the inverse to out and returns true, or returns false (out unchanged) when the matrix is degenerate, e.g. an axis scaled to 0. The test is relative to the matrix scale, so small but valid scales still invert"
+description.ja = "チェック付き逆行列: 逆行列を out に書き込んで true を返す。行列が退化している場合 (例: ある軸のスケールが 0) は false を返し out は変更しない。判定は行列のスケールに対する相対値なので、小さくても有効なスケールは逆行列を求められる"
+description.ko = "검사 포함 역행렬: 역행렬을 out에 쓰고 true를 반환. 행렬이 퇴화된 경우(예: 한 축의 스케일이 0)에는 false를 반환하고 out은 변경하지 않음. 판정은 행렬 스케일에 대한 상대값이므로 작지만 유효한 스케일은 역행렬을 구할 수 있음"
+related = ["Mat4::inverted"]
 
 ["Mat4::transposed"]
 description.en = "Get transposed matrix"
@@ -6724,14 +6733,15 @@ description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
 related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
-description.en = "Load image from file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Safe to call from a worker thread."
-description.ja = "ファイルから画像を読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。ワーカースレッドから呼んでよい"
-description.ko = "파일에서 이미지를 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 워커 스레드에서 호출해도 됨"
+description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
+related = ["Image::load", "Texture::allocate"]
 
 ["Pixels::loadFromMemory"]
-description.en = "Load image from memory"
-description.ja = "メモリから画像を読み込む"
-description.ko = "메모리에서 이미지를 로드"
+description.en = "Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread."
+description.ja = "メモリ上の画像を CPU メモリにデコードする。GPU を使わないのでワーカースレッドで呼んでよい"
+description.ko = "메모리의 이미지를 CPU 메모리로 디코딩. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능"
 
 ["Pixels::loadHDR"]
 category = "graphics_pixels"
@@ -6772,9 +6782,9 @@ description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom �
 ["Pixels::save"]
 category = "graphics_pixels"
 keywords = ["write", "export", "file", "png", "store"]
-description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created; when it cannot be, an error is logged and false returned"
-description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。作れないときはエラーをログに出して false を返す"
-description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 만들 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it"
+description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。ファイルを開く前にメモリ上でエンコードするので、エンコードに失敗しても既存のファイルはそのまま残る。エンコードに失敗したとき、フォルダを作れないとき、ファイルのオープン・書き込み・close に失敗したときはエラーをログに出して false を返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する"
+description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 파일을 열기 전에 메모리에서 인코딩하므로 인코딩에 실패해도 기존 파일은 그대로 남는다. 인코딩에 실패하거나, 폴더를 만들 수 없거나, 파일 열기·쓰기·닫기에 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다"
 
 ["Pixels::setColor"]
 category = "graphics_pixels"
@@ -12351,9 +12361,9 @@ description.ko = "일시정지 또는 재개"
 ["VideoPlayerBase::setResyncThreshold"]
 category = "video"
 keywords = ["sync", "drift", "av sync", "lag"]
-description.en = "Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend."
-description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定。ズレがこの値を超えるとフレーム送りではなくシークで同期。0で無効。デフォルト: 0.5秒。主にLinux(FFmpeg)で有効"
-description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크하는 값을 설정. 드리프트가 이 값을 초과하면 프레임 추적 대신 시크로 동기화. 0이면 비활성. 기본값: 0.5초. 주로 Linux(FFmpeg)에서 유효"
+description.en = "Set the maximum video/audio drift before hard re-sync (video seeks to the audio position). Set to 0 or negative to disable hard re-sync. Default: 0.5s. Affects the Linux (FFmpeg) backend and tcxHap's HapPlayer. HapPlayer advances by wall-clock dt * speed and slews toward playing audio with a 0.25s time constant; slewing remains enabled when hard re-sync is disabled."
+description.ja = "映像/音声のズレが許容値を超えた場合にハードリシンクする閾値を設定（映像を音声位置へシーク）。0以下でハードリシンクを無効化。デフォルト: 0.5秒。Linux(FFmpeg)とtcxHapのHapPlayerで有効。HapPlayerは壁時計のdt * speedで進み、再生中の音声位置へ時定数0.25秒で徐々に補正する。ハードリシンクを無効にしても、この補正は続く"
+description.ko = "비디오/오디오 드리프트가 임계값을 초과하면 하드 리싱크(비디오를 오디오 위치로 시크)하는 값을 설정. 0 이하면 하드 리싱크를 비활성화. 기본값: 0.5초. Linux(FFmpeg)와 tcxHap의 HapPlayer에서 유효. HapPlayer는 벽시계 dt * speed로 진행하며 재생 중인 오디오 위치로 0.25초 시정수로 서서히 보정한다. 하드 리싱크를 비활성화해도 이 보정은 유지된다"
 related = ["VideoPlayerBase::getResyncThreshold"]
 
 ["VideoPlayerBase::setSpeed"]
@@ -13154,9 +13164,9 @@ related = ["drawSuperellipse", "appendArc", "beginShape"]
 ["appendToFile"]
 category = "file"
 keywords = ["write", "add", "concat"]
-description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
-description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
-description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails"
+description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないとき、ファイルを開けないとき、書き込みや close に失敗したときはエラーをログに出して false を返す"
+description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나, 파일을 열 수 없거나, 쓰기 또는 닫기에 실패하면 오류를 로그에 남기고 false 반환"
 related = ["saveTextFile"]
 
 ["applyWindow"]
@@ -14583,9 +14593,9 @@ related = ["setCurveTolerance"]
 category = "file"
 keywords = ["resource", "asset", "resolve"]
 of = ["ofToDataPath"]
-description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Safe to call from any thread."
-description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。どのスレッドから呼んでもよい"
-description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 어느 스레드에서 호출해도 됨"
+description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread."
+description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。データディレクトリの基準部分だけを字句的に正規化し、ファイル名の構成要素は保つ。どのスレッドから呼んでもよい"
+description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 데이터 디렉터리 기준 부분만 어휘적으로 정규화하고 파일 이름의 구성 요소는 유지. 어느 스레드에서 호출해도 됨"
 related = ["getDataPathRoot", "getAbsolutePath", "joinPath"]
 
 ["getDataPathRoot"]
@@ -16286,9 +16296,9 @@ platform_note.ja = "非同期のファイル保存。iOS は UIDocumentPickerVie
 ["saveJson"]
 category = "file"
 keywords = ["write", "store", "serialize"]
-description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). Returns true on success; on failure it logs an error and returns false."
-description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。成功時trueを返し、失敗時はエラーをログに出してfalseを返す"
-description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
+description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it."
+description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。ファイルを開く前にシリアライズするので、シリアライズに失敗しても既存のファイルはそのまま残る。バイナリモードで書く(どのプラットフォームでも改行はLF)。成功時trueを返し、シリアライズ・オープン・書き込み・closeのいずれかに失敗したときはエラーをログに出してfalseを返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する"
+description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 파일을 열기 전에 직렬화하므로 직렬화에 실패해도 기존 파일은 그대로 남는다. 바이너리 모드로 기록(모든 플랫폼에서 줄바꿈은 LF). 성공 시 true 반환, 직렬화·열기·쓰기·닫기 중 하나라도 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다"
 related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 
 ["saveScreenshot"]
@@ -16306,9 +16316,9 @@ platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추
 category = "file"
 keywords = ["write", "store"]
 of = ["ofBufferToFile"]
-description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
-description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
-description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it"
+description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないとき、ファイルを開けないとき、書き込みや close に失敗したときはエラーをログに出して false を返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する"
+description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나, 파일을 열 수 없거나, 쓰기 또는 닫기에 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다"
 related = ["loadTextFile", "appendToFile", "saveJson"]
 
 ["scale"]

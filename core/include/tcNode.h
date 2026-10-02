@@ -184,6 +184,7 @@ public:
         }
 
         child->parent_ = weak_from_this();
+        child->markGlobalMatrixDirty();   // global matrix now depends on this node
         children_.push_back(child);
 
         // If preserving global position, recalculate local coordinates relative to new parent
@@ -217,6 +218,7 @@ public:
         }
 
         child->parent_ = weak_from_this();
+        child->markGlobalMatrixDirty();   // global matrix now depends on this node
 
         // Clamp index and insert
         if (index >= children_.size()) {
@@ -247,6 +249,7 @@ public:
             // the local iterator before we use it.
             children_.erase(it);
             child->parent_.reset();
+            child->markGlobalMatrixDirty();   // no parent: global == local
             onChildRemoved(child);
         }
     }
@@ -261,6 +264,7 @@ public:
         children_.clear();   // moved-from vector is "valid but unspecified"
         for (auto& child : cleared) {
             child->parent_.reset();
+            child->markGlobalMatrixDirty();   // no parent: global == local
             onChildRemoved(child);
         }
     }
@@ -897,6 +901,7 @@ private:
             c->cleanupTree();
             onChildRemoved(c);
             c->parent_.reset();
+            c->markGlobalMatrixDirty();   // no parent: global == local
         }
     }
 
@@ -1234,8 +1239,11 @@ protected:
         // Effective camera context for this subtree (own stamp or inherited)
         auto [ctx, ray] = resolvePickRay(pick, inheritedCtx, globalRay);
 
-        // Calculate inverse matrix for this node
-        Mat4 localInverse = getLocalMatrix().inverted();
+        // Calculate inverse matrix for this node. A degenerate local matrix
+        // (an axis scaled to 0) has no area, so neither this node nor its
+        // subtree can be hit.
+        Mat4 localInverse;
+        if (!getLocalMatrix().tryInvert(localInverse)) return HitResult{};
         Mat4 globalInverse = localInverse * parentInverseMatrix;
 
         // Convert global ray to local ray
