@@ -10,9 +10,14 @@
 //
 //     if (img.load("photo.png")) { ... }        // still fine
 //
-// Rule: a loader that returns LoadResult also logs a missing file at Error
-// (same text as `message`), so callers that load optional files check
-// fs::exists() first.
+// Rule: a loader that returns LoadResult also logs a missing file at Error,
+// naming the path. Most use the same text as `message`; loadOgg() logs
+// "failed to open <path>" and Font logs "FontAtlasManager: not a regular
+// file: <path>". Callers that load optional files check for the file first, at
+// the path the loader opens: Image and VideoPlayer resolve a relative path
+// via getDataPath(), so check fs::exists(getDataPath(path)) there; Pixels
+// and SoundBuffer / Sound open the path as given. Font also accepts system
+// font names, so a file check does not cover it.
 //
 // Error taxonomy is deliberately coarse for now (v0.7): the enum can gain
 // values and messages can get richer without breaking anything. What CAN'T

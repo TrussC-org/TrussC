@@ -69,7 +69,8 @@
 //   audio backend" warning (that warning is for a fallback to it).
 // - A missing file fails with FileNotFound and logs one Error naming the
 //   path, for each loader that returns LoadResult and runs here: .wav, .ogg,
-//   a stream, .m4a (Linux) and Pixels::load() / loadHDR() (#359).
+//   a stream, .m4a and VideoPlayer::load() (Linux, macOS, Windows) and
+//   Pixels::load() / loadHDR() (#359).
 // =============================================================================
 
 #include <TrussC.h>
@@ -1154,11 +1155,18 @@ int main() {
                      [](const fs::path& p) { Sound s; return s.load(p); });
         checkMissing("Sound::loadStream()", missingDir / "e.wav",
                      [](const fs::path& p) { Sound s; return s.loadStream(p); });
-#if defined(__linux__) && !defined(__ANDROID__)
+        // loadAac() is per platform (Linux, macOS / iOS, Windows), and each
+        // implementation logs the missing file itself.
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__) || defined(_WIN32)
         checkMissing("SoundBuffer::loadAac()", missingDir / "f.m4a",
                      [](const fs::path& p) { SoundBuffer b; return b.loadAac(p); });
         checkMissing("Sound::load() of an .m4a", missingDir / "g.m4a",
                      [](const fs::path& p) { Sound s; return s.load(p); });
+        // VideoPlayer::load() classifies a missing file before it reaches the
+        // platform backend, so no window or decoder is needed. The path is
+        // absolute, so getDataPath() passes it through unchanged.
+        checkMissing("VideoPlayer::load()", missingDir / "j.mp4",
+                     [](const fs::path& p) { VideoPlayer v; return v.load(p); });
 #endif
         checkMissing("Pixels::load()", missingDir / "h.png",
                      [](const fs::path& p) { Pixels px; return px.load(p); });
