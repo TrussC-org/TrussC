@@ -86,24 +86,28 @@ Used by: TcvPlayer, HapPlayer (for AAC audio tracks)
 
 ## External Library Updates
 
-TrussC depends on several external libraries.
+TrussC depends on several external libraries. Which ones, and the version of each, are listed in one place: [LICENSE.md, "Third-Party Libraries"](LICENSE.md#third-party-libraries). This section keeps only the update policy.
 Image processing libraries are particularly prone to vulnerabilities, so **check for latest versions with each release**.
+
+- Every pull request runs `tools/check_dependencies.py` (CI job `header-state-check`): the list must match what the build fetches or vendors.
+- Every week, `.github/workflows/upstream-check.yml` comments on the tracking issue "Third-party updates available" when the set of libraries with a newer upstream release (or, for a commit, changed upstream files) changes. Nothing is bumped automatically.
 
 | Library | Purpose | Update Priority | Notes |
 |:--------|:--------|:----------------|:------|
 | **stb_image** | Image loading | **High** | Many CVEs, always use latest |
 | **stb_image_write** | Image writing | **High** | Same as above |
 | **stb_truetype** | Font rendering | **High** | Upstream explicitly states "NO SECURITY GUARANTEE — do not use on untrusted font files". See [docs/SECURITY.md](SECURITY.md). |
-| **mbedTLS** (tcxTls) | TLS for tcxTls / tcxWebSocket | **High** | Track the v3.6.x LTS branch for CVE fixes. Current: v3.6.7 (bumped v0.7.4). |
+| **mbedTLS** (tcxTls) | TLS for tcxTls / tcxWebSocket | **High** | Track the v3.6.x LTS branch for CVE fixes. |
 | pugixml | XML parsing | Medium | |
 | nlohmann/json | JSON parsing | Medium | |
 | sokol | Rendering backend | Medium | **TrussC has customizations (see below)** |
 | miniaudio | Audio | Medium | |
-| Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions. Current: v1.92.9b. **Patched** (value hook for the MCP tools) — update by 3-way merge, see [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) |
+| Dear ImGui | GUI (tcxImGui addon) | Low | Use stable versions. **Patched** (value hook for the MCP tools) — update by 3-way merge, see [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) |
 
 **Update Checklist:**
 - Check GitHub Release Notes / Security Advisories
 - For stb, check commit history at https://github.com/nothings/stb (no tags)
+- Update the library's row in [LICENSE.md](LICENSE.md#third-party-libraries) (and its provenance file, where the row links one) in the same pull request
 
 ### sokol Customizations
 
