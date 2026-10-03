@@ -1,8 +1,9 @@
 # tcxLua
 
-- Using Lua 5.4.8 sources now (NOTE: Lua 5.5 is currently not supported by Sol2)
-- Using [sol2](https://github.com/ThePhD/sol2) (v3.5.0).
-- LuaJIT v2.1 can be enabled with `-DUSE_LUAJIT=ON` in cmake (using [luajit-cmake](https://github.com/zhaozg/luajit-cmake), disabled by default).
+- Using Lua 5.4 sources (NOTE: Lua 5.5 is currently not supported by Sol2)
+- Using [sol2](https://github.com/ThePhD/sol2).
+- Versions of Lua, sol2, LuaJIT and luajit-cmake: [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries).
+- LuaJIT can be enabled with `-DUSE_LUAJIT=ON` in cmake (using [luajit-cmake](https://github.com/zhaozg/luajit-cmake), disabled by default).
 
 ## Binding coverage
 

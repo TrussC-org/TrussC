@@ -7,6 +7,8 @@
 #if defined(__linux__)
 
 #include <unistd.h>
+#include <pwd.h>
+#include <cstdlib>
 #include <linux/limits.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
@@ -132,6 +134,51 @@ fs::path getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The executable name names the app's folder.
+fs::path appFolderName() {
+    fs::path name = getExecutablePath().filename();
+    return name.empty() ? fs::path("TrussC") : name;
+}
+
+// An environment variable as a path, when set to an absolute path (the XDG
+// spec ignores relative values).
+fs::path absoluteEnvPath(const char* name) {
+    const char* value = std::getenv(name);
+    if (!value || !*value) return {};
+    fs::path p(value);
+    return p.is_absolute() ? p : fs::path();
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    fs::path base = absoluteEnvPath("XDG_DATA_HOME");
+    if (base.empty()) {
+        fs::path home = absoluteEnvPath("HOME");
+        if (home.empty()) {
+            if (const passwd* pw = getpwuid(getuid())) {
+                if (pw->pw_dir) home = pw->pw_dir;
+            }
+        }
+        if (home.empty()) return platformTempRoot();   // no home folder at all
+        base = home / ".local" / "share";
+    }
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    fs::path base = absoluteEnvPath("TMPDIR");
+    if (base.empty()) base = "/tmp";
+    return base / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // Screenshot Functions (OpenGL)
 // ---------------------------------------------------------------------------
 
@@ -187,9 +234,12 @@ bool captureWindow(Pixels& outPixels) {
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     // Use stb_image_write to save
     // Case-insensitive extension match on the resolved destination
@@ -198,7 +248,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
-    unsigned char* data = pixels.getData();
+    const unsigned char* data = pixels.getData();
 
     int result = 0;
     if (ext == "png") {

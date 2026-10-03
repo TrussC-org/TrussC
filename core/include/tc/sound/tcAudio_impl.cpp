@@ -577,8 +577,8 @@ struct StreamInstance {
     std::atomic<uint64_t> seekAppliedEpoch{0};
     std::atomic<uint64_t> seekAppliedSeq{0};      // pending while != seekRequestSeq
 
-    // Worker only.
-    uint64_t seekServedSeq = 0;   // last request the worker took
+    // Worker writes; atomic so test diagnostics can observe it safely.
+    std::atomic<uint64_t> seekServedSeq{0};   // last request the worker took
     // Under the worker's mutex: whether the worker has looked at this
     // stream, and the read position it saw then (its poll interval, #550).
     bool workerSeen = false;
@@ -594,7 +594,7 @@ struct StreamInstance {
     // worker starts the file over. Unlike endOfStream it is cleared when the
     // worker loops back, so a stream that looped after its end and then
     // stops looping is read on to its real end.
-    bool decoderAtEnd = false;
+    std::atomic<bool> decoderAtEnd{false};   // worker writes; test diagnostics read
 
     // Under the engine lock (internal::seekVoice()): a seek on this voice
     // was refused because the length is unknown, and that was logged.
@@ -932,7 +932,8 @@ private:
     // A seek request the worker can take now: a new one, and the mixer has
     // applied the previous seek (the published fields stay put until then).
     static bool seekTakeable(const StreamInstance& s) {
-        return s.seekRequestSeq.load(std::memory_order_acquire) != s.seekServedSeq
+        return s.seekRequestSeq.load(std::memory_order_acquire)
+                   != s.seekServedSeq.load(std::memory_order_relaxed)
             && s.seekAppliedEpoch.load(std::memory_order_acquire)
                    == s.seekEpoch.load(std::memory_order_relaxed);
     }
@@ -944,7 +945,8 @@ private:
                 == (int)internal::StreamFaultForTests::SeekRefillStalls) {
             return false;   // test: serve seeks, but hold back decoded frames
         }
-        return !s.decoderAtEnd || s.looping.load(std::memory_order_acquire);
+        return !s.decoderAtEnd.load(std::memory_order_relaxed)
+            || s.looping.load(std::memory_order_acquire);
     }
 
     // The wait predicate's test for one stream: a seek to take, or a ring
@@ -973,9 +975,9 @@ private:
             const double target =
                 s.clampSeekTarget(s.seekTargetFrame.load(std::memory_order_relaxed));
             const uint64_t frame = (uint64_t)target;
-            s.seekServedSeq = req;
+            s.seekServedSeq.store(req, std::memory_order_relaxed);
             s.halted.store(false, std::memory_order_relaxed);
-            s.decoderAtEnd = false;
+            s.decoderAtEnd.store(false, std::memory_order_relaxed);
             const ma_result sr = seekDecoder(s, frame);
             // Publish before writing any post-seek data (see the section
             // comment). endOfStream is reset before the epoch, so a mixer
@@ -1021,10 +1023,10 @@ private:
                         break;
                     }
                     atStart = true;
-                    s.decoderAtEnd = false;
+                    s.decoderAtEnd.store(false, std::memory_order_relaxed);
                     continue;
                 }
-                s.decoderAtEnd = true;
+                s.decoderAtEnd.store(true, std::memory_order_relaxed);
                 s.endOfStream.store(true, std::memory_order_release);
                 break;
             }
@@ -1578,6 +1580,23 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
 // Seek / position of a voice (Sound::setPosition() / getPosition())
 // ---------------------------------------------------------------------------
 namespace internal {
+
+StreamSeekStateForTests streamSeekStateForTests(const Sound& sound) {
+    StreamSeekStateForTests state;
+    AudioEngine& engine = AudioEngine::getInstance();
+    std::lock_guard<std::mutex> lock(engine.mutex_);
+    state.workerPasses = g_streamWorkerPasses.load(std::memory_order_relaxed);
+    if (!sound.playing_ || !sound.playing_->stream) return state;
+    const StreamInstance& s = *sound.playing_->stream;
+    state.hasStream = true;
+    state.request = s.seekRequestSeq.load(std::memory_order_acquire);
+    state.served = s.seekServedSeq.load(std::memory_order_relaxed);
+    state.published = s.seekPublishedSeq.load(std::memory_order_relaxed);
+    state.applied = s.seekAppliedSeq.load(std::memory_order_acquire);
+    state.endOfStream = s.endOfStream.load(std::memory_order_acquire);
+    state.decoderAtEnd = s.decoderAtEnd.load(std::memory_order_relaxed);
+    return state;
+}
 
 void seekVoice(PlayingSound& voice, double frame) {
     if (!(frame >= 0.0)) frame = 0.0;   // also NaN

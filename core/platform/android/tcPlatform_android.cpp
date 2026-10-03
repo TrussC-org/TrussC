@@ -225,6 +225,27 @@ fs::path getExecutableDir() {
     return fs::path("/data/local/tmp");
 }
 
+// User data / temp folders. internalDataPath is the app's internal files
+// folder (Context.getFilesDir()); the cache folder (Context.getCacheDir())
+// is its sibling "cache" in the same app data folder.
+fs::path internal::platformUserDataRoot() {
+    auto* activity = (ANativeActivity*)sapp_android_get_native_activity();
+    if (activity && activity->internalDataPath) {
+        return fs::path(activity->internalDataPath);
+    }
+    return fs::path("/data/local/tmp/files");
+}
+
+fs::path internal::platformTempRoot() {
+    fs::path files = platformUserDataRoot().lexically_normal();
+    if (files.filename().empty()) files = files.parent_path();   // trailing '/'
+    return files.parent_path() / "cache";
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot Functions (GLES3)
 // ---------------------------------------------------------------------------
@@ -259,9 +280,12 @@ bool captureWindow(Pixels& outPixels) {
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     // Case-insensitive extension match on the resolved destination
     std::string ext = toLower(getFileExtension(path));
@@ -269,7 +293,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
-    unsigned char* data = pixels.getData();
+    const unsigned char* data = pixels.getData();
 
     int result = 0;
     if (ext == "png") {
