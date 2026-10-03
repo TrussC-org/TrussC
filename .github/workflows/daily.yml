@@ -107,9 +107,6 @@ jobs:
         shell: bash
         run: |
           launcher="${{ matrix.launcher }}"
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            launcher="python3;$GITHUB_WORKSPACE/tools/time_compile.py;$launcher"
-          fi
           for lang in C CXX OBJC OBJCXX; do
             echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
           done
