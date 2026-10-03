@@ -622,6 +622,23 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `windowAppSwap/` — a secondary window's `setApp()` and `close()` are
+  requests that land at the window's next frame boundary (#315). Called from
+  the window's own App (`update()`, `keyPressed()`) or from its child
+  (`update()`, `onKeyPress()`), the window is unchanged until the tick or
+  event ends (`getApp()`, `App::getWindow()`, `isOpen()`), the App and its
+  children stay alive for the rest of it, and then the swap lands; a request
+  from outside a tick lands when the next tick starts. Two `setApp()` in one
+  frame: the last wins and the other App is never attached. `close()` with a
+  `setApp()` in the same frame: `close()` wins (the pending App is dropped
+  with a warning; a `setApp()` after `close()` is an error at the call). The
+  checks run again when a request is applied (the same App requested on two
+  windows lands on the first only), and the teardown detaches the App before
+  its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
+  closed window. The tick / event bracket is the glue's
+  `internal::WindowDispatchScope`; build with `-fsanitize=address` for the
+  memory side. Not covered: the native close (`sapp_window_request_close()`
+  landing through `close_cb` on X11 / Win32 / macOS), a manual check.
 - `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
   client that leaves (closes or resets) are joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200

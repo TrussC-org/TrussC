@@ -2419,6 +2419,11 @@ typedef struct sapp_window_desc {
 
 SOKOL_APP_API_DECL sapp_window sapp_create_window(const sapp_window_desc* desc);
 SOKOL_APP_API_DECL void sapp_destroy_window(sapp_window win);
+/* ask for the window to be closed, like a click on its close button: sets a
+   per-window flag that the backend handles where it handles quit_requested
+   (outside any tick / event of the window), which then calls close_cb.
+   Safe to call from the window's own tick_cb / event_cb. */
+SOKOL_APP_API_DECL void sapp_window_request_close(sapp_window win);
 SOKOL_APP_API_DECL bool sapp_window_valid(sapp_window win);
 
 /* geometry (valid whenever the window is alive) */
@@ -2565,6 +2570,7 @@ typedef struct _sapp_tc_window_t {
     double last_tick_time;              /* CADisplayLink timestamp */
     bool occluded;
     bool in_tick;
+    bool close_requested;               /* sapp_window_request_close(): closed after the main tick */
 } _sapp_tc_window_t;
 
 #define _SAPP_TC_MAX_WINDOWS (32)
@@ -3408,6 +3414,18 @@ static void _sapp_tc_main_tick(CADisplayLink* link) {
         w->in_tick = false;
         w->frame_drawable = nil;    /* presented by sg_commit; release our ref */
     }
+    /* sapp_window_request_close() lands here, after the main tick and
+       outside every window's tick: -close (not performClose:, which only
+       plays the alert sound on a borderless window) sends windowWillClose:,
+       which calls close_cb like a click on the close button. Re-fetch each
+       slot: a close destroys windows. */
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_window_t* cw = _sapp_tc.windows[i];
+        if (!cw || cw->is_main || !cw->close_requested) continue;
+        cw->close_requested = false;
+        NSWindow* nsw = cw->window;   /* strong: outlives the destroy in close_cb */
+        if (nsw) [nsw close];
+    }
     if (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) {
         [w->window performClose:nil];
     }
@@ -3657,6 +3675,12 @@ void sapp_destroy_window(sapp_window win) {
     w->msaa_tex = nil;
     w->frame_drawable = nil;
     delete w;
+}
+
+void sapp_window_request_close(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    w->close_requested = true;
 }
 
 bool sapp_window_valid(sapp_window win) {
@@ -5992,6 +6016,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -6108,6 +6133,7 @@ typedef struct _sapp_tc_window_t {
     bool occluded;
     bool iconified;
     bool in_tick;
+    bool close_requested;       /* sapp_window_request_close(): WM_CLOSE posted at the loop tail */
     bool mouse_tracked;         /* TrackMouseEvent enter/leave state */
     bool mouse_pos_valid;
     float mouse_x, mouse_y;     /* last position in event coordinates */
@@ -7504,6 +7530,15 @@ static void _sapp_tc_win32_run_loop(void) {
                 _sapp_tc_win32_tick(w, false);
             }
         }
+        /* sapp_window_request_close(): post WM_CLOSE to that window, so the
+           close lands through the same WM_CLOSE branch (close_cb) as a click
+           on its close button, outside every tick */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (!w || w->is_main || !w->close_requested) continue;
+            w->close_requested = false;
+            if (w->hwnd) PostMessageW(w->hwnd, WM_CLOSE, 0, 0);
+        }
         /* route programmatic quits through the same WM_CLOSE dance so the
            QUIT_REQUESTED semantics stay identical (upstream parity) */
         if (_sapp_tc.app.quit_requested && _sapp_tc.app.main) {
@@ -7577,6 +7612,12 @@ void sapp_destroy_window(sapp_window win) {
     w->desc.close_cb = 0;
     _sapp_tc_win32_destroy_window_resources(w);
     delete w;
+}
+
+void sapp_window_request_close(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    w->close_requested = true;
 }
 
 bool sapp_window_valid(sapp_window win) {
@@ -8142,6 +8183,7 @@ typedef struct _sapp_tc_window_t {
     bool iconified;             /* WM_STATE == IconicState */
     bool occluded;              /* VisibilityFullyObscured (secondary windows only) */
     bool in_tick;
+    bool close_requested;       /* sapp_window_request_close(): close_cb at the loop tail */
     bool mouse_pos_valid;
     float mouse_x, mouse_y;     /* last position in event coordinates (raw px) */
     float mouse_dx, mouse_dy;
@@ -10740,6 +10782,18 @@ static void _sapp_tc_x11_run_loop(void) {
             }
         }
         XFlush(_sapp_tc.display);
+        /* sapp_window_request_close() lands here, outside every tick and
+           event: the same close_cb a WM_DELETE_WINDOW sends (re-fetch each
+           slot: a close may destroy windows) */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (!w || w->is_main || !w->close_requested) continue;
+            w->close_requested = false;
+            if (w->desc.close_cb) {
+                sapp_window handle = { w->win_id };
+                w->desc.close_cb(handle, w->desc.user_data);
+            }
+        }
         /* the cancellable quit dance (upstream parity): WM_DELETE_WINDOW or
            sapp_request_quit() land here; sapp_quit() pre-sets quit_ordered */
         if (_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered) {
@@ -10862,6 +10916,12 @@ void sapp_destroy_window(sapp_window win) {
     if (!glXGetCurrentContext() && _sapp_tc.app.main && _sapp_tc.app.main->glx_win) {
         glXMakeCurrent(_sapp_tc.display, _sapp_tc.app.main->glx_win, _sapp_tc.ctx);
     }
+}
+
+void sapp_window_request_close(sapp_window win) {
+    _sapp_tc_window_t* w = _sapp_tc_lookup(win);
+    if (!w || w->is_main) return;   /* the main window: sapp_request_quit() */
+    w->close_requested = true;
 }
 
 bool sapp_window_valid(sapp_window win) {
@@ -15654,6 +15714,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -17759,6 +17820,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -20657,6 +20719,7 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     return w;
 }
 void sapp_destroy_window(sapp_window win) { _SOKOL_UNUSED(win); }
+void sapp_window_request_close(sapp_window win) { _SOKOL_UNUSED(win); }
 bool sapp_window_valid(sapp_window win) { _SOKOL_UNUSED(win); return false; }
 int sapp_window_width(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
 int sapp_window_height(sapp_window win) { _SOKOL_UNUSED(win); return 0; }
@@ -20693,6 +20756,7 @@ extern "C" {
 #endif
 sapp_window sapp_create_window(const sapp_window_desc* desc) { (void)desc; sapp_window w = {0}; return w; }
 void sapp_destroy_window(sapp_window win) { (void)win; }
+void sapp_window_request_close(sapp_window win) { (void)win; }
 bool sapp_window_valid(sapp_window win) { (void)win; return false; }
 int sapp_window_width(sapp_window win) { (void)win; return 0; }
 int sapp_window_height(sapp_window win) { (void)win; return 0; }

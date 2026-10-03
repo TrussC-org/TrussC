@@ -8,7 +8,7 @@
 //   tick_cb   -> WindowContext switch + per-window dt + update/draw the tree
 //   event_cb  -> CoreEvents + App hooks + Node-tree dispatch (same keycode
 //                semantics as the main window: key == SAPP_KEYCODE_*)
-//   close_cb  -> Window::close()
+//   close_cb  -> Window::teardown() (close button, or a close() request)
 // All rendering shares the one sokol_gfx context; each window gets its own
 // sokol_gl context (same pattern as Fbo). Mirror of platform/mac/tcWindowMac.mm.
 
@@ -55,6 +55,9 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 void windowTick(sapp_window swin, void* user) {
     Window* win = static_cast<Window*>(user);
     if (!win) return;
+    // Frame boundary: a setApp() requested before or during this tick is
+    // applied when the scope is entered and left, never inside the tick.
+    internal::WindowDispatchScope scope(*win);
     auto& ctx = win->context();
 
     const int fbw = sapp_window_framebuffer_width(swin);
@@ -275,14 +278,19 @@ void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
     auto& ctx = win->context();
     auto* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &ctx;
-    dispatchWindowEvent(ev, swin, win, ctx);
+    {
+        internal::WindowDispatchScope scope(*win);   // frame boundary, as in windowTick
+        dispatchWindowEvent(ev, swin, win, ctx);
+    }
     internal::currentWindowCtx() = prev;
 }
 
 void windowClosed(sapp_window swin, void* user) {
     (void)swin;
     Window* win = static_cast<Window*>(user);
-    if (win) win->close();   // tears down native + app state
+    // The backend's safe point (close button, or a close() request landing):
+    // never inside this window's tick or events.
+    if (win) trussc::internal::WindowRequestAccess::teardown(*win);   // native + app state
 }
 
 } // namespace
@@ -292,14 +300,24 @@ void windowClosed(sapp_window swin, void* user) {
 // ---------------------------------------------------------------------------
 namespace trussc {
 
-Window::~Window() { close(); }
+Window::~Window() { teardown(); }
 
+// A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
+// next safe point, outside this window's tick and events.
 void Window::close() {
+    auto* st = static_cast<AdapterState*>(native_);
+    if (!st || closeRequested_) return;
+    closeRequested_ = true;
+    sapp_window_request_close(st->win);
+}
+
+void Window::teardown() {
     // The window's exit() is an entry point (#349).
     internal::EntryStackGuard guard(internal::AppEntry::Exit);
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     native_ = nullptr;             // re-entrancy guard (close_cb)
+    closeRequested_ = false;
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
     sapp_destroy_window(st->win);
@@ -310,16 +328,7 @@ void Window::close() {
     // tcxImGui per-window manager) tear down here, while this window's
     // CoreEvents is still alive.
     events_.exit.notify();
-    if (app_) {
-        app_->exit();
-        app_->cleanup();
-        // Audio keeps running for the other windows: detach this App's audio
-        // hooks and wait for a callback in flight before the App goes (#256).
-        internal::detachAppAudio(*app_);
-        internal::attachedApps().erase(app_.get());
-        app_.reset();
-        ctx_.rootNode.reset();
-    }
+    endApp();
 }
 
 void Window::setTitle(const std::string& title) {

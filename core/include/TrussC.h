@@ -345,6 +345,11 @@ namespace internal {
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
+    // Closes the secondary windows whose close() request is still pending
+    // (defined in tc/app/tcWindow.h). The app shutdown calls it after the
+    // main App's exit(): the run loop has ended, so no backend safe point
+    // follows.
+    void closeRequestedWindowsAtShutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -3077,6 +3082,9 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         if (app) {
             events().exit.notify();
             app->exit();
+            // close() requests made so far (e.g. from exit()) land here,
+            // before the main App's cleanup().
+            internal::closeRequestedWindowsAtShutdown();
             app->cleanup();
             // The audio device is still running (it stops in _cleanup_cb, so
             // exit() can use audio): detach the App's audio hooks and wait
