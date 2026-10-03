@@ -239,7 +239,7 @@ void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
-    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
+    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
         .arg<bool>("devices", "Enumerate playback / capture devices (default true)", false)
         .bind([](const json& args) -> json {
             bool enumerate = true;
@@ -257,12 +257,15 @@ void registerInspectionTools() {
                                   {"position", v.position}, {"duration", v.duration},
                                   {"volume", v.volume}, {"pan", v.pan}, {"speed", v.speed},
                                   {"loop", v.loop}, {"paused", v.paused},
-                                  {"level", v.level}});
+                                  {"level", st.stalled ? 0.0f : v.level}});
             }
 
             auto& mic = trussc::getMicInput();
             json r{{"status", "ok"},
                    {"running", engine.isInitialized()},
+                   {"stalled", st.stalled},
+                   {"underrunFrames", st.underrunFrames},
+                   {"voicesStoppedByReinit", st.voicesStoppedByReinit},
                    {"output", {{"device", dev.outputDevice},
                                {"default", dev.outputIsDefault},
                                {"backend", dev.backend},
