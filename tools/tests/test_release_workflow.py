@@ -27,6 +27,14 @@ def step(job, name):
     return next(s for s in WORKFLOW['jobs'][job]['steps'] if s.get('name') == name)
 
 
+def cmake_script_writer(variable):
+    """Exercise the production writer without configuring/building TrussC."""
+    source = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+    start = source.index(f'file(WRITE "${{{variable}}}"')
+    end = source.index('\n")', start) + len('\n")')
+    return source[start:end]
+
+
 class ReleaseWorkflowTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -63,7 +71,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                               text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     def ok(self, result):
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + (result.stderr or ''))
 
     def test_workflow_shell_syntax_and_contract(self):
         for job_name, job in WORKFLOW['jobs'].items():
@@ -145,6 +153,86 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 self.ok(self.run_step(job, 'Reject hot reload'))
             state.unlink()
             self.assertNotEqual(self.run_step(job, 'Reject hot reload').returncode, 0)
+
+    def test_generated_hot_reload_check_with_backslash_paths(self):
+        src = self.project / 'src/nested'
+        src.mkdir(parents=True)
+        source = src / 'app.cpp'
+        source.write_text('TC_HOT_RELOAD(App)\n')
+        cmakelists = self.project / 'CMakeLists.txt'
+        cmakelists.touch()
+        state = self.project / '.tc_hot_reload_state'
+        generated = self.root / '_tc_check_hot_reload.cmake'
+        generator = self.root / 'generate.cmake'
+        native = lambda path: str(path).replace('/', '\\')
+        writer = cmake_script_writer('_TC_HR_CHECK_SCRIPT')
+        # Apply modern CMake policies even on older Linux installations.
+        driver = self.root / 'run-check.cmake'
+        driver.write_text(f'cmake_minimum_required(VERSION 3.20)\ninclude([==[{generated}]==])\n')
+        check_command = ['cmake', '-P', str(driver)]
+        for explicit in [False, True]:
+            with self.subTest(explicit=explicit):
+                values = {
+                    '_TC_HR_CHECK_SCRIPT': str(generated),
+                    '_TC_HR_STATE_FILE': str(state),
+                    '_TC_HR_SRC_DIR': str(self.project / 'src'),
+                    '_TC_HR_CMAKELISTS': str(cmakelists),
+                    '_TC_HR_PLATFORM_SUPPORTED': 'TRUE',
+                    '_TC_HR_EXPLICIT_SOURCES': str(source) if explicit else '',
+                    'TRUSSC_DIR': native(ROOT / 'core'),
+                }
+                generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
+                    f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer)
+                self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True))
+                source.write_text('TC_HOT_RELOAD(App)\n')
+                state.write_text('ON')
+                self.ok(subprocess.run(check_command, text=True, capture_output=True))
+                source.write_text('int x;\n')
+                result = subprocess.run(check_command, text=True, stderr=subprocess.STDOUT,
+                                        stdout=subprocess.PIPE)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('hot reload state changed', result.stdout)
+                state.write_text('OFF')
+                self.ok(subprocess.run(check_command, text=True, capture_output=True))
+
+        # Drive paths from the failing runner must also survive the CMake parser.
+        scanner = self.root / 'D:/a/TrussC/TrussC/TrussC/core/cmake/tc_hot_reload_scan.cmake'
+        scanner.parent.mkdir(parents=True)
+        shutil.copy2(ROOT / 'core/cmake/tc_hot_reload_scan.cmake', scanner)
+        values.update(_TC_HR_PLATFORM_SUPPORTED='FALSE',
+                      TRUSSC_DIR=r'D:\a\TrussC\TrussC/TrussC/core',
+                      _TC_HR_SRC_DIR=r'D:\a\TrussC\TrussC\src',
+                      _TC_HR_CMAKELISTS=r'D:\a\TrussC\TrussC\CMakeLists.txt',
+                      _TC_HR_EXPLICIT_SOURCES=r'D:\a\app with spaces\one.cpp;D:\a\app\two.cpp')
+        generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
+            f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer)
+        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True))
+        with generated.open('a') as out:
+            for key, value in [('SRC_DIR', values['_TC_HR_SRC_DIR']),
+                               ('CMAKELISTS', values['_TC_HR_CMAKELISTS']),
+                               ('EXPLICIT_SOURCES', values['_TC_HR_EXPLICIT_SOURCES'])]:
+                out.write(f'\nif(NOT "${{{key}}}" STREQUAL [==[{value}]==])\n'
+                          f'    message(FATAL_ERROR "{key} changed during parsing")\nendif()\n')
+        self.ok(subprocess.run(check_command, cwd=self.root, text=True, capture_output=True))
+
+    def test_generated_windows_exports_uses_runtime_paths(self):
+        # The other generated CMake script takes paths through -D at execution,
+        # rather than baking them into quoted source. Guard that distinction.
+        generated = self.root / '_tc_gen_exports.cmake'
+        generator = self.root / 'generate-exports.cmake'
+        generator.write_text(f'set(_TC_DEF_SCRIPT [==[{generated}]==])\n' +
+                             cmake_script_writer('_TC_DEF_SCRIPT'))
+        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True))
+        library = r'D:\a\app with spaces\TrussC.lib'
+        self.mock('dumpbin', "import os, sys\n"
+                            "assert sys.argv[1:] == ['/LINKERMEMBER:1', os.environ['LIBRARY_PATH']]\n"
+                            "print('  000001 ?fixture@@YAXXZ')\n")
+        exports = self.project / 'exports.def'
+        result = subprocess.run(['cmake', f'-DLIB_FILE={library}', f'-DDEF_FILE={exports}',
+                                 f'-DDUMPBIN={self.commands / "dumpbin"}', '-P', str(generated)],
+                                env=dict(self.env, LIBRARY_PATH=library), text=True, capture_output=True)
+        self.ok(result)
+        self.assertEqual(exports.read_text(), 'EXPORTS\n    ?fixture@@YAXXZ\n')
 
     def test_windows_archive_layout_and_separate_symbols(self):
         self.mock('7z', "import pathlib, sys, zipfile\n"
@@ -249,6 +337,42 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         expected = plistlib.loads(custom.read_bytes() if replacement else (ROOT / 'core/resources/macos.entitlements').read_bytes())
                         self.assertEqual(plistlib.loads(entitlements.read_bytes()), expected)
                 log.unlink()
+
+    def test_mac_entitlements_xml_output_and_failures(self):
+        self.mock('plutil', "print('14.0')\n")
+        self.mock('xcrun', "print('    minos 14.0')\n")
+        self.mock('lipo', "print('arm64')\n")
+        self.mock('codesign', "import os, sys\nfrom pathlib import Path\n"
+                             "assert '--xml' in sys.argv\n"
+                             "sys.stderr.write('Executable=Fixture.app/Contents/MacOS/Fixture\\n')\n"
+                             "sys.stdout.buffer.write(Path(os.environ['CODESIGN_OUTPUT']).read_bytes())\n"
+                             "sys.exit(int(os.environ.get('CODESIGN_EXIT', '0')))\n")
+        # Data staging has its own coverage; this test isolates entitlements.
+        shutil.rmtree(self.data)
+        output = self.root / 'codesign-output'
+        env = dict(APP_PATH='Fixture.app', APP_NAME='Fixture', SIGN_IDENTITY='-',
+                   ENTITLEMENTS_INPUT='', CODESIGN_OUTPUT=str(output))
+        entitlements = {'com.apple.security.device.camera': True,
+                        'com.apple.security.device.audio-input': True}
+        xml = plistlib.dumps(entitlements)
+        for payload in [xml, b'Executable=Fixture.app\n' + xml,
+                        b'Fixture.app: warning: diagnostic\n' + xml + b'\ntrailing diagnostic\n']:
+            with self.subTest(payload=payload):
+                output.write_bytes(payload)
+                self.ok(self.run_step('macos', 'Verify macOS bundle', **env))
+        for invalid in [{}, {'com.apple.security.device.camera': True},
+                        {'com.apple.security.device.audio-input': True},
+                        dict(entitlements, **{'com.apple.security.device.camera': False}),
+                        dict(entitlements, **{'com.apple.security.device.audio-input': False})]:
+            with self.subTest(entitlements=invalid):
+                output.write_bytes(plistlib.dumps(invalid))
+                self.assertNotEqual(self.run_step('macos', 'Verify macOS bundle', **env).returncode, 0)
+        for payload in [b'', b'not an XML plist', b'<plist><dict>', b'<plist>invalid</plist>']:
+            with self.subTest(payload=payload):
+                output.write_bytes(payload)
+                self.assertNotEqual(self.run_step('macos', 'Verify macOS bundle', **env).returncode, 0)
+        output.write_bytes(xml)
+        self.assertNotEqual(self.run_step('macos', 'Verify macOS bundle', **env, CODESIGN_EXIT='1').returncode, 0)
 
     @unittest.skipUnless(os.environ.get('RELEASE_TEST_EXECUTABLE'), 'set RELEASE_TEST_EXECUTABLE for real ELF packaging')
     def test_linux_real_elf_archive_and_symbols(self):

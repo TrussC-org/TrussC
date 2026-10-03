@@ -294,11 +294,17 @@ jobs:
           xcrun vtool -show-build "$APP_PATH/Contents/MacOS/$APP_NAME" | grep -Eq 'minos +14\.0$'
           test "$(lipo -archs "$APP_PATH/Contents/MacOS/$APP_NAME")" = arm64
           if [ -n "$SIGN_IDENTITY" ] && [ -z "$ENTITLEMENTS_INPUT" ]; then
-            codesign -d --entitlements - "$APP_PATH" > "$RUNNER_TEMP/signed.entitlements"
+            codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/signed.entitlements"
             python3 - "$RUNNER_TEMP/signed.entitlements" <<'PYTHON'
           import plistlib, sys
           with open(sys.argv[1], 'rb') as source:
-              entitlements = plistlib.load(source)
+              output = source.read()
+          # codesign can prefix the XML with diagnostics. Parse only the plist.
+          start = output.find(b'<plist')
+          end = output.find(b'</plist>', start)
+          if start < 0 or end < 0:
+              raise ValueError('codesign did not return an XML entitlements plist')
+          entitlements = plistlib.loads(output[start:end + len(b'</plist>')])
           assert entitlements['com.apple.security.device.camera'] is True
           assert entitlements['com.apple.security.device.audio-input'] is True
           PYTHON
