@@ -1153,7 +1153,10 @@ static void clockTests() {
     }
 }
 
+int runVideoTests();
+
 int main() {
+    g_fail += runVideoTests();
     const fs::path data = fs::path(getDataPath(""));
     printf("data: %s\n", data.string().c_str());
 

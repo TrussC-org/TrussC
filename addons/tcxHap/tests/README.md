@@ -1,5 +1,16 @@
 # tcxHap tests
 
+Video regressions (#283) check BC1, BC3 (Hap Alpha and HAP-Q), and BC7
+decoding at 6x5, 6x8, 8x5, 8x8, and 1x1. Hand-built blocks have known pixel
+values; both a 64-byte guard region and an exact-sized allocation are checked.
+Run these tests under AddressSanitizer with the BC decoder implementation
+instrumented as well.
+
+HAP-Q draw setup checks transformed quad corners, UVs, tint and alpha,
+column-major MVP uniforms, an Fbo-sized projection, and a perspective camera.
+These are headless setup checks; real HAP-Q playback in a Node, an Fbo, and a
+3D camera still needs a manual check on each platform.
+
 Headless console test (no window, no GPU, no audio device). Checks that PCM
 audio in HAP movies decodes in the right byte order (#419): each movie is
 parsed with `MovParser` and decoded with `loadPcmTrack()`, the path
