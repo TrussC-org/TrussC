@@ -25,7 +25,7 @@ json analyze(const json& source,const json& ops,json save=nullptr) {
     return call("tc_analyze_image",{{"source",source},{"ops",ops},{"save",save}});
 }
 json op(const char* name) {return {{"op",name}};}
-bool near(double a,double b) {return abs(a-b)<1e-6;}
+bool approxEq(double a,double b) {return abs(a-b)<1e-6;}
 json named(const json& list,const char* key,const char* name) {
     for(const auto& e:list.at(key)) if(e.at("name")==name) return e;
     return nullptr;
@@ -56,7 +56,7 @@ void headlessChecks() {
     r=analyze(source,json::array({{{"op","count"},{"min",{0.9,0,0}},{"max",{1,0.1,0.1}}}}));
     const auto count=r["results"][0];
     check("count bbox and centroid",count["count"]==3&&count["bbox"]==json::array({1,0,2,2})&&
-        near(count["centroid"][0],4.0/3)&&near(count["centroid"][1],1.0/3));
+        approxEq(count["centroid"][0],4.0/3)&&approxEq(count["centroid"][1],1.0/3));
     r=analyze(source,json::array({{{"op","count"},{"color",{1,0,0}},{"tolerance",0.0},{"rect",{0,0,4,1}}}}));
     check("count color+tolerance honors rect",r["results"][0]["count"]==2&&r["results"][0]["centroid"]==json::array({1.5,0}));
     r=analyze(source,json::array({{{"op","count"},{"color",{0,1,0}},{"tolerance",0.0}}}));
@@ -64,7 +64,7 @@ void headlessChecks() {
     r=analyze(source,json::array({{{"op","histogram"},{"bins",2},{"rect",{0,0,4,1}}}}));
     check("per-channel histogram with rect",r["results"][0]["histogram"]==json::array({json::array({2,2}),json::array({4,0}),json::array({2,2}),json::array({0,4})}));
     r=analyze(source,json::array({op("stats")}));
-    check("stats mean/min/max",near(r["results"][0]["mean"][0],0.25)&&near(r["results"][0]["mean"][2],0.75)&&
+    check("stats mean/min/max",approxEq(r["results"][0]["mean"][0],0.25)&&approxEq(r["results"][0]["mean"][2],0.75)&&
         r["results"][0]["min"]==json::array({0,0,0,1})&&r["results"][0]["max"]==json::array({1,0,1,1}));
     r=analyze(source,json::array({{{"op","grid"},{"cols",2},{"rows",1},{"rect",{0,0,4,1}}}}));
     check("grid averages cells in rect",r["results"][0]["colors"]==json::array({json::array({json::array({0.5,0,0.5,1}),json::array({0.5,0,0.5,1})})}));
@@ -73,7 +73,7 @@ void headlessChecks() {
     r=analyze(source,json::array({op("stats")}),"nested/画像.unknown");
     check("save creates parents and screenshot extension fallback",filesystem::exists(dir/"nested/画像.unknown.png"));
     r=analyze({{"path","nested/画像.unknown.png"}},json::array({op("stats")}));
-    check("saved path source round trip",near(r["results"][0]["mean"][0],0.25));
+    check("saved path source round trip",approxEq(r["results"][0]["mean"][0],0.25));
     p.setColor(3,2,Color(1,1,1,1));
     r=analyze(source,json::array({{{"op","diff"},{"path","nested/画像.unknown.png"},{"threshold",0.02},{"save","diff/output"}}}));
     check("diff count/bbox/max difference",r["results"][0]["count"]==1&&r["results"][0]["bbox"]==json::array({3,2,1,1})&&r["results"][0]["maxDifference"]==1);
@@ -123,7 +123,7 @@ void headlessChecks() {
     gray.setDebugName("gray");gray.getPixels().allocate(1,1,2);
     gray.getPixels().getData()[0]=128;gray.getPixels().getData()[1]=64;
     r=analyze({{"image","gray"}},json::array({{{"op","pixel"},{"x",0},{"y",0}}}));
-    check("gray+alpha preserves alpha and linear metadata",r["colorSpace"]=="linear"&&near(r["results"][0]["color"][3],64.0/255));
+    check("gray+alpha preserves alpha and linear metadata",r["colorSpace"]=="linear"&&approxEq(r["results"][0]["color"][3],64.0/255));
     r=analyze({{"image","hdr"}},json::array({{{"op","count"},{"min",{2,-1,0}},{"max",{3,0,1}}}}));
     check("float count matches unclamped values",r["results"][0]["count"]==1&&r["results"][0]["bbox"]==json::array({0,0,1,1}));
     r=analyze({{"image","known"}},json::array({{{"op","line"},{"x0",3},{"y0",2},{"x1",1},{"y1",0}}}));
@@ -146,7 +146,7 @@ public:
             auto first=decode(pending_[0]()());
             check("named Fbo captures final pass after frame",first["results"][0]["color"]==json::array({0,1,0,1}));
             auto second=decode(pending_[1]()());
-            check("float Fbo preserves HDR values",second["format"]=="float"&&near(second["results"][0]["color"][0],2.5));
+            check("float Fbo preserves HDR values",second["format"]=="float"&&approxEq(second["results"][0]["color"][0],2.5));
             auto dead=decode(pending_[2]()());check("destroyed deferred source returns error",dead["status"]=="error");
             auto win=decode(pending_[3]()());check("window source captures completed frame",win["width"]==32&&win["height"]==32&&win["results"][0]["color"]==json::array({1,0,0,1}));
             auto changed=decode(pending_[4]()());
