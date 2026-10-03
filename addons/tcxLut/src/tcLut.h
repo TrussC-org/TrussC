@@ -11,7 +11,7 @@
 //
 // Usage example:
 //   tcx::lut::Lut3D lut;
-//   lut.load("data/luts/cinematic.cube");
+//   lut.load("luts/cinematic.cube");   // relative: bin/data/luts/ (getDataPath)
 //
 //   // In shader, sample using: texture(lut3D, color.rgb)
 //
@@ -64,18 +64,20 @@ public:
     // Loading
     // =========================================================================
 
-    // Load from .cube file
-    bool load(const fs::path& path) {
+    // Load from .cube file. Relative paths resolve via getDataPath, like
+    // Image::load.
+    bool load(const fs::path& filePath) {
+        const fs::path path = getDataPath(filePath);   // absolute paths pass through
         std::ifstream file(path);
         if (!file) {
-            logError() << "Lut3D: failed to open " << path.string();
+            logError() << "Lut3D: failed to open " << path;
             return false;
         }
 
         std::string line;
         int size = 0;
         std::vector<float> data;
-        title_ = path.stem().string();
+        title_ = pathToUtf8(path.stem());
 
         // Parse .cube file
         while (std::getline(file, line)) {
@@ -525,7 +527,7 @@ inline void generatePastel(float* data, int size) {
 inline bool saveCube(const fs::path& path, const float* data, int size, const std::string& title = "") {
     std::ofstream file(path);
     if (!file) {
-        logError() << "lut::saveCube: failed to open " << path.string();
+        logError() << "lut::saveCube: failed to open " << path;
         return false;
     }
 

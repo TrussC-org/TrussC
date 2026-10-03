@@ -104,7 +104,7 @@ void windowTick(sapp_window swin, void* user) {
         cdesc.color_format = SG_PIXELFORMAT_BGRA8;
         cdesc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         cdesc.sample_count = sapp_window_sample_count(swin);
-        ctx.swapchainTarget.context = sgl_make_context(&cdesc);
+        ctx.swapchainTarget.makeContext(cdesc, "a window");
     }
     sgl_set_context(ctx.swapchainTarget.context);
     sgl_defaults();
@@ -302,11 +302,8 @@ void Window::close() {
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
     sapp_destroy_window(st->win);
-    if (ctx_.swapchainTarget.context.id != SG_INVALID_ID) {
-        sgl_destroy_context(ctx_.swapchainTarget.context);
-        ctx_.swapchainTarget.context.id = SG_INVALID_ID;
-        ctx_.swapchainTarget.cache.clear();
-    }
+    // Frees this window's sgl pipelines and its sgl context (#317).
+    ctx_.swapchainTarget.release();
     delete st;
     // The window's own exit event: per-window resource holders (e.g. the
     // tcxImGui per-window manager) tear down here, while this window's

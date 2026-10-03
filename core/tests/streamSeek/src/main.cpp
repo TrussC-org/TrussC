@@ -1,5 +1,5 @@
 // =============================================================================
-// core/tests/streamSeek — behavioral regression test for #280: seeking a
+// core/tests/streamSeek — behavioral regression test for #280 and #448: seeking a
 // streamed Sound moves the audio, and a stream that cannot be read ends
 // instead of spinning the StreamWorker thread.
 //
@@ -36,9 +36,8 @@
 //   refilling the other streams.
 // - A decoder read error, a failed loop seek and a failed seek request each
 //   end the stream with one error log (a test hook makes the decoder fail).
-//   A non-looping voice then ends; a looping one stays playing but silent
-//   (what isPlaying() should say then is #448), and setPosition() makes it
-//   play again.
+//   Both looping and non-looping voices end. There is no automatic retry;
+//   the app can reload and play again after isPlaying() becomes false.
 // - The frames a failing read still returned are played before the voice
 //   ends.
 // - An MP3 stream's decoder gets a seek table (one point per second, at
@@ -649,13 +648,14 @@ TC_CORE_TEST_MAIN() {
               waitFor([&] { return countLogs(LogLevel::Error, "no frames to read") == before + 1; },
                       1000),
               lastLog(LogLevel::Error));
-        sleepMs(1000);   // longer than the other stream's ring holds
-        check("the other stream is still refilled (level 0.5 a second later)", waitLevel(0.5f),
+        check("the emptied looping voice stops",
+              waitFor([&] { return !vanish.isPlaying(); }, 1000));
+        // Advance beyond the other stream's ring capacity, so a stuck
+        // worker cannot pass by playing only already buffered frames.
+        check("the other stream is still refilled beyond its initial ring",
+              waitFor([&] { return bgm.getPosition() > 1.0f; }, 2000) && waitLevel(0.5f),
               to_string(g_level.load()));
-        // A looping voice whose stream halted plays on silently; what
-        // isPlaying() should say then is #448 (undecided), so this pins the
-        // current behaviour.
-        check("the emptied looping voice stays playing, silent (#448)", vanish.isPlaying());
+        check("the emptied looping voice stays stopped", !vanish.isPlaying());
         check("the error is logged once",
               countLogs(LogLevel::Error, "no frames to read") == before + 1);
         vanish.stop();
@@ -677,12 +677,17 @@ TC_CORE_TEST_MAIN() {
         check("the read error is logged once",
               countLogs(LogLevel::Error, "decoder read failed") == 1);
         check("after a read error the voice falls silent", silent, to_string(g_level.load()));
-        // #448: see the emptied stream above.
-        check("after a read error the looping voice stays playing, silent (#448)", c.isPlaying());
+        check("after a read error the looping voice stops",
+              waitFor([&] { return !c.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        c.setPosition(2.0f);
-        check("after a read error setPosition() makes it play again (level 0.5)",
-              waitLevel(0.5f), to_string(g_level.load()));
+        const uint64_t stoppedAt = g_blocks.load();
+        check("audio callbacks continue after the fault is cleared",
+              waitFor([&] { return g_blocks.load() > stoppedAt + 4; }, 1000));
+        check("clearing the read fault does not retry or log again",
+              !c.isPlaying() && engine.getPlayingSounds().empty() &&
+              countLogs(LogLevel::Error, "decoder read failed") == 1);
+        check("the app can reload and play after the read error",
+              (bool)c.loadStream(bgmWav) && c.play() && waitLevel(0.5f), to_string(g_level.load()));
         c.stop();
 
         Sound after;
@@ -708,25 +713,25 @@ TC_CORE_TEST_MAIN() {
         check("the failed loop seek is logged once",
               countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1);
         check("after a failed loop seek the voice falls silent", silent, to_string(g_level.load()));
-        // #448: see the emptied stream above.
-        check("after a failed loop seek the looping voice stays playing, silent (#448)",
-              e.isPlaying());
+        check("after a failed loop seek the looping voice stops",
+              waitFor([&] { return !e.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        e.setPosition(0.0f);
-        check("after a failed loop seek setPosition() makes it play again (level 0.1)",
-              waitLevel(0.1f), to_string(g_level.load()));
+        check("the app can reload and play after the failed loop seek",
+              (bool)e.loadStream(shortWav) && e.play() && waitLevel(0.1f), to_string(g_level.load()));
         e.stop();
     }
 
     // --- failed seek request -----------------------------------------------------
-    {
+    for (bool loop : {false, true}) {
         Sound f;
+        const size_t logged = countLogs(LogLevel::Error, "seek to frame");
+        f.setLoop(loop);
         check("a stream plays", (bool)f.loadStream(dcWav) && f.play() && waitLevel(0.1f),
               to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
         f.setPosition(2.0f);
         check("a failed seek request ends the stream with an error log",
-              waitFor([] { return countLogs(LogLevel::Error, "seek to frame") == 1; }, 1000),
+              waitFor([&] { return countLogs(LogLevel::Error, "seek to frame") == logged + 1; }, 1000),
               lastLog(LogLevel::Error));
         check("after a failed seek the voice ends", waitFor([&] { return !f.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
@@ -739,9 +744,10 @@ TC_CORE_TEST_MAIN() {
     // stream ends: a mixer that saw the end first would end the voice
     // without them. The log listener holds the worker for 100 ms where it
     // logs the error, so that order is observable every time.
-    {
+    for (bool loop : {false, true}) {
         Sound w;
-        check("read error with frames: a non-looping stream at level 0.5 plays",
+        w.setLoop(loop);
+        check("read error with frames: a stream at level 0.5 plays",
               (bool)w.loadStream(bgmWav) && w.play() && waitLevel(0.5f), to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
         // The ring (~340 ms) drains: the mixer underruns.
@@ -1039,13 +1045,16 @@ TC_CORE_TEST_MAIN() {
         const auto t0 = chrono::steady_clock::now();
         const float before = a.getPosition();
         const size_t warned = countLogs(LogLevel::Warning, "stream playback migration failed");
+        const auto statsBefore = engine.getStats();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
         const bool restarted = reinitAt(otherRate());
         const float elapsedSec = chrono::duration<float>(chrono::steady_clock::now() - t0).count();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("reopen fails: the engine restarts", restarted);
         check("reopen fails: both voices end with a warning",
-              !a.isPlaying() &&
+              !a.isPlaying() && !b.isPlaying() &&
+              engine.getStats().voicesStoppedByReinit == statsBefore.voicesStoppedByReinit + 2 &&
+              engine.getStats().droppedPlays == statsBefore.droppedPlays &&
               countLogs(LogLevel::Warning, "stream playback migration failed") == warned + 2,
               lastLog(LogLevel::Warning));
         const float after = a.getPosition();

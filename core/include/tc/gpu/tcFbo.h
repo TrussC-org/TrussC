@@ -31,6 +31,7 @@ struct FboSharedResources {
 
 // Mip-downsample resources shared per color format (see Fbo::ensureSharedMip).
 struct FboSharedMipResources {
+    bool ready = false;   // both shaders usable (internalShaderReady)
     sg_shader shader = {};
     sg_pipeline pipeline = {};
     sg_shader blitShader = {};
@@ -41,8 +42,8 @@ struct FboSharedMipResources {
 };
 
 // Both caches are one per process, defined in tcGlobal.cpp. Nothing ever
-// destroys the contexts, shaders and pipelines they hold, and sokol_gl has 4
-// context slots, the default context included. Header-inline, each hot reload
+// destroys the contexts, shaders and pipelines they hold (each Fbo context
+// takes a slot in sokol_gl's context pool). Header-inline, each hot reload
 // guest generation that drew into an Fbo made a new set in the host's pools,
 // and a few reloads later FBO drawing silently stopped (#249).
 std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap();
@@ -297,6 +298,7 @@ public:
         // Reset counters so the next FBO using this shared context starts clean.
         // Buffers stay allocated at their current (possibly grown) size — no
         // allocation or deallocation overhead between sequential FBO draws.
+        internal::reportSglStackErrors(sgl_context_error(shared.context), true);
         sgl_tc_context_reset(shared.context);
 
         // Switch back to default context
@@ -600,6 +602,7 @@ private:
     void blitColorInto_(const Texture& src, Texture& dst) {
         ensureSharedMip(format_);
         auto& s = getSharedMip(format_);
+        if (!s.ready) return;
 
         sg_pass pass = {};
         pass.attachments.colors[0] = dst.getAttachmentView();
@@ -650,13 +653,13 @@ private:
         ctx_desc.color_format = sgFormat;
         ctx_desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         ctx_desc.sample_count = sampleCount;
-        s.context = sgl_make_context(&ctx_desc);
-
         // RenderTarget for this FBO context (lazy role->pipeline cache; FBO pipelines
         // create fine on first use inside a pass — unlike the swapchain path, which is
         // pre-warmed in tcGlobal because mid-frame creation in setupScreenFov corrupts
-        // the frame).
-        s.target.context = s.context;
+        // the frame). A failed context is warned once and not retried; this
+        // (sampleCount, format) then draws no sokol_gl shapes.
+        s.target.makeContext(ctx_desc, "an Fbo format");
+        s.context = s.target.context;
         s.target.isFbo = true;
 
         s.initialized = true;
@@ -706,6 +709,13 @@ private:
         s.sampler = sg_make_sampler(&smp_desc);
 
         s.shader = sg_make_shader(tc_fbomip_downsample_shader_desc(sg_query_backend()));
+        s.blitShader = sg_make_shader(tc_fbomip_blit_shader_desc(sg_query_backend()));
+        s.ready = internal::internalShaderReady(s.shader, "Fbo mipmap")
+               && internal::internalShaderReady(s.blitShader, "Fbo mipmap blit");
+        if (!s.ready) {
+            s.initialized = true;   // not retried; mipmaps/blits are skipped
+            return;
+        }
 
         sg_pipeline_desc pip_desc = {};
         pip_desc.shader = s.shader;
@@ -719,7 +729,6 @@ private:
         s.pipeline = sg_make_pipeline(&pip_desc);
 
         // 1:1 blit pipeline for copying scratch mip → main mip
-        s.blitShader = sg_make_shader(tc_fbomip_blit_shader_desc(sg_query_backend()));
         sg_pipeline_desc blit_pip_desc = {};
         blit_pip_desc.shader = s.blitShader;
         blit_pip_desc.layout.attrs[ATTR_tc_fbomip_blit_position].format = SG_VERTEXFORMAT_FLOAT2;
@@ -746,6 +755,7 @@ private:
         if (!mipmaps_ || numMipLevels_ <= 1) return;
         ensureSharedMip(format_);
         auto& s = getSharedMip(format_);
+        if (!s.ready) return;
 
         for (int level = 1; level < numMipLevels_; level++) {
             // Pass 1: downsample main[level-1] → scratch[level]
@@ -853,6 +863,7 @@ private:
 
         // Switch to shared FBO context and ensure buffers are allocated
         sgl_set_context(shared.context);
+        sgl_tc_reset_matrix_stacks();
         sgl_tc_context_ensure_buffers(shared.context);
         sgl_defaults();
 

@@ -218,24 +218,27 @@ public:
     // Load / Close
     // =========================================================================
 
-    tc::LoadResult load(const tc::fs::path& path) override {
+    // Relative paths resolve via getDataPath, like VideoPlayer::load.
+    tc::LoadResult load(const tc::fs::path& filePath) override {
         if (initialized_) {
             close();
         }
         resetStats();
 
+        const tc::fs::path path = tc::getDataPath(filePath);   // absolute paths pass through
+
         std::error_code ec;
         if (!tc::fs::exists(path, ec)) {
-            tc::logError("HapPlayer") << "file not found: " << tc::internal::pathToUtf8(path);
+            tc::logError("HapPlayer") << "file not found: " << path;
             return tc::LoadResult::fail(tc::LoadError::FileNotFound,
-                "file not found: " + tc::internal::pathToUtf8(path));
+                "file not found: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         // Parse MOV file
         if (!movParser_.open(path)) {
             tc::logError("HapPlayer") << "Failed to open: " << path;
             return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
-                "failed to parse MOV: " + tc::internal::pathToUtf8(path));
+                "failed to parse MOV: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         const auto& info = movParser_.getInfo();

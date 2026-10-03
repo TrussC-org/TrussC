@@ -37,8 +37,8 @@ TrussC includes or depends on the following third-party libraries. All use permi
 This is the one list of third-party code in TrussC and the version the build uses. Other docs link here instead of repeating versions. Per-library provenance (the exact upstream commit, TrussC patches, how to update) stays in the files linked from the Version column.
 
 - **Version**: the release the build fetches or the vendored copy states. `commit` is the upstream commit for code without releases (or a fork branch). `branch ... (not pinned)` means the build fetches the tip of that branch. `not recorded` means the vendored copy carries no version and its upstream commit was not recorded.
-- **Pinned / vendored in**: the `CMakeLists.txt` with the `FetchContent_Declare`, or the vendored path in the repo.
-- **Checked on every pull request**: `python3 tools/check_dependencies.py` (CI job `header-state-check`) compares each row with the `GIT_TAG` / `URL` of its `FetchContent_Declare`, the version line or macros of its vendored copy, and the provenance file. It fails when a `FetchContent_Declare` has no row, a version differs, or a path no longer exists. A pull request that changes a dependency updates its row here.
+- **Pinned / vendored in**: the CMake file with the `FetchContent_Declare` or shader compiler pin, or the vendored path in the repo.
+- **Checked on every pull request**: `python3 tools/check_dependencies.py` (CI job `header-state-check`) compares each row with the `GIT_TAG` / `URL` of its `FetchContent_Declare`, the shader compiler commit and host binary SHA-256 values, the version line or macros of its vendored copy, and the provenance file. Recorded SHA-256 values must agree with the build; `URL_HASH` must be a valid SHA-256 when present. It fails when a `FetchContent_Declare` has no row, a version differs, or a path no longer exists. A pull request that changes a dependency updates its row here.
 - **Checked every week**: `.github/workflows/upstream-check.yml` asks each upstream for its latest release (or, for a commit, whether the vendored files changed upstream) and comments on one tracking issue, "Third-party updates available", when the set of entries with something newer changes. Incomplete checks appear in the run summary and preserve the last complete report. It never changes a version; a person reads the release notes and decides.
 
 ### Core Dependencies
@@ -61,6 +61,14 @@ This is the one list of third-party code in TrussC and the version the build use
 | **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
 | **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
 
+### Build Tools
+
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |
+|---------|---------|----------------------|----------|---------|---------------------|---------|
+| **sokol-shdc (sokol-tools-bin)** | commit `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | osx: `8b4a6ac1172ec0d90dd41d611067d5e87a51e78dc28acb216cfc341d880b1d78`<br>osx_arm64: `92db37975ad7ff3c3c9bc27cba1503287377cb287ebabf60d1c6b597abfa3244`<br>linux: `ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df`<br>linux_arm64: `446b4bcea0c81d3ae529bc0d93533ea661b017f5b9ec2b2293a4c85f5fdcb639`<br>win32: `bd616287f9ea689d53c6d260e443ee733e61ae1b73a9b37adc482ead0364d561` |
+
+Updates must change the shader compiler commit and all five host binary hashes together, preserving the `metal_sim` and `wgsl` outputs used by TrussC.
+
 ### Addon Dependencies (Optional)
 
 These libraries are only included if you use the corresponding addon.
@@ -76,7 +84,7 @@ These libraries are only included if you use the corresponding addon.
 | **cgltf** | 1.14 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
 | **tinyobjloader** | commit `966edce` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
 | **Snappy** | 1.2.1 | `addons/tcxHap/CMakeLists.txt` | https://github.com/google/snappy | BSD 3-Clause | Google Inc. | tcxHap |
-| **HAP** | branch `master` (not pinned) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
+| **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
 | **bcdec** | 0.98 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
 | **Lua** | 5.4.8 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |

@@ -122,7 +122,10 @@ list of third-party versions; `tools/check_dependencies.py` checks it in CI).
 ## Safe defaults for HTTP and WebSocket
 
 - `tcxCurl` uses libcurl with `CURLOPT_SSL_VERIFYPEER` / `VERIFYHOST` at their
-  defaults (both enabled). Automatic redirect following is off.
+  defaults (both enabled). Automatic redirect following is off. For a device
+  with a self-signed certificate, pass its certificate (or CA) as PEM with
+  `HttpClient::setTlsCACertificate(pem)`; verification stays on and that PEM
+  replaces the OS default store. There is no option to turn verification off.
 - `tcxWebSocket` refuses to silently downgrade `wss://` to an unverified
   session. A user who wants that must call `setTlsVerifyNone()` explicitly.
 

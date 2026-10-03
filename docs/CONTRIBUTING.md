@@ -47,7 +47,7 @@ On every pull request and in the merge queue (`.github/workflows/build.yml`). Th
 
 | Job | What it checks | When it fails |
 |---|---|---|
-| `build` (macOS, Windows, Linux) | Builds trusscli and `AllFeaturesExample`, which calls every documented public core API (its `coverage_generated.cpp`). Then it builds and runs the addon tests (`addons/*/tests`, except the `daily-only` ones) and the core tests (`core/tests`). | Fix the build error or the failing test on that platform. |
+| `build` (macOS, Windows, Linux) | Builds trusscli and `AllFeaturesExample`, which calls every documented public core API (its `coverage_generated.cpp`). Then it builds and runs the addon tests (`addons/*/tests` and `addons/*/tests-*`, except the `daily-only` ones) and the core tests (`core/tests`). | Fix the build error or the failing test on that platform. |
 | `build-android`, `build-web`, `build-ios` | Builds `AllFeaturesExample` for that platform (iOS: device SDK, unsigned). | Fix the compile or link error for that platform. |
 | `reference-check` | `node docs/reference/check.js --strict`: every public symbol has an entry in `docs/reference/api-reference.toml`, with no orphans and no duplicates. | Add the missing entry (en / ja / ko), or remove the orphaned one. |
 | `header-state-check` | `python3 tools/check_header_state.py`: no new mutable state (static locals, `inline` variables, ...) in core headers outside `tools/header_state_allowlist.txt`. | Move the state to a `.cpp` behind an accessor ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)), or add an allowlist line with its category and reason. The failure message prints the line. |

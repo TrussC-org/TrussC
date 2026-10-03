@@ -68,6 +68,30 @@ client.addHeader("X-Custom", "value");
 auto res = client.uploadFile("/upload", "/path/to/file.png");
 ```
 
+### Devices with a self-signed certificate
+
+Projectors, cameras, NAS boxes and similar devices often serve HTTPS with a
+self-signed certificate that is not in the OS trust store. Give `HttpClient`
+that certificate (or the CA that signed it) as PEM text:
+
+```cpp
+HttpClient http;
+http.setBaseUrl("https://192.168.0.50");
+http.setTlsCACertificate(loadTextFile("projector-ca.pem"));  // PEM; "" = OS default store
+auto res = http.get("/api/status");
+```
+
+- The server certificate and host name are still verified. While a PEM is
+  set, it is the only trust source: the OS default store is not used.
+- `request()`, the typed helpers and `uploadFile()` all use it.
+- On Windows, revocation is checked best-effort while a PEM is set, so a
+  certificate without a CRL/OCSP URL is accepted.
+- If the libcurl in use cannot take a PEM from memory (`CURLOPT_CAINFO_BLOB`,
+  libcurl 7.77.0+ with a TLS backend that supports it), the request fails and
+  `res.error` says so.
+- Android: a request with a CA set fails with `res.error` for now.
+- There is no option to turn verification off.
+
 ## API
 
 ### `HttpClient`
@@ -83,6 +107,7 @@ auto res = client.uploadFile("/upload", "/path/to/file.png");
 | `setBearerToken(token)` | Set Bearer authentication |
 | `addHeader(key, value)` | Add custom header |
 | `clearHeaders()` | Remove all custom headers |
+| `setTlsCACertificate(pem)` | Verify the server against this PEM instead of the OS store (`""` = OS store) |
 | `isReachable()` | Check if server responds |
 
 ### `HttpResponse`

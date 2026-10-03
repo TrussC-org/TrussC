@@ -868,6 +868,9 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
         (void)af::val<AudioStats>().rms;
         (void)af::val<AudioStats>().cpuUsage;
         (void)af::val<AudioStats>().cpuUsagePeak;
+        (void)af::val<AudioStats>().underrunFrames;
+        (void)af::val<AudioStats>().stalled;
+        (void)af::val<AudioStats>().voicesStoppedByReinit;
     }
 };
 
@@ -1856,6 +1859,7 @@ struct Cover_Mesh : af::Scope<Mesh> {
         (void)af::val<Mesh>().drawNoLightingWithTexture(af::val<const Texture>());
         (void)af::val<Mesh>().drawWireframe();
         (void)af::val<Mesh>().markGpuDirty();
+        (void)af::val<Mesh>().getDataRevision();
         (void)af::val<Mesh>().uploadToGpu();
         (void)af::val<Mesh>().drawGpuPbr();
         (void)af::val<Mesh>().drawGpuPoints();
