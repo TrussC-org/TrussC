@@ -9,8 +9,10 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 using namespace std;
 using namespace tc;
@@ -20,6 +22,9 @@ constexpr int kRate = 48000;
 constexpr int kRepeats = 50;
 atomic<float> g_level{0.0f};
 atomic<uint64_t> g_frames{0};
+mutex g_blockMutex;
+bool g_record = false;   // protected by g_blockMutex, as is g_blockLevels
+vector<float> g_blockLevels;
 
 template <class Pred>
 bool waitFor(Pred pred) {
@@ -84,8 +89,32 @@ bool runPendingSeek(int iteration, const fs::path& path) {
     if (!pending || !sound.isPlaying()) {
         ok = fail(iteration, "pending seek must stay playing and silent", sound);
     }
-    internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-    const bool heard = waitFor([] { return fabs(g_level.load() - 0.5f) <= 0.02f; });
+    {
+        lock_guard<mutex> lock(g_blockMutex);
+        g_blockLevels.clear();
+        g_record = true;
+        // Arm recording before the worker can produce target audio.
+        internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+    }
+    bool ended = false;
+    uint64_t endedAt = 0;
+    waitFor([&] {
+        if (!ended && !sound.isPlaying()) {
+            ended = true;
+            endedAt = g_frames.load();
+        }
+        // The mixer can end the voice before audioOut records its final
+        // block. Wait for a callback after observing the end.
+        return ended && g_frames.load() > endedAt;
+    });
+    bool heard = false;
+    {
+        lock_guard<mutex> lock(g_blockMutex);
+        g_record = false;
+        for (float level : g_blockLevels) {
+            if (fabs(level - 0.5f) <= 0.02f) heard = true;
+        }
+    }
     if (!heard) ok = fail(iteration, "target audio (level 0.5) never arrived", sound);
     sound.stop();
     if (ok) {
@@ -119,7 +148,11 @@ TC_CORE_TEST_MAIN() {
     EventListener levels = engine.audioOut.listen([](AudioOutBuffer& b) {
         double sum = 0.0;
         for (int i = 0; i < b.frameCount; ++i) sum += b.data[i * b.channels];
-        g_level.store(b.frameCount ? (float)(sum / b.frameCount) : 0.0f);
+        const float level = b.frameCount ? (float)(sum / b.frameCount) : 0.0f;
+        g_level.store(level);
+        lock_guard<mutex> lock(g_blockMutex);
+        if (g_record) g_blockLevels.push_back(level);
+        // Publish progress only after recording the block.
         g_frames.fetch_add(b.frameCount);
     });
     const auto dir = fs::temp_directory_path() /

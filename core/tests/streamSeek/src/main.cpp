@@ -225,10 +225,11 @@ static bool approx(float a, float b, float tol) { return fabs(a - b) <= tol; }
 // Wait (up to `timeoutMs`) until `pred()` holds.
 template <class Pred>
 static bool waitFor(Pred pred, int timeoutMs) {
-    for (int t = 0; t < timeoutMs; t += 5) {
+    const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(timeoutMs);
+    do {
         if (pred()) return true;
         sleepMs(5);
-    }
+    } while (chrono::steady_clock::now() < deadline);
     return pred();
 }
 
@@ -364,9 +365,9 @@ TC_CORE_TEST_MAIN() {
         for (int i = 0; i < b.frameCount; ++i) sum += b.data[i * b.channels];
         const float level = b.frameCount > 0 ? (float)(sum / b.frameCount) : 0.0f;
         g_level.store(level);
+        lock_guard<mutex> lock(g_blockMutex);
         const uint64_t n = g_blocks.fetch_add(1) + 1;
         if (g_record.load()) {
-            lock_guard<mutex> lock(g_blockMutex);
             g_blockLevels.push_back({n, level});
             g_recordSum += sum;
         }
@@ -547,12 +548,40 @@ TC_CORE_TEST_MAIN() {
         if (early) {
             internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
             n.setPosition(0.0f);
-            sleepMs(400);  // longer than what the ring held
-            const bool playing = n.isPlaying();
+            const uint64_t pendingAt = g_blocks.load();
+            // Process 0.4 s of callbacks, longer than what the ring held.
+            const bool pending = waitFor([&] {
+                return g_blocks.load() - pendingAt >= kRate * 4 / 10 / settings.bufferSize;
+            }, 2000);
+            const bool playing = pending && n.isPlaying();
             check("pending: a non-looping stream does not end at the old data's end",
                   playing, playing ? "" : streamSeekFailureState(n, g_level.load()));
-            internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-            const bool heard = waitLevel(0.5f);
+            {
+                lock_guard<mutex> lock(g_blockMutex);
+                g_blockLevels.clear();
+                g_record.store(true);
+                // Arm recording before the worker can produce target audio.
+                internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+            }
+            bool ended = false;
+            uint64_t endedAt = 0;
+            waitFor([&] {
+                if (!ended && !n.isPlaying()) {
+                    ended = true;
+                    endedAt = g_blocks.load();
+                }
+                // The mixer can end the voice before audioOut records its
+                // final block. Wait for a callback after observing the end.
+                return ended && g_blocks.load() > endedAt;
+            }, 2000);
+            bool heard = false;
+            {
+                lock_guard<mutex> lock(g_blockMutex);
+                g_record.store(false);
+                for (const auto& b : g_blockLevels) {
+                    if (approx(b.second, 0.5f, 0.02f)) heard = true;
+                }
+            }
             check("pending: then it plays from the target (level 0.5)",
                   heard, heard ? "" : streamSeekFailureState(n, g_level.load()));
         }
