@@ -1059,9 +1059,12 @@ int main() {
     loud.loadFromBuffer(loudBuf);
     loud.setVolume(4.0f);   // 0.5 * 4 = peaks at 2.0: must clip
     check("loud voice plays", loud.play());
+    // Peak and RMS are published per meter window. The first window that sees
+    // the voice can still be mostly silence: its peak is already high but its
+    // RMS is not, so wait for a window that holds the voice throughout.
     const bool metered = waitFor([&] {
         AudioStats s = engine.getStats();
-        return s.clippedSamples > 0 && s.peak > 1.5f;
+        return s.clippedSamples > 0 && s.peak > 1.5f && s.rms > 0.5f;
     }, 2000);
     st = engine.getStats();
     check("clipped samples are counted", st.clippedSamples > 0);
