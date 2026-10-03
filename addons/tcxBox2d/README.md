@@ -115,18 +115,26 @@ last contact ends, however many fixtures touch.
   cancels it: a body sliding from one fixture of a compound onto the next
   never sees Exit + Enter. `World::update()` does this; if you call
   `b2World::Step()` yourself, call `world.getCollisionManager()->update()`
-  right after it, before creating or destroying bodies. Exits from outside a
-  step (destroying a body, `SetEnabled(false)`, `SetType()`) fire at once.
+  right after it, before creating or destroying bodies.
+- Exit delivery follows one rule: TrussC never calls an Exit listener while
+  Box2D is in the middle of an operation. `Body::destroy()`, `RigidBody2D`
+  teardown, `Body::setEnabled()`, `setStatic()` / `setDynamic()` /
+  `setKinematic()` and `RigidBody2D::setBodyType()` hold Exits until their
+  Box2D call returns, then deliver them before the TrussC function returns.
+  Exits from raw Box2D calls (`DestroyBody()`, `SetEnabled(false)`,
+  `SetType()` or `Step()`) wait for the next `update()`.
 - A body destroyed before its deferred Exit fires (`Body::destroy()`, a
   `RigidBody2D`'s node going away) gets none; the other side still gets its
   own, with that body null (`CollisionEvent::other`, `Contact2D::other`,
   `WorldContact::a` / `b`). Bodies freed with a raw `b2World::DestroyBody()`
   are not tracked: call `update()` first.
-- Stay listeners and the deferred Exit listeners may destroy bodies,
+- Stay and Exit listeners may destroy bodies,
   including the other body of their own pair. With `RigidBody2D` the
   destroyed side hears nothing more. Destroying a classic `Body` from Stay
-  ends that still-touching pair at once, and both sides get their Exit right
-  away; only a held (deferred) Exit is not delivered to a destroyed side.
+  ends that still-touching pair, and both classic colliders get their Exit
+  after Box2D returns, before `destroy()` returns; an Exit already pending
+  before destruction is not delivered to the destroyed side. World-level
+  Exits name a destroyed raw body as null.
 
 ## Tests
 
