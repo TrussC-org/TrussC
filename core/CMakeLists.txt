@@ -677,6 +677,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
 # Built-in Shaders (compiled with sokol-shdc)
 # =============================================================================
 # shaders/*.glsl -> include/tc/gpu/shaders/*.glsl.h (see trussc_shaders.cmake)
+# The shared helper pins sokol-shdc and verifies its host-specific SHA-256.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/trussc_shaders.cmake)
 trussc_compile_shaders(TrussC "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")

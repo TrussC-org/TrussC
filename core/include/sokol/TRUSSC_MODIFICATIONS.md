@@ -7,6 +7,13 @@ Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sectio
 
 **Upstream base:** https://github.com/floooh/sokol commit `082152c` (2026-05-21)
 
+**Shader compiler:** sokol-tools-bin commit
+`11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z), the
+owner-selected master HEAD used by CI. The host hashes are recorded in
+`core/cmake/trussc_shaders.cmake`; update the commit and all five hashes together
+and check the generated shaders against these vendored headers. This compiler
+preserves the `metal_sim` and `wgsl` outputs required by TrussC.
+
 ---
 
 ## Directory Structure
@@ -246,7 +253,7 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 | `sgl_tc_context_reset(ctx)` | Reset command/vertex/uniform counters to zero (fast path between FBO draws on shared context) |
 | `sgl_tc_context_release_buffers(ctx)` | Release CPU + GPU buffers to free idle memory (context shell and pipelines preserved) |
 | `sgl_tc_context_ensure_buffers(ctx)` | Ensure buffers are allocated (no-op if already allocated, call before drawing after release) |
-| `sgl_tc_reset_matrix_stacks()` | Drop every matrix stack of the current context back to depth 0 — called at frame end (`present()`) so an unpopped `pushMatrix()` can't carry sgl's stack depth into the next frame (TrussC #232) |
+| `sgl_tc_reset_matrix_stacks()` | Drop every matrix stack of the current context back to depth 0 — called at frame end (`present()`, TrussC #232) and at FBO pass begin (`Fbo::beginInternal()`, TrussC #327) so an unpopped `pushMatrix()` can't carry sgl's stack depth into the next frame or FBO pass |
 
 ### 13. Float Vertex Colors (UBYTE4N -> FLOAT4)
 
@@ -260,12 +267,40 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 - All `sgl_c*f/c*b/c1i` functions store floats directly
 - Vertex size increased from 28 to 40 bytes (~1.4x)
 
+### 14. Pool handling (#317)
+
+**Purpose:** pool limits show up as id 0 that callers already handle, and the
+context pool grows like the buffers in 11.
+
+**Changes:**
+- `_sgl_make_pipeline()`: all or nothing. `_sgl_init_pipeline()` stops at the
+  first `sg_make_pipeline()` that returns an invalid id or a pipeline that is
+  not `SG_RESOURCESTATE_VALID`; `_sgl_make_pipeline()` then destroys the sg
+  pipelines already made, frees the sgl slot and returns `SG_INVALID_ID`.
+- `_sgl_draw()`: skips a draw command whose sg pipeline id is 0 (recorded
+  while an invalid or destroyed sgl pipeline was loaded) instead of passing
+  it to `sg_apply_pipeline()`.
+- `_sgl_grow_context_pool()`: when `_sgl_alloc_context()` finds no free slot,
+  the context array and the pool bookkeeping double (up to
+  `_SGL_MAX_POOL_SIZE - 1`), `_sgl.cur_ctx` is looked up again, and a warning
+  with the old and new size is logged (`SGL_LOGITEM_CONTEXT_POOL_GROWN`,
+  message built with `snprintf` through `_sgl_log_msg()`; `<stdio.h>` added).
+  Contexts are referenced by id, so moving them is safe.
+  Growth allocations are fallible: on allocation failure, temporary arrays
+  are freed, the old pool and current context stay intact, and context
+  creation returns id 0 so TrussC can warn once without retrying.
+- `_SGL_DEFAULT_CONTEXT_POOL_SIZE`: 4 -> 8 (start size; reason next to it).
+
+Regression test: `core/tests/sglPoolLimits` (dummy backend).
+
 ---
 
 ## sokol_gfx.h
 
 **Untouched.** Pool sizes are configured at runtime in TrussC's `tcGlobal.cpp`:
-- `pipeline_pool_size = 256` (default 64)
+- `shader_pool_size = 1024` (default 32) and `pipeline_pool_size = 1024`
+  (default 64): fixed sizes, since these pools cannot grow (reasons next to
+  the constants)
 - `image_pool_size = 10000`
 - `view_pool_size = 10000`
 - `sampler_pool_size = 10000`

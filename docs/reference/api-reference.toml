@@ -4052,9 +4052,9 @@ description.ja = "現在のシステム（OS ログ）レベルを取得"
 description.ko = "현재 시스템(OS 로그) 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
-description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
-description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）"
-description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열)"
+description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display"
+description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）。Windows では対にならない UTF-16 サロゲートを表示用に U+FFFD に置き換える"
+description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열). Windows에서는 짝이 없는 UTF-16 서로게이트를 표시용 U+FFFD로 바꿈"
 
 ["Logger::isFileOpen"]
 description.en = "Check whether a log file is currently open"
@@ -4870,6 +4870,21 @@ related = ["Mesh::drawNoLighting"]
 description.en = "Get all vertex colors"
 description.ja = "全頂点カラーを取得"
 description.ko = "모든 정점 색상을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getGpuIndexCount"]
 category = "types_mesh"
@@ -4899,6 +4914,21 @@ related = ["Mesh::uploadPointsToGpu", "Mesh::getGpuPointBuffer", "Mesh::getGpuVe
 description.en = "Get all indices"
 description.ja = "全インデックスを取得"
 description.ko = "모든 인덱스를 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getMode"]
 description.en = "Get current primitive mode"
@@ -4914,6 +4944,21 @@ description.ko = "지정 인덱스의 법선을 얻음"
 description.en = "Get all normals"
 description.ja = "全法線を取得"
 description.ko = "모든 법선을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getNumColors"]
 description.en = "Get vertex color count"
@@ -4955,16 +5000,61 @@ description.en = "Get the tangent array (mutable)"
 description.ja = "接線配列を取得（変更可能）"
 description.ko = "탄젠트 배열을 얻음 (변경 가능)"
 related = ["Mesh::addTangent", "Mesh::getNumTangents"]
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getTexCoords"]
 description.en = "Get all texture coordinates"
 description.ja = "全テクスチャ座標を取得"
 description.ko = "모든 텍스처 좌표를 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getVertices"]
 description.en = "Get all vertices"
 description.ja = "全頂点を取得"
 description.ko = "모든 정점을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::hasColors"]
 description.en = "Check if mesh has vertex colors"
@@ -5002,10 +5092,21 @@ description.ko = "텍스처 좌표 개수가 정점 개수와 일치하는지 �
 ["Mesh::markGpuDirty"]
 category = "types_mesh"
 keywords = ["upload", "invalidate"]
-description.en = "Mark GPU buffers stale after editing data in place"
-description.ja = "データを直接編集した後にGPUバッファを古い扱いにする"
-description.ko = "데이터를 직접 수정한 후 GPU 버퍼를 오래된 것으로 표시"
-related = ["Mesh::uploadToGpu"]
+description.en = "Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this."
+details.en = "If you retain a mutable getter reference across draws, call markGpuDirty() after later writes through it. Only fetching the reference marks the mesh changed."
+details.ja = "非 const ゲッターの参照を描画をまたいで保持する場合、後からその参照経由で書き込んだ後に markGpuDirty() を呼ぶ。参照を取得するときだけメッシュが変更済みになる。"
+details.ko = "non-const getter 참조를 여러 그리기에 걸쳐 유지한다면, 나중에 그 참조를 통해 쓴 후 markGpuDirty()를 호출한다. 참조를 가져올 때만 메시가 변경됨으로 표시된다."
+description.ja = "次の描画で GPU への再アップロードを強制する（データリビジョンを進める）。通常の編集後は不要：すべての変更関数と非 const ゲッターが自動で行う。"
+description.ko = "다음 그리기에서 GPU 재업로드를 강제한다(데이터 리비전을 올림). 일반적인 편집 후에는 필요 없다: 모든 변경 함수와 non-const getter가 이미 수행한다."
+related = ["Mesh::uploadToGpu", "Mesh::getDataRevision"]
+
+["Mesh::getDataRevision"]
+category = "types_mesh"
+keywords = ["revision", "dirty", "changed", "upload", "version"]
+description.en = "Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only."
+description.ja = "現在のデータリビジョン。メッシュのデータが変わるたび（変更関数、非 const ゲッター、markGpuDirty）に変わる。GPU バッファはアップロード時のリビジョンと異なると再アップロードされる。比較は != のみで行う。"
+description.ko = "현재 데이터 리비전. 메시 데이터가 바뀔 때마다(변경 함수, non-const getter, markGpuDirty) 바뀐다. GPU 버퍼는 업로드 당시의 리비전과 다르면 다시 업로드된다. 비교는 != 로만 한다."
+related = ["Mesh::markGpuDirty", "Mesh::uploadToGpu", "Mesh::uploadPointsToGpu"]
 
 ["Mesh::rotateX"]
 description.en = "Rotate mesh around X axis"
@@ -5058,28 +5159,30 @@ description.ja = "メッシュの頂点・インデックスデータを今す�
 description.ko = "메시의 정점·인덱스 데이터를 지금 GPU 버퍼에 업로드한다(PBR / 커스텀 렌더링 경로용)."
 related = ["Mesh::markGpuDirty", "Mesh::drawGpuPbr", "Mesh::getGpuVertexBuffer"]
 details.en = '''
-Lazy: it only re-uploads when the data is dirty, so calling it every frame is
+Lazy: it only re-uploads when the data changed since the last upload (see
+[`getDataRevision()`](#Mesh::getDataRevision)), so calling it every frame is
 cheap. [`drawGpuPbr()`](#Mesh::drawGpuPbr) calls it for you, so you only need it
 when accessing [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer) directly for
-custom GPU work. If you mutate vertices in place (e.g. through
-[`getVertices()`](#Mesh::getVertices)), call
-[`markGpuDirty()`](#Mesh::markGpuDirty) first so the next upload actually runs.
+custom GPU work. Every mutator and every non-const getter (e.g.
+[`getVertices()`](#Mesh::getVertices)) marks the data changed, including a
+`clear()` followed by re-adding the same number of vertices.
 '''
 details.ja = '''
-遅延実行で、データが dirty なときだけ再アップロードするので毎フレーム呼んでも
+遅延実行で、前回のアップロード以降にデータが変わったときだけ再アップロードする
+（[`getDataRevision()`](#Mesh::getDataRevision) 参照）ので毎フレーム呼んでも
 安価。[`drawGpuPbr()`](#Mesh::drawGpuPbr) が内部で呼ぶため、明示的に必要なのは
 [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer) を直接触って自前 GPU 処理を
-するときだけ。[`getVertices()`](#Mesh::getVertices) 経由などで頂点をその場で
-書き換えた場合は、先に [`markGpuDirty()`](#Mesh::markGpuDirty) を呼んで次回の
-アップロードを発火させること。
+するときだけ。すべての変更関数と非 const ゲッター（[`getVertices()`](#Mesh::getVertices)
+など）がデータを変更済みにする。`clear()` して同じ数の頂点を追加し直した場合も同様。
 '''
 details.ko = '''
-지연 실행이라 데이터가 dirty일 때만 다시 업로드하므로 매 프레임 호출해도
+지연 실행이라 마지막 업로드 이후 데이터가 바뀌었을 때만 다시 업로드하므로
+([`getDataRevision()`](#Mesh::getDataRevision) 참고) 매 프레임 호출해도
 저렴하다. [`drawGpuPbr()`](#Mesh::drawGpuPbr)이 내부에서 호출하므로, 명시적으로
 필요한 경우는 [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer)를 직접 다뤄
-커스텀 GPU 작업을 할 때뿐이다. [`getVertices()`](#Mesh::getVertices) 등으로
-정점을 제자리에서 수정했다면 먼저 [`markGpuDirty()`](#Mesh::markGpuDirty)를
-호출해 다음 업로드가 실제로 실행되게 해야 한다.
+커스텀 GPU 작업을 할 때뿐이다. 모든 변경 함수와 non-const getter
+([`getVertices()`](#Mesh::getVertices) 등)가 데이터를 변경됨으로 표시한다.
+`clear()` 후 같은 수의 정점을 다시 추가한 경우도 마찬가지다.
 '''
 
 ["Mesh::uploadPointsToGpu"]
@@ -5093,27 +5196,31 @@ details.en = '''
 The point-cloud counterpart of [`uploadToGpu`](#Mesh::uploadToGpu): it packs the
 mesh's positions and per-vertex colors into a separate GPU buffer used by the
 [`PrimitiveMode`](#PrimitiveMode)`::Points` path. Lazy — only re-uploads when
-dirty. [`drawGpuPoints()`](#Mesh::drawGpuPoints) calls it for you; call it
+the data changed since the last upload (see
+[`getDataRevision()`](#Mesh::getDataRevision)).
+[`drawGpuPoints()`](#Mesh::drawGpuPoints) calls it for you; call it
 directly only when reading [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer) for a
-custom shader/compute pass. After mutating the cloud in place, call
-[`markGpuDirty()`](#Mesh::markGpuDirty) first.
+custom shader/compute pass. Every mutator and non-const getter marks the data
+changed.
 '''
 details.ja = '''
 [`uploadToGpu`](#Mesh::uploadToGpu) の点群版。メッシュの位置と頂点ごとの色を、
 [`PrimitiveMode`](#PrimitiveMode)`::Points` パスが使う専用 GPU バッファに詰める。
-遅延実行で dirty なときだけ再アップロード。[`drawGpuPoints()`](#Mesh::drawGpuPoints)
+遅延実行で、前回のアップロード以降にデータが変わったときだけ再アップロード
+（[`getDataRevision()`](#Mesh::getDataRevision) 参照）。[`drawGpuPoints()`](#Mesh::drawGpuPoints)
 が内部で呼ぶため、直接必要なのは [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer)
-を自前のシェーダ／コンピュートパスで読むときだけ。点群をその場で書き換えたら
-先に [`markGpuDirty()`](#Mesh::markGpuDirty) を呼ぶこと。
+を自前のシェーダ／コンピュートパスで読むときだけ。すべての変更関数と非 const
+ゲッターがデータを変更済みにする。
 '''
 details.ko = '''
 [`uploadToGpu`](#Mesh::uploadToGpu)의 포인트 클라우드 버전이다. 메시의 위치와
 정점별 색상을 [`PrimitiveMode`](#PrimitiveMode)`::Points` 경로가 사용하는 전용
-GPU 버퍼에 채운다. 지연 실행이라 dirty일 때만 다시 업로드한다.
+GPU 버퍼에 채운다. 지연 실행이라 마지막 업로드 이후 데이터가 바뀌었을 때만
+다시 업로드한다([`getDataRevision()`](#Mesh::getDataRevision) 참고).
 [`drawGpuPoints()`](#Mesh::drawGpuPoints)가 내부에서 호출하므로, 직접 필요한
 경우는 [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer)를 커스텀 셰이더/컴퓨트
-패스에서 읽을 때뿐이다. 포인트 클라우드를 제자리에서 수정했다면 먼저
-[`markGpuDirty()`](#Mesh::markGpuDirty)를 호출한다.
+패스에서 읽을 때뿐이다. 모든 변경 함수와 non-const getter가 데이터를 변경됨으로
+표시한다.
 '''
 
 ["MicInput"]
@@ -16333,9 +16440,9 @@ description.en = "Save a screenshot of the rendered frame (format picked from th
 description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
 description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
 related = ["grabScreen", "startRecording", "captureWindow"]
-platform_note.en = "Formats: png/jpg/bmp on Linux and Android; macOS also writes tiff/tif and gif; Windows also writes tga; iOS writes only png and jpg/jpeg. Any other extension saves PNG data at the given path, except on Windows, which appends \".png\" to it. Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
-platform_note.ja = "対応形式: Linux と Android は png/jpg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。iOS は png と jpg/jpeg のみ。それ以外の拡張子は指定パスに PNG データで保存する（Windows のみパスに \".png\" を付け足す）。Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
-platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. iOS는 png와 jpg/jpeg만 지원. 그 밖의 확장자는 지정한 경로에 PNG 데이터로 저장(Windows만 경로에 \".png\"를 덧붙임). Web에서는 미구현(canvas 읽기 불가): 파일을 쓸 수 없으므로 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
+platform_note.en = "Formats: png/jpg/jpeg/bmp on Linux, Android and iOS; macOS also writes tiff/tif and gif; Windows also writes tga. On every native platform, an unsupported extension or no extension saves PNG with \".png\" appended to the path (shot.xyz → shot.xyz.png; shot → shot.png), and logs a warning naming the actual destination and supported formats. Reported paths (including MCP responses) name the actual destination; the bool return value still indicates whether capture was queued. Not implemented on web (no canvas readback): always returns false without queuing anything and logs a one-time warning pointing to the browser’s own screenshot feature."
+platform_note.ja = "対応形式: Linux・Android・iOS は png/jpg/jpeg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。すべてのネイティブ環境で、未対応の拡張子または拡張子なしの場合はパスに \".png\" を追加して PNG を保存（shot.xyz → shot.xyz.png、shot → shot.png）し、実際の保存先と対応形式を警告に出す。報告するパス（MCP 応答を含む）は実際の保存先で、bool の戻り値は引き続きキャプチャをキューに積めたかを表す。Web では未実装（canvas の読み戻しはない）: 何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.ko = "지원 형식: Linux, Android, iOS는 png/jpg/jpeg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. 모든 네이티브 플랫폼에서 지원하지 않는 확장자이거나 확장자가 없으면 경로에 \".png\"를 덧붙여 PNG로 저장(shot.xyz → shot.xyz.png, shot → shot.png)하고, 실제 저장 경로와 지원 형식을 경고로 출력. 보고되는 경로(MCP 응답 포함)는 실제 저장 경로이며 bool 반환값은 계속 캡처 큐 등록 여부를 나타냄. Web에서는 미구현(canvas 읽기 불가): 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
 
 ["saveTextFile"]
 category = "file"

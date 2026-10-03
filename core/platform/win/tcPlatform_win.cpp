@@ -359,10 +359,8 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 // saveScreenshot - スクリーンショットをファイルに保存
 // ---------------------------------------------------------------------------
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     // Capture to Pixels
     Pixels pixels;
     if (!captureWindow(pixels)) {
@@ -374,7 +372,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     unsigned char* data = pixels.getData();
 
     // 拡張子から形式を判定
-    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    // Case-insensitive extension match on the resolved destination
     std::string ext = toLower(getFileExtension(path));
 
     int result = 0;
@@ -390,7 +388,6 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
         result = stbi_write_tga(pathStr.c_str(), width, height, 4, data);
     } else {
         // デフォルトは PNG
-        pathStr += ".png";
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
     }
 

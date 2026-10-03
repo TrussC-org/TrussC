@@ -1,0 +1,3 @@
+This harness links tcxCurl, which builds curl from source on Windows; that is
+heavy for the per-PR CI lane.
+examples/build_all.py runs it only with --include-daily (daily.yml passes it).

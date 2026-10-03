@@ -36,6 +36,50 @@ bgm:play()
 
 A `Sound` held only in a local variable stops when the GC collects it.
 
+## Error handling
+
+Call Lua entry points through the two helpers. They do not throw: a Lua error
+(syntax or runtime) is logged with `logError("tcxLua")`, the helper returns
+`false`, and the app keeps running. In a hot-reload setup, fix the script and
+load it again to recover.
+
+```cpp
+auto lua = tcxLua().getLuaState();
+
+tcxLua::runFile(*lua, getDataPath("sketch.lua"));  // loadTextFile + safe_script with sol::script_pass_on_error
+tcxLua::call(*lua, "setup");                       // calls through sol::protected_function
+tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
+```
+
+- `tcxLua::call(sol::state&, const char* fn, args...)` returns `false` when the
+  call raised an error. When `fn` is nil (the script does not define it),
+  nothing is called and nothing is logged; it also returns `false`.
+- `tcxLua::runFile(sol::state&, const fs::path&)` returns `false` for a missing
+  or unreadable file, a syntax error or an error while the file runs. Files are
+  read through `loadTextFile`, supporting Unicode paths on Windows, and Lua
+  diagnostics include the UTF-8 file name.
+- Both also work on the Web, where C++ exceptions cannot be caught.
+
+sol2's own defaults are unchanged: on an error, `lua->safe_script(...)` and
+`safe_script_file(...)` without `sol::script_pass_on_error` throw `sol::error`,
+and so does a direct call such as `(*lua)["draw"]()` in Release builds. An
+uncaught exception ends the app.
+
+`exampleFileReload` uses the helpers. `exampleLiveUpdate` uses protected calls
+and logs runtime errors once per compiled expression with `OnceGate`; it keeps
+trying each frame, and editing the expression resets the log gate.
+
+## Threads
+
+Lua functions only run on the main thread. A `lua_State` must not be entered
+from two threads at once, so callbacks that would run on another thread are not
+exposed to Lua: `Node:callAfterAsync`, `callEveryAsync`, `cancelAsyncTimer` and
+`cancelAllAsyncTimers` are not available. Use `callAfter` / `callEvery`, which
+run in the update loop on the main thread.
+
+In C++, these declarations carry `TC_LUA_SKIP` (`tcAnnotations.h`), and the
+binding generator leaves them out.
+
 ## Lua module sandboxing
 
 `tcxLua::getLuaState()` accepts a `LuaModulePreferences` struct that controls which

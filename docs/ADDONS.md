@@ -174,6 +174,8 @@ addons/tcxMyAddon/
 │   │   └── tcApp.cpp
 │   ├── addons.make          # Addons used by this example
 │   └── CMakeLists.txt       # Shared template
+├── tests/                   # Optional console test harness (run by CI)
+├── tests-<name>/            # Optional extra harness, e.g. one needing a heavy dependency
 └── CMakeLists.txt           # Optional (only for FetchContent, etc.)
 ```
 
@@ -182,6 +184,8 @@ addons/tcxMyAddon/
 - `libs/`: External source code, git submodules, etc.
 - `example-xxx/`: Examples at same level as `src/`. CMakeLists.txt uses shared template
 - `CMakeLists.txt`: Usually not needed. Create only for special processing like FetchContent
+- `tests/`: Console test harness (`src/main.cpp`, non-zero exit fails). CI builds and runs it on every pull request; a `daily-only` marker file in the folder moves it to the daily run instead
+- `tests-<name>/`: An extra harness next to `tests/`, for tests that need a heavy dependency the per-PR `tests/` avoids (e.g. tcxCurl: `tests/` is curl-free, `tests-curl/` links libcurl). Put a `daily-only` marker in it. This applies to addons inside this repository; CI for an external addon repository runs only its `tests/`
 
 ### When CMakeLists.txt Is Not Needed
 

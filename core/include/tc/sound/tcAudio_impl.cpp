@@ -237,7 +237,7 @@ std::string sourceLabel(const SoundSource* source) {
         ? static_cast<const SoundStream*>(source)->getPath()
         : static_cast<const SoundBuffer*>(source)->getPath();
     return p.empty() ? std::string("a generated / in-memory buffer")
-                     : internal::pathToUtf8(p);
+                     : internal::pathToDisplayUtf8(p);
 }
 
 } // namespace
@@ -644,7 +644,7 @@ struct StreamInstance {
         ma_uint64 total = 0;
         ma_decoder_get_length_in_pcm_frames(&decoder, &total);
         totalFramesInFile = (uint64_t)total;
-        pathUtf8 = internal::pathToUtf8(src.path_);
+        pathUtf8 = internal::pathToDisplayUtf8(src.path_);
         return MA_SUCCESS;
     }
 
@@ -1210,9 +1210,9 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     // error codes don't distinguish the two cases cheaply).
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        logError("SoundStream") << "file not found: " << internal::pathToUtf8(path);
+        logError("SoundStream") << "file not found: " << path;
         return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
+                                "file not found: " + internal::pathToDisplayUtf8(path));
     }
 
     // Probe decode: open, query, close. Per-voice decoders re-open later.
@@ -1225,10 +1225,10 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     cfg.encodingFormat = fmt;
     ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
-        logError("SoundStream") << "failed to open " << internal::pathToUtf8(path)
+        logError("SoundStream") << "failed to open " << path
                                 << " (result=" << (int)r << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
-                                "failed to open " + internal::pathToUtf8(path) +
+                                "failed to open " + internal::pathToDisplayUtf8(path) +
                                 " (result=" + std::to_string((int)r) + ")");
     }
 
@@ -1246,9 +1246,9 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
         // Nothing to play (e.g. a WAV with an empty data chunk), like an
         // eager load() that decodes no samples.
         ma_decoder_uninit(&probe);
-        logError("SoundStream") << "no audio frames in " << internal::pathToUtf8(path);
+        logError("SoundStream") << "no audio frames in " << path;
         return LoadResult::fail(LoadError::DecodeFailed,
-                                "no audio frames in " + internal::pathToUtf8(path));
+                                "no audio frames in " + internal::pathToDisplayUtf8(path));
     }
     channels = (int)probe.outputChannels;
     sampleRate = (int)probe.outputSampleRate;
@@ -1261,7 +1261,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = (int)fmt;
 
-    logVerbose("SoundStream") << "ready " << internal::pathToUtf8(path) << " (" << channels
+    logVerbose("SoundStream") << "ready " << path << " (" << channels
                               << " ch, " << sampleRate << " Hz, " << duration_
                               << " s, maxPolyphony=" << maxPolyphony << ")";
     return LoadResult::success();
@@ -1981,7 +1981,7 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
             if (r != MA_SUCCESS) {
                 diag_->voicesStoppedByReinit.fetch_add(1, std::memory_order_relaxed);
                 logWarning("AudioEngine") << "stream playback migration failed for "
-                                          << internal::pathToUtf8(src->getPath())
+                                          << src->getPath()
                                           << " (result=" << (int)r << "); stopping the playback";
                 slot->playing = false;
                 // The voice ends here and keeps its position at the old rate

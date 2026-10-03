@@ -124,8 +124,10 @@ void registerInspectionTools() {
             const int windowIdx = args.value("window", 0);
             if (windowIdx == 0) {
                 // Main window: the classic queued path (drained after present)
-                if (trussc::saveScreenshot(trussc::internal::utf8ToPath(path))) {
-                    return json{{"status", "ok"}, {"path", path}};
+                const auto destination = trussc::internal::resolveScreenshotPath(
+                    trussc::internal::utf8ToPath(path));
+                if (trussc::saveScreenshot(destination)) {
+                    return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}};
                 }
                 return json{{"status", "error"}, {"message", "Failed to save screenshot"}};
             }
@@ -135,8 +137,10 @@ void registerInspectionTools() {
             auto* ctx = resolveWindowCtx(windowIdx, err);
             if (!ctx) return err;
             mcp::deferToolResultUntilAfterFrame([windowIdx, path]() -> json {
-                bool ok = trussc::internal::captureWindowToFile(trussc::internal::utf8ToPath(path));
-                if (ok) return json{{"status", "ok"}, {"path", path}, {"window", windowIdx}};
+                const auto destination = trussc::internal::resolveScreenshotPath(
+                    trussc::internal::utf8ToPath(path));
+                bool ok = trussc::internal::captureWindowToFile(destination);
+                if (ok) return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
             }, ctx);
             return json(nullptr);  // deferred result is sent instead
