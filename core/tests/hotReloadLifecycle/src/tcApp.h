@@ -56,6 +56,7 @@ struct GuestView {
 // Where guest code finds the one-per-process singletons and GPU caches
 // (sharedInstances): each must be the host's instance, not one of its own.
 struct GuestInstances {
+    const void* version = nullptr;
     const void* audioEngine = nullptr;
     const void* screenRecorder = nullptr;
     const void* asyncScheduler = nullptr;

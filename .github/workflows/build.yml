@@ -165,8 +165,14 @@ jobs:
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            launcher="python3;$GITHUB_WORKSPACE/tools/time_compile.py;$launcher"
+          fi
+          # Include Objective-C++: the macOS platform .mm files need caching too.
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           # Hash the compiler by content, not mtime: a fresh runner VM installs
           # the same compiler at a different mtime, which otherwise invalidates
           # every restored ccache entry (macOS hit this: 8% hits despite a warm

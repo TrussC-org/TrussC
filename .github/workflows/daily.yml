@@ -106,8 +106,13 @@ jobs:
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            launcher="python3;$GITHUB_WORKSPACE/tools/time_compile.py;$launcher"
+          fi
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       # The build directories' CMakeCache records absolute compiler paths (the
