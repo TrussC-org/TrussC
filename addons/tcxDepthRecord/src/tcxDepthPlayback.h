@@ -42,6 +42,8 @@ class PlaybackDepthCamera : public DepthCamera {
 public:
     explicit PlaybackDepthCamera(const std::string& path) : path_(path) {}
 
+    ~PlaybackDepthCamera() override { close(); }
+
     int  getFrameCount() const { return static_cast<int>(index_.size()); }
     void setLoop(bool loop) { loop_ = loop; }
     DepthSensorType getSensorType() const override {
@@ -73,9 +75,8 @@ public:
 protected:
     bool openDevice() override {
         // Start from an empty state, so a failed open leaves no manifest or
-        // frame index from a file opened before. A stream still open from an
-        // earlier open (setup() doesn't close it when openDevice() fails) is
-        // closed, and its error state cleared, so this open starts fresh.
+        // frame index from a file opened before. Clear the stream's error state
+        // as well, so this open starts fresh after setup() closes it.
         if (file_.is_open()) file_.close();
         file_.clear();
         header_ = TcdcHeader{};

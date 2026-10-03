@@ -49,9 +49,10 @@ public:
 
     ~DepthCamera() override {
         if (isThreadRunning()) {
-            stopThread();
-            waitForThread(false);
+            logError("tcxDepthCamera")
+                << "backend must call close() in its destructor";
         }
+        waitForThread();
     }
 
     DepthCamera(const DepthCamera&) = delete;
@@ -64,6 +65,7 @@ public:
     // Open the device and (if threaded) start the grabber. Returns false on
     // failure. Call setThreaded() beforehand to choose the mode.
     bool setup() {
+        close();
         if (!openDevice()) return false;
         if (threaded_) startThread();
         return true;
@@ -71,10 +73,7 @@ public:
 
     // Stop the grabber and release the device.
     void close() {
-        if (isThreadRunning()) {
-            stopThread();
-            waitForThread(false);
-        }
+        waitForThread();
         closeDevice();
     }
 
@@ -336,6 +335,8 @@ protected:
     // -------------------------------------------------------------------------
 
     // Open / close the underlying device or source (file, network, ...).
+    // closeDevice() must be safe when nothing is open. Each backend destructor
+    // must call close() before its members are destroyed.
     virtual bool openDevice() = 0;
     virtual void closeDevice() = 0;
 
@@ -355,6 +356,7 @@ private:
     void threadedFunction() override {
         while (isThreadRunning()) {
             StreamFreshness f = captureInto(*capture_);
+            if (!f.any()) continue;
             std::lock_guard<std::mutex> lk(mutex_);
             std::swap(capture_, back_);
             pending_ |= f;
