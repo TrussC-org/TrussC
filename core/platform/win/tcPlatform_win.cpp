@@ -361,15 +361,17 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
-    // Capture to Pixels
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
-    unsigned char* data = pixels.getData();
+    const unsigned char* data = pixels.getData();
 
     // 拡張子から形式を判定
     // Case-insensitive extension match on the resolved destination

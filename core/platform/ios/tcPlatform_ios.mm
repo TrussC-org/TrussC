@@ -228,9 +228,12 @@ bool captureWindow(Pixels& outPixels) {
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
@@ -245,7 +248,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
     CGContextRef context = CGBitmapContextCreate(
-        pixels.getData(),
+        const_cast<unsigned char*>(pixels.getData()),
         width, height,
         8,
         width * 4,

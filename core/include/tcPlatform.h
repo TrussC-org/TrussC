@@ -185,6 +185,8 @@ namespace internal {
 // Returns the actual destination, warning when .png is appended.
 std::filesystem::path resolveScreenshotPath(const std::filesystem::path& path);
 bool captureWindowToFile(const std::filesystem::path& path);
+// Encode an already captured RGBA8 image using the screenshot file formats.
+bool saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);
 }
 
 // ---------------------------------------------------------------------------

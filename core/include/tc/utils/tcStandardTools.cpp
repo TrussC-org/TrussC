@@ -13,6 +13,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "tcAnalyzeImage.h"
 
 namespace trussc {
 namespace mcp {
@@ -66,6 +67,146 @@ void registerInspectionTools() {
             }
             return json{{"windows", arr}};
         }));
+
+    // Lists and source lookup use the same process-wide lifetime registry.
+    auto listImages = []() -> json {
+        json arr = json::array();
+        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
+            const auto& p = static_cast<Image*>(e.object)->getPixels();
+            arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
+                           {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
+        }
+        return json{{"images",arr}};
+    };
+    auto listFbos = []() -> json {
+        json arr = json::array();
+        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
+            const auto& f = *static_cast<Fbo*>(e.object);
+            arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
+                           {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
+        }
+        return json{{"fbos",arr}};
+    };
+    tool("tc_list_images", "List live Images: index, name, width, height, format (RGBA8 or float).")
+        .bind(std::function<json()>(listImages));
+    tool("tc_list_fbos", "List live Fbos: index, name, width, height, format (RGBA8 or float).")
+        .bind(std::function<json()>(listFbos));
+
+    Tool analyze;
+    analyze.name = "tc_analyze_image";
+    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:index}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; byte Fbo readback requires RGBA8.";
+    analyze.args = {{"source","object","Image source (exactly one selector)",true},
+                    {"save","string|null","Optional capture file path; omitted/null writes nothing",false},
+                    {"ops","array","Ordered image operations and their arguments",true}};
+    analyze.handler = [resolveWindowCtx](const json& args) -> json {
+        auto error = [](const std::string& message) { return json{{"status","error"},{"message",message}}; };
+        try {
+            const auto& source = args.at("source");
+            if (!source.is_object() || source.size()!=1) return error("source must contain exactly one selector");
+            if (source.contains("path")) {
+                Pixels p;
+                if (!p.load(trussc::internal::utf8ToPath(source.at("path").get<std::string>()))) return error("failed to load source image");
+                return detail::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
+            }
+            if (source.contains("image") || source.contains("fbo")) {
+                const bool fbo = source.contains("fbo");
+                const auto kind = fbo ? trussc::internal::DebugObjectKind::Fbo : trussc::internal::DebugObjectKind::Image;
+                const auto& selector = source.at(fbo?"fbo":"image");
+                bool byIndex = selector.is_number_unsigned() || selector.is_number_integer();
+                uint64_t index = 0;
+                std::string name;
+                if (byIndex) {
+                    if (selector.is_number_integer() && selector.get<int64_t>()<0) return error("negative object index");
+                    index=selector.get<uint64_t>();
+                } else {
+                    name=selector.get<std::string>();
+                    if (name.empty()) return error("use an index for unnamed objects");
+                }
+                void* object = nullptr;
+                for (const auto& e : trussc::internal::debugObjects(kind)) {
+                    if ((byIndex && e.index==index)||(!byIndex && e.name==name)) {
+                        if(object) return error("debug name is ambiguous; use an index");
+                        object=e.object; index=e.index;
+                    }
+                }
+                if (!object && !byIndex && name.find_first_not_of("0123456789")==std::string::npos) {
+                    index=std::stoull(name);
+                    for (const auto& e : trussc::internal::debugObjects(kind))
+                        if (e.index==index) object=e.object;
+                }
+                if (!object) return error("image source no longer exists or was not found");
+                if (!fbo) {
+                    const auto& p=static_cast<Image*>(object)->getPixels();
+                    return detail::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
+                }
+#ifdef __EMSCRIPTEN__
+                return error("Fbo readback is unavailable on web");
+#else
+                auto* f=static_cast<Fbo*>(object);
+                // Fbo::readPixels explicitly contracts RGBA8 byte readback.
+                // Do not call it on an incompatible integer texture format.
+                if (!isFloatFormat(f->getTextureFormat()) && f->getTextureFormat()!=TextureFormat::RGBA8)
+                    return error("Fbo byte readback requires RGBA8; other integer formats have no supported readback");
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+                if (isFloatFormat(f->getTextureFormat())) return error("float Fbo readback is unavailable on iOS");
+#endif
+                (void)f;
+                // Resolve again after the frame: destruction or a move must not
+                // leave a dangling pointer captured in the deferred producer.
+                mcp::deferToolResultTwoStage([index,args,error]() -> std::function<json()> {
+                    Fbo* current=nullptr;
+                    for(const auto& e:trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo))
+                        if(e.index==index) current=static_cast<Fbo*>(e.object);
+                    auto p=std::make_shared<Pixels>();
+                    bool ok=false;
+                    const char* colorSpace="sRGB";
+                    if(current && current->isAllocated()) {
+                        bool floating=isFloatFormat(current->getTextureFormat());
+                        if (!floating && current->getTextureFormat()!=TextureFormat::RGBA8)
+                            return [error] { return error("Fbo byte readback requires RGBA8; other integer formats have no supported readback"); };
+                        if (floating || channelCount(current->getTextureFormat())<=2) colorSpace="linear";
+                        p->allocate(current->getWidth(),current->getHeight(),4,floating?PixelFormat::F32:PixelFormat::U8);
+                        if(floating) {
+#if !defined(__APPLE__) || !TARGET_OS_IPHONE
+                            int ch=channelCount(current->getTextureFormat());
+                            Pixels raw;
+                            raw.allocate(current->getWidth(),current->getHeight(),ch,PixelFormat::F32);
+                            ok=current->readPixelsFloat(raw.getDataF32());
+                            if(ok) {
+                                const size_t count=size_t(p->getWidth())*p->getHeight();
+                                for(size_t i=0;i<count;++i) for(int k=0;k<4;++k)
+                                    p->getDataF32()[i*4+k]=k<ch?raw.getDataF32()[i*ch+k]:(k==3?1.0f:0.0f);
+                            }
+#endif
+                        } else ok=current->readPixels(p->getData());
+                    }
+                    return [p,args,ok,error,colorSpace]() -> json {
+                        if(!ok) return error("Fbo disappeared or readback failed");
+                        return detail::analyzeImage(*p,args,colorSpace);
+                    };
+                });
+                return nullptr;
+#endif
+            }
+            if(source.contains("window")) {
+                if (!source.at("window").is_number_integer()) return error("window must be an integer");
+                json err;
+                auto* ctx=resolveWindowCtx(source.at("window").get<int>(),err);
+                if(!ctx) return err;
+                mcp::deferToolResultTwoStage([args,error]() -> std::function<json()> {
+                    auto p=std::make_shared<Pixels>();
+                    bool ok=grabScreen(*p);
+                    return [p,args,ok,error]() -> json {
+                        if(!ok) return error("failed to grab screen");
+                        return detail::analyzeImage(*p,args,"sRGB");
+                    };
+                },ctx->isMain?nullptr:ctx);
+                return nullptr;
+            }
+            return error("unknown image source");
+        } catch(const std::exception& e) { return error(e.what()); }
+    };
+    Server::instance().registerTool(analyze);
 
     tool("tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)

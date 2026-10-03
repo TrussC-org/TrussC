@@ -1197,6 +1197,8 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)Fbo();
         (void)af::val<Fbo>().lifetimeToken();
         (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
+        (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
+        (void)af::val<Fbo>().getDebugName();
         (void)af::val<Fbo>().clear();
         (void)af::val<Fbo>().begin();
         (void)af::val<Fbo>().begin(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1467,6 +1469,8 @@ struct Cover_Image : af::Scope<Image> {
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().save(af::val<const fs::path>());
         (void)af::val<Image>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<bool>());
+        (void)af::val<Image>().setDebugName(af::val<const std::string>());
+        (void)af::val<Image>().getDebugName();
         (void)af::val<Image>().clear();
         (void)af::val<Image>().isAllocated();
         (void)af::val<Image>().getWidth();

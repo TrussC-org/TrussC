@@ -877,6 +877,61 @@ AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
 (details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
 
+### Numeric image inspection
+
+Use `tc_analyze_image` to verify drawing without image content tokens:
+
+```cpp
+bloomFbo.setDebugName("bloom");
+photo.setDebugName("photo");
+```
+
+```json
+{"source":{"fbo":"bloom"},"ops":[{"op":"stats"}]}
+```
+
+`source` contains exactly one of `window` (index from `tc_list_windows`),
+`fbo` or `image` (debug name or index from `tc_list_fbos` / `tc_list_images`),
+or `path` (saved file). Lists contain index, name, width, height and format;
+unnamed objects remain discoverable by index. Moves transfer names and indices;
+moved-from objects and destroyed objects disappear from the lists. Duplicate
+names require an index. `Texture` is not a source: draw it into a named Fbo.
+VideoPlayer / VideoGrabber are not sources.
+
+The result contains `width`, `height`, `format` (`RGBA8` or `float`),
+`colorSpace` (`sRGB` for byte RGB/RGBA images, `linear` for float or R/RG pixels), and
+`results` in request order. RGBA values stay in their source encoding; byte
+values are normalized to 0–1 and float values (including values above 1)
+pass through. CPU grayscale becomes RGB with alpha 1 (gray+alpha preserves
+alpha); float Fbo R/RG readbacks fill missing GPU components with 0 and alpha 1.
+
+| Op | Arguments | Result |
+|---|---|---|
+| `pixel` | `x`, `y` | `color` (RGBA) |
+| `histogram` | `bins` | `histogram[channel][bin]`, equal bins over 0–1; float outliers go in end bins |
+| `count` | `color` (RGB/RGBA), `tolerance` (nonnegative scalar), or `min`, `max` (RGB/RGBA) | `count`, `bbox`, `centroid` |
+| `stats` | none | RGBA `mean`, `min`, `max` |
+| `grid` | `cols`, `rows` | mean RGBA `colors[row][col]`; integer boundaries cover the region, cells must be nonempty |
+| `diff` | `path`, `threshold`, optional `save` | `count`, `bbox`, `maxDifference`; optional difference image |
+| `line` | `x0`, `y0`, `x1`, `y1` | RGBA `colors` along an inclusive Bresenham line |
+
+Each op accepts optional `rect: [x,y,w,h]` (default: whole image). Coordinates
+use the top-left origin. Rectangles must be nonempty and inside the source.
+Pixel coordinates must be in the rect; line endpoints must be in the image,
+and only samples inside the rect are returned. Bounding boxes use `[x,y,w,h]`,
+centroids use `[x,y]` in image coordinates; no matches yield null bbox/centroid.
+`diff` requires equal dimensions, compares raw RGBA values without color-space
+conversion, and counts pixels whose maximum absolute channel difference is
+strictly greater than `threshold`.
+
+Top-level `save` is optional; omitted or null writes nothing. Both it and
+`diff.save` use the `tc_save_screenshot` path rules (UTF-8, relative to the data
+directory, create missing parents, unsupported extensions append `.png`).
+File output clamps float values to 0–1; analysis preserves them. Fbo and window
+readback run after the frame, so Fbo results include its final pass. Fbo readback
+on web and float Fbo readback on iOS return errors. The existing byte
+readback API supports RGBA8; other integer Fbo formats return an error.
+
 ## Why TrussC & Licensing
 
 ### Can I use TrussC commercially / in client work?
