@@ -380,11 +380,8 @@ bool captureWindow(Pixels& outPixels) {
     return ok;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    // Resolve relative paths
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     // Capture to Pixels
     Pixels pixels;
     if (!captureWindow(pixels)) {
@@ -430,7 +427,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     // ファイル拡張子から形式を判定
-    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    // Case-insensitive extension match on the resolved destination
     std::string ext = toLower(getFileExtension(path));
     NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
     if (ext == "jpg" || ext == "jpeg") {

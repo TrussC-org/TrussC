@@ -717,8 +717,8 @@ struct PlayingSound {
     // installs new versions via internal::sharedStore and the
     // audio thread reads via internal::sharedLoad each callback.
     // The shim type auto-switches between C++20
-    // std::atomic<std::shared_ptr<T>> and the deprecated free-function
-    // atomic API based on __cpp_lib_atomic_shared_ptr.
+    // std::atomic<std::shared_ptr<T>> and a lock-based fallback based on
+    // __cpp_lib_atomic_shared_ptr.
     //
     // null map  → use mixMode rules
     // non-null  → map is the source of truth
@@ -1566,9 +1566,10 @@ public:
         // Decode into a SoundBuffer, then store as the polymorphic source.
         // SoundBuffer::load() picks the decoder from the extension, ignoring
         // its case (the path itself is used as given), records the file for
-        // getPath() and logs a failure with the file name.
+        // getPath() and logs a failure with the file name. Relative paths
+        // resolve via getDataPath, like Image::load.
         auto buf = std::make_shared<SoundBuffer>();
-        LoadResult result = buf->load(path);
+        LoadResult result = buf->load(getDataPath(path));
 
         if (!result) {
             buffer_.reset();
@@ -1606,7 +1607,8 @@ public:
         return load(path);
 #else
         auto stream = std::make_shared<SoundStream>();
-        LoadResult r = stream->loadStream(path, maxPolyphony);
+        // Relative paths resolve via getDataPath, like load().
+        LoadResult r = stream->loadStream(getDataPath(path), maxPolyphony);
         if (!r) {
             buffer_.reset();
             return r;

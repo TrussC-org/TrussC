@@ -461,7 +461,7 @@ bool GltfModel::load(const string& path) {
     size_t skippedPrimitives = 0;
     try {
         fs::path resolvedPath = getDataPath(path);
-        resolved = resolvedPath.string();
+        resolved = pathToUtf8(resolvedPath);
 
         // Parse with cgltf. The parsed data is freed on every path out of
         // this block, including an exception.

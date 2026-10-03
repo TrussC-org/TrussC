@@ -23,7 +23,7 @@ bool ObjLoader::load(const fs::path& path) {
         return false;
     }
 
-    fs::path baseDir = objPath.parent_path().string() + "/";
+    fs::path baseDir = objPath.parent_path();
 
     tinyobj::attrib_t attrib;
     vector<tinyobj::shape_t> shapes;
@@ -31,8 +31,8 @@ bool ObjLoader::load(const fs::path& path) {
     string warn, err;
 
     bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
-                               objPath.string().c_str(),
-                               baseDir.string().c_str());
+                               pathToUtf8(objPath).c_str(),
+                               (pathToUtf8(baseDir) + "/").c_str());
 
     if (!warn.empty()) {
         logWarning() << "ObjLoader: " << warn;
@@ -48,7 +48,7 @@ bool ObjLoader::load(const fs::path& path) {
     vector<fs::path> texturePaths(materials.size());
     for (size_t i = 0; i < materials.size(); i++) {
         if (!materials[i].diffuse_texname.empty()) {
-            texturePaths[i] = baseDir / materials[i].diffuse_texname;
+            texturePaths[i] = baseDir / utf8ToPath(materials[i].diffuse_texname);
         }
     }
 

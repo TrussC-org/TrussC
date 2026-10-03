@@ -71,6 +71,9 @@
 //   path, for each loader that returns LoadResult and runs here: .wav, .ogg,
 //   a stream, .m4a and VideoPlayer::load() (Linux, macOS, Windows) and
 //   Pixels::load() / loadHDR() (#359).
+// - On Windows, a WAV name holding an unpaired UTF-16 surrogate loads
+//   eagerly and as a stream; its load logs and maxPolyphony warning use
+//   U+FFFD for display instead of throwing (#380).
 // =============================================================================
 
 #include <TrussC.h>
@@ -79,6 +82,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -892,6 +896,68 @@ struct PumpApp : App {
     }
 };
 
+#ifdef _WIN32
+namespace {
+
+template <class F>
+void checkNoThrow(const string& name, F&& body) {
+    bool ok = false;
+    string detail;
+    try {
+        ok = body();
+    } catch (const std::exception& e) {
+        detail = e.what();
+    } catch (...) {
+        detail = "unknown exception";
+    }
+    check(name, ok, detail);
+}
+
+// The null backend is already running. Wait for the warning as a condition:
+// earlier checks may have just used this diagnostic's rate limit.
+void checkSurrogateSoundPath(const fs::path& directory) {
+    const string R = "\xEF\xBF\xBD"; // U+FFFD
+    const string stem = "tc_audio_diag_surrogate";
+    const fs::path path = directory /
+        (std::wstring(L"tc_audio_diag_surrogate") + wchar_t(0xD800) + L".wav");
+    const string display = pathToUtf8(directory / stem) + R + ".wav";
+    checkNoThrow("surrogate WAV: file written through the wide path", [&] {
+        return writeWav(path, 2.0f, 48000);
+    });
+    checkNoThrow("surrogate WAV: eager load succeeds and logs U+FFFD", [&] {
+        SoundBuffer buffer;
+        const size_t before = countLogs(LogLevel::Verbose, "loaded WAV " + display);
+        return buffer.load(path).ok() && buffer.numSamples > 0 && buffer.getPath() == path &&
+               countLogs(LogLevel::Verbose, "loaded WAV " + display) == before + 1;
+    });
+    Sound stream;
+    checkNoThrow("surrogate WAV: stream load succeeds and logs U+FFFD", [&] {
+        const size_t before = countLogs(LogLevel::Verbose, "ready " + display);
+        return stream.loadStream(path, 1).ok() &&
+               countLogs(LogLevel::Verbose, "ready " + display) == before + 1;
+    });
+    checkNoThrow("surrogate WAV: maxPolyphony drop warns with U+FFFD", [&] {
+        stream.setLoop(true);
+        Sound copy = stream;
+        const string warning = "maxPolyphony=1 reached for " + display;
+        const size_t before = countLogs(LogLevel::Warning, warning);
+        if (!stream.play() || copy.play()) return false;
+        // The diagnostic interval is 2 s; allow scheduling slack while
+        // checking the warning itself, never the elapsed time.
+        return waitFor([&] {
+            if (countLogs(LogLevel::Warning, warning) == before + 1) return true;
+            copy.play();
+            return countLogs(LogLevel::Warning, warning) == before + 1;
+        }, 5000);
+    });
+    stream.stop();
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+} // namespace
+#endif
+
 int main() {
     // Device-less engine; set before anything opens a context.
     internal::setNullAudioBackendForTests(true);
@@ -1347,6 +1413,9 @@ int main() {
         check("default buffer size: audioDeviceChanged reports the period the device chose",
               reinit.bufferSize > 0 && reinit.bufferSize == defExpected,
               to_string(reinit.bufferSize) + " vs " + to_string(defExpected));
+#ifdef _WIN32
+        checkSurrogateSoundPath(wavSub);
+#endif
         engine.shutdown();
     }
 

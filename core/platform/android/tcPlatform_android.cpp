@@ -277,16 +277,14 @@ bool captureWindow(Pixels& outPixels) {
     return true;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
     if (!captureWindow(pixels)) {
         return false;
     }
 
-    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    // Case-insensitive extension match on the resolved destination
     std::string ext = toLower(getFileExtension(path));
     std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 

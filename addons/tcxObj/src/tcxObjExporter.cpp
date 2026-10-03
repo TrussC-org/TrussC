@@ -31,7 +31,7 @@ bool ObjExporter::save(const fs::path& path) const {
     }
 
     // Resolve path
-    fs::path objPath = path.is_absolute() ? path : fs::path(getDataPath(path.string()));
+    fs::path objPath = getDataPath(path);
 
     // Ensure parent directory exists
     fs::path dir = objPath.parent_path();
@@ -40,9 +40,10 @@ bool ObjExporter::save(const fs::path& path) const {
     }
 
     // Derive .mtl filename
-    string baseName = objPath.stem().string();
-    fs::path mtlPath = dir / (baseName + ".mtl");
-    string mtlFileName = mtlPath.filename().string();
+    string baseName = pathToUtf8(objPath.stem());
+    fs::path mtlPath = objPath;
+    mtlPath.replace_extension(".mtl");
+    string mtlFileName = pathToUtf8(mtlPath.filename());
 
     // Check if any entry needs materials
     bool hasMaterials = false;
@@ -105,7 +106,7 @@ bool ObjExporter::save(const fs::path& path) const {
 
             string texFileName = baseName + "_" + entry.name + ".png";
             mtlFile << "map_Kd " << texFileName << endl;
-            fs::path texPath = dir / texFileName;
+            fs::path texPath = dir / utf8ToPath(texFileName);
 
             if (entry.texture) {
                 // Save provided texture

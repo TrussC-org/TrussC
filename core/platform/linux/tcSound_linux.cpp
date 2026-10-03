@@ -255,16 +255,16 @@ private:
 LoadResult SoundBuffer::loadAac(const fs::path& path) {
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        logError("SoundBuffer") << "file not found: " << internal::pathToUtf8(path);
+        logError("SoundBuffer") << "file not found: " << path;
         return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
+                                "file not found: " + internal::pathToDisplayUtf8(path));
     }
     GstAacDecoder decoder;
     return decoder.decodeFile(internal::pathToUtf8(path), *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed,
                                   "GStreamer failed to decode AAC: " +
-                                  internal::pathToUtf8(path));
+                                  internal::pathToDisplayUtf8(path));
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {

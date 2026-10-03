@@ -244,10 +244,8 @@ bool captureWindow(Pixels& outPixels) {
     return true;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
     if (!captureWindow(pixels)) {
         return false;
@@ -255,6 +253,14 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
+    const auto ext = toLower(getFileExtension(path));
+    if (ext == "bmp") {
+        // Pixels uses stbi_write_bmp, as on the other native platforms.
+        const bool success = pixels.save(path);
+        if (success) logVerbose("Screenshot") << "Saved: " << path;
+        else logError("Screenshot") << "Failed to save: " << path;
+        return success;
+    }
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
     CGContextRef context = CGBitmapContextCreate(
@@ -291,8 +297,6 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     NSData* data = nil;
-    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
-    std::string ext = toLower(getFileExtension(path));
     if (ext == "jpg" || ext == "jpeg") {
         data = UIImageJPEGRepresentation(image, 0.9);
     } else {

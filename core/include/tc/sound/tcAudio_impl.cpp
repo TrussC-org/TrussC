@@ -213,7 +213,7 @@ std::string sourceLabel(const SoundSource* source) {
         ? static_cast<const SoundStream*>(source)->getPath()
         : static_cast<const SoundBuffer*>(source)->getPath();
     return p.empty() ? std::string("a generated / in-memory buffer")
-                     : internal::pathToUtf8(p);
+                     : internal::pathToDisplayUtf8(p);
 }
 
 } // namespace
@@ -531,13 +531,12 @@ struct StreamInstance {
     // stream, and the read position it saw then (its poll interval, #550).
     bool workerSeen = false;
     uint64_t workerSeenReadFrame = 0;
-    // The stream ended on an error (set with endOfStream, cleared by the
-    // next seek request, which retries). The worker decodes nothing more
-    // for it until then. The mixer ends a non-looping voice once the ring
-    // has drained; a looping one stays playing but silent (what
-    // isPlaying() should say then is #448). Also set by the re-init
-    // migration, before the worker sees the instance (see halt()).
-    bool halted = false;
+    // The stream ended on an error (published with endOfStream, cleared by
+    // an explicit seek request). The worker decodes nothing more for it
+    // until then. The mixer ends the voice once the ring has drained,
+    // including looping voices. Also set by the re-init migration before
+    // registration. Atomic because the mixer reads it too (see halt()).
+    std::atomic<bool> halted{false};
     // The decoder returned no frames on a non-looping stream: nothing more
     // to read until a seek request, or until the loop flag is set and the
     // worker starts the file over. Unlike endOfStream it is cleared when the
@@ -592,7 +591,7 @@ struct StreamInstance {
         ma_uint64 total = 0;
         ma_decoder_get_length_in_pcm_frames(&decoder, &total);
         totalFramesInFile = (uint64_t)total;
-        pathUtf8 = internal::pathToUtf8(src.path_);
+        pathUtf8 = internal::pathToDisplayUtf8(src.path_);
         return MA_SUCCESS;
     }
 
@@ -619,12 +618,12 @@ struct StreamInstance {
 
     // The stream cannot go on: the worker decodes nothing more for it until
     // the next seek request. The mixer drains what the ring holds; then a
-    // non-looping voice ends and a looping one plays on silently (#448).
+    // voice ends, whether looping or not.
     // Logged as an error once per halt: the audio stops for a reason the
     // app cannot see otherwise. The worker, or the re-init migration before
-    // it registers the instance (halted is the worker's field).
+    // it registers the instance. endOfStream publishes halted to the mixer.
     void halt(const std::string& why) {
-        halted = true;
+        halted.store(true, std::memory_order_relaxed);
         endOfStream.store(true, std::memory_order_release);
         logError("SoundStream") << pathUtf8 << ": " << why << "; the stream ends here";
     }
@@ -887,13 +886,13 @@ private:
 
     // Whether the decoder can give more frames (after any seek is taken).
     static bool readable(const StreamInstance& s) {
-        if (s.halted) return false;
+        if (s.halted.load(std::memory_order_relaxed)) return false;
         return !s.decoderAtEnd || s.looping.load(std::memory_order_acquire);
     }
 
     // The wait predicate's test for one stream: a seek to take, or a ring
     // with room for a chunk that the decoder can fill. The worker thread,
-    // under mutex_ (seekServedSeq, halted and decoderAtEnd are the worker's;
+    // under mutex_ (seekServedSeq and decoderAtEnd are the worker's;
     // the rest are atomics or fixed before registration).
     static bool hasWork(const StreamInstance& s) {
         if (!serviceable(s)) return false;
@@ -918,7 +917,7 @@ private:
                 s.clampSeekTarget(s.seekTargetFrame.load(std::memory_order_relaxed));
             const uint64_t frame = (uint64_t)target;
             s.seekServedSeq = req;
-            s.halted = false;
+            s.halted.store(false, std::memory_order_relaxed);
             s.decoderAtEnd = false;
             const ma_result sr = seekDecoder(s, frame);
             // Publish before writing any post-seek data (see the section
@@ -1154,9 +1153,9 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     // error codes don't distinguish the two cases cheaply).
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        logError("SoundStream") << "file not found: " << internal::pathToUtf8(path);
+        logError("SoundStream") << "file not found: " << path;
         return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
+                                "file not found: " + internal::pathToDisplayUtf8(path));
     }
 
     // Probe decode: open, query, close. Per-voice decoders re-open later.
@@ -1169,10 +1168,10 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     cfg.encodingFormat = fmt;
     ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
-        logError("SoundStream") << "failed to open " << internal::pathToUtf8(path)
+        logError("SoundStream") << "failed to open " << path
                                 << " (result=" << (int)r << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
-                                "failed to open " + internal::pathToUtf8(path) +
+                                "failed to open " + internal::pathToDisplayUtf8(path) +
                                 " (result=" + std::to_string((int)r) + ")");
     }
 
@@ -1190,9 +1189,9 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
         // Nothing to play (e.g. a WAV with an empty data chunk), like an
         // eager load() that decodes no samples.
         ma_decoder_uninit(&probe);
-        logError("SoundStream") << "no audio frames in " << internal::pathToUtf8(path);
+        logError("SoundStream") << "no audio frames in " << path;
         return LoadResult::fail(LoadError::DecodeFailed,
-                                "no audio frames in " + internal::pathToUtf8(path));
+                                "no audio frames in " + internal::pathToDisplayUtf8(path));
     }
     channels = (int)probe.outputChannels;
     sampleRate = (int)probe.outputSampleRate;
@@ -1205,7 +1204,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = (int)fmt;
 
-    logVerbose("SoundStream") << "ready " << internal::pathToUtf8(path) << " (" << channels
+    logVerbose("SoundStream") << "ready " << path << " (" << channels
                               << " ch, " << sampleRate << " Hz, " << duration_
                               << " s, maxPolyphony=" << maxPolyphony << ")";
     return LoadResult::success();
@@ -1403,7 +1402,7 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
         // Need both readFrame and readFrame+1 for interpolation.
         if (readFrame + 1 >= writeFrame) {
             if (!stream->endOfStream.load(std::memory_order_acquire)
-                || sound.loop.load()) {
+                || (sound.loop.load() && !stream->halted.load(std::memory_order_relaxed))) {
                 // Underrun: emit nothing for this output frame, give the
                 // worker a chance to catch up. subFrame state preserved.
                 continue;
@@ -1905,7 +1904,7 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
                 : newStream->openDecoder(*src, (ma_uint32)newRate);
             if (r != MA_SUCCESS) {
                 logWarning("AudioEngine") << "stream playback migration failed for "
-                                          << internal::pathToUtf8(src->getPath())
+                                          << src->getPath()
                                           << " (result=" << (int)r << "); stopping the playback";
                 slot->playing = false;
                 // The voice ends here and keeps its position at the old rate

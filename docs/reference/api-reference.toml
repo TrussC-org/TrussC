@@ -1986,9 +1986,9 @@ description.ko = "줌 감도를 설정"
 
 ["Environment"]
 keywords = ["ibl", "skybox", "hdr"]
-description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)"
-description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）"
-description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT)"
+description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "light-types"
 related = ["setEnvironment", "getEnvironment", "Light", "Material", "Fbo"]
 details = '''
@@ -2025,9 +2025,9 @@ description.ja = "environment mapが読み込み済みか確認"
 description.ko = "환경맵이 로드되었는지 확인"
 
 ["Environment::loadFromHDR"]
-description.en = "Load environment from HDR image file"
-description.ja = "HDR画像からIBL environment mapを生成"
-description.ko = "HDR 이미지에서 IBL 환경맵을 생성"
+description.en = "Load environment from HDR image file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "HDR画像からIBL environment mapを生成。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "HDR 이미지에서 IBL 환경맵을 생성. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 
 ["Environment::loadProcedural"]
 description.en = "Generate a simple procedural sky environment"
@@ -2599,9 +2599,9 @@ description.ko = "줄 바꿈이 활성화되었는지 확인"
 ["Font::load"]
 category = "font"
 keywords = ["open", "read", "file"]
-description.en = "Load font file"
-description.ja = "フォントファイルを読み込む"
-description.ko = "폰트 파일을 로드"
+description.en = "Load a font file or a system font name. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins."
+description.ja = "フォントファイルまたはシステムフォント名を読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う"
+description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용"
 
 ["Font::resetLineHeight"]
 keywords = ["line height", "default", "leading"]
@@ -3083,9 +3083,9 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
@@ -4037,9 +4037,9 @@ description.ja = "現在のシステム（OS ログ）レベルを取得"
 description.ko = "현재 시스템(OS 로그) 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
-description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
-description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）"
-description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열)"
+description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display"
+description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）。Windows では対にならない UTF-16 サロゲートを表示用に U+FFFD に置き換える"
+description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열). Windows에서는 짝이 없는 UTF-16 서로게이트를 표시용 U+FFFD로 바꿈"
 
 ["Logger::isFileOpen"]
 description.en = "Check whether a log file is currently open"
@@ -4410,9 +4410,9 @@ description.ko = "전치 행렬을 얻음"
 ["Material"]
 keywords = ["pbr", "shader surface", "metallic", "roughness", "gltf"]
 of = ["ofMaterial"]
-description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
-description.ja = "PBR material（metallic-roughness、glTF 2.0互換）"
-description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환)"
+description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR material（metallic-roughness、glTF 2.0互換）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "material-types"
 related = ["setMaterial", "calculateLighting", "Light", "Mesh", "Environment"]
 
@@ -4855,6 +4855,21 @@ related = ["Mesh::drawNoLighting"]
 description.en = "Get all vertex colors"
 description.ja = "全頂点カラーを取得"
 description.ko = "모든 정점 색상을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getGpuIndexCount"]
 category = "types_mesh"
@@ -4884,6 +4899,21 @@ related = ["Mesh::uploadPointsToGpu", "Mesh::getGpuPointBuffer", "Mesh::getGpuVe
 description.en = "Get all indices"
 description.ja = "全インデックスを取得"
 description.ko = "모든 인덱스를 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getMode"]
 description.en = "Get current primitive mode"
@@ -4899,6 +4929,21 @@ description.ko = "지정 인덱스의 법선을 얻음"
 description.en = "Get all normals"
 description.ja = "全法線を取得"
 description.ko = "모든 법선을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getNumColors"]
 description.en = "Get vertex color count"
@@ -4940,16 +4985,61 @@ description.en = "Get the tangent array (mutable)"
 description.ja = "接線配列を取得（変更可能）"
 description.ko = "탄젠트 배열을 얻음 (변경 가능)"
 related = ["Mesh::addTangent", "Mesh::getNumTangents"]
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getTexCoords"]
 description.en = "Get all texture coordinates"
 description.ja = "全テクスチャ座標を取得"
 description.ko = "모든 텍스처 좌표를 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getVertices"]
 description.en = "Get all vertices"
 description.ja = "全頂点を取得"
 description.ko = "모든 정점을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::hasColors"]
 description.en = "Check if mesh has vertex colors"
@@ -4987,10 +5077,21 @@ description.ko = "텍스처 좌표 개수가 정점 개수와 일치하는지 �
 ["Mesh::markGpuDirty"]
 category = "types_mesh"
 keywords = ["upload", "invalidate"]
-description.en = "Mark GPU buffers stale after editing data in place"
-description.ja = "データを直接編集した後にGPUバッファを古い扱いにする"
-description.ko = "데이터를 직접 수정한 후 GPU 버퍼를 오래된 것으로 표시"
-related = ["Mesh::uploadToGpu"]
+description.en = "Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this."
+details.en = "If you retain a mutable getter reference across draws, call markGpuDirty() after later writes through it. Only fetching the reference marks the mesh changed."
+details.ja = "非 const ゲッターの参照を描画をまたいで保持する場合、後からその参照経由で書き込んだ後に markGpuDirty() を呼ぶ。参照を取得するときだけメッシュが変更済みになる。"
+details.ko = "non-const getter 참조를 여러 그리기에 걸쳐 유지한다면, 나중에 그 참조를 통해 쓴 후 markGpuDirty()를 호출한다. 참조를 가져올 때만 메시가 변경됨으로 표시된다."
+description.ja = "次の描画で GPU への再アップロードを強制する（データリビジョンを進める）。通常の編集後は不要：すべての変更関数と非 const ゲッターが自動で行う。"
+description.ko = "다음 그리기에서 GPU 재업로드를 강제한다(데이터 리비전을 올림). 일반적인 편집 후에는 필요 없다: 모든 변경 함수와 non-const getter가 이미 수행한다."
+related = ["Mesh::uploadToGpu", "Mesh::getDataRevision"]
+
+["Mesh::getDataRevision"]
+category = "types_mesh"
+keywords = ["revision", "dirty", "changed", "upload", "version"]
+description.en = "Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only."
+description.ja = "現在のデータリビジョン。メッシュのデータが変わるたび（変更関数、非 const ゲッター、markGpuDirty）に変わる。GPU バッファはアップロード時のリビジョンと異なると再アップロードされる。比較は != のみで行う。"
+description.ko = "현재 데이터 리비전. 메시 데이터가 바뀔 때마다(변경 함수, non-const getter, markGpuDirty) 바뀐다. GPU 버퍼는 업로드 당시의 리비전과 다르면 다시 업로드된다. 비교는 != 로만 한다."
+related = ["Mesh::markGpuDirty", "Mesh::uploadToGpu", "Mesh::uploadPointsToGpu"]
 
 ["Mesh::rotateX"]
 description.en = "Rotate mesh around X axis"
@@ -5043,28 +5144,30 @@ description.ja = "メッシュの頂点・インデックスデータを今す�
 description.ko = "메시의 정점·인덱스 데이터를 지금 GPU 버퍼에 업로드한다(PBR / 커스텀 렌더링 경로용)."
 related = ["Mesh::markGpuDirty", "Mesh::drawGpuPbr", "Mesh::getGpuVertexBuffer"]
 details.en = '''
-Lazy: it only re-uploads when the data is dirty, so calling it every frame is
+Lazy: it only re-uploads when the data changed since the last upload (see
+[`getDataRevision()`](#Mesh::getDataRevision)), so calling it every frame is
 cheap. [`drawGpuPbr()`](#Mesh::drawGpuPbr) calls it for you, so you only need it
 when accessing [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer) directly for
-custom GPU work. If you mutate vertices in place (e.g. through
-[`getVertices()`](#Mesh::getVertices)), call
-[`markGpuDirty()`](#Mesh::markGpuDirty) first so the next upload actually runs.
+custom GPU work. Every mutator and every non-const getter (e.g.
+[`getVertices()`](#Mesh::getVertices)) marks the data changed, including a
+`clear()` followed by re-adding the same number of vertices.
 '''
 details.ja = '''
-遅延実行で、データが dirty なときだけ再アップロードするので毎フレーム呼んでも
+遅延実行で、前回のアップロード以降にデータが変わったときだけ再アップロードする
+（[`getDataRevision()`](#Mesh::getDataRevision) 参照）ので毎フレーム呼んでも
 安価。[`drawGpuPbr()`](#Mesh::drawGpuPbr) が内部で呼ぶため、明示的に必要なのは
 [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer) を直接触って自前 GPU 処理を
-するときだけ。[`getVertices()`](#Mesh::getVertices) 経由などで頂点をその場で
-書き換えた場合は、先に [`markGpuDirty()`](#Mesh::markGpuDirty) を呼んで次回の
-アップロードを発火させること。
+するときだけ。すべての変更関数と非 const ゲッター（[`getVertices()`](#Mesh::getVertices)
+など）がデータを変更済みにする。`clear()` して同じ数の頂点を追加し直した場合も同様。
 '''
 details.ko = '''
-지연 실행이라 데이터가 dirty일 때만 다시 업로드하므로 매 프레임 호출해도
+지연 실행이라 마지막 업로드 이후 데이터가 바뀌었을 때만 다시 업로드하므로
+([`getDataRevision()`](#Mesh::getDataRevision) 참고) 매 프레임 호출해도
 저렴하다. [`drawGpuPbr()`](#Mesh::drawGpuPbr)이 내부에서 호출하므로, 명시적으로
 필요한 경우는 [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer)를 직접 다뤄
-커스텀 GPU 작업을 할 때뿐이다. [`getVertices()`](#Mesh::getVertices) 등으로
-정점을 제자리에서 수정했다면 먼저 [`markGpuDirty()`](#Mesh::markGpuDirty)를
-호출해 다음 업로드가 실제로 실행되게 해야 한다.
+커스텀 GPU 작업을 할 때뿐이다. 모든 변경 함수와 non-const getter
+([`getVertices()`](#Mesh::getVertices) 등)가 데이터를 변경됨으로 표시한다.
+`clear()` 후 같은 수의 정점을 다시 추가한 경우도 마찬가지다.
 '''
 
 ["Mesh::uploadPointsToGpu"]
@@ -5078,27 +5181,31 @@ details.en = '''
 The point-cloud counterpart of [`uploadToGpu`](#Mesh::uploadToGpu): it packs the
 mesh's positions and per-vertex colors into a separate GPU buffer used by the
 [`PrimitiveMode`](#PrimitiveMode)`::Points` path. Lazy — only re-uploads when
-dirty. [`drawGpuPoints()`](#Mesh::drawGpuPoints) calls it for you; call it
+the data changed since the last upload (see
+[`getDataRevision()`](#Mesh::getDataRevision)).
+[`drawGpuPoints()`](#Mesh::drawGpuPoints) calls it for you; call it
 directly only when reading [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer) for a
-custom shader/compute pass. After mutating the cloud in place, call
-[`markGpuDirty()`](#Mesh::markGpuDirty) first.
+custom shader/compute pass. Every mutator and non-const getter marks the data
+changed.
 '''
 details.ja = '''
 [`uploadToGpu`](#Mesh::uploadToGpu) の点群版。メッシュの位置と頂点ごとの色を、
 [`PrimitiveMode`](#PrimitiveMode)`::Points` パスが使う専用 GPU バッファに詰める。
-遅延実行で dirty なときだけ再アップロード。[`drawGpuPoints()`](#Mesh::drawGpuPoints)
+遅延実行で、前回のアップロード以降にデータが変わったときだけ再アップロード
+（[`getDataRevision()`](#Mesh::getDataRevision) 参照）。[`drawGpuPoints()`](#Mesh::drawGpuPoints)
 が内部で呼ぶため、直接必要なのは [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer)
-を自前のシェーダ／コンピュートパスで読むときだけ。点群をその場で書き換えたら
-先に [`markGpuDirty()`](#Mesh::markGpuDirty) を呼ぶこと。
+を自前のシェーダ／コンピュートパスで読むときだけ。すべての変更関数と非 const
+ゲッターがデータを変更済みにする。
 '''
 details.ko = '''
 [`uploadToGpu`](#Mesh::uploadToGpu)의 포인트 클라우드 버전이다. 메시의 위치와
 정점별 색상을 [`PrimitiveMode`](#PrimitiveMode)`::Points` 경로가 사용하는 전용
-GPU 버퍼에 채운다. 지연 실행이라 dirty일 때만 다시 업로드한다.
+GPU 버퍼에 채운다. 지연 실행이라 마지막 업로드 이후 데이터가 바뀌었을 때만
+다시 업로드한다([`getDataRevision()`](#Mesh::getDataRevision) 참고).
 [`drawGpuPoints()`](#Mesh::drawGpuPoints)가 내부에서 호출하므로, 직접 필요한
 경우는 [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer)를 커스텀 셰이더/컴퓨트
-패스에서 읽을 때뿐이다. 포인트 클라우드를 제자리에서 수정했다면 먼저
-[`markGpuDirty()`](#Mesh::markGpuDirty)를 호출한다.
+패스에서 읽을 때뿐이다. 모든 변경 함수와 non-const getter가 데이터를 변경됨으로
+표시한다.
 '''
 
 ["MicInput"]
@@ -6733,9 +6840,9 @@ description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
 related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
-description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`)."
-description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)"
-description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`)"
+description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Image::load", "Texture::allocate"]
 
 ["Pixels::loadFromMemory"]
@@ -6746,9 +6853,9 @@ description.ko = "메모리의 이미지를 CPU 메모리로 디코딩. GPU를 �
 ["Pixels::loadHDR"]
 category = "graphics_pixels"
 keywords = ["float", "radiance"]
-description.en = "Load an HDR (.hdr) image into a float pixel buffer"
-description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む"
-description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드"
+description.en = "Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Pixels::loadPlatform", "Pixels::isFloat"]
 
 ["Pixels::loadPlatform"]
@@ -8705,9 +8812,19 @@ description.ko = "일시정지 상태인지 확인"
 ["Sound::isPlaying"]
 category = "sound"
 keywords = ["active", "running", "status"]
-description.en = "Check if playing"
-description.ja = "再生中か確認"
-description.ko = "재생 중인지 확인"
+description.en = "Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically."
+description.ja = "再生中か確認（一時停止中は false）。デコーダの失敗で停止したストリームは、バッファ内の音声を再生し終えるとループ中でも false になる。エラーは一度ログに記録され、TrussC は自動で再試行しない。"
+description.ko = "재생 중인지 확인 (일시정지 중에는 false). 디코더 오류로 중단된 스트림은 버퍼의 오디오를 재생한 뒤 반복 재생 중에도 멈춘다. 오류는 한 번 기록되며 TrussC는 자동으로 재시도하지 않는다."
+details.en = '''
+For a long-running app that expects continuous music, check `isPlaying()` while the sound is not intentionally paused or stopped. If it becomes false, schedule a reload with `loadStream()` and call `play()` only if loading succeeds. Check the play result too. The app chooses when to retry, including after another load or play failure.
+'''
+details.ja = '''
+長時間動作するアプリで音楽を継続再生する場合は、意図的に一時停止・停止していないときに `isPlaying()` を確認する。false になったらアプリ側で `loadStream()` による再読み込みを予定し、読み込みが成功した場合だけ `play()` を呼ぶ。再生開始の結果も確認する。再読み込みや再生開始が失敗した場合も含め、再試行のタイミングはアプリが決める。
+'''
+details.ko = '''
+장시간 실행되는 앱에서 음악을 계속 재생하려면 의도적으로 일시정지하거나 정지하지 않은 상태에서 `isPlaying()`을 확인한다. false가 되면 앱에서 `loadStream()`으로 다시 로드할 시점을 정하고, 로드가 성공했을 때만 `play()`를 호출한다. 재생 시작 결과도 확인한다. 다시 로드하거나 재생을 시작하는 데 실패한 경우를 포함해 재시도 시점은 앱이 결정한다.
+'''
+related = ["Sound::loadStream", "Sound::play", "Sound::isPaused"]
 
 ["Sound::isStreaming"]
 category = "sound"
@@ -8719,9 +8836,9 @@ description.ko = "loadStream()으로 로드되었으면 true"
 ["Sound::load"]
 category = "sound"
 keywords = ["open", "read", "file"]
-description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)"
-description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）"
-description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지)"
+description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 
 ["Sound::loadFromBuffer"]
 description.en = "Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr."
@@ -8731,9 +8848,9 @@ description.ko = "미리 생성한 SoundBuffer (ChipSound나 절차적 파형 �
 ["Sound::loadStream"]
 category = "sound"
 keywords = ["streaming", "disk", "music"]
-description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count."
-description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数"
-description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수"
+description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Sound::isStreaming"]
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
@@ -14593,17 +14710,17 @@ related = ["setCurveTolerance"]
 category = "file"
 keywords = ["resource", "asset", "resolve"]
 of = ["ofToDataPath"]
-description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. This is the bundled data the app reads (bin/data in development, the bundle's Resources when packaged); files the app writes and keeps go to getUserDataPath()."
-description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。アプリが読む同梱データの場所（開発中は bin/data、パッケージ後はバンドルの Resources）。アプリが書いて残すファイルは getUserDataPath() へ"
-description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 앱이 읽는 동봉 데이터의 위치(개발 중에는 bin/data, 패키지 후에는 번들의 Resources). 앱이 쓰고 보관하는 파일은 getUserDataPath()로"
+description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread. This is the bundled data the app reads (bin/data in development, the bundle's Resources/data when packaged); files the app writes and keeps go to getUserDataPath()."
+description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。データディレクトリの基準部分だけを字句的に正規化し、ファイル名の構成要素は保つ。どのスレッドから呼んでもよい。アプリが読む同梱データの場所（開発中は bin/data、パッケージ後はバンドルの Resources/data）。アプリが書いて残すファイルは getUserDataPath() へ"
+description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 데이터 디렉터리 기준 부분만 어휘적으로 정규화하고 파일 이름의 구성 요소는 유지. 어느 스레드에서 호출해도 됨. 앱이 읽는 동봉 데이터의 위치(개발 중에는 bin/data, 패키지 후에는 번들의 Resources/data). 앱이 쓰고 보관하는 파일은 getUserDataPath()로"
 related = ["getDataPathRoot", "getUserDataPath", "getAbsolutePath", "joinPath"]
 
 ["getDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Get the current data path root as fs::path."
-description.ja = "現在のデータパスルートを fs::path で取得"
-description.ko = "현재 데이터 경로 루트를 fs::path로 얻음"
+description.en = "Get the current data path root as fs::path. Unless explicitly set, Apple platforms choose one existing folder on first use, in order: <exe>/data (iOS), <exe>/../Resources/data (macOS release), <exe>/../../../data (macOS development). The choice is kept for the process; missing files never fall back to another folder. Only the release workflow copies bin/data into the macOS bundle; normal builds keep using bin/data."
+description.ja = "現在のデータパスルートを fs::path で取得。明示的に設定しない場合、Apple では最初の使用時に存在するフォルダを <exe>/data（iOS）、<exe>/../Resources/data（macOS 配布）、<exe>/../../../data（macOS 開発）の順で一つ選ぶ。この選択はプロセス中保持され、見つからないファイルを別フォルダで探すことはない。macOS バンドルに bin/data をコピーするのはリリース workflow のみで、通常のビルドでは bin/data を使う"
+description.ko = "현재 데이터 경로 루트를 fs::path로 얻음. 명시적으로 설정하지 않으면 Apple에서는 최초 사용 시 존재하는 폴더를 <exe>/data(iOS), <exe>/../Resources/data(macOS 배포), <exe>/../../../data(macOS 개발) 순으로 하나 선택한다. 이 선택은 프로세스 동안 유지되며, 없는 파일을 다른 폴더에서 찾지 않는다. macOS 번들에 bin/data를 복사하는 것은 릴리스 workflow뿐이며 일반 빌드에서는 bin/data를 사용한다"
 related = ["setDataPathRoot", "getDataPath"]
 
 ["getTempPath"]
@@ -16327,9 +16444,9 @@ description.en = "Save a screenshot of the rendered frame (format picked from th
 description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
 description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["grabScreen", "startRecording", "captureWindow"]
-platform_note.en = "Formats: png/jpg/bmp on Linux and Android; macOS also writes tiff/tif and gif; Windows also writes tga; iOS writes only png and jpg/jpeg. Any other extension saves PNG data at the given path, except on Windows, which appends \".png\" to it. Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
-platform_note.ja = "対応形式: Linux と Android は png/jpg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。iOS は png と jpg/jpeg のみ。それ以外の拡張子は指定パスに PNG データで保存する（Windows のみパスに \".png\" を付け足す）。Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
-platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. iOS는 png와 jpg/jpeg만 지원. 그 밖의 확장자는 지정한 경로에 PNG 데이터로 저장(Windows만 경로에 \".png\"를 덧붙임). Web에서는 미구현(canvas 읽기 불가): 파일을 쓸 수 없으므로 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
+platform_note.en = "Formats: png/jpg/jpeg/bmp on Linux, Android and iOS; macOS also writes tiff/tif and gif; Windows also writes tga. On every native platform, an unsupported extension or no extension saves PNG with \".png\" appended to the path (shot.xyz → shot.xyz.png; shot → shot.png), and logs a warning naming the actual destination and supported formats. Reported paths (including MCP responses) name the actual destination; the bool return value still indicates whether capture was queued. Not implemented on web (no canvas readback): always returns false without queuing anything and logs a one-time warning pointing to the browser’s own screenshot feature."
+platform_note.ja = "対応形式: Linux・Android・iOS は png/jpg/jpeg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。すべてのネイティブ環境で、未対応の拡張子または拡張子なしの場合はパスに \".png\" を追加して PNG を保存（shot.xyz → shot.xyz.png、shot → shot.png）し、実際の保存先と対応形式を警告に出す。報告するパス（MCP 応答を含む）は実際の保存先で、bool の戻り値は引き続きキャプチャをキューに積めたかを表す。Web では未実装（canvas の読み戻しはない）: 何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
+platform_note.ko = "지원 형식: Linux, Android, iOS는 png/jpg/jpeg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. 모든 네이티브 플랫폼에서 지원하지 않는 확장자이거나 확장자가 없으면 경로에 \".png\"를 덧붙여 PNG로 저장(shot.xyz → shot.xyz.png, shot → shot.png)하고, 실제 저장 경로와 지원 형식을 경고로 출력. 보고되는 경로(MCP 응답 포함)는 실제 저장 경로이며 bool 반환값은 계속 캡처 큐 등록 여부를 나타냄. Web에서는 미구현(canvas 읽기 불가): 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
 
 ["saveTextFile"]
 category = "file"
@@ -16527,17 +16644,17 @@ related = ["getCurveTolerance", "setCurveResolution", "drawBezier", "drawCurve"]
 ["setDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is."
-description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる"
-description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨"
+description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup())."
+description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる。ファイルを読み込むスレッドを開始する前に呼ぶ (例: setup() 内)"
+description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨. 파일을 로드하는 스레드를 시작하기 전에 호출 (예: setup() 안)"
 related = ["getDataPathRoot", "setDataPathToResources", "getDataPath"]
 
 ["setDataPathToResources"]
 category = "file"
 keywords = ["bundle", "macos", "app"]
-description.en = "Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms."
-description.ja = "配布用にデータパスルートをmacOSアプリバンドルのContents/Resources/dataフォルダに向ける。macOS以外のプラットフォームでは何もしない"
-description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음"
+description.en = "Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup())."
+description.ja = "配布用にデータパスルートをmacOSアプリバンドルのContents/Resources/dataフォルダに向ける。macOS以外のプラットフォームでは何もしない。ファイルを読み込むスレッドを開始する前に呼ぶ (例: setup() 内)"
+description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음. 파일을 로드하는 스레드를 시작하기 전에 호출 (예: setup() 안)"
 related = ["setDataPathRoot", "getExecutableDir"]
 
 ["setUserDataPathRoot"]

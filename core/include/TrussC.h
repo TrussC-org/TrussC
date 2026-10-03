@@ -260,6 +260,10 @@ namespace internal {
     };
     SglBudget& sglBudget();
 
+    // Separate report gates for screen and FBO contexts, shared across modules.
+    OnceGate& sglStackErrorReportGate(bool inFbo);
+    void reportSglStackErrors(sgl_error_t err, bool inFbo);
+
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
     // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan
@@ -2121,12 +2125,14 @@ namespace internal {
 // captures on Linux when called inside draw().
 //
 // Returns true if the destination was prepared and the capture was queued;
-// false if the parent directory could not be created (e.g. no write
+// false if the destination is inside the app bundle (with an Error naming
+// getUserDataPath()) or the parent directory could not be created (e.g. no write
 // permission). The rare failure of the deferred write itself (permission/disk
 // after the directory check) is reported via logError("Screenshot").
 // Relative paths resolve against the data path. The format comes from the
-// extension (case-insensitive): png/jpg/bmp; macOS also writes tiff/gif,
-// Windows also tga, and iOS only png/jpg.
+// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
+// Windows also tga. Unsupported or missing extensions append .png and warn
+// with the actual destination and supported formats.
 //
 // Web: not implemented (no canvas readback). Always returns false (nothing is
 // queued or written) and warns once, pointing to the browser's own screenshot
@@ -2140,7 +2146,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
     return internal::captureWindowToFile(path);
 #else
     // Resolve relative paths up front so the deferred worker gets an absolute one.
-    std::filesystem::path resolved = getDataPath(path);   // absolute passes through
+    std::filesystem::path resolved = internal::resolveScreenshotPath(path);
     // Inside the app bundle: refused, with an Error naming getUserDataPath()
     if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
 
@@ -2394,9 +2400,9 @@ namespace internal {
 
         setup();
 
-        // The Apple data path root is chosen lazily on first getDataPath() use
-        // (resolveDataPathRootOnce in tcUtils.h) — probing here is too early to
-        // see a valid executable path on iOS.
+        // App's pre-setup hook resolves the data path root right before its
+        // setup() runs. getDataPath() also probes on an earlier call; probing
+        // here is too early to see a valid executable path on iOS.
 
         // Start console input thread (enabled by default)
         // To disable, call console::stop() in setup()
