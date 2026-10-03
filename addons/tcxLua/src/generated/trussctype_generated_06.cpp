@@ -65,6 +65,7 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["isInitialized"] = &trussc::Serial::isInitialized;
         t["getDevicePath"] = &trussc::Serial::getDevicePath;
         t["available"] = &trussc::Serial::available;
+        t["getDroppedByteCount"] = &trussc::Serial::getDroppedByteCount;
         t["readByte"] = &trussc::Serial::readByte;
         t["writeBytes"] = [](trussc::Serial& self, const std::string & buffer) { return self.writeBytes(buffer); };
         t["writeByte"] = &trussc::Serial::writeByte;

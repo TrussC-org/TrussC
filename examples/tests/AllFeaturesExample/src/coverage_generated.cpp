@@ -2480,6 +2480,7 @@ struct Cover_Serial : af::Scope<Serial> {
         (void)af::val<Serial>().isInitialized();
         (void)af::val<Serial>().getDevicePath();
         (void)af::val<Serial>().available();
+        (void)af::val<Serial>().getDroppedByteCount();
         (void)af::val<Serial>().readBytes(af::val<void *>(), af::val<int>());
         (void)af::val<Serial>().readBytes(af::val<std::string>(), af::val<int>());
         (void)af::val<Serial>().readByte();
