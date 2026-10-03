@@ -809,7 +809,7 @@ light.setIesProfile(&iesProfile);                           // Photometric profi
 
 ### How do I draw a point cloud / lots of points fast?
 
-Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once — only rebuild (or `markGpuDirty()`) when the data actually changes, not every frame.
+Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once and only rebuild it when the data actually changes, not every frame: every edit re-uploads the whole buffer on the next draw. Any change re-uploads automatically — every mutator (`clear()`, `add*`, `setNormal`, `translate`/`rotate*`/`scale`/`transform`, `append`, `setMode`) and every non-const getter (`getVertices()`, `getColors()`, ...) marks the mesh changed, so writes through `getVertices()[i]` need no `markGpuDirty()`. To only read a mesh, use a `const Mesh&` (or `std::as_const(mesh)`); reading through a non-const reference also re-uploads. If you keep a mutable reference across draws, call `markGpuDirty()` after later writes through it, since only fetching the reference marks the mesh changed.
 
 ```cpp
 Mesh cloud;
@@ -1708,6 +1708,8 @@ All file-path parameters take `fs::path` (`std::filesystem::path`) — string li
 The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`, `Xml::save`, `Pixels::save` / `Image::save`, `setLogFile`) resolve a relative path against `getDataPath()`, use an absolute path as given, and create a missing parent folder (as `saveScreenshot()` and the recorders do). When the folder cannot be created or the file cannot be opened, they return false and log the reason. `saveTextFile`, `appendToFile`, `saveJson` and `Pixels::save` also check writing and closing the file, logging an error and returning false on failure. `saveJson` serializes first and writes in binary mode (LF on every platform); `Pixels::save` encodes in memory first. A serialization or encoding error leaves an existing file untouched. These saves write in place: a crash, power loss or full disk during writing can leave the file truncated. Apps needing crash-safe saves must handle them themselves, for example by writing a new file and renaming it.
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
+
+Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.
 
 For the other direction, path → string (display, `Font`, JSON, a string compare), use `pathToUtf8(path)`, not `path.string()`: it returns UTF-8 on every platform, while `path.string()` on Windows follows the process code page, and throws for characters outside it when that is not UTF-8. On Windows `pathToUtf8()` can still throw for a name that is not valid UTF-16 (an unpaired surrogate, which NTFS allows); to log a path, use `logNotice() << path`, which does not throw. The path helpers (`getFileName()`, `getBaseName()`, `getFileExtension()`, `getParentDirectory()`, `joinPath()`, `getAbsolutePath()`, `listDirectory()`) already return UTF-8 (without the manifest, turn a result back into a path with `utf8ToPath()` before passing it to `load()` / `save()`, not with `fs::path(str)`), and `logNotice() << path` writes the path as UTF-8 (without the quotes `std::ostream` adds). In a Windows console, `runApp()` and `runHeadlessApp()` switch the output code page to UTF-8 while the app runs, so non-ASCII log text prints correctly.
 
@@ -3243,6 +3245,7 @@ void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
+uint64_t Mesh::getDataRevision() const  // Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only.
 sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
 int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
 sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
@@ -3268,7 +3271,7 @@ bool Mesh::hasNormals() const  // Check if mesh has normals
 bool Mesh::hasTangents() const  // Whether the mesh has tangents
 bool Mesh::hasTexCoords() const  // Check if mesh has texture coordinates
 bool Mesh::hasValidTexCoords() const  // Check if texture coordinates match vertex count
-void Mesh::markGpuDirty() const  // Mark GPU buffers stale after editing data in place
+void Mesh::markGpuDirty() const  // Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this.
 Mesh & Mesh::rotateX(float radians)  // Rotate mesh around X axis
 Mesh & Mesh::rotateY(float radians)  // Rotate mesh around Y axis
 Mesh & Mesh::rotateZ(float radians)  // Rotate mesh around Z axis

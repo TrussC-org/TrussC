@@ -29,8 +29,16 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     endif()
 
     # Select sokol-shdc binary based on host platform
-    # Download from official sokol-tools-bin repository
-    set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/master/bin")
+    # sokol-tools-bin master HEAD when pinned (2026-08-29T14:15:01Z), including the
+    # metal_sim and wgsl outputs used below. Update the commit and all five
+    # hashes together; record the version in docs/LICENSE.md.
+    set(_TC_SOKOL_SHDC_COMMIT "11d0cf678105d614d675e6d9bd2aaf3eeff12f8c")
+    set(_TC_SOKOL_SHDC_SHA256_osx "8b4a6ac1172ec0d90dd41d611067d5e87a51e78dc28acb216cfc341d880b1d78")
+    set(_TC_SOKOL_SHDC_SHA256_osx_arm64 "92db37975ad7ff3c3c9bc27cba1503287377cb287ebabf60d1c6b597abfa3244")
+    set(_TC_SOKOL_SHDC_SHA256_linux "ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df")
+    set(_TC_SOKOL_SHDC_SHA256_linux_arm64 "446b4bcea0c81d3ae529bc0d93533ea661b017f5b9ec2b2293a4c85f5fdcb639")
+    set(_TC_SOKOL_SHDC_SHA256_win32 "bd616287f9ea689d53c6d260e443ee733e61ae1b73a9b37adc482ead0364d561")
+    set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/${_TC_SOKOL_SHDC_COMMIT}/bin")
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
         if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
             set(_TC_SOKOL_SHDC_DIR "osx_arm64")
@@ -46,6 +54,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
             set(_TC_SOKOL_SHDC_DIR "linux")
         endif()
     endif()
+    set(_TC_SOKOL_SHDC_EXPECTED_HASH "${_TC_SOKOL_SHDC_SHA256_${_TC_SOKOL_SHDC_DIR}}")
     # Windows uses .exe extension
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
         set(_TC_SOKOL_SHDC_EXT ".exe")
@@ -59,23 +68,33 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
         "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/sokol-shdc" ABSOLUTE)
     set(_TC_SOKOL_SHDC "${_TC_SOKOL_SHDC_TOOLS_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
 
-    # Download sokol-shdc if not present.
+    # Replace stale caches when the pin changes, including old CI caches.
+    if(EXISTS "${_TC_SOKOL_SHDC}")
+        file(SHA256 "${_TC_SOKOL_SHDC}" _TC_SOKOL_SHDC_ACTUAL_HASH)
+        if(NOT _TC_SOKOL_SHDC_ACTUAL_HASH STREQUAL _TC_SOKOL_SHDC_EXPECTED_HASH)
+            message(STATUS "[${_TC_TARGET}] Cached sokol-shdc does not match the pinned SHA-256; downloading replacement")
+            file(REMOVE "${_TC_SOKOL_SHDC}")
+        endif()
+    endif()
+
+    # Download sokol-shdc if not present, then verify before installing it.
     # raw.githubusercontent.com rate-limits anonymous requests (HTTP 429),
     # especially from shared CI runner IPs, so retry with a pause before
-    # giving up. A failed file(DOWNLOAD) leaves a 0-byte file behind, which
-    # would satisfy the EXISTS guard on the next configure — remove it.
+    # giving up. Remove failed temporary downloads so neither a transport
+    # failure nor a hash mismatch leaves an executable for a later build.
     if(NOT EXISTS "${_TC_SOKOL_SHDC}")
         message(STATUS "[${_TC_TARGET}] Downloading sokol-shdc...")
         file(MAKE_DIRECTORY "${_TC_SOKOL_SHDC_TOOLS_DIR}")
+        set(_TC_SOKOL_SHDC_DOWNLOAD "${_TC_SOKOL_SHDC}.download")
         foreach(_TC_ATTEMPT RANGE 1 3)
-            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
+            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC_DOWNLOAD}"
                 SHOW_PROGRESS
                 STATUS _TC_DOWNLOAD_STATUS)
             list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
             if(NOT _TC_DOWNLOAD_ERROR)
                 break()
             endif()
-            file(REMOVE "${_TC_SOKOL_SHDC}")
+            file(REMOVE "${_TC_SOKOL_SHDC_DOWNLOAD}")
             if(_TC_ATTEMPT LESS 3)
                 message(STATUS "[${_TC_TARGET}] sokol-shdc download failed (${_TC_DOWNLOAD_STATUS}), retrying in 5s (attempt ${_TC_ATTEMPT}/3)...")
                 execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 5)
@@ -84,11 +103,24 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
         if(_TC_DOWNLOAD_ERROR)
             message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
         endif()
+        # An explicit SHA256 check lets us clean up before FATAL_ERROR;
+        # file(DOWNLOAD EXPECTED_HASH) can stop before that cleanup runs.
+        file(SHA256 "${_TC_SOKOL_SHDC_DOWNLOAD}" _TC_SOKOL_SHDC_ACTUAL_HASH)
+        if(NOT _TC_SOKOL_SHDC_ACTUAL_HASH STREQUAL _TC_SOKOL_SHDC_EXPECTED_HASH)
+            file(REMOVE "${_TC_SOKOL_SHDC_DOWNLOAD}")
+            message(FATAL_ERROR
+                "sokol-shdc SHA-256 mismatch for ${_TC_SOKOL_SHDC_DIR} at commit ${_TC_SOKOL_SHDC_COMMIT}:\n"
+                "  expected: ${_TC_SOKOL_SHDC_EXPECTED_HASH}\n"
+                "  actual:   ${_TC_SOKOL_SHDC_ACTUAL_HASH}\n"
+                "  URL: ${_TC_SOKOL_SHDC_URL}\n"
+                "The failed download was removed.")
+        endif()
+        file(RENAME "${_TC_SOKOL_SHDC_DOWNLOAD}" "${_TC_SOKOL_SHDC}")
         # Make executable on Unix
         if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
             file(CHMOD "${_TC_SOKOL_SHDC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
         endif()
-        message(STATUS "[${_TC_TARGET}] sokol-shdc downloaded successfully")
+        message(STATUS "[${_TC_TARGET}] sokol-shdc downloaded and SHA-256 verified (${_TC_SOKOL_SHDC_COMMIT})")
     endif()
 
     # Output languages: Metal (macOS/iOS/iOS-simulator), HLSL (Windows),
@@ -140,7 +172,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_shader_name}.h ${_shader_out}
                 WORKING_DIRECTORY ${_shader_tmp_dir}
-                DEPENDS ${_shader_src}
+                DEPENDS ${_shader_src} "${_TC_SOKOL_SHDC}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
             )
         else()
@@ -148,7 +180,7 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
                 OUTPUT ${_shader_out}
                 COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_name}.h -l ${_TC_SOKOL_SLANG} --ifdef
                 WORKING_DIRECTORY ${_shader_out_dir}
-                DEPENDS ${_shader_src}
+                DEPENDS ${_shader_src} "${_TC_SOKOL_SHDC}"
                 COMMENT "[${_TC_TARGET}] Compiling shader: ${_shader_name}"
             )
         endif()

@@ -204,6 +204,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the first Spot light with a projection texture and the single IES slot to
   the first light with a profile (among the first 8), and flags a further
   projector or IES light that gets no slot (the PBR draw warns once from it).
+- `meshGpuDirty/` — the `Mesh` data revision that decides GPU re-uploads
+  (#267): every mutator (`clear()` / `clearXxx()`, `add*`, `setNormal`,
+  `translate` / `rotateX/Y/Z` / `scale` / `transform`, `append`, `setMode`),
+  every non-const getter and `markGpuDirty()` change `getDataRevision()`,
+  also for a `clear()` followed by re-adding the same vertex count; const
+  getters and other const reads leave it unchanged. Uses `TC_CORE_TEST_MAIN`
+  in allCoreTests; the default run is headless. With `--gpu-check`, FBO
+  readback checks Points rebuilds/colors/translations and PBR rotations and
+  vertex edits, plus independent buffer caching and move assignment.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
@@ -232,6 +241,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `appendToFile`, `saveJson` and `Pixels::save` to `/dev/full` return false
   and log an error; the normal saves (PNG / JPEG / BMP included) still return
   true with the expected bytes.
+- `audioHealth/` — audio health diagnostics (#302) on miniaudio's null
+  backend: counts silent output frames after a stream starts, excludes startup,
+  pauses, pending seeks, refill waits after applied seeks and normal ends; reports stalled callbacks with zero
+  meters and voice levels; counts stream decoder reopen failures on live re-init
+  separately from dropped plays. Checks MCP fields, main-thread underrun/stall
+  warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
+  Uses callback gates and condition-based waits.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -396,6 +412,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `sglPoolLimits/` — *(standalone, dummy backend)* sokol_gl pool handling
+  in the fork (#317): `sgl_context_make_pipeline()` returns id 0 when the sg
+  pipeline pool cannot hold all of its sg pipelines, and the ones it made are
+  destroyed again (their slots are usable afterwards); `sgl_draw()` skips a
+  command recorded while a destroyed sgl pipeline was loaded and draws the
+  rest; the sgl context pool grows when full, and the current context keeps
+  its vertices, drawing and commit rewind across the grow. Backend pipeline
+  failures with nonzero FAILED handles also roll back; failure of any growth
+  allocation leaves the old pool usable and frees temporary allocations.
+  TrussC's `RenderTarget::release()` on window close and the one-time
+  warnings require separate windowed checks.
 - `hotReloadLifecycle/` — *(hot reload host/guest build)* the real
   `GuestLibrary` loads, runs and unloads the guest several times (see the
   header of `src/main.cpp` for every check). `events().hotReloadUnload` fires
@@ -413,6 +440,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   platforms without hot reload (web / Android / iOS) even with the macro in
   source (#329). The end-to-end build of a macro app as a normal app is
   `examples/tests/HotReloadFallback`, built by the daily sweeps.
+- `screenshotExtension/` — unknown or missing screenshot extensions append
+  `.png`, warn with the actual path and supported formats, and report that
+  path in the queue and MCP reply (#455). Supported formats preserve the
+  requested spelling. `--screen` (needs a display, e.g. Xvfb) also checks the
+  deferred PNG/JPEG/BMP files, direct file capture and absence of duplicate
+  suffixes. The default run needs no GPU.
 - `screenshotContract/` — *(also on web)* the screenshot APIs report what they
   actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
   nothing is queued or created, and each API warns once. Native:

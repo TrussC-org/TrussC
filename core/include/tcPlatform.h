@@ -176,10 +176,14 @@ TC_PLATFORMS("macos,windows,linux,ios,android") bool captureWindow(Pixels& outPi
 // AFTER present() (see the afterFrame drain in TrussC.h). Callers pass an
 // already-resolved absolute path; the parent directory is assumed to exist.
 // Returns true on success, false on failure.
-// Supported formats: .png, .jpg/.jpeg, .tiff/.tif, .bmp
+// Formats: png/jpg/jpeg/bmp; macOS also tiff/tif/gif, Windows also tga.
+// Unsupported or missing extensions append .png and warn.
 // Web: a stub that always returns false and warns once; saveScreenshot()
 // calls it directly instead of queuing.
 namespace internal {
+// Resolve the data path and the platform-specific screenshot extension.
+// Returns the actual destination, warning when .png is appended.
+std::filesystem::path resolveScreenshotPath(const std::filesystem::path& path);
 bool captureWindowToFile(const std::filesystem::path& path);
 }
 
