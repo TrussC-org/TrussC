@@ -306,6 +306,7 @@ public:
             << (hasAudio_ ? ", with audio" : ", no audio");
 
         initialized_ = true;
+        applyCachedStateToPlatform();
         currentFrame_ = 0;
         return tc::LoadResult::success();
     }
