@@ -148,7 +148,6 @@ function emitType(typeEntry, cppType, luaName, T) {
     for (const id in data) {
         const e = data[id];
         if (e.owner !== owner) continue;
-        if (e.noLua) { skip.noLua = (skip.noLua || 0) + 1; continue; }   // `lua = false`: C++ only
         if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; continue; }   // TC_LUA_SKIP: not exposed to Lua
         if (e.access && e.access !== 'public') { skip.nonpublic = (skip.nonpublic || 0) + 1; continue; }  // protected/private
         if (e.tparams && e.tparams.length) { skip.template++; continue; }
@@ -291,7 +290,6 @@ for (const id in data) {
     const e = data[id];
     if (e.kind !== 'type' || e.ns) continue;
     if (EXCLUDE.has(e.owner ? `${e.owner}::${e.name}` : e.name)) { report.push(`${id}: excluded (custom Lua glue, hand-written)`); continue; }
-    if (e.noLua) { skip.noLua = (skip.noLua || 0) + 1; report.push(`${id}: lua = false (skipped)`); continue; }
     if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; report.push(`${id}: TC_LUA_SKIP (skipped)`); continue; }
     if (e.owner) {
         try { blocks.push(guardedType(emitType(e, `${e.owner}::${e.name}`, flatName(e), null), e)); count++; }
@@ -477,5 +475,5 @@ ${tail}}
 ${POSTLUDE}`);
     console.error(`[luagen-types] wrote ${SHARDS} shard TUs + aggregator to ${outdir} (largest shard ${Math.max(...buckets.map(b => b.size))} bytes)`);
 }
-console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | consts: ${constCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op} | lua=false ${skip.noLua || 0} | TC_LUA_SKIP ${skip.luaSkip || 0}`);
+console.error(`[luagen-types] usertypes: ${count} | enums: ${enumCount} | colors: ${colorCount} | consts: ${constCount} | skipped members: template ${skip.template}, unbindable ${skip.unbindable}, unsupported-op ${skip.op} | TC_LUA_SKIP ${skip.luaSkip || 0}`);
 for (const r of report) console.error('  ' + r);
