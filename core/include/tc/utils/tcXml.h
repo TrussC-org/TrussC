@@ -54,7 +54,8 @@ public:
     }
 
     // Save to file (relative paths resolved via getDataPath, like saveJson;
-    // a missing parent folder is created)
+    // a missing parent folder is created; a path inside the app bundle is
+    // refused, use getUserDataPath())
     bool save(const fs::path& path, const std::string& indent = "  ") const {
         fs::path fullPath = getDataPath(path);
         // "" or "out/": fail before creating any folder
@@ -62,6 +63,7 @@ public:
             logError() << "No file name in XML file path: " << fullPath;
             return false;
         }
+        if (!internal::checkWriteTarget(path, fullPath, "Xml")) return false;
         std::error_code ec;
         fs::path parent = fullPath.parent_path();
         if (!parent.empty()) {

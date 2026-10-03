@@ -41,7 +41,8 @@ inline Json loadJson(const fs::path& path) {
 // ---------------------------------------------------------------------------
 // JSON file writing
 // Relative paths are resolved via getDataPath (like oF), and a missing
-// parent folder is created
+// parent folder is created. A path inside the app bundle is refused (use
+// getUserDataPath()).
 // ---------------------------------------------------------------------------
 inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
     fs::path fullPath = getDataPath(path);
@@ -50,6 +51,7 @@ inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
         logError() << "No file name in JSON file path: " << fullPath;
         return false;
     }
+    if (!internal::checkWriteTarget(path, fullPath, "Json")) return false;
     // Serialize before touching the disk: a serialization error (e.g. a
     // string that is not valid UTF-8) leaves an existing file untouched.
     std::string text;

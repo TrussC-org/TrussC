@@ -42,6 +42,9 @@ static void cover_file() {
 #if defined(AF_MACOS) || defined(AF_IOS)
     (void)setDataPathToResources();
 #endif
+    (void)getUserDataPath(af::val<const fs::path>());
+    (void)getTempPath(af::val<const fs::path>());
+    (void)setUserDataPathRoot(af::val<const fs::path>());
     (void)loadJson(af::val<const fs::path>());
     (void)saveJson(af::val<const Json>(), af::val<const fs::path>(), af::val<int>());
     (void)loadXml(af::val<const fs::path>());

@@ -7,6 +7,8 @@
 #if defined(__linux__)
 
 #include <unistd.h>
+#include <pwd.h>
+#include <cstdlib>
 #include <linux/limits.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
@@ -129,6 +131,51 @@ fs::path getExecutableDir() {
     fs::path exePath = getExecutablePath();
     if (!exePath.empty()) return exePath.parent_path();
     return fs::path(".");
+}
+
+// ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The executable name names the app's folder.
+fs::path appFolderName() {
+    fs::path name = getExecutablePath().filename();
+    return name.empty() ? fs::path("TrussC") : name;
+}
+
+// An environment variable as a path, when set to an absolute path (the XDG
+// spec ignores relative values).
+fs::path absoluteEnvPath(const char* name) {
+    const char* value = std::getenv(name);
+    if (!value || !*value) return {};
+    fs::path p(value);
+    return p.is_absolute() ? p : fs::path();
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    fs::path base = absoluteEnvPath("XDG_DATA_HOME");
+    if (base.empty()) {
+        fs::path home = absoluteEnvPath("HOME");
+        if (home.empty()) {
+            if (const passwd* pw = getpwuid(getuid())) {
+                if (pw->pw_dir) home = pw->pw_dir;
+            }
+        }
+        if (home.empty()) return platformTempRoot();   // no home folder at all
+        base = home / ".local" / "share";
+    }
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    fs::path base = absoluteEnvPath("TMPDIR");
+    if (base.empty()) base = "/tmp";
+    return base / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
 }
 
 // ---------------------------------------------------------------------------
