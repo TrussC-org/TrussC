@@ -67,7 +67,7 @@ public:
     void update(VideoPlayer* player);
 
     bool hasNewFrame() const { return hasNewFrame_; }
-    bool isFinished() const { return isFinished_; }
+    bool isFinished() const { return isFinished_ && !isLoop_ && !isPlaying_; }
 
     float getPosition() const;
     void setPosition(float pct);
@@ -159,6 +159,7 @@ private:
 
     float volume_ = 1.0f;
     float speed_ = 1.0f;
+    double lastAudioPts_ = 0.0;
 
     // Threading
     std::thread decodeThread_;
@@ -372,10 +373,18 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
     isLoaded_ = true;
 
-    // Pre-decode audio for playback using FFmpeg (audio stream only)
+    // Audio uses the shared stream worker unless the app opts into preloading.
     if (hasAudio_) {
-        if (loadAudioForPlayback()) {
-            logNotice("VideoPlayer") << "Audio decoded and ready";
+        bool ready = false;
+        try {
+            ready = player->isAudioStreaming()
+                ? (bool)internal::loadFFmpegAudioStream(utf8ToPath(filePath_), audioSound_)
+                : loadAudioForPlayback();
+        } catch (const std::bad_alloc&) {
+            logWarning("VideoPlayer") << "Not enough memory to load audio; continuing video-only";
+        }
+        if (ready) {
+            logNotice("VideoPlayer") << "Audio ready";
         } else {
             logWarning("VideoPlayer") << "Failed to decode audio";
         }
@@ -456,6 +465,7 @@ void TCVideoPlayerImpl::close() {
     width_ = 0;
     height_ = 0;
     audioSound_.stop();
+    audioSound_ = Sound{};
     audioBuffer_.reset();
     hasAudio_ = false;
     audioStreamIndex_ = -1;
@@ -487,10 +497,11 @@ void TCVideoPlayerImpl::play() {
     isPaused_ = false;
     cv_.notify_all();
 
-    if (audioBuffer_) {
+    if (audioSound_.isLoaded()) {
         audioSound_.play();
         audioSound_.setPosition(static_cast<float>(currentPts_));
         audioSound_.setVolume(volume_);
+        lastAudioPts_ = currentPts_;
     }
 }
 
@@ -526,7 +537,7 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
         cv_.notify_all();
     }
 
-    if (audioBuffer_) {
+    if (audioSound_.isLoaded()) {
         if (paused) audioSound_.pause();
         else audioSound_.resume();
     }
@@ -538,10 +549,22 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
     // Target PTS: use audio as master clock when available (no drift).
-    // Fall back to wall clock for audio-less videos.
+    // Fall back to wall clock when audio is absent or its voice has stopped.
     double targetPts;
-    if (audioBuffer_) {
+    if (audioSound_.isPlaying()) {
         targetPts = audioSound_.getPosition();
+        // Keep a wall-clock anchor ready in case the audio voice stops.
+        if (speed_ > 0.0f)
+            playbackStartTime_ = av_gettime_relative() / 1000000.0 - targetPts / speed_;
+        // The stream worker pre-fills across EOF; eager voices wrap in the
+        // mixer. Follow their clock without resetting audio at video EOF.
+        if (isLoop_ && targetPts < lastAudioPts_) {
+            seekToTime(targetPts);
+            isFinished_ = false;
+            lastAudioPts_ = targetPts;
+            return;
+        }
+        lastAudioPts_ = targetPts;
     } else {
         double elapsed = av_gettime_relative() / 1000000.0 - playbackStartTime_;
         targetPts = elapsed * speed_;
@@ -596,11 +619,20 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     // Check if finished
     if (frameQueue_.empty() && isFinished_) {
         if (isLoop_) {
-            if (audioBuffer_) {
-                audioSound_.setPosition(0.0f);
+            if (audioSound_.isPlaying()) {
+                // Both stream and eager voices loop in the mixer. Wait for
+                // the audio clock to wrap, then seek only the video above.
+                cv_.notify_all();
+                return;
             }
             seekToTime(0.0);
             playbackStartTime_ = av_gettime_relative() / 1000000.0;
+            if (audioSound_.isLoaded()) {
+                // Recover a stopped voice at the video loop boundary.
+                audioSound_.play();
+                audioSound_.setPosition(0.0f);
+                lastAudioPts_ = 0.0;
+            }
             isFinished_ = false;
             cv_.notify_all();
         } else {
@@ -618,7 +650,7 @@ void TCVideoPlayerImpl::decodeThread() {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [this] {
                 return shouldStop_ ||
-                       (isPlaying_ && !isPaused_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
+                       (isPlaying_ && !isPaused_ && !isFinished_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
                        seekRequested_;
             });
         }
@@ -649,6 +681,7 @@ void TCVideoPlayerImpl::decodeThread() {
             }
 
             currentPts_ = target;
+            isFinished_ = false;
             continue;
         }
 
@@ -901,6 +934,7 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         return false;
     }
     AVCodecContext* audioCtx = avcodec_alloc_context3(codec);
+    if (!audioCtx) { avformat_close_input(&fmtCtx); return false; }
     avcodec_parameters_to_context(audioCtx, par);
     if (avcodec_open2(audioCtx, codec, nullptr) < 0) {
         avcodec_free_context(&audioCtx);
@@ -925,30 +959,37 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
         return false;
     }
 
-    // Reserve from the container's stated duration, capped by what the file's
-    // size plausibly decodes to (internal::decodeReserveSamples). Only a hint:
-    // the buffer grows as audio actually decodes.
+    // Duration is only a hint, bounded by what the file plausibly decodes to.
     std::vector<float> samples;
-    if (duration_ > 0) {
-        // Range-checked as a double first: the cast of an out-of-range double
-        // to an integer is undefined.
-        const double statedFrames = duration_ * engineSampleRate * 1.05;
-        const uint64_t frames = statedFrames < 1.8e19 ? (uint64_t)statedFrames : ~(uint64_t)0;
-        std::error_code sizeEc;
-        const uintmax_t fileBytes = fs::file_size(filePath_, sizeEc);
-        try {
-            samples.reserve(internal::decodeReserveSamples(
-                frames, 2, sizeEc ? 0 : (uint64_t)fileBytes,
-                internal::kReserveSamplesPerInputByte, samples.max_size()));
-        } catch (const std::exception&) {
-        }
-    }
 
     AVFrame* frame = av_frame_alloc();
     AVPacket* pkt  = av_packet_alloc();
+    if (!frame || !pkt) {
+        av_frame_free(&frame);
+        av_packet_free(&pkt);
+        swr_free(&swr);
+        avcodec_free_context(&audioCtx);
+        avformat_close_input(&fmtCtx);
+        logWarning("VideoPlayer") << "Not enough memory to decode audio";
+        return false;
+    }
 
     // Set when growing the buffer fails; decoding stops and the load fails.
     bool outOfMemory = false;
+    try {
+        if (duration_ > 0) {
+            const double statedFrames = duration_ * engineSampleRate * 1.05;
+            const uint64_t frames = statedFrames < 1.8e19
+                ? static_cast<uint64_t>(statedFrames) : ~uint64_t{0};
+            std::error_code sizeEc;
+            const uintmax_t fileBytes = fs::file_size(filePath_, sizeEc);
+            samples.reserve(internal::decodeReserveSamples(
+                frames, 2, sizeEc ? 0 : static_cast<uint64_t>(fileBytes),
+                internal::kReserveSamplesPerInputByte, samples.max_size()));
+        }
+    } catch (const std::exception&) {
+        // The reserve is only an estimate; a real shortage fails while growing.
+    }
     auto appendConverted = [&](int nbIn) {
         int outN = av_rescale_rnd(
             swr_get_delay(swr, audioCtx->sample_rate) + nbIn,
@@ -997,23 +1038,32 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
 
     if (outOfMemory) {
         logError("VideoPlayer") << "not enough memory to decode the audio of " << filePath_
-                                << " (" << samples.size() / 2 << " frames decoded)";
+                                << " (" << samples.size() / 2 << " frames decoded, estimated "
+                                << duration_ * engineSampleRate * 2 * sizeof(float) << " bytes)";
         return false;
     }
 
     if (samples.empty()) return false;
 
-    auto buf = std::make_shared<SoundBuffer>();
-    buf->samples   = std::move(samples);
-    buf->channels  = 2;
-    buf->sampleRate = engineSampleRate;
-    buf->numSamples = buf->samples.size() / 2;
-    audioBuffer_ = buf;
-    audioSound_.loadFromBuffer(audioBuffer_);
+    try {
+        auto buf = std::make_shared<SoundBuffer>();
+        buf->samples   = std::move(samples);
+        buf->channels  = 2;
+        buf->sampleRate = engineSampleRate;
+        buf->numSamples = buf->samples.size() / 2;
+        audioBuffer_ = buf;
+        audioSound_.loadFromBuffer(audioBuffer_);
 
-    logNotice("VideoPlayer") << "Audio: " << buf->numSamples << " frames @ "
-                              << buf->sampleRate << " Hz";
-    return true;
+        logNotice("VideoPlayer") << "Audio: " << buf->numSamples << " frames @ "
+                                  << buf->sampleRate << " Hz";
+        return true;
+    } catch (const std::bad_alloc&) {
+        audioBuffer_.reset();
+        audioSound_ = Sound{};
+        logWarning("VideoPlayer") << "Not enough memory to retain decoded audio (estimated "
+                                  << duration_ * engineSampleRate * 2 * sizeof(float) << " bytes)";
+        return false;
+    }
 }
 
 // Helper: sample rate index for ADTS header
@@ -1099,9 +1149,10 @@ float TCVideoPlayerImpl::getPosition() const {
 
 void TCVideoPlayerImpl::setPosition(float pct) {
     double targetTime = pct * duration_;
+    lastAudioPts_ = targetTime;
     seekToTime(targetTime);
     playbackStartTime_ = av_gettime_relative() / 1000000.0 - targetTime;
-    if (audioBuffer_) {
+    if (audioSound_.isLoaded()) {
         audioSound_.setPosition(static_cast<float>(targetTime));
     }
 }
@@ -1124,6 +1175,7 @@ void TCVideoPlayerImpl::setSpeed(float speed) {
 
 void TCVideoPlayerImpl::setLoop(bool loop) {
     isLoop_ = loop;
+    audioSound_.setLoop(loop);
 }
 
 int TCVideoPlayerImpl::getCurrentFrame() const {
@@ -1238,6 +1290,11 @@ protected:
 };
 
 namespace trussc {
+
+void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player) {
+    if (player.platformHandle_)
+        static_cast<TCVideoPlayerImpl*>(player.platformHandle_)->audioSound_.stop();
+}
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     auto impl = new TCVideoPlayerImpl();

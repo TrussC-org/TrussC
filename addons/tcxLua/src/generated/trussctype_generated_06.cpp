@@ -13,6 +13,8 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::VideoPlayer> t = lua->new_usertype<trussc::VideoPlayer>("VideoPlayer",
             sol::constructors<trussc::VideoPlayer()>(),
             sol::call_constructor, sol::constructors<trussc::VideoPlayer()>());
+        t["setAudioStreaming"] = &trussc::VideoPlayer::setAudioStreaming;
+        t["isAudioStreaming"] = &trussc::VideoPlayer::isAudioStreaming;
         t["load"] = &trussc::VideoPlayer::load;
         t["close"] = &trussc::VideoPlayer::close;
         t["update"] = &trussc::VideoPlayer::update;

@@ -39,6 +39,10 @@
 #include <thread>
 #include <vector>
 
+#if defined(__linux__) && !defined(__ANDROID__)
+#include "tc/sound/internal/tcFFmpegAudio.h"
+#endif
+
 namespace trussc {
 
 namespace {
@@ -630,6 +634,8 @@ struct StreamInstance {
     ma_result openDecoder(const SoundStream& src, ma_uint32 rate) {
         ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, CHANNELS, rate);
         cfg.encodingFormat = (ma_encoding_format)src.encodingFormatHint_;
+        auto* backend = static_cast<ma_decoding_backend_vtable*>(src.customBackend_);
+        if (backend) { cfg.ppCustomBackendVTables = &backend; cfg.customBackendCount = 1; }
         if (cfg.encodingFormat == ma_encoding_format_mp3) {
             cfg.seekPointCount = mp3SeekPointCount(src.duration_);
         }
@@ -1217,6 +1223,10 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                                 "file not found: " + internal::pathToDisplayUtf8(path));
     }
 
+    return openStream(path, maxPolyphony, (int)fmt, nullptr);
+}
+
+LoadResult SoundStream::openStream(const fs::path& path, int maxPolyphony, int format, void* customBackend) {
     // Probe decode: open, query, close. Per-voice decoders re-open later.
     // The decoder is configured to output at the engine's runtime sample
     // rate so the mixer can memcpy without resampling.
@@ -1224,7 +1234,9 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32,
                                                     StreamInstance::CHANNELS,
                                                     AudioEngine::getInstance().getSampleRate());
-    cfg.encodingFormat = fmt;
+    cfg.encodingFormat = (ma_encoding_format)format;
+    auto* backend = static_cast<ma_decoding_backend_vtable*>(customBackend);
+    if (backend) { cfg.ppCustomBackendVTables = &backend; cfg.customBackendCount = 1; }
     ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
         logError("SoundStream") << "failed to open " << path
@@ -1261,13 +1273,29 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
 
     path_ = path;
     maxPolyphony_ = maxPolyphony;
-    encodingFormatHint_ = (int)fmt;
+    encodingFormatHint_ = format;
+    customBackend_ = customBackend;
 
     logVerbose("SoundStream") << "ready " << path << " (" << channels
                               << " ch, " << sampleRate << " Hz, " << duration_
                               << " s, maxPolyphony=" << maxPolyphony << ")";
     return LoadResult::success();
 }
+
+LoadResult internal::SoundStreamAccess::load(const fs::path& path, Sound& sound, void* backend) {
+    auto& engine = AudioEngine::getInstance();
+    if (!engine.isInitialized()) engine.init();
+    auto stream = std::make_shared<SoundStream>();
+    LoadResult result = stream->openStream(path, 1, (int)ma_encoding_format_unknown, backend);
+    if (result) sound.buffer_ = std::move(stream);
+    return result;
+}
+
+#if defined(__linux__) && !defined(__ANDROID__)
+LoadResult internal::loadFFmpegAudioStream(const fs::path& path, Sound& sound) {
+    return SoundStreamAccess::load(path, sound, &ffBackendVTable);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // AudioEngine::play(SoundSource) — unified entry point for both eager
