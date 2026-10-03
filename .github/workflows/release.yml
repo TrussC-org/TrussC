@@ -59,6 +59,8 @@ jobs:
   # Resolve once so all platforms use the same release, even during a tag update.
   version:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       ref: ${{ steps.trussc-ver.outputs.ref }}
     steps:
@@ -94,6 +96,8 @@ jobs:
         working-directory: ${{ inputs.project-path }}
     if: contains(fromJSON(inputs.platforms), 'macos')
     runs-on: macos-15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -412,6 +416,8 @@ jobs:
         working-directory: ${{ inputs.project-path }}
     if: contains(fromJSON(inputs.platforms), 'windows')
     runs-on: windows-2025
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -539,6 +545,8 @@ jobs:
         working-directory: ${{ inputs.project-path }}
     if: contains(fromJSON(inputs.platforms), 'linux')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
