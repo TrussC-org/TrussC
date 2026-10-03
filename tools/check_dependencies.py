@@ -16,8 +16,11 @@ row with what the repo actually fetches or vendors:
     where the copy states one (VENDORED_VERSIONS below);
   - a row's commit matches the commit in its provenance file (PROVENANCE_
     COMMITS below);
+  - the sokol-shdc commit, upstream URL and all five host SHA-256 values
+    match its CMake pins; FetchContent URL_HASH values are valid SHA-256
+    and match any archive hash recorded in the inventory;
   - every path in "Pinned / vendored in" exists, and a row that names a
-    CMakeLists.txt has a matching `FetchContent_Declare` in it;
+    CMake file has a matching `FetchContent_Declare` or shader compiler pin;
   - every row is checked against something: a declaration, a vendored
     version, a provenance commit, or `not recorded` (NO_SOURCE lists the
     rows whose version is recorded only in the list itself).
@@ -39,6 +42,9 @@ import subprocess
 import sys
 
 LIST_FILE = "docs/LICENSE.md"
+SHADER_COMPILER = "sokol-shdc (sokol-tools-bin)"
+SHADER_CMAKE = "core/cmake/trussc_shaders.cmake"
+SHADER_HOSTS = ("osx", "osx_arm64", "linux", "linux_arm64", "win32")
 
 # Vendored copies that state their version. Each entry is a list of
 # (path, extractor); every listed copy must match the row.
@@ -186,14 +192,19 @@ def parse_list(text):
             "paths": re.findall(r"`([^`]+)`", where),
             "upstream": upstream,
             "slug": github_slug(upstream),
+            "hashes": dict(re.findall(r"(\w+): `([^`]+)`", col.get("sha-256", ""))),
         }
+        # A single archive hash may be recorded without a platform label.
+        hashes = col.get("sha-256", "")
+        if hashes and not row["hashes"]:
+            row["hashes"]["archive"] = hashes.strip("` ")
         row.update(parse_version_cell(row["version_cell"]))
         rows.append(row)
     return rows
 
 
 def github_slug(url):
-    m = re.search(r"github\.com/([^/\s)]+)/([^/\s)#?]+)", url or "")
+    m = re.search(r"(?:github\.com|raw\.githubusercontent\.com)/([^/\s)]+)/([^/\s)#?]+)", url or "")
     if not m:
         return None
     repo = m.group(2)
@@ -217,7 +228,7 @@ def tag_from_url(url):
     m = re.search(r"/releases/download/([^/]+)/", url)
     if m:
         return m.group(1)
-    m = re.search(r"/archive/(.+?)\.(?:tar\.gz|tar\.xz|tgz|zip)$", url)
+    m = re.search(r"/archive/([^/]+?)\.(?:tar\.gz|tar\.xz|tgz|zip)$", url)
     if m:
         return m.group(1)
     return None
@@ -243,8 +254,8 @@ def tracked_cmake_files(root):
     return files
 
 
-def parse_fetch_declares(text):
-    """(name, {KEY: value}, line) for every FetchContent_Declare( ... )."""
+def parse_cmake_commands(text, commands):
+    """(command, arguments, line), excluding comments and literal strings."""
     # Tokenize before looking for commands: comments and quoted/bracket
     # arguments can contain command names, '#' and parentheses literally.
     rx = re.compile(
@@ -266,9 +277,10 @@ def parse_fetch_declares(text):
     i = 0
     while i + 1 < len(tokens):
         value, kind, position = tokens[i]
-        if kind != "word" or value.lower() != "fetchcontent_declare" or tokens[i + 1][:2] != ("(", "paren"):
+        if kind != "word" or value.lower() not in commands or tokens[i + 1][:2] != ("(", "paren"):
             i += 1
             continue
+        command = value.lower()
         line = text[:position].count("\n") + 1
         depth, i, body = 1, i + 2, []
         while i < len(tokens) and depth:
@@ -281,14 +293,22 @@ def parse_fetch_declares(text):
                 body.append(value)
             i += 1
         if depth or not body:
-            raise ValueError("line %d: incomplete FetchContent_Declare" % line)
+            display = "FetchContent_Declare" if command == "fetchcontent_declare" else command
+            raise ValueError("line %d: incomplete %s" % (line, display))
+        out.append((command, body, line))
+    return out
+
+
+def parse_fetch_declares(text):
+    """(name, {KEY: value}, line) for every FetchContent_Declare( ... )."""
+    out = []
+    for _, body, line in parse_cmake_commands(text, {"fetchcontent_declare"}):
         args = {}
         keywords = [v.upper() for v in body]
-        for k in ("GIT_REPOSITORY", "GIT_TAG", "URL"):
+        for k in ("GIT_REPOSITORY", "GIT_TAG", "URL", "URL_HASH"):
             if k in keywords:
                 j = keywords.index(k)
-                if j + 1 < len(body):
-                    args[k] = body[j + 1]
+                args[k] = body[j + 1] if j + 1 < len(body) else ""
         out.append((body[0], args, line))
     return out
 
@@ -311,6 +331,45 @@ def read(root, rel):
 # --------------------------------------------------------------------------
 # The check
 # --------------------------------------------------------------------------
+
+def check_shader_compiler(root, row):
+    """Read the literal pins used by #597's shader compiler download."""
+    errors = []
+
+    def err(message):
+        errors.append("%s: %s: %s" % (SHADER_CMAKE, SHADER_COMPILER, message))
+
+    try:
+        commands = parse_cmake_commands(read(root, SHADER_CMAKE), {"set"})
+    except (OSError, ValueError) as e:
+        err(str(e))
+        return errors
+    pins = {}
+    for _, body, _ in commands:
+        if body[0] in {"_TC_SOKOL_SHDC_COMMIT", "_TC_SOKOL_SHDC_BASE_URL"} or body[0].startswith("_TC_SOKOL_SHDC_SHA256_"):
+            if body[0] in pins:
+                err("duplicate pin %s" % body[0])
+            pins[body[0]] = body[1] if len(body) == 2 else ""
+    if SHADER_CMAKE not in row["paths"]:
+        err('"Pinned / vendored in" does not include %s' % SHADER_CMAKE)
+    commit = pins.get("_TC_SOKOL_SHDC_COMMIT", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        err("missing or invalid pinned commit")
+    elif not row["commit"] or not commit.startswith(row["commit"]) or row["branch"] or row["version"]:
+        err("list says commit %s, build fetches %s" % (row["commit"], commit))
+    url = pins.get("_TC_SOKOL_SHDC_BASE_URL", "")
+    if not same_upstream(url, row) or not url.endswith("/${_TC_SOKOL_SHDC_COMMIT}/bin"):
+        err("upstream URL does not match the inventory and pinned commit: %s" % url)
+    if set(row["hashes"]) != set(SHADER_HOSTS):
+        err("inventory must record SHA-256 for all five hosts: %s" % ", ".join(SHADER_HOSTS))
+    for host in SHADER_HOSTS:
+        digest = pins.get("_TC_SOKOL_SHDC_SHA256_" + host, "")
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            err("missing or invalid SHA-256 for %s" % host)
+        elif row["hashes"].get(host) != digest:
+            err("list SHA-256 for %s disagrees with the build" % host)
+    return errors
+
 
 def check(root, rows):
     errors = []
@@ -367,6 +426,12 @@ def check(root, rows):
             r = match[0]
             fetched_rows.add((r["name"], f))
             checked.add(r["name"])
+            digest = args.get("URL_HASH")
+            if digest is not None and not re.fullmatch(r"SHA256=[0-9a-fA-F]{64}", digest, re.I):
+                err(r, "%s: invalid URL_HASH (expected SHA256=<64 hex digits>)" % where)
+            recorded = r["hashes"].get("archive")
+            if recorded and (digest or "").lower() != ("SHA256=" + recorded).lower():
+                err(r, "%s: URL_HASH disagrees with the inventory SHA-256" % where)
             if "GIT_TAG" in args:
                 pinned = args["GIT_TAG"]
             elif "URL" in args:
@@ -388,7 +453,15 @@ def check(root, rows):
             else:
                 err(r, "%s: the row has no version, commit or branch" % where)
 
-    # A row naming a CMakeLists.txt has a declaration in it.
+    shader_row = by_name.get(SHADER_COMPILER)
+    if shader_row is None:
+        errors.append("%s: no row for %s (pinned in %s)" % (LIST_FILE, SHADER_COMPILER, SHADER_CMAKE))
+    else:
+        errors.extend(check_shader_compiler(root, shader_row))
+        checked.add(SHADER_COMPILER)
+        fetched_rows.add((SHADER_COMPILER, SHADER_CMAKE))
+
+    # A row naming a CMake file has a declaration or shader compiler pin in it.
     for r in rows:
         for p in r["paths"]:
             if (p.endswith("CMakeLists.txt") or p.endswith(".cmake")) and (r["name"], p) not in fetched_rows \

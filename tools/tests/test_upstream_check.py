@@ -35,15 +35,28 @@ def row(name="library", version="1.2.3", commit=None):
 class UpstreamTests(unittest.TestCase):
     def test_inventory(self):
         rows = check.parse_list((ROOT / check.LIST_FILE).read_text())
-        self.assertEqual(len(rows), 30)
+        self.assertEqual(len(rows), 31)
         by_name = {r["name"]: r for r in rows}
         self.assertEqual(by_name["mbedTLS"]["version"], "3.6.7")
         self.assertEqual(by_name["miniaudio"]["version"], "0.11.23")
         self.assertEqual(by_name["tinyobjloader"]["commit"], "966edce")
+        self.assertEqual(by_name["HAP"]["commit"], "d847f6bbd3be88575dd4ef33a877243780e3be76")
+        self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["commit"], "11d0cf678105d614d675e6d9bd2aaf3eeff12f8c")
         for r in rows:
             self.assertTrue(r["slug"], r["name"])
             self.assertTrue(r["paths"], r["name"])
             self.assertTrue(all((ROOT / p).exists() for p in r["paths"]))
+
+    def test_new_pins_use_commit_checks_in_weekly_report(self):
+        rows = check.parse_list((ROOT / check.LIST_FILE).read_text())
+        for current in rows:
+            if current["name"] not in {"HAP", "sokol-shdc (sokol-tools-bin)"}:
+                continue
+            with self.subTest(library=current["name"]), \
+                    patch.object(check, "ls_remote", return_value=[("0" * 40, "refs/heads/master")]):
+                state, text = check.check_row(current)
+                self.assertEqual(state, "newer")
+                self.assertIn(current["commit"], text)
 
     def test_releases_ignore_prereleases_and_sort_numerically(self):
         tags = ["v1.9.0", "v1.10.0", "v2.0.0-rc1", "v2.0.0-beta", "unrelated"]

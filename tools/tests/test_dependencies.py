@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("dependencies", ROOT / "tools/check_dependencies.py")
 deps = importlib.util.module_from_spec(spec)
@@ -40,7 +42,7 @@ class DependencyTests(unittest.TestCase):
         return rows
 
     def test_real_tree_and_selftest(self):
-        self.assertEqual(len(self.rows), 30)
+        self.assertEqual(len(self.rows), 31)
         self.assertEqual(deps.check(str(ROOT), self.rows), [])
         self.assertEqual(deps.selftest(str(ROOT), self.rows), [])
 
@@ -61,6 +63,92 @@ class DependencyTests(unittest.TestCase):
             with self.subTest(library=name):
                 changed = deps.read(str(ROOT), path).replace(old, new)
                 self.assertTrue(any(name in e and "fetches" in e for e in self.errors(changes={path: changed})))
+
+    def test_pinned_hap_and_shader_commits(self):
+        for name, path in [("HAP", "addons/tcxHap/CMakeLists.txt"),
+                           (deps.SHADER_COMPILER, deps.SHADER_CMAKE)]:
+            current = next(r for r in self.rows if r["name"] == name)
+            self.assertEqual(len(current["commit"]), 40)
+            self.assertIsNone(current["branch"])
+            for pin in ["0" * 40, "master"]:
+                with self.subTest(library=name, pin=pin):
+                    source = deps.read(str(ROOT), path).replace(current["commit"], pin)
+                    self.assertTrue(any(name in e and "commit" in e for e in self.errors(changes={path: source})))
+            self.assertTrue(any(name in e and "fetches" in e for e in
+                                self.errors(self.change_row(name, commit="0" * 40))))
+
+    def test_shader_host_hash_mismatches_missing_and_invalid(self):
+        current = next(r for r in self.rows if r["name"] == deps.SHADER_COMPILER)
+        source = deps.read(str(ROOT), deps.SHADER_CMAKE)
+        for host, digest in current["hashes"].items():
+            for replacement in ["0" * 64, "too-short"]:
+                with self.subTest(host=host, replacement=replacement):
+                    errors = self.errors(changes={deps.SHADER_CMAKE: source.replace(digest, replacement)})
+                    self.assertTrue(any(host in e and "SHA-256" in e for e in errors))
+            hashes = dict(current["hashes"], **{host: "0" * 64})
+            self.assertTrue(any(host in e and "SHA-256" in e for e in
+                                self.errors(self.change_row(deps.SHADER_COMPILER, hashes=hashes))))
+            del hashes[host]
+            self.assertTrue(any("all five hosts" in e for e in
+                                self.errors(self.change_row(deps.SHADER_COMPILER, hashes=hashes))))
+            declaration = 'set(_TC_SOKOL_SHDC_SHA256_%s "%s")' % (host, digest)
+            self.assertIn(declaration, source)
+            self.assertTrue(any(host in e and "missing" in e for e in
+                                self.errors(changes={deps.SHADER_CMAKE: source.replace(declaration, "")})))
+
+    def test_shader_upstream_pin_path_and_comments(self):
+        source = deps.read(str(ROOT), deps.SHADER_CMAKE)
+        for old, new in [("floooh/sokol-tools-bin/", "other/wrong/"),
+                         ("${_TC_SOKOL_SHDC_COMMIT}/bin", "master/bin")]:
+            self.assertIn(old, source)
+            self.assertTrue(any("upstream URL" in e for e in
+                                self.errors(changes={deps.SHADER_CMAKE: source.replace(old, new)})))
+        self.assertTrue(any("does not include" in e for e in
+                            self.errors(self.change_row(deps.SHADER_COMPILER, paths=["core/CMakeLists.txt"]))))
+        commented = ('# set(_TC_SOKOL_SHDC_COMMIT "wrong")\n'
+                     '#[=[set(_TC_SOKOL_SHDC_SHA256_linux "wrong")]=]\n'
+                     'message([=[set(_TC_SOKOL_SHDC_COMMIT "wrong")]=])\n')
+        self.assertEqual(self.errors(changes={deps.SHADER_CMAKE: commented + source}), [])
+        self.assertTrue(any("incomplete set" in e for e in
+                            self.errors(changes={deps.SHADER_CMAKE: source + '\nset(broken "value"'})))
+
+    def test_url_hash_parsing_and_inventory_comparison(self):
+        path = "addons/tcxMidi/CMakeLists.txt"
+        source = deps.read(str(ROOT), path)
+        args = deps.parse_fetch_declares(source)[0][1]
+        digest = args["URL_HASH"].removeprefix("SHA256=")
+        rows = self.change_row("libremidi", hashes={"archive": digest})
+        self.assertEqual(self.errors(rows), [])
+        for replacement in ["SHA256=" + "0" * 64, "SHA256=abc", "MD5=" + "0" * 32, ""]:
+            with self.subTest(hash=replacement):
+                source_change = source.replace("URL_HASH " + args["URL_HASH"],
+                                               "URL_HASH " + replacement if replacement else "")
+                errors = self.errors(rows, {path: source_change})
+                self.assertTrue(any("libremidi" in e and "URL_HASH" in e for e in errors))
+        text = '''\n## Third-Party Libraries\n
+| Library | Version | Pinned / vendored in | Upstream | SHA-256 |
+|---|---|---|---|---|
+| archive | commit `abcdef0123456789abcdef0123456789abcdef01` | `CMakeLists.txt` | https://github.com/owner/archive | `%s` |
+''' % digest
+        self.assertEqual(deps.parse_list(text)[0]["hashes"], {"archive": digest})
+        self.assertEqual(deps.tag_from_url("https://github.com/owner/archive/archive/abcdef0123456789abcdef0123456789abcdef01.tar.gz"),
+                         "abcdef0123456789abcdef0123456789abcdef01")
+
+    def test_commit_archive_with_url_hash(self):
+        path = "addons/tcxHap/CMakeLists.txt"
+        source = deps.read(str(ROOT), path)
+        current = next(r for r in self.rows if r["name"] == "HAP")
+        digest = "a" * 64
+        source = source.replace("GIT_REPOSITORY https://github.com/Vidvox/hap.git",
+                                "URL https://github.com/Vidvox/hap/archive/%s.tar.gz\n    URL_HASH SHA256=%s" %
+                                (current["commit"], digest))
+        source = source.replace("GIT_TAG " + current["commit"], "")
+        rows = self.change_row("HAP", hashes={"archive": digest})
+        self.assertEqual(self.errors(rows, {path: source}), [])
+        for changed, expected in [(source.replace(current["commit"], "0" * 40), "fetches"),
+                                  (source.replace(digest, "b" * 64), "URL_HASH"),
+                                  (source.replace("URL_HASH SHA256=" + digest, "URL_HASH"), "URL_HASH")]:
+            self.assertTrue(any("HAP" in e and expected in e for e in self.errors(rows, {path: changed})))
 
     def test_vendored_versions_and_provenance_mismatches(self):
         for name in deps.VENDORED_VERSIONS:
@@ -183,9 +271,12 @@ fetchcontent_declare(real
 
             good = run()
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
-            self.assertIn("30 third-party entries", good.stdout)
+            self.assertIn("31 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
             inventory = license_path.read_text().replace("| 0.11.23 |", "| 0.11.21 |")
+            shader_row = next(r for r in self.rows if r["name"] == deps.SHADER_COMPILER)
+            inventory = inventory.replace(shader_row["commit"], "0" * 40)
+            inventory = inventory.replace(shader_row["hashes"]["linux"], "0" * 64)
             inventory = "\n".join(line for line in inventory.splitlines() if not line.startswith("| **cgltf**")) + "\n"
             license_path.write_text(inventory)
             for path, old, new in [
@@ -197,9 +288,24 @@ fetchcontent_declare(real
                 target.write_text(target.read_text().replace(old, new))
             bad = run()
             self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
-            for expected in ["mbedTLS", "miniaudio", "FetchContent_Declare(cgltf)", "stb_truetype", "libcurl"]:
+            for expected in ["mbedTLS", "miniaudio", "FetchContent_Declare(cgltf)", "stb_truetype", "libcurl",
+                             deps.SHADER_COMPILER, "SHA-256 for linux", "build fetches"]:
                 self.assertIn(expected, bad.stdout)
             self.assertNotIn("match the build.", bad.stdout)
+
+    def test_merge_preserves_all_header_job_checks(self):
+        workflow = yaml.load((ROOT / ".github/workflows/build.yml").read_text(), Loader=yaml.BaseLoader)
+        job = workflow["jobs"]["header-state-check"]
+        commands = [step for step in job["steps"] if "run" in step]
+        for command in ["python3 tools/check_header_state.py", "python3 tools/check_core_logging.py",
+                        "python3 tools/test_core_test_runner.py", "python3 tools/tests/test_release_workflow.py -v",
+                        "python3 -m unittest discover -s tools/tests -p test_dependencies.py -v",
+                        "python3 tools/check_dependencies.py"]:
+            matches = [step for step in commands if command in step["run"].splitlines()]
+            self.assertEqual(len(matches), 1, command)
+            if "check_header_state.py" not in command:
+                self.assertEqual(matches[0]["if"], "always()")
+        self.assertIn("header-state-check", workflow["jobs"]["ci-ok"]["needs"])
 
 
 if __name__ == "__main__":
