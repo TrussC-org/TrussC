@@ -65,8 +65,8 @@ public:
     // the TCP connection is up. Default 15. 0 = no deadline. When it runs
     // out, the connection is closed and the client fires onError and then
     // onConnect(false) with the message "TLS handshake timeout". The TCP
-    // connect before it is not covered: the OS times that out. Applies to the
-    // next connect().
+    // connect before it uses setConnectTimeout() (default: the OS deadline).
+    // Applies to the next connect().
     void setHandshakeTimeout(float seconds);
 
     // -------------------------------------------------------------------------
@@ -78,6 +78,7 @@ public:
 
     // Disconnect
     void disconnect() override;
+    bool isConnecting() const override;
 
     // -------------------------------------------------------------------------
     // Data Send/Receive (override TcpClient)
@@ -115,7 +116,7 @@ private:
 
     std::string hostname_;
     bool verifyNone_ = false;
-    bool handshakePending_ = false;
+    std::atomic<bool> handshakePending_{false};
     bool handshakeStarted_ = false;
     // True once the user has called setCACertificate() or setCACertificateFile().
     // When true, ensureDefaultCAsLoaded() is skipped — the user's explicit set
@@ -133,7 +134,7 @@ private:
     //  - The value is deliberately generous: a too-short timeout broke
     //    Schannel renegotiation in tcxCurl (commit a3b79116). A longer value
     //    only delays noticing a stalled server.
-    // The TCP connect stage has an OS timeout of its own and is left to it.
+    // The TCP connect stage keeps the OS deadline unless setConnectTimeout() is used.
     static constexpr float defaultHandshakeTimeout_ = 15.0f;
 
     // setHandshakeTimeout()'s value. Atomic: read by the receive thread.
@@ -144,7 +145,9 @@ private:
 
     // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
     // client") if the client was connected. The destructor passes false.
-    void disconnectImpl(bool notify);
+    void disconnectImpl(bool notify, bool stopConnect = true);
+    int writeSendStep(const void* data, size_t size, bool& forWrite, int& error) override;
+    std::mutex tlsMutex_;
 
     // Clear the connection flags, close the socket and reset the SSL
     // context, leaving tlsReceiveThread_ alone. The receive thread calls it
@@ -209,19 +212,9 @@ private:
     // onDisconnect and a failed handshake's onError / onConnect(false) it
     // stops without reading the client at all (#262).
     //
-    // Not covered: the reconnect itself. connect() on the receive thread
-    // lets go of that thread (tlsKeptThreads_ keeps it) and then, on it,
-    // creates the socket, resolves the host, connects (blocking) and starts
-    // the new receive thread. A disconnect() called on the receive thread
-    // lets go of it the same way. The next connect() or disconnect() on
-    // another thread, or the destructor, joins it, but socket_ is not
-    // atomic. So, as for TcpClient (see its Events comment): until #261
-    // lands, do not call disconnect() on the client from another thread
-    // until the listener's call has returned. connect(), connectAsync(),
-    // disconnect() and the destructor can wait for a listener still running
-    // on one of the client's threads. Do not call them while holding a lock
-    // that such a listener takes: the call and the listener would wait for
-    // each other forever.
+    // Teardown cancels and joins the connect worker before releasing TLS
+    // state. Reentrant connection methods from listeners still require the
+    // external caller to wait for that listener's call (see TcpClient Events).
     std::atomic<unsigned> tlsReceiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()
