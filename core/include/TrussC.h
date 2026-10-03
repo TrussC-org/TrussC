@@ -2125,7 +2125,8 @@ namespace internal {
 // captures on Linux when called inside draw().
 //
 // Returns true if the destination was prepared and the capture was queued;
-// false if the parent directory could not be created (e.g. no write
+// false if the destination is inside the app bundle (with an Error naming
+// getUserDataPath()) or the parent directory could not be created (e.g. no write
 // permission). The rare failure of the deferred write itself (permission/disk
 // after the directory check) is reported via logError("Screenshot").
 // Relative paths resolve against the data path. The format comes from the
@@ -2146,6 +2147,8 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
 #else
     // Resolve relative paths up front so the deferred worker gets an absolute one.
     std::filesystem::path resolved = internal::resolveScreenshotPath(path);
+    // Inside the app bundle: refused, with an Error naming getUserDataPath()
+    if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
 
     // Auto-create the parent directory (mirrors VideoRecorder). This is the
     // failure users want to catch synchronously (missing/unwritable folder).

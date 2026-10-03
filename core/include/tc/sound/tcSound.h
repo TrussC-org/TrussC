@@ -41,6 +41,7 @@
 
 namespace trussc {
 
+class Sound;
 
 // ---------------------------------------------------------------------------
 // SoundSource — abstract base for anything Sound::play() can consume.
@@ -971,6 +972,20 @@ namespace internal {
     // tcAudio_impl.cpp.
     uint64_t streamWorkerPassesForTests();
 
+    // Test-only snapshot for pending-seek failures (#582). The worker can
+    // advance between fields; this is diagnostic state, not a transaction.
+    struct StreamSeekStateForTests {
+        bool hasStream = false;
+        uint64_t request = 0;
+        uint64_t served = 0;
+        uint64_t published = 0;
+        uint64_t applied = 0;
+        bool endOfStream = false;
+        bool decoderAtEnd = false;
+        uint64_t workerPasses = 0;
+    };
+    StreamSeekStateForTests streamSeekStateForTests(const Sound& sound);
+
     // Seek a voice (Sound::setPosition()). `frame` counts the voice's
     // positionF units: source frames for an eager voice, engine-rate frames
     // for a stream. An eager voice moves at once (positionF is written
@@ -1214,6 +1229,7 @@ private:
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
     friend void internal::releaseVoice(PlayingSound&);
+    friend internal::StreamSeekStateForTests internal::streamSeekStateForTests(const Sound&);
 
     // Zero the output meters, the CPU usage window and every playback's
     // level. Only while no device is running (init(), shutdown()), so the
@@ -1931,6 +1947,8 @@ private:
         if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
         return playing_->positionRateHz_.load(std::memory_order_relaxed);
     }
+
+    friend internal::StreamSeekStateForTests internal::streamSeekStateForTests(const Sound&);
 
     std::shared_ptr<SoundSource> buffer_;
     // Points at the voice; owns (and shares with copies) its VoiceOwner.

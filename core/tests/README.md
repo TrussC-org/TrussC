@@ -224,6 +224,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `userDataPath/` — where the app writes (#433): `getUserDataPath()` and
+  `getTempPath()` are the OS per-user folders, created on first use (Linux:
+  `$XDG_DATA_HOME` / `$HOME` and `$TMPDIR` overrides; Windows:
+  `%LOCALAPPDATA%` / `%TMP%`; macOS: the parent folders);
+  `setUserDataPathRoot()` fixes the folder (absolute or relative to the
+  executable); with a simulated app bundle every core writer refuses a path
+  inside it (relative, absolute, or a user data root inside it) with one Error
+  naming the file and `getUserDataPath()`, and creates nothing; on macOS the
+  first relative write into the data folder outside a bundle logs one Notice.
 - `dataPathLoads/` — the loaders share the same path rule (#273):
   `Pixels::load` / `loadHDR`, `Sound::load` / `loadStream` and tcxLut's
   `Lut3D::load` resolve a relative path against `getDataPath()` with no
@@ -283,6 +292,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   move keeps the moved voice playing), a paused voice is released too, and a
   streamed voice closes its file on `stop()` and when its last handle goes
   away (checked through `/proc/self/fd` on Linux).
+- `streamSeekRepeat/` — daily-only repetition of the exhausted non-looping
+  stream's pending seek to frame 0 (#582), 50 times on the null audio backend.
+  It checks that target audio returns after the worker stall is released.
+  Failures here and in `streamSeek/` report the voice's playing state and
+  position, seek request/served/published/applied sequences, end-of-stream
+  and decoder-end flags, and worker pass count.
 - `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
   read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
   measured on `audioOut` with files of DC levels: `setPosition()` moves the

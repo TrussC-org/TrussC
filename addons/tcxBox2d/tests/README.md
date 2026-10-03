@@ -84,6 +84,18 @@ free the other body of their pair, and bodies may be destroyed between
   dispatched, and one that also adds a new ball at the freed address: the
   dropped side gets no Stay, the new ball nothing.
 
+Outside-step Exits (#473) are queued until Box2D returns:
+
+- `Body::destroy()`, disabling, each body type setter, `RigidBody2D` teardown
+  and each `setBodyType()` transition deliver Exits before the wrapper
+  returns; an Exit listener destroys a third touching body, with each live
+  side notified exactly once, in both body creation orders;
+- listeners check the completed operation (destroyed or disabled state,
+  or removed contacts), and a later update does not repeat any Exit;
+- raw disabling, type changes and destruction deliver no Exit during the
+  Box2D call; the next update flushes them and its listener can destroy a
+  third body safely.
+
 Without the guards these are use-after-frees that a plain build may not
 report; run them under AddressSanitizer after touching the event code.
 

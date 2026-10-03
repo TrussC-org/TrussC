@@ -129,6 +129,25 @@ fs::path getExecutableDir() {
     return exePath.parent_path();
 }
 
+// User data / temp folders: the app's own container folders (they belong to
+// this app already, so no bundle id subfolder).
+fs::path internal::platformUserDataRoot() {
+    NSString* support = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    if (support) return fs::path(support.UTF8String);
+    return fs::path(NSHomeDirectory().UTF8String) / "Library" / "Application Support";
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path(NSTemporaryDirectory().UTF8String);
+}
+
+fs::path internal::platformAppBundlePath() {
+    NSString* bundle = [[NSBundle mainBundle] bundlePath];
+    if (!bundle) return {};
+    return fs::path(bundle.UTF8String);
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot (Metal API)
 // ---------------------------------------------------------------------------
@@ -228,9 +247,12 @@ bool captureWindow(Pixels& outPixels) {
 bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
@@ -245,7 +267,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
     CGContextRef context = CGBitmapContextCreate(
-        pixels.getData(),
+        const_cast<unsigned char*>(pixels.getData()),
         width, height,
         8,
         width * 4,

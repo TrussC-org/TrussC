@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcDebugName.h"
 #include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
@@ -59,6 +60,10 @@ public:
     Fbo() { internal::fboCount()++; }
     ~Fbo() { clear(); internal::fboCount()--; }
 
+    // Name this object for MCP inspection; empty names are listed by index.
+    void setDebugName(const std::string& name) { debugName_.set(name); }
+    const std::string& getDebugName() const { return debugName_.get(); }
+
     // Non-copyable
     Fbo(const Fbo&) = delete;
     Fbo& operator=(const Fbo&) = delete;
@@ -70,13 +75,15 @@ public:
     std::shared_ptr<void> lifetimeToken() const { return aliveToken_; }
 
     // Move-enabled
-    Fbo(Fbo&& other) noexcept {
+    Fbo(Fbo&& other) noexcept
+        : debugName_(std::move(other.debugName_), this) {
         moveFrom(std::move(other));
     }
 
     Fbo& operator=(Fbo&& other) noexcept {
         if (this != &other) {
             clear();
+            debugName_.moveFrom(other.debugName_);
             moveFrom(std::move(other));
         }
         return *this;
@@ -423,6 +430,7 @@ public:
     sg_sampler getSampler() const { return curColorTex_().getSampler(); }
 
 private:
+    internal::DebugName debugName_{internal::DebugObjectKind::Fbo, this};
     static bool needsGlYFlip() {
         sg_backend be = sg_query_backend();
         return be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3;

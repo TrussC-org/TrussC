@@ -950,6 +950,8 @@ bool Logger::setLogFile(const fs::path& path) {
         log(LogLevel::Error, "Failed to open log file: " + pathUtf8 + " (no file name in path)");
         return false;
     }
+    // Inside the app bundle: refused (logged, the current log stays open)
+    if (!internal::checkWriteTarget(path, resolved, "Logger")) return false;
 
     // Create a missing parent folder, like saveScreenshot().
     std::error_code ec;
@@ -1444,6 +1446,171 @@ DataPathState& dataPathState() {
         return s;
     }();
     return *state;
+}
+
+// ---------------------------------------------------------------------------
+// User data / temp folders (declared in tcUtils.h)
+// ---------------------------------------------------------------------------
+namespace {
+struct UserPathState {
+    std::mutex mutex;
+    fs::path userRoot;            // setUserDataPathRoot(), as given
+    bool userRootSet = false;
+    fs::path defaultUserRoot;     // platform default, read once
+    fs::path defaultTempRoot;
+    fs::path createdUserRoot;     // last folder created (skip the next stat)
+    fs::path createdTempRoot;
+    fs::path bundleForTests;
+    bool bundleForTestsSet = false;
+};
+
+UserPathState& userPathState() {
+    static auto* state = new UserPathState();   // leaked: usable during exit
+    return *state;
+}
+
+fs::path appBundlePath();
+bool isInsideFolder(const fs::path& p, const fs::path& folder);
+
+// Create `root` unless it is the folder created last time. Logged outside
+// the state mutex (an onLog listener may ask for a path again).
+fs::path ensureFolder(const fs::path& root, fs::path UserPathState::*created) {
+    // Resolving a user root inside the bundle must not modify the bundle
+    // itself. Return the path; the writer reports the refusal once.
+    const fs::path bundle = appBundlePath();
+    if (!bundle.empty() && isInsideFolder(root, bundle)) return root;
+    auto& s = userPathState();
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.*created == root) return root;
+    }
+    std::error_code ec;
+    fs::create_directories(root, ec);
+    if (ec) {
+        logError() << "Cannot create folder: " << pathToDisplayUtf8(root)
+                   << " (" << ec.message() << ")";
+        return root;
+    }
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.*created = root;
+    return root;
+}
+
+fs::path appBundlePath() {
+    auto& s = userPathState();
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.bundleForTestsSet) return s.bundleForTests;
+    }
+    return platformAppBundlePath();
+}
+
+// Absolute, normalized, with symlinks of the existing part resolved.
+fs::path comparablePath(const fs::path& p) {
+    std::error_code ec;
+    fs::path abs = fs::absolute(p, ec);
+    if (ec) abs = p;
+    fs::path canon = fs::weakly_canonical(abs, ec);
+    return (ec ? abs : canon).lexically_normal();
+}
+
+// True if `p` is `folder` or inside it (component-wise, so "/a/bc" is not
+// inside "/a/b").
+bool isInsideFolder(const fs::path& p, const fs::path& folder) {
+    const fs::path a = comparablePath(p);
+    const fs::path b = comparablePath(folder);
+    auto ia = a.begin();
+    for (auto ib = b.begin(); ib != b.end(); ++ib) {
+        if (ib->empty()) continue;   // trailing separator
+        if (ia == a.end() || *ia != *ib) return false;
+        ++ia;
+    }
+    return true;
+}
+} // namespace
+
+fs::path userDataPathRoot() {
+    auto& s = userPathState();
+    fs::path root;
+    bool userSet = false;
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        userSet = s.userRootSet;
+        if (userSet) {
+            root = s.userRoot;
+        } else {
+            if (s.defaultUserRoot.empty()) s.defaultUserRoot = platformUserDataRoot();
+            root = s.defaultUserRoot;
+        }
+    }
+    // A relative root (setUserDataPathRoot) is resolved against the
+    // executable directory, like setDataPathRoot().
+    if (root.is_relative()) root = getExecutableDir() / root;
+    return ensureFolder(root.lexically_normal(), &UserPathState::createdUserRoot);
+}
+
+fs::path tempPathRoot() {
+    auto& s = userPathState();
+    fs::path root;
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.defaultTempRoot.empty()) s.defaultTempRoot = platformTempRoot();
+        root = s.defaultTempRoot;
+    }
+    if (root.is_relative()) root = getExecutableDir() / root;
+    return ensureFolder(root.lexically_normal(), &UserPathState::createdTempRoot);
+}
+
+void setUserDataPathRootState(const fs::path& path) {
+    auto& s = userPathState();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.userRoot = path;
+    s.userRootSet = true;
+}
+
+void setAppBundlePathForTests(const fs::path& bundle) {
+    auto& s = userPathState();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.bundleForTests = bundle;
+    s.bundleForTestsSet = !bundle.empty();
+}
+
+void resetUserDataPathForTests() {
+    auto& s = userPathState();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.userRoot.clear();
+    s.userRootSet = false;
+    s.defaultUserRoot.clear();
+    s.defaultTempRoot.clear();
+    s.createdUserRoot.clear();
+    s.createdTempRoot.clear();
+}
+
+bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+                      const char* module) {
+    const fs::path bundle = appBundlePath();
+    if (!bundle.empty() && isInsideFolder(resolved, bundle)) {
+        const fs::path name = requested.filename().empty() ? resolved.filename()
+                                                           : requested.filename();
+        logError(module) << "Cannot write " << pathToDisplayUtf8(resolved)
+                         << ": it is inside the app bundle. Write to getUserDataPath(\""
+                         << pathToDisplayUtf8(name) << "\") instead";
+        return false;
+    }
+#ifdef __APPLE__
+    // Development on macOS / iOS: the data folder is outside a bundle, so
+    // this write works now but would be refused in a packaged app.
+    if (!requested.empty() && requested.is_relative()) {
+        static OnceGate noticed;
+        if (isInsideFolder(resolved, getDataPath(fs::path()))
+            && noticed.isFirstTime()) {
+            logNotice(module) << "Writing " << pathToDisplayUtf8(requested)
+                              << " into the data folder. In a packaged .app this write"
+                                 " would be refused; use getUserDataPath()";
+        }
+    }
+#endif
+    return true;
 }
 
 std::function<bool()>& overlayHoveredQuery() {

@@ -245,9 +245,11 @@ public:
     RigidBody2D& setBodyType(BodyType t) {
         type_ = t;
         if (body_) {
+            auto* cm = world_->getCollisionManager();
             body_->SetType(t == BodyType::Dynamic ? b2_dynamicBody
                          : t == BodyType::Static  ? b2_staticBody
                                                   : b2_kinematicBody);
+            if (cm) cm->flushPendingExits();
         }
         return *this;
     }
@@ -427,16 +429,22 @@ protected:
     }
 
     void onDestroy() override {
+        b2Body* gone = body_;
+        body_ = nullptr;
         auto it = detail::contactRouters().find(world_);
-        if (it != detail::contactRouters().end()) it->second.bodies.erase(body_);
+        if (it != detail::contactRouters().end()) it->second.bodies.erase(gone);
         // Only touch the world if it's still alive — at shutdown it may be
         // destroyed before its bodies' nodes (it frees all bodies itself).
-        if (!worldAlive_.expired() && world_ && body_) {
+        if (!worldAlive_.expired() && world_ && gone) {
             // A deferred Exit must not name this body once it is freed
-            if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
-            if (auto* w = world_->getWorld()) w->DestroyBody(body_);
+            auto* cm = world_->getCollisionManager();
+            if (cm) cm->forget(gone);
+            if (auto* w = world_->getWorld()) w->DestroyBody(gone);
+            if (cm) {
+                cm->forgetBody(gone);
+                cm->flushPendingExits();
+            }
         }
-        body_ = nullptr;
     }
 
     bool isExclusive() const override { return true; }
