@@ -192,7 +192,7 @@ cmake --build --preset android
 Notes:
 - trusscli detects the NDK from `ANDROID_NDK_HOME` or `$ANDROID_HOME/ndk/`.
 - APK signing uses `~/.android/debug.keystore`. If missing, APK packaging is skipped and only the .so is built.
-- Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. To also receive them as mouse events, call `setTouchAsMouse(true)` in `setup()`.
+- Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. Touch-as-mouse is ON by default: the first finger down also drives the mouse (one `mousePressed`, then `mouseDragged`, then one `mouseReleased` when it lifts); other fingers only produce touch events. Call `setTouchAsMouse(false)` in `setup()` to receive touch events only.
 - Data files: Use `adb push` to transfer assets to the app's internal storage.
 - **If `cmake --preset android` fails after trusscli update**, try running the command manually from the terminal.
 
