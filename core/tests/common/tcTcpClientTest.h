@@ -69,8 +69,8 @@ struct RawListener {
 #else
         socklen_t len = sizeof(addr);
 #endif
-        if (bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
-            getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len) != 0 || listen(fd, backlog) != 0) {
+        if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
+            ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &len) != 0 || ::listen(fd, backlog) != 0) {
             check("raw listener setup", false);
             _Exit(1);
         }
@@ -87,7 +87,7 @@ struct RawListener {
         pollfd ready{fd, POLLIN, 0};
         if (poll(&ready, 1, 10000) <= 0) return INVALID_SOCKET;
 #endif
-        return accept(fd, nullptr, nullptr);
+        return ::accept(fd, nullptr, nullptr);
     }
 };
 
