@@ -233,7 +233,7 @@ struct TouchPoint {
 // Touch event arguments (multi-touch)
 // ---------------------------------------------------------------------------
 struct TouchEventArgs {
-    static constexpr int MAX_TOUCHES = 8;  // Matches SAPP_MAX_TOUCHPOINTS
+    static constexpr int MAX_TOUCHES = 32;  // Matches SAPP_MAX_TOUCHPOINTS
     TouchPoint touches[MAX_TOUCHES];
     int numTouches = 0;
     bool cancelled = false;   // true when touchReleased is due to system cancellation

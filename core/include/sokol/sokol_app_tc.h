@@ -1486,7 +1486,7 @@ extern "C" {
 
 /* misc constants */
 enum {
-    SAPP_MAX_TOUCHPOINTS = 8,
+    SAPP_MAX_TOUCHPOINTS = 32,
     SAPP_MAX_MOUSEBUTTONS = 3,
     SAPP_MAX_KEYCODES = 512,
     SAPP_MAX_ICONIMAGES = 8,
@@ -1964,6 +1964,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(IMAGE_DATA_SIZE_MISMATCH, "image data size mismatch (must be width*height*4 bytes)") \
     _SAPP_LOGITEM_XMACRO(DROPPED_FILE_PATH_TOO_LONG, "dropped file path too long (sapp_desc.max_dropped_filed_path_length)") \
     _SAPP_LOGITEM_XMACRO(CLIPBOARD_STRING_TOO_BIG, "clipboard string didn't fit into clipboard buffer") \
+    _SAPP_LOGITEM_XMACRO(TOUCHPOINTS_DROPPED, "touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped") \
 
 #define _SAPP_LOGITEM_XMACRO(item,msg) SAPP_LOGITEM_##item,
 typedef enum sapp_log_item {
@@ -5006,13 +5007,34 @@ _SOKOL_PRIVATE void _sapp_tc_ios_touch_event(sapp_event_type type, NSSet<UITouch
         NSEnumerator* enumerator = event.allTouches.objectEnumerator;
         UITouch* ios_touch;
         while ((ios_touch = [enumerator nextObject])) {
-            if ((_sapp_tc.event.num_touches + 1) < SAPP_MAX_TOUCHPOINTS) {
+            const bool changed = [touches containsObject:ios_touch];
+            int dst_index = -1;
+            if (_sapp_tc.event.num_touches < SAPP_MAX_TOUCHPOINTS) {
+                dst_index = _sapp_tc.event.num_touches++;
+            } else {
+                // Implementation-only state: warn once for this backend's lifetime.
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "iOS: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+                }
+                // Preserve platform order until full, then replace an unchanged tail point.
+                if (changed) {
+                    for (int i = SAPP_MAX_TOUCHPOINTS - 1; i >= 0; i--) {
+                        if (!_sapp_tc.event.touches[i].changed) {
+                            dst_index = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (dst_index >= 0) {
                 CGPoint ios_pos = [ios_touch locationInView:_sapp_tc.ios.view];
-                sapp_touchpoint* cur_point = &_sapp_tc.event.touches[_sapp_tc.event.num_touches++];
+                sapp_touchpoint* cur_point = &_sapp_tc.event.touches[dst_index];
                 cur_point->identifier = (uintptr_t) ios_touch;
                 cur_point->pos_x = ios_pos.x * _sapp_tc.dpi_scale;
                 cur_point->pos_y = ios_pos.y * _sapp_tc.dpi_scale;
-                cur_point->changed = [touches containsObject:ios_touch];
+                cur_point->changed = changed;
             }
         }
         if (_sapp_tc.event.num_touches > 0) {
@@ -16601,17 +16623,29 @@ _SOKOL_PRIVATE bool _sapp_tc_android_touch_event(const AInputEvent* e) {
     _sapp_tc_init_event(type);
     _sapp_tc.event.num_touches = (int)AMotionEvent_getPointerCount(e);
     if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+        // Implementation-only state: warn once for this backend's lifetime.
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "Android: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+        }
         _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
     }
     for (int32_t i = 0; i < _sapp_tc.event.num_touches; i++) {
+        // Only substitute the last slot when the changed pointer would be dropped.
+        int32_t src_index = i;
+        if (i == SAPP_MAX_TOUCHPOINTS - 1 && idx >= SAPP_MAX_TOUCHPOINTS &&
+            (action == AMOTION_EVENT_ACTION_POINTER_DOWN || action == AMOTION_EVENT_ACTION_POINTER_UP)) {
+            src_index = idx;
+        }
         sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
-        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)i);
-        dst->pos_x = (AMotionEvent_getX(e, (size_t)i) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
-        dst->pos_y = (AMotionEvent_getY(e, (size_t)i) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
-        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)i);
+        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)src_index);
+        dst->pos_x = (AMotionEvent_getX(e, (size_t)src_index) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
+        dst->pos_y = (AMotionEvent_getY(e, (size_t)src_index) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
+        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)src_index);
         if (action == AMOTION_EVENT_ACTION_POINTER_DOWN ||
             action == AMOTION_EVENT_ACTION_POINTER_UP) {
-            dst->changed = (i == idx);
+            dst->changed = (src_index == idx);
         } else {
             dst->changed = true;
         }
@@ -19751,11 +19785,32 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_touch_cb(int emsc_type, const EmscriptenTou
             _sapp_tc.event.modifiers = _sapp_tc_emsc_touch_event_mods(emsc_event);
             _sapp_tc.event.num_touches = emsc_event->numTouches;
             if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+                // Implementation-only state: warn once for this backend's lifetime.
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "Web: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+                }
                 _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
             }
-            for (int i = 0; i < _sapp_tc.event.num_touches; i++) {
+            for (int i = 0; i < emsc_event->numTouches; i++) {
                 const EmscriptenTouchPoint* src = &emsc_event->touches[i];
-                sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
+                int dst_index = i;
+                if (i >= SAPP_MAX_TOUCHPOINTS) {
+                    dst_index = -1;
+                    if (src->isChanged) {
+                        for (int j = SAPP_MAX_TOUCHPOINTS - 1; j >= 0; j--) {
+                            if (!_sapp_tc.event.touches[j].changed) {
+                                dst_index = j;
+                                break;
+                            }
+                        }
+                    }
+                    if (dst_index < 0) {
+                        continue;
+                    }
+                }
+                sapp_touchpoint* dst = &_sapp_tc.event.touches[dst_index];
                 dst->identifier = (uintptr_t)src->identifier;
                 dst->pos_x = src->targetX * _sapp_tc.dpi_scale;
                 dst->pos_y = src->targetY * _sapp_tc.dpi_scale;

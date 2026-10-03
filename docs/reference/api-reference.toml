@@ -10514,9 +10514,9 @@ description.ja = "touches 内の有効なエントリ数"
 description.ko = "touches 내의 유효한 항목 수"
 
 ["TouchEventArgs::touches"]
-description.en = "Array of active touch points (up to MAX_TOUCHES = 8)"
-description.ja = "アクティブなタッチ点の配列(最大 MAX_TOUCHES = 8)"
-description.ko = "활성 터치 포인트의 배열(최대 MAX_TOUCHES = 8)"
+description.en = "Array of active touch points (up to MAX_TOUCHES = 32)"
+description.ja = "アクティブなタッチ点の配列(最大 MAX_TOUCHES = 32)"
+description.ko = "활성 터치 포인트의 배열(최대 MAX_TOUCHES = 32)"
 
 ["TouchEventArgs::x"]
 description.en = "Convenience: X position of the first touch point"
