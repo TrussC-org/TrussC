@@ -4618,7 +4618,6 @@ description.ko = "은 프리셋"
 
 ["MatrixScope"]
 hide = true
-lua = false
 keywords = ["raii", "guard", "scope"]
 
 ["Mesh"]
@@ -9353,7 +9352,6 @@ description.ko = "내부 삼각형 메시를 재구축(편집 후 draw 전에 �
 
 ["StyleScope"]
 hide = true
-lua = false
 keywords = ["raii", "guard", "scope"]
 
 ["TcpClient"]
@@ -16482,7 +16480,6 @@ description.ko = "크기 조절"
 related = ["translate", "rotate"]
 
 ["scopedMatrix"]
-lua = false
 category = "transform"
 keywords = ["raii", "scope", "guard", "save", "restore", "transform", "stack", "push", "pop", "early return"]
 description.en = "pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning"
@@ -16494,7 +16491,6 @@ details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無い�
 details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushMatrix() / popMatrix()를 사용한다."
 
 ["scopedStyle"]
-lua = false
 category = "graphics_style"
 keywords = ["raii", "scope", "guard", "save", "restore", "state", "stack", "push", "pop", "early return"]
 description.en = "pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning"
