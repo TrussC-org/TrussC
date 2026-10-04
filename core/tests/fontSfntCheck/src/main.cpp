@@ -28,6 +28,8 @@
 // Plus:
 // - a glyph index from the cmap past numGlyphs, or for CFF past the number
 //   of CharStrings, is treated as .notdef,
+// - only supported Unicode cmap formats are selected, the last usable
+//   record wins, and fonts without a usable map are refused with a reason,
 // - a codepoint above U+10FFFF is answered as missing (.notdef),
 // - CFF data is read within the CFF table's length (a CharStrings offset
 //   past the table finds no CharStrings INDEX),
@@ -290,6 +292,55 @@ static Bytes makeCmap12(const vector<pair<uint32_t, uint32_t>>& codepointToGlyph
     return b;
 }
 
+struct CmapRecord { uint16_t platform, encoding; Bytes subtable; };
+static Bytes makeCmapRecords(const vector<CmapRecord>& records) {
+    Bytes b;
+    put16(b, 0);
+    put16(b, (uint32_t)records.size());
+    uint32_t offset = 4 + 8 * (uint32_t)records.size();
+    for (const auto& rec : records) {
+        put16(b, rec.platform); put16(b, rec.encoding); put32(b, offset);
+        offset += (uint32_t)rec.subtable.size();
+    }
+    for (const auto& rec : records)
+        b.insert(b.end(), rec.subtable.begin(), rec.subtable.end());
+    return b;
+}
+
+// Supported subtables mapping 'A' to the requested glyph. Existing format
+// 4/12 builders include a one-record cmap header, removed here.
+static Bytes makeCmapSubtable(int format, uint16_t glyph = 1) {
+    if (format == 4 || format == 12 || format == 13) {
+        Bytes cmap = format == 4 ? makeCmap({{65, 65, glyph}}) : makeCmap12({{65, glyph}});
+        Bytes sub(cmap.begin() + 12, cmap.end());
+        set16(sub, 0, (uint32_t)format);
+        return sub;
+    }
+    Bytes sub;
+    put16(sub, (uint32_t)format);
+    put16(sub, format == 0 ? 262 : 12);
+    put16(sub, 0);  // language
+    if (format == 0) {
+        sub.resize(262, 0);
+        sub[6 + 65] = (uint8_t)glyph;
+    } else {  // format 6: one glyph, starting at 'A'
+        put16(sub, 65); put16(sub, 1); put16(sub, glyph);
+    }
+    return sub;
+}
+
+static Bytes makeUnsupportedCmapSubtable(int format) {
+    Bytes sub;
+    put16(sub, (uint32_t)format);
+    if (format == 14) {
+        put32(sub, 10); put32(sub, 0);  // length, no variation selector records
+    } else {  // format 2: all subHeaderKeys point to the empty subheader 0
+        put16(sub, 526); put16(sub, 0);
+        sub.resize(526, 0);
+    }
+    return sub;
+}
+
 struct Pt { int x, y; bool on; };
 static Bytes simpleGlyph(const vector<vector<Pt>>& contours) {
     int xMin = 1 << 30, yMin = 1 << 30, xMax = -(1 << 30), yMax = -(1 << 30);
@@ -506,6 +557,61 @@ static void expectRejected(const string& name, const Bytes& f, const string& rea
 }
 
 static bool closeTo(float a, float b) { return fabs(a - b) < 1e-4f; }
+
+// --- Unicode cmap selection --------------------------------------------------
+static void checkCmapSelection() {
+    auto expectMap = [](const string& label, const Bytes& cmap, int glyph, bool cff = false) {
+        const Bytes font = cff ? makeCffFont(cffCharStrings(), {}, kNumGlyphs, cmap)
+                               : makeTrueType(0, 2, cmap);
+        stbtt_fontinfo info{};
+        const bool initialized = stbtt_InitFont(&info, font.data(), 0) != 0;
+        check(label + ": stb selects expected glyph",
+              initialized && stbtt_FindGlyphIndex(&info, 'A') == glyph);
+        internal::FontAtlasManager m;
+        const LoadOutcome r = tryLoad(m, font);
+        check(label + ": Font loads and renders 'A'",
+              r.ok && r.warnings == 0 && m.fontHasGlyph('A') && !m.getGlyphPath('A').empty());
+    };
+    const Bytes variation = makeUnsupportedCmapSubtable(14);
+    const Bytes legacy = makeUnsupportedCmapSubtable(2);
+    for (int format : {0, 4, 6, 12, 13}) {
+        const Bytes sub = makeCmapSubtable(format);
+        for (auto platform : {pair<uint16_t, uint16_t>{0, 3}, {3, 1}, {3, 10}}) {
+            const string label = "cmap " + to_string(format) + " (" + to_string(platform.first) +
+                                 "," + to_string(platform.second) + ") before formats 2/14";
+            expectMap(label, makeCmapRecords({{platform.first, platform.second, sub},
+                                              {0, 3, legacy}, {0, 5, variation}}), 1);
+        }
+    }
+    const Bytes bmp = makeCmapSubtable(4, 1);
+    const Bytes full = makeCmapSubtable(12, 3);
+    expectMap("last usable cmap is Unicode format 12",
+              makeCmapRecords({{3, 1, bmp}, {0, 4, full}, {0, 5, variation}}), 3);
+    expectMap("last usable cmap is Microsoft format 4",
+              makeCmapRecords({{0, 4, full}, {3, 1, bmp}, {3, 10, legacy}}), 1);
+    expectMap("CFF Unicode format 4 before format 14",
+              makeCmapRecords({{0, 3, bmp}, {0, 5, variation}}), 1, true);
+    {
+        // Offsets for non-Unicode records are not checked by the skeleton;
+        // selection must not read their subtable formats.
+        Bytes cmap = makeCmapRecords({{0, 3, bmp}, {1, 0, full}, {3, 0, full}});
+        set32(cmap, 16, (uint32_t)cmap.size());
+        set32(cmap, 24, (uint32_t)cmap.size());
+        expectMap("non-Unicode records are ignored", cmap, 1);
+    }
+    for (const Bytes& cmap : {makeCmapRecords({{0, 5, variation}}),
+                              makeCmapRecords({{3, 1, legacy}, {0, 5, variation}}),
+                              makeCmapRecords({{1, 0, bmp}, {3, 0, bmp}}),
+                              makeCmapRecords({})}) {
+        const Bytes font = makeTrueType(0, 2, cmap);
+        stbtt_fontinfo info{};
+        check("no usable Unicode cmap: stb refuses font", !stbtt_InitFont(&info, font.data(), 0));
+        expectRejected("no usable Unicode cmap", font, "no usable Unicode character map");
+        expectRejected("CFF without usable Unicode cmap",
+                       makeCffFont(cffCharStrings(), {}, kNumGlyphs, cmap),
+                       "no usable Unicode character map");
+    }
+}
 
 // --- valid fonts -------------------------------------------------------------
 static void checkValid(const string& label, const Bytes& f) {
@@ -1294,6 +1400,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     checkGlyphIndexClamp("TrueType", makeTrueType());
     checkGlyphIndexClamp("CFF", makeCffFont());
+    checkCmapSelection();
     checkCffCharStringsCount();
     checkCffMalformed();
     checkCodepointRange();
