@@ -7,7 +7,7 @@
 // Each case writes a small .obj to a temp directory and loads it with
 // ObjLoader. Texture cases use the dummy GPU backend, without a window.
 //
-// It checks that ObjLoader validates face indices before reading:
+// It checks face index validation and computed normals:
 //   - valid faces load as before: positive and relative (negative) indices,
 //     normals and texcoords, quads split into two triangles, a concave
 //     pentagon split into three by ear clipping
@@ -20,6 +20,8 @@
 //     vertex (AddressSanitizer builds check this), and ObjLoader skips the
 //     triangles that use it
 //   - a normal index in a file with no normals is ignored, as before
+//   - computed normals keep their direction and area weighting at small and
+//     large scales; zero-length sums keep the fallback normal
 // =============================================================================
 
 #include <tcxObj.h>
@@ -299,6 +301,64 @@ int main() {
         check("normal index with no normals in the file: face still loads",
               r.ok && r.mesh.getNumIndices() == 3 && r.mesh.getNumNormals() == 3 &&
               r.skippedWarnings == 0);
+    }
+
+    // ----- computed normals are independent of model scale -------------------
+    {
+        // These triangles meet along the X axis. Their cross products point
+        // along +Z and +Y, with areas in a 1:4 ratio. At the shared vertices,
+        // area weighting must therefore give normalize(0, 4, 1).
+        auto small = loadObjText(
+            "v 0 0 0\nv 0.001 0 0\nv 0 0.001 0\nv 0 0 0.004\n"
+            "f 1 2 3\nf 1 4 2\n");
+        auto large = loadObjText(
+            "v 0 0 0\nv 100 0 0\nv 0 100 0\nv 0 0 400\n"
+            "f 1 2 3\nf 1 4 2\n");
+        check("computed normals: small and large models load",
+              small.ok && large.ok && small.warnings == 0 && large.warnings == 0 &&
+              small.mesh.getNumVertices() == 4 && large.mesh.getNumVertices() == 4 &&
+              small.mesh.getNumIndices() == 6 && large.mesh.getNumIndices() == 6 &&
+              small.mesh.getNumNormals() == 4 && large.mesh.getNumNormals() == 4);
+
+        auto correctNormals = [](const Mesh& mesh) {
+            if (mesh.getNumNormals() != 4) return false;
+            const auto& normals = mesh.getNormals();
+            float invLen = 1.0f / sqrt(17.0f);
+            return vecNear(normals[0], 0, 4 * invLen, invLen) &&
+                   vecNear(normals[1], 0, 4 * invLen, invLen) &&
+                   vecNear(normals[2], 0, 0, 1) && vecNear(normals[3], 0, 1, 0);
+        };
+        check("small model: expected area-weighted normal directions", correctNormals(small.mesh));
+        check("large model: expected area-weighted normal directions", correctNormals(large.mesh));
+
+        bool unitLength = small.mesh.getNumNormals() == 4 && large.mesh.getNumNormals() == 4;
+        for (const auto* mesh : {&small.mesh, &large.mesh}) {
+            for (const auto& n : mesh->getNormals()) {
+                unitLength = unitLength && fabs(n.length() - 1.0f) < 1e-5f;
+            }
+        }
+        check("computed normals: unit length at both scales", unitLength);
+
+        bool sameDirections = small.mesh.getNumNormals() == 4 && large.mesh.getNumNormals() == 4;
+        if (sameDirections) {
+            for (size_t i = 0; i < small.mesh.getNormals().size(); ++i) {
+                const auto& n = large.mesh.getNormals()[i];
+                sameDirections = sameDirections && vecNear(small.mesh.getNormals()[i], n.x, n.y, n.z);
+            }
+        }
+        check("computed normals: small and large directions agree", sameDirections);
+    }
+    {
+        auto r = loadObjText("v 0 0 0\nv 1 0 0\nv 2 0 0\nf 1 2 3\n");
+        bool fallback = r.ok && r.mesh.getNumNormals() == 3;
+        for (const auto& n : r.mesh.getNormals()) fallback = fallback && vecNear(n, 0, 0, 1);
+        check("degenerate face: zero sum keeps fallback normal", fallback);
+    }
+    {
+        auto r = loadObjText("v 0 0 0\nv 1 0 0\nv 0 0 1\nf 1 2 3\nf 1 3 2\n");
+        bool fallback = r.ok && r.mesh.getNumNormals() == 3 && r.mesh.getNumIndices() == 6;
+        for (const auto& n : r.mesh.getNormals()) fallback = fallback && vecNear(n, 0, 0, 1);
+        check("opposite faces: cancelling sums keep fallback normal", fallback);
     }
 
     error_code ec;

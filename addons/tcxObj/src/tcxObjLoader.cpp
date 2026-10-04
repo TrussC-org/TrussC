@@ -262,7 +262,7 @@ void ObjLoader::computeNormals(Mesh& mesh) {
     // Normalize and add to mesh
     for (auto& n : normals) {
         float len = n.length();
-        if (len > 0.0001f) {
+        if (len > 0.0f) {
             n = n / len;
         } else {
             n = Vec3(0, 0, 1);
