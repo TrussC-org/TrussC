@@ -153,6 +153,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   runs only what was queued when it started, in order and nothing dropped, so
   frames keep starting while a worker keeps the queue non-empty (#397); the
   count is the one `tc_get_health` reports (`ThreadChannel::receiveAll`).
+- `threadChannelClosed/` — `ThreadChannel::isClosed()` synchronizes with
+  concurrent `close()` calls (#565); closed state is permanent. Also run this
+  focused test under ThreadSanitizer to detect races that values alone cannot
+  reveal.
 - `threadLifecycle/` — destroying a `tc::Thread` never calls `std::terminate`
   (#257): not after its worker returned on its own, not after only
   `stopThread()`, not right after `startThread()` (the worker skips
