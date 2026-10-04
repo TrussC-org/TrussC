@@ -1481,6 +1481,7 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
    info->index_map = 0;
    for (i=0; i < numTables; ++i) {
       stbtt_uint32 encoding_record = cmap + 4 + 8 * i;
+      stbtt_uint32 index_map = 0;
       // find an encoding we understand:
       switch(ttUSHORT(data+encoding_record)) {
          case STBTT_PLATFORM_ID_MICROSOFT:
@@ -1488,15 +1489,23 @@ static int stbtt_InitFont_internal(stbtt_fontinfo *info, unsigned char *data, in
                case STBTT_MS_EID_UNICODE_BMP:
                case STBTT_MS_EID_UNICODE_FULL:
                   // MS/Unicode
-                  info->index_map = cmap + ttULONG(data+encoding_record+4);
+                  index_map = cmap + ttULONG(data+encoding_record+4);
                   break;
             }
             break;
         case STBTT_PLATFORM_ID_UNICODE:
             // Mac/iOS has these
             // all the encodingIDs are unicode, so we don't bother to check it
-            info->index_map = cmap + ttULONG(data+encoding_record+4);
+            index_map = cmap + ttULONG(data+encoding_record+4);
             break;
+      }
+      // TrussC patch: only choose Unicode maps FindGlyphIndex can read.
+      // Keep the last usable record; format 14 describes variations only.
+      // Read the format only for an accepted platform/encoding above.
+      if (index_map) {
+         stbtt_uint16 format = ttUSHORT(data+index_map);
+         if (format == 0 || format == 4 || format == 6 || format == 12 || format == 13)
+            info->index_map = index_map;
       }
    }
    if (info->index_map == 0)
