@@ -826,6 +826,8 @@ void NodeInspector::drawGizmo() {
 
     const float scale = style_.gizmoScale;
     const float thick = style_.gizmoThickness * scale;
+    const ImU32 outlineCol = IM_COL32(20, 20, 20, 255);
+    const float outlineWidth = 2.0f * scale;
 
     for (int i = 0; i < 3; ++i) {
         if (!g.axis[i].valid) continue;
@@ -837,6 +839,9 @@ void NodeInspector::drawGizmo() {
         if (mode == GizmoMode::Translate) {
             ImVec2 a(g.axis[i].p0.x, g.axis[i].p0.y);
             ImVec2 b(g.axis[i].p1.x, g.axis[i].p1.y);
+            // Same geometry, with a dark edge beneath the axis color so the
+            // handle stays readable over scene colors close to its own.
+            dl->AddLine(a, b, outlineCol, w + outlineWidth);
             dl->AddLine(a, b, col, w);
 
             // Arrow head at the tip
@@ -847,6 +852,7 @@ void NodeInspector::drawGizmo() {
             ImVec2 tip(b.x + dpx.x * ah, b.y + dpx.y * ah);
             ImVec2 b1(b.x + n.x * aw, b.y + n.y * aw);
             ImVec2 b2(b.x - n.x * aw, b.y - n.y * aw);
+            dl->AddTriangle(tip, b1, b2, outlineCol, outlineWidth);
             dl->AddTriangleFilled(tip, b1, b2, col);
         } else {
             const auto& ring = g.axis[i].ring;
@@ -854,6 +860,7 @@ void NodeInspector::drawGizmo() {
             pts.clear();
             pts.reserve(ring.size());
             for (auto& p : ring) pts.emplace_back(p.x, p.y);
+            dl->AddPolyline(pts.data(), (int)pts.size(), outlineCol, w + outlineWidth, ImDrawFlags_Closed);
             dl->AddPolyline(pts.data(), (int)pts.size(), col, w, ImDrawFlags_Closed);
         }
     }
