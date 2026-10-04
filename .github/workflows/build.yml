@@ -587,6 +587,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_release_workflow.py -v
 
+      - name: daily web sequencing regression checks
+        if: always()
+        run: python3 tools/tests/test_daily_workflow.py -v
+
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
