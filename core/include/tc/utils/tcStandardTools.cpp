@@ -123,12 +123,17 @@ void registerInspectionTools() {
                     if (name.empty()) return error("use an index for unnamed objects");
                 }
                 void* object = nullptr;
+                std::string matchingIndices;
+                size_t matches = 0;
                 for (const auto& e : trussc::internal::debugObjects(kind)) {
                     if ((byIndex && e.index==index)||(!byIndex && e.name==name)) {
-                        if(object) return error("debug name is ambiguous; use an index");
+                        if (matches++) matchingIndices += ", ";
+                        matchingIndices += std::to_string(e.index);
                         object=e.object; index=e.index;
                     }
                 }
+                if (matches>1) return error("debug name " + json(name).dump() +
+                    " is ambiguous (indices " + matchingIndices + "); use an index");
                 if (!object && !byIndex && name.find_first_not_of("0123456789")==std::string::npos) {
                     index=std::stoull(name);
                     for (const auto& e : trussc::internal::debugObjects(kind))
