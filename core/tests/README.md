@@ -147,6 +147,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
   passes, checks the growth warning, and exercises Shader moves/clear with
   a pending swapchain draw. On Linux, run it with Xvfb.
+- `stringPatterns/` — empty substring patterns count as zero or leave the
+  input unchanged (#405); replacements are left-to-right and nonoverlapping,
+  including the internal timestamp helper. Covers deletion, growth, and many
+  CRLF replacements without timing thresholds.
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
   main thread, and `Node::destroy()` is safe from any thread. Each frame's drain

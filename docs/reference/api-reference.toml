@@ -17261,17 +17261,17 @@ related = ["startRecording", "isRecording", "recordingPath"]
 category = "utility"
 keywords = ["substitute", "find replace", "swap", "sub"]
 of = ["ofStringReplace"]
-description.en = "Replace substring in place"
-description.ja = "部分文字列を置換（直接変更）"
-description.ko = "부분 문자열을 직접 치환"
+description.en = "Replace substrings in place, left to right without overlapping or searching the replacement. An empty search string leaves the input unchanged."
+description.ja = "部分文字列を左から重なりなしで置換（直接変更）。置換後の文字列は再検索しない。検索文字列が空なら入力は変更しない。"
+description.ko = "부분 문자열을 왼쪽부터 겹치지 않게 직접 치환하며 치환 결과는 다시 검색하지 않음. 검색 문자열이 비어 있으면 입력을 변경하지 않음."
 related = ["splitString", "isStringInString", "trim"]
 
 ["stringTimesInString"]
 category = "utility"
 keywords = ["count", "occurrences", "frequency", "tally", "substring"]
-description.en = "Count occurrences of a substring in a string"
-description.ja = "文字列中の部分文字列の出現回数を数える"
-description.ko = "문자열 내 부분 문자열의 출현 횟수를 셈"
+description.en = "Count nonoverlapping occurrences of a substring in a string. An empty substring matches nothing and returns 0."
+description.ja = "文字列中の部分文字列の出現回数を重なりなしで数える。部分文字列が空なら一致なしとして 0 を返す。"
+description.ko = "문자열 내 부분 문자열의 출현 횟수를 겹치지 않게 셈. 부분 문자열이 비어 있으면 일치 없음으로 0을 반환함."
 related = ["isStringInString", "splitString"]
 
 ["systemFontPath"]
