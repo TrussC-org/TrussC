@@ -1395,6 +1395,11 @@ FontSamplers& fontSamplers() {
 // ---------------------------------------------------------------------------
 namespace internal {
 
+int& appExitCode() {
+    static int code = 0;
+    return code;
+}
+
 MainLoopState& mainLoop() {
     static MainLoopState state;
     return state;

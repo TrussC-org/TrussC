@@ -34,6 +34,9 @@ public:
     // Exit request (can be cancelled)
     Event<ExitRequestEventArgs> exitRequested;  // Set args.cancel = true to cancel
 
+    // Shared D3D11 device lost (once); cancel suppresses the default failure exit.
+    Event<DeviceLostEventArgs> deviceLost;
+
     // Keyboard
     Event<KeyEventArgs> keyPressed;
     Event<KeyEventArgs> keyReleased;

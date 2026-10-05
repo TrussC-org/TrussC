@@ -676,7 +676,7 @@ static void cover_window_input() {
     (void)setTouchAsMouse(af::val<bool>());
     (void)getTouchAsMouse();
     (void)requestExitApp();
-    (void)exitApp();
+    (void)exitApp(af::val<int>());
     (void)isOverlayHovered();
     (void)isOverlayFocused();
 }
@@ -1077,6 +1077,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().exit;
         (void)af::val<CoreEvents>().hotReloadUnload;
         (void)af::val<CoreEvents>().exitRequested;
+        (void)af::val<CoreEvents>().deviceLost;
         (void)af::val<CoreEvents>().keyPressed;
         (void)af::val<CoreEvents>().keyReleased;
         (void)af::val<CoreEvents>().mousePressed;
@@ -1100,6 +1101,13 @@ struct Cover_CurveStyle : af::Scope<CurveStyle> {
         (void)af::val<CurveStyle>().mode;
         (void)af::val<CurveStyle>().tolerance;
         (void)af::val<CurveStyle>().resolution;
+    }
+};
+
+struct Cover_DeviceLostEventArgs : af::Scope<DeviceLostEventArgs> {
+    static void run() {
+        (void)af::val<DeviceLostEventArgs>().reason;
+        (void)af::val<DeviceLostEventArgs>().cancel;
     }
 };
 
@@ -3469,6 +3477,7 @@ void af::coverGenerated() {
     af_generated::Cover_ConsoleEventArgs::run();
     af_generated::Cover_CoreEvents::run();
     af_generated::Cover_CurveStyle::run();
+    af_generated::Cover_DeviceLostEventArgs::run();
     af_generated::Cover_DragDropEventArgs::run();
     af_generated::Cover_EasyCam::run();
     af_generated::Cover_EnumLabelSpan::run();

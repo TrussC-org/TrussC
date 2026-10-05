@@ -1525,6 +1525,7 @@ typedef enum sapp_event_type {
     SAPP_EVENTTYPE_QUIT_REQUESTED,
     SAPP_EVENTTYPE_CLIPBOARD_PASTED,
     SAPP_EVENTTYPE_FILES_DROPPED,
+    SAPP_EVENTTYPE_TC_DEVICE_LOST,      // TrussC: shared D3D11 device lost (once per run)
     _SAPP_EVENTTYPE_NUM,
     _SAPP_EVENTTYPE_FORCE_U32 = 0x7FFFFFFF
 } sapp_event_type;
@@ -1751,6 +1752,7 @@ typedef struct sapp_event {
     int window_height;
     int framebuffer_width;              // = window_width * dpi_scale
     int framebuffer_height;             // = window_height * dpi_scale
+    uint32_t device_lost_reason;       // GetDeviceRemovedReason HRESULT bits, TC_DEVICE_LOST only
 } sapp_event;
 
 /*
@@ -1859,6 +1861,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(WIN32_WGL_INCOMPATIBLE_DEVICE_CONTEXT, "CreateContextAttribsARB failed with ERROR_INCOMPATIBLE_DEVICE_CONTEXTS_ARB") \
     _SAPP_LOGITEM_XMACRO(WIN32_WGL_CREATE_CONTEXT_ATTRIBS_FAILED_OTHER, "CreateContextAttribsARB failed for other reason") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_CREATE_DEVICE_AND_SWAPCHAIN_WITH_DEBUG_FAILED, "D3D11CreateDeviceAndSwapChain() with D3D11_CREATE_DEVICE_DEBUG failed, retrying without debug flag.") \
+    _SAPP_LOGITEM_XMACRO(WIN32_D3D11_DEVICE_LOST, "D3D11 device lost") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_GET_IDXGIFACTORY_FAILED, "could not obtain IDXGIFactory object") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_GET_IDXGIADAPTER_FAILED, "could not obtain IDXGIAdapter object") \
     _SAPP_LOGITEM_XMACRO(WIN32_D3D11_QUERY_INTERFACE_IDXGIDEVICE1_FAILED, "could not obtain IDXGIDevice1 interface") \
@@ -6038,6 +6041,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #include <shellapi.h>   /* DragAcceptFiles / DragQueryFileW */
 #include <d3d11.h>
 #include <dxgi1_3.h>    /* IDXGIFactory2 / IDXGISwapChain2 (frame latency waitable) */
+#include "util/sokol_d3d11_device_loss.h"
 
 #if defined(_MSC_VER)
 #pragma comment (lib, "kernel32")
@@ -6145,6 +6149,7 @@ static struct {
         bool dpi_aware;
         uint64_t frame_count;
         _sapp_tc_window_t* main;
+        bool device_lost_notified;  /* one notification across every swapchain */
         ID3D11Device* device;
         ID3D11DeviceContext* device_context;
         /* mouse cursor */
@@ -6171,7 +6176,7 @@ static struct {
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal);
 static bool _sapp_tc_win32_update_dimensions(_sapp_tc_window_t* w);
-static void _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
+static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
 static void _sapp_tc_win32_apply_cursor(sapp_mouse_cursor cursor, bool shown, bool skip_area_test);
 
 /*-- timing -----------------------------------------------------------------*/
@@ -6600,6 +6605,38 @@ static void _sapp_tc_win32_restore_console(void) {
     }
 }
 
+/* The device belongs to the app, even when a secondary window detects loss.
+   Route the notification to the main callback, never a secondary Node tree. */
+static bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
+    if (!_sapp_tc_d3d11_is_device_loss((uint32_t)hr)) return false;
+    if (_sapp_tc_d3d11_first_device_loss((uint32_t)hr, &_sapp_tc.app.device_lost_notified)) {
+        const HRESULT reason = _sapp_tc.app.device->GetDeviceRemovedReason();
+        /* A dead device may never signal another frame-latency credit. Keep
+           all windows timer-paced if the app opts to continue non-GPU work. */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (w) {
+                w->credit_held = true;
+                w->earliest_next = _sapp_tc_now() + w->refresh_period;
+            }
+        }
+        if (_sapp_tc.app.desc.logger.func) {
+            char message[128];
+            snprintf(message, sizeof(message),
+                "D3D11 device lost: HRESULT=0x%08X, GetDeviceRemovedReason=0x%08X",
+                (unsigned int)hr, (unsigned int)reason);
+            _sapp_tc.app.desc.logger.func("sapp", 1, SAPP_LOGITEM_WIN32_D3D11_DEVICE_LOST,
+                message, __LINE__, __FILE__, _sapp_tc.app.desc.logger.user_data);
+        }
+        sapp_event ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
+        ev.device_lost_reason = (uint32_t)reason;
+        _sapp_tc_send(_sapp_tc.app.main, &ev);
+    }
+    return true;
+}
+
 /*-- D3D11 / DXGI -----------------------------------------------------------*/
 static HRESULT _sapp_tc_d3d11_try_create_device(UINT flags) {
     D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
@@ -6669,8 +6706,8 @@ static bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t* w) {
     return true;
 }
 
-static void _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
-    if (!w->swap_chain) return;
+static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
+    if (!w->swap_chain || _sapp_tc.app.device_lost_notified) return false;
     _sapp_tc_d3d11_destroy_render_targets(w);
     /* flip model: EVERY backbuffer reference must be gone before
        ResizeBuffers, including an RTV still bound on the shared immediate
@@ -6681,9 +6718,11 @@ static void _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
     }
     /* the creation flags (frame latency waitable!) must be passed unchanged
        on every resize, or the waitable handle is silently invalidated */
-    w->swap_chain->ResizeBuffers(2, (UINT)w->fb_width, (UINT)w->fb_height,
+    const HRESULT hr = w->swap_chain->ResizeBuffers(2, (UINT)w->fb_width, (UINT)w->fb_height,
                                  w->color_fmt, w->swapchain_flags);
+    if (_sapp_tc_d3d11_check_device_loss(hr)) return false;
     _sapp_tc_d3d11_create_render_targets(w);
+    return true;
 }
 
 static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
@@ -6979,7 +7018,7 @@ static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
 }
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
-    if (w->in_tick || !w->swap_chain) return;
+    if (_sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
     /* the due-check just consumed a waitable credit (unless one was already
        held); hold it until a real Present returns it through the swapchain.
        Clear waitable_ready: this signal is now spent (the next one comes from
@@ -6994,8 +7033,9 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
            per-WM_SIZE ResizeBuffers blows up memory on some drivers). During
            a modal size-move loop the swapchain keeps its size (DXGI stretch)
            and one resize lands on the first normal tick after the drag. */
-        if (!from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            _sapp_tc_d3d11_resize(w);
+        if (_sapp_tc.app.init_called && !_sapp_tc.app.device_lost_notified &&
+            !from_modal && _sapp_tc_win32_update_dimensions(w)) {
+            if (!_sapp_tc_d3d11_resize(w)) return;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
         }
         w->in_tick = true;
@@ -7015,13 +7055,14 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
         _sapp_tc.app.frame_count++;
         w->in_tick = false;
         bool presented = false;
-        if (_sapp_tc.app.skip_present) {
+        if (_sapp_tc.app.skip_present || _sapp_tc.app.device_lost_notified) {
             /* one-shot event-driven present suppression (TrussC patch: keeps
                the last image on screen when a frame decides not to draw) */
             _sapp_tc.app.skip_present = false;
         } else {
             const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
             const HRESULT hr = w->swap_chain->Present((UINT)swap_interval, flags);
+            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
             presented = SUCCEEDED(hr) && (hr != DXGI_STATUS_OCCLUDED);
         }
         if (presented) {
@@ -7042,10 +7083,11 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             _sapp_tc_win32_pace(w, w->refresh_period);
             return;
         }
-        if (w->occluded) {
+        if (w->occluded && !_sapp_tc.app.device_lost_notified) {
             /* cheap visibility poll: a fully covered window costs one
                present-test per pace period and never renders or stalls */
             const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
+            if (_sapp_tc_d3d11_check_device_loss(hr)) return;
             if (hr == DXGI_STATUS_OCCLUDED) {
                 _sapp_tc_win32_pace(w, w->refresh_period);
                 return;
@@ -7053,8 +7095,8 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             w->occluded = false;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESUMED);
         }
-        if (!from_modal && _sapp_tc_win32_update_dimensions(w)) {
-            _sapp_tc_d3d11_resize(w);
+        if (!_sapp_tc.app.device_lost_notified && !from_modal && _sapp_tc_win32_update_dimensions(w)) {
+            if (!_sapp_tc_d3d11_resize(w)) return;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);
         }
         w->in_tick = true;
@@ -7063,8 +7105,13 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             w->desc.tick_cb(handle, w->desc.user_data);
         }
         w->in_tick = false;
+        if (_sapp_tc.app.device_lost_notified) {
+            _sapp_tc_win32_pace(w, w->refresh_period);
+            return;
+        }
         const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
         const HRESULT hr = w->swap_chain->Present(1, flags);
+        if (_sapp_tc_d3d11_check_device_loss(hr)) return;
         if (hr == DXGI_STATUS_OCCLUDED) {
             w->occluded = true;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_SUSPENDED);

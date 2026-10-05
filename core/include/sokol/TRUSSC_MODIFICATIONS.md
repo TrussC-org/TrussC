@@ -61,6 +61,24 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### D3D11 device loss (#258)
+
+All three Present paths (main, secondary, and occlusion test) and ResizeBuffers
+classify DEVICE_REMOVED / DEVICE_RESET using the shared, headless-testable
+`util/sokol_d3d11_device_loss.h`. Other failures and DXGI status codes do not
+trigger device loss. The first loss across the shared device logs the triggering
+HRESULT and GetDeviceRemovedReason, then routes SAPP_EVENTTYPE_TC_DEVICE_LOST
+(with `sapp_event.device_lost_reason`) to the main app callback. The latch is set
+before callbacks so reentry and other windows cannot notify again.
+
+TrussC offers `events().deviceLost`: cancellation keeps the main loop running;
+the default logs an error and exits with code 1. After loss, windows use timer
+pacing, no longer wait for dead frame-latency signals, and stop presenting or
+resizing the failed swapchains. App callbacks continue if cancellation opts
+into handling the failure. Resources are
+not recreated. Resize detection starts after app initialization so the event
+cannot be swallowed by the initialization gate.
+
 ### 1. Skip Present (D3D11 flickering fix)
 
 **Purpose:** Add `sapp_skip_present()` function to skip the next present call, fixing D3D11 flickering in event-driven rendering.
