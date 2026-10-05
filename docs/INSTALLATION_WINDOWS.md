@@ -76,6 +76,7 @@ A Task Scheduler task with an empty "Start in" runs with the working directory a
 - Set "Start in" to the exe folder in the task or shortcut.
 - Load assets with paths under `bin/data`, the way the examples do. `getDataPath("file")` gives the absolute path.
 - Log file names resolve against `bin/data` too: `getLogger().setLogFile("logs/app.log")` writes `bin/data/logs/app.log` and creates `logs` if it is missing. A relative `TRUSSC_LOG_FILE` resolves the same way. Check the return value: on failure `setLogFile()` returns false and logs why.
+- If window or GPU startup fails before `setup()` runs, `runApp()` returns 1; otherwise it returns 0. `TC_RUN_APP` passes this status to `main()`. With `TRUSSC_LOG_FILE` set, D3D11 and main-window startup failures are recorded with their HRESULT or Win32 error code so a supervisor can identify a failed start.
 
 ## 7. GPU on dual-GPU machines
 

@@ -2391,6 +2391,9 @@ namespace internal {
         #endif
     }
 
+    // Host launcher state; survives cleanup so runApp can report a failed start.
+    bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
+
     inline void _setup_cb() {
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
@@ -2400,6 +2403,7 @@ namespace internal {
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
         setup();
+        appSetupCalled() = true;
 
         // App's pre-setup hook resolves the data path root right before its
         // setup() runs. getDataPath() also probes on an earlier call; probing
@@ -3243,8 +3247,14 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #ifdef _WIN32
     internal::ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
 #endif
+    internal::appSetupCalled() = false;
     sapp_run(&desc);
+#ifdef __EMSCRIPTEN__
+    // The browser owns the asynchronous loop; returning is not app shutdown.
     return 0;
+#else
+    return internal::appSetupCalled() ? 0 : 1;
+#endif
 }
 #endif
 
