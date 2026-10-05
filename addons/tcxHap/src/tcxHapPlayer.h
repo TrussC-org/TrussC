@@ -220,9 +220,11 @@ public:
 
     // Relative paths resolve via getDataPath, like VideoPlayer::load.
     tc::LoadResult load(const tc::fs::path& filePath) override {
+        const auto previousError = errorMessage_;
         if (initialized_) {
             close();
         }
+        errorMessage_ = previousError;
         resetStats();
 
         const tc::fs::path path = tc::getDataPath(filePath);   // absolute paths pass through
@@ -305,12 +307,14 @@ public:
             << duration_ << "s, format: " << static_cast<int>(hapFormat_)
             << (hasAudio_ ? ", with audio" : ", no audio");
 
+        clearPlaybackError();
         initialized_ = true;
         currentFrame_ = 0;
         return tc::LoadResult::success();
     }
 
     void close() override {
+        clearPlaybackError();
         if (!initialized_) return;
 
         // Stop audio
@@ -350,6 +354,7 @@ public:
 
     void update() override {
         if (!initialized_) return;
+        if (dispatchPlaybackError() || errorStopped_) return;
 
         // Only reset frameNew_ when actively playing
         // (preserve frameNew_ set by setFrame() for encoding workflows)
@@ -393,6 +398,7 @@ public:
                 }
             }
         }
+        dispatchPlaybackError();
     }
 
     // =========================================================================
@@ -663,6 +669,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(HapPlayer&& other) {
+        movePlaybackErrorFrom(other);
         // Move base class state
         width_ = other.width_;
         height_ = other.height_;
@@ -848,6 +855,7 @@ private:
 
         // Read sample data from MOV
         if (!movParser_.readSample(*videoTrack_, frameIndex, sampleBuffer_)) {
+            reportPlaybackError("Failed to read HAP video sample");
             return false;
         }
 
@@ -858,6 +866,7 @@ private:
                 width_, height_,
                 frameBuffer_.data(), frameBuffer_.size(),
                 outFormat)) {
+            reportPlaybackError("Failed to decode HAP video frame", hapDecoder_.lastErrorCode_);
             return false;
         }
 

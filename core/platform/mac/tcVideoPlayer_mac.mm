@@ -45,7 +45,10 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
 // =============================================================================
 // Internal Objective-C class for AVFoundation handling
 // =============================================================================
-@interface TCVideoPlayerImpl : NSObject
+@interface TCVideoPlayerImpl : NSObject {
+@public
+    trussc::internal::VideoErrorQueue playbackErrors_;
+}
 
 @property (nonatomic, strong) AVPlayer* player;
 @property (nonatomic, strong) AVPlayerItem* playerItem;
@@ -282,6 +285,11 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
                                                  name:AVPlayerItemDidPlayToEndTimeNotification
                                                object:self.playerItem];
 
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(playerFailedToFinish:)
+                                                 name:AVPlayerItemFailedToPlayToEndTimeNotification
+                                               object:self.playerItem];
+
     // Allocate pixel buffer (RGBA)
     _pixelBufferSize = _videoWidth * _videoHeight * 4;
     _pixelBuffer = new unsigned char[_pixelBufferSize];
@@ -323,6 +331,12 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
     _isFinished = NO;
     _hasNewFrame = NO;
     _sizeMismatchWarned = NO;
+}
+
+- (void)playerFailedToFinish:(NSNotification*)notification {
+    NSError* error = notification.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+    playbackErrors_.report(error ? tcLogText(error.localizedDescription) : "Video playback failed",
+                           error ? static_cast<int64_t>(error.code) : 0);
 }
 
 - (void)playerDidFinishPlaying:(NSNotification*)notification {
@@ -723,6 +737,16 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 void VideoPlayer::updatePlatform() {
     if (!platformHandle_) return;
     TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;
+    if (impl.playerItem.status == AVPlayerItemStatusFailed) {
+        NSError* error = impl.playerItem.error;
+        impl->playbackErrors_.report(error ? tcLogText(error.localizedDescription) : "Video playback failed",
+                                    error ? static_cast<int64_t>(error.code) : 0);
+    }
+    auto error = impl->playbackErrors_.take();
+    if (!error.message.empty()) {
+        reportPlaybackError(error.message, error.errorCode);
+        return;
+    }
     [impl update];
 
     // Copy pixels from Objective-C side

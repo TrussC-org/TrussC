@@ -1153,7 +1153,66 @@ static void clockTests() {
     }
 }
 
-int main() {
+// Optional GPU-backed playback failure checks (run under Xvfb on Linux).
+class PlaybackErrorApp : public App {
+public:
+    void draw() override {
+        const auto source = getDataPath("sine_sowt.mov");
+        auto bytes = readBytes(source);
+        MovParser parser;
+        bool opened = parser.open(source);
+        const auto* track = opened ? parser.getInfo().getVideoTrack() : nullptr;
+        check("error fixture has three samples", track && track->samples.size() >= 3);
+        if (!track || track->samples.size() < 3) { exitApp(); return; }
+        const auto sample = track->samples[2];
+        const auto tmp = fs::temp_directory_path() / "tcxHap_playback_error.mov";
+        const size_t mdat = findChild(bytes, 0, bytes.size(), "mdat");
+        bool written = writeMoovFirstTruncated(bytes, tmp, sample.offset - mdat - 8 + sample.size / 2);
+        check("truncated playback fixture written", written);
+        if (written) checkFailure(tmp, false);
+        // Keep the container valid, but make the third HAP frame undecodable.
+        fill(bytes.begin() + sample.offset, bytes.begin() + sample.offset + sample.size, 0);
+        written = writeBytes(tmp, bytes);
+        check("decoder failure fixture written", written);
+        if (written) checkFailure(tmp, true);
+        error_code ec;
+        fs::remove(tmp, ec);
+        exitApp();
+    }
+private:
+    void checkFailure(const fs::path& path, bool hasCode) {
+        HapPlayer player;
+        if (!player.load(path)) { check("error fixture loads", false); return; }
+        player.setFrame(0);
+        const auto texture = player.getTexture().getImage();
+        const auto position = player.getPosition();
+        check("HAP first frame ready", player.isReady());
+        int events = 0;
+        auto listener = player.onError.listen([&](VideoErrorEventArgs& error) {
+            ++events;
+            check("HAP failure message and code", !error.message.empty() && (hasCode ? error.errorCode != 0 : error.errorCode == 0));
+            check("HAP stopped before callback", !player.isPlaying());
+        });
+        player.play();
+        player.setFrame(2);
+        player.update();
+        player.update();
+        check("HAP failure reported once", events == 1 && player.hasError());
+        check("HAP error retains frame and position", player.isLoaded() && player.isReady() &&
+              player.getTexture().getImage().id == texture.id && player.getPosition() == position);
+        player.close();
+        check("HAP close clears error", !player.hasError());
+    }
+};
+
+int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--playback-errors") {
+        WindowSettings settings;
+        settings.setSize(64, 64);
+        settings.setHighDpi(false);
+        runApp<PlaybackErrorApp>(settings);
+        return g_fail ? 1 : 0;
+    }
     const fs::path data = fs::path(getDataPath(""));
     printf("data: %s\n", data.string().c_str());
 

@@ -106,6 +106,13 @@ private:
     bool loadAudioForPlayback();
     void decodeThread();
     bool decodeNextFrame();
+    internal::VideoErrorQueue playbackErrors_;
+    void decodeError(const char* operation, int code) {
+        char message[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(code, message, sizeof(message));
+        isPlaying_ = false;
+        playbackErrors_.report(std::string(operation) + ": " + message, code);
+    }
     void seekToTime(double seconds);
     void probeHwOutputFormat();
 
@@ -535,6 +542,11 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
     hasNewFrame_ = false;
 
+    auto error = playbackErrors_.take();
+    if (!error.message.empty()) {
+        if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
+        return;
+    }
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
     // Target PTS: use audio as master clock when available (no drift).
@@ -739,10 +751,16 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
                 if (rret == AVERROR_EOF) {
                     // Enter drain mode so remaining buffered frames are
                     // flushed out on following receive_frame calls.
-                    avcodec_send_packet(codecCtx_, nullptr);
+                    int drain = avcodec_send_packet(codecCtx_, nullptr);
+                    if (drain < 0 && drain != AVERROR_EOF && drain != AVERROR(EAGAIN)) {
+                        decodeError("avcodec_send_packet (drain)", drain);
+                        return false;
+                    }
                     continue;
                 }
+                if (rret == AVERROR(EAGAIN)) return true;
                 if (rret < 0) {
+                    decodeError("av_read_frame", rret);
                     av_strerror(rret, errbuf, sizeof(errbuf));
                     logWarning("VideoPlayer") << "av_read_frame ended: " << errbuf
                                               << " (pts=" << currentPts_ << ")";
@@ -766,9 +784,11 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             packetPending_ = false;
 
             if (sret < 0 && sret != AVERROR_EOF) {
+                decodeError("avcodec_send_packet", sret);
                 av_strerror(sret, errbuf, sizeof(errbuf));
                 logWarning("VideoPlayer") << "send_packet failed: " << errbuf
                                           << " (pts=" << currentPts_ << ")";
+                return false;
             }
             continue;
         }
@@ -778,6 +798,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             return false;
         }
         if (ret < 0) {
+            decodeError("avcodec_receive_frame", ret);
             av_strerror(ret, errbuf, sizeof(errbuf));
             logWarning("VideoPlayer") << "receive_frame failed: " << errbuf
                                       << " (pts=" << currentPts_ << ")";
@@ -793,11 +814,12 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             // avoid an extra pixel-format conversion during transfer. The
             // scaler is rebuilt lazily on format change (lastScalerFmt_).
             swFrame->format = AV_PIX_FMT_NONE;
-            if (av_hwframe_transfer_data(swFrame, frame_, 0) < 0) {
-                logWarning("VideoPlayer") << "HW frame transfer failed, dropping frame";
+            int transfer = av_hwframe_transfer_data(swFrame, frame_, 0);
+            if (transfer < 0) {
+                decodeError("av_hwframe_transfer_data", transfer);
                 av_frame_free(&swFrame);
                 av_frame_unref(frame_);
-                continue;
+                return false;
             }
             srcFrame = swFrame;
         }
