@@ -188,12 +188,16 @@ TC_PLATFORMS("macos,windows,linux,ios,android") bool captureWindow(Pixels& outPi
 // Returns true on success, false on failure.
 // Formats: png/jpg/jpeg/bmp; macOS also tiff/tif/gif, Windows also tga.
 // Unsupported or missing extensions append .png and warn.
-// Web: a stub that always returns false and warns once; saveScreenshot()
-// calls it directly instead of queuing.
+// Web: starts asynchronous canvas.toBlob + browser download in this same task.
+// Paths are download filenames; returns true when encoding starts, with later
+// failures logged. Supports PNG/JPEG, with .png appended for other extensions.
 namespace internal {
 // Resolve the data path and the platform-specific screenshot extension.
 // Returns the actual destination, warning when .png is appended.
 std::filesystem::path resolveScreenshotPath(const std::filesystem::path& path);
+#ifdef __EMSCRIPTEN__
+std::filesystem::path resolveScreenshotDownloadName(const std::filesystem::path& path);
+#endif
 bool captureWindowToFile(const std::filesystem::path& path);
 // Encode an already captured RGBA8 image using the screenshot file formats.
 bool saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);

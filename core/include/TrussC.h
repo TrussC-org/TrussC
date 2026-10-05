@@ -2134,18 +2134,15 @@ namespace internal {
 // Windows also tga. Unsupported or missing extensions append .png and warn
 // with the actual destination and supported formats.
 //
-// Web: not implemented (no canvas readback). Always returns false (nothing is
-// queued or written) and warns once, pointing to the browser's own screenshot
-// feature.
-TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const std::filesystem::path& path) {
-#ifdef __EMSCRIPTEN__
-    // Web capture is not implemented: nothing reads the canvas back (see
-    // platform/web/tcPlatform_web.cpp). So fail up front instead of queuing a
-    // capture that would never write a file while this call reported success.
-    // The web captureWindowToFile() stub returns false and warns once.
-    return internal::captureWindowToFile(path);
-#else
-    // Resolve relative paths up front so the deferred worker gets an absolute one.
+// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
+// name gets a timestamped default. Returns true when queued; later failures
+// (including a tainted canvas) are logged. The browser may ask for permission
+// to allow multiple downloads.
+inline bool saveScreenshot(const std::filesystem::path& path) {
+    // Resolve native destinations or web download names before queuing.
+    #ifdef __EMSCRIPTEN__
+    std::filesystem::path resolved = internal::resolveScreenshotDownloadName(path);
+    #else
     std::filesystem::path resolved = internal::resolveScreenshotPath(path);
     // Inside the app bundle: refused, with an Error naming getUserDataPath()
     if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
@@ -2162,6 +2159,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
             return false;
         }
     }
+#endif
 
     internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
     // Guarantee a present() (and thus the afterFrame drain) even when paused.
@@ -2172,7 +2170,6 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
         redraw();
     }
     return true;
-#endif
 }
 
 // ---------------------------------------------------------------------------

@@ -463,14 +463,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   requested spelling. `--screen` (needs a display, e.g. Xvfb) also checks the
   deferred PNG/JPEG/BMP files, direct file capture and absence of duplicate
   suffixes. The default run needs no GPU.
-- `screenshotContract/` — *(also on web)* the screenshot APIs report what they
-  actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
-  nothing is queued or created, and each API warns once. Native:
-  `saveScreenshot()` still creates the destination folder, queues the capture
-  and returns true. The per-PR CI runs only the native half, which passes with
-  or without the #230 fix: it catches the web early return leaking into native
-  builds. The web half is what guards #230; the daily run (`daily.yml`,
-  `sweep-web`) runs it under node.
+- `screenshotContract/` — *(also on web)* screenshot contracts (#230, #298).
+  Web: `grabScreen()` returns false and warns once; `saveScreenshot()` queues
+  a canvas download without creating folders. A mock DOM under node checks
+  filenames, PNG/JPEG selection, deferred callbacks, resource cleanup and
+  errors (including a tainted canvas). Native: the destination folder is
+  created and capture is queued. The web half runs in the daily sweep.
 - `mcpHttpGuard/` — a web page in the user's browser cannot drive the
   loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
   403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
