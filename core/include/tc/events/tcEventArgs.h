@@ -259,6 +259,7 @@ struct ConsoleEventArgs {
 // ---------------------------------------------------------------------------
 struct ExitRequestEventArgs {
     bool cancel = false;           // Set to true to cancel the exit
+    std::string reason;            // Optional Windows shutdown-block explanation
 };
 
 } // namespace trussc

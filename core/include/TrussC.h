@@ -126,6 +126,8 @@
 
 // TrussC MCP (Model Context Protocol) Server
 #include "tc/utils/tcMCP.h"
+#include "tc/app/tcExit.h"
+#include <csignal>
 
 // =============================================================================
 // trussc namespace
@@ -2037,12 +2039,14 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
+    internal::setExitReason("request-exit-app");
     sapp_request_quit();
 }
 
 // Immediately exit the application (cannot be cancelled)
 // Use this for forced exit, e.g., after user confirms exit in a dialog
 inline void exitApp() {
+    internal::setExitReason("exit-app");
     sapp_quit();
 }
 
@@ -2391,6 +2395,7 @@ namespace internal {
     }
 
     inline void _setup_cb() {
+        installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
         // key off this. (sokol's init_cb runs on the main thread.)
@@ -2520,6 +2525,7 @@ namespace internal {
     // leaks pile up until the next frame).
     inline void runMainUpdate(double fixedDelta = 0.0,
                               std::chrono::steady_clock::time_point stepTime = {}) {
+        if (exitCleanupStarted()) return;
         beginMainUpdateCall(fixedDelta, stepTime);
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
@@ -2658,11 +2664,18 @@ namespace internal {
 
     inline void _frame_cb() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
-        if (frameReentryGuard) return;
+        if (frameReentryGuard || exitCleanupStarted()) return;
+        if (int sig = pendingWindowExitSignal()) {
+            setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
+            sapp_request_quit();
+            sapp_skip_present();
+            return;
+        }
         frameReentryGuard = true;
 
         // Frame time, queued work, independent updates and the draw decision.
         bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
+        if (exitCleanupStarted()) { frameReentryGuard = false; return; }
 
         // Force a frame when a capture is pending so present()/afterFrame runs
         // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
@@ -2681,8 +2694,10 @@ namespace internal {
 
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
+            if (exitCleanupStarted()) { frameReentryGuard = false; return; }
 
             if (appDrawFunc) appDrawFunc();
+            if (exitCleanupStarted()) { frameReentryGuard = false; return; }
 
             // Reset shader stack if any shaders are still pushed
             internal::resetShaderStack();
@@ -2715,6 +2730,10 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        if (!beginExitCleanup()) return;
+        logNotice("System") << exitLogMessage(false);
+        // Session end may arrive inside a secondary window's modal loop.
+        currentWindowCtx() = &mainWindowContext();
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2736,6 +2755,8 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+        logNotice("System") << exitLogMessage(true);
+        restoreWindowExitSignals();
     }
 
     // The name an event entry point (#349) gives in its warning, from the
@@ -2764,6 +2785,8 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
+        if (exitCleanupStarted()) return;
+        auto eventRoot = mainWindowContext().rootNode.lock();
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they
         // found them.
@@ -2771,6 +2794,7 @@ namespace internal {
 
         // Notify raw event listeners (used by addons like tcxImGui)
         events().rawEvent.notify(*ev);
+        if (exitCleanupStarted()) return;
 
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode() == true: use as-is (coords = framebuffer size)
@@ -3018,9 +3042,12 @@ namespace internal {
             }
             case SAPP_EVENTTYPE_QUIT_REQUESTED: {
                 // Notify exitRequested event - listeners can cancel by setting args.cancel = true
+                setExitBlockReason("");
                 ExitRequestEventArgs args;
                 events().exitRequested.notify(args);
                 if (args.cancel) {
+                    setExitBlockReason(args.reason);
+                    clearExitReason();
                     sapp_cancel_quit();
                 }
                 break;
@@ -3065,13 +3092,14 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count
         events().update.notify();
-        if (app) {
-            app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
+        // A nested session-end message can reset app during the callback.
+        if (auto active = app) {
+            active->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
         }
     };
     internal::appDrawFunc = []() {
         events().draw.notify();
-        if (app) app->handleDraw();
+        if (auto active = app) active->handleDraw();
     };
     internal::appCleanupFunc = []() {
         if (app) {

@@ -173,6 +173,7 @@ public:
         if (!root) return;
         internal::setupNodeOnce(*root);   // the setup() entry point (#349)
         root->updateTree();
+        if (internal::exitCleanupStarted()) return;
         root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
     void drawTreeNow() {

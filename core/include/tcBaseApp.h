@@ -310,6 +310,7 @@ public:
     void handleUpdate(int mouseX, int mouseY) {
         internal::setupNodeOnce(*this);
         updateTree();
+        if (internal::exitCleanupStarted()) return;
         updateHoverState((float)mouseX, (float)mouseY);
     }
 

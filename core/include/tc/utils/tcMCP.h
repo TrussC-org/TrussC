@@ -30,6 +30,7 @@ using json = nlohmann::json;
 #include "tcLog.h"
 #include "tcThreadChannel.h"
 #include "tcVersion.h"
+#include "../app/tcExit.h"
 
 #ifndef __EMSCRIPTEN__
 #include "../../impl/httplib.h"
@@ -657,6 +658,32 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
 
 } // namespace detail
 
+namespace detail {
+// Serializes enqueue against close + drain. A worker arriving during shutdown
+// receives a reply directly; it must never wait on an unserviceable promise.
+std::mutex& httpQueueMutex();
+inline std::string normalExitMessage() {
+    const auto reason = internal::exitReason();
+    return "the app is exiting normally" + (reason.empty() ? std::string() : " (reason=" + reason + ")");
+}
+inline std::string normalExitReply(const std::string& body) {
+    auto request = json::parse(body, nullptr, false);
+    json id = nullptr;
+    if (request.is_object() && request.contains("id")) id = request["id"];
+    return json{{"jsonrpc", "2.0"}, {"id", id},
+        {"error", {{"code", -32000}, {"message", normalExitMessage()}}}}.dump();
+}
+inline void enqueueHttpRequest(McpRequest request) {
+    std::lock_guard<std::mutex> lock(httpQueueMutex());
+    if (!getHttpChannel().isClosed()) {
+        getHttpChannel().send(std::move(request));
+    } else {
+        const auto reply = normalExitReply(request.body);
+        request.response->set_value([reply] { return reply; });
+    }
+}
+} // namespace detail
+
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
 //   host  : "127.0.0.1" (default) keeps it loopback-only. The default is an
@@ -723,7 +750,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
         mcpReq.body = req.body;
         mcpReq.response = p;
 
-        detail::getHttpChannel().send(std::move(mcpReq));
+        detail::enqueueHttpRequest(std::move(mcpReq));
 
         // Block until main thread processes the request, then execute the
         // reply thunk HERE — heavy two-stage work (thumbnail encode etc.) runs
@@ -790,15 +817,24 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
 
 // Stop HTTP server
 inline void stopHttpServer() {
+    {
+        std::lock_guard<std::mutex> lock(detail::httpQueueMutex());
+        auto queued = detail::getHttpChannel().receiveAll();
+        detail::getHttpChannel().close();
+        for (auto& request : queued) {
+            const auto reply = detail::normalExitReply(request.body);
+            request.response->set_value([reply] { return reply; });
+        }
+    }
     // Unblock any HTTP workers still waiting on a deferred reply — no more frames
     // will be presented, so their producers would never run (and a blocked
     // worker would stall the server shutdown below).
     {
         auto& list = detail::deferredResponses();
         for (auto& d : list) {
-            const std::string message = "the MCP server shut down before the reply was produced";
+            const std::string message = detail::normalExitMessage();
             std::string reply = d.errorReply ? d.errorReply(message)
-                                             : "{\"error\":\"" + message + "\"}";
+                                             : detail::normalExitReply("{}");
             d.response->set_value([reply]() { return reply; });
         }
         list.clear();

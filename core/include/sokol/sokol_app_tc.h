@@ -2475,6 +2475,8 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #if defined(SOKOL_APP_TC_IMPL_INCLUDED) && !defined(SOKOL_APP_TC_IMPL_DONE)
 #define SOKOL_APP_TC_IMPL_DONE (1)
 
+#include "../tc/app/tcExit.h"
+
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
@@ -3102,6 +3104,7 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 
 /*-- per-frame tick (CADisplayLink target) ---------------------------------*/
 - (void)tick:(CADisplayLink*)link {
+    if (_sapp_tc.app.cleanup_called) return;
     _sapp_tc_window_t* w = self.w;
     if (!w) return;
 
@@ -3197,11 +3200,8 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 static void _sapp_tc_start_fallback_timer(void);
 static void _sapp_tc_stop_fallback_timer(void);
 
-@implementation _sapp_tc_win_delegate
-- (BOOL)windowShouldClose:(id)sender {
-    (void)sender;
-    _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return YES;
+static BOOL _sapp_tc_request_exit(void) {
+    _sapp_tc_window_t* w = _sapp_tc.app.main;
     /* main window: sokol_app.h's cancellable quit dance. sapp_quit() pre-sets
        quit_ordered (unvetoable); otherwise QUIT_REQUESTED is delivered and a
        handler may call sapp_cancel_quit() to keep the window open. */
@@ -3215,6 +3215,15 @@ static void _sapp_tc_stop_fallback_timer(void);
         }
     }
     return _sapp_tc.app.quit_ordered ? YES : NO;
+}
+
+@implementation _sapp_tc_win_delegate
+- (BOOL)windowShouldClose:(id)sender {
+    (void)sender;
+    _sapp_tc_window_t* w = self.w;
+    if (!w || !w->is_main) return YES;
+    trussc::internal::setExitReasonIfEmpty("window-close");
+    return _sapp_tc_request_exit();
 }
 - (void)windowWillClose:(NSNotification*)n {
     (void)n;
@@ -3378,6 +3387,7 @@ static void _sapp_tc_update_main_dimensions(bool allow_event) {
    acquired lazily by sapp_get_swapchain() (upstream parity) and released
    when the tick ends. `link` is nil when driven by the fallback timer. */
 static void _sapp_tc_main_tick(CADisplayLink* link) {
+    if (_sapp_tc.app.cleanup_called) return;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || w->in_tick) return;
     _sapp_tc_timing_update(&_sapp_tc.app.timing);      /* feeds the fallback estimate */
@@ -3541,6 +3551,26 @@ static void _sapp_tc_create_main_window(void) {
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     (void)sender;
     return YES;
+}
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
+    (void)sender;
+    if (!_sapp_tc.app.quit_ordered) {
+        // Cocoa forwards the quit Apple event's reason for OS session exits.
+        // keyAEQuitReason ('why?'); absent/unknown means we omit the reason.
+        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+        const AEEventID why = [[event paramDescriptorForKeyword:0x7768793f] enumCodeValue];
+        switch (why) {
+            case 0x6c6f676f: // kAELogOut ('logo')
+            case 0x726c676f: // kAEReallyLogOut ('rlgo')
+                trussc::internal::setExitReason("os-logoff"); break;
+            case 0x72657374: // kAERestart ('rest')
+                trussc::internal::setExitReason("os-restart"); break;
+            case 0x73687574: // kAEShutDown ('shut')
+                trussc::internal::setExitReason("os-shutdown"); break;
+            default: break;
+        }
+    }
+    return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
 }
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
@@ -6979,6 +7009,7 @@ static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
 }
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
+    if (_sapp_tc.app.cleanup_called || _sapp_tc.app.quit_ordered) return;
     if (w->in_tick || !w->swap_chain) return;
     /* the due-check just consumed a waitable credit (unless one was already
        held); hold it until a real Present returns it through the swapchain.
@@ -7012,6 +7043,7 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
         } else if (_sapp_tc.app.desc.frame_userdata_cb) {
             _sapp_tc.app.desc.frame_userdata_cb(_sapp_tc.app.desc.user_data);
         }
+        if (_sapp_tc.app.cleanup_called) { w->in_tick = false; return; }
         _sapp_tc.app.frame_count++;
         w->in_tick = false;
         bool presented = false;
@@ -7062,6 +7094,7 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
             sapp_window handle = { w->win_id };
             w->desc.tick_cb(handle, w->desc.user_data);
         }
+        if (_sapp_tc.app.cleanup_called) return; // callback may have destroyed w
         w->in_tick = false;
         const UINT flags = from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
         const HRESULT hr = w->swap_chain->Present(1, flags);
@@ -7082,6 +7115,23 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
     }
 }
 
+static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
+    if (!_sapp_tc.app.quit_ordered) {
+        _sapp_tc.app.quit_requested = true;
+        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+    }
+    return _sapp_tc.app.quit_ordered || _sapp_tc.app.quit_requested;
+}
+
+static void _sapp_tc_win32_cleanup(void) {
+    if (_sapp_tc.app.cleanup_called) return;
+    _sapp_tc.app.cleanup_called = true; // before callbacks: modal loops can reenter
+    if (_sapp_tc.app.main) ShutdownBlockReasonDestroy(_sapp_tc.app.main->hwnd);
+    if (_sapp_tc.app.desc.cleanup_cb) _sapp_tc.app.desc.cleanup_cb();
+    else if (_sapp_tc.app.desc.cleanup_userdata_cb)
+        _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+}
+
 /*-- window procedure --------------------------------------------------------*/
 static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_NCCREATE) {
@@ -7095,18 +7145,53 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         /* creation-time messages are swallowed (upstream in_create_window) */
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
+    if (_sapp_tc.app.cleanup_called && msg != WM_ENDSESSION) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
     switch (msg) {
+        case WM_QUERYENDSESSION:
+            if (!w->is_main) return TRUE;
+            trussc::internal::setExitReason("os-session-end");
+            if (_sapp_tc_win32_request_exit(w)) {
+                // Do not end the run loop until WM_ENDSESSION(TRUE): another
+                // app may still veto the session. No QUIT_REQUESTED twice.
+                _sapp_tc.app.quit_requested = false;
+                ShutdownBlockReasonDestroy(hwnd);
+                return TRUE;
+            } else {
+                std::string reason = trussc::internal::exitBlockReason();
+                if (reason.empty()) reason = "The app is still busy.";
+                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, NULL, 0);
+                if (count > 0) {
+                    std::wstring wide((size_t)count, L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, &wide[0], count);
+                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
+                }
+                return FALSE;
+            }
+        case WM_ENDSESSION:
+            if (!w->is_main) return 0;
+            ShutdownBlockReasonDestroy(hwnd);
+            if (wParam) {
+                // Forced shutdown can arrive after a veto. Cleanup must finish
+                // inside this message; Windows may kill us as soon as it returns.
+                trussc::internal::setExitReason("os-session-end");
+                _sapp_tc.app.quit_ordered = true;
+                _sapp_tc_win32_cleanup();
+                PostQuitMessage(0);
+            } else if (!_sapp_tc.app.cleanup_called) {
+                _sapp_tc.app.quit_requested = false;
+                _sapp_tc.app.quit_ordered = false;
+                trussc::internal::clearExitReason();
+                trussc::internal::setExitBlockReason("");
+            }
+            return 0;
         case WM_CLOSE:
             if (w->is_main) {
-                /* the cancellable quit dance (sokol_app.h parity): sapp_quit()
-                   pre-sets quit_ordered (unvetoable); otherwise QUIT_REQUESTED
-                   is delivered and a handler may sapp_cancel_quit() */
-                if (!_sapp_tc.app.quit_ordered) {
-                    _sapp_tc.app.quit_requested = true;
-                    _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
-                    if (_sapp_tc.app.quit_requested) {
-                        _sapp_tc.app.quit_ordered = true;
-                    }
+                trussc::internal::setExitReasonIfEmpty("window-close");
+                if (_sapp_tc_win32_request_exit(w)) {
+                    _sapp_tc.app.quit_ordered = true;
+                    ShutdownBlockReasonDestroy(hwnd);
                 }
                 if (_sapp_tc.app.quit_ordered) {
                     PostQuitMessage(0);
@@ -7495,7 +7580,7 @@ static void _sapp_tc_win32_run_loop(void) {
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        if (done) break;
+        if (done || _sapp_tc.app.quit_ordered || _sapp_tc.app.cleanup_called) break;
         /* tick every due window (re-fetch each slot: a tick or a dispatched
            message may have destroyed windows) */
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
@@ -7714,14 +7799,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
-    if (!_sapp_tc.app.cleanup_called) {
-        _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.desc.cleanup_cb) {
-            _sapp_tc.app.desc.cleanup_cb();
-        } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-    }
+    _sapp_tc_win32_cleanup();
     /* destroy any windows the app left open (secondary first, then main) */
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
@@ -10097,6 +10175,7 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
                 /* the cancellable quit dance runs at the loop tail (upstream
                    parity): QUIT_REQUESTED is delivered there and a handler
                    may sapp_cancel_quit() */
+                trussc::internal::setExitReason("window-close");
                 _sapp_tc.app.quit_requested = true;
             } else if (w->desc.close_cb) {
                 /* user closed a secondary window: notify; the app accepts by
@@ -14554,6 +14633,7 @@ _SOKOL_PRIVATE void _sapp_tc_x11_on_clientmessage(XEvent* event) {
     if (event->xclient.message_type == _sapp_tc.x11.WM_PROTOCOLS) {
         const Atom protocol = (Atom)event->xclient.data.l[0];
         if (protocol == _sapp_tc.x11.WM_DELETE_WINDOW) {
+            trussc::internal::setExitReason("window-close");
             _sapp_tc.quit_requested = true;
         }
     } else if (event->xclient.message_type == _sapp_tc.x11.xdnd.XdndEnter) {
@@ -18590,6 +18670,7 @@ _SOKOL_PRIVATE void _sapp_tc_wgpu_device_lost_cb(const WGPUDevice* dev, WGPUDevi
     // NOTE: on wgpuInstanceRelease(), the device lost callback is always called with
     // WGPUDeviceLostReason_CallbackCancelled (even though no device should exist at that point)
     if (reason != WGPUDeviceLostReason_CallbackCancelled) {
+        trussc::internal::setExitReason("device-lost");
         SOKOL_ASSERT(msg.data && (msg.length > 0));
         char buf[1024];
         _sapp_tc_strcpy_range(msg.data, msg.length, buf, sizeof(buf));

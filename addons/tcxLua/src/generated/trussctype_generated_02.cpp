@@ -126,6 +126,7 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
         t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
     }
 }
 #ifndef _MSC_VER
