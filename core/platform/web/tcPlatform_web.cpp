@@ -55,6 +55,20 @@ fs::path getExecutableDir() {
     return fs::path("/");
 }
 
+// User data / temp folders: the browser has no persistent file system here,
+// so both live in Emscripten's in-memory file system and are gone on reload.
+fs::path internal::platformUserDataRoot() {
+    return fs::path("/userdata");
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path("/tmp");
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot — not implemented on web (#230)
 // ---------------------------------------------------------------------------
@@ -79,6 +93,10 @@ bool captureWindow(Pixels& outPixels) {
 
 // Reached from saveScreenshot(), which on web skips the deferred queue and
 // comes straight here (see TrussC.h).
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path) {
+    return pixels.save(internal::resolveScreenshotPath(path));
+}
+
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
     (void)path;
     if (!captureWindowToFileWarned_) {

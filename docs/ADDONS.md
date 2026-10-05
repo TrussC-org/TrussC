@@ -174,6 +174,8 @@ addons/tcxMyAddon/
 │   │   └── tcApp.cpp
 │   ├── addons.make          # Addons used by this example
 │   └── CMakeLists.txt       # Shared template
+├── tests/                   # Optional console test harness (run by CI)
+├── tests-<name>/            # Optional extra harness, e.g. one needing a heavy dependency
 └── CMakeLists.txt           # Optional (only for FetchContent, etc.)
 ```
 
@@ -182,6 +184,8 @@ addons/tcxMyAddon/
 - `libs/`: External source code, git submodules, etc.
 - `example-xxx/`: Examples at same level as `src/`. CMakeLists.txt uses shared template
 - `CMakeLists.txt`: Usually not needed. Create only for special processing like FetchContent
+- `tests/`: Console test harness (`src/main.cpp`, non-zero exit fails). CI builds and runs it on every pull request; a `daily-only` marker file in the folder moves it to the daily run instead
+- `tests-<name>/`: An extra harness next to `tests/`, for tests that need a heavy dependency the per-PR `tests/` avoids (e.g. tcxCurl: `tests/` is curl-free, `tests-curl/` links libcurl). Put a `daily-only` marker in it. This applies to addons inside this repository; CI for an external addon repository runs only its `tests/`
 
 ### When CMakeLists.txt Is Not Needed
 
@@ -697,9 +701,24 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+`HapPlayer::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
+there is no working-directory fallback.
+
 **Features:**
 - Hap, Hap Alpha, Hap Q codecs
 - GPU-side decompression (S3TC/DXT)
+- Audio track: PCM (`sowt`, `twos`, `fl32`, `lpcm`; 16-bit integer or 32-bit
+  float, sound description v0/v1/v2), AAC, MP3. Other PCM formats load
+  without audio and log a warning.
+- A/V sync: video time advances by wall-clock `dt * speed`. While audio is
+  playing and speed is positive, it slews toward the audio position with a
+  0.25 s time constant, smoothing the mixer's device-period position steps.
+  Drift above `getResyncThreshold()` triggers hard re-sync; a threshold of
+  0 or less disables hard re-sync while keeping the slew. After shorter
+  audio ends, wall time carries video to its duration. The video drives the
+  loop and restarts/resyncs audio at wraps. Absent audio, reverse and
+  zero-speed playback use wall time alone.
 
 ### tcxImGui
 
@@ -712,6 +731,10 @@ Dear ImGui integration.
 ### tcxLut
 
 3D LUT (Look-Up Table) color grading.
+
+`Lut3D::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `Image::load()`. Absolute paths pass through;
+there is no working-directory fallback.
 
 **Features:**
 - Load .cube LUT files

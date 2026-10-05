@@ -141,6 +141,16 @@ fs::path getExecutablePath();
 // Get directory containing executable (with trailing /)
 fs::path getExecutableDir();
 
+namespace internal {
+// The OS folders behind getUserDataPath() / getTempPath() (the table in
+// tcUtils.h), not created here. One definition per platform file.
+fs::path platformUserDataRoot();
+fs::path platformTempRoot();
+// The running .app bundle on macOS / iOS; empty when the app does not run
+// from a bundle and on the other platforms.
+fs::path platformAppBundlePath();
+}
+
 // ---------------------------------------------------------------------------
 // Immersive mode (hide system UI)
 // Android: Sticky Immersive (hides status bar + navigation bar)
@@ -176,11 +186,17 @@ TC_PLATFORMS("macos,windows,linux,ios,android") bool captureWindow(Pixels& outPi
 // AFTER present() (see the afterFrame drain in TrussC.h). Callers pass an
 // already-resolved absolute path; the parent directory is assumed to exist.
 // Returns true on success, false on failure.
-// Supported formats: .png, .jpg/.jpeg, .tiff/.tif, .bmp
+// Formats: png/jpg/jpeg/bmp; macOS also tiff/tif/gif, Windows also tga.
+// Unsupported or missing extensions append .png and warn.
 // Web: a stub that always returns false and warns once; saveScreenshot()
 // calls it directly instead of queuing.
 namespace internal {
+// Resolve the data path and the platform-specific screenshot extension.
+// Returns the actual destination, warning when .png is appended.
+std::filesystem::path resolveScreenshotPath(const std::filesystem::path& path);
 bool captureWindowToFile(const std::filesystem::path& path);
+// Encode an already captured RGBA8 image using the screenshot file formats.
+bool saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path);
 }
 
 // ---------------------------------------------------------------------------

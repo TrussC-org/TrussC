@@ -3,6 +3,7 @@
 #include "sol/sol.hpp"
 #include "tcxLuaPathAdapter.h"  // sol2 <-> std::filesystem::path (Lua string) conversion; must precede any path binding TU
 #include "TrussC.h"
+#include <fstream>
 
 // namespace tcx::lua {
 
@@ -39,6 +40,69 @@ public:
     /// @brief Get able to use LuaJIT or not from Sol2
     /// @return 
     bool canUseLuaJITFromSol2();
+
+    // -------------------------------------------------------------------------
+    // Error-contained entry points
+    // -------------------------------------------------------------------------
+    // Neither helper throws: a Lua error is logged with logError("tcxLua") and
+    // reported as false, so the app keeps running (also on the Web, where C++
+    // exceptions cannot be caught). sol2's own defaults are unchanged.
+
+    /// @brief Call the global Lua function `fn` with `args` through sol::protected_function.
+    /// @return true if the call succeeded. false if it raised a Lua error (logged)
+    ///         or if `fn` is nil (nothing is called, nothing is logged).
+    template<typename... Args>
+    static bool call(sol::state& lua, const char* fn, Args&&... args) {
+        sol::object target = lua[fn];
+        if (target.get_type() == sol::type::lua_nil || target.get_type() == sol::type::none) {
+            return false;
+        }
+        if (target.get_type() != sol::type::function) {
+            trussc::logError("tcxLua") << fn << ": expected a Lua function";
+            return false;
+        }
+        sol::protected_function f = target;
+        sol::protected_function_result result = f(std::forward<Args>(args)...);
+        if (!result.valid()) {
+            sol::error err = result;
+            trussc::logError("tcxLua") << err.what();
+            return false;
+        }
+        return true;
+    }
+
+    /// @brief Load and run a Lua file with sol::script_pass_on_error.
+    /// @return true if the file loaded and ran. false on a missing file, a syntax
+    ///         error or a runtime error (logged).
+    static bool runFile(sol::state& lua, const std::filesystem::path& path) {
+        try {
+            const auto fullPath = trussc::getDataPath(path);
+            std::error_code ec;
+            const auto size = std::filesystem::file_size(fullPath, ec);
+            // loadTextFile returns an empty string on failure as well as for an
+            // empty file. Check readability separately so empty scripts work.
+            std::ifstream readable(fullPath, std::ios::binary);
+            if (ec || !readable.is_open()) {
+                trussc::logError("tcxLua") << "Cannot read file: " << trussc::pathToUtf8(path);
+                return false;
+            }
+            const auto text = trussc::loadTextFile(path);
+            if (text.size() != size) {
+                trussc::logError("tcxLua") << "Cannot read complete file: " << trussc::pathToUtf8(path);
+                return false;
+            }
+            auto result = lua.safe_script(text, sol::script_pass_on_error, "@" + trussc::pathToUtf8(path));
+            if (!result.valid()) {
+                sol::error err = result;
+                trussc::logError("tcxLua") << err.what();
+                return false;
+            }
+            return true;
+        } catch (const std::exception& err) {
+            trussc::logError("tcxLua") << err.what();
+            return false;
+        }
+    }
 
 protected:
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);

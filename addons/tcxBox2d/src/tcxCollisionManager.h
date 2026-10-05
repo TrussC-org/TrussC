@@ -56,11 +56,13 @@ public:
     // from one fixture onto another in one step never sees Ended + Began.
     // If you call b2World::Step() yourself, call update() right after it,
     // before creating or destroying bodies. A body destroyed before its
-    // deferred Ended / Exit fires (Body::destroy(), a RigidBody2D's node
+    // already pending Ended / Exit fires (Body::destroy(), a RigidBody2D's node
     // going away) gets none, and the other side still gets its own with that
     // body null (WorldContact::a / b, CollisionEvent::other,
     // Contact2D::other). Listeners of the deferred events and of Stay may
-    // destroy bodies.
+    // destroy bodies. Exits from TrussC body destruction, disabling or type
+    // changes are also queued, then flushed after Box2D returns and before
+    // the wrapper returns. Exits from raw Box2D calls wait for update().
     // -------------------------------------------------------------------------
     tc::Event<WorldContact> contactBegan;   // started touching
     tc::Event<WorldContact> contactStay;    // still touching, once per World::update()
@@ -68,7 +70,7 @@ public:
 
     // -------------------------------------------------------------------------
     // Update (called each frame): dispatch the Ended / Exit events deferred
-    // from the last step, then the Stay events.
+    // from the last Box2D operation, then the Stay events.
     // -------------------------------------------------------------------------
     void update();
 
@@ -91,12 +93,12 @@ private:
     // The touching contacts of one pair (colliders or bodies, unordered).
     // Enter/Began fires when the first one begins, Exit/Ended when the last
     // one ends, and Stay once per update with the first contact.
-    //   - The last contact ending inside b2World::Step() only marks the pair
+    //   - The last contact ending in any Box2D operation only marks the pair
     //     exitPending, with the Exit payload built from that contact (it may
     //     be freed before the step ends). A contact of the pair that begins
     //     later in the same step clears the mark, so a hand-over from one
     //     fixture to another is no Exit + Enter; flushPendingExits() fires
-    //     the rest after the step.
+    //     the rest after the step or TrussC wrapper's Box2D call.
     //   - While update() or flushPendingExits() dispatches, a pair whose
     //     last contact ends (a listener destroyed or disabled a body) is left
     //     in place with no contacts, since the loops walk the vector by
@@ -136,7 +138,7 @@ private:
     // True while update() iterates the pair vectors (see ContactPair).
     bool dispatching_ = false;
 
-    // Fire the Ended / Exit events deferred inside the last step.
+    // Fire the Ended / Exit events after a Box2D operation returns.
     void flushPendingExits();
 
     // `body` is about to be destroyed (b2World::DestroyBody()). Null it and
@@ -144,6 +146,9 @@ private:
     // then reaches only the other side, with this body null in its payload.
     // Pairs that still have contacts are ended by DestroyBody() itself.
     void forget(b2Body* body);
+
+    // Null world-level references without reading a destroyed body.
+    void forgetBody(b2Body* body);
 
     // Drop the pairs left empty by a dispatch (see ContactPair).
     void dropEmptied();
@@ -167,17 +172,10 @@ private:
     static bool addContact(std::vector<ContactPair<T, Exit>>& pairs, T* a, T* b, b2Contact* contact);
 
     // Remove a contact from its pair. Returns the pair if it was the pair's
-    // last contact (still in `pairs`; see endPair()), else null.
+    // last contact (still in `pairs`; Exit is queued), else null.
     template<typename T, typename Exit>
     static ContactPair<T, Exit>* removeContact(std::vector<ContactPair<T, Exit>>& pairs,
                                                T* a, T* b, b2Contact* contact);
-
-    // A pair lost its last contact: outside a step, drop it (or leave it
-    // empty while update() dispatches) and return true to fire Exit now;
-    // inside a step, mark it exitPending with `exit` and return false.
-    template<typename T, typename Exit>
-    bool endPair(std::vector<ContactPair<T, Exit>>& pairs, ContactPair<T, Exit>* pair,
-                 const Exit& exit, bool stepping);
 };
 
 } // namespace tcx::box2d

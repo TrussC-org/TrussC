@@ -218,14 +218,25 @@ function annotationsOf(node, file) {
         const ln = loc.line;
         if (!ln) continue;
         const text = (lines[ln - 1] || '') + ' ' + (lines[ln] || '');   // macro line (+next, in case the decl wraps)
-        let m = text.match(/\bTC_(PLATFORMS|LUA_BIND)\b(?:\(\s*"([^"]*)")?/);
-        if (m) {
-            if (m[1] === 'PLATFORMS') out.platforms = _csv(m[2] || '');
-            else if (m[1] === 'LUA_BIND') out.lua_bind = _csv(m[2] || '');
+        // Several TC_* macros can sit on one line (`TC_PLATFORMS("...") TC_LUA_SKIP void f();`),
+        // each with its own AnnotateAttr on that line. Read every macro on the macro
+        // line itself; only when it has none, fall back to the first one in the
+        // two-line window.
+        const RX = /\bTC_(PLATFORMS|LUA_BIND|LUA_SKIP)\b(?:\(\s*"([^"]*)")?/g;
+        let ms = [...(lines[ln - 1] || '').matchAll(RX)];
+        if (!ms.length) { const m1 = text.match(new RegExp(RX.source)); if (m1) ms = [m1]; }
+        let m;
+        if (ms.length) {
+            for (const mm of ms) {
+                if (mm[1] === 'PLATFORMS') out.platforms = _csv(mm[2] || '');
+                else if (mm[1] === 'LUA_BIND') out.lua_bind = _csv(mm[2] || '');
+                else if (mm[1] === 'LUA_SKIP') out.lua_skip = true;
+            }
         } else if ((m = text.match(/clang::annotate\(\s*"tc:([^"]*)"/))) {
             const s = m[1];
             if (s.startsWith('platforms:')) out.platforms = _csv(s.slice(10));
             else if (s.startsWith('lua_bind:')) out.lua_bind = _csv(s.slice(9));
+            else if (s === 'lua_skip') out.lua_skip = true;
         }
     }
     return out;
@@ -354,7 +365,7 @@ pub = pub.filter(s => !(s.kind === 'enum' && !(s.members && s.members.length) &&
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
-    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
+    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, lua_skip: (s.ann && s.ann.lua_skip) || undefined, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
     const e = structure[id];
     if ((s.flags || []).includes('static')) e.static = true;
     if (s.deprecated && !e.deprecated) e.deprecated = s.deprecated;
