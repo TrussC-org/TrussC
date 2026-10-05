@@ -24,7 +24,8 @@ sokol/
 │                        #   every platform + multi-window API (sokol_app.h
 │                        #   no longer exists in this tree — see below)
 ├── sokol_gfx.h          # Modified (Metal: swapchain store-action hint,
-│                        #   uniform-buffer auto-grow, mid-frame flush)
+│                        #   uniform-buffer auto-grow, upload-only frame
+│                        #   synchronization, mid-frame flush)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
 ├── TRUSSC_MODIFICATIONS.md
@@ -185,17 +186,18 @@ sokol_gl, or present a partially rendered swapchain.
   deferred resources, rotate uniform slots, or reset `cur_ub_offset` / the
   uniform base pointer. Subsequent draws append uniforms in the same slot;
   existing uniform auto-grow and deferred retirement keep working.
-- `_sg_mtl_ensure_command_buffer()` shares the existing semaphore acquisition
-  and completion handler between pass start and final presentation. Each
-  sokol command buffer acquires/releases exactly one permit. Flush waits for
+- Reuses #599's `_sg_mtl_ensure_command_buffer()` and unconditional final
+  commit; #270 adds no separate helper or conditional buffer-acquisition path.
+  Each sokol command buffer acquires/releases exactly one permit. Flush waits for
   its submission (and earlier submissions on the same queue), so extra
   buffers cannot let a later frame overwrite an in-flight uniform slot.
   Flush never manually signals the semaphore. The separate, synchronous
   readback blit does not participate in sokol's semaphore.
 - `_sg_mtl_end_pass()` retains each used drawable once in `pending_drawables`.
-  Only `_sg_mtl_commit()` schedules their presentation and empties the list;
-  it creates a command buffer if the last operation was a flush. Otherwise a
-  suspended swapchain's `presentDrawable` would run at the mid-frame flush.
+  Only `_sg_mtl_commit()` schedules their presentation and empties the list,
+  after #599's unconditional buffer acquisition and before its commit. This
+  also works after a flush with no subsequent pass, using the final buffer
+  #599 already guarantees. A mid-frame flush never presents these drawables.
   This presentation change applies to both Metal platforms; the iOS readback
   implementation is unchanged pending the separate hardware investigation.
 
@@ -235,6 +237,25 @@ optional optimization rather than a correctness requirement.
 
 WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
 bind groups / descriptor sets; growing them is much more invasive).
+
+### Upload-only frame synchronization (Metal, #599 / #332)
+
+**Purpose:** End frames on ticks that record offscreen work or uploads without
+drawing the screen (#332). A commit without a pass must participate in the
+in-flight semaphore before rotating uniform slots or collecting resources.
+
+**Changes (marked `[TrussC modification]`):**
+- `_sg_mtl_ensure_command_buffer()` shares the first-pass command-buffer creation,
+  semaphore wait and completion-handler signal with `_sg_mtl_commit()`.
+- `_sg_mtl_commit()` unconditionally ensures a command buffer and commits it,
+  even when no pass created one or #270's flush cleared the previous buffer.
+  Existing pass frames reuse their command buffer and semaphore slot.
+  Retained/unretained-reference settings remain respected.
+- #270 layers deferred presentation onto this base: between ensuring the
+  buffer and committing it, present each retained `pending_drawables` entry
+  once and clear the list. Acquisition never depends on the list being nonempty.
+  Garbage collection, uniform-ring rotation/reset, and frame advancement still
+  belong only to the real commit; flush neither duplicates nor bypasses them.
 
 ---
 

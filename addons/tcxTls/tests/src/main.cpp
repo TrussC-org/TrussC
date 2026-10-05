@@ -706,12 +706,12 @@ static void scenario() {
     int threadsAfterOnConnect = -1;
     waitFor(1000, [&] {
         threadsAfterOnConnect = countEntries("/proc/self/task");
-        return threadsAfterOnConnect <= threadsBeforeOnConnect + 1;
+        return threadsAfterOnConnect <= threadsBeforeOnConnect + 2;
     });
-    printf("  (threads: %d before connect(), %d after; one receive thread expected)\n",
+    printf("  (threads: %d before connect(), %d after; one receive and one writer thread expected)\n",
            threadsBeforeOnConnect, threadsAfterOnConnect);
     check("onConnect reconnect: the old receive thread stopped",
-          threadsAfterOnConnect <= threadsBeforeOnConnect + 1);
+          threadsAfterOnConnect <= threadsBeforeOnConnect + 2);
 #else
     printf("%-60s %s\n", "onConnect reconnect: the old receive thread stopped",
            "SKIP (counted on Linux)");
@@ -1133,6 +1133,105 @@ static void scenario() {
     if (g_fail) bail();
     // victimErr outlives its Event: disconnecting it is a no-op
 
+    // #261: cancellation must precede resetting/freeing the TLS state.
+    for (int i = 0; i < 20; ++i) {
+        auto pending = make_unique<TlsClient>();
+        pending->setVerifyNone();
+        pending->setHandshakeTimeout(0);
+        pending->connectAsync("127.0.0.1", plainPort);
+        rawsocket_t accepted = acceptWithin(plainListener, 5000);
+        check("async TLS: silent peer accepted", accepted != kNoSocket);
+        check("async TLS: handshake is connecting", pending->isConnecting());
+        if (i % 2 == 0) {
+            pending.reset();
+        } else {
+            pending->disconnect();
+            check("async TLS disconnect leaves no attempt", !pending->isConnected() && !pending->isConnecting());
+            pending.reset();
+        }
+        if (accepted != kNoSocket) TC_CLOSE(accepted);
+    }
+    for (int i = 0; i < 100; ++i) {
+        auto pending = make_unique<TlsClient>();
+        pending->setVerifyNone();
+        pending->connectAsync("127.0.0.1", plainPort);
+        pending.reset();
+    }
+    // Drain any TCP attempts that completed just before their cancellation.
+    for (;;) {
+#ifdef _WIN32
+        fd_set ready;
+        FD_ZERO(&ready); FD_SET(plainListener, &ready);
+        timeval tv{};
+        if (select(0, &ready, nullptr, nullptr, &tv) <= 0) break;
+#else
+        pollfd ready{plainListener, POLLIN, 0};
+        if (poll(&ready, 1, 0) <= 0) break;
+#endif
+        rawsocket_t accepted = ::accept(plainListener, nullptr, nullptr);
+        if (accepted == kNoSocket) break;
+        TC_CLOSE(accepted);
+    }
+    check("async TLS immediate destruction completes", true);
+
+    // #261: one send path, including TLS WANT_READ/WANT_WRITE and idle timeout.
+    for (bool threads : {true, false}) {
+        TlsClient sender;
+        sender.setVerifyNone();
+        sender.setUseThread(threads);
+        sender.setSendTimeout(0.5f);
+        atomic<int> sendErrors{0}, sendCompletions{0};
+        atomic<bool> sendTimedOut{false};
+        atomic<SendError> result{SendError::None};
+        auto err = sender.onError.listen([&](TcpErrorEventArgs& e) {
+            sendTimedOut = e.message.find("timed out") != string::npos;
+            ++sendErrors;
+        });
+        auto completion = sender.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+            result = e.error;
+            ++sendCompletions;
+        });
+        check("TLS send timeout: connect", sender.connect("127.0.0.1", port));
+        TlsPeer nonReader;
+        atomic<bool> serverDone{false}, serverOk{false};
+        thread handshaker([&] {
+            serverOk = nonReader.accept(listener, server.conf, 5000);
+            serverDone = true;
+        });
+        check("TLS send timeout: handshake completes", waitFor(10000, [&] {
+            if (!threads) sender.processNetwork();
+            return serverDone.load() && sender.isConnected();
+        }));
+        handshaker.join();
+        check("TLS send timeout: peer handshakes", serverOk);
+        if (g_fail) bail();
+        check("TLS send timeout: send fails", !sender.send(vector<char>(64 * 1024 * 1024, 'x')));
+        check("TLS send timeout: completion arrives", waitFor(5000, [&] { return sendCompletions == 1; }));
+        check("TLS send timeout: one error, timeout and disconnect", sendErrors == 1 && sendTimedOut && result == SendError::Disconnected && !sender.isConnected());
+        sender.disconnect();
+        if (g_fail) bail();
+    }
+
+    {
+        // A WebSocket-style owner replaces its TLS client from a send error.
+        auto doomed = make_unique<TlsClient>();
+        doomed->setVerifyNone();
+        doomed->setSendTimeout(0.5f);
+        atomic<bool> armed{false}, destroyed{false};
+        auto error = doomed->onError.listen([&](TcpErrorEventArgs&) {
+            if (armed) { doomed.reset(); destroyed = true; }
+        });
+        TlsPeer nonReader;
+        check("TLS send listener destruction: connect", doomed->connect("127.0.0.1", port));
+        check("TLS send listener destruction: handshake", nonReader.accept(listener, server.conf, 5000));
+        check("TLS send listener destruction: connected", waitFor(5000, [&] { return doomed->isConnected(); }));
+        if (g_fail) bail();
+        TlsClient* sender = doomed.get();
+        armed = true;
+        check("TLS send listener destruction wakes the sender", !sender->send(vector<char>(64 * 1024 * 1024, 'x')));
+        check("TLS send listener destroyed the client", waitFor(5000, [&] { return destroyed.load(); }));
+    }
+
     // --- handshake deadline (#262) -------------------------------------------
     // The plain peer accepts TCP and then says nothing
     for (bool threads : {true, false}) {
@@ -1336,6 +1435,11 @@ int main() {
         check("psa_crypto_init()", false);
         bail();
     }
+#ifdef __linux__
+    // Include persistent sanitizer/runtime helpers in the thread baseline.
+    std::thread([] {}).join();
+    const int threadsAtStart = countEntries("/proc/self/task");
+#endif
     g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
@@ -1351,10 +1455,10 @@ int main() {
     int threadsAtExit = -1;
     waitFor(1000, [&] {
         threadsAtExit = countEntries("/proc/self/task");
-        return threadsAtExit == 1;
+        return threadsAtExit <= threadsAtStart;
     });
-    printf("  (threads when main() returns: %d)\n", threadsAtExit);
-    check("no thread is left when main() returns", threadsAtExit == 1);
+    printf("  (threads: %d when main() started, %d when it returns)\n", threadsAtStart, threadsAtExit);
+    check("no thread is left when main() returns", threadsAtStart > 0 && threadsAtExit > 0 && threadsAtExit <= threadsAtStart);
 #else
     printf("%-60s %s\n", "no thread is left when main() returns", "SKIP (counted on Linux)");
 #endif

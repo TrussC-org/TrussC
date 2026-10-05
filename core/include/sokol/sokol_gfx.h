@@ -16251,10 +16251,13 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
     #endif
 }
 
-// [TrussC] Also used when sg_commit follows a flush with no intervening pass.
+// [TrussC modification] Every committed frame must take an in-flight slot,
+// even when uploads are its only work. Use the same command buffer creation
+// and completion handler for the first pass and for a pass-less commit (#332).
 _SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
+    SOKOL_ASSERT(_sg.mtl.cmd_queue);
     if (nil == _sg.mtl.cmd_buffer) {
-        // Each command buffer acquires one permit and releases it on completion.
+        // block until the oldest frame in flight has finished
         dispatch_semaphore_wait(_sg.mtl.sem, DISPATCH_TIME_FOREVER);
         if (_sg.desc.metal.use_command_buffer_with_retained_references) {
             _sg.mtl.cmd_buffer = [_sg.mtl.cmd_queue commandBuffer];
@@ -16269,6 +16272,7 @@ _SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
         }];
     }
 }
+// [TrussC modification end]
 
 _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
     SOKOL_ASSERT(pass && atts);
@@ -16278,6 +16282,7 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
     SOKOL_ASSERT(nil == _sg.mtl.cur_drawable);
     _sg_mtl_clear_state_cache();
 
+    // [TrussC modification] Shared with upload-only commits (#332).
     _sg_mtl_ensure_command_buffer();
 
     // if this is first pass in frame, get uniform buffer base pointer
@@ -16341,20 +16346,18 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
     SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
     SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
 
-    // [TrussC] Even if the last operation was a flush, presentation belongs
-    // to the final command buffer, ordered after all earlier work on this queue.
-    if ([_sg.mtl.pending_drawables count] > 0) {
-        _sg_mtl_ensure_command_buffer();
-        for (id<CAMetalDrawable> drawable in _sg.mtl.pending_drawables) {
-            [_sg.mtl.cmd_buffer presentDrawable:drawable];
-        }
-        [_sg.mtl.pending_drawables removeAllObjects];
+    // [TrussC modification] An upload-only frame still advances frame_index
+    // and the uniform ring. Acquire its slot and submit an empty command
+    // buffer so completion ordering also protects deferred resource GC (#332).
+    _sg_mtl_ensure_command_buffer();
+    // [TrussC] Present only at the real commit, including after a flush with
+    // no subsequent pass. #599 already guarantees this final command buffer.
+    for (id<CAMetalDrawable> drawable in _sg.mtl.pending_drawables) {
+        [_sg.mtl.cmd_buffer presentDrawable:drawable];
     }
-
-    // commit the frame's command buffer
-    if (_sg.mtl.cmd_buffer) {
-        [_sg.mtl.cmd_buffer commit];
-    }
+    [_sg.mtl.pending_drawables removeAllObjects];
+    [_sg.mtl.cmd_buffer commit];
+    // [TrussC modification end]
 
     // garbage-collect resources pending for release
     _sg_mtl_garbage_collect(_sg.frame_index);

@@ -299,7 +299,8 @@ struct WindowContext {
 
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
-    // Resolved absolute paths queued by saveScreenshot() on THIS window, drained
+    // Resolved absolute paths (download names on web) queued by saveScreenshot()
+    // on THIS window, drained
     // right after present() while this context is current (so the capture reads
     // back this window's lastSwapchainDrawable, not the main window's). The main
     // window drains from the afterFrame listener in _setup_cb; each secondary
