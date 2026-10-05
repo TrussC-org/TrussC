@@ -13,6 +13,11 @@ namespace trussc {
 static bool readFromGLTexture(sg_image image, int width, int height,
                               GLenum glFormat, GLenum glType,
                               void* buffer, size_t rowBytes, bool flipY) {
+    if (internal::currentWindowContext().inFboPass) {
+        logError("Fbo") << "read back after fbo.end()";
+        return false;
+    }
+
     sg_gl_image_info info = sg_gl_query_image_info(image);
     GLuint texID = info.tex[0];
 

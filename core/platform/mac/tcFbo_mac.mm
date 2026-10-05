@@ -30,6 +30,11 @@ static MTLPixelFormat toMTLPixelFormat(sg_pixel_format fmt) {
 static bool readPixelsInternal(sg_image srcImage, int width, int height,
                                MTLPixelFormat mtlFormat, size_t bytesPerRow,
                                void* dstBuffer) {
+    if (internal::currentWindowContext().inFboPass) {
+        logError("Fbo") << "read back after fbo.end()";
+        return false;
+    }
+
     id<MTLCommandQueue> cmdQueue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
     if (!cmdQueue) {
         tc::logError() << "[FBO] Failed to get Metal command queue";

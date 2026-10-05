@@ -29,6 +29,8 @@ public:
         // Use the working directory, not a macOS app bundle's data folder.
         path_ = filesystem::current_path() / "fbo-readback-test.png";
         screenPath_ = filesystem::current_path() / "fbo-readback-screen.png";
+        filesystem::remove(path_);
+        filesystem::remove(screenPath_);
     }
 
     void draw() override {
@@ -38,8 +40,11 @@ public:
             check("previous frame screenshot loads", static_cast<bool>(screen.load(screenPath_)));
             if (screen.isAllocated()) {
                 const Color red = screen.getPixels().getColor(32, 32);
-                const Color green = screen.getPixels().getColor(96, 32);
-                check("2D before readback remains visible", red.r > 0.9f && red.g < 0.1f && red.b < 0.1f);
+                const Color secondRed = screen.getPixels().getColor(96, 32);
+                const Color green = screen.getPixels().getColor(160, 32);
+                check("2D before no-pass readback remains visible", red.r > 0.9f && red.g < 0.1f && red.b < 0.1f);
+                check("2D before open-pass readback remains visible",
+                      secondRed.r > 0.9f && secondRed.g < 0.1f && secondRed.b < 0.1f);
                 check("2D after readback remains visible", green.r < 0.1f && green.g > 0.9f && green.b < 0.1f);
             }
         }
@@ -59,11 +64,14 @@ public:
         fullscreen_.draw();
         check("FullscreenShader opens swapchain pass", isInSwapchainPass());
         setColor(1, 0, 0);
-        drawRect(8, 8, 48, 48);
+        drawRect(72, 8, 48, 48);
         renderFbo(); // suspends and resumes the pass before readback does so
         readAll(true);
 
         half_.begin(0.25f, 0.5f, 1.0f, 1.0f);
+#if defined(__linux__) || defined(__APPLE__)
+        checkReadbackDuringFboPass();
+#endif
         half_.end();
         vector<float> floats(16 * 16 * 4);
         check("RGBA16F float readback succeeds", half_.readPixelsFloat(floats.data()));
@@ -77,7 +85,7 @@ public:
         check("float/rejected read preserves swapchain pass", isInSwapchainPass());
         check("readbacks never commit the frame", commits == frames_);
         setColor(0, 1, 0);
-        drawCircle(96, 32, 20);
+        drawCircle(160, 32, 20);
         check("screen capture queued for after present", saveScreenshot(screenPath_));
         ++frames_;
     }
@@ -89,6 +97,32 @@ public:
     }
 
 private:
+    void checkReadbackDuringFboPass() {
+        // Read a different Fbo: checking only the source's active_ misses this.
+        int errors = 0;
+        EventListener logSub = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Error &&
+                e.message == "[Fbo] read back after fbo.end()") ++errors;
+        });
+        vector<unsigned char> bytes(16 * 16 * 4, 123);
+        vector<float> floats(16 * 16 * 4, -1.0f);
+        check("readPixels during another Fbo pass is rejected", !fbo_.readPixels(bytes.data()));
+        check("rejected readPixels logs the Fbo error", errors == 1);
+        check("rejected byte read leaves destination unchanged",
+              all_of(bytes.begin(), bytes.end(), [](unsigned char v) { return v == 123; }));
+        check("readPixelsFloat during another Fbo pass is rejected", !fbo_.readPixelsFloat(floats.data()));
+        check("rejected readPixelsFloat logs the Fbo error", errors == 2);
+        check("rejected float read leaves destination unchanged",
+              all_of(floats.begin(), floats.end(), [](float v) { return v == -1.0f; }));
+        Image copy;
+        check("copyTo during another Fbo pass is rejected", !fbo_.copyTo(copy));
+        check("rejected copyTo logs the Fbo error", errors == 3);
+        check("save during another Fbo pass is rejected", !fbo_.save(path_));
+        check("rejected save logs the Fbo error", errors == 4);
+        check("rejected reads leave the Fbo pass open",
+              internal::currentWindowContext().inFboPass && half_.isActive());
+    }
+
     void renderFbo() {
         // Alternate contents each frame to expose stale GPU reads.
         fbo_.begin(frames_ % 2 ? 1.0f : 0.0f, 0, frames_ % 2 ? 0.0f : 1.0f, 1);
@@ -131,7 +165,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return 0;
     }
     WindowSettings settings;
-    settings.setSize(128, 64);
+    settings.setSize(192, 64);
     settings.setHighDpi(false);
     runApp<ReadbackApp>(settings);
     check("all three frames completed", completed);
