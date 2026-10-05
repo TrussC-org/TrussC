@@ -102,7 +102,7 @@ private:
         int errors = 0;
         EventListener logSub = getLogger().onLog.listen([&](LogEventArgs& e) {
             if (e.level == LogLevel::Error &&
-                e.message == "[Fbo] read back after fbo.end()") ++errors;
+                e.message == "[Fbo] readPixels() inside fbo.begin()/end() is not supported; call it after end()") ++errors;
         });
         vector<unsigned char> bytes(16 * 16 * 4, 123);
         vector<float> floats(16 * 16 * 4, -1.0f);
