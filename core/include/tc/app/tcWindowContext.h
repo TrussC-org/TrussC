@@ -350,6 +350,18 @@ struct WindowContext {
     CoreEvents* coreEvents = nullptr;
 };
 
+// Pipeline target for swapchain draws. The main window keeps sokol's defaults.
+struct SwapchainTargetFormat {
+    sg_pixel_format colorFormat;
+    int sampleCount;
+};
+
+inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
+    return ctx.isMain
+        ? SwapchainTargetFormat{_SG_PIXELFORMAT_DEFAULT, sapp_sample_count()}
+        : SwapchainTargetFormat{ctx.swapchainColorFormat, ctx.swapchainSampleCount};
+}
+
 // Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
 WindowContext& mainWindowContext();
 
