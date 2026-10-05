@@ -75,9 +75,9 @@ TrussC offers `events().deviceLost`: cancellation keeps the main loop running;
 the default logs an error and exits with code 1. After loss, windows use timer
 pacing, no longer wait for dead frame-latency signals, and stop presenting or
 resizing the failed swapchains. App callbacks continue if cancellation opts
-into handling the failure. Resources are
-not recreated. Resize detection starts after app initialization so the event
-cannot be swallowed by the initialization gate.
+into handling the failure. Resources are not recreated. The first tick still
+updates dimensions and resizes before app initialization. Loss detected before
+initialization is logged and latched without dispatching an app event.
 
 ### 1. Skip Present (D3D11 flickering fix)
 

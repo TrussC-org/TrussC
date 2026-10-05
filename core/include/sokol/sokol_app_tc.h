@@ -6620,14 +6620,13 @@ static bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
                 w->earliest_next = _sapp_tc_now() + w->refresh_period;
             }
         }
-        if (_sapp_tc.app.desc.logger.func) {
-            char message[128];
-            snprintf(message, sizeof(message),
-                "D3D11 device lost: HRESULT=0x%08X, GetDeviceRemovedReason=0x%08X",
-                (unsigned int)hr, (unsigned int)reason);
-            _sapp_tc.app.desc.logger.func("sapp", 1, SAPP_LOGITEM_WIN32_D3D11_DEVICE_LOST,
-                message, __LINE__, __FILE__, _sapp_tc.app.desc.logger.user_data);
-        }
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1,
+            (uint32_t)SAPP_LOGITEM_WIN32_D3D11_DEVICE_LOST, __LINE__, "error: ",
+            "D3D11 device lost: HRESULT=0x%08X, GetDeviceRemovedReason=0x%08X",
+            (unsigned int)hr, (unsigned int)reason);
+        /* Before init, only log and latch the loss; app listeners aren't ready.
+           Keep this gate here so the first tick still updates dimensions. */
+        if (!_sapp_tc.app.init_called) return true;
         sapp_event ev;
         memset(&ev, 0, sizeof(ev));
         ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
@@ -7033,7 +7032,7 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
            per-WM_SIZE ResizeBuffers blows up memory on some drivers). During
            a modal size-move loop the swapchain keeps its size (DXGI stretch)
            and one resize lands on the first normal tick after the drag. */
-        if (_sapp_tc.app.init_called && !_sapp_tc.app.device_lost_notified &&
+        if (!_sapp_tc.app.device_lost_notified &&
             !from_modal && _sapp_tc_win32_update_dimensions(w)) {
             if (!_sapp_tc_d3d11_resize(w)) return;
             _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_RESIZED);

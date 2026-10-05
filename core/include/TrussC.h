@@ -29,6 +29,7 @@
 #include "sokol/util/sokol_memtrack.h"
 
 // Standard libraries
+#include <cstdlib>
 #include <cstdint>
 #include <cmath>
 #include <string>
@@ -2738,6 +2739,11 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+
+        #if defined(__APPLE__) && TARGET_OS_OSX
+        // AppKit's terminate: would exit(0) right after this.
+        if (appExitCode() != 0) std::exit(appExitCode());
+        #endif
     }
 
     // The name an event entry point (#349) gives in its warning, from the
