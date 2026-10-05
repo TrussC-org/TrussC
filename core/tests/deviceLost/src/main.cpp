@@ -78,6 +78,37 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check(!_sapp_tc_d3d11_first_device_loss(removed, &notified), "repeat/reentrant removed suppressed");
         check(!_sapp_tc_d3d11_first_device_loss(reset, &notified), "second swapchain reset suppressed");
     }
+    // Exercise the backend's shared pending-event gate without a GPU/display.
+    // A resize can latch loss before setup has installed the app listener.
+    for (uint32_t first : {removed, reset}) {
+        bool notified = false;
+        bool pending = false;
+        bool initialized = false;
+        int deferredCalls = 0;
+        auto dispatchPending = [&] {
+            if (_sapp_tc_d3d11_take_pending_device_loss(initialized, &pending)) notifyLoss();
+        };
+        check(!_sapp_tc_d3d11_take_pending_device_loss(true, &pending),
+              "normal init has no pending loss");
+        if (_sapp_tc_d3d11_first_device_loss(first, &notified)) pending = true;
+        dispatchPending();
+        check(notified && pending, "pre-init loss remains latched and pending");
+        auto deferred = events().deviceLost.listen([&](DeviceLostEventArgs& args) {
+            ++deferredCalls;
+            check(initialized && args.reason == hung, "deferred loss delivered after init with reason");
+            check(!pending, "pending cleared before app callback");
+            check(!_sapp_tc_d3d11_first_device_loss(reset, &notified),
+                  "reentrant loss cannot queue another event");
+            dispatchPending();
+            args.cancel = true;
+        });
+        dispatchPending();
+        check(deferredCalls == 0 && pending, "no notification before init completes");
+        initialized = true;
+        dispatchPending();
+        dispatchPending(); // another tick must not replay the notification
+        check(deferredCalls == 1 && !pending, "pre-init loss delivered exactly once after init");
+    }
     int lossCalls = 0;
     int errorLogs = 0;
     auto logs = getLogger().onLog.listen([&](LogEventArgs& args) {

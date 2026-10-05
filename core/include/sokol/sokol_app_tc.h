@@ -6150,6 +6150,8 @@ static struct {
         uint64_t frame_count;
         _sapp_tc_window_t* main;
         bool device_lost_notified;  /* one notification across every swapchain */
+        bool device_lost_event_pending; /* deliver after app initialization */
+        uint32_t device_lost_reason; /* preserve the first removal reason */
         ID3D11Device* device;
         ID3D11DeviceContext* device_context;
         /* mouse cursor */
@@ -6607,10 +6609,21 @@ static void _sapp_tc_win32_restore_console(void) {
 
 /* The device belongs to the app, even when a secondary window detects loss.
    Route the notification to the main callback, never a secondary Node tree. */
+static void _sapp_tc_d3d11_dispatch_pending_device_loss(void) {
+    if (!_sapp_tc_d3d11_take_pending_device_loss(_sapp_tc.app.init_called,
+            &_sapp_tc.app.device_lost_event_pending)) return;
+    sapp_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
+    ev.device_lost_reason = _sapp_tc.app.device_lost_reason;
+    _sapp_tc_send(_sapp_tc.app.main, &ev);
+}
+
 static bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
     if (!_sapp_tc_d3d11_is_device_loss((uint32_t)hr)) return false;
     if (_sapp_tc_d3d11_first_device_loss((uint32_t)hr, &_sapp_tc.app.device_lost_notified)) {
         const HRESULT reason = _sapp_tc.app.device->GetDeviceRemovedReason();
+        _sapp_tc.app.device_lost_reason = (uint32_t)reason;
         /* A dead device may never signal another frame-latency credit. Keep
            all windows timer-paced if the app opts to continue non-GPU work. */
         for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
@@ -6624,14 +6637,10 @@ static bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {
             (uint32_t)SAPP_LOGITEM_WIN32_D3D11_DEVICE_LOST, __LINE__, "error: ",
             "D3D11 device lost: HRESULT=0x%08X, GetDeviceRemovedReason=0x%08X",
             (unsigned int)hr, (unsigned int)reason);
-        /* Before init, only log and latch the loss; app listeners aren't ready.
-           Keep this gate here so the first tick still updates dimensions. */
-        if (!_sapp_tc.app.init_called) return true;
-        sapp_event ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
-        ev.device_lost_reason = (uint32_t)reason;
-        _sapp_tc_send(_sapp_tc.app.main, &ev);
+        /* Preserve pre-init loss until listeners are ready, without changing
+           the first tick's dimension-update/resize ordering. */
+        _sapp_tc.app.device_lost_event_pending = true;
+        _sapp_tc_d3d11_dispatch_pending_device_loss();
     }
     return true;
 }
@@ -7044,6 +7053,11 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
                 _sapp_tc.app.desc.init_cb();
             } else if (_sapp_tc.app.desc.init_userdata_cb) {
                 _sapp_tc.app.desc.init_userdata_cb(_sapp_tc.app.desc.user_data);
+            }
+            _sapp_tc_d3d11_dispatch_pending_device_loss();
+            if (_sapp_tc.app.quit_ordered) {
+                w->in_tick = false;
+                return;
             }
         }
         if (_sapp_tc.app.desc.frame_cb) {

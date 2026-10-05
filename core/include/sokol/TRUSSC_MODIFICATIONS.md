@@ -77,7 +77,10 @@ pacing, no longer wait for dead frame-latency signals, and stop presenting or
 resizing the failed swapchains. App callbacks continue if cancellation opts
 into handling the failure. Resources are not recreated. The first tick still
 updates dimensions and resizes before app initialization. Loss detected before
-initialization is logged and latched without dispatching an app event.
+initialization is logged and latched, preserving the removal reason. Its pending
+event is delivered once immediately after the init callback returns, before the
+first frame; a default failure exit skips that frame. Pending state is cleared
+before dispatch so reentry cannot deliver the event twice.
 
 ### 1. Skip Present (D3D11 flickering fix)
 

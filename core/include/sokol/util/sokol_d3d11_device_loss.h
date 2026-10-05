@@ -15,4 +15,10 @@ static inline bool _sapp_tc_d3d11_first_device_loss(uint32_t result, bool* notif
     *notified = true;  /* before callbacks, including reentrant ones */
     return true;
 }
+
+static inline bool _sapp_tc_d3d11_take_pending_device_loss(bool init_called, bool* pending) {
+    if (!init_called || !*pending) return false;
+    *pending = false;  /* before dispatch, so reentry cannot deliver it twice */
+    return true;
+}
 #endif
