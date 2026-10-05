@@ -16392,9 +16392,9 @@ related = ["floor", "ceil"]
 ["runApp"]
 category = "lifecycle"
 keywords = ["main", "start", "launch", "boot", "entry"]
-description.en = "Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main()."
-description.ja = "App サブクラスを指定してアプリのメインループを開始。アプリ型でテンプレート化されているので、main() から TC_RUN_APP(MyApp)（または runApp<MyApp>()）で呼ぶ。"
-description.ko = "App 서브클래스로 애플리케이션 메인 루프를 시작. 앱 타입으로 템플릿화되어 있으므로 main()에서 TC_RUN_APP(MyApp)(또는 runApp<MyApp>())로 호출."
+description.en = "Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main(). On desktop, returns 1 if window or GPU startup fails before setup() runs, otherwise 0. TC_RUN_APP passes this status to main(); Android and Web use OS/browser-owned loops and do not report shutdown through this return value."
+description.ja = "App サブクラスを指定してアプリのメインループを開始。アプリ型でテンプレート化されているので、main() から TC_RUN_APP(MyApp)（または runApp<MyApp>()）で呼ぶ。 デスクトップでは、ウィンドウや GPU の起動に失敗して setup() が実行されなかった場合は 1、それ以外は 0 を返す。TC_RUN_APP はこの終了コードを main() に渡す。Android と Web は OS／ブラウザがループを管理するため、この戻り値で終了を通知しない。"
+description.ko = "App 서브클래스로 애플리케이션 메인 루프를 시작. 앱 타입으로 템플릿화되어 있으므로 main()에서 TC_RUN_APP(MyApp)(또는 runApp<MyApp>())로 호출. 데스크톱에서는 창 또는 GPU 시작 실패로 setup()이 실행되지 않으면 1, 그 외에는 0을 반환한다. TC_RUN_APP은 이 종료 코드를 main()에 전달한다. Android와 Web은 OS/브라우저가 루프를 관리하므로 이 반환값으로 종료를 보고하지 않는다."
 related = ["WindowSettings", "runHeadlessApp", "events"]
 
 ["runHeadlessApp"]
