@@ -1345,6 +1345,27 @@ description.ja = "フレームワークの全コアイベントのハブ。各�
 description.ko = "프레임워크의 모든 코어 이벤트 허브. 각 멤버는 .listen(callback) 으로 구독하는 Event. 전역 인스턴스는 events() 로 접근"
 related = ["events", "Event<T>", "EventListener"]
 
+["CoreEvents::deviceLost"]
+description.en = "Fired once when the shared Windows D3D11 device is lost. args.reason contains the GetDeviceRemovedReason HRESULT bits. Set args.cancel = true to keep running and handle the loss yourself; otherwise the app logs an error and exits with code 1. GPU resources are not recreated."
+description.ja = "Windows の共有 D3D11 デバイス喪失時に一度発火。args.reason は GetDeviceRemovedReason の HRESULT ビット値。args.cancel = true で終了を抑止し、アプリ自身で対処できる。既定ではエラーを記録してコード 1 で終了。GPU リソースは再作成しない。"
+description.ko = "Windows 공유 D3D11 장치가 손실되면 한 번 발생. args.reason은 GetDeviceRemovedReason의 HRESULT 비트 값. args.cancel = true로 종료를 취소하고 앱이 직접 처리할 수 있다. 기본값은 오류 기록 후 코드 1로 종료. GPU 리소스는 재생성하지 않는다."
+related = ["DeviceLostEventArgs", "exitApp"]
+
+["DeviceLostEventArgs"]
+description.en = "Arguments for the deviceLost event (Windows D3D11)."
+description.ja = "deviceLost イベントの引数 (Windows D3D11)。"
+description.ko = "deviceLost 이벤트의 인자 (Windows D3D11)."
+
+["DeviceLostEventArgs::reason"]
+description.en = "GetDeviceRemovedReason HRESULT bits, stored as uint32_t."
+description.ja = "GetDeviceRemovedReason の HRESULT ビット値を uint32_t で保持。"
+description.ko = "GetDeviceRemovedReason의 HRESULT 비트 값을 uint32_t로 저장."
+
+["DeviceLostEventArgs::cancel"]
+description.en = "Set true to cancel the default failure exit and handle device loss in the app."
+description.ja = "true にすると既定の異常終了を抑止し、デバイス喪失をアプリで処理する。"
+description.ko = "true로 설정하면 기본 실패 종료를 취소하고 앱에서 장치 손실을 처리."
+
 ["CoreEvents::afterFrame"]
 description.en = "Fired after present() (swapchain committed, outside any pass)"
 description.ja = "present() 後に発火 (スワップチェーンコミット済み、いかなるパスの外)"
@@ -14398,9 +14419,9 @@ related = ["CoreEvents", "setup"]
 ["exitApp"]
 category = "window_input"
 keywords = ["quit", "close", "terminate", "shutdown", "kill"]
-description.en = "Immediately exit the application (cannot be cancelled)"
-description.ja = "アプリケーションを即座に終了（キャンセル不可）"
-description.ko = "어플리케이션을 즉시 종료 (취소 불가)"
+description.en = "Exit the application with normal cleanup (cannot be cancelled). code defaults to 0. On Windows/Linux, runApp returns this code to its caller; on macOS, the process exits with this code after cleanup without returning from runApp. Use a non-zero code for failures."
+description.ja = "通常のクリーンアップを行ってアプリを終了（キャンセル不可）。code の既定値は 0。Windows/Linux では runApp がこの値を呼び出し元へ返す。macOS では runApp から戻らず、クリーンアップ後にこの終了コードでプロセスを終了する。異常終了には非ゼロを指定。"
+description.ko = "정상 정리 후 앱 종료 (취소 불가). code의 기본값은 0. Windows/Linux에서는 runApp이 이 값을 호출자에게 반환하며, macOS에서는 runApp이 반환하지 않고 정리 후 이 코드로 프로세스가 종료됨. 실패 시 0이 아닌 값 사용."
 related = ["requestExitApp"]
 
 ["exp"]

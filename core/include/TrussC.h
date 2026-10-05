@@ -29,6 +29,7 @@
 #include "sokol/util/sokol_memtrack.h"
 
 // Standard libraries
+#include <cstdlib>
 #include <cstdint>
 #include <cmath>
 #include <string>
@@ -306,6 +307,7 @@ namespace internal {
         double drawAccumulator = 0.0;
     };
     MainLoopState& mainLoop();
+    int& appExitCode();  // shared by the host and hot reload guests
 
     // Mouse position/button state + keyboard state moved to WindowContext
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
@@ -2046,7 +2048,8 @@ inline void requestExitApp() {
 
 // Immediately exit the application (cannot be cancelled)
 // Use this for forced exit, e.g., after user confirms exit in a dialog
-inline void exitApp() {
+inline void exitApp(int code = 0) {
+    internal::appExitCode() = code;
     sapp_quit();
 }
 
@@ -2746,6 +2749,11 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+
+        #if defined(__APPLE__) && TARGET_OS_OSX
+        // AppKit's terminate: would exit(0) right after this.
+        if (appExitCode() != 0) std::exit(appExitCode());
+        #endif
     }
 
     // The name an event entry point (#349) gives in its warning, from the
@@ -2768,6 +2776,7 @@ namespace internal {
             case SAPP_EVENTTYPE_RESIZED:           return "windowResized()";
             case SAPP_EVENTTYPE_FILES_DROPPED:     return "filesDropped()";
             case SAPP_EVENTTYPE_CLIPBOARD_PASTED:  return "the clipboardPasted event";
+            case SAPP_EVENTTYPE_TC_DEVICE_LOST:    return "the deviceLost event";
             case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
             default:                               return "a rawEvent listener";
         }
@@ -3026,6 +3035,17 @@ namespace internal {
                 events().clipboardPasted.notify(args);
                 break;
             }
+            case SAPP_EVENTTYPE_TC_DEVICE_LOST: {
+                DeviceLostEventArgs args;
+                args.reason = ev->device_lost_reason;
+                events().deviceLost.notify(args);
+                if (!args.cancel) {
+                    logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x"
+                        << std::hex << ev->device_lost_reason << "; exiting";
+                    exitApp(1);
+                }
+                break;
+            }
             case SAPP_EVENTTYPE_QUIT_REQUESTED: {
                 // Notify exitRequested event - listeners can cancel by setting args.cancel = true
                 ExitRequestEventArgs args;
@@ -3049,6 +3069,8 @@ namespace internal {
 // Used by runApp() on desktop and by sokol_main() on Android.
 template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
+    internal::appExitCode() = 0;
+
     // Set pixel perfect mode
     internal::pixelPerfectMode() = settings.pixelPerfect;
 
@@ -3253,7 +3275,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     // The browser owns the asynchronous loop; returning is not app shutdown.
     return 0;
 #else
-    return internal::appSetupCalled() ? 0 : 1;
+    return internal::appSetupCalled() ? internal::appExitCode() : 1;
 #endif
 }
 #endif

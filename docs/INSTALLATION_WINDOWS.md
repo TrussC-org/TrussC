@@ -69,6 +69,8 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\MyAp
    - **anchorbolt** ([tettou771/anchorbolt](https://github.com/tettou771/anchorbolt)): `anchorbolt start` supervises a TrussC app: it restarts the app when it exits or stops responding, collects the logs, and can report to a fleet dashboard. Start anchorbolt from the scheduled task instead of the app.
    - **Without anchorbolt:** a small loop script that restarts the exe when it exits works, as long as the crash dialog is suppressed (section 4).
 
+On D3D11 device loss, `events().deviceLost` fires once and the app exits with code 1 unless a listener cancels; project templates use `return TC_RUN_APP(...)` to propagate the exit code to a watchdog (ordinary exits return 0).
+
 ## 6. Working directory and file paths
 
 A Task Scheduler task with an empty "Start in" runs with the working directory at `C:\Windows\System32`, and shortcuts can differ too. Don't depend on the working directory:
