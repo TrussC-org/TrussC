@@ -213,6 +213,15 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
     lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });
+    lua->set_function("getUserDataPath", sol::overload(
+        []() { return trussc::getUserDataPath(); },
+        [](const fs::path & path) { return trussc::getUserDataPath(path); }
+    ));
+    lua->set_function("getTempPath", sol::overload(
+        []() { return trussc::getTempPath(); },
+        [](const fs::path & path) { return trussc::getTempPath(path); }
+    ));
+    lua->set_function("setUserDataPathRoot", [](const fs::path & path) { return trussc::setUserDataPathRoot(path); });
     lua->set_function("toInt", [](const std::string & str) { return trussc::toInt(str); });
     lua->set_function("toInt64", [](const std::string & str) { return trussc::toInt64(str); });
     lua->set_function("toFloat", [](const std::string & str) { return trussc::toFloat(str); });

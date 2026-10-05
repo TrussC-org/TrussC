@@ -20,7 +20,7 @@ on:
         type: string
         default: 'TrussC-org/TrussC'
       trussc-ref:
-        description: 'TrussC のブランチ/タグ/コミット (未指定: .trussc-version → main)'
+        description: 'TrussC のブランチ/タグ/コミット (未指定: .trussc-version → 最新リリース)'
         type: string
         default: ''
       bundle-id:
@@ -31,6 +31,18 @@ on:
         description: 'Linux 追加パッケージ (スペース区切り)'
         type: string
         default: ''
+      entitlements:
+        description: 'macOS entitlements file relative to project-path (empty: camera and microphone defaults)'
+        type: string
+        default: ''
+      project-path:
+        description: 'Application directory in the calling repository'
+        type: string
+        default: '.'
+      publish:
+        description: 'Create a GitHub Release (false: build and verify artifacts only)'
+        type: boolean
+        default: true
     secrets:
       APPLE_CERTIFICATE_P12:
         required: false
@@ -44,36 +56,76 @@ on:
         required: false
 
 jobs:
+  # Resolve once so all platforms use the same release, even during a tag update.
+  version:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      ref: ${{ steps.trussc-ver.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Resolve TrussC version
+        id: trussc-ver
+        working-directory: ${{ inputs.project-path }}
+        env:
+          REQUESTED_REF: ${{ inputs.trussc-ref }}
+          GH_REPO: ${{ inputs.trussc-repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REF="$REQUESTED_REF"
+          if [ -z "$REF" ] && [ -f .trussc-version ]; then
+            REF=$(cat .trussc-version)
+          fi
+          if [ -z "$REF" ]; then
+            REF=$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)
+          fi
+          if [ -z "$REF" ] || [ "$REF" = null ]; then
+            echo "ERROR: no TrussC release or explicit ref found"
+            exit 1
+          fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
   # -----------------------------------------------------------
   # macOS — build, sign (optional), notarize (optional), DMG
   # -----------------------------------------------------------
   macos:
+    needs: version
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
     if: contains(fromJSON(inputs.platforms), 'macos')
-    runs-on: macos-latest
+    runs-on: macos-15
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Resolve TrussC version
-        id: trussc-ver
-        run: |
-          REF="${{ inputs.trussc-ref }}"
-          if [ -z "$REF" ] && [ -f .trussc-version ]; then
-            REF=$(cat .trussc-version)
-          fi
-          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
-
       - name: Clone TrussC
         uses: actions/checkout@v5
         with:
           repository: ${{ inputs.trussc-repository }}
           path: TrussC
-          ref: ${{ steps.trussc-ver.outputs.ref }}
+          ref: ${{ needs.version.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Record TrussC revision
+        shell: bash
+        env:
+          TRUSSC_REF: ${{ needs.version.outputs.ref }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/revision"
+          COMMIT=$(git -C "$GITHUB_WORKSPACE/TrussC" rev-parse HEAD)
+          TAGS=$(git -C "$GITHUB_WORKSPACE/TrussC" tag --points-at HEAD | paste -sd ',' -)
+          printf 'TrussC (%s): ref `%s`, tag `%s`, commit `%s`\n' \
+            "$RUNNER_OS" "$TRUSSC_REF" "${TAGS:-none (non-tag ref)}" "$COMMIT" \
+            > "$RUNNER_TEMP/revision/trussc-$RUNNER_OS.md"
 
       - name: Generate CMakeLists.txt
-        if: ${{ hashFiles('CMakeLists.txt') == '' }}
+        if: ${{ hashFiles(format('{0}/CMakeLists.txt', inputs.project-path)) == '' }}
         run: |
           printf '%s\n' \
             'cmake_minimum_required(VERSION 3.20)' \
@@ -86,7 +138,7 @@ jobs:
             > CMakeLists.txt
 
       - name: Import signing certificate
-        if: inputs.sign-identity != ''
+        if: inputs.sign-identity != '' && inputs.sign-identity != '-'
         env:
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -111,8 +163,19 @@ jobs:
         run: |
           cmake -B build \
             -G "Unix Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/core"
+
+      - name: Reject hot reload
+        shell: bash
+        run: |
+          STATE=$(tr -d '\r\n' < build/.tc_hot_reload_state)
+          if [ "$STATE" = ON ]; then
+            echo "ERROR: release packages require hot reload to be OFF"
+            exit 1
+          fi
 
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.logicalcpu)
@@ -120,13 +183,27 @@ jobs:
       - name: Find .app bundle
         id: find-app
         run: |
-          APP_PATH=$(find bin -name "*.app" -type d | head -1)
+          APP_PATH=$(find bin -maxdepth 1 -name "*.app" -type d -print -quit)
           if [ -z "$APP_PATH" ]; then
             echo "ERROR: .app bundle not found"
             exit 1
           fi
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "app_name=$(basename "$APP_PATH" .app)" >> "$GITHUB_OUTPUT"
+
+      - name: Set minimum macOS version
+        env:
+          APP_PATH: ${{ steps.find-app.outputs.app_path }}
+        run: |
+          python3 - "$APP_PATH/Contents/Info.plist" <<'PYTHON'
+          import plistlib, sys
+          path = sys.argv[1]
+          with open(path, 'rb') as source:
+              info = plistlib.load(source)
+          info['LSMinimumSystemVersion'] = '14.0'
+          with open(path, 'wb') as destination:
+              plistlib.dump(info, destination)
+          PYTHON
 
       - name: Set Bundle ID
         if: inputs.bundle-id != ''
@@ -135,17 +212,113 @@ jobs:
             -string "${{ inputs.bundle-id }}" \
             "${{ steps.find-app.outputs.app_path }}/Contents/Info.plist"
 
+      - name: Bundle data and extract symbols
+        env:
+          APP_PATH: ${{ steps.find-app.outputs.app_path }}
+          APP_NAME: ${{ steps.find-app.outputs.app_name }}
+        run: |
+          if [ -d bin/data ]; then
+            mkdir -p "$APP_PATH/Contents/Resources"
+            ditto bin/data "$APP_PATH/Contents/Resources/data"
+          fi
+          mkdir -p "$RUNNER_TEMP/symbols"
+          dsymutil "$APP_PATH/Contents/MacOS/$APP_NAME" \
+            -o "$RUNNER_TEMP/symbols/$APP_NAME.dSYM"
+          test -s "$RUNNER_TEMP/symbols/$APP_NAME.dSYM/Contents/Resources/DWARF/$APP_NAME"
+          tar -czf "$RUNNER_TEMP/$APP_NAME-dSYM.tar.gz" -C "$RUNNER_TEMP/symbols" .
+
       - name: Code Sign
         if: inputs.sign-identity != ''
+        env:
+          SIGN_IDENTITY: ${{ inputs.sign-identity }}
+          ENTITLEMENTS_INPUT: ${{ inputs.entitlements }}
+          APP_PATH: ${{ steps.find-app.outputs.app_path }}
         run: |
-          codesign --deep --force --options runtime \
-            --sign "${{ inputs.sign-identity }}" \
-            "${{ steps.find-app.outputs.app_path }}"
+          ENTITLEMENTS="$ENTITLEMENTS_INPUT"
+          if [ -z "$ENTITLEMENTS" ]; then
+            ENTITLEMENTS="$GITHUB_WORKSPACE/TrussC/core/resources/macos.entitlements"
+            # Older pinned TrussC releases predate the default file.
+            if [ ! -f "$ENTITLEMENTS" ]; then
+              ENTITLEMENTS="$RUNNER_TEMP/default.entitlements"
+              cat > "$ENTITLEMENTS" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.security.device.camera</key>
+              <true/>
+              <key>com.apple.security.device.audio-input</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+            fi
+          fi
+          plutil -lint "$ENTITLEMENTS"
+          TIMESTAMP=(--timestamp)
+          if [ "$SIGN_IDENTITY" = '-' ]; then
+            TIMESTAMP=(--timestamp=none)
+          fi
+          # Sign Mach-O files, then nested bundles from the inside out, then
+          # the outer app. Entitlements belong to executables/bundles, not dylibs.
+          while IFS= read -r -d '' CODE; do
+            if file -b "$CODE" | grep -q 'Mach-O'; then
+              CODE_ENTITLEMENTS=()
+              if file -b "$CODE" | grep -q 'executable'; then
+                CODE_ENTITLEMENTS=(--entitlements "$ENTITLEMENTS")
+              fi
+              codesign --force --options runtime "${TIMESTAMP[@]}" \
+                "${CODE_ENTITLEMENTS[@]}" --sign "$SIGN_IDENTITY" "$CODE"
+            fi
+          done < <(find "$APP_PATH/Contents" -type f -print0)
+          while IFS= read -r -d '' BUNDLE; do
+            codesign --force --options runtime "${TIMESTAMP[@]}" \
+              --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$BUNDLE"
+          done < <(find "$APP_PATH/Contents" -depth -type d \
+            \( -name '*.framework' -o -name '*.app' -o -name '*.xpc' -o -name '*.bundle' -o -name '*.appex' -o -name '*.plugin' \) -print0)
+          codesign --force --options runtime "${TIMESTAMP[@]}" \
+            --entitlements "$ENTITLEMENTS" --sign "$SIGN_IDENTITY" "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+
+      - name: Verify macOS bundle
+        env:
+          APP_PATH: ${{ steps.find-app.outputs.app_path }}
+          APP_NAME: ${{ steps.find-app.outputs.app_name }}
+          SIGN_IDENTITY: ${{ inputs.sign-identity }}
+          ENTITLEMENTS_INPUT: ${{ inputs.entitlements }}
+        run: |
+          if [ -d bin/data ]; then
+            diff -r bin/data "$APP_PATH/Contents/Resources/data"
+          fi
+          test "$(plutil -extract LSMinimumSystemVersion raw -o - "$APP_PATH/Contents/Info.plist")" = 14.0
+          xcrun vtool -show-build "$APP_PATH/Contents/MacOS/$APP_NAME" | grep -Eq 'minos +14\.0$'
+          test "$(lipo -archs "$APP_PATH/Contents/MacOS/$APP_NAME")" = arm64
+          if [ -n "$SIGN_IDENTITY" ] && [ -z "$ENTITLEMENTS_INPUT" ]; then
+            codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/signed.entitlements"
+            python3 - "$RUNNER_TEMP/signed.entitlements" <<'PYTHON'
+          import plistlib, sys
+          with open(sys.argv[1], 'rb') as source:
+              output = source.read()
+          # codesign can prefix the XML with diagnostics. Parse only the plist.
+          start = output.find(b'<plist')
+          end = output.find(b'</plist>', start)
+          if start < 0 or end < 0:
+              raise ValueError('codesign did not return an XML entitlements plist')
+          entitlements = plistlib.loads(output[start:end + len(b'</plist>')])
+          assert entitlements['com.apple.security.device.camera'] is True
+          assert entitlements['com.apple.security.device.audio-input'] is True
+          PYTHON
+          fi
 
       - name: Create DMG
+        env:
+          APP_PATH: ${{ steps.find-app.outputs.app_path }}
+          APP_NAME: ${{ steps.find-app.outputs.app_name }}
         run: |
           brew install create-dmg
-          APP_NAME="${{ steps.find-app.outputs.app_name }}"
+          DMG_SOURCE="$RUNNER_TEMP/dmg-source"
+          mkdir -p "$DMG_SOURCE"
+          ditto "$APP_PATH" "$DMG_SOURCE/$APP_NAME.app"
 
           # --volicon はアイコンがある場合のみ追加
           VOLICON_OPT=""
@@ -167,10 +340,22 @@ jobs:
             --hide-extension "${APP_NAME}.app" \
             --hdiutil-quiet \
             "$RUNNER_TEMP/${APP_NAME}.dmg" \
-            "${{ steps.find-app.outputs.app_path }}"
+            "$DMG_SOURCE"
+
+      - name: Sign DMG
+        if: inputs.sign-identity != ''
+        env:
+          SIGN_IDENTITY: ${{ inputs.sign-identity }}
+          APP_NAME: ${{ steps.find-app.outputs.app_name }}
+        run: |
+          TIMESTAMP=(--timestamp)
+          if [ "$SIGN_IDENTITY" = '-' ]; then
+            TIMESTAMP=(--timestamp=none)
+          fi
+          codesign --force "${TIMESTAMP[@]}" --sign "$SIGN_IDENTITY" "$RUNNER_TEMP/$APP_NAME.dmg"
 
       - name: Notarize DMG
-        if: inputs.sign-identity != ''
+        if: inputs.sign-identity != '' && inputs.sign-identity != '-'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -184,10 +369,28 @@ jobs:
             --wait
 
       - name: Staple
-        if: inputs.sign-identity != ''
+        if: inputs.sign-identity != '' && inputs.sign-identity != '-'
         run: |
           APP_NAME="${{ steps.find-app.outputs.app_name }}"
           xcrun stapler staple "$RUNNER_TEMP/${APP_NAME}.dmg"
+
+      - name: Verify DMG contents
+        env:
+          APP_NAME: ${{ steps.find-app.outputs.app_name }}
+          SIGN_IDENTITY: ${{ inputs.sign-identity }}
+        run: |
+          MOUNT="$RUNNER_TEMP/dmg-check"
+          mkdir -p "$MOUNT"
+          hdiutil attach "$RUNNER_TEMP/$APP_NAME.dmg" -readonly -nobrowse -mountpoint "$MOUNT"
+          trap 'hdiutil detach "$MOUNT"' EXIT
+          test -f "$MOUNT/$APP_NAME.app/Contents/MacOS/$APP_NAME"
+          if [ -d bin/data ]; then
+            diff -r bin/data "$MOUNT/$APP_NAME.app/Contents/Resources/data"
+          fi
+          if [ -n "$SIGN_IDENTITY" ]; then
+            codesign --verify --deep --strict "$MOUNT/$APP_NAME.app"
+            codesign --verify "$RUNNER_TEMP/$APP_NAME.dmg"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5
@@ -195,37 +398,60 @@ jobs:
           name: macos-dmg
           path: ${{ runner.temp }}/${{ steps.find-app.outputs.app_name }}.dmg
 
+      - name: Upload symbols
+        uses: actions/upload-artifact@v5
+        with:
+          name: macos-symbols
+          path: ${{ runner.temp }}/${{ steps.find-app.outputs.app_name }}-dSYM.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TrussC revision
+        uses: actions/upload-artifact@v5
+        with:
+          name: trussc-revision-macos
+          path: ${{ runner.temp }}/revision/*.md
+          if-no-files-found: error
+
   # -----------------------------------------------------------
   # Windows — build, zip
   # -----------------------------------------------------------
   windows:
+    needs: version
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
     if: contains(fromJSON(inputs.platforms), 'windows')
-    runs-on: windows-latest
+    runs-on: windows-2025
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Resolve TrussC version
-        id: trussc-ver
-        shell: bash
-        run: |
-          REF="${{ inputs.trussc-ref }}"
-          if [ -z "$REF" ] && [ -f .trussc-version ]; then
-            REF=$(cat .trussc-version)
-          fi
-          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
-
       - name: Clone TrussC
         uses: actions/checkout@v5
         with:
           repository: ${{ inputs.trussc-repository }}
           path: TrussC
-          ref: ${{ steps.trussc-ver.outputs.ref }}
+          ref: ${{ needs.version.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Record TrussC revision
+        shell: bash
+        env:
+          TRUSSC_REF: ${{ needs.version.outputs.ref }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/revision"
+          COMMIT=$(git -C "$GITHUB_WORKSPACE/TrussC" rev-parse HEAD)
+          TAGS=$(git -C "$GITHUB_WORKSPACE/TrussC" tag --points-at HEAD | paste -sd ',' -)
+          printf 'TrussC (%s): ref `%s`, tag `%s`, commit `%s`\n' \
+            "$RUNNER_OS" "$TRUSSC_REF" "${TAGS:-none (non-tag ref)}" "$COMMIT" \
+            > "$RUNNER_TEMP/revision/trussc-$RUNNER_OS.md"
 
       - name: Generate CMakeLists.txt
-        if: ${{ hashFiles('CMakeLists.txt') == '' }}
+        if: ${{ hashFiles(format('{0}/CMakeLists.txt', inputs.project-path)) == '' }}
         shell: bash
         run: |
           printf '%s\n' \
@@ -241,32 +467,58 @@ jobs:
       - name: Configure (CMake)
         run: |
           cmake -B build `
-            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
             -DTRUSSC_DIR="${{ github.workspace }}/TrussC/core"
 
+      - name: Reject hot reload
+        shell: bash
+        run: |
+          STATE=$(tr -d '\r\n' < build/.tc_hot_reload_state)
+          if [ "$STATE" = ON ]; then
+            echo "ERROR: release packages require hot reload to be OFF"
+            exit 1
+          fi
+
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config RelWithDebInfo
 
       - name: Package (zip)
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
-          # Find app name from built executable
-          APP_NAME=$(basename "$(find bin -name '*.exe' | head -1)" .exe)
-          if [ -z "$APP_NAME" ]; then
-            echo "ERROR: executable not found"
-            exit 1
-          fi
-          if [ -d "bin/Release" ]; then
-            DIST_DIR="bin/Release"
+          if [ -d "bin/RelWithDebInfo" ]; then
+            DIST_DIR="bin/RelWithDebInfo"
           else
             DIST_DIR="bin"
           fi
+          EXE_PATH=$(find "$DIST_DIR" -maxdepth 1 -type f -name '*.exe' -print -quit)
+          if [ -z "$EXE_PATH" ]; then
+            echo "ERROR: executable not found"
+            exit 1
+          fi
+          APP_NAME=$(basename "$EXE_PATH" .exe)
           mkdir -p "$RUNNER_TEMP/package"
-          cp "$DIST_DIR"/*.exe "$RUNNER_TEMP/package/" 2>/dev/null || true
-          cp "$DIST_DIR"/*.dll "$RUNNER_TEMP/package/" 2>/dev/null || true
+          cp "$DIST_DIR"/*.exe "$RUNNER_TEMP/package/"
+          for DLL in "$DIST_DIR"/*.dll; do
+            [ ! -f "$DLL" ] || cp "$DLL" "$RUNNER_TEMP/package/"
+          done
+          if [ -d bin/data ]; then
+            cp -R bin/data "$RUNNER_TEMP/package/data"
+          fi
+          mkdir -p "$RUNNER_TEMP/symbols"
+          find "$DIST_DIR" build -path 'bin/data' -prune -o \
+            -type f -name '*.pdb' -exec cp {} "$RUNNER_TEMP/symbols/" \;
+          test -s "$RUNNER_TEMP/symbols/$APP_NAME.pdb"
+          (cd "$RUNNER_TEMP/symbols" && 7z a "$RUNNER_TEMP/${APP_NAME}-PDB.zip" .)
           cd "$RUNNER_TEMP/package"
           7z a "$RUNNER_TEMP/${APP_NAME}-${TAG}-windows.zip" .
+          mkdir -p "$RUNNER_TEMP/verify"
+          7z x "$RUNNER_TEMP/${APP_NAME}-${TAG}-windows.zip" "-o$RUNNER_TEMP/verify"
+          test -f "$RUNNER_TEMP/verify/$APP_NAME.exe"
+          if [ -d "$OLDPWD/bin/data" ]; then
+            diff -r "$OLDPWD/bin/data" "$RUNNER_TEMP/verify/data"
+          fi
+          test -z "$(find "$RUNNER_TEMP/verify" -maxdepth 1 -name '*.pdb' -print -quit)"
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -275,36 +527,60 @@ jobs:
           name: windows-zip
           path: ${{ runner.temp }}/${{ env.APP_NAME }}-*-windows.zip
 
+      - name: Upload symbols
+        uses: actions/upload-artifact@v5
+        with:
+          name: windows-symbols
+          path: ${{ runner.temp }}/${{ env.APP_NAME }}-PDB.zip
+          if-no-files-found: error
+
+      - name: Upload TrussC revision
+        uses: actions/upload-artifact@v5
+        with:
+          name: trussc-revision-windows
+          path: ${{ runner.temp }}/revision/*.md
+          if-no-files-found: error
+
   # -----------------------------------------------------------
   # Linux — build, tar.gz
   # -----------------------------------------------------------
   linux:
+    needs: version
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
     if: contains(fromJSON(inputs.platforms), 'linux')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Resolve TrussC version
-        id: trussc-ver
-        run: |
-          REF="${{ inputs.trussc-ref }}"
-          if [ -z "$REF" ] && [ -f .trussc-version ]; then
-            REF=$(cat .trussc-version)
-          fi
-          echo "ref=${REF:-main}" >> "$GITHUB_OUTPUT"
-
       - name: Clone TrussC
         uses: actions/checkout@v5
         with:
           repository: ${{ inputs.trussc-repository }}
           path: TrussC
-          ref: ${{ steps.trussc-ver.outputs.ref }}
+          ref: ${{ needs.version.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Record TrussC revision
+        shell: bash
+        env:
+          TRUSSC_REF: ${{ needs.version.outputs.ref }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/revision"
+          COMMIT=$(git -C "$GITHUB_WORKSPACE/TrussC" rev-parse HEAD)
+          TAGS=$(git -C "$GITHUB_WORKSPACE/TrussC" tag --points-at HEAD | paste -sd ',' -)
+          printf 'TrussC (%s): ref `%s`, tag `%s`, commit `%s`\n' \
+            "$RUNNER_OS" "$TRUSSC_REF" "${TAGS:-none (non-tag ref)}" "$COMMIT" \
+            > "$RUNNER_TEMP/revision/trussc-$RUNNER_OS.md"
 
       - name: Generate CMakeLists.txt
-        if: ${{ hashFiles('CMakeLists.txt') == '' }}
+        if: ${{ hashFiles(format('{0}/CMakeLists.txt', inputs.project-path)) == '' }}
         run: |
           printf '%s\n' \
             'cmake_minimum_required(VERSION 3.20)' \
@@ -332,8 +608,17 @@ jobs:
         run: |
           cmake -B build \
             -G "Unix Makefiles" \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DTRUSSC_DIR="${GITHUB_WORKSPACE}/TrussC/core"
+
+      - name: Reject hot reload
+        shell: bash
+        run: |
+          STATE=$(tr -d '\r\n' < build/.tc_hot_reload_state)
+          if [ "$STATE" = ON ]; then
+            echo "ERROR: release packages require hot reload to be OFF"
+            exit 1
+          fi
 
       - name: Build
         run: cmake --build build -j$(nproc)
@@ -341,18 +626,33 @@ jobs:
       - name: Package (tar.gz)
         run: |
           TAG="${GITHUB_REF_NAME}"
-          # Find app name from built executable
-          APP_NAME=$(find bin -maxdepth 1 -type f -executable | head -1 | xargs basename)
-          if [ -z "$APP_NAME" ]; then
+          EXE_PATH=$(find bin -maxdepth 1 -type f -executable -print -quit)
+          if [ -z "$EXE_PATH" ]; then
             echo "ERROR: executable not found"
             exit 1
           fi
+          APP_NAME=$(basename "$EXE_PATH")
           mkdir -p "$RUNNER_TEMP/package"
-          cp "bin/${APP_NAME}" "$RUNNER_TEMP/package/" 2>/dev/null || \
-            find bin -maxdepth 2 -type f -executable ! -name "*.cmake" \
-              -exec cp {} "$RUNNER_TEMP/package/" \;
+          cp "bin/${APP_NAME}" "$RUNNER_TEMP/package/"
+          if [ -d bin/data ]; then
+            cp -R bin/data "$RUNNER_TEMP/package/data"
+          fi
+          mkdir -p "$RUNNER_TEMP/symbols"
+          objcopy --only-keep-debug "bin/$APP_NAME" "$RUNNER_TEMP/symbols/$APP_NAME.debug"
+          test -s "$RUNNER_TEMP/symbols/$APP_NAME.debug"
+          objdump -h "$RUNNER_TEMP/symbols/$APP_NAME.debug" | grep -q '\.debug_info'
+          objcopy --strip-debug "$RUNNER_TEMP/package/$APP_NAME"
+          objcopy --add-gnu-debuglink="$RUNNER_TEMP/symbols/$APP_NAME.debug" "$RUNNER_TEMP/package/$APP_NAME"
+          tar -czf "$RUNNER_TEMP/$APP_NAME-debug.tar.gz" -C "$RUNNER_TEMP/symbols" .
           tar -czf "$RUNNER_TEMP/${APP_NAME}-${TAG}-linux.tar.gz" \
             -C "$RUNNER_TEMP/package" .
+          mkdir -p "$RUNNER_TEMP/verify"
+          tar -xzf "$RUNNER_TEMP/${APP_NAME}-${TAG}-linux.tar.gz" -C "$RUNNER_TEMP/verify"
+          test -x "$RUNNER_TEMP/verify/$APP_NAME"
+          if [ -d bin/data ]; then
+            diff -r bin/data "$RUNNER_TEMP/verify/data"
+          fi
+          test -z "$(find "$RUNNER_TEMP/verify" -maxdepth 1 -name '*.debug' -print -quit)"
           echo "APP_NAME=$APP_NAME" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -361,13 +661,27 @@ jobs:
           name: linux-tar
           path: ${{ runner.temp }}/${{ env.APP_NAME }}-*-linux.tar.gz
 
+      - name: Upload symbols
+        uses: actions/upload-artifact@v5
+        with:
+          name: linux-symbols
+          path: ${{ runner.temp }}/${{ env.APP_NAME }}-debug.tar.gz
+          if-no-files-found: error
+
+      - name: Upload TrussC revision
+        uses: actions/upload-artifact@v5
+        with:
+          name: trussc-revision-linux
+          path: ${{ runner.temp }}/revision/*.md
+          if-no-files-found: error
+
   # -----------------------------------------------------------
   # Release — collect all artifacts and publish
   # -----------------------------------------------------------
   release:
     needs: [macos, windows, linux]
-    if: always() && !cancelled() && !contains(needs.*.result, 'failure')
-    runs-on: ubuntu-latest
+    if: always() && inputs.publish && !cancelled() && !contains(needs.*.result, 'failure')
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -381,8 +695,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          shopt -s nullglob
           TAG="${GITHUB_REF_NAME}"
+          cat artifacts/trussc-revision-*/*.md > release-notes.md
           gh release create "$TAG" \
-            artifacts/**/* \
+            artifacts/macos-dmg/* artifacts/windows-zip/* artifacts/linux-tar/* \
+            artifacts/*-symbols/* \
             --title "$TAG" \
+            --notes-file release-notes.md \
             --generate-notes

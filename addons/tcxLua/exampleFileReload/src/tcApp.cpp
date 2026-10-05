@@ -28,11 +28,9 @@ void tcApp::reloadLuaFile(){
     fs::path luaScriptPath = getDataPath(luaScriptBaseName);
 
     if(fileExists(luaScriptPath)){
-        sol::optional<sol::error> result = lua->safe_script_file(luaScriptPath.string());
-        if (result.has_value()) {
-            std::cerr << "Lua execution failed: "
-                    << result.value().what() << std::endl;
-        }
+        // runFile logs a syntax or runtime error and returns false; the app keeps
+        // running, so fixing the script and pressing R recovers.
+        tcxLua::runFile(*lua, luaScriptPath);
     }else{
         logError("tcApp") << "Lua file not found at: " << luaScriptPath;
     }
@@ -47,15 +45,13 @@ void tcApp::setup() {
     reloadLuaFile();
 
 #ifdef FILE_RELOAD_SUPPORTED
-    // lua->script("setup()");
-    ((*lua)["setup"])();
+    tcxLua::call(*lua, "setup");
 #endif // FILE_RELOAD_SUPPORTED
 }
 
 void tcApp::update() {
 #ifdef FILE_RELOAD_SUPPORTED
-    // lua->script("update()");
-    ((*lua)["update"])();
+    tcxLua::call(*lua, "update");
 #endif // FILE_RELOAD_SUPPORTED
 }
 
@@ -63,8 +59,7 @@ void tcApp::draw() {
     pushStyle();
 
 #ifdef FILE_RELOAD_SUPPORTED
-    // lua->script("draw()");
-    ((*lua)["draw"])();
+    tcxLua::call(*lua, "draw");
 #endif // FILE_RELOAD_SUPPORTED
 
     popStyle();
@@ -80,14 +75,11 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
 #ifdef FILE_RELOAD_SUPPORTED
-    // lua->script("keyPressed(" + std::to_string(key) + ")");
-    ((*lua)["keyPressed"])(key);
+    tcxLua::call(*lua, "keyPressed", key);
 
     if(key == 'r' || key == 'R'){
         reloadLuaFile();
-
-        // lua->script("setup()");
-        ((*lua)["setup"])();
+        tcxLua::call(*lua, "setup");
     }
 #endif // FILE_RELOAD_SUPPORTED
 }

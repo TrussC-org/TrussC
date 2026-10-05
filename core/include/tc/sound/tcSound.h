@@ -41,6 +41,7 @@
 
 namespace trussc {
 
+class Sound;
 
 // ---------------------------------------------------------------------------
 // SoundSource — abstract base for anything Sound::play() can consume.
@@ -717,8 +718,8 @@ struct PlayingSound {
     // installs new versions via internal::sharedStore and the
     // audio thread reads via internal::sharedLoad each callback.
     // The shim type auto-switches between C++20
-    // std::atomic<std::shared_ptr<T>> and the deprecated free-function
-    // atomic API based on __cpp_lib_atomic_shared_ptr.
+    // std::atomic<std::shared_ptr<T>> and a lock-based fallback based on
+    // __cpp_lib_atomic_shared_ptr.
     //
     // null map  → use mixMode rules
     // non-null  → map is the source of truth
@@ -862,7 +863,7 @@ struct PlayingSoundInfo {
     float       pan = 0.0f;
     float       speed = 1.0f;
     float       level = 0.0f;       // peak of this playback's output in the last callback
-                                    // (linear, 1.0 = full scale; 0 while paused)
+                                    // (linear, 1.0 = full scale; 0 while paused or stalled)
 };
 
 // ---------------------------------------------------------------------------
@@ -881,24 +882,28 @@ struct AudioStats {
 
     uint64_t clippedSamples = 0;       // output samples beyond +/-1.0 that were hard-clipped
 
-    // Meters: 0 while no device is running (before init, after shutdown).
+    // Meters: 0 while no device is running or callbacks are stalled.
     float peak = 0.0f;                 // master output peak over the last ~100 ms (linear, before clipping)
     float rms = 0.0f;                  // master output RMS over the same window
     // Fraction of audio-thread time: mix time / audio time, averaged over
     // ~0.5 s. 1.0 means the callback took as long as the audio it produced.
     float cpuUsage = 0.0f;
     float cpuUsagePeak = 0.0f;         // worst single callback in that window (> 1 = a dropout)
+
+    uint64_t underrunFrames = 0;       // silent output frames per stream voice after playback began
+    bool stalled = false;             // running, but no callback finished for max(250 ms, 4 periods)
+    uint64_t voicesStoppedByReinit = 0; // stream voices whose decoder could not reopen at the new rate
 };
 
 // Engine diagnostics state (counters, meters, report timers). Defined in
 // tcAudio_impl.cpp so the audio-thread accumulators stay out of this header.
 namespace internal {
     struct AudioDiagnostics;
-    // Log the dropped plays that were only counted: drops off the main
+    // Log diagnostics that were only counted: drops off the main
     // thread, and repeats inside the rate limit. Rate limited. Called once
     // per frame by the app loop on the main thread.
     void pumpAudioDiagnostics();
-    // Same, ignoring the rate limit, so no counted drop is left unlogged:
+    // Same, ignoring the rate limit, so no counted diagnostic is left unlogged:
     // the exit paths call it (AudioEngine::shutdown(), runHeadlessApp()).
     // Main thread.
     void flushAudioDiagnostics();
@@ -948,10 +953,12 @@ namespace internal {
     // the stream's ring is written; the mixer then waits right there (up to
     // 50 ms) until the worker has served the seek and reached the stream's
     // end (an audio thread preempted at that point).
+    // SeekRefillStalls lets the worker serve seeks but holds back decoded
+    // frames, including after the mixer has applied the seek.
     // Otherwise only the worker's refill is affected, not loadStream() or
     // play(). State lives in tcAudio_impl.cpp.
     enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls,
-                                     ReopenFails, MixerLags };
+                                     ReopenFails, MixerLags, SeekRefillStalls };
     void setStreamFaultForTests(StreamFaultForTests fault);
 
     // Test hook: the number of seek points in the seek table of the stream
@@ -964,6 +971,20 @@ namespace internal {
     // a headless test can count how often it wakes (core/tests/streamWorkerIdle).
     // tcAudio_impl.cpp.
     uint64_t streamWorkerPassesForTests();
+
+    // Test-only snapshot for pending-seek failures (#582). The worker can
+    // advance between fields; this is diagnostic state, not a transaction.
+    struct StreamSeekStateForTests {
+        bool hasStream = false;
+        uint64_t request = 0;
+        uint64_t served = 0;
+        uint64_t published = 0;
+        uint64_t applied = 0;
+        bool endOfStream = false;
+        bool decoderAtEnd = false;
+        uint64_t workerPasses = 0;
+    };
+    StreamSeekStateForTests streamSeekStateForTests(const Sound& sound);
 
     // Seek a voice (Sound::setPosition()). `frame` counts the voice's
     // positionF units: source frames for an eager voice, engine-rate frames
@@ -1208,6 +1229,7 @@ private:
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
     friend void internal::releaseVoice(PlayingSound&);
+    friend internal::StreamSeekStateForTests internal::streamSeekStateForTests(const Sound&);
 
     // Zero the output meters, the CPU usage window and every playback's
     // level. Only while no device is running (init(), shutdown()), so the
@@ -1363,7 +1385,7 @@ private:
     // Streaming mix path: full implementation in tcAudio_impl.cpp where
     // StreamInstance / ma_decoder types are visible. Declared here, body
     // is out-of-line.
-    static void mixStreamVoice(PlayingSound& sound, SoundStream& src,
+    void mixStreamVoice(PlayingSound& sound, SoundStream& src,
                                float* buffer, int num_frames, int num_channels);
 
     // Re-init helper: rate-adjust active voices so they keep playing from
@@ -1566,9 +1588,10 @@ public:
         // Decode into a SoundBuffer, then store as the polymorphic source.
         // SoundBuffer::load() picks the decoder from the extension, ignoring
         // its case (the path itself is used as given), records the file for
-        // getPath() and logs a failure with the file name.
+        // getPath() and logs a failure with the file name. Relative paths
+        // resolve via getDataPath, like Image::load.
         auto buf = std::make_shared<SoundBuffer>();
-        LoadResult result = buf->load(path);
+        LoadResult result = buf->load(getDataPath(path));
 
         if (!result) {
             buffer_.reset();
@@ -1606,7 +1629,8 @@ public:
         return load(path);
 #else
         auto stream = std::make_shared<SoundStream>();
-        LoadResult r = stream->loadStream(path, maxPolyphony);
+        // Relative paths resolve via getDataPath, like load().
+        LoadResult r = stream->loadStream(getDataPath(path), maxPolyphony);
         if (!r) {
             buffer_.reset();
             return r;
@@ -1923,6 +1947,8 @@ private:
         if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
         return playing_->positionRateHz_.load(std::memory_order_relaxed);
     }
+
+    friend internal::StreamSeekStateForTests internal::streamSeekStateForTests(const Sound&);
 
     std::shared_ptr<SoundSource> buffer_;
     // Points at the voice; owns (and shares with copies) its VoiceOwner.

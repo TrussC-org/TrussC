@@ -42,6 +42,9 @@ static void cover_file() {
 #if defined(AF_MACOS) || defined(AF_IOS)
     (void)setDataPathToResources();
 #endif
+    (void)getUserDataPath(af::val<const fs::path>());
+    (void)getTempPath(af::val<const fs::path>());
+    (void)setUserDataPathRoot(af::val<const fs::path>());
     (void)loadJson(af::val<const fs::path>());
     (void)saveJson(af::val<const Json>(), af::val<const fs::path>(), af::val<int>());
     (void)loadXml(af::val<const fs::path>());
@@ -868,6 +871,9 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
         (void)af::val<AudioStats>().rms;
         (void)af::val<AudioStats>().cpuUsage;
         (void)af::val<AudioStats>().cpuUsagePeak;
+        (void)af::val<AudioStats>().underrunFrames;
+        (void)af::val<AudioStats>().stalled;
+        (void)af::val<AudioStats>().voicesStoppedByReinit;
     }
 };
 
@@ -1197,6 +1203,8 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)Fbo();
         (void)af::val<Fbo>().lifetimeToken();
         (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
+        (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
+        (void)af::val<Fbo>().getDebugName();
         (void)af::val<Fbo>().clear();
         (void)af::val<Fbo>().begin();
         (void)af::val<Fbo>().begin(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1467,6 +1475,8 @@ struct Cover_Image : af::Scope<Image> {
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().save(af::val<const fs::path>());
         (void)af::val<Image>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<bool>());
+        (void)af::val<Image>().setDebugName(af::val<const std::string>());
+        (void)af::val<Image>().getDebugName();
         (void)af::val<Image>().clear();
         (void)af::val<Image>().isAllocated();
         (void)af::val<Image>().getWidth();
@@ -1856,6 +1866,7 @@ struct Cover_Mesh : af::Scope<Mesh> {
         (void)af::val<Mesh>().drawNoLightingWithTexture(af::val<const Texture>());
         (void)af::val<Mesh>().drawWireframe();
         (void)af::val<Mesh>().markGpuDirty();
+        (void)af::val<Mesh>().getDataRevision();
         (void)af::val<Mesh>().uploadToGpu();
         (void)af::val<Mesh>().drawGpuPbr();
         (void)af::val<Mesh>().drawGpuPoints();
