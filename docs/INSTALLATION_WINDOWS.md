@@ -69,6 +69,8 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\MyAp
    - **anchorbolt** ([tettou771/anchorbolt](https://github.com/tettou771/anchorbolt)): `anchorbolt start` supervises a TrussC app: it restarts the app when it exits or stops responding, collects the logs, and can report to a fleet dashboard. Start anchorbolt from the scheduled task instead of the app.
    - **Without anchorbolt:** a small loop script that restarts the exe when it exits works, as long as the crash dialog is suppressed (section 4).
 
+On D3D11 device loss, `events().deviceLost` fires once and the app exits with code 1 unless a listener cancels; project templates use `return TC_RUN_APP(...)` to propagate the exit code to a watchdog (ordinary exits return 0).
+
 ## 6. Working directory and file paths
 
 A Task Scheduler task with an empty "Start in" runs with the working directory at `C:\Windows\System32`, and shortcuts can differ too. Don't depend on the working directory:
@@ -76,6 +78,7 @@ A Task Scheduler task with an empty "Start in" runs with the working directory a
 - Set "Start in" to the exe folder in the task or shortcut.
 - Load assets with paths under `bin/data`, the way the examples do. `getDataPath("file")` gives the absolute path.
 - Log file names resolve against `bin/data` too: `getLogger().setLogFile("logs/app.log")` writes `bin/data/logs/app.log` and creates `logs` if it is missing. A relative `TRUSSC_LOG_FILE` resolves the same way. Check the return value: on failure `setLogFile()` returns false and logs why.
+- If window or GPU startup fails before `setup()` runs, `runApp()` returns 1; otherwise it returns 0. `TC_RUN_APP` passes this status to `main()`. With `TRUSSC_LOG_FILE` set, D3D11 and main-window startup failures are recorded with their HRESULT or Win32 error code so a supervisor can identify a failed start.
 
 ## 7. GPU on dual-GPU machines
 

@@ -615,7 +615,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](int count) { return trussc::redraw(count); }
     ));
     lua->set_function("requestExitApp", []() { return trussc::requestExitApp(); });
-    lua->set_function("exitApp", []() { return trussc::exitApp(); });
+    lua->set_function("exitApp", sol::overload(
+        []() { return trussc::exitApp(); },
+        [](int code) { return trussc::exitApp(code); }
+    ));
     lua->set_function("grabScreen", [](trussc::Pixels & outPixels) { return trussc::grabScreen(outPixels); });
     lua->set_function("saveScreenshot", [](const std::filesystem::path & path) { return trussc::saveScreenshot(path); });
     lua->set_function("beginShape", []() { return trussc::beginShape(); });

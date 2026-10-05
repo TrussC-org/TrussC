@@ -43,13 +43,21 @@ runs on and logs a warning. sokol's own errors, warnings and panics go through t
 logger too, and lines logged from worker threads land whole. A window or GPU
 setup failure reaches the file where sokol reports it as text: on Linux (no X
 display; GLX setup, framebuffer config, GL context or window creation; EGL
-setup in GLES3 builds) and on iOS (Metal swapchain textures). On the web,
+setup in GLES3 builds), Windows (D3D11 device, main window and swapchain),
+macOS (Metal device and main window), and iOS (Metal swapchain textures). On the web,
 WebGPU instance, adapter and device request failures reach the logger (the
 browser console and `onLog`), not a file. On Android sokol's app messages
 (lifecycle, the app thread's startup) reach the logger too, but an EGL setup
-failure is not logged; on Windows and macOS a window or GPU setup failure is
-not logged yet. This is how a supervisor process (e.g. `anchorbolt start`)
+failure is not logged. This is how a supervisor process (e.g. `anchorbolt start`)
 captures logs from an unmodified app.
+
+On desktop, `runApp()` returns **1** when window or GPU startup fails before
+`setup()` runs, and **0** otherwise; `TC_RUN_APP` passes that status to `main()`.
+A supervisor can use the exit code together with `TRUSSC_LOG_FILE` to distinguish
+a failed start from a normal shutdown. Fatal panics still abort the process.
+On Linux, no available X display causes an abort (a nonzero process status).
+Android and Web have OS/browser-owned loops; this return value does not report
+their eventual shutdown.
 
 The audio engine reports through the logger too, so the file also receives
 the plays it had to drop (`Sound::play()` returned false: every playback slot busy, a

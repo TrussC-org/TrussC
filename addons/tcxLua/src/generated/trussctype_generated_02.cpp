@@ -124,6 +124,11 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
     {
+        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
+        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
+    }
+    {
         sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
         t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
         t["reason"] = &trussc::ExitRequestEventArgs::reason;

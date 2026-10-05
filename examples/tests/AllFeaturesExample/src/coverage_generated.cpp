@@ -676,7 +676,7 @@ static void cover_window_input() {
     (void)setTouchAsMouse(af::val<bool>());
     (void)getTouchAsMouse();
     (void)requestExitApp();
-    (void)exitApp();
+    (void)exitApp(af::val<int>());
     (void)isOverlayHovered();
     (void)isOverlayFocused();
 }
@@ -1077,6 +1077,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().exit;
         (void)af::val<CoreEvents>().hotReloadUnload;
         (void)af::val<CoreEvents>().exitRequested;
+        (void)af::val<CoreEvents>().deviceLost;
         (void)af::val<CoreEvents>().keyPressed;
         (void)af::val<CoreEvents>().keyReleased;
         (void)af::val<CoreEvents>().mousePressed;
@@ -1100,6 +1101,13 @@ struct Cover_CurveStyle : af::Scope<CurveStyle> {
         (void)af::val<CurveStyle>().mode;
         (void)af::val<CurveStyle>().tolerance;
         (void)af::val<CurveStyle>().resolution;
+    }
+};
+
+struct Cover_DeviceLostEventArgs : af::Scope<DeviceLostEventArgs> {
+    static void run() {
+        (void)af::val<DeviceLostEventArgs>().reason;
+        (void)af::val<DeviceLostEventArgs>().cancel;
     }
 };
 
@@ -2683,14 +2691,24 @@ struct Cover_TcpClient : af::Scope<TcpClient> {
         (void)af::val<TcpClient>().onConnect;
         (void)af::val<TcpClient>().onReceive;
         (void)af::val<TcpClient>().onDisconnect;
+        (void)af::val<TcpClient>().onSendComplete;
         (void)af::val<TcpClient>().onError;
         (void)af::val<TcpClient>().connect(af::val<const std::string>(), af::val<int>());
         (void)af::val<TcpClient>().connectAsync(af::val<const std::string>(), af::val<int>());
         (void)af::val<TcpClient>().disconnect();
         (void)af::val<TcpClient>().isConnected();
+        (void)af::val<TcpClient>().isConnecting();
         (void)af::val<TcpClient>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpClient>().send(af::val<const std::vector<char>>());
         (void)af::val<TcpClient>().send(af::val<const std::string>());
+        (void)af::val<TcpClient>().sendAsync(af::val<const void *>(), af::val<size_t>());
+        (void)af::val<TcpClient>().sendAsync(std::move(af::val<std::vector<char>>()));
+        (void)af::val<TcpClient>().sendAsync(af::val<const std::string>());
+        (void)af::val<TcpClient>().setSendTimeout(af::val<float>());
+        (void)af::val<TcpClient>().setConnectTimeout(af::val<float>());
+        (void)af::val<TcpClient>().setSendAsyncBufferSize(af::val<size_t>());
+        (void)af::val<TcpClient>().getSendAsyncBufferSize();
+        (void)af::val<TcpClient>().getSendAsyncPendingBytes();
         (void)af::val<TcpClient>().setReceiveBufferSize(af::val<size_t>());
         (void)af::val<TcpClient>().setBlocking(af::val<bool>());
         (void)af::val<TcpClient>().setUseThread(af::val<bool>());
@@ -3470,6 +3488,7 @@ void af::coverGenerated() {
     af_generated::Cover_ConsoleEventArgs::run();
     af_generated::Cover_CoreEvents::run();
     af_generated::Cover_CurveStyle::run();
+    af_generated::Cover_DeviceLostEventArgs::run();
     af_generated::Cover_DragDropEventArgs::run();
     af_generated::Cover_EasyCam::run();
     af_generated::Cover_EnumLabelSpan::run();

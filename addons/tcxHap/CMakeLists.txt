@@ -32,11 +32,11 @@ if(EMSCRIPTEN)
     target_compile_options(snappy PRIVATE -Wno-pass-failed)
 endif()
 
-# Snappy adds -Werror for Clang builds; its `#pragma clang loop` hints can fail
-# on backends that can't vectorize them (e.g. wasm/em++), turning the
-# -Wpass-failed diagnostic into a hard error. Suppress just that diagnostic.
+# Snappy adds -Werror for Clang builds. Xcode enables additional warnings
+# (e.g. -Wshorten-64-to-32) that must not fail this third-party target.
+# Keep failed-vectorization hints quiet on backends such as wasm/em++.
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(snappy PRIVATE -Wno-pass-failed)
+    target_compile_options(snappy PRIVATE -Wno-pass-failed -Wno-error)
 endif()
 
 # -----------------------------------------------------------------------------

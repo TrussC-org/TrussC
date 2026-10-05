@@ -61,6 +61,27 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### D3D11 device loss (#258)
+
+All three Present paths (main, secondary, and occlusion test) and ResizeBuffers
+classify DEVICE_REMOVED / DEVICE_RESET using the shared, headless-testable
+`util/sokol_d3d11_device_loss.h`. Other failures and DXGI status codes do not
+trigger device loss. The first loss across the shared device logs the triggering
+HRESULT and GetDeviceRemovedReason, then routes SAPP_EVENTTYPE_TC_DEVICE_LOST
+(with `sapp_event.device_lost_reason`) to the main app callback. The latch is set
+before callbacks so reentry and other windows cannot notify again.
+
+TrussC offers `events().deviceLost`: cancellation keeps the main loop running;
+the default logs an error and exits with code 1. After loss, windows use timer
+pacing, no longer wait for dead frame-latency signals, and stop presenting or
+resizing the failed swapchains. App callbacks continue if cancellation opts
+into handling the failure. Resources are not recreated. The first tick still
+updates dimensions and resizes before app initialization. Loss detected before
+initialization is logged and latched, preserving the removal reason. Its pending
+event is delivered once immediately after the init callback returns, before the
+first frame; a default failure exit skips that frame. Pending state is cleared
+before dispatch so reentry cannot deliver the event twice.
+
 ### 1. Skip Present (D3D11 flickering fix)
 
 **Purpose:** Add `sapp_skip_present()` function to skip the next present call, fixing D3D11 flickering in event-driven rendering.
@@ -196,6 +217,19 @@ optional optimization rather than a correctness requirement.
 
 WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
 bind groups / descriptor sets; growing them is much more invasive).
+
+### Upload-only frame synchronization (Metal)
+
+**Purpose:** End frames on ticks that record offscreen work or uploads without
+drawing the screen (#332). A commit without a pass must participate in the
+in-flight semaphore before rotating uniform slots or collecting resources.
+
+**Changes (marked `[TrussC modification]`):**
+- `_sg_mtl_ensure_command_buffer()` shares the first-pass command-buffer creation,
+  semaphore wait and completion-handler signal with `_sg_mtl_commit()`.
+- `_sg_mtl_commit()` creates and commits an empty command buffer when no pass
+  created one. Existing pass frames reuse their command buffer and semaphore
+  slot. Retained/unretained-reference settings remain respected.
 
 ---
 

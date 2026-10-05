@@ -2,7 +2,9 @@
 // tcVideoPlayer_win.cpp - Windows VideoPlayer implementation using Media Foundation
 // =============================================================================
 // Uses IMFMediaEngine for hardware-accelerated video decoding.
-// D3D11 textures are injected directly into sokol_gfx.
+// Each new frame is read back through a D3D11 staging texture and converted
+// from BGRA to RGBA on the CPU, then copied to VideoPlayer's pixel buffer.
+// VideoPlayer::update() uploads that buffer to a sokol_gfx texture.
 //
 // Reference: openFrameworks ofMediaFoundationPlayer (MIT License)
 // Based on code by Andrew Wright (https://github.com/axjxwright/AX-MediaPlayer/)
