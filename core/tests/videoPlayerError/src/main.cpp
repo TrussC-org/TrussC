@@ -148,13 +148,18 @@ public:
 fs::path videoPath;
 bool expectVideoError = false;
 bool expectBadPacket = false;
+bool expectBadPackets = false;
 class VideoCheckApp : public App {
 public:
     void setup() override {
         logger = getLogger().onLog.listen([&](LogEventArgs& log) {
             if (log.message.find("[VideoPlayer]") != 0) return;
             if (log.level == LogLevel::Error) ++errorLogs;
-            if (log.level == LogLevel::Warning && log.message.find("skipping invalid") != string::npos) ++badPackets;
+            if (log.level == LogLevel::Warning && log.message.find("skipping invalid") != string::npos) {
+                if (log.message.find("skipped 2 invalid packets and 0 invalid frames since the last report") != string::npos)
+                    sawSkippedCount = true;
+                ++badPackets;
+            }
         });
         player.setUseHwAccel(false);
         player.setResyncThreshold(0);
@@ -171,6 +176,13 @@ public:
         player.play();
     }
     void update() override {
+        if (waitingForWarningInterval) {
+            if (chrono::steady_clock::now() < replayAt) return;
+            waitingForWarningInterval = false;
+            replaying = true;
+            player.setPosition(0);
+            player.play();
+        }
         if (checkingRecoverySeek) {
             player.update();
             check("seek after failure uploads before play", !player.isPlaying() && player.hasError() &&
@@ -202,6 +214,17 @@ public:
             check("one invalid packet was skipped", badPackets == 1);
             check("frames after bad packet reach EOF", player.isDone() && player.getCurrentFrame() >= player.getTotalFrames() - 1);
         }
+        if (expectBadPackets) {
+            check("invalid packet burst reaches final frame without error", player.isDone() &&
+                  !player.hasError() && player.getCurrentFrame() >= player.getTotalFrames() - 1);
+            if (!replaying) {
+                check("two consecutive bad packets produce one warning", badPackets == 1);
+                replayAt = chrono::steady_clock::now() + chrono::milliseconds(5100);
+                waitingForWarningInterval = true;
+                return;
+            }
+            check("next interval produces one more warning with skipped count", badPackets == 2 && sawSkippedCount);
+        }
         if (player.hasError()) {
             // Two seeks in one app frame force the second poster upload to
             // defer to update(), exercising the removed errorStopped_ guard.
@@ -230,6 +253,10 @@ private:
     EventListener logger;
     atomic<int> errorLogs{0};
     atomic<int> badPackets{0};
+    atomic<bool> sawSkippedCount{false};
+    bool waitingForWarningInterval = false;
+    bool replaying = false;
+    chrono::steady_clock::time_point replayAt;
     int events = 0;
     bool checkingRecoverySeek = false;
     uint32_t seekUploadFrame = 0;
@@ -241,6 +268,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         videoPath = fs::absolute(argv[2]);
         expectVideoError = argc > 3 && strcmp(argv[3], "error") == 0;
         expectBadPacket = argc > 3 && strcmp(argv[3], "bad-packet") == 0;
+        expectBadPackets = argc > 3 && strcmp(argv[3], "bad-packets") == 0;
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);

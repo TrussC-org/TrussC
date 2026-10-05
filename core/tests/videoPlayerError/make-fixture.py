@@ -1,4 +1,4 @@
-"""Create a truncated or one-bad-packet copy of the bundled HAP test movie."""
+"""Create a truncated or bad-packet copy of the bundled HAP test movie."""
 from pathlib import Path
 import struct
 import argparse
@@ -6,7 +6,10 @@ import argparse
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("source", type=Path)
 parser.add_argument("destination", type=Path)
-parser.add_argument("--bad-packet", action="store_true")
+mode = parser.add_mutually_exclusive_group()
+mode.add_argument("--bad-packet", action="store_true")
+mode.add_argument("--bad-packets", action="store_true",
+                  help="corrupt two consecutive video packets for warning throttling")
 args = parser.parse_args()
 source, destination = args.source, args.destination
 data = bytearray(source.read_bytes())
@@ -41,10 +44,13 @@ offsets = [u32(stco + 16 + 4 * i) for i in range(u32(stco + 12))]
 stsz = next(offset for offset, kind in atoms if kind == b"stsz")
 size = u32(stsz + 12)
 assert size and len(offsets) >= 3
-if args.bad_packet:
-    # Preserve container/sample lengths and every other packet. An invalid
+if args.bad_packet or args.bad_packets:
+    # Preserve container/sample lengths and the other packets. An invalid
     # compressor with a valid texture format reaches HapDecode/FFmpeg decode.
-    data[offsets[2] + 3] &= 0x0F
+    count = 2 if args.bad_packets else 1
+    assert len(offsets) > 2 + count  # Keep valid frames after the corrupt burst.
+    for offset in offsets[2:2 + count]:
+        data[offset + 3] &= 0x0F
     destination.write_bytes(data)
     raise SystemExit(0)
 

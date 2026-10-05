@@ -36,6 +36,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
@@ -1200,10 +1201,14 @@ private:
         player.setFrame(1);
         const auto frame = player.getCurrentFrame();
         int events = 0, warnings = 0, errorLogs = 0;
+        string lastWarning;
         auto listener = player.onError.listen([&](VideoErrorEventArgs&) { ++events; });
         auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
             if (log.message.find("[HapPlayer]") != 0) return;
-            if (log.level == LogLevel::Warning) ++warnings;
+            if (log.level == LogLevel::Warning && log.message.find("Skipping invalid HAP frame") != string::npos) {
+                ++warnings;
+                lastWarning = log.message;
+            }
             if (log.level == LogLevel::Error) ++errorLogs;
         });
         player.setFrame(2);
@@ -1212,6 +1217,18 @@ private:
         check("HAP bad frame keeps playing without error", player.isPlaying() && !player.hasError() && events == 0 && errorLogs == 0);
         player.setFrame(3);
         check("HAP frame after bad frame decodes", player.isFrameNew() && player.getCurrentFrame() == 3);
+        player.setPaused(true);
+        for (int i = 0; i < 46; ++i) player.setFrame(2);
+        check("HAP bad-frame burst produces only one warning", warnings == 1);
+        this_thread::sleep_for(chrono::milliseconds(5100));
+        player.setFrame(2);
+        check("HAP next warning reports all skips since last report", warnings == 2 &&
+              lastWarning.find("skipped 47 invalid frames since the last report") != string::npos);
+        HapPlayer other;
+        check("second HAP player loads", bool(other.load(path)));
+        other.setFrame(2);
+        check("HAP warning gate is per player and starts with one skip", warnings == 3 &&
+              lastWarning.find("skipped 1 invalid frames since the last report") != string::npos);
         player.close();
     }
 

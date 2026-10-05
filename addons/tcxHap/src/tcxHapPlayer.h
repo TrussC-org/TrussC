@@ -636,6 +636,8 @@ protected:
 private:
     MovParser movParser_;
     HapDecoder hapDecoder_;
+    tc::OnceGate invalidFrameWarningGate_{5.0};
+    uint64_t skippedInvalidFrames_ = 0;
     const MovTrack* videoTrack_ = nullptr;
     const MovTrack* audioTrack_ = nullptr;
 
@@ -867,7 +869,13 @@ private:
                 frameBuffer_.data(), frameBuffer_.size(),
                 outFormat)) {
             if (hapDecoder_.lastErrorCode_ == HapResult_Bad_Frame) {
-                tc::logWarning("HapPlayer") << "Skipping invalid HAP frame " << frameIndex;
+                ++skippedInvalidFrames_;
+                if (invalidFrameWarningGate_.isFirstTime()) {
+                    tc::logWarning("HapPlayer") << "Skipping invalid HAP frame " << frameIndex
+                        << "; skipped " << skippedInvalidFrames_
+                        << " invalid frames since the last report";
+                    skippedInvalidFrames_ = 0;
+                }
                 return false;
             }
             reportPlaybackError("Failed to decode HAP video frame", hapDecoder_.lastErrorCode_);

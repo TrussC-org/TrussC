@@ -107,6 +107,22 @@ private:
     void decodeThread();
     bool decodeNextFrame();
     internal::VideoErrorQueue playbackErrors_;
+    // Both decode paths share a per-player budget. Only the decoder accesses
+    // these counters; include the current skip in each report, then reset.
+    OnceGate invalidDataWarningGate_{5.0};
+    uint64_t skippedInvalidPackets_ = 0;
+    uint64_t skippedInvalidFrames_ = 0;
+    void warnInvalidData(bool packet) {
+        if (packet) ++skippedInvalidPackets_;
+        else ++skippedInvalidFrames_;
+        if (!invalidDataWarningGate_.isFirstTime()) return;
+        logWarning("VideoPlayer")
+            << (packet ? "avcodec_send_packet: skipping invalid packet" :
+                         "avcodec_receive_frame: skipping invalid frame")
+            << "; skipped " << skippedInvalidPackets_ << " invalid packets and "
+            << skippedInvalidFrames_ << " invalid frames since the last report";
+        skippedInvalidPackets_ = skippedInvalidFrames_ = 0;
+    }
     void decodeError(const char* operation, int code) {
         char message[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(code, message, sizeof(message));
@@ -800,7 +816,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             packetPending_ = false;
 
             if (sret == AVERROR_INVALIDDATA) {
-                logWarning("VideoPlayer") << "avcodec_send_packet: skipping invalid packet";
+                warnInvalidData(true);
                 continue;
             }
             if (sret < 0 && sret != AVERROR_EOF) {
@@ -818,7 +834,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             return false;
         }
         if (ret == AVERROR_INVALIDDATA) {
-            logWarning("VideoPlayer") << "avcodec_receive_frame: skipping invalid frame";
+            warnInvalidData(false);
             continue;
         }
         if (ret < 0) {

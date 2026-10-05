@@ -15,6 +15,7 @@ allCoreTests videoPlayerError --gpu-check
 allCoreTests videoPlayerError --video-check path/to/working.mov
 allCoreTests videoPlayerError --video-check path/to/truncated.mov error
 allCoreTests videoPlayerError --video-check path/to/one-bad-packet.mov bad-packet
+allCoreTests videoPlayerError --video-check path/to/two-bad-packets.mov bad-packets
 ```
 
 The optional GPU check compares FBO pixels before and after an injected error.
@@ -26,6 +27,9 @@ The `bad-packet` mode requires one invalid-packet/frame warning, no error event
 or error log, and playback reaching the last frame and normal EOF. The error
 mode also checks one runtime error log, retained pixels/texture, and a recovery
 seek uploading its poster on a subsequent update before `play()`.
+The `bad-packets` mode uses two consecutive invalid packets, checks one warning
+for the burst, waits past the five-second warning interval, then replays and
+checks that the next warning includes the accumulated skip count.
 
 To recreate the Linux fixture used here (a HAP MOV with its third video sample
 cut in half), run from the repository root:
@@ -35,6 +39,8 @@ python3 core/tests/videoPlayerError/make-fixture.py \
   addons/tcxHap/tests/bin/data/sine_sowt.mov truncated.mov
 python3 core/tests/videoPlayerError/make-fixture.py --bad-packet \
   addons/tcxHap/tests/bin/data/sine_sowt.mov one-bad-packet.mov
+python3 core/tests/videoPlayerError/make-fixture.py --bad-packets \
+  addons/tcxHap/tests/bin/data/sine_sowt.mov two-bad-packets.mov
 ```
 
 Real display/platform checks required by the Decision remain manual: run a
