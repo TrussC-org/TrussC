@@ -596,7 +596,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
 
         internal::updateFrameCount++;
         events().update.notify();
-        auto app = g_host.guest.app; // keep the active tree through nested OS cleanup
+        App* app = g_host.getApp();
         if (app) {
             app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
         }
@@ -604,7 +604,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
 
     internal::appDrawFunc = []() {
         events().draw.notify();
-        auto app = g_host.guest.app;
+        App* app = g_host.getApp();
         if (app) app->handleDraw();
     };
 

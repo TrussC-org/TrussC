@@ -10,7 +10,6 @@ void clearExitReason();
 void setExitBlockReason(const std::string& reason);
 std::string exitBlockReason();
 bool beginExitCleanup();
-bool exitCleanupStarted();
 std::string exitLogMessage(bool clean);
 void installWindowExitSignals();
 void restoreWindowExitSignals();

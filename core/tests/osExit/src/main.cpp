@@ -21,7 +21,7 @@ std::string mode;
 EventListener quitListener, logListener;
 void verifyWindowExit() {
     check(exits == 1 && begins == 1 && cleans == 1, "one exit and one complete log pair");
-    check(requests == (mode == "nested" ? 0 : (mode == "cancel" || mode == "cancel-empty") ? 2 : 1), "quit request count");
+    check(requests == ((mode == "cancel" || mode == "cancel-empty") ? 2 : 1), "quit request count");
     if (failures) std::_Exit(1);
 }
 struct ExitApp : App {
@@ -38,13 +38,6 @@ struct ExitApp : App {
     }
     void update() override {
         ++updates;
-        if (mode == "nested") {
-            internal::setExitReason("os-session-end");
-            internal::_cleanup_cb(); // emulate a session end inside a modal loop
-            internal::_cleanup_cb();
-            sapp_quit();
-            return;
-        }
 #ifdef _WIN32
         HWND hwnd = (HWND)sapp_win32_get_hwnd();
         if (updates == 1) {
@@ -67,9 +60,10 @@ struct ExitApp : App {
                       "cancelled session removes shutdown block");
                 requestExitApp();
             } else {
-                SendMessageW(hwnd, WM_ENDSESSION, TRUE, ENDSESSION_LOGOFF);
-                SendMessageW(hwnd, WM_ENDSESSION, TRUE, ENDSESSION_LOGOFF);
-                sapp_quit();
+                SendMessageW(hwnd, WM_ENDSESSION, TRUE,
+                             mode == "forced" ? ENDSESSION_CLOSEAPP : ENDSESSION_LOGOFF);
+                check(false, "session end must not return to update");
+                std::_Exit(1);
             }
         }
 #elif (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
@@ -80,10 +74,10 @@ struct ExitApp : App {
         requestExitApp();
 #endif
     }
-    void draw() override {
-        check(!internal::exitCleanupStarted(), "no draw after synchronous cleanup");
+    void exit() override {
+        ++exits;
+        if (mode == "cleanup-reentry") internal::_cleanup_cb();
     }
-    void exit() override { ++exits; }
 };
 
 #ifndef __EMSCRIPTEN__
@@ -199,9 +193,23 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         mode = argc > 2 ? argv[2] : "accept";
         logListener = getLogger().onLog.listen([](LogEventArgs& args) {
             if (args.message.find("exit: begin ") != std::string::npos) ++begins;
-            if (args.message.find("exit: clean ") != std::string::npos) ++cleans;
+            if (args.message.find("exit: clean ") != std::string::npos) {
+                ++cleans;
+#ifdef _WIN32
+                // TerminateProcess skips atexit, so verify before leaving cleanup.
+                if (mode == "accept" || mode == "forced") {
+                    verifyWindowExit();
+                    std::fflush(stdout);
+                }
+#endif
+            }
         });
-        std::atexit(verifyWindowExit); // macOS sapp_run does not return
+        std::atexit([] {
+#ifdef _WIN32
+            check(mode != "accept" && mode != "forced", "session end skips atexit");
+#endif
+            verifyWindowExit(); // macOS sapp_run does not return
+        });
         WindowSettings settings;
         settings.width = 64; settings.height = 64;
         runApp<ExitApp>(settings);

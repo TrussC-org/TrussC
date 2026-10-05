@@ -2525,7 +2525,6 @@ namespace internal {
     // leaks pile up until the next frame).
     inline void runMainUpdate(double fixedDelta = 0.0,
                               std::chrono::steady_clock::time_point stepTime = {}) {
-        if (exitCleanupStarted()) return;
         beginMainUpdateCall(fixedDelta, stepTime);
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
@@ -2664,7 +2663,7 @@ namespace internal {
 
     inline void _frame_cb() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
-        if (frameReentryGuard || exitCleanupStarted()) return;
+        if (frameReentryGuard) return;
         if (int sig = pendingWindowExitSignal()) {
             setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
             sapp_request_quit();
@@ -2675,7 +2674,6 @@ namespace internal {
 
         // Frame time, queued work, independent updates and the draw decision.
         bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
-        if (exitCleanupStarted()) { frameReentryGuard = false; return; }
 
         // Force a frame when a capture is pending so present()/afterFrame runs
         // and the deferred screenshot (or MCP tc_get_screenshot) actually fires —
@@ -2694,10 +2692,8 @@ namespace internal {
 
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
-            if (exitCleanupStarted()) { frameReentryGuard = false; return; }
 
             if (appDrawFunc) appDrawFunc();
-            if (exitCleanupStarted()) { frameReentryGuard = false; return; }
 
             // Reset shader stack if any shaders are still pushed
             internal::resetShaderStack();
@@ -2785,8 +2781,6 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
-        if (exitCleanupStarted()) return;
-        auto eventRoot = mainWindowContext().rootNode.lock();
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they
         // found them.
@@ -2794,7 +2788,6 @@ namespace internal {
 
         // Notify raw event listeners (used by addons like tcxImGui)
         events().rawEvent.notify(*ev);
-        if (exitCleanupStarted()) return;
 
         // ev->mouse_x/y arrive in framebuffer coordinates
         // pixelPerfectMode() == true: use as-is (coords = framebuffer size)
@@ -3092,14 +3085,13 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::appUpdateFunc = []() {
         internal::updateFrameCount++;  // Update frame count
         events().update.notify();
-        // A nested session-end message can reset app during the callback.
-        if (auto active = app) {
-            active->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
+        if (app) {
+            app->handleUpdate(internal::currentWindowContext().mouseX, internal::currentWindowContext().mouseY);
         }
     };
     internal::appDrawFunc = []() {
         events().draw.notify();
-        if (auto active = app) active->handleDraw();
+        if (app) app->handleDraw();
     };
     internal::appCleanupFunc = []() {
         if (app) {

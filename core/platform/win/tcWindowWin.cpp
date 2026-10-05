@@ -54,7 +54,7 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 // --- tick: drive this window's update/draw with its context active ---------
 void windowTick(sapp_window swin, void* user) {
     Window* win = static_cast<Window*>(user);
-    if (!win || internal::exitCleanupStarted()) return;
+    if (!win) return;
     auto& ctx = win->context();
 
     const int fbw = sapp_window_framebuffer_width(swin);
@@ -117,17 +117,13 @@ void windowTick(sapp_window swin, void* user) {
         // contained at present().
         internal::EntryStackGuard guard(internal::AppEntry::Update);
         win->events().update.notify();
-        if (internal::exitCleanupStarted()) { internal::currentWindowCtx() = prev; return; }
         win->tickTree();
     }
-    if (internal::exitCleanupStarted()) { internal::currentWindowCtx() = prev; return; }
 
     const Color& cc = win->clearColor_;
     clear(cc.r, cc.g, cc.b, cc.a);
     win->events().draw.notify();
-    if (internal::exitCleanupStarted()) { internal::currentWindowCtx() = prev; return; }
     win->drawTreeNow();
-    if (internal::exitCleanupStarted()) { internal::currentWindowCtx() = prev; return; }
 
     present();
     {
@@ -137,7 +133,6 @@ void windowTick(sapp_window swin, void* user) {
     }
     // Drain this window's saveScreenshot() queue while ITS context (and its
     // lastSwapchainDrawable) is current — must run before we restore prev.
-    if (internal::exitCleanupStarted()) { internal::currentWindowCtx() = prev; return; }
     internal::drainPendingScreenshots();
 
     sgl_set_context(sgl_default_context());

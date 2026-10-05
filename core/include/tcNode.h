@@ -1,6 +1,5 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
-#include "tc/app/tcExit.h"
 
 // tcNode.h declares its direct dependencies, included in dependency order
 // (foundation types first, then the headers that build on them) instead of
@@ -851,28 +850,23 @@ private:
 
     // Recursively update self and child nodes
     void updateTree() {
-        if (!isActive_ || internal::exitCleanupStarted()) return;
+        if (!isActive_) return;
 
         // Remove dead children before processing
         sweepDeadChildren();
 
         // Call setup() once on first update/draw
         setupOnce();
-        if (internal::exitCleanupStarted()) return;
 
         // Mod early update (before Node::update). forEachMod snapshots types
         // and defers self-removal, so a mod may add/remove mods safely here.
         forEachMod([](Mod* m) { m->earlyUpdate(); });
-        if (internal::exitCleanupStarted()) return;
 
         processTimers();
-        if (internal::exitCleanupStarted()) return;
         update();  // User code
-        if (internal::exitCleanupStarted()) return;
 
         // Mod update (after Node::update).
         forEachMod([](Mod* m) { m->update(); });
-        if (internal::exitCleanupStarted()) return;
 
         // Iterate over a snapshot — a child's update() may add, remove, or
         // reorder siblings (via addChild / removeChild / moveToFront / etc.),
@@ -942,11 +936,10 @@ private:
 
     // Recursively draw self and child nodes
     void drawTree() {
-        if (!isActive_ || internal::exitCleanupStarted()) return;
+        if (!isActive_) return;
 
         // Call setup() once on first update/draw
         setupOnce();
-        if (internal::exitCleanupStarted()) return;
 
         // Stamp the camera scope this node is being drawn under (pointer
         // compare first — steady state is one assignment skip per frame).
@@ -967,7 +960,6 @@ private:
 
         // Begin draw hook (for clipping, etc.)
         beginDraw();
-        if (internal::exitCleanupStarted()) return;
 
         // User drawing, then mod draw (mods draw in the node's local space,
         // after the node's own draw()). An invisible node hides its whole
@@ -982,9 +974,7 @@ private:
             const auto prevFloor = rc.setStackFloor(matrixDepth, styleDepth, &typeid(*this));
             resetStyle();
             draw();
-            if (internal::exitCleanupStarted()) return;
             forEachMod([](Mod* m) { m->draw(); });
-            if (internal::exitCleanupStarted()) return;
             rc.setStackFloor(prevFloor);
             // A missing pop in draw() is named and contained here (#232): the
             // pop below must undo THIS node's push, not the user's.
@@ -994,13 +984,11 @@ private:
 
             // Draw child nodes (overridable for clipping, etc.)
             drawChildren();
-            if (internal::exitCleanupStarted()) return;
         }
 
         // End draw hook
         resetStyle();
         endDraw();
-        if (internal::exitCleanupStarted()) return;
 
         popMatrix();
     }

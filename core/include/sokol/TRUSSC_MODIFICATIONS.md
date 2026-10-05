@@ -367,11 +367,14 @@ All modifications by tettou771
 - Windows `WM_QUERYENDSESSION` shares the main-window quit request, including
   `ENDSESSION_CLOSEAPP`. Vetoes supply a UTF-8 shutdown-block reason. Accepted
   queries wait for `WM_ENDSESSION`; cancellation resets the request and block.
-  `WM_ENDSESSION(TRUE)` performs guarded synchronous cleanup even after a veto.
+  `WM_ENDSESSION(TRUE)`, including `ENDSESSION_CLOSEAPP`, performs synchronous
+  cleanup even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)`.
+  Interrupted user code, DLL detach and guest static destructors do not resume.
 - macOS `applicationShouldTerminate:` uses the same cancellable request as
   window close. Known quit Apple event reasons identify logoff/restart/shutdown.
-- Backends identify native exit origins through internal `tcExit` state. Main
-  and secondary ticks stop once cleanup starts; Windows skips Present when a
-  nested session-end notification cleans up during a frame.
+- Backends identify native exit origins through internal `tcExit` state. Window
+  close preserves an already recorded origin on Windows, macOS, X11 and EGL.
+  `_cleanup_cb` guards cleanup once and freezes its reason; `sapp_run` retains
+  its backend cleanup check. Frame/tree/event paths need no teardown guards.
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
   documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).

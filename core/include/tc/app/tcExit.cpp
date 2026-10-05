@@ -51,7 +51,6 @@ bool beginExitCleanup() {
     cleaning = true;
     return true;
 }
-bool exitCleanupStarted() { return cleaning.load(std::memory_order_relaxed); }
 std::string exitLogMessage(bool clean) {
     const auto why = exitReason();
 #ifdef _WIN32

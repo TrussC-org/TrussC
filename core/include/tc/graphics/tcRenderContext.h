@@ -1,5 +1,4 @@
 #pragma once
-#include "tc/app/tcExit.h"
 
 // =============================================================================
 // RenderContext - Context class holding rendering state
@@ -1251,10 +1250,7 @@ public:
     explicit EntryStackGuard(AppEntry entry, const char* eventName = nullptr)
         : entry_(entry), eventName_(eventName), rc_(getDefaultContext()),
           matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()) {}
-    ~EntryStackGuard() {
-        // A nested WM_ENDSESSION may have destroyed the GPU context.
-        if (!exitCleanupStarted()) rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_);
-    }
+    ~EntryStackGuard() { rc_.restoreStacksAtEntryEnd(entry_, matrixDepth_, styleDepth_, eventName_); }
     EntryStackGuard(const EntryStackGuard&) = delete;
     EntryStackGuard& operator=(const EntryStackGuard&) = delete;
 

@@ -12,7 +12,11 @@ frame requests exit on the main thread, even in event-driven rendering. A
 second signal after the first, including after a veto or during cleanup,
 terminates immediately without another event or cleanup. Forced OS shutdown
 and SIGKILL cannot be vetoed. Windows runs cleanup inside `WM_ENDSESSION(TRUE)`
-even after a veto, but grants only a few seconds: keep exit handlers short.
+even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)` inside
+that message, including for `ENDSESSION_CLOSEAPP`. This prevents returning to
+interrupted user code or running DLL detach/guest static destructors after
+teardown. Cleanup and its log writes finish first. Windows grants only a few
+seconds: keep exit handlers short.
 
 The Logger emits these stable **message payloads**, with its usual timestamp,
 level and `[System]` prefix:
@@ -57,8 +61,10 @@ Headless log-file/MCP startup and anchorbolt classification are separate work.
 Run `osExit --window accept` and `osExit --window cancel` (or
 `allCoreTests osExit --window ...`). On Windows also run `--window cancel-empty` for the generic explanation and
 `--window forced`
-to send an accepted end-session notification after a veto. These use synthetic
-messages; verify real logoff/restart/shutdown separately, including Restart
+to send an accepted `ENDSESSION_CLOSEAPP` notification after a veto. Accepted
+session-end tests verify cleanup before process termination, which skips
+`atexit`; check status 0 and one begin/clean pair in `TRUSSC_LOG_FILE` as well.
+These use synthetic messages; verify real logoff/restart/shutdown separately, including Restart
 Manager, a custom/empty block reason, cancellation by another application,
 and forced shutdown while a modal dialog or window drag is active. Check the
 app's saved state and the single log pair after signing back in.
