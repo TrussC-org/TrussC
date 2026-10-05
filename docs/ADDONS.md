@@ -701,6 +701,10 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+Playback requires GPU support for the movie's BC-compressed texture format.
+See [tcxHap GPU requirements](../addons/tcxHap/README.md#gpu-requirements) for
+the iOS Simulator limitation and unverified iOS device support.
+
 `HapPlayer::load()` resolves relative paths against the data folder via
 `getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
 there is no working-directory fallback.
