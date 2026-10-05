@@ -3,6 +3,7 @@
 
 // Internal, process-wide exit bookkeeping shared by the runtime and backends.
 namespace trussc::internal {
+int& appExitCode();  // defined in tcGlobal.cpp; shared by host, guests and backends
 void setExitReason(const char* reason);
 void setExitReasonIfEmpty(const char* reason);
 std::string exitReason();

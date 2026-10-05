@@ -60,7 +60,7 @@ std::string exitLogMessage(bool clean) {
 #endif
     return std::string("exit: ") + (clean ? "clean" : "begin")
         + (why.empty() ? "" : " reason=" + why)
-        + (clean ? " code=0" : "") + " pid=" + std::to_string(pid);
+        + (clean ? " code=" + std::to_string(appExitCode()) : "") + " pid=" + std::to_string(pid);
 }
 void installWindowExitSignals() {
 #if (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)) || (defined(__APPLE__) && TARGET_OS_OSX)

@@ -121,16 +121,23 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         args.cancel = true;
     });
     internal::appExitCode() = 0;
+    internal::clearExitReason();
     notifyLoss();
     check(lossCalls == 1 && internal::appExitCode() == 0 && errorLogs == 0,
           "cancellation leaves exit code unchanged");
+    check(internal::exitReason().empty(), "cancelled device loss leaves exit reason unchanged");
     cancel.disconnect();
     // An exitRequested listener cannot cancel the default device-loss exit.
     auto exitCancel = events().exitRequested.listen([](ExitRequestEventArgs& args) { args.cancel = true; });
     notifyLoss();
     check(internal::appExitCode() == 1 && errorLogs == 1, "default logs reason and selects failure exit");
+    check(internal::exitReason() == "device-lost", "default device loss preserves its exit reason");
+    check(internal::exitLogMessage(true).find("exit: clean reason=device-lost code=1 pid=") == 0,
+          "device loss clean log includes failure code and reason");
     exitApp(23);
     check(internal::appExitCode() == 23, "explicit exit code");
+    check(internal::exitLogMessage(true).find("exit: clean reason=exit-app code=23 pid=") == 0,
+          "explicit exit code reaches clean log");
     exitApp();
     check(internal::appExitCode() == 0, "no-argument exit remains success");
     std::printf("deviceLost headless: %d failures\n", failures);

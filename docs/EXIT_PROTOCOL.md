@@ -29,7 +29,8 @@ exit: clean reason=os-session-end code=0 pid=1234
 `begin` is emitted at the start of `_cleanup_cb`, before MCP, app `exit()` and
 audio shutdown. `clean` follows framework `cleanup()`. Each appears once.
 The `reason=TOKEN` field is omitted when the origin is unknown. Field order,
-spacing, `code=0`, and decimal `pid` are part of the protocol. A PID identifies
+spacing, decimal `code` (the application's exit code), and decimal `pid` are
+part of the protocol. A PID identifies
 a run in an appended log; correlate with its startup/time since PIDs can be
 reused. `TRUSSC_LOG_FILE` uses the existing Logger file sink and level settings.
 
