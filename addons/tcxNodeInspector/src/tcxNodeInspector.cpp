@@ -829,46 +829,46 @@ void NodeInspector::drawGizmo() {
     const ImU32 outlineCol = IM_COL32(20, 20, 20, 255);
     const float outlineWidth = 2.0f * scale;
 
-    for (int i = 0; i < 3; ++i) {
-        if (!g.axis[i].valid) continue;
-        bool hot = (i == hoverAxis_);
-        const Color& c = hot ? hotColor : axisColor[i];
-        ImU32 col = ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, 1.0f));
-        float w = hot ? thick + 1.0f : thick;
-
-        if (mode == GizmoMode::Translate) {
-            ImVec2 a(g.axis[i].p0.x, g.axis[i].p0.y);
-            ImVec2 b(g.axis[i].p1.x, g.axis[i].p1.y);
-            // Same geometry, with a dark edge beneath the axis color so the
-            // handle stays readable over scene colors close to its own.
-            dl->AddLine(a, b, outlineCol, w + outlineWidth);
-            dl->AddLine(a, b, col, w);
-
-            // Arrow head at the tip
-            Vec2 dpx = g.axis[i].p1 - g.axis[i].p0;
-            dpx = dpx * (1.0f / dpx.length());
-            Vec2 n(-dpx.y, dpx.x);
-            const float ah = 8.0f * scale, aw = 3.5f * scale;
-            ImVec2 tip(b.x + dpx.x * ah, b.y + dpx.y * ah);
-            ImVec2 b1(b.x + n.x * aw, b.y + n.y * aw);
-            ImVec2 b2(b.x - n.x * aw, b.y - n.y * aw);
-            dl->AddTriangle(tip, b1, b2, outlineCol, outlineWidth);
-            dl->AddTriangleFilled(tip, b1, b2, col);
-        } else {
-            const auto& ring = g.axis[i].ring;
-            static std::vector<ImVec2> pts;
-            pts.clear();
-            pts.reserve(ring.size());
-            for (auto& p : ring) pts.emplace_back(p.x, p.y);
-            dl->AddPolyline(pts.data(), (int)pts.size(), outlineCol, w + outlineWidth, ImDrawFlags_Closed);
-            dl->AddPolyline(pts.data(), (int)pts.size(), col, w, ImDrawFlags_Closed);
-        }
-    }
-
-    // Origin pad
+    // Draw the complete dark underlay before any colored part. This keeps
+    // another axis's outline from cutting across already painted color.
     const Color& acc = style_.accent;
     ImU32 accCol = ImGui::ColorConvertFloat4ToU32(ImVec4(acc.r, acc.g, acc.b, 1.0f));
-    dl->AddCircleFilled(ImVec2(g.screenOrigin.x, g.screenOrigin.y), 3.5f * scale, accCol, 16);
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool outline = pass == 0;
+        for (int i = 0; i < 3; ++i) {
+            if (!g.axis[i].valid) continue;
+            bool hot = (i == hoverAxis_);
+            const Color& c = hot ? hotColor : axisColor[i];
+            ImU32 col = outline ? outlineCol : ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, 1.0f));
+            float w = (hot ? thick + 1.0f : thick) + (outline ? outlineWidth : 0.0f);
+
+            if (mode == GizmoMode::Translate) {
+                ImVec2 a(g.axis[i].p0.x, g.axis[i].p0.y);
+                ImVec2 b(g.axis[i].p1.x, g.axis[i].p1.y);
+                dl->AddLine(a, b, col, w);
+                Vec2 dpx = g.axis[i].p1 - g.axis[i].p0;
+                dpx = dpx * (1.0f / dpx.length());
+                Vec2 n(-dpx.y, dpx.x);
+                const float ah = 8.0f * scale, aw = 3.5f * scale;
+                ImVec2 tip(b.x + dpx.x * ah, b.y + dpx.y * ah);
+                ImVec2 b1(b.x + n.x * aw, b.y + n.y * aw);
+                ImVec2 b2(b.x - n.x * aw, b.y - n.y * aw);
+                if (outline) dl->AddTriangle(tip, b1, b2, col, outlineWidth);
+                dl->AddTriangleFilled(tip, b1, b2, col);
+            } else {
+                const auto& ring = g.axis[i].ring;
+                static std::vector<ImVec2> pts;
+                pts.clear();
+                pts.reserve(ring.size());
+                for (auto& p : ring) pts.emplace_back(p.x, p.y);
+                dl->AddPolyline(pts.data(), (int)pts.size(), col, w, ImDrawFlags_Closed);
+            }
+        }
+        // The origin belongs to the same underlay and color passes.
+        dl->AddCircleFilled(ImVec2(g.screenOrigin.x, g.screenOrigin.y),
+                            3.5f * scale + (outline ? outlineWidth * 0.5f : 0.0f),
+                            outline ? outlineCol : accCol, 16);
+    }
 
     // Multi-selection: a small ring on each member (projected through its own
     // camera context), so you can see what the centroid gizmo will move.
