@@ -1435,6 +1435,12 @@ bool& touchAsMouse() {
     return enabled;
 }
 
+// Whether the setup callback ran in the current launch (#394).
+bool& appSetupCalled() {
+    static bool called = false;
+    return called;
+}
+
 DataPathState& dataPathState() {
     static DataPathState* state = [] {
         auto* s = new DataPathState();

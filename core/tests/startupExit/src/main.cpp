@@ -80,9 +80,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_HOT_RELOAD_BUILD
     openWindow = false;
     setupRan = exitRan = false;
-    tc::internal::appSetupCalled = true; // A previous setup must not mask failure.
+    tc::internal::appSetupCalled() = true; // A previous setup must not mask failure.
     check(TC_RUN_APP(StartupApp, settings) == 1, "hot reload failed startup returns 1");
-    check(!tc::internal::appSetupCalled && !setupRan && !exitRan,
+    check(!tc::internal::appSetupCalled() && !setupRan && !exitRan,
           "hot reload resets setup status and skips App lifecycle");
 #endif
     return failures ? 1 : 0;
