@@ -9371,9 +9371,12 @@ description.ja = "サーバへ接続（ブロッキング）"
 description.ko = "서버에 연결 (블로킹)"
 
 ["TcpClient::connectAsync"]
-description.en = "Connect asynchronously (notifies via onConnect)"
-description.ja = "非同期に接続（onConnectで通知）"
-description.ko = "비동기로 연결 (onConnect로 통지)"
+description.en = "Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it"
+description.ja = "キャンセル可能な接続を開始。接続中の同じ宛先は何もせず、別の宛先なら置き換える"
+description.ko = "취소 가능한 연결 시작. 같은 대기 대상은 무시하고 다른 대상은 기존 시도를 대체"
+details.en = "Uses a non-blocking TCP connect and short poll slices even with threads. Repeating the same host and port while isConnecting() is true does nothing, without a warning. Changing the target, disconnect() and destruction cancel the old TCP wait before joining its worker. The default TCP deadline is the OS deadline; setConnectTimeout() opts into a shorter one. DNS resolution and user listeners can still delay teardown. Without threads, call processNetwork() through the update event to advance the attempt and asynchronous sends."
+details.ja = "スレッドありでも非ブロッキング TCP 接続を短い poll で待つ。isConnecting() が true の間は同じホストとポートへの再呼び出しは警告なしで何もしない。宛先変更、disconnect()、破棄は TCP 接続待ちをキャンセルしてからワーカーを join する。接続期限は既定では OS に任せ、setConnectTimeout() で短縮できる。DNS 解決やユーザーのリスナーを待つことはある。スレッドなしでは update イベントから processNetwork() を呼び、接続と非同期送信を進める。"
+details.ko = "스레드 사용 시에도 비차단 TCP 연결을 짧은 poll로 기다린다. isConnecting()이 true이면 같은 호스트와 포트 재호출은 경고 없이 무시한다. 대상 변경, disconnect(), 소멸은 TCP 대기를 취소한 뒤 작업자를 join한다. 기본 연결 기한은 OS에 맡기며 setConnectTimeout()으로 단축할 수 있다. DNS 해석과 사용자 리스너는 종료를 지연시킬 수 있다. 스레드 없이 update 이벤트에서 processNetwork()을 호출해 연결과 비동기 전송을 진행한다."
 
 ["TcpClient::disconnect"]
 description.en = "Disconnect"
@@ -9459,6 +9462,8 @@ details.en = '''
   connection. Fires on the receive thread.
 - `"Connection error"` (`wasClean` false; `TlsClient`: `"TLS error: ..."`) —
   an error ended it. Fires on the receive thread.
+- `"Send failed"` (`wasClean` false) — a send failed or timed out. Fires
+  on the writer thread, or inline without threads.
 - `"Disconnected by client"` (`wasClean` true) — the app ended it, with
   [`disconnect()`](#TcpClient::disconnect) or with
   [`connect()`](#TcpClient::connect) on a connected client. Fires
@@ -9485,7 +9490,7 @@ disconnect anyway is overruled: `connect()` closes that connection again,
 without another notification, and connects where it was asked to. With
 threads, do not call [`connectAsync()`](#TcpClient::connectAsync) from such a
 listener: the connect thread it starts runs `connect()` at the same time as the
-outer `connect()`, which can end in `std::terminate` (#261). Without threads
+outer `connect()`, which is unsupported. Without threads
 `connectAsync()` is `connect()`, and is overruled the same way.
 
 When the event fires on the receive thread, a plain (inline) listener that
@@ -9493,9 +9498,8 @@ calls `connect()` runs it on that thread, which cannot join itself. A
 listener that calls `disconnect()` there is in the same position. The client
 keeps that thread and joins it from another thread: the next `connect()` or
 `disconnect()` returns only once the thread has ended (the rest of the
-listener and of its receive loop), and so does the destructor. Until
-#261 lands, do not call `disconnect()` on the client from another
-thread until the listener's call has returned.
+listener and of its receive loop), and so does the destructor. Do not run reentrant connection management from another thread until the
+listener's connection call has returned.
 
 A listener on the receive thread may also destroy the client (an owner that
 replaces it, as `WebSocketClient::connect()` does). The destructor cannot
@@ -9541,7 +9545,7 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 スレッドありのときは、このリスナーから
 [`connectAsync()`](#TcpClient::connectAsync) を呼ばないこと：それが起こす接続
 スレッドが、外側の `connect()` と同時に `connect()` を走らせ、`std::terminate`
-に至ることがある（#261）。スレッドなしでは `connectAsync()` は `connect()` と
+に至り得るため未対応。スレッドなしでは `connectAsync()` は `connect()` と
 同じで、同じように閉じ直される。
 
 受信スレッドで発火したとき、そこで `connect()` を呼ぶ通常の（inline の）
@@ -9550,8 +9554,8 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 そのスレッドを手元に置いておき、別のスレッドから join する：次の
 `connect()` か `disconnect()` は、そのスレッドが終わってから（リスナーの
 残りと受信ループを抜けるまで）戻り、デストラクタも同じように待つ。
-#261 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
-`disconnect()` を呼ばないこと。
+リスナーの接続操作が返るまで、別スレッドから同時に
+接続を操作しないこと。
 
 受信スレッドのリスナーはクライアントを破棄してもよい（`WebSocketClient::connect()`
 のように、持ち主がクライアントを置き換える場合）。デストラクタは自分が動いて
@@ -9572,6 +9576,8 @@ details.ko = '''
   수신 스레드에서 발생한다.
 - `"Connection error"` (`wasClean`은 false, `TlsClient`에서는
   `"TLS error: ..."`) — 오류로 끊겼다. 수신 스레드에서 발생한다.
+- `"Send failed"` (`wasClean`은 false) — 전송 실패 또는 기한 만료.
+  전송 스레드에서, 스레드 없으면 호출한 스레드에서 발생한다.
 - `"Disconnected by client"` (`wasClean`은 true) — 앱이
   [`disconnect()`](#TcpClient::disconnect) 또는 연결 중인
   [`connect()`](#TcpClient::connect)로 끊었다. 호출한 스레드에서, 그 호출이
@@ -9596,7 +9602,7 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 스레드를 사용할 때는 이 리스너에서
 [`connectAsync()`](#TcpClient::connectAsync)를 호출하지 말 것: 그것이 시작하는
 연결 스레드가 바깥 `connect()`와 동시에 `connect()`를 실행하여
-`std::terminate`에 이를 수 있다(#261). 스레드 없이는 `connectAsync()`가
+이런 동시 연결 관리는 지원하지 않는다. 스레드 없이는 `connectAsync()`가
 `connect()`와 같으며, 같은 방식으로 다시 닫힌다.
 
 수신 스레드에서 발생했을 때 그 자리에서 `connect()`를 호출하는 일반(inline)
@@ -9605,8 +9611,8 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 클라이언트는 그 스레드를 보관해 두었다가 다른 스레드에서 join한다: 다음
 `connect()`나 `disconnect()`는 그 스레드가 끝난 뒤에(리스너의 나머지와 수신
 루프를 빠져나올 때까지) 반환하며, 소멸자도 같은 방식으로 기다린다.
-#261이 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
-`disconnect()`를 호출하지 말 것.
+리스너의 연결 관리 호출이 반환되기 전에는 다른 스레드에서 동시에 연결을
+관리하지 말 것.
 
 수신 스레드의 리스너는 클라이언트를 파괴해도 된다(`WebSocketClient::connect()`
 처럼 소유자가 클라이언트를 교체하는 경우). 소멸자는 자신이 실행 중인 스레드를
@@ -9634,11 +9640,17 @@ description.ko = "데이터 수신 시 발생"
 description.en = "Send data to the server"
 description.ja = "サーバへ送信"
 description.ko = "서버로 전송"
+details.en = "Queues the payload on the same FIFO as sendAsync() and waits for completion, lending the caller's bytes. After 60 seconds without progress by default, returns false, fires onError and disconnects; setSendTimeout(0) disables that deadline. The same path handles TLS writes."
+details.ja = "sendAsync() と同じ FIFO にデータを借用して追加し完了を待つ。既定では進捗なし60秒で false を返し、onError と切断を通知。setSendTimeout(0) で期限を無効にする。TLS 送信も同じ経路。"
+details.ko = "sendAsync()와 같은 FIFO에 호출자의 데이터를 빌려 추가하고 완료 대기. 기본 무진행60초 후 false 반환, onError 및 연결 해제. setSendTimeout(0)으로 기한 해제. TLS도 같은 경로."
 
 ["TcpClient::setBlocking"]
 description.en = "Set blocking mode"
 description.ja = "ブロッキングモードを設定"
 description.ko = "블로킹 모드를 설정"
+details.en = "Active sockets stay non-blocking so connect, receive and send can be cancelled. A request to make an active socket blocking is ignored with a warning."
+details.ja = "接続・受信・送信をキャンセルできるよう稼働中のソケットは非ブロッキングを保つ。稼働中にブロッキングへ変更する要求は警告して無視する。"
+details.ko = "연결/수신/전송 취소를 위해 동작 중 소켓은 비차단 유지. 동작 중 차단 모드 요청은 경고 후 무시."
 
 ["TcpClient::setReceiveBufferSize"]
 description.en = "Set the receive buffer size"
@@ -9781,7 +9793,7 @@ value_desc.ClientNotFound.en = "No client is registered under that id"
 value_desc.Disconnected.en = "The connection went away before the payload was written"
 value_desc.Timeout.en = "The peer stopped reading long enough to trip the send timeout; the connection is still up"
 value_desc.QueueFull.en = "The send queue is already at its high-water mark"
-value_desc.NotRunning.en = "The server is not running"
+value_desc.NotRunning.en = "The server is not running, or the client is not connected"
 
 ["SendResult"]
 category = "network"
@@ -19304,6 +19316,85 @@ description.ko = "그리드 피팅이 실제로 픽셀 격자에 맞는지 여�
 description.en = "Snap a baseline offset accumulated from the anchor to the pixel grid, or pass it through unchanged when grid fit does not land. Callers must accumulate first and round once: rounding the line height and stepping by it would compound into a whole-pixel layout drift."
 description.ja = "アンカーからの累積ベースラインオフセットをピクセル境界にスナップする。グリッドフィットが働かない場合はそのまま返す。呼び出し側は必ず累積してから1回だけ丸めること。行の高さを丸めてから加算すると誤差が積み上がり、レイアウトが1ピクセル分ずれてしまう。"
 description.ko = "앵커에서 누적된 베이스라인 오프셋을 픽셀 격자에 맞추고, 그리드 피팅이 유효하지 않으면 그대로 돌려준다. 호출자는 반드시 먼저 누적한 뒤 한 번만 반올림해야 한다. 줄 높이를 반올림해 더해 나가면 오차가 쌓여 레이아웃이 한 픽셀만큼 어긋난다."
+
+["TcpClient::isConnecting"]
+description.en = "Whether a TCP connection attempt or TLS handshake is in progress"
+description.ja = "TCP 接続または TLS ハンドシェイクの進行中か"
+description.ko = "TCP 연결 또는 TLS 핸드셰이크 진행 중인지"
+
+["TcpClient::setConnectTimeout"]
+description.en = "Set the TCP connect deadline in seconds; default 0 uses the OS deadline"
+description.ja = "TCP 接続期限を秒で設定。既定の 0 は OS の期限に任せる"
+description.ko = "TCP 연결 기한을 초로 설정. 기본 0은 OS 기한 사용"
+details.en = "The deadline covers TCP connect, not DNS resolution or the TLS handshake. In installations, connect by IP address so nothing waits for DNS. Default 0 preserves the OS SYN timeout (roughly 21 seconds on Windows, 127 on Linux). For installations whose peer device may power off, setConnectTimeout(5) lets a reconnect loop attempt again sooner; waiting for the Linux OS deadline can delay recovery by about a minute. Cancellation works even with 0. Applies to the current pending connect as well as later attempts."
+details.ja = "期限は TCP 接続だけに適用し、DNS 解決や TLS ハンドシェイクを含まない。展示では IP アドレスで接続し、DNS を待たないようにする。既定の 0 は OS の SYN タイムアウト（Windows 約21秒、Linux 約127秒）を保つ。相手機器の電源が切れる展示では setConnectTimeout(5) にすると次の再試行を早く始められる。Linux の OS の期限を待つと復旧が約1分遅れることがある。0 でもキャンセル可能。現在保留中の接続と次の試行に適用。"
+details.ko = "기한은 TCP 연결에만 적용되며 DNS 해석이나 TLS 핸드셰이크는 포함하지 않는다. 설치 환경에서는 IP 주소로 연결하여 DNS를 기다리지 않도록 한다. 기본 0은 OS SYN 타임아웃(Windows 약21초, Linux 약127초)을 유지한다. 상대 장치가 꺼질 수 있는 설치에서는 setConnectTimeout(5)로 다음 재시도를 빨리 시작할 수 있다. Linux OS 기한을 기다리면 복구가 약1분 늦어질 수 있다. 0에서도 취소 가능. 현재 대기 연결과 이후 시도에 적용."
+
+["TcpClient::setSendTimeout"]
+description.en = "Set the idle send timeout in seconds; default 60, 0 waits forever"
+description.ja = "送信に進捗がない時間の上限を秒で設定。既定 60、0 は無期限"
+description.ko = "전송 진행 없는 시간 제한을 초로 설정. 기본 60, 0은 무기한"
+
+["TcpClient::sendAsync"]
+description.en = "Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete"
+description.ja = "データを所有するキューに待たずに追加。SendResult を返し onSendComplete で1回通知"
+description.ko = "데이터를 소유하는 큐에 대기 없이 추가. SendResult 반환 및 onSendComplete로 한 번 알림"
+details.en = "Shares the FIFO queue and idle deadline with send(). Pointer/string overloads copy; vector&& takes ownership. An empty queue accepts any payload size. Once pending bytes reach the high-water mark, further calls return QueueFull without disconnecting. With threads, completions run on the writer thread; without threads, processNetwork() drains the queue without waiting and emits completions inline. A send timeout closes this client, so completion reports Disconnected (onError describes the timeout), following SendError's existing connection-state vocabulary. Do not call send() inline from a send completion/error listener; use sendAsync()."
+details.ja = "send() と FIFO キューおよび無進捗の期限を共有。ポインターと文字列はコピー、vector&& は所有権を移す。空のキューは任意のサイズを受け入れ、高水位に達したあとの呼び出しは切断せず QueueFull を返す。スレッドありの完了通知は送信スレッド上、なしでは processNetwork() が待たずにキューを進めてその場で通知する。送信期限が切れると接続を閉じるため、完了は Disconnected（onError はタイムアウトを説明）となる。送信の完了・エラーリスナーから send() をその場で呼ばず sendAsync() を使う。"
+details.ko = "send()와 FIFO 큐 및 무진행 기한을 공유. 포인터/문자열은 복사하고 vector&&는 소유권 이동. 빈 큐는 모든 크기를 받으며 기준에 도달한 뒤에는 연결을 끊지 않고 QueueFull 반환. 스레드 사용 시 완료는 전송 스레드에서, 없으면 processNetwork()이 대기 없이 진행하고 즉시 알린다. 전송 기한 만료 시 연결을 닫으므로 완료는 Disconnected이며 onError가 타임아웃을 설명한다. 전송 완료/오류 리스너에서 send() 대신 sendAsync() 사용."
+
+["TcpClient::onSendComplete"]
+description.en = "A queued send completed; clientId is -1, sendId identifies the payload"
+description.ja = "キュー済みの送信の完了。clientId は -1、sendId がデータを識別"
+description.ko = "큐에 든 전송 완료. clientId는 -1, sendId가 데이터를 식별"
+details.en = "Every queued id completes once while the client is alive, including pending sends cancelled by disconnect(). With threads it fires on the writer; without threads it fires from processNetwork(), send() or disconnect(). Destruction stops workers and wakes blocked senders without firing new events."
+details.ja = "クライアントが生存している間、キュー済み id は disconnect() でのキャンセルを含め1回完了を通知する。スレッドありでは送信スレッド上、なしでは processNetwork()、send()、disconnect() から通知。破棄は新たなイベントを出さずにワーカーを停止し、待機中の送信元を起こす。"
+details.ko = "클라이언트가 살아 있는 동안 큐 id는 disconnect() 취소를 포함해 한 번 완료를 알린다. 스레드 사용 시 전송 스레드에서, 없으면 processNetwork(), send(), disconnect()에서 발생. 소멸은 새 이벤트 없이 작업자를 멈추고 대기 송신자를 깨운다."
+
+["TcpClient::setSendAsyncBufferSize"]
+description.en = "Set the send queue high-water mark; default 16 MB, 0 unlimited"
+description.ja = "送信キューの高水位を設定。既定 16 MB、0 は無制限"
+description.ko = "전송 큐의 상한 기준 설정. 기본 16 MB, 0은 무제한"
+
+["TcpClient::getSendAsyncBufferSize"]
+description.en = "Get the send queue high-water mark in bytes"
+description.ja = "送信キューの高水位をバイト数で取得"
+description.ko = "전송 큐의 상한 기준을 바이트로 가져오기"
+
+["TcpClient::getSendAsyncPendingBytes"]
+description.en = "Bytes queued but not yet completed"
+description.ja = "キュー済みで未完了のバイト数"
+description.ko = "큐에 있고 아직 완료되지 않은 바이트 수"
+
+["TcpClient::stopConnectThread"]
+hide = true
+
+["TcpClient::prepareConnect"]
+hide = true
+
+["TcpClient::connectSocket"]
+hide = true
+
+["TcpClient::checkPendingConnect"]
+hide = true
+
+["TcpClient::closeClientSocket"]
+hide = true
+
+["TcpClient::startSendChannel"]
+hide = true
+
+["TcpClient::stopSendChannel"]
+hide = true
+
+["TcpClient::writeSendStep"]
+hide = true
+
+["TcpClient::processSendQueue"]
+hide = true
+
+["TcpClient::waitClientSocket"]
+hide = true
 
 ["Fbo::setDebugName"]
 category = "graphics_fbo"
