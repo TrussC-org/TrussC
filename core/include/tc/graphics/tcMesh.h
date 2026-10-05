@@ -1240,8 +1240,14 @@ public:
 
     // Accessors used by PbrPipeline
     sg_buffer getGpuVertexBuffer() const { return vbuf_; }
+    // Uploaded list indices: TriangleStrip/Fan expand to triangle lists and
+    // LineStrip/Loop expand to line lists. Without source indices, use 0..N-1
+    // (N = vertex count), including for Points. Custom pipelines must draw
+    // triangle modes as triangle lists and line modes as line lists.
     sg_buffer getGpuIndexBuffer() const { return ibuf_; }
     int getGpuVertexCount() const { return gpuVertexCount_; }
+    // Number of uploaded list indices (see getGpuIndexBuffer), including the
+    // generated indices for meshes without source indices.
     int getGpuIndexCount() const { return gpuIndexCount_; }
 
     // Accessors used by PointPipeline

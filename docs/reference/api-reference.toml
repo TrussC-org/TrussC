@@ -4888,9 +4888,9 @@ non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조�
 ["Mesh::getGpuIndexCount"]
 category = "types_mesh"
 keywords = ["gpu", "buffer", "interop"]
-description.en = "Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering."
-description.ja = "現在 GPU インデックスバッファにアップロードされているインデックス数（非インデックスメッシュなら 0）。自前描画では getGpuIndexBuffer と組で使う。"
-description.ko = "현재 GPU 인덱스 버퍼에 업로드된 인덱스 수(비인덱스 메시면 0). 커스텀 렌더링에서는 getGpuIndexBuffer와 짝으로 쓴다."
+description.en = "Number of indices in the uploaded GPU list; pairs with getGpuIndexBuffer for custom rendering. TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists."
+description.ja = "GPU にアップロードしたリストのインデックス数。自前描画では getGpuIndexBuffer と組で使う。TriangleStrip と TriangleFan は三角形リストに、LineStrip と LineLoop は線リストに展開する。元のインデックスが無ければ 0..N-1（N は頂点数）を入力列とし、Points でも同じ連番を使う。独自のパイプラインでは三角形モードを三角形リスト、線モードを線リストとして描画する。"
+description.ko = "GPU에 업로드한 리스트의 인덱스 수. 커스텀 렌더링에서는 getGpuIndexBuffer와 함께 쓴다. TriangleStrip과 TriangleFan은 삼각형 리스트로, LineStrip과 LineLoop는 선 리스트로 확장한다. 원본 인덱스가 없으면 0..N-1(N은 정점 수)을 입력 시퀀스로 사용하며, Points에서도 같은 순차 인덱스를 사용한다. 커스텀 파이프라인에서는 삼각형 모드를 삼각형 리스트로, 선 모드를 선 리스트로 그려야 한다."
 related = ["Mesh::uploadToGpu", "Mesh::getGpuIndexBuffer", "Mesh::getGpuVertexCount"]
 
 ["Mesh::getGpuVertexCount"]
@@ -18226,9 +18226,9 @@ id가 `0`이다.
 ["Mesh::getGpuIndexBuffer"]
 category = "types_mesh"
 keywords = ["gpu", "buffer", "interop", "sokol", "sg_buffer"]
-description.en = "The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop)."
-description.ja = "メッシュを支える sokol-gfx インデックスバッファハンドル（非インデックスなら空ハンドル、高度な相互運用向け）。"
-description.ko = "메시를 뒷받침하는 sokol-gfx 인덱스 버퍼 핸들(비인덱스면 빈 핸들, 고급 상호운용용)."
+description.en = "The sokol-gfx buffer handle holding the uploaded list indices (advanced interop). TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Use getGpuIndexCount for the uploaded count. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists."
+description.ja = "アップロードしたリストのインデックスを保持する sokol-gfx バッファハンドル（高度な相互運用向け）。TriangleStrip と TriangleFan は三角形リストに、LineStrip と LineLoop は線リストに展開する。元のインデックスが無ければ 0..N-1（N は頂点数）を入力列とし、Points でも同じ連番を使う。アップロード済みの数は getGpuIndexCount で取得する。独自のパイプラインでは三角形モードを三角形リスト、線モードを線リストとして描画する。"
+description.ko = "업로드한 리스트 인덱스를 담는 sokol-gfx 버퍼 핸들(고급 상호운용용). TriangleStrip과 TriangleFan은 삼각형 리스트로, LineStrip과 LineLoop는 선 리스트로 확장한다. 원본 인덱스가 없으면 0..N-1(N은 정점 수)을 입력 시퀀스로 사용하며, Points에서도 같은 순차 인덱스를 사용한다. 업로드된 개수는 getGpuIndexCount로 얻는다. 커스텀 파이프라인에서는 삼각형 모드를 삼각형 리스트로, 선 모드를 선 리스트로 그려야 한다."
 related = ["Mesh::getGpuIndexCount", "Mesh::getGpuVertexBuffer", "Mesh::uploadToGpu"]
 
 ["Mesh::getGpuPointBuffer"]
