@@ -7293,7 +7293,8 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
                 _sapp_tc_win32_cleanup();
                 // This is what Windows does after we return; cleanup and logs
                 // are complete. Do not run DLL detach or guest static destructors.
-                TerminateProcess(GetCurrentProcess(), trussc::internal::appExitCode());
+                TerminateProcess(GetCurrentProcess(),
+                    trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
             } else {
                 _sapp_tc.app.quit_requested = false;
                 _sapp_tc.app.quit_ordered = false;
