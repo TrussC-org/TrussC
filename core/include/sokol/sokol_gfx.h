@@ -16243,15 +16243,11 @@ _SOKOL_PRIVATE void _sg_mtl_begin_render_pass(const sg_pass* pass, const _sg_att
     #endif
 }
 
-_SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
-    SOKOL_ASSERT(pass && atts);
+// [TrussC modification] Every committed frame must take an in-flight slot,
+// even when uploads are its only work. Use the same command buffer creation
+// and completion handler for the first pass and for a pass-less commit (#332).
+_SOKOL_PRIVATE void _sg_mtl_ensure_command_buffer(void) {
     SOKOL_ASSERT(_sg.mtl.cmd_queue);
-    SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
-    SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
-    SOKOL_ASSERT(nil == _sg.mtl.cur_drawable);
-    _sg_mtl_clear_state_cache();
-
-    // if this is the first pass in the frame, create one command buffer and blit-cmd-encoder for the entire frame
     if (nil == _sg.mtl.cmd_buffer) {
         // block until the oldest frame in flight has finished
         dispatch_semaphore_wait(_sg.mtl.sem, DISPATCH_TIME_FOREVER);
@@ -16267,6 +16263,19 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
             dispatch_semaphore_signal(_sg.mtl.sem);
         }];
     }
+}
+// [TrussC modification end]
+
+_SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachments_ptrs_t* atts) {
+    SOKOL_ASSERT(pass && atts);
+    SOKOL_ASSERT(_sg.mtl.cmd_queue);
+    SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
+    SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
+    SOKOL_ASSERT(nil == _sg.mtl.cur_drawable);
+    _sg_mtl_clear_state_cache();
+
+    // [TrussC modification] Shared with upload-only commits (#332).
+    _sg_mtl_ensure_command_buffer();
 
     // if this is first pass in frame, get uniform buffer base pointer
     if (0 == _sg.mtl.cur_ub_base_ptr) {
@@ -16325,10 +16334,12 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
     SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
     SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
 
-    // commit the frame's command buffer
-    if (_sg.mtl.cmd_buffer) {
-        [_sg.mtl.cmd_buffer commit];
-    }
+    // [TrussC modification] An upload-only frame still advances frame_index
+    // and the uniform ring. Acquire its slot and submit an empty command
+    // buffer so completion ordering also protects deferred resource GC (#332).
+    _sg_mtl_ensure_command_buffer();
+    [_sg.mtl.cmd_buffer commit];
+    // [TrussC modification end]
 
     // garbage-collect resources pending for release
     _sg_mtl_garbage_collect(_sg.frame_index);

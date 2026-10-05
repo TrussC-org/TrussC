@@ -3433,17 +3433,36 @@ static void _sapp_tc_stop_fallback_timer(void) {
     _sapp_tc.app.fallback_timer = nil;
 }
 
-static void _sapp_tc_create_main_window(void) {
+static bool _sapp_tc_create_main_window(void) {
     const sapp_desc* d = &_sapp_tc.app.desc;
     int slot = -1;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
     }
-    if (slot < 0) return;
+    if (slot < 0) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "Main window creation failed: no free window slot");
+        return false;
+    }
 
     _sapp_tc_window_t* w = new _sapp_tc_window_t();
     w->win_id = ++_sapp_tc.next_id;
     w->is_main = true;
+    auto fail = [w, slot](const char* operation) {
+        // These creation APIs have no NSError output parameter.
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "%s returned nil (no NSError available)", operation);
+        w->view.w = 0;
+        w->delegate.w = 0;
+        w->window.delegate = nil;
+        [w->link invalidate];
+        [w->window orderOut:nil];
+        _sapp_tc.windows[slot] = 0;
+        _sapp_tc.app.main = 0;
+        _sapp_tc.app.device = nil;
+        delete w;
+        return false;
+    };
     w->color_fmt = MTLPixelFormatRGB10A2Unorm;  /* TrussC 10-bit output */
     w->dpi_scale = 1.0f;
 
@@ -3462,6 +3481,7 @@ static void _sapp_tc_create_main_window(void) {
     w->desc.event_cb = _sapp_tc_main_event_tramp;
 
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
+    if (dev == nil) return fail("MTLCreateSystemDefaultDevice");
     _sapp_tc.app.device = dev;
 
     const NSRect rect = NSMakeRect(0, 0, width, height);
@@ -3469,15 +3489,18 @@ static void _sapp_tc_create_main_window(void) {
                                     NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
     w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
+    if (w->window == nil) return fail("NSWindow initWithContentRect");
     w->window.title = [NSString stringWithUTF8String:_sapp_tc.app.window_title];
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     w->window.acceptsMouseMovedEvents = YES;
     w->window.restorable = YES;
 
     _sapp_tc_view* view = [[_sapp_tc_view alloc] initWithFrame:rect];
+    if (view == nil) return fail("Main window view initWithFrame");
     view.w = w;
     w->view = view;
     w->layer = [CAMetalLayer layer];
+    if (w->layer == nil) return fail("CAMetalLayer layer");
     w->layer.device = dev;
     w->layer.pixelFormat = w->color_fmt;
     w->layer.opaque = YES;
@@ -3490,6 +3513,7 @@ static void _sapp_tc_create_main_window(void) {
     [w->window makeFirstResponder:view];
 
     _sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new];
+    if (del == nil) return fail("Main window delegate allocation");
     del.w = w;
     w->delegate = del;
     w->window.delegate = del;
@@ -3497,7 +3521,6 @@ static void _sapp_tc_create_main_window(void) {
     [w->window center];
     _sapp_tc.windows[slot] = w;
     _sapp_tc.app.main = w;
-    _sapp_tc.app.valid = true;
 
     if (d->fullscreen) {
         _sapp_tc.app.fullscreen = true;
@@ -3506,14 +3529,23 @@ static void _sapp_tc_create_main_window(void) {
     [w->window makeKeyAndOrderFront:nil];
     _sapp_tc_update_main_dimensions(false);     /* silent startup sizing */
 
+    /* A zero-sized view defers texture allocation until it has a drawable size. */
+    if (w->fb_width > 0 && w->fb_height > 0) {
+        if (w->depth_tex == nil) return fail("Metal depth texture creation");
+        if (d->sample_count > 1 && w->msaa_tex == nil) return fail("Metal MSAA texture creation");
+    }
+
     /* window #0's vsync source; swap_interval > 1 divides the display rate */
     w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
+    if (w->link == nil) return fail("Main window display link creation");
     if (d->swap_interval > 1) {
         const float maxfps = (float)[NSScreen mainScreen].maximumFramesPerSecond;
         const float p = maxfps / (float)d->swap_interval;
         w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
     }
     [w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    _sapp_tc.app.valid = true;
+    return true;
 }
 
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
@@ -3525,7 +3557,15 @@ static void _sapp_tc_create_main_window(void) {
     /* activation policy must be set before window creation (sokol #1500) */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     _sapp_tc_init_cursors();
-    _sapp_tc_create_main_window();
+    if (!_sapp_tc_create_main_window()) {
+        /* Wake the event loop after stopping it so sapp_run can report failure. */
+        [NSApp stop:nil];
+        NSEvent* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+            location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+            context:nil subtype:0 data1:0 data2:0];
+        [NSApp postEvent:event atStart:YES];
+        return;
+    }
     [NSEvent setMouseCoalescingEnabled:NO];
     [NSApp activateIgnoringOtherApps:YES];
     /* focus workaround (sokol #982): make sure the window has focus even if
@@ -3555,7 +3595,7 @@ static void _sapp_tc_create_main_window(void) {
     }
     /* user cleanup runs BEFORE any GPU object release (the app shuts down
        sokol_gfx here; we only hold the device/layer references) */
-    if (!_sapp_tc.app.cleanup_called) {
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
@@ -3794,7 +3834,14 @@ void sapp_run(const sapp_desc* desc) {
             return event;
         }];
     [NSApp run];
-    /* never returns; cleanup runs in applicationWillTerminate */
+    /* Failed startup stops the loop; terminate: would instead exit with 0. */
+    if (!_sapp_tc.app.valid) {
+        [_sapp_tc.app.dlg applicationWillTerminate:nil];
+        NSApp.delegate = nil;
+        _sapp_tc.app.dlg = nil;
+        return;
+    }
+    /* Normal termination never returns; cleanup runs in applicationWillTerminate. */
 }
 
 bool sapp_isvalid(void) {
@@ -6673,6 +6720,10 @@ static bool _sapp_tc_d3d11_create_device(void) {
         hr = _sapp_tc_d3d11_try_create_device(flags & ~(UINT)D3D11_CREATE_DEVICE_DEBUG);
     }
 #endif
+    if (FAILED(hr)) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "D3D11CreateDevice failed (HRESULT 0x%08lX)", (unsigned long)hr);
+    }
     return SUCCEEDED(hr);
 }
 
@@ -6685,11 +6736,19 @@ static void _sapp_tc_d3d11_destroy_render_targets(_sapp_tc_window_t* w) {
     _SAPP_TC_RELEASE(w->rt);
 }
 
+/* Log only terminal failures: compatibility retries happen before this. */
+static bool _sapp_tc_d3d11_check(HRESULT hr, const char* operation) {
+    if (SUCCEEDED(hr)) return true;
+    _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                 "error: ", "%s failed (HRESULT 0x%08lX)", operation, (unsigned long)hr);
+    return false;
+}
+
 static bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t* w) {
     ID3D11Device* dev = _sapp_tc.app.device;
     if (!dev || !w->swap_chain) return false;
-    if (FAILED(w->swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&w->rt))) return false;
-    if (FAILED(dev->CreateRenderTargetView((ID3D11Resource*)w->rt, NULL, &w->rtv))) return false;
+    if (!_sapp_tc_d3d11_check(w->swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&w->rt), "GetBuffer")) return false;
+    if (!_sapp_tc_d3d11_check(dev->CreateRenderTargetView((ID3D11Resource*)w->rt, NULL, &w->rtv), "CreateRenderTargetView")) return false;
     D3D11_TEXTURE2D_DESC td;
     memset(&td, 0, sizeof(td));
     td.Width = (UINT)(w->fb_width > 0 ? w->fb_width : 1);
@@ -6704,13 +6763,13 @@ static bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t* w) {
            separate MSAA texture, sokol_gfx resolves into the backbuffer */
         td.Format = w->color_fmt;
         td.BindFlags = D3D11_BIND_RENDER_TARGET;
-        if (FAILED(dev->CreateTexture2D(&td, NULL, &w->msaa_rt))) return false;
-        if (FAILED(dev->CreateRenderTargetView((ID3D11Resource*)w->msaa_rt, NULL, &w->msaa_rtv))) return false;
+        if (!_sapp_tc_d3d11_check(dev->CreateTexture2D(&td, NULL, &w->msaa_rt), "CreateTexture2D")) return false;
+        if (!_sapp_tc_d3d11_check(dev->CreateRenderTargetView((ID3D11Resource*)w->msaa_rt, NULL, &w->msaa_rtv), "CreateRenderTargetView")) return false;
     }
     td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    if (FAILED(dev->CreateTexture2D(&td, NULL, &w->ds))) return false;
-    if (FAILED(dev->CreateDepthStencilView((ID3D11Resource*)w->ds, NULL, &w->dsv))) return false;
+    if (!_sapp_tc_d3d11_check(dev->CreateTexture2D(&td, NULL, &w->ds), "CreateTexture2D")) return false;
+    if (!_sapp_tc_d3d11_check(dev->CreateDepthStencilView((ID3D11Resource*)w->ds, NULL, &w->dsv), "CreateDepthStencilView")) return false;
     return true;
 }
 
@@ -6737,12 +6796,12 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
     IDXGIDevice1* dxgi_device = 0;
     IDXGIAdapter* adapter = 0;
     IDXGIFactory2* factory = 0;
-    if (FAILED(_sapp_tc.app.device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgi_device))) {
+    if (!_sapp_tc_d3d11_check(_sapp_tc.app.device->QueryInterface(__uuidof(IDXGIDevice1), (void**)&dxgi_device), "QueryInterface(IDXGIDevice1)")) {
         return false;
     }
     bool ok = false;
-    if (SUCCEEDED(dxgi_device->GetAdapter(&adapter)) &&
-        SUCCEEDED(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory))) {
+    if (_sapp_tc_d3d11_check(dxgi_device->GetAdapter(&adapter), "GetAdapter") &&
+        _sapp_tc_d3d11_check(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory), "GetParent(IDXGIFactory2)")) {
         DXGI_SWAP_CHAIN_DESC1 d;
         memset(&d, 0, sizeof(d));
         d.Width = (UINT)(w->fb_width > 0 ? w->fb_width : 1);
@@ -6763,7 +6822,7 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
             hr = factory->CreateSwapChainForHwnd((IUnknown*)_sapp_tc.app.device,
                 w->hwnd, &d, NULL, NULL, &w->swap_chain);
         }
-        if (SUCCEEDED(hr)) {
+        if (_sapp_tc_d3d11_check(hr, "CreateSwapChainForHwnd")) {
             w->swapchain_flags = d.Flags;
             /* fullscreen is driven here (borderless); kill DXGI's Alt-Enter */
             factory->MakeWindowAssociation(w->hwnd, DXGI_MWA_NO_ALT_ENTER | DXGI_MWA_NO_PRINT_SCREEN);
@@ -7358,9 +7417,8 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 }
 
 /*-- window creation / destruction ------------------------------------------*/
-static void _sapp_tc_win32_ensure_wndclass(void) {
-    if (_sapp_tc.wndclass_registered) return;
-    _sapp_tc.wndclass_registered = true;
+static bool _sapp_tc_win32_ensure_wndclass(void) {
+    if (_sapp_tc.wndclass_registered) return true;
     WNDCLASSW wndclassw;
     memset(&wndclassw, 0, sizeof(wndclassw));
     wndclassw.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
@@ -7369,7 +7427,17 @@ static void _sapp_tc_win32_ensure_wndclass(void) {
     wndclassw.hCursor = LoadCursor(NULL, IDC_ARROW);
     wndclassw.hIcon = LoadIcon(NULL, IDI_WINLOGO);
     wndclassw.lpszClassName = L"SOKOLAPP_TC";
-    RegisterClassW(&wndclassw);
+    if (!RegisterClassW(&wndclassw)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_CLASS_ALREADY_EXISTS) {
+            _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                         "error: ", "RegisterClassW failed (Win32 error %lu, HRESULT 0x%08lX)",
+                         (unsigned long)error, (unsigned long)HRESULT_FROM_WIN32(error));
+            return false;
+        }
+    }
+    _sapp_tc.wndclass_registered = true;
+    return true;
 }
 
 /* create the HWND at the desc's logical size: first against 96 DPI, then --
@@ -7377,7 +7445,7 @@ static void _sapp_tc_win32_ensure_wndclass(void) {
    the window actually landed on (the standard create-then-resize dance) */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
         DWORD style, DWORD ex_style, int x, int y, bool use_default_size) {
-    _sapp_tc_win32_ensure_wndclass();
+    if (!_sapp_tc_win32_ensure_wndclass()) return false;
     int outer_w = CW_USEDEFAULT;
     int outer_h = CW_USEDEFAULT;
     if (!use_default_size) {
@@ -7391,7 +7459,13 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
         (y >= 0) ? y : CW_USEDEFAULT,
         outer_w, outer_h,
         NULL, NULL, GetModuleHandleW(NULL), w);
-    if (!w->hwnd) return false;
+    if (!w->hwnd) {
+        const DWORD error = GetLastError();
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "CreateWindowExW failed (Win32 error %lu, HRESULT 0x%08lX)",
+                     (unsigned long)error, (unsigned long)HRESULT_FROM_WIN32(error));
+        return false;
+    }
     w->hmonitor = MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST);
     _sapp_tc_win32_update_refresh(w);
     _sapp_tc_win32_update_scale(w);
@@ -7434,7 +7508,11 @@ static bool _sapp_tc_win32_create_main_window(void) {
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == 0) { slot = i; break; }
     }
-    if (slot < 0) return false;
+    if (slot < 0) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                     "error: ", "Main window creation failed: no free window slot");
+        return false;
+    }
 
     _sapp_tc_window_t* w = new _sapp_tc_window_t();
     w->win_id = ++_sapp_tc.next_id;
@@ -7774,7 +7852,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
-    if (!_sapp_tc.app.cleanup_called) {
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
@@ -11056,7 +11134,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GL/window teardown (the app shuts down
        sokol_gfx here, which still needs a current context) */
-    if (!_sapp_tc.app.cleanup_called) {
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
@@ -11891,7 +11969,7 @@ _SOKOL_PRIVATE void _sapp_tc_call_frame(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
-    if (!_sapp_tc.cleanup_called) {
+    if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
         if (_sapp_tc.desc.cleanup_cb) {
             _sapp_tc.desc.cleanup_cb();
         } else if (_sapp_tc.desc.cleanup_userdata_cb) {

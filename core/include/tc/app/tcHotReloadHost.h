@@ -690,8 +690,9 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
 #endif
     appExitCode() = 0;
+    appSetupCalled() = false;
     sapp_run(&desc);
-    return appExitCode();
+    return appSetupCalled() ? appExitCode() : 1;
 }
 
 } // namespace internal

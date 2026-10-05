@@ -45,6 +45,7 @@
 
 // Headless mode state (must be included early for graphics skip checks)
 #include "tc/app/tcHeadlessState.h"
+#include "tc/app/tcGpuFrame.h"
 
 // Platform-specific headers for memory usage
 #if defined(__APPLE__)
@@ -170,6 +171,9 @@ enum class TextureWrap {
 // a Windows hot reload guest DLL would get its own copy of an inline variable
 // (docs/ARCHITECTURE.md, "One instance per process").
 namespace internal {
+    // Shared frame-end tail for drawn and non-drawing ticks (#332).
+    void endGpuFrame();
+
     // Bitmap font GPU state.
     struct BitmapFontAtlas {
         sg_image   texture = {};
@@ -2137,18 +2141,15 @@ namespace internal {
 // Windows also tga. Unsupported or missing extensions append .png and warn
 // with the actual destination and supported formats.
 //
-// Web: not implemented (no canvas readback). Always returns false (nothing is
-// queued or written) and warns once, pointing to the browser's own screenshot
-// feature.
-TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const std::filesystem::path& path) {
-#ifdef __EMSCRIPTEN__
-    // Web capture is not implemented: nothing reads the canvas back (see
-    // platform/web/tcPlatform_web.cpp). So fail up front instead of queuing a
-    // capture that would never write a file while this call reported success.
-    // The web captureWindowToFile() stub returns false and warns once.
-    return internal::captureWindowToFile(path);
-#else
-    // Resolve relative paths up front so the deferred worker gets an absolute one.
+// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
+// name gets a timestamped default. Returns true when queued; later failures
+// (including a tainted canvas) are logged. The browser may ask for permission
+// to allow multiple downloads.
+inline bool saveScreenshot(const std::filesystem::path& path) {
+    // Resolve native destinations or web download names before queuing.
+    #ifdef __EMSCRIPTEN__
+    std::filesystem::path resolved = internal::resolveScreenshotDownloadName(path);
+    #else
     std::filesystem::path resolved = internal::resolveScreenshotPath(path);
     // Inside the app bundle: refused, with an Error naming getUserDataPath()
     if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
@@ -2165,6 +2166,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
             return false;
         }
     }
+#endif
 
     internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
     // Guarantee a present() (and thus the afterFrame drain) even when paused.
@@ -2175,7 +2177,6 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
         redraw();
     }
     return true;
-#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -2393,6 +2394,9 @@ namespace internal {
         #endif
     }
 
+    // Host launcher state; survives cleanup so runApp can report a failed start.
+    bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
+
     inline void _setup_cb() {
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
@@ -2402,6 +2406,7 @@ namespace internal {
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
         setup();
+        appSetupCalled() = true;
 
         // App's pre-setup hook resolves the data path root right before its
         // setup() runs. getDataPath() also probes on an earlier call; probing
@@ -2706,6 +2711,11 @@ namespace internal {
                 loop.redrawCount--;
             }
         } else {
+            // Offscreen passes/uploads also need a frame boundary, including
+            // work recorded by event handlers before this tick (#332).
+            if (tc_internal_gpu_frame_has_work()) {
+                internal::endGpuFrame();
+            }
             // Skip Present when not drawing (prevent double-buffer flickering)
             sapp_skip_present();
         }
@@ -3259,8 +3269,14 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #ifdef _WIN32
     internal::ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
 #endif
+    internal::appSetupCalled() = false;
     sapp_run(&desc);
-    return internal::appExitCode();
+#ifdef __EMSCRIPTEN__
+    // The browser owns the asynchronous loop; returning is not app shutdown.
+    return 0;
+#else
+    return internal::appSetupCalled() ? internal::appExitCode() : 1;
+#endif
 }
 #endif
 

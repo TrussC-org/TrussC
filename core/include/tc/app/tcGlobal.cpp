@@ -428,19 +428,7 @@ void reportSglStackErrors(sgl_error_t err, bool inFbo) {
 }
 } // namespace internal
 
-void present() {
-    if (headless::isActive()) return;
-
-    // Final pass of the frame — nothing suspends it, so no preserve hint
-    // (keeps the normal one-pass frame's store behavior unchanged).
-    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
-        beginSwapchainPassInternal(false);
-    }
-
-    internal::flushDeferredShaderDraws();
-
-    events().onRender.notify();
-
+void internal::endGpuFrame() {
     sgl_error_t err = sgl_error();
     internal::reportSglStackErrors(err, false);
     if (err.vertices_full || err.commands_full) {
@@ -455,11 +443,6 @@ void present() {
         }
     }
 
-    sg_end_pass();
-    internal::currentWindowContext().inSwapchainPass = false;
-    // Frame is over: the next swapchain pass start belongs to the next frame
-    // and must CLEAR again with swapchainClearValue (see issue #191).
-    internal::currentWindowContext().swapchainPassStartedThisFrame = false;
     sg_commit();
 
     // Now that every deferred draw (swapchain layers above, FBO passes at
@@ -467,6 +450,27 @@ void present() {
     // resources released during this frame (temporary Mesh draws, texture
     // re-uploads, atlas growth, sampler changes, ...).
     internal::drainPendingGpuDestroys();
+}
+
+void present() {
+    if (headless::isActive()) return;
+
+    // Final pass of the frame — nothing suspends it, so no preserve hint
+    // (keeps the normal one-pass frame's store behavior unchanged).
+    if (!internal::currentWindowContext().inSwapchainPass && !internal::currentWindowContext().inFboPass) {
+        beginSwapchainPassInternal(false);
+    }
+
+    internal::flushDeferredShaderDraws();
+
+    events().onRender.notify();
+
+    sg_end_pass();
+    internal::currentWindowContext().inSwapchainPass = false;
+    // Frame is over: the next swapchain pass start belongs to the next frame
+    // and must CLEAR again with swapchainClearValue (see issue #191).
+    internal::currentWindowContext().swapchainPassStartedThisFrame = false;
+    internal::endGpuFrame();
 
     // Frame end (#232): whatever this frame left pushed is dropped here (with
     // a warning), so a missing pop can't leak into the next frame; sokol_gl's
@@ -1438,6 +1442,12 @@ float& farClipOverride() {
 bool& touchAsMouse() {
     static bool enabled = true;
     return enabled;
+}
+
+// Whether the setup callback ran in the current launch (#394).
+bool& appSetupCalled() {
+    static bool called = false;
+    return called;
 }
 
 DataPathState& dataPathState() {

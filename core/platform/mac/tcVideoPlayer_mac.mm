@@ -1,6 +1,9 @@
 // =============================================================================
 // tcVideoPlayer_mac.mm - VideoPlayer macOS implementation (AVFoundation)
 // =============================================================================
+// AVPlayerItemVideoOutput supplies BGRA pixel buffers, converted to RGBA on
+// the CPU and copied to VideoPlayer's pixel buffer with optional gamma correction.
+// VideoPlayer::update() uploads that buffer to a sokol_gfx texture.
 
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
