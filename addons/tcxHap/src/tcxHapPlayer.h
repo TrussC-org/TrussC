@@ -182,7 +182,7 @@ public:
     HapPlayer() = default;
     ~HapPlayer() { close(); }
 
-    // Non-copyable, move-enabled
+    // Non-copyable, move-enabled. onError listeners are not moved.
     HapPlayer(const HapPlayer&) = delete;
     HapPlayer& operator=(const HapPlayer&) = delete;
 
@@ -354,7 +354,7 @@ public:
 
     void update() override {
         if (!initialized_) return;
-        if (dispatchPlaybackError() || errorStopped_) return;
+        if (dispatchPlaybackError("HapPlayer")) return;
 
         // Only reset frameNew_ when actively playing
         // (preserve frameNew_ set by setFrame() for encoding workflows)
@@ -398,7 +398,7 @@ public:
                 }
             }
         }
-        dispatchPlaybackError();
+        dispatchPlaybackError("HapPlayer");
     }
 
     // =========================================================================
@@ -866,6 +866,10 @@ private:
                 width_, height_,
                 frameBuffer_.data(), frameBuffer_.size(),
                 outFormat)) {
+            if (hapDecoder_.lastErrorCode_ == HapResult_Bad_Frame) {
+                tc::logWarning("HapPlayer") << "Skipping invalid HAP frame " << frameIndex;
+                return false;
+            }
             reportPlaybackError("Failed to decode HAP video frame", hapDecoder_.lastErrorCode_);
             return false;
         }

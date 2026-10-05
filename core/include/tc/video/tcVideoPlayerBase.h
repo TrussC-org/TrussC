@@ -12,6 +12,7 @@
 #include "tc/gpu/tcHasTexture.h"
 #include "tc/events/tcEvent.h"
 #include "tc/utils/tcLoadResult.h"
+#include "tc/utils/tcLog.h"
 
 namespace trussc {
 
@@ -115,6 +116,7 @@ public:
     // =========================================================================
 
     // Call update() on the main thread to receive runtime errors.
+    // onError listeners are not moved; they stay with their original object.
     Event<VideoErrorEventArgs> onError;
     bool hasError() const { return !errorMessage_.empty(); }
     const std::string& getErrorMessage() const { return errorMessage_; }
@@ -282,7 +284,7 @@ protected:
 
     // Derived update() calls this on the main thread, outside backend locks.
     // Return immediately when true: a listener may close or reload this player.
-    bool dispatchPlaybackError() {
+    bool dispatchPlaybackError(const char* logModule = "VideoPlayer") {
         auto error = playbackErrors_.take();
         if (error.message.empty() || errorStopped_) return false;
         errorMessage_ = error.message;
@@ -292,6 +294,7 @@ protected:
         paused_ = false;
         frameNew_ = false;
         done_ = false;
+        logError(logModule) << error.message << " (code " << error.errorCode << ")";
         onError.notify(error);
         return true;
     }

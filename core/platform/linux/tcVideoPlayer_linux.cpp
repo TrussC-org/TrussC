@@ -67,7 +67,7 @@ public:
     void update(VideoPlayer* player);
 
     bool hasNewFrame() const { return hasNewFrame_; }
-    bool isFinished() const { return isFinished_; }
+    bool isFinished() const { return isFinished_ && !isPlaying_; }
 
     float getPosition() const;
     void setPosition(float pct);
@@ -630,7 +630,7 @@ void TCVideoPlayerImpl::decodeThread() {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [this] {
                 return shouldStop_ ||
-                       (isPlaying_ && !isPaused_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
+                       (isPlaying_ && !isPaused_ && !isFinished_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
                        seekRequested_;
             });
         }
@@ -645,6 +645,7 @@ void TCVideoPlayerImpl::decodeThread() {
             int64_t timestamp = (int64_t)(target / av_q2d(timeBase_));
             av_seek_frame(formatCtx_, videoStreamIndex_, timestamp, AVSEEK_FLAG_BACKWARD);
             avcodec_flush_buffers(codecCtx_);
+            isFinished_ = false;
 
             // Any packet held from a previous EAGAIN is invalidated by the seek.
             if (packetPending_) {
@@ -758,12 +759,27 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
                     }
                     continue;
                 }
-                if (rret == AVERROR(EAGAIN)) return true;
+                if (rret == AVERROR(EAGAIN)) {
+                    std::unique_lock<std::mutex> lock(mutex_);
+                    cv_.wait_for(lock, std::chrono::milliseconds(10), [this] {
+                        return shouldStop_ || seekRequested_ || !isPlaying_ || isPaused_;
+                    });
+                    return true;
+                }
                 if (rret < 0) {
                     decodeError("av_read_frame", rret);
                     av_strerror(rret, errbuf, sizeof(errbuf));
                     logWarning("VideoPlayer") << "av_read_frame ended: " << errbuf
                                               << " (pts=" << currentPts_ << ")";
+                    return false;
+                }
+                // Demuxers can return a short packet instead of a read error
+                // at a truncated file's end. Distinguish that incomplete read
+                // from a complete packet whose encoded contents are invalid.
+                if ((packet_->flags & AV_PKT_FLAG_CORRUPT) && formatCtx_->pb &&
+                    avio_feof(formatCtx_->pb)) {
+                    av_packet_unref(packet_);
+                    decodeError("av_read_frame (truncated packet)", AVERROR_INVALIDDATA);
                     return false;
                 }
                 if (packet_->stream_index != videoStreamIndex_) {
@@ -783,6 +799,10 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             av_packet_unref(packet_);
             packetPending_ = false;
 
+            if (sret == AVERROR_INVALIDDATA) {
+                logWarning("VideoPlayer") << "avcodec_send_packet: skipping invalid packet";
+                continue;
+            }
             if (sret < 0 && sret != AVERROR_EOF) {
                 decodeError("avcodec_send_packet", sret);
                 av_strerror(sret, errbuf, sizeof(errbuf));
@@ -796,6 +816,10 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         if (ret == AVERROR_EOF) {
             // Decoder fully drained after EOF was signalled upstream.
             return false;
+        }
+        if (ret == AVERROR_INVALIDDATA) {
+            logWarning("VideoPlayer") << "avcodec_receive_frame: skipping invalid frame";
+            continue;
         }
         if (ret < 0) {
             decodeError("avcodec_receive_frame", ret);

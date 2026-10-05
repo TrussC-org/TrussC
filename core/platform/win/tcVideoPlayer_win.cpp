@@ -837,7 +837,10 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             break;
 
         case MF_MEDIA_ENGINE_EVENT_ERROR:
-            playbackErrors_.report("Media Foundation playback error", static_cast<int64_t>(param1));
+            playbackErrors_.report("Media Foundation playback error (MF_MEDIA_ENGINE_ERR " +
+                                   std::to_string(param1) + ")",
+                                   param2 ? static_cast<int64_t>(static_cast<HRESULT>(param2))
+                                          : static_cast<int64_t>(param1));
             break;
 
         case MF_MEDIA_ENGINE_EVENT_RESOURCELOST:

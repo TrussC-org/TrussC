@@ -147,13 +147,20 @@ public:
 };
 fs::path videoPath;
 bool expectVideoError = false;
+bool expectBadPacket = false;
 class VideoCheckApp : public App {
 public:
     void setup() override {
+        logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.message.find("[VideoPlayer]") != 0) return;
+            if (log.level == LogLevel::Error) ++errorLogs;
+            if (log.level == LogLevel::Warning && log.message.find("skipping invalid") != string::npos) ++badPackets;
+        });
         player.setUseHwAccel(false);
         player.setResyncThreshold(0);
         listener = player.onError.listen([&](VideoErrorEventArgs& error) {
             ++events;
+            check("real backend logs before notification", errorLogs == 1);
             check("real backend provides message and code", !error.message.empty() && error.errorCode != 0);
         });
         if (!player.load(videoPath)) {
@@ -164,12 +171,50 @@ public:
         player.play();
     }
     void update() override {
+        if (checkingRecoverySeek) {
+            player.update();
+            check("seek after failure uploads before play", !player.isPlaying() && player.hasError() &&
+                  sg_query_image_info(player.getTexture().getImage()).upd_frame_index != seekUploadFrame);
+            check("recovery seek does not repeat error", events == 1 && errorLogs == 1);
+            finish();
+            return;
+        }
+        const auto texture = player.getTexture().getImage();
+        vector<unsigned char> before;
+        if (player.getPixels()) {
+            const size_t size = static_cast<size_t>(player.getWidth() * player.getHeight() * 4);
+            before.assign(player.getPixels(), player.getPixels() + size);
+        }
         player.update();
         if (!player.hasError() && !player.isDone()) return;
+        if (player.hasError()) {
+            check("real failure keeps last pixels and texture", !before.empty() &&
+                  equal(before.begin(), before.end(), player.getPixels()) &&
+                  texture.id == player.getTexture().getImage().id);
+        }
         check("real backend distinguishes failure from EOF", player.hasError() == expectVideoError);
         check("real backend stops", !player.isPlaying());
         check("real backend retains loaded frame", player.isLoaded() && player.isReady());
+        for (int i = 0; i < 3; ++i) player.update();
         check("real backend reports once", events == (expectVideoError ? 1 : 0));
+        check("real backend logs once per error stop", errorLogs == (expectVideoError ? 1 : 0));
+        if (expectBadPacket) {
+            check("one invalid packet was skipped", badPackets == 1);
+            check("frames after bad packet reach EOF", player.isDone() && player.getCurrentFrame() >= player.getTotalFrames() - 1);
+        }
+        if (player.hasError()) {
+            // Two seeks in one app frame force the second poster upload to
+            // defer to update(), exercising the removed errorStopped_ guard.
+            player.setPosition(0);
+            player.setPosition(0);
+            seekUploadFrame = sg_query_image_info(player.getTexture().getImage()).upd_frame_index;
+            checkingRecoverySeek = true;
+            return;
+        }
+        finish();
+    }
+private:
+    void finish() {
         if (player.hasError()) {
             auto message = player.getErrorMessage();
             check("failed reload stays a load failure", !player.load(videoPath / "missing-file"));
@@ -182,7 +227,12 @@ public:
 private:
     VideoPlayer player;
     EventListener listener;
+    EventListener logger;
+    atomic<int> errorLogs{0};
+    atomic<int> badPackets{0};
     int events = 0;
+    bool checkingRecoverySeek = false;
+    uint32_t seekUploadFrame = 0;
 };
 } // namespace
 
@@ -190,6 +240,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc > 2 && strcmp(argv[1], "--video-check") == 0) {
         videoPath = fs::absolute(argv[2]);
         expectVideoError = argc > 3 && strcmp(argv[3], "error") == 0;
+        expectBadPacket = argc > 3 && strcmp(argv[3], "bad-packet") == 0;
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);

@@ -1,9 +1,14 @@
-"""Create a moov-first truncated copy of the bundled HAP test movie."""
+"""Create a truncated or one-bad-packet copy of the bundled HAP test movie."""
 from pathlib import Path
 import struct
-import sys
+import argparse
 
-source, destination = map(Path, sys.argv[1:])
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("source", type=Path)
+parser.add_argument("destination", type=Path)
+parser.add_argument("--bad-packet", action="store_true")
+args = parser.parse_args()
+source, destination = args.source, args.destination
 data = bytearray(source.read_bytes())
 
 
@@ -36,6 +41,13 @@ offsets = [u32(stco + 16 + 4 * i) for i in range(u32(stco + 12))]
 stsz = next(offset for offset, kind in atoms if kind == b"stsz")
 size = u32(stsz + 12)
 assert size and len(offsets) >= 3
+if args.bad_packet:
+    # Preserve container/sample lengths and every other packet. An invalid
+    # compressor with a valid texture format reaches HapDecode/FFmpeg decode.
+    data[offsets[2] + 3] &= 0x0F
+    destination.write_bytes(data)
+    raise SystemExit(0)
+
 cut = offsets[2] + size // 2
 moov_size = u32(moov)
 assert moov + moov_size == len(data)

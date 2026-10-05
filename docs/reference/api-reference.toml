@@ -19347,9 +19347,9 @@ description.ja = "バックエンド固有のエラーコード。取得でき�
 description.ko = "백엔드별 오류 코드. 코드가 없으면 0이며 백엔드 간 공통 값이 아니다."
 
 ["VideoPlayerBase::onError"]
-description.en = "Runtime failure event, delivered once per error stop by update() on the main thread. Playback stops without unloading, rewinding, or replacing the last frame. The app may seek, play again, or reload; there is no automatic retry. Keep calling update() on the main thread to receive errors. Normal EOF and stalls alone are not errors."
-description.ja = "再生時エラーによる停止ごとに一度、メインスレッドの update() から通知する。読み込み状態・位置・最後のフレームを保持して停止する。アプリ側でシーク・再生再開・再読み込みを選択でき、自動再試行はしない。通知を受け取るにはメインスレッドで update() を呼び続ける。正常な EOF や単なる停滞はエラーではない。"
-description.ko = "재생 오류로 정지할 때마다 메인 스레드의 update()에서 한 번 알린다. 로드 상태, 위치, 마지막 프레임을 유지한다. 앱이 탐색, 재생 재개, 다시 로드를 선택하며 자동 재시도는 없다. 오류를 받으려면 메인 스레드에서 update()를 계속 호출한다. 정상 EOF나 단순 정체는 오류가 아니다."
+description.en = "Runtime failure event, delivered once per error stop by update() on the main thread. Playback stops without unloading, rewinding, or replacing the last frame. The app may seek, play again, or reload; there is no automatic retry. Keep calling update() on the main thread to receive errors. Normal EOF and stalls alone are not errors. Isolated invalid packets/frames are warned and skipped. onError listeners are not moved."
+description.ja = "再生時エラーによる停止ごとに一度、メインスレッドの update() から通知する。読み込み状態・位置・最後のフレームを保持して停止する。アプリ側でシーク・再生再開・再読み込みを選択でき、自動再試行はしない。通知を受け取るにはメインスレッドで update() を呼び続ける。正常な EOF や単なる停滞はエラーではない。単独の破損パケット・フレームは警告して読み飛ばす。onError リスナーはムーブされない。"
+description.ko = "재생 오류로 정지할 때마다 메인 스레드의 update()에서 한 번 알린다. 로드 상태, 위치, 마지막 프레임을 유지한다. 앱이 탐색, 재생 재개, 다시 로드를 선택하며 자동 재시도는 없다. 오류를 받으려면 메인 스레드에서 update()를 계속 호출한다. 정상 EOF나 단순 정체는 오류가 아니다. 개별 손상 패킷/프레임은 경고 후 건너뛴다. onError 리스너는 이동되지 않는다."
 
 ["VideoPlayerBase::hasError"]
 description.en = "Whether update() has delivered a runtime playback failure. Cleared by a successful load() or close(), retained through seek and play()."

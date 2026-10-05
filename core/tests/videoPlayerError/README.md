@@ -14,13 +14,18 @@ allCoreTests videoPlayerError
 allCoreTests videoPlayerError --gpu-check
 allCoreTests videoPlayerError --video-check path/to/working.mov
 allCoreTests videoPlayerError --video-check path/to/truncated.mov error
+allCoreTests videoPlayerError --video-check path/to/one-bad-packet.mov bad-packet
 ```
 
 The optional GPU check compares FBO pixels before and after an injected error.
 The real-player check waits for explicit failure or normal EOF. Run graphical
 checks under Xvfb on Linux and apply an external process timeout for hangs.
 A truncated file that the backend treats as normal EOF is intentionally not
-classified as an error; choose one that produces an explicit decoder failure.
+classified as an error; choose one that produces an explicit read failure.
+The `bad-packet` mode requires one invalid-packet/frame warning, no error event
+or error log, and playback reaching the last frame and normal EOF. The error
+mode also checks one runtime error log, retained pixels/texture, and a recovery
+seek uploading its poster on a subsequent update before `play()`.
 
 To recreate the Linux fixture used here (a HAP MOV with its third video sample
 cut in half), run from the repository root:
@@ -28,19 +33,17 @@ cut in half), run from the repository root:
 ```sh
 python3 core/tests/videoPlayerError/make-fixture.py \
   addons/tcxHap/tests/bin/data/sine_sowt.mov truncated.mov
+python3 core/tests/videoPlayerError/make-fixture.py --bad-packet \
+  addons/tcxHap/tests/bin/data/sine_sowt.mov one-bad-packet.mov
 ```
 
 Real display/platform checks required by the Decision remain manual: run a
 truncated supported video on Windows, macOS/iOS, Linux and Web, and tcxHap.
-Check event count/thread, `hasError()`, `!isPlaying()`, retained picture and load
+Check one `onError` and one `logError` line per failure, callback thread,
+`hasError()`, `!isPlaying()`, retained picture and load
 state, and app-directed retry/reload. On Windows also check an explicit
 resource/device-loss signal. Normal EOF and temporary stalls must not report
 an error.
 
-A Node mock executes the Web backend's actual element-creation script and
-checks error message/code capture, pause, preserved readiness, reset on load,
-and rejection of stale events. From the repository root:
-
-```sh
-node core/tests/videoPlayerError/check-web-error.js
-```
+Also check that a file containing one bad packet keeps playing on each platform.
+Web error handling must be checked in a real browser.

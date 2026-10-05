@@ -36,7 +36,7 @@ public:
     VideoPlayer() = default;
     ~VideoPlayer() { close(); }
 
-    // Move-enabled
+    // Move-enabled. onError listeners are not moved.
     VideoPlayer(VideoPlayer&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -165,7 +165,7 @@ public:
         if (!initialized_) return;
 
         frameNew_ = false;
-        if (dispatchPlaybackError() || errorStopped_) return;
+        if (dispatchPlaybackError()) return;
 
         // Platform-specific update
         updatePlatform();
@@ -410,6 +410,9 @@ protected:
         // seek still returns the OLD position. Remember the target: the
         // poster logic in play() uses it until a live frame supersedes it.
         pendingSeekSec_ = pct * getDurationPlatform();
+        // A failed backend stays paused until play(). Use the existing poster
+        // path to show an explicit recovery seek even while it is stopped.
+        if (errorStopped_ && autoPoster_) loadPosterFrame(pendingSeekSec_);
     }
 
     void setVolumeImpl(float vol) override {

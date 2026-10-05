@@ -1169,18 +1169,53 @@ public:
         const size_t mdat = findChild(bytes, 0, bytes.size(), "mdat");
         bool written = writeMoovFirstTruncated(bytes, tmp, sample.offset - mdat - 8 + sample.size / 2);
         check("truncated playback fixture written", written);
-        if (written) checkFailure(tmp, false);
-        // Keep the container valid, but make the third HAP frame undecodable.
-        fill(bytes.begin() + sample.offset, bytes.begin() + sample.offset + sample.size, 0);
+        if (written) checkFailure(tmp, 0);
+        // Valid texture format, invalid compressor: HapDecode returns Bad_Frame.
+        const auto originalType = bytes[sample.offset + 3];
+        bytes[sample.offset + 3] &= 0x0F;
+        written = writeBytes(tmp, bytes);
+        check("bad-frame fixture written", written);
+        if (written) checkBadFrame(tmp);
+        // Snappy header advertises more output than the allocated texture:
+        // HapDecode returns Buffer_Too_Small, which remains fatal.
+        bytes[sample.offset + 3] = (originalType & 0x0F) | 0xB0;
+        const size_t headerSize = (bytes[sample.offset] == 0 &&
+                                   bytes[sample.offset + 1] == 0 &&
+                                   bytes[sample.offset + 2] == 0) ? 8 : 4;
+        bytes[sample.offset + headerSize] = 0x80;
+        bytes[sample.offset + headerSize + 1] = 0x80;
+        bytes[sample.offset + headerSize + 2] = 0x04; // 65536 bytes (varint)
         written = writeBytes(tmp, bytes);
         check("decoder failure fixture written", written);
-        if (written) checkFailure(tmp, true);
+        if (written) checkFailure(tmp, HapResult_Buffer_Too_Small);
         error_code ec;
         fs::remove(tmp, ec);
         exitApp();
     }
 private:
-    void checkFailure(const fs::path& path, bool hasCode) {
+    void checkBadFrame(const fs::path& path) {
+        HapPlayer player;
+        if (!player.load(path)) { check("bad-frame fixture loads", false); return; }
+        player.play();
+        player.setFrame(1);
+        const auto frame = player.getCurrentFrame();
+        int events = 0, warnings = 0, errorLogs = 0;
+        auto listener = player.onError.listen([&](VideoErrorEventArgs&) { ++events; });
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.message.find("[HapPlayer]") != 0) return;
+            if (log.level == LogLevel::Warning) ++warnings;
+            if (log.level == LogLevel::Error) ++errorLogs;
+        });
+        player.setFrame(2);
+        check("HAP bad frame skipped with warning", warnings == 1 && player.getCurrentFrame() == frame);
+        player.update();
+        check("HAP bad frame keeps playing without error", player.isPlaying() && !player.hasError() && events == 0 && errorLogs == 0);
+        player.setFrame(3);
+        check("HAP frame after bad frame decodes", player.isFrameNew() && player.getCurrentFrame() == 3);
+        player.close();
+    }
+
+    void checkFailure(const fs::path& path, int expectedCode) {
         HapPlayer player;
         if (!player.load(path)) { check("error fixture loads", false); return; }
         player.setFrame(0);
@@ -1188,16 +1223,20 @@ private:
         const auto position = player.getPosition();
         check("HAP first frame ready", player.isReady());
         int events = 0;
+        int errorLogs = 0;
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.level == LogLevel::Error && log.message.find("[HapPlayer]") == 0) ++errorLogs;
+        });
         auto listener = player.onError.listen([&](VideoErrorEventArgs& error) {
             ++events;
-            check("HAP failure message and code", !error.message.empty() && (hasCode ? error.errorCode != 0 : error.errorCode == 0));
-            check("HAP stopped before callback", !player.isPlaying());
+            check("HAP failure message and code", !error.message.empty() && error.errorCode == expectedCode);
+            check("HAP stopped and logged before callback", !player.isPlaying() && errorLogs == 1);
         });
         player.play();
         player.setFrame(2);
         player.update();
         player.update();
-        check("HAP failure reported once", events == 1 && player.hasError());
+        check("HAP failure reported and logged once", events == 1 && errorLogs == 1 && player.hasError());
         check("HAP error retains frame and position", player.isLoaded() && player.isReady() &&
               player.getTexture().getImage().id == texture.id && player.getPosition() == position);
         player.close();
