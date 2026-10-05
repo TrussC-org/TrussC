@@ -14,7 +14,7 @@ void scenario() {
     // the connect worker must also cancel that queue, even with no send limit.
     for (bool cancel : {true, false}) {
         RawListener peerListener(8, true);
-        ProbeClient client;
+        BackpressureClient client;
         client.setSendTimeout(cancel ? 0.0f : 0.5f);
         atomic<bool> sent{false}, failed{false}, errorHandled{false};
         auto connect = client.onConnect.listen([&](TcpConnectEventArgs& e) {
@@ -29,8 +29,9 @@ void scenario() {
         });
         client.connectAsync("127.0.0.1", peerListener.port);
         TestSocket peer = peerListener.acceptPeer();
+        check("connect listener peer accepted", peer != INVALID_SOCKET);
         check("connect listener has a queued send", until([&] {
-            return client.getSendAsyncPendingBytes() != 0;
+            return client.wouldBlock && client.getSendAsyncPendingBytes() != 0;
         }));
         if (cancel) client.disconnect();
         check("connect listener send is released", until([&] { return sent.load(); }) && failed);

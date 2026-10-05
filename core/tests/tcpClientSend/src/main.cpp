@@ -71,7 +71,7 @@ void scenario() {
     }
     for (bool threads : {true, false}) for (bool async : {false, true}) {
         RawListener listener(8, true);
-        ProbeClient client;
+        BackpressureClient client;
         client.setUseThread(threads);
         client.setSendTimeout(0.5f);
         atomic<int> errors{0}, completions{0};
@@ -100,13 +100,16 @@ void scenario() {
             if (!threads) client.processNetwork();
             return completions == 1;
         }));
+        check("idle send reached socket back-pressure", client.wouldBlock &&
+              client.acceptedBytes > 0 && client.acceptedBytes < 64 * 1024 * 1024);
+        printf("native sends accepted %zu bytes before timeout\n", client.acceptedBytes.load());
         check("timeout reports once and disconnects", errors == 1 && timedOut && outcome == SendError::Disconnected && !client.isConnected());
         client.disconnect();
         if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
     }
     for (bool threads : {true, false}) {
         RawListener listener(8, true);
-        ProbeClient client;
+        BackpressureClient client;
         client.setUseThread(threads);
         client.setSendTimeout(0);
         client.setSendAsyncBufferSize(1024);
@@ -122,6 +125,10 @@ void scenario() {
         client.smallSendBuffer();
         auto queued = client.sendAsync(vector<char>(64 * 1024 * 1024, 'x'));
         check("oversized payload queues on an empty queue", queued.ok() && queued.id != 0);
+        check("timeout-disabled send reaches socket back-pressure", until([&] {
+            if (!threads) client.processNetwork();
+            return client.wouldBlock.load();
+        }));
         check("back-pressure refuses another payload", client.sendAsync(string("tail")).error == SendError::QueueFull);
         check("pending bytes exceed the mark", client.getSendAsyncPendingBytes() > client.getSendAsyncBufferSize());
         client.disconnect();
@@ -132,7 +139,7 @@ void scenario() {
     // WebSocket owners may replace their client from a send-error listener.
     for (bool threads : {true, false}) {
         RawListener listener(8, true);
-        auto owner = make_unique<ProbeClient>();
+        auto owner = make_unique<BackpressureClient>();
         owner->setUseThread(threads);
         owner->setSendTimeout(0.5f);
         atomic<bool> destroyed{false};
