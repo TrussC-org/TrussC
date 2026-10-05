@@ -55,6 +55,7 @@ On desktop, `runApp()` returns **1** when window or GPU startup fails before
 `setup()` runs, and **0** otherwise; `TC_RUN_APP` passes that status to `main()`.
 A supervisor can use the exit code together with `TRUSSC_LOG_FILE` to distinguish
 a failed start from a normal shutdown. Fatal panics still abort the process.
+On Linux, no available X display causes an abort (a nonzero process status).
 Android and Web have OS/browser-owned loops; this return value does not report
 their eventual shutdown.
 

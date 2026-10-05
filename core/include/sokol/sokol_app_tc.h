@@ -3526,8 +3526,11 @@ static bool _sapp_tc_create_main_window(void) {
     [w->window makeKeyAndOrderFront:nil];
     _sapp_tc_update_main_dimensions(false);     /* silent startup sizing */
 
-    if (w->depth_tex == nil) return fail("Metal depth texture creation");
-    if (d->sample_count > 1 && w->msaa_tex == nil) return fail("Metal MSAA texture creation");
+    /* A zero-sized view defers texture allocation until it has a drawable size. */
+    if (w->fb_width > 0 && w->fb_height > 0) {
+        if (w->depth_tex == nil) return fail("Metal depth texture creation");
+        if (d->sample_count > 1 && w->msaa_tex == nil) return fail("Metal MSAA texture creation");
+    }
 
     /* window #0's vsync source; swap_interval > 1 divides the display rate */
     w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
@@ -3551,7 +3554,15 @@ static bool _sapp_tc_create_main_window(void) {
     /* activation policy must be set before window creation (sokol #1500) */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     _sapp_tc_init_cursors();
-    if (!_sapp_tc_create_main_window()) return;
+    if (!_sapp_tc_create_main_window()) {
+        /* Wake the event loop after stopping it so sapp_run can report failure. */
+        [NSApp stop:nil];
+        NSEvent* event = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+            location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0
+            context:nil subtype:0 data1:0 data2:0];
+        [NSApp postEvent:event atStart:YES];
+        return;
+    }
     [NSEvent setMouseCoalescingEnabled:NO];
     [NSApp activateIgnoringOtherApps:YES];
     /* focus workaround (sokol #982): make sure the window has focus even if
@@ -3819,16 +3830,14 @@ void sapp_run(const sapp_desc* desc) {
             }
             return event;
         }];
-    /* Finish launch before entering the loop: on a failed startup there is
-       no window/tick to quit it, and terminate: would exit with status 0. */
-    [NSApp finishLaunching];
+    [NSApp run];
+    /* Failed startup stops the loop; terminate: would instead exit with 0. */
     if (!_sapp_tc.app.valid) {
         [_sapp_tc.app.dlg applicationWillTerminate:nil];
         NSApp.delegate = nil;
         _sapp_tc.app.dlg = nil;
         return;
     }
-    [NSApp run];
     /* Normal termination never returns; cleanup runs in applicationWillTerminate. */
 }
 
@@ -7360,10 +7369,12 @@ static bool _sapp_tc_win32_ensure_wndclass(void) {
     wndclassw.lpszClassName = L"SOKOLAPP_TC";
     if (!RegisterClassW(&wndclassw)) {
         const DWORD error = GetLastError();
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
-                     "", "RegisterClassW failed (Win32 error %lu, HRESULT 0x%08lX)",
-                     (unsigned long)error, (unsigned long)HRESULT_FROM_WIN32(error));
-        return false;
+        if (error != ERROR_CLASS_ALREADY_EXISTS) {
+            _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
+                         "", "RegisterClassW failed (Win32 error %lu, HRESULT 0x%08lX)",
+                         (unsigned long)error, (unsigned long)HRESULT_FROM_WIN32(error));
+            return false;
+        }
     }
     _sapp_tc.wndclass_registered = true;
     return true;
@@ -11063,7 +11074,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GL/window teardown (the app shuts down
        sokol_gfx here, which still needs a current context) */
-    if (!_sapp_tc.app.cleanup_called) {
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
@@ -11898,7 +11909,7 @@ _SOKOL_PRIVATE void _sapp_tc_call_frame(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_call_cleanup(void) {
-    if (!_sapp_tc.cleanup_called) {
+    if (_sapp_tc.init_called && !_sapp_tc.cleanup_called) {
         if (_sapp_tc.desc.cleanup_cb) {
             _sapp_tc.desc.cleanup_cb();
         } else if (_sapp_tc.desc.cleanup_userdata_cb) {

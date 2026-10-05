@@ -1,5 +1,6 @@
 // #394: exercise the real runApp return path with a failed platform startup.
 // --window additionally runs a real window through setup and normal shutdown.
+// --glx-failure exercises real Linux startup with GLX disabled on the X server.
 #include "sokol/sokol_app_tc.h"
 namespace {
 void startupTestRun(const sapp_desc* desc);
@@ -44,10 +45,15 @@ void check(bool ok, const char* label) {
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     bool sawStartupError = false;
+    bool sawGlxError = false;
     auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& e) {
         if (e.level == tc::LogLevel::Error &&
             e.message.find("forced startup failure") != std::string::npos) {
             sawStartupError = true;
+        }
+        if (e.level == tc::LogLevel::Error &&
+            e.message.find("GLX extension not present") != std::string::npos) {
+            sawGlxError = true;
         }
     });
     tc::WindowSettings settings;
@@ -56,6 +62,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check(tc::runApp<StartupApp>(settings) == 1, "failed startup returns 1");
     check(!setupRan && !exitRan, "failed startup never enters App lifecycle");
     check(sawStartupError, "startup error reaches Logger before setup");
+    if (argc > 1 && std::strcmp(argv[1], "--glx-failure") == 0) {
+        openWindow = true;
+        check(tc::runApp<StartupApp>(settings) == 1, "real GLX startup failure returns 1");
+        check(!setupRan && !exitRan, "real GLX failure skips App setup and exit");
+        check(sawGlxError, "real GLX startup diagnostic reaches Logger");
+    }
     if (argc > 1 && std::strcmp(argv[1], "--window") == 0) {
         openWindow = true;
         check(tc::runApp<StartupApp>(settings) == 0, "normal shutdown returns 0");
@@ -65,5 +77,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check(tc::runApp<StartupApp>(settings) == 1, "failed start after success returns 1");
         check(!setupRan && !exitRan, "second failed start does not enter App lifecycle");
     }
+#ifdef TC_HOT_RELOAD_BUILD
+    openWindow = false;
+    setupRan = exitRan = false;
+    tc::internal::appSetupCalled = true; // A previous setup must not mask failure.
+    check(TC_RUN_APP(StartupApp, settings) == 1, "hot reload failed startup returns 1");
+    check(!tc::internal::appSetupCalled && !setupRan && !exitRan,
+          "hot reload resets setup status and skips App lifecycle");
+#endif
     return failures ? 1 : 0;
 }

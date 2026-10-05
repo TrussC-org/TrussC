@@ -8,6 +8,22 @@ simulates another failed launch to check that the previous success is cleared.
 Use Xvfb when running without a display. The same arguments work when building
 this test separately with trusscli.
 
+On Linux, `--glx-failure` calls the real platform launcher and checks that a
+missing GLX extension returns 1 without calling `App::setup()` or `App::exit()`.
+Run it in a separate process with GLX disabled on Xvfb (no source injection):
+
+```sh
+env __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json LIBGL_ALWAYS_SOFTWARE=1 \
+  xvfb-run -a -s '-screen 0 640x480x24 -extension GLX' \
+  core/tests/startupExit/bin/startupExit --glx-failure
+```
+
+The X display must still be available; `XOpenDisplay` failure deliberately aborts.
+
+When this test translation unit is compiled with `TC_HOT_RELOAD_BUILD`, it also
+checks the `TC_RUN_APP` hot-reload failure path, including resetting a previous
+setup status. The test platform entry point fails before loading a Guest.
+
 The optional window test is intended for Linux: macOS's normal termination
 exits inside NSApplication rather than returning to the test. Native failure
 injection still needs a Windows/macOS build. In a Windows debug build, force
