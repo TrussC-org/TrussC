@@ -325,6 +325,7 @@ static void testUnchangedPicksAndComboPreview() {
     check("combo: next frame restores the matching item",
           w && w->value.hasText && w->value.text == "Medium" && touchedJson("quality").value("item", "") == "Medium");
     hideOnPick = true;
+    pickFrameHasText = true;   // reset so the check below covers the second pick
     h.click("quality");
     h.click("High");
     const auto entry = touchedJson("quality");
