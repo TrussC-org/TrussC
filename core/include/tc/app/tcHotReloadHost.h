@@ -114,6 +114,7 @@ struct GuestLibrary {
             return false;
         }
 #endif
+        internal::refreshCrashModules();
         loadedPath = tempPath;
         return true;
     }

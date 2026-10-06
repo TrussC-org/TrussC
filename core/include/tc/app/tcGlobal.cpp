@@ -985,6 +985,10 @@ bool Logger::setLogFile(const fs::path& path) {
         closeFileLocked();
         fileStream_ = std::move(stream);
         filePath_ = pathUtf8;
+        if (this == &getLogger()) {
+            internal::setCrashLogFile(resolved);
+            crashLogOwner_ = true;
+        }
     }
     return true;
 }
