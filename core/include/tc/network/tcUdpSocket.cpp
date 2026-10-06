@@ -157,9 +157,11 @@ bool UdpSocket::connect(const std::string& host, int port) {
 
     int status = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result);
     if (status != 0 || !result) {
-        notifyError("Failed to resolve host: " + host, status);
+        notifyError(ErrorKind::Resolve, "Failed to resolve host: " + host, status);
         return false;
     }
+
+    notifyRecovery(ErrorKind::Resolve);
 
     // Set destination with connect() (for UDP, this just fixes the destination for send(), not an actual connection)
     if (::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen)) < 0) {
@@ -220,9 +222,11 @@ bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size
 
     int status = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result);
     if (status != 0 || !result) {
-        notifyError("Failed to resolve host: " + host, status);
+        notifyError(ErrorKind::Resolve, "Failed to resolve host: " + host, status);
         return false;
     }
+
+    notifyRecovery(ErrorKind::Resolve);
 
     auto sent = sendto(socket_,
                        static_cast<const char*>(data),
@@ -234,10 +238,11 @@ bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size
     freeaddrinfo(result);
 
     if (sent < 0) {
-        notifyError("Failed to send data", SOCKET_ERROR_CODE);
+        notifyError(ErrorKind::Send, "Failed to send data", SOCKET_ERROR_CODE);
         return false;
     }
 
+    notifyRecovery(ErrorKind::Send);
     return true;
 }
 
@@ -247,21 +252,22 @@ bool UdpSocket::sendTo(const std::string& host, int port, const std::string& mes
 
 bool UdpSocket::send(const void* data, size_t size) {
     if (socket_ == INVALID_SOCKET_HANDLE) {
-        notifyError("Socket not created");
+        notifyError(ErrorKind::Send, "Socket not created");
         return false;
     }
 
     if (connectedHost_.empty()) {
-        notifyError("No destination set. Call connect() first.");
+        notifyError(ErrorKind::Send, "No destination set. Call connect() first.");
         return false;
     }
 
     auto sent = ::send(socket_, static_cast<const char*>(data), static_cast<int>(size), 0);
     if (sent < 0) {
-        notifyError("Failed to send data", SOCKET_ERROR_CODE);
+        notifyError(ErrorKind::Send, "Failed to send data", SOCKET_ERROR_CODE);
         return false;
     }
 
+    notifyRecovery(ErrorKind::Send);
     return true;
 }
 
@@ -292,6 +298,8 @@ int UdpSocket::receive(void* buffer, size_t bufferSize, std::string& remoteHost,
                              0,
                              reinterpret_cast<sockaddr*>(&fromAddr),
                              &fromLen);
+
+    if (received >= 0) notifyRecovery(ErrorKind::Receive);
 
     if (received > 0) {
         char hostStr[INET_ADDRSTRLEN];
@@ -366,6 +374,8 @@ void UdpSocket::processNetwork() {
                                  reinterpret_cast<sockaddr*>(&fromAddr),
                                  &fromLen);
 
+        if (received >= 0) notifyRecovery(ErrorKind::Receive);
+
         if (received > 0) {
             UdpReceiveEventArgs args;
             args.data.assign(buffer.begin(), buffer.begin() + received);
@@ -391,7 +401,7 @@ void UdpSocket::processNetwork() {
             // Check for actual error
             if (received < 0) {
                 if (!shouldStop_.load()) {
-                    notifyError("Receive error", err);
+                    notifyError(ErrorKind::Receive, "Receive error", err);
                 }
                 // Don't stop receiving on error, just log and wait for next
                 break; 
@@ -441,7 +451,7 @@ void UdpSocket::receiveThreadFunc() {
             if (err == EINTR) continue;   // interrupted by a signal, not a failure
 #endif
             if (!waitFailing) {
-                notifyError("Receive wait failed", err);
+                notifyError(ErrorKind::Receive, "Receive wait failed", err);
                 waitFailing = true;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -462,6 +472,8 @@ void UdpSocket::receiveThreadFunc() {
 
             if (shouldStop_.load()) break;
 
+            if (received >= 0) notifyRecovery(ErrorKind::Receive);
+
             if (received > 0) {
                 UdpReceiveEventArgs args;
                 args.data.assign(buffer.begin(), buffer.begin() + received);
@@ -481,7 +493,7 @@ void UdpSocket::receiveThreadFunc() {
                 if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR)
 #endif
                 {
-                    notifyError("Receive error", err);
+                    notifyError(ErrorKind::Receive, "Receive error", err);
                 }
             }
         }
@@ -658,6 +670,46 @@ bool UdpSocket::setReceiveTimeout(int timeoutMs) {
 // ---------------------------------------------------------------------------
 // Error notification
 // ---------------------------------------------------------------------------
+// Gate and counter are atomic so a suppressed failure takes no mutex. Only
+// reports/recoveries take the small bookkeeping lock. Emit outside it: logger
+// listeners and onError listeners may call back into this socket.
+void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code) {
+    auto& state = errorLogs_[static_cast<size_t>(kind)];
+    if (state.gate.isFirstTime()) {
+        uint64_t count;
+        {
+            std::lock_guard<std::mutex> lock(errorLogMutex_);
+            count = state.suppressed.exchange(0);
+        }
+        auto line = logError();
+        line << "UdpSocket: " << message << " (code: " << code << ")";
+        if (count > 0) line << " (+" << count << " more since the last report)";
+    } else {
+        state.suppressed.fetch_add(1);
+    }
+
+    UdpErrorEventArgs args;
+    args.message = message;
+    args.errorCode = code;
+    onError.notify(args);
+}
+
+void UdpSocket::notifyRecovery(ErrorKind kind) {
+    auto& state = errorLogs_[static_cast<size_t>(kind)];
+    if (state.suppressed.load() == 0) return;
+
+    uint64_t count;
+    {
+        std::lock_guard<std::mutex> lock(errorLogMutex_);
+        count = state.suppressed.exchange(0);
+    }
+    if (count > 0) {
+        const char* name = kind == ErrorKind::Resolve ? "resolve" :
+                           kind == ErrorKind::Send ? "send" : "receive";
+        logNotice() << "UdpSocket: " << name << " recovered after " << count << " more failures";
+    }
+}
+
 void UdpSocket::notifyError(const std::string& message, int code) {
     logError() << "UdpSocket: " << message << " (code: " << code << ")";
 
