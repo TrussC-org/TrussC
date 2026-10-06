@@ -2,6 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include "tc/sound/tcAudioAnalysis.h"
 #include <cstdio>
+#include <chrono>
 #include <thread>
 
 using namespace tc;
@@ -53,7 +54,14 @@ void ringChecks() {
     while (!writes.load(memory_order_relaxed)) this_thread::yield();
     bool nonempty = true, consistent = true;
     uint64_t first = 0, last = 0;
-    for (int i = 0; i < 30000; ++i) {
+    // Read at least 30000 times and until the writer has wrapped the ring
+    // several times: sleep_for(50us) can take a millisecond or more (Windows),
+    // so a fixed read count may finish before the writer wraps. The deadline
+    // only stops a stalled writer from hanging the test.
+    const uint64_t wrapTarget = 3 * (historyFrames * 5 / 4);
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
+    for (int i = 0; i < 30000 || (last <= first + wrapTarget &&
+                                  chrono::steady_clock::now() < deadline); ++i) {
         s = concurrent.snapshot(historyFrames);
         nonempty &= s.samples.size() == historyFrames * 2;
         if (i == 0) first = s.framesWritten;
@@ -67,7 +75,7 @@ void ringChecks() {
     writer.join();
     check("30000 concurrent full-history snapshots are never empty", nonempty);
     check("concurrent snapshots are contiguous with consistent channels", consistent);
-    check("stress reader overlaps writer progress and multiple wraps", last > first + 3 * (historyFrames * 5 / 4));
+    check("stress reader overlaps writer progress and multiple wraps", last > first + wrapTarget);
     check("snapshot succeeds once writer is quiescent", concurrent.snapshot(historyFrames).samples.size() == historyFrames * 2);
 }
 } // namespace
