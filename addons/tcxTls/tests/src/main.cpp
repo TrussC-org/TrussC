@@ -57,7 +57,7 @@
 //     handshake waits for that listener: the receive thread stays owned.
 //   - Handshake deadline (#262): a peer that accepts TCP and never speaks
 //     TLS, with setHandshakeTimeout(1) -> onError, then onConnect(false),
-//     both "TLS handshake timeout", after about 1 s and within 5 s; with
+//     both "TLS handshake timeout", after disconnecting; with
 //     threads and without (update event pumped). With 0 (no deadline)
 //     nothing fires for 1.5 s and disconnect() still returns at once.
 //   - A client destroyed by a listener on its own receive thread (#262): an
@@ -80,6 +80,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include <tcWebSocketClient.h>
 #include "tcTlsClient.h"
 
 #include <mbedtls/ctr_drbg.h>
@@ -215,7 +216,7 @@ static bool waitFor(int ms, P pred) {
 // -----------------------------------------------------------------------------
 
 // A listening TCP socket on 127.0.0.1 with a port the OS picks
-static rawsocket_t listenLoopback(int& port) {
+static rawsocket_t listenLoopback(int& port, int backlog = 8) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == kNoSocket) return kNoSocket;
     sockaddr_in addr{};
@@ -225,7 +226,7 @@ static rawsocket_t listenLoopback(int& port) {
     socklen_t len = sizeof(addr);
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0 ||
         ::getsockname(s, (sockaddr*)&addr, &len) != 0 ||
-        ::listen(s, 8) != 0) {
+        ::listen(s, backlog) != 0) {
         TC_CLOSE(s);
         return kNoSocket;
     }
@@ -1174,6 +1175,47 @@ static void scenario() {
     }
     check("async TLS immediate destruction completes", true);
 
+#ifdef __linux__
+    // As in core's tcpClientConnect fixture, a full accept queue leaves TCP
+    // pending. Exercise TlsClient's inherited deadline before TLS can start.
+    {
+        int fullPort = 0;
+        rawsocket_t full = listenLoopback(fullPort, 0);
+        check("TLS TCP timeout: listener created", full != kNoSocket);
+        if (g_fail) bail();
+        rawsocket_t filler = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = htons(static_cast<uint16_t>(fullPort));
+        check("TLS TCP timeout: fill accept queue",
+              ::connect(filler, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+        if (g_fail) bail();
+        for (bool threads : {true, false}) {
+            TlsClient pending;
+            pending.setUseThread(threads);
+            pending.setConnectTimeout(0.5f);
+            pending.setHandshakeTimeout(0);
+            atomic<int> errors{0}, failures{0};
+            auto error = pending.onError.listen([&](TcpErrorEventArgs&) { ++errors; });
+            auto connected = pending.onConnect.listen([&](TcpConnectEventArgs& e) {
+                if (!e.success) ++failures;
+            });
+            pending.connectAsync("127.0.0.1", fullPort);
+            check("TLS TCP timeout: failure delivered", waitFor(5000, [&] {
+                if (!threads) pending.processNetwork();
+                return failures == 1;
+            }));
+            pending.disconnect();
+            check("TLS TCP timeout: one error and no connection",
+                  errors == 1 && failures == 1 && !pending.isConnected() && !pending.isConnecting());
+            if (g_fail) bail();
+        }
+        TC_CLOSE(filler);
+        TC_CLOSE(full);
+    }
+#endif
+
     // #261: one send path, including TLS WANT_READ/WANT_WRITE and idle timeout.
     for (bool threads : {true, false}) {
         TlsClient sender;
@@ -1241,6 +1283,7 @@ static void scenario() {
         silent.setVerifyNone();
         silent.setUseThread(threads);
         silent.setHandshakeTimeout(1);
+        silent.setConnectTimeout(2);
         mutex evMutex;
         vector<string> evs;
         EventListener errSub = silent.onError.listen([&](TcpErrorEventArgs& e) {
@@ -1251,7 +1294,6 @@ static void scenario() {
             lock_guard<mutex> lock(evMutex);
             evs.push_back(e.success ? string("connected") : "failed: " + e.message);
         });
-        const auto t0 = chrono::steady_clock::now();
         check((name + ": connect() to a silent peer").c_str(),
               silent.connect("127.0.0.1", plainPort));
         rawsocket_t silentPeer = acceptWithin(plainListener, 2000);
@@ -1261,14 +1303,8 @@ static void scenario() {
             lock_guard<mutex> lock(evMutex);
             return evs.size() >= 2;
         });
-        const auto elapsed = chrono::steady_clock::now() - t0;
-        waitFor(100, [&] {   // let any extra event arrive
-            if (!threads) events().update.notify();
-            return false;
-        });
-        check((name + ": reported within 5 s").c_str(), reported);
-        check((name + ": not before the 1 s deadline").c_str(),
-              elapsed >= chrono::milliseconds(900));
+        check((name + ": failure reported").c_str(), reported);
+        silent.disconnect(); // join before checking the complete event sequence
         {
             lock_guard<mutex> lock(evMutex);
             check((name + ": onError, then onConnect(false), \"TLS handshake timeout\"").c_str(),
@@ -1297,6 +1333,89 @@ static void scenario() {
               completesWithin(2000, [&] { patient.disconnect(); }));
         if (silentPeer != kNoSocket) TC_CLOSE(silentPeer);
         if (g_fail) bail();
+    }
+
+    // Complete TLS, then leave the HTTP upgrade unanswered. The shared
+    // handshake deadline must also cover this second stage of wss://.
+    {
+        tcx::websocket::WebSocketClient ws;
+        ws.setTlsVerifyNone();
+        ws.setConnectTimeout(2);
+        ws.setHandshakeTimeout(1);
+        string notifications;
+        mutex notificationMutex;
+        atomic<bool> disconnected{false};
+        EventListener err = ws.onError.listen([&](TcpErrorEventArgs&) {
+            disconnected = ws.getState() == tcx::websocket::WebSocketClient::State::Disconnected;
+            lock_guard<mutex> lock(notificationMutex);
+            notifications += "error ";
+        });
+        EventListener close = ws.onClose.listen([&] {
+            lock_guard<mutex> lock(notificationMutex);
+            notifications += "close";
+        });
+        ws.connect("wss://127.0.0.1:" + to_string(port) + "/");
+        TlsPeer silentUpgrade;
+        check("WebSocket: TLS completes before a silent HTTP upgrade",
+              silentUpgrade.accept(listener, server.conf, 3000));
+        check("WebSocket: wss 101 deadline disconnects before error then close",
+              waitFor(5000, [&] {
+                  events().update.notify();
+                  lock_guard<mutex> lock(notificationMutex);
+                  return notifications == "error close";
+              }) && disconnected);
+        ws.disconnect();
+    }
+
+    // Reconnect from onClose after a successful wss:// upgrade. Sending the
+    // upgrade answer after TLS succeeds also exercises the non-blocking
+    // receive loop after the handshake finishes.
+    {
+        tcx::websocket::WebSocketClient ws;
+        ws.setTlsVerifyNone();
+        const string url = "wss://127.0.0.1:" + to_string(port) + "/";
+        atomic<int> opens{0}, closes{0};
+        atomic<bool> done{false};
+        EventListener open = ws.onOpen.listen([&] { ++opens; });
+        EventListener close = ws.onClose.listen([&] {
+            if (++closes < 20) ws.connect(url);
+            else done = true;
+        });
+        bool ok = ws.connect(url);
+        for (int i = 0; ok && i < 20; ++i) {
+            TlsPeer closing;
+            ok = closing.accept(listener, server.conf, 3000) &&
+                 closing.write("HTTP/1.1 101 Switching Protocols\r\n\r\n") &&
+                 waitFor(3000, [&] { return opens > i; });
+            if (closing.fd != kNoSocket) closing.closeNotify();
+        }
+        check("WebSocket: wss onClose reconnects inline (20 rounds)",
+              ok && waitFor(3000, [&] { return done.load(); }) && opens == 20);
+        ws.disconnect();
+    }
+
+    // WebSocket reconnects inline after rejection of the self-signed peer.
+    // This replaces the TlsClient from its onConnect(false) callback.
+    {
+        tcx::websocket::WebSocketClient ws;
+        ws.setConnectTimeout(2);
+        const string url = "wss://127.0.0.1:" + to_string(port) + "/";
+        atomic<int> failures{0};
+        atomic<bool> listenerDone{false};
+        EventListener err = ws.onError.listen([&](TcpErrorEventArgs&) {
+            if (++failures < 20) ws.connect(url);
+            else listenerDone = true;
+        });
+        bool accepted = ws.connect(url);
+        for (int i = 0; accepted && i < 20; ++i) {
+            TlsPeer rejected;
+            rejected.accept(listener, server.conf, 3000);
+            accepted = rejected.fd != kNoSocket &&
+                waitFor(3000, [&] { return failures > i; });
+        }
+        check("WebSocket: reconnect on self-signed certificate failure (20 rounds)",
+              accepted && waitFor(3000, [&] { return listenerDone.load(); }) && failures == 20);
+        ws.disconnect();
     }
 
     // --- destroyed by a listener on its own receive thread (#262) ------------

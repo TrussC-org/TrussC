@@ -36,6 +36,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
@@ -1153,7 +1154,121 @@ static void clockTests() {
     }
 }
 
-int main() {
+// Optional GPU-backed playback failure checks (run under Xvfb on Linux).
+class PlaybackErrorApp : public App {
+public:
+    void draw() override {
+        const auto source = getDataPath("sine_sowt.mov");
+        auto bytes = readBytes(source);
+        MovParser parser;
+        bool opened = parser.open(source);
+        const auto* track = opened ? parser.getInfo().getVideoTrack() : nullptr;
+        check("error fixture has three samples", track && track->samples.size() >= 3);
+        if (!track || track->samples.size() < 3) { exitApp(); return; }
+        const auto sample = track->samples[2];
+        const auto tmp = fs::temp_directory_path() / "tcxHap_playback_error.mov";
+        const size_t mdat = findChild(bytes, 0, bytes.size(), "mdat");
+        bool written = writeMoovFirstTruncated(bytes, tmp, sample.offset - mdat - 8 + sample.size / 2);
+        check("truncated playback fixture written", written);
+        if (written) checkFailure(tmp, 0);
+        // Valid texture format, invalid compressor: HapDecode returns Bad_Frame.
+        const auto originalType = bytes[sample.offset + 3];
+        bytes[sample.offset + 3] &= 0x0F;
+        written = writeBytes(tmp, bytes);
+        check("bad-frame fixture written", written);
+        if (written) checkBadFrame(tmp);
+        // Snappy header advertises more output than the allocated texture:
+        // HapDecode returns Buffer_Too_Small, which remains fatal.
+        bytes[sample.offset + 3] = (originalType & 0x0F) | 0xB0;
+        const size_t headerSize = (bytes[sample.offset] == 0 &&
+                                   bytes[sample.offset + 1] == 0 &&
+                                   bytes[sample.offset + 2] == 0) ? 8 : 4;
+        bytes[sample.offset + headerSize] = 0x80;
+        bytes[sample.offset + headerSize + 1] = 0x80;
+        bytes[sample.offset + headerSize + 2] = 0x04; // 65536 bytes (varint)
+        written = writeBytes(tmp, bytes);
+        check("decoder failure fixture written", written);
+        if (written) checkFailure(tmp, HapResult_Buffer_Too_Small);
+        error_code ec;
+        fs::remove(tmp, ec);
+        exitApp();
+    }
+private:
+    void checkBadFrame(const fs::path& path) {
+        HapPlayer player;
+        if (!player.load(path)) { check("bad-frame fixture loads", false); return; }
+        player.play();
+        player.setFrame(1);
+        const auto frame = player.getCurrentFrame();
+        int events = 0, warnings = 0, errorLogs = 0;
+        string lastWarning;
+        auto listener = player.onError.listen([&](VideoErrorEventArgs&) { ++events; });
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.message.find("[HapPlayer]") != 0) return;
+            if (log.level == LogLevel::Warning && log.message.find("Skipping invalid HAP frame") != string::npos) {
+                ++warnings;
+                lastWarning = log.message;
+            }
+            if (log.level == LogLevel::Error) ++errorLogs;
+        });
+        player.setFrame(2);
+        check("HAP bad frame skipped with warning", warnings == 1 && player.getCurrentFrame() == frame);
+        player.update();
+        check("HAP bad frame keeps playing without error", player.isPlaying() && !player.hasError() && events == 0 && errorLogs == 0);
+        player.setFrame(3);
+        check("HAP frame after bad frame decodes", player.isFrameNew() && player.getCurrentFrame() == 3);
+        player.setPaused(true);
+        for (int i = 0; i < 46; ++i) player.setFrame(2);
+        check("HAP bad-frame burst produces only one warning", warnings == 1);
+        this_thread::sleep_for(chrono::milliseconds(5100));
+        player.setFrame(2);
+        check("HAP next warning reports all skips since last report", warnings == 2 &&
+              lastWarning.find("skipped 47 invalid frames since the last report") != string::npos);
+        HapPlayer other;
+        check("second HAP player loads", bool(other.load(path)));
+        other.setFrame(2);
+        check("HAP warning gate is per player and starts with one skip", warnings == 3 &&
+              lastWarning.find("skipped 1 invalid frames since the last report") != string::npos);
+        player.close();
+    }
+
+    void checkFailure(const fs::path& path, int expectedCode) {
+        HapPlayer player;
+        if (!player.load(path)) { check("error fixture loads", false); return; }
+        player.setFrame(0);
+        const auto texture = player.getTexture().getImage();
+        const auto position = player.getPosition();
+        check("HAP first frame ready", player.isReady());
+        int events = 0;
+        int errorLogs = 0;
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.level == LogLevel::Error && log.message.find("[HapPlayer]") == 0) ++errorLogs;
+        });
+        auto listener = player.onError.listen([&](VideoErrorEventArgs& error) {
+            ++events;
+            check("HAP failure message and code", !error.message.empty() && error.errorCode == expectedCode);
+            check("HAP stopped and logged before callback", !player.isPlaying() && errorLogs == 1);
+        });
+        player.play();
+        player.setFrame(2);
+        player.update();
+        player.update();
+        check("HAP failure reported and logged once", events == 1 && errorLogs == 1 && player.hasError());
+        check("HAP error retains frame and position", player.isLoaded() && player.isReady() &&
+              player.getTexture().getImage().id == texture.id && player.getPosition() == position);
+        player.close();
+        check("HAP close clears error", !player.hasError());
+    }
+};
+
+int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--playback-errors") {
+        WindowSettings settings;
+        settings.setSize(64, 64);
+        settings.setHighDpi(false);
+        runApp<PlaybackErrorApp>(settings);
+        return g_fail ? 1 : 0;
+    }
     const fs::path data = fs::path(getDataPath(""));
     printf("data: %s\n", data.string().c_str());
 

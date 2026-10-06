@@ -2268,6 +2268,9 @@ keywords = ["download", "cpu"]
 description.en = "Read FBO contents into a CPU buffer (8-bit per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり8ビット）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 8비트)"
+details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
+details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
+details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
@@ -2276,6 +2279,9 @@ keywords = ["download", "cpu"]
 description.en = "Read FBO contents into a CPU buffer (32-bit float per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり32ビット浮動小数点）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 32비트 부동소수점)"
+details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
+details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
+details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
 related = ["Fbo::readPixels"]
 
 ["Fbo::save"]
@@ -4931,9 +4937,9 @@ non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조�
 ["Mesh::getGpuIndexCount"]
 category = "types_mesh"
 keywords = ["gpu", "buffer", "interop"]
-description.en = "Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering."
-description.ja = "現在 GPU インデックスバッファにアップロードされているインデックス数（非インデックスメッシュなら 0）。自前描画では getGpuIndexBuffer と組で使う。"
-description.ko = "현재 GPU 인덱스 버퍼에 업로드된 인덱스 수(비인덱스 메시면 0). 커스텀 렌더링에서는 getGpuIndexBuffer와 짝으로 쓴다."
+description.en = "Number of indices in the uploaded GPU list; pairs with getGpuIndexBuffer for custom rendering. TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists."
+description.ja = "GPU にアップロードしたリストのインデックス数。自前描画では getGpuIndexBuffer と組で使う。TriangleStrip と TriangleFan は三角形リストに、LineStrip と LineLoop は線リストに展開する。元のインデックスが無ければ 0..N-1（N は頂点数）を入力列とし、Points でも同じ連番を使う。独自のパイプラインでは三角形モードを三角形リスト、線モードを線リストとして描画する。"
+description.ko = "GPU에 업로드한 리스트의 인덱스 수. 커스텀 렌더링에서는 getGpuIndexBuffer와 함께 쓴다. TriangleStrip과 TriangleFan은 삼각형 리스트로, LineStrip과 LineLoop는 선 리스트로 확장한다. 원본 인덱스가 없으면 0..N-1(N은 정점 수)을 입력 시퀀스로 사용하며, Points에서도 같은 순차 인덱스를 사용한다. 커스텀 파이프라인에서는 삼각형 모드를 삼각형 리스트로, 선 모드를 선 리스트로 그려야 한다."
 related = ["Mesh::uploadToGpu", "Mesh::getGpuIndexBuffer", "Mesh::getGpuVertexCount"]
 
 ["Mesh::getGpuVertexCount"]
@@ -12397,9 +12403,9 @@ description.ko = "일시정지 상태인지 확인"
 ["VideoPlayerBase::isPlaying"]
 category = "video"
 keywords = ["active", "running", "status"]
-description.en = "Check if video is currently playing (not paused)"
-description.ja = "再生中か確認（一時停止中は false）"
-description.ko = "현재 재생 중인지 확인 (일시정지 시 false)"
+description.en = "Check if video is currently playing (not paused). False after a runtime playback error."
+description.ja = "再生中か確認（一時停止中および再生時エラーによる停止後は false）。"
+description.ko = "현재 재생 중인지 확인한다. 일시정지 중이거나 재생 오류로 정지하면 false."
 
 ["VideoPlayerBase::isReady"]
 category = "video"
@@ -18281,9 +18287,9 @@ id가 `0`이다.
 ["Mesh::getGpuIndexBuffer"]
 category = "types_mesh"
 keywords = ["gpu", "buffer", "interop", "sokol", "sg_buffer"]
-description.en = "The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop)."
-description.ja = "メッシュを支える sokol-gfx インデックスバッファハンドル（非インデックスなら空ハンドル、高度な相互運用向け）。"
-description.ko = "메시를 뒷받침하는 sokol-gfx 인덱스 버퍼 핸들(비인덱스면 빈 핸들, 고급 상호운용용)."
+description.en = "The sokol-gfx buffer handle holding the uploaded list indices (advanced interop). TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Use getGpuIndexCount for the uploaded count. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists."
+description.ja = "アップロードしたリストのインデックスを保持する sokol-gfx バッファハンドル（高度な相互運用向け）。TriangleStrip と TriangleFan は三角形リストに、LineStrip と LineLoop は線リストに展開する。元のインデックスが無ければ 0..N-1（N は頂点数）を入力列とし、Points でも同じ連番を使う。アップロード済みの数は getGpuIndexCount で取得する。独自のパイプラインでは三角形モードを三角形リスト、線モードを線リストとして描画する。"
+description.ko = "업로드한 리스트 인덱스를 담는 sokol-gfx 버퍼 핸들(고급 상호운용용). TriangleStrip과 TriangleFan은 삼각형 리스트로, LineStrip과 LineLoop는 선 리스트로 확장한다. 원본 인덱스가 없으면 0..N-1(N은 정점 수)을 입력 시퀀스로 사용하며, Points에서도 같은 순차 인덱스를 사용한다. 업로드된 개수는 getGpuIndexCount로 얻는다. 커스텀 파이프라인에서는 삼각형 모드를 삼각형 리스트로, 선 모드를 선 리스트로 그려야 한다."
 related = ["Mesh::getGpuIndexCount", "Mesh::getGpuVertexBuffer", "Mesh::uploadToGpu"]
 
 ["Mesh::getGpuPointBuffer"]
@@ -19464,3 +19470,53 @@ description.en = "Return the MCP inspection name (empty for unnamed or moved-fro
 description.ja = "MCP 検査用の名前を返す（名前なし、または移動元は空文字列）。"
 description.ko = "MCP 검사 이름을 반환 (이름이 없거나 이동된 원본이면 빈 문자열)."
 related = ["Image::setDebugName"]
+
+["VideoErrorEventArgs"]
+description.en = "Runtime video error event payload."
+description.ja = "動画の再生時エラーのイベント引数。"
+description.ko = "동영상 재생 오류 이벤트 인자."
+
+["VideoErrorEventArgs::message"]
+description.en = "Backend error message."
+description.ja = "バックエンドのエラーメッセージ。"
+description.ko = "백엔드 오류 메시지."
+
+["VideoErrorEventArgs::errorCode"]
+description.en = "Backend-specific error code; zero when unavailable. Codes are not portable between backends."
+description.ja = "バックエンド固有のエラーコード。取得できない場合は 0。バックエンド間で共通の値ではない。"
+description.ko = "백엔드별 오류 코드. 코드가 없으면 0이며 백엔드 간 공통 값이 아니다."
+
+["VideoPlayerBase::onError"]
+description.en = "Runtime failure event, delivered once per error stop by update() on the main thread. Playback stops without unloading, rewinding, or replacing the last frame. The app may seek, play again, or reload; there is no automatic retry. Keep calling update() on the main thread to receive errors. Normal EOF and stalls alone are not errors. Isolated invalid packets/frames are warned and skipped. onError listeners are not moved."
+description.ja = "再生時エラーによる停止ごとに一度、メインスレッドの update() から通知する。読み込み状態・位置・最後のフレームを保持して停止する。アプリ側でシーク・再生再開・再読み込みを選択でき、自動再試行はしない。通知を受け取るにはメインスレッドで update() を呼び続ける。正常な EOF や単なる停滞はエラーではない。単独の破損パケット・フレームは警告して読み飛ばす。onError リスナーはムーブされない。"
+description.ko = "재생 오류로 정지할 때마다 메인 스레드의 update()에서 한 번 알린다. 로드 상태, 위치, 마지막 프레임을 유지한다. 앱이 탐색, 재생 재개, 다시 로드를 선택하며 자동 재시도는 없다. 오류를 받으려면 메인 스레드에서 update()를 계속 호출한다. 정상 EOF나 단순 정체는 오류가 아니다. 개별 손상 패킷/프레임은 경고 후 건너뛴다. onError 리스너는 이동되지 않는다."
+
+["VideoPlayerBase::hasError"]
+description.en = "Whether update() has delivered a runtime playback failure. Cleared by a successful load() or close(), retained through seek and play()."
+description.ja = "update() が再生時エラーを通知済みかを返す。成功した load() または close() で解除し、シークや play() では保持する。"
+description.ko = "update()가 재생 오류를 전달했는지 반환한다. load() 성공 또는 close()로 초기화하며 탐색과 play()에서는 유지한다."
+
+["VideoPlayerBase::getErrorMessage"]
+description.en = "Last runtime error message, or an empty string when there is no error. Query on the main thread after update()."
+description.ja = "最後の再生時エラーメッセージ。エラーがなければ空文字列。メインスレッドで update() 後に参照する。"
+description.ko = "마지막 재생 오류 메시지. 오류가 없으면 빈 문자열. 메인 스레드에서 update() 후 조회한다."
+
+["VideoPlayerBase::reportPlaybackError"]
+description.en = "Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them."
+description.ja = "派生クラス用：任意スレッドからバックエンドの失敗をキューに入れる。update() が通知するまでの重複をまとめる。"
+description.ko = "파생 클래스용: 임의 스레드에서 백엔드 오류를 큐에 넣는다. update() 전달 전 중복 보고를 합친다."
+
+["VideoPlayerBase::dispatchPlaybackError"]
+description.en = "Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player."
+description.ja = "派生クラス用：メインスレッドの update() でバックエンドのロック外から呼ぶ。バックエンドを一時停止してフレームを保持し、エラー状態を設定して通知する。リスナーが close/load できるため、true なら直ちに戻る。"
+description.ko = "파생 클래스용: 메인 스레드의 update()에서 백엔드 잠금 밖에서 호출한다. 백엔드를 일시정지하고 프레임을 유지하며 오류 상태를 설정해 알린다. 리스너가 close/load할 수 있으므로 true이면 즉시 반환한다."
+
+["VideoPlayerBase::clearPlaybackError"]
+description.en = "Subclass hook: clear pending and delivered errors on successful load and close."
+description.ja = "派生クラス用：load 成功時と close 時に通知待ちと通知済みのエラーを解除する。"
+description.ko = "파생 클래스용: load 성공 및 close 시 대기 중인 오류와 전달된 오류를 초기화한다."
+
+["VideoPlayerBase::movePlaybackErrorFrom"]
+description.en = "Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object."
+description.ja = "派生クラス用：ムーブ時に通知待ちと通知済みのエラー状態を移す。イベントリスナーは元のオブジェクトに残る。"
+description.ko = "파생 클래스용: 이동 시 대기 중인 오류와 전달된 오류 상태를 옮긴다. 이벤트 리스너는 원래 객체에 남는다."

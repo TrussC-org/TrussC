@@ -412,22 +412,25 @@ protected:
     virtual void onEnd() {}
     virtual void setupBindings(sg_bindings& bind) {}
 
-    // Pipeline matching the current render target. The swapchain uses the
-    // load()-time `pipeline`; an FBO pass needs a pipeline whose color format,
-    // sample count and depth match the FBO, so one is built lazily (from the same
-    // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
+    // Pipeline matching the current render target. The main swapchain uses the
+    // load()-time `pipeline`; secondary windows and FBOs need matching color
+    // format, sample count and depth. Build those pipelines lazily from the same
+    // createPipelineDesc() and cache per distinct (format, sampleCount) target.
     sg_pipeline pipelineForCurrentTarget() {
         auto& wctx = internal::currentWindowContext();
-        if (!wctx.inFboPass) return pipeline;
-        uint64_t key = ((uint64_t)wctx.currentFboColorFormat << 8)
-                     | (uint64_t)(wctx.currentFboSampleCount & 0xff);
+        if (!wctx.inFboPass && wctx.isMain) return pipeline;
+        const auto target = wctx.inFboPass
+            ? internal::SwapchainTargetFormat{wctx.currentFboColorFormat, wctx.currentFboSampleCount}
+            : internal::swapchainTargetFormat(wctx);
+        uint64_t key = ((uint64_t)target.colorFormat << 8)
+                     | (uint64_t)(target.sampleCount & 0xff);
         auto it = targetPipelines_.find(key);
         if (it != targetPipelines_.end()) return it->second;
         sg_pipeline_desc desc = createPipelineDesc();
         desc.shader = shader;
-        desc.colors[0].pixel_format = wctx.currentFboColorFormat;
-        desc.sample_count           = wctx.currentFboSampleCount;
-        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // Fbo always allocates depth-stencil
+        desc.colors[0].pixel_format = target.colorFormat;
+        desc.sample_count           = target.sampleCount;
+        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // FBOs and windows use depth-stencil
         sg_pipeline pip = sg_make_pipeline(&desc);
         targetPipelines_[key] = pip;
         return pip;

@@ -338,10 +338,14 @@ public:
     }
 
     // Read pixel data (RGBA8 only, for backward compatibility)
-    // Note: Call after rendering is complete (after end())
+    // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     // For MSAA, reads from resolved texture
     TC_PLATFORMS("macos,windows,linux,ios,android") bool readPixels(unsigned char* pixels) const {
         if (!allocated_ || !pixels) return false;
+        if (internal::currentWindowContext().inFboPass) {
+            logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
+            return false;
+        }
 
         // sokol_gfx doesn't have direct pixel reading API
         // Platform-specific implementation required
@@ -351,8 +355,13 @@ public:
 
     // Read pixel data as float (for float pixel formats: R16F, R32F, RGBA16F, RGBA32F, etc.)
     // Buffer must be large enough: width * height * channelCount(format) floats
+    // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     TC_PLATFORMS("macos,windows,linux,android") bool readPixelsFloat(float* pixels) const {
         if (!allocated_ || !pixels) return false;
+        if (internal::currentWindowContext().inFboPass) {
+            logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
+            return false;
+        }
         return readPixelsFloatPlatform(pixels);
     }
 

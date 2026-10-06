@@ -8,22 +8,6 @@
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
-// Access sokol's internal command buffer.
-// After sg_end_pass(), the render encoder is finished but the command buffer
-// is still open (committed only in sg_commit/present). We encode a blit into
-// the same command buffer, then commit+wait so the GPU executes both the
-// FBO render pass AND the blit before we read back pixels.
-//
-// This temporarily commits the command buffer mid-frame.  sokol will lazily
-// create a new one when the next sg_begin_pass() is called (see
-// _sg_mtl_begin_pass: "if (nil == _sg.mtl.cmd_buffer)").
-
-extern "C" {
-    // Defined in sokol_gfx.h (Metal backend internals)
-    // _sg is the global state, _sg.mtl.cmd_buffer is id<MTLCommandBuffer>
-    // We access it through the public query helpers where possible.
-}
-
 namespace trussc {
 
 // Map sokol pixel format to Metal pixel format
@@ -59,9 +43,6 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         return false;
     }
 
-    // Force sokol to commit its current command buffer
-    sg_commit();
-
     id<MTLDevice> device = cmdQueue.device;
 
     MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:mtlFormat
@@ -76,6 +57,13 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
         tc::logError() << "[FBO] Failed to create staging texture";
         return false;
     }
+
+    // End only the active swapchain pass, preserving its attachments for LOAD.
+    // Keep it suspended until the blit completes: a newly begun sokol pass
+    // enqueues its command buffer, which would otherwise precede this blit.
+    const bool resumeSwapchain = isInSwapchainPass();
+    if (resumeSwapchain) suspendSwapchainPass();
+    sg_tc_mtl_flush();
 
     id<MTLCommandBuffer> cmdBuffer = [cmdQueue commandBuffer];
     id<MTLBlitCommandEncoder> blitEncoder = [cmdBuffer blitCommandEncoder];
@@ -94,6 +82,8 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
     [cmdBuffer commit];
     [cmdBuffer waitUntilCompleted];
 
+    if (resumeSwapchain) resumeSwapchainPass();
+
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     [dstTexture getBytes:dstBuffer
              bytesPerRow:bytesPerRow
@@ -105,6 +95,11 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
 
 bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     if (!allocated_ || !pixels) return false;
+
+    if (format_ != TextureFormat::RGBA8) {
+        logError("Fbo") << "readPixels() requires RGBA8; use readPixelsFloat() for other formats";
+        return false;
+    }
 
     size_t bytesPerRow = width_ * 4;  // RGBA8
     return readPixelsInternal(curColorTex_().getImage(), width_, height_,
