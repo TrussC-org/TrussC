@@ -4,6 +4,7 @@
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>
+#include <chrono>
 #include <future>
 #include <memory>
 #ifndef _WIN32
@@ -244,9 +245,20 @@ void loopback() {
             }
             check("queue receive recovery datagram", sender.send(empty ? "" : "x"));
             if (mode == 0) check("synchronous receive succeeds", receiver.receive(buffer, sizeof(buffer)) == (empty ? 0 : 1));
-            if (mode == 1) receiver.processNetwork();
-            check("receive success logs recovery (sync/poll/thread, data/empty)",
-                  result.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+            bool gotRecovery = false;
+            if (mode == 1) {
+                // Poll as a frame loop would: the loopback datagram may not
+                // be queued yet on the first non-blocking read (macOS).
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+                do {
+                    receiver.processNetwork();
+                    gotRecovery = result.wait_for(std::chrono::milliseconds(1)) ==
+                                  std::future_status::ready;
+                } while (!gotRecovery && std::chrono::steady_clock::now() < deadline);
+            } else {
+                gotRecovery = result.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            }
+            check("receive success logs recovery (sync/poll/thread, data/empty)", gotRecovery);
             if (mode != 0) receiver.stopReceiving();
             check("receive recovery logs once", logs.take() ==
                   std::vector<std::string>{"UdpSocket: receive recovered after 1 more failures"});
