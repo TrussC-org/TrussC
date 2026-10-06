@@ -40,7 +40,7 @@ CrashContext& crashContext();
 inline void crashFrame(uint64_t frame) {
     crashContext().frame.store(frame, std::memory_order_relaxed);
 }
-inline void crashInput(int type, int x, int y, int detail, uint64_t frame) {
+inline void crashInput(int type, int x, int y, int detail) {
     auto& context = crashContext();
     const unsigned n = context.inputCount.load(std::memory_order_relaxed);
     auto& e = context.inputs[n % 8];
@@ -49,7 +49,8 @@ inline void crashInput(int type, int x, int y, int detail, uint64_t frame) {
     e.x.store(x, std::memory_order_relaxed);
     e.y.store(y, std::memory_order_relaxed);
     e.detail.store(detail, std::memory_order_relaxed);
-    e.frame.store(frame, std::memory_order_relaxed);
+    // Use the report's main-loop frame; sokol may have advanced its event counter.
+    e.frame.store(context.frame.load(std::memory_order_relaxed), std::memory_order_relaxed);
     e.sequence.store(n * 2 + 2);
     context.inputCount.store(n + 1);
 }
@@ -67,7 +68,7 @@ inline void refreshCrashModules() noexcept {}
 inline void setCrashLogFile(const std::filesystem::path&) {}
 inline void closeCrashLogFile() {}
 inline void crashFrame(uint64_t) {}
-inline void crashInput(int, int, int, int, uint64_t) {}
+inline void crashInput(int, int, int, int) {}
 struct CrashPhaseScope { explicit CrashPhaseScope(const char*) {} };
 #endif
 } // namespace trussc::internal

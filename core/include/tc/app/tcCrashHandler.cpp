@@ -158,15 +158,15 @@ void writeTo(int fd) noexcept {
     }
 }
 #endif
-void flush() noexcept {
+void flush(bool includeResolverHint = true) noexcept {
 #ifdef _WIN32
-    text("    Resolve module offsets with the matching PDB offline.\n");
+    if (includeResolverHint) text("    Resolve module offsets with the matching PDB offline.\n");
     writeTo(stderrHandle);
 #elif defined(__APPLE__)
-    text("    Resolve raw addresses with atos -l <base> -o <module> <address>.\n");
+    if (includeResolverHint) text("    Resolve raw addresses with atos -l <base> -o <module> <address>.\n");
     writeTo(STDERR_FILENO);
 #else
-    text("    Resolve module offsets with addr2line -C -f -e <module> <offset>.\n");
+    if (includeResolverHint) text("    Resolve module offsets with addr2line -C -f -e <module> <offset>.\n");
     writeTo(STDERR_FILENO);
 #endif
     writeTo(logFile.load());
@@ -258,20 +258,32 @@ void onSignal(int sig, siginfo_t* info, void* raw) noexcept {
 void windowsStack(const CONTEXT* fault = nullptr) noexcept {
     // CaptureStackBackTrace uses the OS unwinder, without DbgHelp's symbol
     // locks/heap. Symbol resolution is deliberately left to offline tools.
-    // Include the original fault PC before the handler's own call stack.
-    unsigned first = 0;
+    uintptr_t faultPc = 0;
     if (fault) {
 #if defined(_M_X64) || defined(__x86_64__)
-        address(first++, fault->Rip);
+        faultPc = fault->Rip;
 #elif defined(_M_ARM64)
-        address(first++, fault->Pc);
+        faultPc = fault->Pc;
 #elif defined(_M_IX86)
-        address(first++, fault->Eip);
+        faultPc = fault->Eip;
 #endif
     }
-    void* frames[64];
+    unsigned index = 0;
+    if (fault) address(index++, faultPc);
+    static void* frames[64];
     const USHORT count = CaptureStackBackTrace(0, 64, frames, nullptr);
-    for (USHORT i = 0; i < count; ++i) address(first + i, reinterpret_cast<uintptr_t>(frames[i]));
+    // Skip our handler and exception dispatch through the duplicate fault PC.
+    // If the unwinder did not reach it, retain the complete captured stack.
+    USHORT start = 0;
+    if (fault) {
+        for (USHORT i = 0; i < count; ++i) {
+            if (reinterpret_cast<uintptr_t>(frames[i]) == faultPc) {
+                start = i + 1;
+                break;
+            }
+        }
+    }
+    for (USHORT i = start; i < count; ++i) address(index++, reinterpret_cast<uintptr_t>(frames[i]));
 }
 LONG WINAPI onException(EXCEPTION_POINTERS* exception) {
     if (!reporting.exchange(true)) {
@@ -329,7 +341,7 @@ void onTerminate() noexcept {
             stack(reinterpret_cast<uintptr_t>(&onTerminate), fp, fp);
 #endif
         } else text("\n");
-        flush();
+        flush(first); // An appended what() block has no new stack to resolve.
     }
     if (previousTerminate) previousTerminate();
     std::abort(); // a broken custom terminate handler must not return

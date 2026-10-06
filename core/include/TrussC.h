@@ -2797,8 +2797,7 @@ namespace internal {
             crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
                        static_cast<int>(ev->mouse_y),
                        ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP
-                           ? static_cast<int>(ev->key_code) : static_cast<int>(ev->mouse_button),
-                       ev->frame_count);
+                           ? static_cast<int>(ev->key_code) : static_cast<int>(ev->mouse_button));
         }
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they

@@ -42,7 +42,10 @@ struct CrashApp : App {
     void setup() override {
         if (mode == "setup") throw std::runtime_error("crash-handler setup exception");
     }
-    void update() override { throw std::runtime_error("crash-handler update exception"); }
+    void update() override {
+        internal::crashInput(SAPP_EVENTTYPE_MOUSE_DOWN, 42, 305, 0);
+        throw std::runtime_error("crash-handler update exception");
+    }
 };
 void priorTerminate() { std::_Exit(78); }
 #ifndef _WIN32
@@ -115,10 +118,12 @@ int child(const std::string& selected, const fs::path& directory) {
         internal::installCrashHandler(); // must not reclaim a later hook
         fault();
     }
-    internal::crashFrame(812);
     internal::CrashPhaseScope phase("update");
-    for (int i = 0; i < 12; ++i)
-        internal::crashInput(SAPP_EVENTTYPE_MOUSE_DOWN, i, 305, 0, 800 + i);
+    for (int i = 0; i < 12; ++i) {
+        internal::crashFrame(800 + i);
+        internal::crashInput(SAPP_EVENTTYPE_MOUSE_DOWN, i, 305, 0);
+    }
+    internal::crashFrame(812);
     if (mode == "throw") throw std::runtime_error("crash-handler test exception");
     if (mode == "non-std") throw 42;
     if (mode == "terminate" || mode == "prior-terminate" || mode == "later-terminate") std::terminate();
@@ -129,7 +134,9 @@ int child(const std::string& selected, const fs::path& directory) {
         sapp_event event{};
         event.type = SAPP_EVENTTYPE_KEY_DOWN;
         event.key_code = SAPP_KEYCODE_A;
-        event.frame_count = 812;
+        // Sokol advances this counter after _frame_cb; the crash context
+        // still names the current main-loop frame (812).
+        event.frame_count = 813;
         internal::_event_cb(&event);
         return 95;
     }
@@ -260,9 +267,34 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         }
         if (name == "throw" || name == "setup" || name == "update")
             check(err.find("what(): crash-handler ") != std::string::npos, name + ": exception what()");
+        if (name == "throw") {
+#ifdef __APPLE__
+            const std::string hint = "Resolve raw addresses";
+#else
+            const std::string hint = "Resolve module offsets";
+#endif
+            for (const auto* sink : {&err, &log}) {
+                const auto first = sink->find(hint);
+                check(first != std::string::npos && sink->find(hint, first + hint.size()) == std::string::npos,
+                      name + (sink == &err ? ": stderr" : ": log") + " resolver hint exactly once");
+            }
+        }
         if (name == "terminate") check(err.find("no active exception") != std::string::npos, name + ": empty exception");
         if (name == "non-std") check(err.find("non-std exception") != std::string::npos, name + ": unknown exception");
-        if (name == "event") check(err.find("phase: event dispatch") != std::string::npos, name + ": event phase");
+        if (name == "event") {
+            check(err.find("phase: event dispatch") != std::string::npos, name + ": event phase");
+            for (const auto* sink : {&err, &log})
+                check(sink->find("main-loop frame 812 / phase: event dispatch") != std::string::npos &&
+                      sink->find("keyPressed (0, 0) 65; frame 812\n") != std::string::npos &&
+                      sink->find("; frame 813\n") == std::string::npos,
+                      name + (sink == &err ? ": stderr" : ": log") + " input matches header, not advanced event counter");
+        }
+        if (name == "update") {
+            for (const auto* sink : {&err, &log})
+                check(sink->find("main-loop frame 0 / phase: update") != std::string::npos &&
+                      sink->find("mousePressed (42, 305) 0; frame 0\n") != std::string::npos,
+                      name + (sink == &err ? ": stderr" : ": log") + " input matches headless header frame");
+        }
         if (name == "setup" || name == "update") check(err.find("phase: " + name) != std::string::npos, name + ": runtime phase");
         if (name == "switch") check(read(directory / "crash.log").find(marker) == std::string::npos, name + ": retired log untouched");
 #ifndef _WIN32
