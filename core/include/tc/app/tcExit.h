@@ -16,4 +16,5 @@ std::string exitLogMessage(bool clean);
 void installWindowExitSignals();
 void restoreWindowExitSignals();
 int pendingWindowExitSignal();
+void cancelWindowExitSignal();
 }

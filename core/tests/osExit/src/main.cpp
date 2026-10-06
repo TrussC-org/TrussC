@@ -27,13 +27,26 @@ void verifyWindowExit() {
 struct ExitApp : App {
     int updates = 0;
     void setup() override {
+        if (mode == "log-warning" || mode == "log-silent") setLogLevel(LogLevel::Warning);
+        if (mode == "log-silent") setFileLogLevel(LogLevel::Silent);
         if (mode == "event-driven") { setIndependentFps(VSYNC, EVENT_DRIVEN); }
         quitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) {
             ++requests;
-            if ((mode == "cancel" || mode == "cancel-empty" || mode == "forced" || mode == "escalate") && requests == 1) {
+            if ((mode == "cancel" || mode == "cancel-empty" || mode == "forced" || mode == "escalate" || mode == "escalate-term") && requests == 1) {
                 args.cancel = true;
                 if (mode != "cancel-empty") args.reason = "Unsaved test document";
             }
+#if (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
+            if ((mode == "escalate" || mode == "escalate-term") && requests == 2) {
+                check(exits == 0 && begins == 0 && cleans == 0,
+                      "first signal after veto delivers another cancellable request");
+                std::fflush(stdout);
+                // This request is still pending inside its listener. Only
+                // now does a further signal have permission to force exit.
+                std::raise(mode == "escalate-term" ? SIGTERM : SIGINT);
+                std::_Exit(1);
+            }
+#endif
         });
     }
     void update() override {
@@ -69,7 +82,7 @@ struct ExitApp : App {
 #elif (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
         if (updates == 1) std::raise(mode == "sigint" ? SIGINT : SIGTERM);
         if (requests == 1 && (mode == "cancel" || mode == "cancel-empty")) requestExitApp();
-        if (requests == 1 && mode == "escalate") std::raise(SIGINT);
+        if (requests == 1 && (mode == "escalate" || mode == "escalate-term")) std::raise(SIGTERM);
 #else
         requestExitApp();
 #endif
@@ -140,6 +153,18 @@ void testShared() {
     int status = 0;
     check(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status)
               && WEXITSTATUS(status) == 128 + SIGINT, "second signal forces process exit");
+    internal::cancelWindowExitSignal();
+    check(internal::pendingWindowExitSignal() == 0, "veto clears pending signal");
+    std::raise(SIGTERM);
+    check(internal::pendingWindowExitSignal() == SIGTERM, "same signal after veto requests quit again");
+    check(internal::pendingWindowExitSignal() == 0, "renewed signal delivered only once");
+    child = fork();
+    if (child == 0) { std::raise(SIGTERM); std::_Exit(1); }
+    check(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status)
+              && WEXITSTATUS(status) == 128 + SIGTERM, "second pending signal after veto exits with 143");
+    internal::cancelWindowExitSignal();
+    std::raise(SIGINT);
+    check(internal::pendingWindowExitSignal() == SIGINT, "different signal after veto requests quit again");
     internal::restoreWindowExitSignals();
     internal::installWindowExitSignals();
     std::raise(SIGINT);

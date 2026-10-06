@@ -2739,7 +2739,7 @@ namespace internal {
 
     inline void _cleanup_cb() {
         if (!beginExitCleanup()) return;
-        logNotice("System") << exitLogMessage(false);
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
         currentWindowCtx() = &mainWindowContext();
         // Stop MCP HTTP server
@@ -2763,7 +2763,7 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
-        logNotice("System") << exitLogMessage(true);
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
         restoreWindowExitSignals();
 
         #if defined(__APPLE__) && TARGET_OS_OSX
@@ -3072,6 +3072,7 @@ namespace internal {
                     setExitBlockReason(args.reason);
                     clearExitReason();
                     sapp_cancel_quit();
+                    cancelWindowExitSignal();
                 }
                 break;
             }

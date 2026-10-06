@@ -25,7 +25,7 @@ struct sigaction oldTerm{}, oldInt{};
 bool signalsInstalled = false;
 void onExitSignal(int sig) {
     // No logging, allocation, callbacks or locks in a signal handler. Keep the
-    // flag after a veto so a second signal can also stop a stuck editor.
+    // flag until the main thread cancels the pending request.
     if (pendingSignal.exchange(sig, std::memory_order_relaxed)) _exit(128 + sig);
 }
 #endif
@@ -87,14 +87,21 @@ void restoreWindowExitSignals() {
 }
 int pendingWindowExitSignal() {
 #if (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)) || (defined(__APPLE__) && TARGET_OS_OSX)
-    // Main-thread acknowledgement is separate from the signal flag: a veto
-    // must not result in repeated requests on every frame.
+    // Acknowledge delivery without clearing the pending request: another
+    // signal must still escalate while listeners or cleanup are running.
     const sig_atomic_t value = pendingSignal.load(std::memory_order_relaxed);
     if (value == deliveredSignal) return 0;
     deliveredSignal = value;
     return value;
 #else
     return 0;
+#endif
+}
+void cancelWindowExitSignal() {
+#if (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)) || (defined(__APPLE__) && TARGET_OS_OSX)
+    // Main thread only. The next signal starts a new cancellable request.
+    pendingSignal.store(0, std::memory_order_relaxed);
+    deliveredSignal = 0;
 #endif
 }
 }

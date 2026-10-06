@@ -9,8 +9,11 @@ block is removed when the request is resolved or Windows cancels session end.
 
 The first SIGTERM/SIGINT only records a flag in the signal handler. The next
 frame requests exit on the main thread, even in event-driven rendering. A
-second signal after the first, including after a veto or during cleanup,
-terminates immediately without another event or cleanup. Forced OS shutdown
+second signal while that request is still pending, including during cleanup,
+terminates immediately without another event or cleanup. A veto clears the
+pending signal and its delivery state: the next signal starts a fresh,
+cancellable request, and only another signal while that request is pending
+forces immediate exit (status `128 + signal`, normally 130 or 143). Forced OS shutdown
 and SIGKILL cannot be vetoed. Windows runs cleanup inside `WM_ENDSESSION(TRUE)`
 even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)` inside
 that message, including for `ENDSESSION_CLOSEAPP`. This prevents returning to
@@ -32,7 +35,11 @@ The `reason=TOKEN` field is omitted when the origin is unknown. Field order,
 spacing, decimal `code` (the application's exit code), and decimal `pid` are
 part of the protocol. A PID identifies
 a run in an appended log; correlate with its startup/time since PIDs can be
-reused. `TRUSSC_LOG_FILE` uses the existing Logger file sink and level settings.
+reused. When a Logger file is open (via `TRUSSC_LOG_FILE` or `setLogFile`), both
+exit records are written and flushed at NOTICE regardless of its level,
+including Warning or Silent. Console and system outputs retain their normal
+level filtering. `onLog` listeners receive both records normally. Ordinary
+log records still obey the file level; the bypass is internal to the runtime.
 
 Known reason tokens are `window-close`, `request-exit-app`, `exit-app`,
 `tc-quit`, `os-session-end` (Windows), `os-logoff`, `os-restart`, `os-shutdown`
@@ -72,5 +79,10 @@ app's saved state and the single log pair after signing back in.
 
 On macOS verify Cmd+Q and real logout/restart/shutdown with and without a veto,
 including the Apple event reason and a modal dialog. On Linux/macOS also run
-`osExit --window escalate`: the first signal is vetoed and the second exits
-with status 130, without a cleanup pair. Linux screen runs require Xvfb in CI.
+`osExit --window escalate`: the first signal is vetoed, the next signal delivers
+a fresh `exitRequested` event, and another signal inside that listener exits
+with status 130, without a cleanup pair. `--window escalate-term` checks the
+same sequence with status 143. `--window log-warning` and `--window log-silent`
+check normal cleanup with all levels set to Warning and, respectively, the
+file level additionally set to Silent: both NOTICE records must reach the
+open file, but neither reaches the console. Linux screen runs require Xvfb in CI.

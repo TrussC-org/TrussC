@@ -920,6 +920,10 @@ Logger& getLogger() {
     return logger;
 }
 
+void internal::writeProtocolLine(LogLevel level, const std::string& message) {
+    getLogger().logProtocolLine(level, message);
+}
+
 // Shared by the deferred queue, native file writers and MCP path reporting.
 std::filesystem::path internal::resolveScreenshotPath(const std::filesystem::path& path) {
     auto resolved = path.is_absolute() ? path : getDataPath(path);
