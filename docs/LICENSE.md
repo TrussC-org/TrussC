@@ -34,42 +34,64 @@ SOFTWARE.
 
 TrussC includes or depends on the following third-party libraries. All use permissive open-source licenses suitable for commercial use.
 
+This is the one list of third-party code in TrussC and the version the build uses. Other docs link here instead of repeating versions. Per-library provenance (the exact upstream commit, TrussC patches, how to update) stays in the files linked from the Version column.
+
+- **Version**: the release the build fetches or the vendored copy states. `commit` is the upstream commit for code without releases (or a fork branch). `branch ... (not pinned)` means the build fetches the tip of that branch. `not recorded` means the vendored copy carries no version and its upstream commit was not recorded.
+- **Pinned / vendored in**: the CMake file with the `FetchContent_Declare` or shader compiler pin, or the vendored path in the repo.
+- **Checked on every pull request**: `python3 tools/check_dependencies.py` (CI job `header-state-check`) compares each row with the `GIT_TAG` / `URL` of its `FetchContent_Declare`, the shader compiler commit and host binary SHA-256 values, the version line or macros of its vendored copy, and the provenance file. Recorded SHA-256 values must agree with the build; `URL_HASH` must be a valid SHA-256 when present. It fails when a `FetchContent_Declare` has no row, a version differs, or a path no longer exists. A pull request that changes a dependency updates its row here.
+- **Checked every week**: `.github/workflows/upstream-check.yml` asks each upstream for its latest release (or, for a commit, whether the vendored files changed upstream) and comments on one tracking issue, "Third-party updates available", when the set of entries with something newer changes. Incomplete checks appear in the run summary and preserve the last complete report. It never changes a version; a person reads the release notes and decides.
+
 ### Core Dependencies
 
-| Library | Version | License | Author/Organization | License URL |
-|---------|---------|---------|---------------------|-------------|
-| **sokol** | - | zlib License | Andre Weissflog | [LICENSE (in headers)](https://github.com/floooh/sokol/blob/master/sokol_app.h) |
-| **Dear ImGui** | 1.92.9b | MIT | Omar Cornut | [LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt) |
-| **stb_image** | 2.30 (fork [nvpro-samples/stb](https://github.com/nvpro-samples/stb) `nv/all-fixes` @ `1cafe0e`, + 2 TrussC patches) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
-| **stb_image_write** | 1.16 (nothings/stb @ `1ee679c`, + 1 TrussC patch) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
-| **stb_perlin** | 0.5 (nothings/stb @ `2bb4a0a`) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
-| **stb_truetype** | 1.26 (nothings/stb @ `6e9f34d`, + 3 TrussC patches) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
-| **stb_vorbis** | 1.22 (fork [sezero/stb](https://github.com/sezero/stb) `stb_vorbis-sezero` @ `dd0c5ec`) | Public Domain (dual-licensed under MIT) | Sean Barrett | [LICENSE](../core/include/stb/LICENSE) |
-| **dr_mp3** | 0.6.39 | Public Domain or MIT-0 | David Reid | [LICENSE (in source)](https://github.com/mackron/dr_libs/blob/master/dr_mp3.h) |
-| **dr_wav** | 0.13.16 | Public Domain or MIT-0 | David Reid | [LICENSE (in source)](https://github.com/mackron/dr_libs/blob/master/dr_wav.h) |
-| **miniaudio** | 0.11.21 | Public Domain or MIT-0 | David Reid | [LICENSE (in README)](https://github.com/mackron/miniaudio?tab=readme-ov-file#license) |
-| **nlohmann/json** | 3.11.3 | MIT | Niels Lohmann | [LICENSE.MIT](https://github.com/nlohmann/json/blob/develop/LICENSE.MIT) |
-| **pugixml** | 1.15 | MIT | Arseny Kapoulkine | [LICENSE.md](https://github.com/zeux/pugixml/blob/master/LICENSE.md) |
-| **cpp-httplib** | 0.18.3 | MIT | Yuji Hirose | [LICENSE](https://github.com/yhirose/cpp-httplib/blob/master/LICENSE) |
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization |
+|---------|---------|----------------------|----------|---------|---------------------|
+| **sokol** | commit `082152c` (+ TrussC patches, see [TRUSSC_MODIFICATIONS.md](../core/include/sokol/TRUSSC_MODIFICATIONS.md)) | `core/include/sokol/` | https://github.com/floooh/sokol | zlib License | Andre Weissflog |
+| **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 2 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
+| **stb_image_write** | 1.16, commit `1ee679c` (+ 1 TrussC patch) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
+| **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
+| **stb_truetype** | 1.26, commit `6e9f34d` (+ 3 TrussC patches) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
+| **stb_vorbis** | 1.22, commit `dd0c5ec` (fork, branch `stb_vorbis-sezero`) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
+| **miniaudio** | 0.11.23 | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
+| **dr_wav** | 0.14.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **dr_mp3** | 0.7.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **dr_flac** | 0.13.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **nlohmann/json** | 3.11.3 | `core/include/nlohmann/json.hpp` | https://github.com/nlohmann/json | MIT | Niels Lohmann |
+| **pugixml** | 1.15 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
+| **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
+| **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
+| **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+
+### Build Tools
+
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |
+|---------|---------|----------------------|----------|---------|---------------------|---------|
+| **sokol-shdc (sokol-tools-bin)** | commit `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | osx: `8b4a6ac1172ec0d90dd41d611067d5e87a51e78dc28acb216cfc341d880b1d78`<br>osx_arm64: `92db37975ad7ff3c3c9bc27cba1503287377cb287ebabf60d1c6b597abfa3244`<br>linux: `ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df`<br>linux_arm64: `446b4bcea0c81d3ae529bc0d93533ea661b017f5b9ec2b2293a4c85f5fdcb639`<br>win32: `bd616287f9ea689d53c6d260e443ee733e61ae1b73a9b37adc482ead0364d561` |
+
+Updates must change the shader compiler commit and all five host binary hashes together, preserving the `metal_sim` and `wgsl` outputs used by TrussC.
 
 ### Addon Dependencies (Optional)
 
 These libraries are only included if you use the corresponding addon.
 
-| Library | Version | License | Author/Organization | Addon | License URL |
-|---------|---------|---------|---------------------|-------|-------------|
-| **mbedTLS** | 3.6.2 | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls | [LICENSE](https://github.com/Mbed-TLS/mbedtls/blob/development/LICENSE) |
-| **Box2D** | 2.4.1 | MIT (v2.4.0以降) | Erin Catto | tcxBox2d | [LICENSE](https://github.com/erincatto/box2d/blob/main/LICENSE) |
-| **bc7enc** | - | MIT or Public Domain (dual-licensed) | Richard Geldreich, Jr. | tcxTcv | [LICENSE (in source)](https://github.com/richgel999/bc7enc_rdo) |
-| **bcdec** | 0.97 | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxTcv, tcxHap | [LICENSE (in source)](https://github.com/iOrange/bcdec) |
-| **LZ4** | 1.10.0 | BSD 2-Clause | Yann Collet | tcxTcv | [LICENSE](https://github.com/lz4/lz4/blob/dev/lib/LICENSE) |
-| **Snappy** | 1.2.1 | BSD 3-Clause | Google Inc. | tcxHap | [COPYING](https://github.com/google/snappy/blob/main/COPYING) |
-| **HAP** | - | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap | [LICENSE](https://github.com/Vidvox/hap/blob/master/LICENSE) |
-| **Lua** | 5.4.8 | MIT (v5.0 or later) | Lua.org, PUC-Rio | tcxLua | [LICENSE](https://www.lua.org/license.html) |
-| **LuaJIT** | 2.1 | MIT | Mike Pall | tcxLua | [COPYRIGHT](https://github.com/LuaJIT/LuaJIT/blob/v2.1/COPYRIGHT) |
-| **luajit-cmake** | [67637d0](https://github.com/zhaozg/luajit-cmake/commit/67637d05afadea249c2ef466ba1273db0f8bb772) (2026/3/18) | MIT | George Zhao (zhaozg) | tcxLua | [LICENSE](https://github.com/zhaozg/luajit-cmake/blob/master/LICENSE) |
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
+|---------|---------|----------------------|----------|---------|---------------------|-------|
+| **Dear ImGui** | 1.92.9b (+ TrussC patch, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
+| **sokol_imgui.h** | not recorded | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
+| **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
+| **libcurl** | 8.12.1 (Windows, when no system libcurl is found) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
+| **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |
+| **Box2D** | 2.4.1 | `addons/tcxBox2d/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d |
+| **cgltf** | 1.14 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
+| **tinyobjloader** | commit `966edce` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
+| **Snappy** | 1.2.1 | `addons/tcxHap/CMakeLists.txt` | https://github.com/google/snappy | BSD 3-Clause | Google Inc. | tcxHap |
+| **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
+| **bcdec** | 0.98 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
+| **Lua** | 5.4.8 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
+| **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
+| **LuaJIT** | 2.1 (rolling), commit not recorded | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
+| **luajit-cmake** | commit `67637d0` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
 
-> **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.1を使用しています。
+> **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.0以降 (MIT) を使用しています。
 
 ---
 
@@ -101,7 +123,7 @@ freely, subject to the following restrictions:
     3. This notice may not be removed or altered from any source distribution.
 ```
 
-### MIT License (Dear ImGui, nlohmann/json, pugixml, cpp-httplib, Box2D, Lua, LuaJIT, luajit-cmake)
+### MIT License (Dear ImGui, nlohmann/json, pugixml, cpp-httplib, Box2D, cgltf, tinyobjloader, Lua, sol2, LuaJIT, luajit-cmake)
 
 ```
 MIT License
@@ -176,42 +198,9 @@ See the full license text at:
 - Apache-2.0: https://www.apache.org/licenses/LICENSE-2.0
 - GPL-2.0: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 
-### MIT or Public Domain (bc7enc, bcdec)
+### MIT or Public Domain (bcdec)
 
-bc7enc and bcdec are dual-licensed under MIT or Public Domain. You may choose either license.
-
-**bc7enc:**
-```
-This software is available under 2 licenses -- choose whichever you prefer.
-If you use this software in a product, attribution / credits is requested but not required.
-
-ALTERNATIVE A - MIT License
-Copyright(c) 2020-2021 Richard Geldreich, Jr.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files(the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions :
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-ALTERNATIVE B - Public Domain (www.unlicense.org)
-This is free and unencumbered software released into the public domain.
-Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
-software, either in source code form or as a compiled binary, for any purpose,
-commercial or non-commercial, and by any means.
-```
+bcdec is dual-licensed under MIT or Public Domain. You may choose either license.
 
 **bcdec:**
 ```
@@ -237,7 +226,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### BSD 2-Clause License (LZ4, HAP)
+### BSD 2-Clause License (LZ4, HAP, libremidi)
 
 **LZ4:**
 ```
@@ -325,6 +314,34 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+
+### ISC License (earcut.hpp)
+
+```
+ISC License
+
+Copyright (c) 2015, Mapbox
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+
+### libremidi
+
+libremidi's own code is under the BSD 2-Clause License (Copyright (c) 2017-2023, Jean-Michaël Celerier & the libremidi contributors). It is derived from RtMidi (MIT) and ModernMidi (BSD 2-Clause). Full text: [LICENSE.md](https://github.com/celtera/libremidi/blob/master/LICENSE.md).
+
+### curl License (libcurl)
+
+libcurl is under the curl License, an MIT-style license (Copyright (c) Daniel Stenberg, and many contributors). Full text: [COPYING](https://github.com/curl/curl/blob/master/COPYING).
 
 ---
 

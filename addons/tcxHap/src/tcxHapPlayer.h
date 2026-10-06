@@ -182,7 +182,7 @@ public:
     HapPlayer() = default;
     ~HapPlayer() { close(); }
 
-    // Non-copyable, move-enabled
+    // Non-copyable, move-enabled. onError listeners are not moved.
     HapPlayer(const HapPlayer&) = delete;
     HapPlayer& operator=(const HapPlayer&) = delete;
 
@@ -218,24 +218,29 @@ public:
     // Load / Close
     // =========================================================================
 
-    tc::LoadResult load(const tc::fs::path& path) override {
+    // Relative paths resolve via getDataPath, like VideoPlayer::load.
+    tc::LoadResult load(const tc::fs::path& filePath) override {
+        const auto previousError = errorMessage_;
         if (initialized_) {
             close();
         }
+        errorMessage_ = previousError;
         resetStats();
+
+        const tc::fs::path path = tc::getDataPath(filePath);   // absolute paths pass through
 
         std::error_code ec;
         if (!tc::fs::exists(path, ec)) {
-            tc::logError("HapPlayer") << "file not found: " << tc::internal::pathToUtf8(path);
+            tc::logError("HapPlayer") << "file not found: " << path;
             return tc::LoadResult::fail(tc::LoadError::FileNotFound,
-                "file not found: " + tc::internal::pathToUtf8(path));
+                "file not found: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         // Parse MOV file
         if (!movParser_.open(path)) {
             tc::logError("HapPlayer") << "Failed to open: " << path;
             return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
-                "failed to parse MOV: " + tc::internal::pathToUtf8(path));
+                "failed to parse MOV: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         const auto& info = movParser_.getInfo();
@@ -302,12 +307,14 @@ public:
             << duration_ << "s, format: " << static_cast<int>(hapFormat_)
             << (hasAudio_ ? ", with audio" : ", no audio");
 
+        clearPlaybackError();
         initialized_ = true;
         currentFrame_ = 0;
         return tc::LoadResult::success();
     }
 
     void close() override {
+        clearPlaybackError();
         if (!initialized_) return;
 
         // Stop audio
@@ -347,6 +354,7 @@ public:
 
     void update() override {
         if (!initialized_) return;
+        if (dispatchPlaybackError("HapPlayer")) return;
 
         // Only reset frameNew_ when actively playing
         // (preserve frameNew_ set by setFrame() for encoding workflows)
@@ -390,6 +398,7 @@ public:
                 }
             }
         }
+        dispatchPlaybackError("HapPlayer");
     }
 
     // =========================================================================
@@ -627,6 +636,8 @@ protected:
 private:
     MovParser movParser_;
     HapDecoder hapDecoder_;
+    tc::OnceGate invalidFrameWarningGate_{5.0};
+    uint64_t skippedInvalidFrames_ = 0;
     const MovTrack* videoTrack_ = nullptr;
     const MovTrack* audioTrack_ = nullptr;
 
@@ -660,6 +671,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(HapPlayer&& other) {
+        movePlaybackErrorFrom(other);
         // Move base class state
         width_ = other.width_;
         height_ = other.height_;
@@ -845,6 +857,7 @@ private:
 
         // Read sample data from MOV
         if (!movParser_.readSample(*videoTrack_, frameIndex, sampleBuffer_)) {
+            reportPlaybackError("Failed to read HAP video sample");
             return false;
         }
 
@@ -855,6 +868,17 @@ private:
                 width_, height_,
                 frameBuffer_.data(), frameBuffer_.size(),
                 outFormat)) {
+            if (hapDecoder_.lastErrorCode_ == HapResult_Bad_Frame) {
+                ++skippedInvalidFrames_;
+                if (invalidFrameWarningGate_.isFirstTime()) {
+                    tc::logWarning("HapPlayer") << "Skipping invalid HAP frame " << frameIndex
+                        << "; skipped " << skippedInvalidFrames_
+                        << " invalid frames since the last report";
+                    skippedInvalidFrames_ = 0;
+                }
+                return false;
+            }
+            reportPlaybackError("Failed to decode HAP video frame", hapDecoder_.lastErrorCode_);
             return false;
         }
 

@@ -142,6 +142,10 @@ public:
                 << " is odd; most codecs need even dimensions";
         }
         path_ = getDataPath(path);
+        if (!internal::checkWriteTarget(path, path_, "VideoWriter")) {
+            path_.clear();
+            return false;
+        }
         {   // native encoders won't create intermediate directories
             std::error_code ec;
             fs::path parent = path_.parent_path();

@@ -206,6 +206,16 @@ sudo systemctl start trussc-app
 
 Replace `/path/to/your/project` with your project directory and `your_username` with your user.
 
+For unattended installations, pair the app with a watchdog (for example,
+anchorbolt, Task Scheduler on Windows, or a service supervisor) configured to
+restart it after a non-zero exit. Return `tc::runApp<App>(settings)` from
+`main()` so the supervisor receives the exit code. On Windows, a D3D11 device
+loss (such as a GPU timeout or driver reset) logs `GetDeviceRemovedReason`,
+fires `events().deviceLost` once, and exits with code 1 by default. A listener
+can set `args.cancel = true` to keep non-graphics work running and handle the
+failure itself; it must manage subsequent drawing because GPU resources are
+not recreated. Other graphics backends do not gain device-loss detection.
+
 ---
 
 ## 5. SBC-Specific Tips

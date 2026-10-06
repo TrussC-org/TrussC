@@ -55,16 +55,71 @@ fs::path getExecutableDir() {
     return fs::path("/");
 }
 
+// User data / temp folders: the browser has no persistent file system here,
+// so both live in Emscripten's in-memory file system and are gone on reload.
+fs::path internal::platformUserDataRoot() {
+    return fs::path("/userdata");
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path("/tmp");
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
 // ---------------------------------------------------------------------------
-// Screenshot — not implemented on web (#230)
+// Screenshot — deferred canvas download; synchronous Pixels stays unsupported.
 // ---------------------------------------------------------------------------
-// Nothing in the browser build reads the canvas back: screenshots on web are
-// taken with the browser's own tools (#230). Saving the canvas as a browser
-// download is tracked in #298. Every capture entry point fails honestly: it
-// returns false and warns once per API, so an app that calls grabScreen() or
-// saveScreenshot() every frame does not flood the browser console.
 static bool captureWindowWarned_ = false;
-static bool captureWindowToFileWarned_ = false;
+
+// Invoked by the afterFrame drain, before returning to the browser. toBlob()
+// snapshots the rendered canvas now, even though its callback runs later, so
+// neither WebGPU nor WebGL2 needs preserveDrawingBuffer.
+using ScreenshotErrorCallback = void (*)(int);
+EM_JS_DEPS(screenshotDownloadDeps, "$UTF8ToString,$getWasmTableEntry");
+EM_JS(bool, downloadScreenshot, (const char* namePtr, const char* mimePtr,
+                                 ScreenshotErrorCallback onError), {
+    const name = UTF8ToString(namePtr);
+    const mime = UTF8ToString(mimePtr);
+    const fail = (reason) => getWasmTableEntry(onError)(reason);
+    try {
+        const canvas = Module['canvas'] || document.querySelector('#canvas');
+        if (!canvas) { fail(0); return false; }
+        canvas.toBlob((blob) => {
+            if (!blob) { fail(2); return; }
+            let url;
+            let link;
+            try {
+                url = URL.createObjectURL(blob);
+                link = document.createElement('a');
+                link.href = url;
+                link.download = name;
+                document.body.appendChild(link);
+                link.click();
+            } catch (error) {
+                fail(3);
+            } finally {
+                if (link) link.remove();
+                // Keep the URL alive until the browser has consumed the click.
+                if (url) setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }
+        }, mime);
+        return true;
+    } catch (error) {
+        fail(1);
+        return false;
+    }
+});
+
+static void screenshotDownloadError(int reason) {
+    const char* message = reason == 0 ? "Screenshot canvas is unavailable" :
+                          reason == 1 ? "Canvas screenshot failed (the canvas may be tainted by cross-origin content)" :
+                          reason == 2 ? "Canvas screenshot encoding returned no image" :
+                                        "Could not start the screenshot download";
+    logError("Screenshot") << message;
+}
 
 bool captureWindow(Pixels& outPixels) {
     (void)outPixels;
@@ -77,17 +132,29 @@ bool captureWindow(Pixels& outPixels) {
     return false;
 }
 
-// Reached from saveScreenshot(), which on web skips the deferred queue and
-// comes straight here (see TrussC.h).
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    (void)path;
-    if (!captureWindowToFileWarned_) {
-        captureWindowToFileWarned_ = true;
-        logWarning("Screenshot") << "saveScreenshot() is not implemented on "
-            "web (no canvas readback): no file is written (returns false). Use "
-            "the browser's own screenshot feature instead.";
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path) {
+    return pixels.save(internal::resolveScreenshotPath(path));
+}
+
+std::filesystem::path internal::resolveScreenshotDownloadName(const std::filesystem::path& path) {
+    auto name = path.filename();
+    if (name.empty()) name = "screenshot-" + getTimestampString() + ".png";
+    const auto ext = toLower(getFileExtension(name));
+    if (ext != "png" && ext != "jpg" && ext != "jpeg") {
+        name += ".png";
+        logWarning("Screenshot") << "Unsupported or missing extension; saving PNG to "
+                                 << internal::pathToUtf8(name) << ". Supported formats: png, jpg/jpeg";
     }
-    return false;
+    return name;
+}
+
+bool internal::captureWindowToFile(const std::filesystem::path& path) {
+    const auto resolved = internal::resolveScreenshotDownloadName(path);
+    const auto name = internal::pathToUtf8(resolved);
+    const auto ext = toLower(getFileExtension(resolved));
+    return downloadScreenshot(name.c_str(),
+                              (ext == "jpg" || ext == "jpeg") ? "image/jpeg" : "image/png",
+                              screenshotDownloadError);
 }
 
 // ---------------------------------------------------------------------------

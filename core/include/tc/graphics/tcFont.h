@@ -447,10 +447,10 @@ private:
     //
     // Checks the collection header, the table directory, the fixed fields of
     // head / hhea / maxp / cmap, loca and hmtx against the data size before
-    // the data is given to stb_truetype. It does not look inside cmap
-    // subtables, glyph outlines or CFF data. It belongs to the stb backend:
-    // drop it together with stb if the backend is replaced. Offsets and
-    // lengths are added in 64 bits.
+    // the data is given to stb_truetype. For cmap subtables it checks only
+    // the format, not their contents, glyph outlines or CFF data. It belongs
+    // to the stb backend: drop it together with stb if the backend is replaced.
+    // Offsets and lengths are added in 64 bits.
     // -------------------------------------------------------------------------
     static constexpr uint64_t kMaxFontDataSize = 0x40000000u;
     static constexpr const char* kTooLargeReason =
@@ -596,6 +596,7 @@ private:
             reason = "cmap encoding records are truncated";
             return false;
         }
+        bool usableCmap = false;
         for (uint64_t i = 0; i < numSubtables; i++) {
             const uint64_t rec = cmap.offset + 4 + 8 * i;
             const uint64_t platform = u16(rec);
@@ -605,7 +606,16 @@ private:
                     reason = "cmap subtable offset is outside the cmap table";
                     return false;
                 }
+                // Match the vendored stbtt_InitFont selection. Read the format
+                // only after checking this Unicode record's subtable offset.
+                const uint64_t format = u16(cmap.offset + u32(rec + 4));
+                if (format == 0 || format == 4 || format == 6 || format == 12 || format == 13)
+                    usableCmap = true;
             }
+        }
+        if (!usableCmap) {
+            reason = "no usable Unicode character map (stb_truetype supports cmap formats 0, 4, 6, 12 and 13)";
+            return false;
         }
 
         // hmtx: numberOfHMetrics long entries, then one short entry per
@@ -1554,12 +1564,16 @@ public:
         // Resolve input to a concrete path (file / URL). A font NAME
         // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
         // arrive here; the UTF-8 string form is what cache keys and the
-        // system-font lookup use.
+        // system-font lookup use. A relative file path resolves via
+        // getDataPath, like Image::load; when a file in the data folder and a
+        // system font share a name, the data file wins.
         std::string nameStr = internal::pathToUtf8(nameOrPath);
         std::string actualPath = nameStr;
         int actualFace = faceIndex;
         if (!isUrl(nameStr)) {
-            std::ifstream test(nameOrPath, std::ios::binary);
+            const fs::path filePath = getDataPath(nameOrPath);   // absolute paths pass through
+            actualPath = internal::pathToUtf8(filePath);
+            std::ifstream test(filePath, std::ios::binary);
             if (!test.good()) {
                 // Not a usable file path — try as a system font name. The OS
                 // gives the file and the face inside it.
@@ -1577,8 +1591,8 @@ public:
                                       << "\" → " << actualPath << " (face " << actualFace
                                       << ")";
                 }
-                // If resolution failed, fall through with the original input so
-                // the eventual load error mentions what the user actually asked for.
+                // If resolution failed, keep the data-folder path: the load
+                // error then names the input and where it was looked for.
             }
         }
 
