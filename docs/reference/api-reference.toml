@@ -2246,6 +2246,9 @@ keywords = ["download", "cpu"]
 description.en = "Read FBO contents into a CPU buffer (8-bit per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり8ビット）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 8비트)"
+details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
+details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
+details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
@@ -2254,6 +2257,9 @@ keywords = ["download", "cpu"]
 description.en = "Read FBO contents into a CPU buffer (32-bit float per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり32ビット浮動小数点）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 32비트 부동소수점)"
+details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
+details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
+details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
 related = ["Fbo::readPixels"]
 
 ["Fbo::save"]

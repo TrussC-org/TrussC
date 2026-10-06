@@ -5382,6 +5382,11 @@ SOKOL_GFX_API_DECL const void* sg_mtl_render_command_encoder(void);
 SOKOL_GFX_API_DECL const void* sg_mtl_compute_command_encoder(void);
 // Metal: return __bridge-casted MTLCommandQueue
 SOKOL_GFX_API_DECL const void* sg_mtl_command_queue(void);
+// [TrussC] Submit and wait for pending Metal commands between passes, without
+// ending the frame or presenting drawables. The next pass lazily starts a new
+// command buffer. Preserves listeners, frame index and uniform ring state.
+// No-op on other backends; requires no active pass on every backend.
+SOKOL_GFX_API_DECL void sg_tc_mtl_flush(void);
 // Metal: get internal __bridge-casted buffer resource objects
 SOKOL_GFX_API_DECL sg_mtl_buffer_info sg_mtl_query_buffer_info(sg_buffer buf);
 // Metal: get internal __bridge-casted image resource objects
@@ -6839,6 +6844,7 @@ typedef struct {
     id<MTLRenderCommandEncoder> render_cmd_encoder;
     id<MTLComputeCommandEncoder> compute_cmd_encoder;
     id<CAMetalDrawable> cur_drawable;
+    NSMutableArray* pending_drawables; // [TrussC] present only at sg_commit, never at a mid-frame flush
     id<MTLBuffer> uniform_buffers[SG_NUM_INFLIGHT_FRAMES];
 } _sg_mtl_backend_t;
 
@@ -15330,6 +15336,7 @@ _SOKOL_PRIVATE void _sg_mtl_setup_backend(const sg_desc* desc) {
     _sg.mtl.sem = dispatch_semaphore_create(SG_NUM_INFLIGHT_FRAMES);
     _sg.mtl.device = (__bridge id<MTLDevice>) desc->environment.metal.device;
     _sg.mtl.cmd_queue = [_sg.mtl.device newCommandQueue];
+    _sg.mtl.pending_drawables = [[NSMutableArray alloc] init]; // [TrussC]
 
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES; i++) {
         _sg.mtl.uniform_buffers[i] = [_sg.mtl.device
@@ -15379,6 +15386,7 @@ _SOKOL_PRIVATE void _sg_mtl_discard_backend(void) {
     _SG_OBJC_RELEASE(_sg.mtl.sem);
     _SG_OBJC_RELEASE(_sg.mtl.device);
     _SG_OBJC_RELEASE(_sg.mtl.cmd_queue);
+    _SG_OBJC_RELEASE(_sg.mtl.pending_drawables); // [TrussC]
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES; i++) {
         _SG_OBJC_RELEASE(_sg.mtl.uniform_buffers[i]);
     }
@@ -16323,9 +16331,13 @@ _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
         // NOTE: MTLComputeCommandEncoder is autoreleased
         _sg.mtl.compute_cmd_encoder = nil;
     }
-    // if this is a swapchain pass, present the drawable
+    // [TrussC] A mid-frame readback may submit this command buffer. Queue
+    // presentation until sg_commit so suspended/resumed swapchains remain ours.
+    // A drawable used by several passes is presented only once.
     if (nil != _sg.mtl.cur_drawable) {
-        [_sg.mtl.cmd_buffer presentDrawable:_sg.mtl.cur_drawable];
+        if (![_sg.mtl.pending_drawables containsObject:_sg.mtl.cur_drawable]) {
+            [_sg.mtl.pending_drawables addObject:_sg.mtl.cur_drawable];
+        }
         _sg.mtl.cur_drawable = nil;
     }
 }
@@ -16338,6 +16350,12 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
     // and the uniform ring. Acquire its slot and submit an empty command
     // buffer so completion ordering also protects deferred resource GC (#332).
     _sg_mtl_ensure_command_buffer();
+    // [TrussC] Present only at the real commit, including after a flush with
+    // no subsequent pass. #599 already guarantees this final command buffer.
+    for (id<CAMetalDrawable> drawable in _sg.mtl.pending_drawables) {
+        [_sg.mtl.cmd_buffer presentDrawable:drawable];
+    }
+    [_sg.mtl.pending_drawables removeAllObjects];
     [_sg.mtl.cmd_buffer commit];
     // [TrussC modification end]
 
@@ -26567,6 +26585,26 @@ SOKOL_API_IMPL const void* sg_mtl_command_queue(void) {
         }
     #else
         return 0;
+    #endif
+}
+
+// [TrussC] Synchronous mid-frame submission for Fbo readback (#270).
+SOKOL_API_IMPL void sg_tc_mtl_flush(void) {
+    SOKOL_ASSERT(_sg.valid);
+    SOKOL_ASSERT(!_sg.cur_pass.in_pass);
+    #if defined(SOKOL_METAL)
+        SOKOL_ASSERT(nil == _sg.mtl.render_cmd_encoder);
+        SOKOL_ASSERT(nil == _sg.mtl.compute_cmd_encoder);
+        if (_sg.mtl.cmd_buffer) {
+            [_sg.mtl.cmd_buffer commit];
+            // Extra command buffers must not turn the in-flight semaphore into
+            // permission to reuse a uniform ring slot still read by the GPU.
+            // Waiting drains preceding submissions on this same queue too.
+            // The installed completion handler returns this buffer's permit;
+            // do not signal it here. Keep the current uniform offset/base/slot.
+            [_sg.mtl.cmd_buffer waitUntilCompleted];
+            _sg.mtl.cmd_buffer = nil;
+        }
     #endif
 }
 

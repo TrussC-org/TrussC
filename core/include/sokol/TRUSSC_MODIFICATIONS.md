@@ -23,8 +23,9 @@ sokol/
 ├── sokol_app_tc.h       # TrussC-owned fork: full sapp_* implementation on
 │                        #   every platform + multi-window API (sokol_app.h
 │                        #   no longer exists in this tree — see below)
-├── sokol_gfx.h          # Modified (2 patches: swapchain store-action hint +
-│                        #   uniform-buffer auto-grow, both Metal)
+├── sokol_gfx.h          # Modified (Metal: swapchain store-action hint,
+│                        #   uniform-buffer auto-grow, upload-only frame
+│                        #   synchronization, mid-frame flush)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
 ├── TRUSSC_MODIFICATIONS.md
@@ -192,6 +193,46 @@ content would be undefined.
 Passes without the hint (including every pass begun by plain sokol users and
 TrussC's final per-frame pass) behave exactly as upstream.
 
+### Mid-frame Metal flush for Fbo readback (#270)
+
+**Purpose:** synchronous macOS Fbo readback must not end the frame, rewind
+sokol_gl, or present a partially rendered swapchain.
+
+**Changes (marked `[TrussC]`):**
+- `sg_tc_mtl_flush()` requires no active pass, submits the current Metal
+  command buffer and waits for completion, then clears its pointer. The next
+  pass lazily creates/enqueues a fresh buffer, after the caller's readback blit.
+  Other backends provide a no-op with the same between-passes precondition.
+- Flush does not notify commit listeners, advance `frame_index`, collect
+  deferred resources, rotate uniform slots, or reset `cur_ub_offset` / the
+  uniform base pointer. Subsequent draws append uniforms in the same slot;
+  existing uniform auto-grow and deferred retirement keep working.
+- Reuses #599's `_sg_mtl_ensure_command_buffer()` and unconditional final
+  commit; #270 adds no separate helper or conditional buffer-acquisition path.
+  Each sokol command buffer acquires/releases exactly one permit. Flush waits for
+  its submission (and earlier submissions on the same queue), so extra
+  buffers cannot let a later frame overwrite an in-flight uniform slot.
+  Flush never manually signals the semaphore. The separate, synchronous
+  readback blit does not participate in sokol's semaphore.
+- `_sg_mtl_end_pass()` retains each used drawable once in `pending_drawables`.
+  Only `_sg_mtl_commit()` schedules their presentation and empties the list,
+  after #599's unconditional buffer acquisition and before its commit. This
+  also works after a flush with no subsequent pass, using the final buffer
+  #599 already guarantees. A mid-frame flush never presents these drawables.
+  This presentation change applies to both Metal platforms; the iOS readback
+  implementation is unchanged pending the separate hardware investigation.
+
+The macOS Fbo caller suspends an open swapchain pass and resumes with the
+existing LOAD/store behavior after its same-queue blit has completed. Byte
+readback rejects non-RGBA8 formats before touching render state. `copyTo()`
+and `save()` remain synchronous through the same path.
+
+Regression tests: `core/tests/mtlFlush` (dummy bookkeeping on Linux/Windows;
+real offscreen Metal submission and uniform state on macOS), and
+`core/tests/fboReadback --gpu-check` (TrussC window, including FullscreenShader,
+float reads, copy and save). Mac display/Metal validation and post-implementation
+review remain required by the Decision.
+
 ### Per-frame uniform buffer auto-grow (Metal)
 
 **Purpose:** Upstream sizes the Metal per-frame uniform ring buffer once at
@@ -218,7 +259,7 @@ optional optimization rather than a correctness requirement.
 WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
 bind groups / descriptor sets; growing them is much more invasive).
 
-### Upload-only frame synchronization (Metal)
+### Upload-only frame synchronization (Metal, #599 / #332)
 
 **Purpose:** End frames on ticks that record offscreen work or uploads without
 drawing the screen (#332). A commit without a pass must participate in the
@@ -227,9 +268,15 @@ in-flight semaphore before rotating uniform slots or collecting resources.
 **Changes (marked `[TrussC modification]`):**
 - `_sg_mtl_ensure_command_buffer()` shares the first-pass command-buffer creation,
   semaphore wait and completion-handler signal with `_sg_mtl_commit()`.
-- `_sg_mtl_commit()` creates and commits an empty command buffer when no pass
-  created one. Existing pass frames reuse their command buffer and semaphore
-  slot. Retained/unretained-reference settings remain respected.
+- `_sg_mtl_commit()` unconditionally ensures a command buffer and commits it,
+  even when no pass created one or #270's flush cleared the previous buffer.
+  Existing pass frames reuse their command buffer and semaphore slot.
+  Retained/unretained-reference settings remain respected.
+- #270 layers deferred presentation onto this base: between ensuring the
+  buffer and committing it, present each retained `pending_drawables` entry
+  once and clear the list. Acquisition never depends on the list being nonempty.
+  Garbage collection, uniform-ring rotation/reset, and frame advancement still
+  belong only to the real commit; flush neither duplicates nor bypasses them.
 
 ---
 
@@ -331,7 +378,7 @@ Regression test: `core/tests/sglPoolLimits` (dummy backend).
 
 ## sokol_gfx.h
 
-**Untouched.** Pool sizes are configured at runtime in TrussC's `tcGlobal.cpp`:
+**Pool configuration (separate from the Metal patches above).** Pool sizes are configured at runtime in TrussC's `tcGlobal.cpp`:
 - `shader_pool_size = 1024` (default 32) and `pipeline_pool_size = 1024`
   (default 64): fixed sizes, since these pools cannot grow (reasons next to
   the constants)
@@ -343,7 +390,7 @@ Regression test: `core/tests/sglPoolLimits` (dummy backend).
 
 ## How to Update Sokol
 
-For files with TrussC patches (sokol_glue.h, util/sokol_gl_tc.h, and
+For files with TrussC patches (sokol_gfx.h, sokol_glue.h, util/sokol_gl_tc.h, and
 addons/tcxImGui/src/sokol_imgui.h), **use `git merge-file` as a 3-way merge** instead of overwriting and manually
 re-applying patches. This avoids slip bugs from manual patch transcription.
 
@@ -377,8 +424,7 @@ THEIRS, since sokol_gl_tc.h is the renamed fork), and for
 
 ### Direct overwrite (for files without TrussC patches)
 
-1. **sokol_gfx.h** -- overwrite directly (no modifications)
-2. **Other headers** (sokol_log.h, etc.) -- overwrite directly
+1. **Unmodified headers** (sokol_log.h, etc.) -- overwrite directly
 
 ### After updating
 
