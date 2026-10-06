@@ -1,6 +1,8 @@
 Linux GStreamer regression for #453. A truncated M4A and deterministic random
 bytes must each return `DecodeFailed` with one error naming the file and the
 GStreamer error. A valid M4A must still decode, including after failed loads.
+The fixture is mono; faad (used when gst-libav is absent, as on CI) decodes it
+as stereo, so the test accepts one or two channels.
 No display or audio output device is needed. Other platforms skip the test.
 
 Run the binary under an external process timeout so a regression cannot hang:

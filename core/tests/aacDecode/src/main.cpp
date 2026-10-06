@@ -71,9 +71,12 @@ TC_CORE_TEST_MAIN() {
     SoundBuffer buffer;
     const auto result = buffer.load(path);
     check("valid M4A decodes after failures", static_cast<bool>(result));
-    check("valid M4A has mono 44100 Hz samples",
-          buffer.channels == 1 && buffer.sampleRate == 44100 && buffer.numSamples >= 4096 &&
-          buffer.samples.size() == buffer.numSamples);
+    // The fixture is mono, but faad (the AAC decoder without gst-libav, as on
+    // CI) upmixes mono to stereo, so accept either layout.
+    check("valid M4A has 44100 Hz samples",
+          (buffer.channels == 1 || buffer.channels == 2) && buffer.sampleRate == 44100 &&
+          buffer.numSamples >= 4096 &&
+          buffer.samples.size() == buffer.numSamples * static_cast<size_t>(buffer.channels));
     double energy = 0;
     for (float sample : buffer.samples) energy += sample * sample;
     check("valid M4A contains finite non-silent audio", std::isfinite(energy) && energy > 1);
