@@ -2833,7 +2833,7 @@ bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
-bool Fbo::readPixelsFloat(float * pixels) const [macos,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
+bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
 bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
 void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo.
 ```

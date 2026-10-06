@@ -1219,7 +1219,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixels(af::val<unsigned char *>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixelsFloat(af::val<float *>());
 #endif
         (void)af::val<Fbo>().copyTo(af::val<Image>());

@@ -210,7 +210,7 @@ TrussC's final per-frame pass) behave exactly as upstream.
 
 ### Mid-frame Metal flush for Fbo readback (#270)
 
-**Purpose:** synchronous macOS Fbo readback must not end the frame, rewind
+**Purpose:** synchronous macOS/iOS Fbo readback must not end the frame, rewind
 sokol_gl, or present a partially rendered swapchain.
 
 **Changes (marked `[TrussC]`):**
@@ -234,11 +234,11 @@ sokol_gl, or present a partially rendered swapchain.
   after #599's unconditional buffer acquisition and before its commit. This
   also works after a flush with no subsequent pass, using the final buffer
   #599 already guarantees. A mid-frame flush never presents these drawables.
-  This presentation change applies to both Metal platforms; the iOS readback
-  implementation is unchanged pending the separate hardware investigation.
+  This presentation change applies to both Metal platforms.
 
-The macOS Fbo caller suspends an open swapchain pass and resumes with the
-existing LOAD/store behavior after its same-queue blit has completed. Byte
+The shared macOS/iOS Fbo caller (`platform/metal/tcFboReadback.h`, #641)
+suspends an open swapchain pass and resumes with the existing LOAD/store
+behavior after its same-queue blit has completed. Byte
 readback rejects non-RGBA8 formats before touching render state. `copyTo()`
 and `save()` remain synchronous through the same path.
 
