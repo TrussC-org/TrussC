@@ -144,9 +144,9 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        logError("SoundBuffer") << "file not found: " << internal::pathToUtf8(path);
+        logError("SoundBuffer") << "file not found: " << path;
         return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
+                                "file not found: " + internal::pathToDisplayUtf8(path));
     }
 
     // fs::path is already wide on Windows
@@ -156,10 +156,10 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
     HRESULT hr = MFCreateSourceReaderFromURL(wpath.c_str(), NULL, &pReader);
 
     if (FAILED(hr)) {
-        logError("SoundBuffer") << "loadAac failed to open " << internal::pathToUtf8(path)
+        logError("SoundBuffer") << "loadAac failed to open " << path
                                 << " (" << hrHex(hr) << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
-                                "failed to open " + internal::pathToUtf8(path) +
+                                "failed to open " + internal::pathToDisplayUtf8(path) +
                                 " (hr=" + hrHex(hr) + ")");
     }
 
@@ -167,16 +167,16 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
     SafeRelease(&pReader);
 
     if (result) {
-        logVerbose("SoundBuffer") << "loaded AAC " << internal::pathToUtf8(path) << " ("
+        logVerbose("SoundBuffer") << "loaded AAC " << path << " ("
                                   << (int)channels << " ch, " << (int)sampleRate << " Hz, "
                                   << (size_t)numSamples << " samples)";
     } else {
-        logError("SoundBuffer") << "failed to decode AAC " << internal::pathToUtf8(path);
+        logError("SoundBuffer") << "failed to decode AAC " << path;
     }
 
     return result ? LoadResult::success()
                   : LoadResult::fail(LoadError::DecodeFailed,
-                                     "failed to decode AAC: " + internal::pathToUtf8(path));
+                                     "failed to decode AAC: " + internal::pathToDisplayUtf8(path));
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {

@@ -4,22 +4,22 @@
 
 namespace tcx::curl::detail {
 
-constexpr long defaultSslOptions() {
+constexpr long defaultSslOptions(bool customPem = false) {
+    long options = 0;
 #ifdef _WIN32
+#ifdef CURLSSLOPT_NATIVE_CA
+    // A custom PEM replaces the OS store rather than supplementing it.
+    if (!customPem) options |= CURLSSLOPT_NATIVE_CA;
+#endif
     // Revocation is best-effort, like browsers. If you need strict revocation
     // checking, please open an issue.
-    return static_cast<long>(CURLSSLOPT_NATIVE_CA | CURLSSLOPT_REVOKE_BEST_EFFORT);
-#else
-    return 0L;
+    // This also lets a custom certificate without a CRL/OCSP URL pass.
+#ifdef CURLSSLOPT_REVOKE_BEST_EFFORT
+    options |= CURLSSLOPT_REVOKE_BEST_EFFORT;
 #endif
-}
-
-inline void applyTlsDefaults(CURL* curl) {
-#ifdef _WIN32
-    curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, defaultSslOptions());
-#else
-    (void)curl;
 #endif
+    (void)customPem;
+    return options;
 }
 
 } // namespace tcx::curl::detail

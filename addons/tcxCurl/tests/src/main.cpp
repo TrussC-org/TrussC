@@ -90,12 +90,24 @@ int main() {
     // TLS defaults: certificate verification remains enabled; only unavailable
     // revocation information becomes best-effort on Windows.
 #ifdef _WIN32
+    long nativeCa = 0, bestEffort = 0;
+#ifdef CURLSSLOPT_NATIVE_CA
+    nativeCa = CURLSSLOPT_NATIVE_CA;
+#endif
+#ifdef CURLSSLOPT_REVOKE_BEST_EFFORT
+    bestEffort = CURLSSLOPT_REVOKE_BEST_EFFORT;
+#endif
     check("SSL defaults: native CA and best-effort revocation",
-          defaultSslOptions() == static_cast<long>(CURLSSLOPT_NATIVE_CA | CURLSSLOPT_REVOKE_BEST_EFFORT));
+          defaultSslOptions() == (nativeCa | bestEffort));
+    check("SSL custom PEM: best-effort revocation without native CA",
+          defaultSslOptions(true) == bestEffort);
+#ifdef CURLSSLOPT_NO_REVOKE
     check("SSL defaults: revocation is not disabled",
           (defaultSslOptions() & CURLSSLOPT_NO_REVOKE) == 0);
+#endif
 #else
-    check("SSL defaults: other platforms keep curl defaults", defaultSslOptions() == 0L);
+    check("SSL defaults: other platforms keep curl defaults",
+          defaultSslOptions() == 0L && defaultSslOptions(true) == 0L);
 #endif
     const string SECRET = "TOPSECRET42";
 

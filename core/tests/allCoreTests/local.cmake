@@ -2,6 +2,9 @@
 #
 # A test is combined when core/tests/<name>/src/main.cpp exists and the dir
 # has no `own-binary` marker (examples/build_all.py uses the same rule).
+# `daily-only` affects RUN selection in build_all.py, not compilation here:
+# every test stays registered, and the runner checks the full --list against
+# the inventory (including daily-only tests) before selecting PR/daily runs.
 # Every .cpp/.c under its src/ is added, and each gets
 # TC_CORE_TEST_NAME="<name>", which turns its TC_CORE_TEST_MAIN into a
 # registered entry (core/tests/common/tcCoreTest.h). A test's own quoted

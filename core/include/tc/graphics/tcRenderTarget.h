@@ -161,6 +161,25 @@ struct RenderTarget {
     sgl_context context = {};
     bool        isFbo   = false;
     std::unordered_map<uint32_t, sgl_pipeline> cache;
+    // A creation failed (out of memory, or a GPU pool full): warned once and
+    // not retried. The target stays degraded for the rest of the run (#317).
+    bool contextFailed  = false;
+    bool pipelineWarned = false;
+
+    // Makes this target's own sgl context once. On failure logs one warning
+    // and does not try again (no retry on every tick / begin()).
+    bool makeContext(const sgl_context_desc_t& desc, const char* what) {
+        if (context.id != SG_INVALID_ID) return true;
+        if (contextFailed) return false;
+        context = sgl_make_context(&desc);
+        if (context.id == SG_INVALID_ID) {
+            contextFailed = true;
+            logWarning("TrussC") << "could not create the sokol_gl context for "
+                << what << "; its shapes are not drawn for the rest of the run";
+            return false;
+        }
+        return true;
+    }
 
     sgl_pipeline pipeline(uint32_t key, const sg_pipeline_desc& desc) {
         if (context.id == 0) return {};   // not set up yet (e.g. headless) -> no-op
@@ -168,13 +187,57 @@ struct RenderTarget {
         if (it != cache.end()) return it->second;
         sg_pipeline_desc d = desc;   // sgl fills pixel_format/sample_count/depth from the context
         sgl_pipeline p = sgl_context_make_pipeline(context, &d);
+        // Id 0 is cached too, so the creation is not retried on every call;
+        // loadPipeline() then keeps the previously loaded pipeline.
         cache.emplace(key, p);
+        if (p.id == SG_INVALID_ID) {
+            if (!pipelineWarned) {
+                pipelineWarned = true;
+                logWarning("TrussC") << "could not create a sokol_gl pipeline (GPU "
+                    << "pipeline pool full); draws that need it keep the previous "
+                    << "blend/depth state";
+            }
+            return p;
+        }
 #ifndef NDEBUG
         pipelineOwnerCtx()[p.id] = context.id;
 #endif
         return p;
     }
+
+    // Frees this target's GPU objects: every cached sgl pipeline (sgl
+    // pipelines live in one global pool, and sgl_destroy_context() frees only
+    // the context's own default pipeline), then the context. For a target
+    // that owns its context, e.g. a secondary window on close().
+    void release() {
+        for (auto& entry : cache) {
+            if (entry.second.id == SG_INVALID_ID) continue;
+            sgl_destroy_pipeline(entry.second);
+#ifndef NDEBUG
+            pipelineOwnerCtx().erase(entry.second.id);
+#endif
+        }
+        cache.clear();
+        if (context.id != SG_INVALID_ID) {
+            sgl_destroy_context(context);
+            context = {};
+        }
+        contextFailed = false;
+        pipelineWarned = false;
+    }
 };
+
+// Check for TrussC's internal lazily created shaders (PBR, shadow, points,
+// IBL, Fbo mip/blit), called once right after sg_make_shader(): true when the
+// shader is usable. Otherwise logs one warning; the caller remembers the
+// result and skips the draws that need the shader, instead of making a
+// pipeline from an invalid shader (#317).
+inline bool internalShaderReady(sg_shader shd, const char* name) {
+    if (sg_query_shader_state(shd) == SG_RESOURCESTATE_VALID) return true;
+    logWarning("TrussC") << "could not create the internal " << name
+        << " shader (GPU shader pool full?); draws that use it are skipped";
+    return false;
+}
 
 // The swapchain target, the active-target pointer, and the active*() pipeline
 // helpers moved to the per-window WindowContext — see tc/app/tcWindowContext.h

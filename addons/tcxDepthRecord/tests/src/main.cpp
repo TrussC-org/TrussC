@@ -240,7 +240,7 @@ static Played play(const filesystem::path& path) {
                                     f.color.getChannels());
                 memcpy(pf.f.color.getData(), f.color.getData(), f.color.getTotalBytes());
             }
-            r.frames.push_back(move(pf));
+            r.frames.push_back(std::move(pf));
         }
         p->close();
     }

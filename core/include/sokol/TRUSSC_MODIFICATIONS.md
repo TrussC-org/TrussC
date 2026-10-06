@@ -7,6 +7,13 @@ Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sectio
 
 **Upstream base:** https://github.com/floooh/sokol commit `082152c` (2026-05-21)
 
+**Shader compiler:** sokol-tools-bin commit
+`11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z), the
+owner-selected master HEAD used by CI. The host hashes are recorded in
+`core/cmake/trussc_shaders.cmake`; update the commit and all five hashes together
+and check the generated shaders against these vendored headers. This compiler
+preserves the `metal_sim` and `wgsl` outputs required by TrussC.
+
 ---
 
 ## Directory Structure
@@ -16,8 +23,9 @@ sokol/
 ├── sokol_app_tc.h       # TrussC-owned fork: full sapp_* implementation on
 │                        #   every platform + multi-window API (sokol_app.h
 │                        #   no longer exists in this tree — see below)
-├── sokol_gfx.h          # Modified (2 patches: swapchain store-action hint +
-│                        #   uniform-buffer auto-grow, both Metal)
+├── sokol_gfx.h          # Modified (Metal: swapchain store-action hint,
+│                        #   uniform-buffer auto-grow, upload-only frame
+│                        #   synchronization, mid-frame flush)
 ├── sokol_glue.h         # Modified (1 patch)
 ├── sokol_log.h          # Untouched
 ├── TRUSSC_MODIFICATIONS.md
@@ -53,6 +61,27 @@ upstream sokol_app changes are cherry-picked deliberately when wanted.
 The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
+
+### D3D11 device loss (#258)
+
+All three Present paths (main, secondary, and occlusion test) and ResizeBuffers
+classify DEVICE_REMOVED / DEVICE_RESET using the shared, headless-testable
+`util/sokol_d3d11_device_loss.h`. Other failures and DXGI status codes do not
+trigger device loss. The first loss across the shared device logs the triggering
+HRESULT and GetDeviceRemovedReason, then routes SAPP_EVENTTYPE_TC_DEVICE_LOST
+(with `sapp_event.device_lost_reason`) to the main app callback. The latch is set
+before callbacks so reentry and other windows cannot notify again.
+
+TrussC offers `events().deviceLost`: cancellation keeps the main loop running;
+the default logs an error and exits with code 1. After loss, windows use timer
+pacing, no longer wait for dead frame-latency signals, and stop presenting or
+resizing the failed swapchains. App callbacks continue if cancellation opts
+into handling the failure. Resources are not recreated. The first tick still
+updates dimensions and resizes before app initialization. Loss detected before
+initialization is logged and latched, preserving the removal reason. Its pending
+event is delivered once immediately after the init callback returns, before the
+first frame; a default failure exit skips that frame. Pending state is cleared
+before dispatch so reentry cannot deliver the event twice.
 
 ### 1. Skip Present (D3D11 flickering fix)
 
@@ -164,6 +193,46 @@ content would be undefined.
 Passes without the hint (including every pass begun by plain sokol users and
 TrussC's final per-frame pass) behave exactly as upstream.
 
+### Mid-frame Metal flush for Fbo readback (#270)
+
+**Purpose:** synchronous macOS Fbo readback must not end the frame, rewind
+sokol_gl, or present a partially rendered swapchain.
+
+**Changes (marked `[TrussC]`):**
+- `sg_tc_mtl_flush()` requires no active pass, submits the current Metal
+  command buffer and waits for completion, then clears its pointer. The next
+  pass lazily creates/enqueues a fresh buffer, after the caller's readback blit.
+  Other backends provide a no-op with the same between-passes precondition.
+- Flush does not notify commit listeners, advance `frame_index`, collect
+  deferred resources, rotate uniform slots, or reset `cur_ub_offset` / the
+  uniform base pointer. Subsequent draws append uniforms in the same slot;
+  existing uniform auto-grow and deferred retirement keep working.
+- Reuses #599's `_sg_mtl_ensure_command_buffer()` and unconditional final
+  commit; #270 adds no separate helper or conditional buffer-acquisition path.
+  Each sokol command buffer acquires/releases exactly one permit. Flush waits for
+  its submission (and earlier submissions on the same queue), so extra
+  buffers cannot let a later frame overwrite an in-flight uniform slot.
+  Flush never manually signals the semaphore. The separate, synchronous
+  readback blit does not participate in sokol's semaphore.
+- `_sg_mtl_end_pass()` retains each used drawable once in `pending_drawables`.
+  Only `_sg_mtl_commit()` schedules their presentation and empties the list,
+  after #599's unconditional buffer acquisition and before its commit. This
+  also works after a flush with no subsequent pass, using the final buffer
+  #599 already guarantees. A mid-frame flush never presents these drawables.
+  This presentation change applies to both Metal platforms; the iOS readback
+  implementation is unchanged pending the separate hardware investigation.
+
+The macOS Fbo caller suspends an open swapchain pass and resumes with the
+existing LOAD/store behavior after its same-queue blit has completed. Byte
+readback rejects non-RGBA8 formats before touching render state. `copyTo()`
+and `save()` remain synchronous through the same path.
+
+Regression tests: `core/tests/mtlFlush` (dummy bookkeeping on Linux/Windows;
+real offscreen Metal submission and uniform state on macOS), and
+`core/tests/fboReadback --gpu-check` (TrussC window, including FullscreenShader,
+float reads, copy and save). Mac display/Metal validation and post-implementation
+review remain required by the Decision.
+
 ### Per-frame uniform buffer auto-grow (Metal)
 
 **Purpose:** Upstream sizes the Metal per-frame uniform ring buffer once at
@@ -189,6 +258,25 @@ optional optimization rather than a correctness requirement.
 
 WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
 bind groups / descriptor sets; growing them is much more invasive).
+
+### Upload-only frame synchronization (Metal, #599 / #332)
+
+**Purpose:** End frames on ticks that record offscreen work or uploads without
+drawing the screen (#332). A commit without a pass must participate in the
+in-flight semaphore before rotating uniform slots or collecting resources.
+
+**Changes (marked `[TrussC modification]`):**
+- `_sg_mtl_ensure_command_buffer()` shares the first-pass command-buffer creation,
+  semaphore wait and completion-handler signal with `_sg_mtl_commit()`.
+- `_sg_mtl_commit()` unconditionally ensures a command buffer and commits it,
+  even when no pass created one or #270's flush cleared the previous buffer.
+  Existing pass frames reuse their command buffer and semaphore slot.
+  Retained/unretained-reference settings remain respected.
+- #270 layers deferred presentation onto this base: between ensuring the
+  buffer and committing it, present each retained `pending_drawables` entry
+  once and clear the list. Acquisition never depends on the list being nonempty.
+  Garbage collection, uniform-ring rotation/reset, and frame advancement still
+  belong only to the real commit; flush neither duplicates nor bypasses them.
 
 ---
 
@@ -246,7 +334,7 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 | `sgl_tc_context_reset(ctx)` | Reset command/vertex/uniform counters to zero (fast path between FBO draws on shared context) |
 | `sgl_tc_context_release_buffers(ctx)` | Release CPU + GPU buffers to free idle memory (context shell and pipelines preserved) |
 | `sgl_tc_context_ensure_buffers(ctx)` | Ensure buffers are allocated (no-op if already allocated, call before drawing after release) |
-| `sgl_tc_reset_matrix_stacks()` | Drop every matrix stack of the current context back to depth 0 — called at frame end (`present()`) so an unpopped `pushMatrix()` can't carry sgl's stack depth into the next frame (TrussC #232) |
+| `sgl_tc_reset_matrix_stacks()` | Drop every matrix stack of the current context back to depth 0 — called at frame end (`present()`, TrussC #232) and at FBO pass begin (`Fbo::beginInternal()`, TrussC #327) so an unpopped `pushMatrix()` can't carry sgl's stack depth into the next frame or FBO pass |
 
 ### 13. Float Vertex Colors (UBYTE4N -> FLOAT4)
 
@@ -260,12 +348,40 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 - All `sgl_c*f/c*b/c1i` functions store floats directly
 - Vertex size increased from 28 to 40 bytes (~1.4x)
 
+### 14. Pool handling (#317)
+
+**Purpose:** pool limits show up as id 0 that callers already handle, and the
+context pool grows like the buffers in 11.
+
+**Changes:**
+- `_sgl_make_pipeline()`: all or nothing. `_sgl_init_pipeline()` stops at the
+  first `sg_make_pipeline()` that returns an invalid id or a pipeline that is
+  not `SG_RESOURCESTATE_VALID`; `_sgl_make_pipeline()` then destroys the sg
+  pipelines already made, frees the sgl slot and returns `SG_INVALID_ID`.
+- `_sgl_draw()`: skips a draw command whose sg pipeline id is 0 (recorded
+  while an invalid or destroyed sgl pipeline was loaded) instead of passing
+  it to `sg_apply_pipeline()`.
+- `_sgl_grow_context_pool()`: when `_sgl_alloc_context()` finds no free slot,
+  the context array and the pool bookkeeping double (up to
+  `_SGL_MAX_POOL_SIZE - 1`), `_sgl.cur_ctx` is looked up again, and a warning
+  with the old and new size is logged (`SGL_LOGITEM_CONTEXT_POOL_GROWN`,
+  message built with `snprintf` through `_sgl_log_msg()`; `<stdio.h>` added).
+  Contexts are referenced by id, so moving them is safe.
+  Growth allocations are fallible: on allocation failure, temporary arrays
+  are freed, the old pool and current context stay intact, and context
+  creation returns id 0 so TrussC can warn once without retrying.
+- `_SGL_DEFAULT_CONTEXT_POOL_SIZE`: 4 -> 8 (start size; reason next to it).
+
+Regression test: `core/tests/sglPoolLimits` (dummy backend).
+
 ---
 
 ## sokol_gfx.h
 
-**Untouched.** Pool sizes are configured at runtime in TrussC's `tcGlobal.cpp`:
-- `pipeline_pool_size = 256` (default 64)
+**Pool configuration (separate from the Metal patches above).** Pool sizes are configured at runtime in TrussC's `tcGlobal.cpp`:
+- `shader_pool_size = 1024` (default 32) and `pipeline_pool_size = 1024`
+  (default 64): fixed sizes, since these pools cannot grow (reasons next to
+  the constants)
 - `image_pool_size = 10000`
 - `view_pool_size = 10000`
 - `sampler_pool_size = 10000`
@@ -274,7 +390,7 @@ These functions do NOT exist in upstream sokol_gl. They are TrussC additions.
 
 ## How to Update Sokol
 
-For files with TrussC patches (sokol_glue.h, util/sokol_gl_tc.h, and
+For files with TrussC patches (sokol_gfx.h, sokol_glue.h, util/sokol_gl_tc.h, and
 addons/tcxImGui/src/sokol_imgui.h), **use `git merge-file` as a 3-way merge** instead of overwriting and manually
 re-applying patches. This avoids slip bugs from manual patch transcription.
 
@@ -308,8 +424,7 @@ THEIRS, since sokol_gl_tc.h is the renamed fork), and for
 
 ### Direct overwrite (for files without TrussC patches)
 
-1. **sokol_gfx.h** -- overwrite directly (no modifications)
-2. **Other headers** (sokol_log.h, etc.) -- overwrite directly
+1. **Unmodified headers** (sokol_log.h, etc.) -- overwrite directly
 
 ### After updating
 
