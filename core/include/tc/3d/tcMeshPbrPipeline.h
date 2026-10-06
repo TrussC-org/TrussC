@@ -16,7 +16,7 @@
 //   6. tcMeshPbrPipeline.h        (this file; defines Mesh::drawGpuPbr())
 //
 // Draw submission:
-//   - Pipelines are cached per (color format, sample count), so both the
+//   - Pipelines are cached per (color format, sample count, primitive kind), so both the
 //     swapchain and Fbo passes are supported render targets.
 //   - ALL PBR draws are deferred: swapchain draws into the per-layer flush
 //     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
@@ -29,6 +29,7 @@
 
 #include <cstring>
 #include <map>
+#include <tuple>
 #include <vector>
 
 #include "tc/gpu/shaders/meshPbr.glsl.h"
@@ -109,9 +110,8 @@ public:
     }
 
     // Get or create a pipeline for the given color pixel format and sample count.
-    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount) {
-        // キャッシュキー: colorFormat(下位16bit) + sampleCount(上位16bit)
-        int key = static_cast<int>(colorFormat) | (sampleCount << 16);
+    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount, bool lines = false) {
+        const auto key = std::make_tuple(colorFormat, sampleCount, lines);
         auto it = pipelineCache_.find(key);
         if (it != pipelineCache_.end()) return it->second;
 
@@ -133,6 +133,7 @@ public:
 
         pd.sample_count = sampleCount;
         pd.index_type = SG_INDEXTYPE_UINT32;
+        pd.primitive_type = lines ? SG_PRIMITIVETYPE_LINES : SG_PRIMITIVETYPE_TRIANGLES;
         pd.label = "tc_mesh_pbr_pipeline";
 
         sg_pipeline pip = sg_make_pipeline(&pd);
@@ -160,14 +161,15 @@ public:
             colorFmt = wctx.currentFboColorFormat;
             sampleCount = wctx.currentFboSampleCount;
         } else {
-            colorFmt = _SG_PIXELFORMAT_DEFAULT;
-            sampleCount = sapp_sample_count();
+            const auto target = swapchainTargetFormat(wctx);
+            colorFmt = target.colorFormat;
+            sampleCount = target.sampleCount;
         }
 
         // Resolve the pipeline now; GPU submission happens at the end of this
         // function — deferred for the swapchain (so it composites with sokol_gl
         // in submission order), immediate inside an FBO pass.
-        sg_pipeline pip = getPipeline(colorFmt, sampleCount);
+        sg_pipeline pip = getPipeline(colorFmt, sampleCount, isLineMesh(mesh.getMode()));
 
         // --- Bindings -------------------------------------------------------
         sg_bindings bind = {};
@@ -683,7 +685,7 @@ public:
 
     void shadowDrawMesh(const Mesh& mesh) {
         auto& sh = internal::currentWindowContext().shadow;
-        if (!sh.inPass) return;
+        if (!sh.inPass || isLineMesh(mesh.getMode())) return;
         mesh.uploadToGpu();
         if (mesh.getGpuVertexBuffer().id == 0) return;
 
@@ -852,7 +854,7 @@ private:
     // --- PBR pipeline state ---
     sg_shader shader_{};
     bool shaderReady_{false};
-    std::map<int, sg_pipeline> pipelineCache_;  // keyed by sg_pixel_format
+    std::map<std::tuple<sg_pixel_format, int, bool>, sg_pipeline> pipelineCache_;
     bool initialized_{false};
 
     // --- Shadow pipeline state ---
@@ -944,7 +946,10 @@ inline void flushFboDeferredPbr(sgl_context ctx) {
 // forward declaration.
 inline void Mesh::drawGpuPbr() const {
     uploadToGpu();
-    if (vbuf_.id == 0) return;  // upload failed or mesh empty
+    if (vbuf_.id == 0) {
+        if (!vertices_.empty()) drawWithLighting();
+        return;
+    }
     internal::getPbrPipeline().drawMesh(*this);
 }
 

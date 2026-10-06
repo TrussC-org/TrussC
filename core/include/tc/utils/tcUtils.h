@@ -508,8 +508,10 @@ inline bool isStringInString(const std::string& haystack, const std::string& nee
 }
 
 /// Count occurrences of needle in haystack
+/// Matches are nonoverlapping; an empty needle matches nothing.
 /// Same as oF's ofStringTimesInString
 inline std::size_t stringTimesInString(const std::string& haystack, const std::string& needle) {
+    if (needle.empty()) return 0;
     const size_t step = needle.size();
     size_t count = 0;
     size_t pos = 0;
@@ -579,19 +581,24 @@ inline std::string joinString(const std::vector<std::string>& stringElements, co
 }
 
 /// Replace occurrences in string (in-place)
+/// Replaces left to right without overlapping or searching the replacement.
+/// An empty search string leaves input unchanged.
 /// Same as oF's ofStringReplace
 inline void stringReplace(std::string& input, const std::string& searchStr, const std::string& replaceStr) {
+    if (searchStr.empty()) return;
     auto pos = input.find(searchStr);
+    if (pos == std::string::npos) return;
+    std::string result;
+    result.reserve(input.size());
+    std::size_t start = 0;
     while (pos != std::string::npos) {
-        input.replace(pos, searchStr.size(), replaceStr);
-        pos += replaceStr.size();
-        std::string nextfind(input.begin() + pos, input.end());
-        auto nextpos = nextfind.find(searchStr);
-        if (nextpos == std::string::npos) {
-            break;
-        }
-        pos += nextpos;
+        result.append(input, start, pos - start);
+        result += replaceStr;
+        start = pos + searchStr.size();
+        pos = input.find(searchStr, start);
     }
+    result.append(input, start, std::string::npos);
+    input.swap(result);
 }
 
 /// Remove leading/trailing whitespace from string

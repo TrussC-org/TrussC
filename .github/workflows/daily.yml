@@ -248,6 +248,7 @@ jobs:
           ./tools/build_linux.sh
 
       - name: Build every example (Web)
+        id: web_examples
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --verbose
@@ -256,7 +257,10 @@ jobs:
       # marker (core/tests/*/web-test) are built for wasm and RUN under node, so
       # web-only behaviour (#ifdef __EMSCRIPTEN__) is exercised once a day. They
       # must not touch the canvas / GPU; a non-zero exit fails the job.
+      # An example failure must not hide web regressions; a skipped sweep means
+      # its prerequisites did not complete, so the tests cannot run either.
       - name: Build and run core tests (Web, under node)
+        if: ${{ !cancelled() && steps.web_examples.outcome != 'skipped' }}
         run: ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
 
       - name: Compiler cache stats

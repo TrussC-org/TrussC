@@ -40,7 +40,7 @@
 #include <nlohmann/json.hpp>
 
 #ifdef TCX_HTTP_CURL
-#include <curl/curl.h>
+#include "tcCurlTlsInternal.h"
 #endif
 
 namespace tcx::curl {
@@ -438,18 +438,18 @@ private:
 
 #ifdef TCX_HTTP_CURL
     // TLS options shared by request() and uploadFile(). Returns false, with
-    // response.error set, when the CA PEM cannot be applied.
+    // response.error set, when a TLS option cannot be applied.
     bool applyTlsOptions(CURL* curl, HttpResponse& response) const {
-        if (tlsCaPem_.empty()) {
-#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
-            // Windows curl is built against Schannel, which already verifies against the
-            // OS certificate store — so this is a harmless no-op today. Kept as belt-and-
-            // suspenders: if the backend is ever swapped (e.g. an OpenSSL build), it makes
-            // curl use the OS trust store instead of failing with "SSL connect error".
-            curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
-#endif
-            return true;
+        const long sslOptions = detail::defaultSslOptions(!tlsCaPem_.empty());
+        if (sslOptions != 0) {
+            const CURLcode rc = curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, sslOptions);
+            if (rc != CURLE_OK) {
+                response.error = std::string(tlsCaPem_.empty() ? "TLS options: " : "setTlsCACertificate: ") +
+                                 curl_easy_strerror(rc);
+                return false;
+            }
         }
+        if (tlsCaPem_.empty()) return true;
 #if LIBCURL_VERSION_NUM >= 0x074D00  // CURLOPT_CAINFO_BLOB: curl 7.77.0
         // The PEM is the only trust source: no CA file, CA directory or OS store.
         curl_blob blob;
@@ -474,15 +474,6 @@ private:
                              curl_easy_strerror(rc) + ")";
             return false;
         }
-#if defined(_WIN32) && defined(CURLSSLOPT_REVOKE_BEST_EFFORT)
-        // No NATIVE_CA here: the PEM replaces the OS store. Revocation is
-        // checked best-effort, so a certificate without a CRL/OCSP URL passes.
-        rc = curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_REVOKE_BEST_EFFORT);
-        if (rc != CURLE_OK) {
-            response.error = std::string("setTlsCACertificate: ") + curl_easy_strerror(rc);
-            return false;
-        }
-#endif
         return true;
 #else
         response.error = "setTlsCACertificate: needs libcurl 7.77.0 or newer (CURLOPT_CAINFO_BLOB)";

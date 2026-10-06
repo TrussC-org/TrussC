@@ -155,8 +155,9 @@ public:
             colorFmt = wctx.currentFboColorFormat;
             sampleCount = wctx.currentFboSampleCount;
         } else {
-            colorFmt = _SG_PIXELFORMAT_DEFAULT;
-            sampleCount = sapp_sample_count();
+            const auto target = swapchainTargetFormat(wctx);
+            colorFmt = target.colorFormat;
+            sampleCount = target.sampleCount;
         }
 
         PointDrawCommand cmd{};

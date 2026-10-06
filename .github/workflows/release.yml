@@ -397,6 +397,7 @@ jobs:
         with:
           name: macos-dmg
           path: ${{ runner.temp }}/${{ steps.find-app.outputs.app_name }}.dmg
+          if-no-files-found: error
 
       - name: Upload symbols
         uses: actions/upload-artifact@v5
@@ -485,7 +486,7 @@ jobs:
       - name: Package (zip)
         shell: bash
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_REF="${GITHUB_REF_NAME//\//-}"
           if [ -d "bin/RelWithDebInfo" ]; then
             DIST_DIR="bin/RelWithDebInfo"
           else
@@ -511,9 +512,9 @@ jobs:
           test -s "$RUNNER_TEMP/symbols/$APP_NAME.pdb"
           (cd "$RUNNER_TEMP/symbols" && 7z a "$RUNNER_TEMP/${APP_NAME}-PDB.zip" .)
           cd "$RUNNER_TEMP/package"
-          7z a "$RUNNER_TEMP/${APP_NAME}-${TAG}-windows.zip" .
+          7z a "$RUNNER_TEMP/${APP_NAME}-${ARCHIVE_REF}-windows.zip" .
           mkdir -p "$RUNNER_TEMP/verify"
-          7z x "$RUNNER_TEMP/${APP_NAME}-${TAG}-windows.zip" "-o$RUNNER_TEMP/verify"
+          7z x "$RUNNER_TEMP/${APP_NAME}-${ARCHIVE_REF}-windows.zip" "-o$RUNNER_TEMP/verify"
           test -f "$RUNNER_TEMP/verify/$APP_NAME.exe"
           if [ -d "$OLDPWD/bin/data" ]; then
             diff -r "$OLDPWD/bin/data" "$RUNNER_TEMP/verify/data"
@@ -526,6 +527,7 @@ jobs:
         with:
           name: windows-zip
           path: ${{ runner.temp }}/${{ env.APP_NAME }}-*-windows.zip
+          if-no-files-found: error
 
       - name: Upload symbols
         uses: actions/upload-artifact@v5
@@ -625,7 +627,7 @@ jobs:
 
       - name: Package (tar.gz)
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          ARCHIVE_REF="${GITHUB_REF_NAME//\//-}"
           EXE_PATH=$(find bin -maxdepth 1 -type f -executable -print -quit)
           if [ -z "$EXE_PATH" ]; then
             echo "ERROR: executable not found"
@@ -644,10 +646,10 @@ jobs:
           objcopy --strip-debug "$RUNNER_TEMP/package/$APP_NAME"
           objcopy --add-gnu-debuglink="$RUNNER_TEMP/symbols/$APP_NAME.debug" "$RUNNER_TEMP/package/$APP_NAME"
           tar -czf "$RUNNER_TEMP/$APP_NAME-debug.tar.gz" -C "$RUNNER_TEMP/symbols" .
-          tar -czf "$RUNNER_TEMP/${APP_NAME}-${TAG}-linux.tar.gz" \
+          tar -czf "$RUNNER_TEMP/${APP_NAME}-${ARCHIVE_REF}-linux.tar.gz" \
             -C "$RUNNER_TEMP/package" .
           mkdir -p "$RUNNER_TEMP/verify"
-          tar -xzf "$RUNNER_TEMP/${APP_NAME}-${TAG}-linux.tar.gz" -C "$RUNNER_TEMP/verify"
+          tar -xzf "$RUNNER_TEMP/${APP_NAME}-${ARCHIVE_REF}-linux.tar.gz" -C "$RUNNER_TEMP/verify"
           test -x "$RUNNER_TEMP/verify/$APP_NAME"
           if [ -d bin/data ]; then
             diff -r bin/data "$RUNNER_TEMP/verify/data"
@@ -660,6 +662,7 @@ jobs:
         with:
           name: linux-tar
           path: ${{ runner.temp }}/${{ env.APP_NAME }}-*-linux.tar.gz
+          if-no-files-found: error
 
       - name: Upload symbols
         uses: actions/upload-artifact@v5

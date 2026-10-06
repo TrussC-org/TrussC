@@ -16,6 +16,7 @@
 #pragma once
 
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -28,6 +29,18 @@ public:
     KeptThreads() = default;
     KeptThreads(const KeptThreads&) = delete;
     KeptThreads& operator=(const KeptThreads&) = delete;
+
+    // Publish the thread handle before its worker can enter a listener that
+    // reconnects/disconnects and releases that same handle.
+    template<typename F>
+    void start(std::thread& t, F&& fn) {
+        auto gate = std::make_shared<std::mutex>();
+        std::lock_guard<std::mutex> publishing(*gate);
+        t = std::thread([gate, fn = std::forward<F>(fn)]() mutable {
+            { std::lock_guard<std::mutex> published(*gate); }
+            fn();
+        });
+    }
 
     // The owner's destructor. joinOthers() has already run in it (the
     // client's disconnect work), so what is left here is the calling thread

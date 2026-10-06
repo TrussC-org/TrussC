@@ -36,7 +36,7 @@ public:
     VideoPlayer() = default;
     ~VideoPlayer() { close(); }
 
-    // Move-enabled
+    // Move-enabled. onError listeners are not moved.
     VideoPlayer(VideoPlayer&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -54,9 +54,11 @@ public:
     // =========================================================================
 
     LoadResult load(const fs::path& path) override {
+        const auto previousError = errorMessage_;
         if (initialized_) {
             close();
         }
+        errorMessage_ = previousError;
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
         // (the web backend streams straight from them). Display conversion
@@ -107,6 +109,7 @@ public:
             }
         }
 
+        clearPlaybackError();
         initialized_ = true;
         firstFrameReceived_ = false;
         posterActive_ = false;
@@ -122,9 +125,10 @@ public:
     }
 
     void close() override {
-        if (!initialized_) return;
+        if (!initialized_) { clearPlaybackError(); return; }
 
         closePlatform();
+        clearPlaybackError();
 
         texture_.clear();
         textureY_.clear();
@@ -161,9 +165,11 @@ public:
         if (!initialized_) return;
 
         frameNew_ = false;
+        if (dispatchPlaybackError()) return;
 
         // Platform-specific update
         updatePlatform();
+        if (dispatchPlaybackError()) return;
 
         // Check for new frame from platform
         if (hasNewFramePlatform()) {
@@ -404,6 +410,9 @@ protected:
         // seek still returns the OLD position. Remember the target: the
         // poster logic in play() uses it until a live frame supersedes it.
         pendingSeekSec_ = pct * getDurationPlatform();
+        // A failed backend stays paused until play(). Use the existing poster
+        // path to show an explicit recovery seek even while it is stopped.
+        if (errorStopped_ && autoPoster_) loadPosterFrame(pendingSeekSec_);
     }
 
     void setVolumeImpl(float vol) override {
@@ -461,6 +470,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(VideoPlayer&& other) {
+        movePlaybackErrorFrom(other);
         width_ = other.width_;
         height_ = other.height_;
         initialized_ = other.initialized_;
@@ -716,6 +726,9 @@ namespace internal {
 // Helper class for platform implementations to access protected members
 class VideoPlayerPlatformAccess {
 public:
+    static void reportError(VideoPlayer& player, const VideoErrorEventArgs& error) {
+        player.reportPlaybackError(error.message, error.errorCode);
+    }
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;
         player.height_ = h;

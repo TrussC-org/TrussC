@@ -92,6 +92,37 @@ void headlessChecks() {
     r=analyze({{"image","123"}},json::array({op("stats")}));
     check("numeric debug name is resolved as a name",r["width"]==4);
     image.setDebugName("known");
+    {
+        Image second, third;
+        second.setDebugName("known"); third.setDebugName("known");
+        string indices;
+        const auto images=call("tc_list_images");
+        for (const auto& entry : images["images"]) if (entry["name"]=="known") {
+            if (!indices.empty()) indices += ", ";
+            indices += to_string(entry["index"].get<uint64_t>());
+        }
+        r=analyze(source,json::array({op("stats")}));
+        check("ambiguous Image name reports all matching indices",
+            r["status"]=="error" && r["message"]==
+                "debug name \"known\" is ambiguous (indices " + indices + "); use an index");
+        r=analyze({{"image",old["index"]}},json::array({op("stats")}));
+        check("explicit index resolves an ambiguous Image name",r["width"]==4);
+    }
+    {
+        Fbo first, second, third;
+        const string duplicate="bloom\"pass";
+        first.setDebugName(duplicate); second.setDebugName(duplicate); third.setDebugName(duplicate);
+        string indices;
+        const auto fbos=call("tc_list_fbos");
+        for (const auto& entry : fbos["fbos"]) if (entry["name"]==duplicate) {
+            if (!indices.empty()) indices += ", ";
+            indices += to_string(entry["index"].get<uint64_t>());
+        }
+        r=analyze({{"fbo",duplicate}},json::array({op("stats")}));
+        check("ambiguous Fbo name reports indices and escapes the name",
+            r["status"]=="error" && r["message"]==
+                "debug name " + json(duplicate).dump() + " is ambiguous (indices " + indices + "); use an index");
+    }
     Image moved(std::move(image));
     check("Image move transfers debug name",moved.getDebugName()=="known"&&image.getDebugName().empty());
     check("moved-from Image is absent",call("tc_list_images")["images"].size()==2);

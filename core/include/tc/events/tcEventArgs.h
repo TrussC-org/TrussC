@@ -4,6 +4,7 @@
 // tcEventArgs - Event argument structures
 // =============================================================================
 
+#include <cstdint>
 #include <vector>
 #include <string>
 #include "tcMath.h"   // Vec2
@@ -259,6 +260,12 @@ struct ConsoleEventArgs {
 // ---------------------------------------------------------------------------
 struct ExitRequestEventArgs {
     bool cancel = false;           // Set to true to cancel the exit
+};
+
+// D3D11 device loss. The reason contains GetDeviceRemovedReason HRESULT bits.
+struct DeviceLostEventArgs {
+    uint32_t reason = 0;
+    bool cancel = false;           // Set true to keep running without GPU recovery
 };
 
 } // namespace trussc

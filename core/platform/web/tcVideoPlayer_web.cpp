@@ -29,6 +29,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             }
 
             // Initialize state
+            window._trussc_player_error = null;
             window._trussc_player_ready = false;
             window._trussc_player_playing = false;
             window._trussc_player_frameNew = false;
@@ -93,8 +94,13 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             };
 
             video.onerror = function(e) {
-                console.error('[VideoPlayer] Web: failed to load -', video.error ? video.error.message : 'unknown error');
-                window._trussc_player_ready = false;
+                if (window._trussc_player_video !== video) return;
+                window._trussc_player_error = {
+                    message: video.error && video.error.message || 'Video playback failed',
+                    code: video.error ? video.error.code : 0
+                };
+                video.pause();
+                window._trussc_player_playing = false;
             };
 
             // Start loading
@@ -171,6 +177,13 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 }
 
 void VideoPlayer::updatePlatform() {
+    if (emscripten_run_script_int("!!window._trussc_player_error")) {
+        const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
+        int code = emscripten_run_script_int("window._trussc_player_error.code");
+        emscripten_run_script("window._trussc_player_error = null;");
+        reportPlaybackError(message, code);
+        return;
+    }
     // Update size if changed
     int newWidth = emscripten_run_script_int("(window._trussc_player_width || 0)");
     int newHeight = emscripten_run_script_int("(window._trussc_player_height || 0)");

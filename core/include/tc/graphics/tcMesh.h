@@ -20,6 +20,55 @@ enum class PrimitiveMode {
     Points
 };
 
+namespace internal {
+
+inline bool isLineMesh(PrimitiveMode mode) {
+    return mode == PrimitiveMode::Lines || mode == PrimitiveMode::LineStrip ||
+           mode == PrimitiveMode::LineLoop;
+}
+
+// Normalize topology without modifying the mesh's public index data.
+inline std::vector<unsigned int> meshListIndices(PrimitiveMode mode, size_t vertexCount,
+                                                const std::vector<unsigned int>& indices) {
+    const size_t n = indices.empty() ? vertexCount : indices.size();
+    auto index = [&](size_t i) { return indices.empty() ? static_cast<unsigned int>(i) : indices[i]; };
+    std::vector<unsigned int> result;
+    switch (mode) {
+        case PrimitiveMode::TriangleStrip:
+        case PrimitiveMode::TriangleFan:
+            if (n < 3) return result;
+            result.reserve((n - 2) * 3);
+            for (size_t i = 0; i + 2 < n; ++i) {
+                if (mode == PrimitiveMode::TriangleFan) {
+                    result.insert(result.end(), {index(0), index(i + 1), index(i + 2)});
+                } else if (i % 2) {
+                    result.insert(result.end(), {index(i + 1), index(i), index(i + 2)});
+                } else {
+                    result.insert(result.end(), {index(i), index(i + 1), index(i + 2)});
+                }
+            }
+            break;
+        case PrimitiveMode::LineStrip:
+        case PrimitiveMode::LineLoop:
+            if (n < 2) return result;
+            result.reserve((n - 1 + (mode == PrimitiveMode::LineLoop)) * 2);
+            for (size_t i = 0; i + 1 < n; ++i) {
+                result.insert(result.end(), {index(i), index(i + 1)});
+            }
+            if (mode == PrimitiveMode::LineLoop) {
+                result.insert(result.end(), {index(n - 1), index(0)});
+            }
+            break;
+        default:
+            result.reserve(n);
+            for (size_t i = 0; i < n; ++i) result.push_back(index(i));
+            break;
+    }
+    return result;
+}
+
+} // namespace internal
+
 // Mesh - Class with vertices, colors, and indices
 class Mesh {
 public:
@@ -640,8 +689,7 @@ public:
 
     // Draw with lighting (CPU-side lighting calculation)
     void drawWithLighting() const {
-        if (mode_ != PrimitiveMode::Triangles) {
-            // Currently only triangle mode supported
+        if (mode_ == PrimitiveMode::Points) {
             drawNoLighting();
             return;
         }
@@ -652,7 +700,8 @@ public:
         const Material& baseMaterial = *internal::currentWindowContext().currentMaterial;
         bool useVertexColors = hasColors() && colors_.size() >= vertices_.size();
 
-        sgl_begin_triangles();
+        if (internal::isLineMesh(mode_)) sgl_begin_lines();
+        else sgl_begin_triangles();
 
         auto processVertex = [&](size_t idx) {
             const Vec3& localPos = vertices_[idx];
@@ -699,17 +748,16 @@ public:
             sgl_v3f(localPos.x, localPos.y, localPos.z);
         };
 
-        if (hasIndices()) {
-            for (auto idx : indices_) {
-                if (idx < vertices_.size() && idx < normals_.size()) {
-                    processVertex(idx);
-                }
+        const auto list = internal::meshListIndices(mode_, vertices_.size(), indices_);
+        // Skip invalid primitives as a whole, retaining the topology of valid ones.
+        const size_t stride = internal::isLineMesh(mode_) ? 2 : 3;
+        for (size_t i = 0; i + stride <= list.size(); i += stride) {
+            bool valid = true;
+            for (size_t j = 0; j < stride; ++j) {
+                if (list[i + j] >= vertices_.size() || list[i + j] >= normals_.size()) valid = false;
             }
-        } else {
-            for (size_t i = 0; i < vertices_.size(); i++) {
-                if (i < normals_.size()) {
-                    processVertex(i);
-                }
+            if (valid) {
+                for (size_t j = 0; j < stride; ++j) processVertex(list[i + j]);
             }
         }
 
@@ -1076,6 +1124,22 @@ public:
         if (vbuf_.id != 0 && gpuRevision_ == dataRevision_) return;
         if (vertices_.empty()) return;
 
+        for (auto index : indices_) {
+            if (index >= vertices_.size()) {
+                static OnceGate invalidIndexWarned;
+                if (invalidIndexWarned.isFirstTime()) {
+                    logWarning("Mesh") << "Index out of range; falling back to CPU lighting";
+                }
+                releaseGpuBuffers();
+                return;
+            }
+        }
+        const auto list = internal::meshListIndices(mode_, vertices_.size(), indices_);
+        if (list.empty()) {
+            releaseGpuBuffers();
+            return;
+        }
+
         // Pack interleaved: pos(3) + normal(3) + uv(2) + tangent(4) = 48 bytes
         struct PbrVertex {
             float x, y, z;
@@ -1122,17 +1186,13 @@ public:
         vbuf_ = sg_make_buffer(&vbd);
         gpuVertexCount_ = static_cast<int>(vertices_.size());
 
-        if (!indices_.empty()) {
-            sg_buffer_desc ibd = {};
-            ibd.usage.index_buffer = true;
-            ibd.data.ptr = indices_.data();
-            ibd.data.size = indices_.size() * sizeof(unsigned int);
-            ibd.label = "tc_mesh_pbr_ibuf";
-            ibuf_ = sg_make_buffer(&ibd);
-            gpuIndexCount_ = static_cast<int>(indices_.size());
-        } else {
-            gpuIndexCount_ = 0;
-        }
+        sg_buffer_desc ibd = {};
+        ibd.usage.index_buffer = true;
+        ibd.data.ptr = list.data();
+        ibd.data.size = list.size() * sizeof(unsigned int);
+        ibd.label = "tc_mesh_pbr_ibuf";
+        ibuf_ = sg_make_buffer(&ibd);
+        gpuIndexCount_ = static_cast<int>(list.size());
 
         gpuRevision_ = dataRevision_;
     }
@@ -1180,8 +1240,14 @@ public:
 
     // Accessors used by PbrPipeline
     sg_buffer getGpuVertexBuffer() const { return vbuf_; }
+    // Uploaded list indices: TriangleStrip/Fan expand to triangle lists and
+    // LineStrip/Loop expand to line lists. Without source indices, use 0..N-1
+    // (N = vertex count), including for Points. Custom pipelines must draw
+    // triangle modes as triangle lists and line modes as line lists.
     sg_buffer getGpuIndexBuffer() const { return ibuf_; }
     int getGpuVertexCount() const { return gpuVertexCount_; }
+    // Number of uploaded list indices (see getGpuIndexBuffer), including the
+    // generated indices for meshes without source indices.
     int getGpuIndexCount() const { return gpuIndexCount_; }
 
     // Accessors used by PointPipeline

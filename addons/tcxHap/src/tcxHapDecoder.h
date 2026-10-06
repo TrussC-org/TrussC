@@ -158,6 +158,7 @@ public:
                         uint8_t* outputBuffer, size_t outputBufferSize,
                         HapFormat& outFormat) {
 
+        lastErrorCode_ = 0;
         if (!frameData || frameSize == 0 || !outputBuffer) {
             return false;
         }
@@ -166,6 +167,7 @@ public:
         unsigned int hapFormat = 0;
         unsigned int hapResult = HapGetFrameTextureFormat(frameData, frameSize, 0, &hapFormat);
         if (hapResult != HapResult_No_Error) {
+            lastErrorCode_ = hapResult;
             return false;
         }
 
@@ -192,10 +194,13 @@ public:
             &bytesUsed, &outputFormatOut
         );
 
+        lastErrorCode_ = hapResult;
         return hapResult == HapResult_No_Error;
     }
 
 private:
+    friend class HapPlayer;
+    unsigned int lastErrorCode_ = 0;
     mutable int lastChunkCount_ = -1;  // -1 = callback never called
 
     // HAP decode callback for parallel decoding

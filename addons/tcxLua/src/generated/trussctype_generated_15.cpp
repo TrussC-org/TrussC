@@ -62,6 +62,7 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["exit"] = &trussc::CoreEvents::exit;
         t["hotReloadUnload"] = &trussc::CoreEvents::hotReloadUnload;
         t["exitRequested"] = &trussc::CoreEvents::exitRequested;
+        t["deviceLost"] = &trussc::CoreEvents::deviceLost;
         t["keyPressed"] = &trussc::CoreEvents::keyPressed;
         t["keyReleased"] = &trussc::CoreEvents::keyReleased;
         t["mousePressed"] = &trussc::CoreEvents::mousePressed;
