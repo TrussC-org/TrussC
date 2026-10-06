@@ -106,6 +106,29 @@ private:
     bool loadAudioForPlayback();
     void decodeThread();
     bool decodeNextFrame();
+    internal::VideoErrorQueue playbackErrors_;
+    // Both decode paths share a per-player budget. Only the decoder accesses
+    // these counters; include the current skip in each report, then reset.
+    OnceGate invalidDataWarningGate_{5.0};
+    uint64_t skippedInvalidPackets_ = 0;
+    uint64_t skippedInvalidFrames_ = 0;
+    void warnInvalidData(bool packet) {
+        if (packet) ++skippedInvalidPackets_;
+        else ++skippedInvalidFrames_;
+        if (!invalidDataWarningGate_.isFirstTime()) return;
+        logWarning("VideoPlayer")
+            << (packet ? "avcodec_send_packet: skipping invalid packet" :
+                         "avcodec_receive_frame: skipping invalid frame")
+            << "; skipped " << skippedInvalidPackets_ << " invalid packets and "
+            << skippedInvalidFrames_ << " invalid frames since the last report";
+        skippedInvalidPackets_ = skippedInvalidFrames_ = 0;
+    }
+    void decodeError(const char* operation, int code) {
+        char message[AV_ERROR_MAX_STRING_SIZE];
+        av_strerror(code, message, sizeof(message));
+        isPlaying_ = false;
+        playbackErrors_.report(std::string(operation) + ": " + message, code);
+    }
     void seekToTime(double seconds);
     void probeHwOutputFormat();
 
@@ -546,6 +569,11 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
     hasNewFrame_ = false;
 
+    auto error = playbackErrors_.take();
+    if (!error.message.empty()) {
+        if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
+        return;
+    }
     if (!isLoaded_ || !isPlaying_ || isPaused_) return;
 
     // Target PTS: use audio as master clock when available (no drift).
@@ -665,6 +693,7 @@ void TCVideoPlayerImpl::decodeThread() {
             int64_t timestamp = (int64_t)(target / av_q2d(timeBase_));
             av_seek_frame(formatCtx_, videoStreamIndex_, timestamp, AVSEEK_FLAG_BACKWARD);
             avcodec_flush_buffers(codecCtx_);
+            isFinished_ = false;
 
             // Any packet held from a previous EAGAIN is invalidated by the seek.
             if (packetPending_) {
@@ -772,13 +801,34 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
                 if (rret == AVERROR_EOF) {
                     // Enter drain mode so remaining buffered frames are
                     // flushed out on following receive_frame calls.
-                    avcodec_send_packet(codecCtx_, nullptr);
+                    int drain = avcodec_send_packet(codecCtx_, nullptr);
+                    if (drain < 0 && drain != AVERROR_EOF && drain != AVERROR(EAGAIN)) {
+                        decodeError("avcodec_send_packet (drain)", drain);
+                        return false;
+                    }
                     continue;
                 }
+                if (rret == AVERROR(EAGAIN)) {
+                    std::unique_lock<std::mutex> lock(mutex_);
+                    cv_.wait_for(lock, std::chrono::milliseconds(10), [this] {
+                        return shouldStop_ || seekRequested_ || !isPlaying_ || isPaused_;
+                    });
+                    return true;
+                }
                 if (rret < 0) {
+                    decodeError("av_read_frame", rret);
                     av_strerror(rret, errbuf, sizeof(errbuf));
                     logWarning("VideoPlayer") << "av_read_frame ended: " << errbuf
                                               << " (pts=" << currentPts_ << ")";
+                    return false;
+                }
+                // Demuxers can return a short packet instead of a read error
+                // at a truncated file's end. Distinguish that incomplete read
+                // from a complete packet whose encoded contents are invalid.
+                if ((packet_->flags & AV_PKT_FLAG_CORRUPT) && formatCtx_->pb &&
+                    avio_feof(formatCtx_->pb)) {
+                    av_packet_unref(packet_);
+                    decodeError("av_read_frame (truncated packet)", AVERROR_INVALIDDATA);
                     return false;
                 }
                 if (packet_->stream_index != videoStreamIndex_) {
@@ -798,10 +848,16 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             av_packet_unref(packet_);
             packetPending_ = false;
 
+            if (sret == AVERROR_INVALIDDATA) {
+                warnInvalidData(true);
+                continue;
+            }
             if (sret < 0 && sret != AVERROR_EOF) {
+                decodeError("avcodec_send_packet", sret);
                 av_strerror(sret, errbuf, sizeof(errbuf));
                 logWarning("VideoPlayer") << "send_packet failed: " << errbuf
                                           << " (pts=" << currentPts_ << ")";
+                return false;
             }
             continue;
         }
@@ -810,7 +866,12 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             // Decoder fully drained after EOF was signalled upstream.
             return false;
         }
+        if (ret == AVERROR_INVALIDDATA) {
+            warnInvalidData(false);
+            continue;
+        }
         if (ret < 0) {
+            decodeError("avcodec_receive_frame", ret);
             av_strerror(ret, errbuf, sizeof(errbuf));
             logWarning("VideoPlayer") << "receive_frame failed: " << errbuf
                                       << " (pts=" << currentPts_ << ")";
@@ -826,11 +887,12 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             // avoid an extra pixel-format conversion during transfer. The
             // scaler is rebuilt lazily on format change (lastScalerFmt_).
             swFrame->format = AV_PIX_FMT_NONE;
-            if (av_hwframe_transfer_data(swFrame, frame_, 0) < 0) {
-                logWarning("VideoPlayer") << "HW frame transfer failed, dropping frame";
+            int transfer = av_hwframe_transfer_data(swFrame, frame_, 0);
+            if (transfer < 0) {
+                decodeError("av_hwframe_transfer_data", transfer);
                 av_frame_free(&swFrame);
                 av_frame_unref(frame_);
-                continue;
+                return false;
             }
             srcFrame = swFrame;
         }

@@ -37,7 +37,7 @@ public:
     VideoPlayer() = default;
     ~VideoPlayer() { close(); }
 
-    // Move-enabled
+    // Move-enabled. onError listeners are not moved.
     VideoPlayer(VideoPlayer&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -70,14 +70,17 @@ public:
     bool isAudioStreaming() const { return audioStreaming_; }
 
     LoadResult load(const fs::path& path) override {
+        const auto previousError = errorMessage_;
         if (initialized_) {
             close();
         }
+        errorMessage_ = previousError;
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
-        // (the web backend streams straight from them). UTF-8, not
-        // path.string(): that throws on Windows for names outside the code page.
-        const std::string pathStr = pathToUtf8(path);
+        // (the web backend streams straight from them). Display conversion
+        // cannot create or hide the ASCII URL prefix, and accepts Windows
+        // names holding unpaired UTF-16 surrogates.
+        const std::string pathStr = internal::pathToDisplayUtf8(path);
         bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
         fs::path resolvedPath = isUrl ? path : getDataPath(path);
 
@@ -86,9 +89,9 @@ public:
         if (!isUrl) {
             std::error_code ec;
             if (!fs::exists(resolvedPath, ec)) {
-                logError("VideoPlayer") << "file not found: " << internal::pathToUtf8(resolvedPath);
+                logError("VideoPlayer") << "file not found: " << resolvedPath;
                 return LoadResult::fail(LoadError::FileNotFound,
-                                        "file not found: " + internal::pathToUtf8(resolvedPath));
+                                        "file not found: " + internal::pathToDisplayUtf8(resolvedPath));
             }
         }
 
@@ -96,7 +99,7 @@ public:
         if (!loadPlatform(resolvedPath)) {
             return LoadResult::fail(LoadError::DecodeFailed,
                                     "platform decoder failed to open: " +
-                                    internal::pathToUtf8(resolvedPath));
+                                    internal::pathToDisplayUtf8(resolvedPath));
         }
 
         // Remember the resolved path so instance-level frame extraction
@@ -122,6 +125,7 @@ public:
             }
         }
 
+        clearPlaybackError();
         initialized_ = true;
         firstFrameReceived_ = false;
         posterActive_ = false;
@@ -137,9 +141,10 @@ public:
     }
 
     void close() override {
-        if (!initialized_) return;
+        if (!initialized_) { clearPlaybackError(); return; }
 
         closePlatform();
+        clearPlaybackError();
 
         texture_.clear();
         textureY_.clear();
@@ -176,9 +181,11 @@ public:
         if (!initialized_) return;
 
         frameNew_ = false;
+        if (dispatchPlaybackError()) return;
 
         // Platform-specific update
         updatePlatform();
+        if (dispatchPlaybackError()) return;
 
         // Check for new frame from platform
         if (hasNewFramePlatform()) {
@@ -419,6 +426,9 @@ protected:
         // seek still returns the OLD position. Remember the target: the
         // poster logic in play() uses it until a live frame supersedes it.
         pendingSeekSec_ = pct * getDurationPlatform();
+        // A failed backend stays paused until play(). Use the existing poster
+        // path to show an explicit recovery seek even while it is stopped.
+        if (errorStopped_ && autoPoster_) loadPosterFrame(pendingSeekSec_);
     }
 
     void setVolumeImpl(float vol) override {
@@ -477,6 +487,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(VideoPlayer&& other) {
+        movePlaybackErrorFrom(other);
         width_ = other.width_;
         height_ = other.height_;
         initialized_ = other.initialized_;
@@ -733,6 +744,9 @@ namespace internal {
 // Helper class for platform implementations to access protected members
 class VideoPlayerPlatformAccess {
 public:
+    static void reportError(VideoPlayer& player, const VideoErrorEventArgs& error) {
+        player.reportPlaybackError(error.message, error.errorCode);
+    }
 #if defined(__linux__) && !defined(__ANDROID__)
     // Exercise the real Linux decoder/clock in headless regression tests,
     // without creating textures or uploading frames to a GPU.

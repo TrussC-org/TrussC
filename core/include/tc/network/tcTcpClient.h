@@ -14,6 +14,8 @@
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
 #include "tc/network/tcKeptThreads.h"
+#include "tc/network/tcTcpSendChannel.h"
+#include <chrono>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -78,7 +80,7 @@ public:
     // Events
     //
     // THREADING: with threading enabled (default), these events fire on the
-    // internal receive/connect threads, not the main thread. A listener that
+    // internal receive/connect/send threads, not the main thread. A listener that
     // touches the Node tree, GPU resources, or unguarded app state must opt
     // into main-thread delivery:
     //
@@ -95,6 +97,8 @@ public:
     //    Fires on the receive thread.
     //  - "Connection error" (wasClean false; TlsClient: "TLS error: ..."):
     //    an error ended it. Fires on the receive thread.
+    //  - "Send failed" (wasClean false): a send failed or timed out.
+    //    Fires on the writer thread, or inline without threads.
     //  - "Disconnected by client" (wasClean true): the app ended it, with
     //    disconnect() or with connect() on a connected client. Fires
     //    synchronously on the calling thread, before that call returns.
@@ -115,7 +119,7 @@ public:
     // without another notification, and connects where it was asked to.
     // With threads, do not call connectAsync() from such a listener: the
     // connect thread it starts runs connect() at the same time as the outer
-    // connect(), which can end in std::terminate (#261). Without threads
+    // connect(), which is unsupported. Without threads
     // connectAsync() is connect(), and is overruled the same way.
     //
     // RECONNECTING ON THE RECEIVE THREAD: when an event fires on the receive
@@ -131,10 +135,9 @@ public:
     // connect(), connectAsync(), disconnect() and the destructor can wait
     // for a listener still running on one of the client's threads. Do not
     // call them while holding a lock that such a listener takes: the call
-    // and the listener would wait for each other forever. Until #261 lands,
-    // do not call disconnect() on the client from another thread until the
-    // listener's call has returned, or the connection may complete after
-    // disconnect() has returned.
+    // and the listener would wait for each other forever. Do not call disconnect() on the client from another thread until the
+    // listener's call has returned; simultaneous reentrant connection
+    // management from multiple threads is unsupported.
     // Reconnecting from the main thread, as above, avoids all of this.
     //
     // DESTROYING FROM A LISTENER: an inline listener on the receive thread
@@ -161,6 +164,7 @@ public:
     Event<TcpConnectEventArgs> onConnect;       // On connection complete
     Event<TcpReceiveEventArgs> onReceive;       // On data receive
     Event<TcpDisconnectEventArgs> onDisconnect; // On disconnect
+    Event<TcpSendCompleteEventArgs> onSendComplete; // Writer thread, or processNetwork() without threads
     Event<TcpErrorEventArgs> onError;           // On error
 
     // -------------------------------------------------------------------------
@@ -199,6 +203,9 @@ public:
     // Whether connected
     virtual bool isConnected() const;
 
+    // True during an asynchronous TCP connect (TLS also includes its handshake).
+    virtual bool isConnecting() const;
+
     // -------------------------------------------------------------------------
     // Data send/receive (virtual - can be overridden in TlsClient)
     // -------------------------------------------------------------------------
@@ -207,6 +214,21 @@ public:
     virtual bool send(const void* data, size_t size);
     virtual bool send(const std::vector<char>& data);
     virtual bool send(const std::string& message);
+
+    // Queue owned bytes; completion reports through onSendComplete.
+    SendResult sendAsync(const void* data, size_t size);
+    SendResult sendAsync(std::vector<char>&& data);
+    SendResult sendAsync(const std::string& message);
+
+    // Idle send deadline, default 60 seconds; 0 waits indefinitely.
+    void setSendTimeout(float seconds);
+    // TCP connect deadline, default 0 (the OS deadline). Does not cover DNS or TLS.
+    void setConnectTimeout(float seconds);
+    // Same high-water mark as TcpServer: 16 MB; 0 is unlimited. A single
+    // payload may exceed the mark. send() waits for room; sendAsync() refuses it.
+    void setSendAsyncBufferSize(size_t bytes);
+    size_t getSendAsyncBufferSize() const;
+    size_t getSendAsyncPendingBytes() const;
 
     // -------------------------------------------------------------------------
     // Settings
@@ -238,13 +260,29 @@ public:
     int getRemotePort() const;
 
 protected:
+    using AliveToken = std::shared_ptr<std::atomic<bool>>;
+    // Cancel and join before derived connection state is released. Self-join
+    // is kept for a later caller, as with the receive thread.
+    void stopConnectThread();
+    bool prepareConnect();
+    bool connectSocket(const std::string& host, int port);
+    // 1 connected, 0 pending, -1 failed, -2 cancelled. waitMs <= 100.
+    int checkPendingConnect(int waitMs, int& error);
+    void closeClientSocket();
+    void waitClientSocket(bool forWrite, int ms);
+    void startSendChannel();
+    bool processSendQueue(const AliveToken& alive);
+    void stopSendChannel();
+    // Non-blocking write step; -1 means retry, -2 fatal. TLS overrides it.
+    virtual int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
+    std::mutex socketMutex_;
+
     // Accessible from derived classes
     void notifyError(const std::string& msg, int code = 0);
 
     // Set to false by the destructor. A receive thread holds its own copy:
     // after a notification it checks this copy, not the client, to find out
     // whether a listener destroyed the client (#262).
-    using AliveToken = std::shared_ptr<std::atomic<bool>>;
     AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
 
     // processNetwork()'s work. alive: the caller's copy of alive_. Returns
@@ -270,7 +308,7 @@ protected:
     // Atomic: setReceiveBufferSize() may run on any thread (a listener on the
     // receive thread, say) while a receive thread reads it
     std::atomic<size_t> receiveBufferSize_{65536};
-    std::mutex sendMutex_;
+
 
     // Atomic, both: a receive thread that a listener's disconnect() let go of
     // may still read them while the app calls setUseThread() or connect()
@@ -284,23 +322,44 @@ protected:
 
 private:
     void receiveThreadFunc(unsigned generation, AliveToken alive);
-    void connectThreadFunc(const std::string& host, int port);
+    void connectThreadFunc(const std::string& host, int port, unsigned attempt);
 
     // Close the socket and release the receive thread (connectThread_ is left alone)
     void resetConnection();
 
     // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
     // client") if the client was connected. The destructor passes false.
-    void disconnectImpl(bool notify);
+    void disconnectImpl(bool notify, bool stopConnect = true);
 
     std::thread receiveThread_;
     std::thread connectThread_;
+    struct ClientSendChannel;
+    bool drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, bool wait, const AliveToken& alive);
+    std::thread writerThread_;
+    mutable std::mutex channelMutex_;
+    std::shared_ptr<ClientSendChannel> sendChannel_;
+    std::atomic<float> sendTimeout_{60.0f};
+    std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
+    std::atomic<uint64_t> nextSendId_{0};
+    std::atomic<float> connectTimeout_{0.0f};
+    std::chrono::steady_clock::time_point connectStart_;
+    std::atomic<bool> connectCancelled_{false};
+    std::atomic<bool> asyncConnecting_{false};
+    std::atomic<unsigned> connectAttempt_{0};
+    mutable std::mutex targetMutex_;
+    std::string asyncHost_;
+    int asyncPort_ = 0;
+
+    std::shared_ptr<ClientSendChannel> sendChannel() const;
+    SendResult enqueue(internal::TcpSendItem&& item);
+    void writerThreadFunc(std::shared_ptr<ClientSendChannel> channel, AliveToken alive);
 
     // receiveThread_ or connectThread_ when a call on that very thread (a
     // listener's connect() or disconnect(), or the destructor) let go of it.
     // Joined by the next connect() or disconnect() on another thread, or by
     // the destructor (see tcKeptThreads.h).
     internal::KeptThreads keptThreads_;
+    internal::KeptThreads keptWriters_;
 
     // Bumped by every connect(), before it sets any flag for the new
     // connection; its receive thread gets that value. A thread whose
@@ -309,17 +368,9 @@ private:
     // thread (onReceive or onDisconnect) can reconnect without the old
     // thread reading the new connection's socket.
     //
-    // Not covered: the reconnect itself. connect() on the receive thread
-    // lets go of that thread (keptThreads_ keeps it) and then, on it,
-    // creates the socket, resolves the host, connects (blocking), fires
-    // onConnect and starts the new receive thread. disconnect() called on
-    // the receive thread lets go of it the same way. The next connect() or
-    // disconnect() on another thread, or the destructor, joins it, but
-    // socket_ is not atomic: a disconnect() from another thread before the
-    // listener's call has returned races it. Hence the rule in the Events
-    // comment above. The fix belongs to #261 (a cancellable connect).
-    // Destruction by a listener on the receive thread itself is covered:
-    // see alive_.
+    // Cancellation of connectAsync() is checked between non-blocking TCP
+    // waits. Reentrant connection methods from listeners still require the
+    // external caller to wait for that listener's call (see Events).
     std::atomic<unsigned> receiveGeneration_{0};
 
     // Receive buffer, sized to receiveBufferSize_ by processNetwork()

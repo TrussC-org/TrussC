@@ -264,14 +264,17 @@ public:
     // === File I/O ===
 
     // Load from file (stb_image first, then platform-specific fallback for HEIC etc.)
-    LoadResult load(const fs::path& path) {
+    // Relative paths resolve via getDataPath, like Image::load. Safe to call
+    // from a worker thread.
+    LoadResult load(const fs::path& filePath) {
         clear();
 
+        const fs::path path = getDataPath(filePath);   // absolute paths pass through
         std::error_code ec;
         if (!std::filesystem::exists(path, ec)) {
-            logError("Pixels") << "file not found: " << internal::pathToUtf8(path);
+            logError("Pixels") << "file not found: " << path;
             return LoadResult::fail(LoadError::FileNotFound,
-                                    "file not found: " + internal::pathToUtf8(path));
+                                    "file not found: " + internal::pathToDisplayUtf8(path));
         }
         int w, h, channels;
         unsigned char* loaded = stbi_load(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 4);
@@ -299,15 +302,17 @@ public:
 
     // Load an HDR (Radiance .hdr / .pic) image as float pixels. stb_image
     // decodes radiance RGBE into linear float32 RGB. The alpha channel is
-    // synthesized as 1.0 to keep downstream code RGBA-friendly.
-    LoadResult loadHDR(const fs::path& path) {
+    // synthesized as 1.0 to keep downstream code RGBA-friendly. Relative
+    // paths resolve via getDataPath, like load().
+    LoadResult loadHDR(const fs::path& filePath) {
         clear();
 
+        const fs::path path = getDataPath(filePath);   // absolute paths pass through
         std::error_code ec;
         if (!std::filesystem::exists(path, ec)) {
-            logError("Pixels") << "file not found: " << internal::pathToUtf8(path);
+            logError("Pixels") << "file not found: " << path;
             return LoadResult::fail(LoadError::FileNotFound,
-                                    "file not found: " + internal::pathToUtf8(path));
+                                    "file not found: " + internal::pathToDisplayUtf8(path));
         }
         int w, h, channels;
         float* loaded = stbi_loadf(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 3);

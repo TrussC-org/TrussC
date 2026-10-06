@@ -181,6 +181,7 @@ void World::createBounds(float x, float y, float width, float height) {
     if (groundBody_) {
         if (collisionManager_) collisionManager_->forget(groundBody_);
         world_->DestroyBody(groundBody_);
+        if (collisionManager_) collisionManager_->forgetBody(groundBody_);
         groundBody_ = nullptr;
     }
 
@@ -228,6 +229,7 @@ void World::createGround(float y, float width) {
     if (groundBody_) {
         if (collisionManager_) collisionManager_->forget(groundBody_);
         world_->DestroyBody(groundBody_);
+        if (collisionManager_) collisionManager_->forgetBody(groundBody_);
         groundBody_ = nullptr;
     }
 
@@ -259,6 +261,7 @@ void World::clear() {
             b2Body* next = body->GetNext();
             if (collisionManager_) collisionManager_->forget(body);
             world_->DestroyBody(body);
+            if (collisionManager_) collisionManager_->forgetBody(body);
             body = next;
         }
         groundBody_ = nullptr;

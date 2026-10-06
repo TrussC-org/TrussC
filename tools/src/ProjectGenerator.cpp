@@ -967,9 +967,9 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     file << ")\n\n";
     file << "REM Configure and build using CMake presets\n";
     file << "cmake --preset web\n";
-    file << "if errorlevel 1 exit /b 1\n\n";
+    file << "if %ERRORLEVEL% neq 0 exit /b 1\n\n";
     file << "cmake --build --preset web --parallel\n";
-    file << "if errorlevel 1 exit /b 1\n\n";
+    file << "if %ERRORLEVEL% neq 0 exit /b 1\n\n";
     file << "echo.\n";
     file << "echo Build complete! Output files are in bin\\\n";
     file << "echo To test locally:\n";

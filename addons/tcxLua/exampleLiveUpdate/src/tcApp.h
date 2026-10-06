@@ -2,7 +2,8 @@
 
 #include <TrussC.h>
 
-#include "sol/sol.hpp"
+#include <tcxLua.h>
+#include <optional>
 
 using namespace std;
 using namespace tc;
@@ -30,6 +31,8 @@ public:
     void reset();
 
     std::string script;
+    std::string compiledScript;   // the script that `step` was last built from
+    std::optional<OnceGate> stepErrorLogged{std::in_place};
     sol::state lua;
     Fbo fbo;
 
