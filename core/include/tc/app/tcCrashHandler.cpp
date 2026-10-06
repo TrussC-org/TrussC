@@ -21,7 +21,13 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <unistd.h>
+#ifdef __APPLE__
+// <ucontext.h> requires _XOPEN_SOURCE on macOS, which in turn hides the
+// arm_thread_state64_get_* accessors; the struct alone is all we need.
+#include <sys/ucontext.h>
+#else
 #include <ucontext.h>
+#endif
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #include <mach/vm_prot.h>
