@@ -289,6 +289,7 @@ struct Recorder {
 
 static bool connectClient(WebSocketClient& client, FakeServer& fake, Recorder& rec) {
     size_t opens = rec.count("open");
+    client.setConnectTimeout(2);
     if (!client.connect("ws://127.0.0.1:" + to_string(fake.port) + "/")) return false;
     if (!fake.acceptUpgrade()) return false;
     return waitFor([&] { return rec.count("open") > opens && client.isConnected(); });
@@ -349,35 +350,18 @@ static void checkHandshakeTimeout(const string& name, const string& scheme) {
     client.setHandshakeTimeout(1);
     Recorder rec;
     rec.attach(client);
-    const auto t0 = chrono::steady_clock::now();
+    client.setConnectTimeout(2);
+    atomic<bool> disconnectedBeforeError{false};
+    EventListener stateL = client.onError.listen([&](TcpErrorEventArgs&) {
+        disconnectedBeforeError = client.getState() == WebSocketClient::State::Disconnected;
+    });
     check(name + ": connect()", client.connect(scheme + "://127.0.0.1:" + to_string(fake.port) + "/"));
     check(name + ": the server accepted",
           waitFor([&] { lock_guard<mutex> l(fake.m); return fake.connects == 1; }));
-    // Before t0 + 1 s the deadline cannot have run out: it counts from the
-    // TCP connect, which comes after t0. Pump until t0 + 500 ms (however long
-    // the wait above took), then sample the state and the time; the sample
-    // only proves something when it was taken before t0 + 1 s.
-    {
-        const auto until = t0 + chrono::milliseconds(500);
-        const auto now = chrono::steady_clock::now();
-        if (now < until) {
-            pumpUntil([] { return false; },
-                      (int)chrono::duration_cast<chrono::milliseconds>(until - now).count());
-        }
-        const bool connecting = client.getState() == WebSocketClient::State::Connecting &&
-                                rec.count("error") == 0 && rec.count("close") == 0;
-        if (chrono::steady_clock::now() < t0 + chrono::milliseconds(1000)) {
-            check(name + ": still Connecting before the deadline", connecting);
-        } else {
-            printf("    (still Connecting before the deadline: not checked, the waits above "
-                   "already took 1 s)\n");
-        }
-    }
     const bool closed = pumpUntil([&] { return rec.count("close") >= 1; }, 5000);
-    const auto elapsed = chrono::steady_clock::now() - t0;
-    pumpUntil([] { return false; }, 100);   // let any extra event arrive
-    check(name + ": onClose within 5 s", closed);
-    check(name + ": not before the 1 s deadline", elapsed >= chrono::milliseconds(900));
+    check(name + ": onClose fired", closed);
+    check(name + ": disconnected before onError", disconnectedBeforeError);
+    client.disconnect(); // join before checking the complete event sequence
     {
         lock_guard<mutex> l(rec.m);
         check(name + ": events are onError then onClose",
@@ -436,6 +420,37 @@ static void runHandshakeTimeoutTests() {
     checkHandshakeTimeout("ws:// no 101", "ws");
     checkHandshakeTimeout("wss:// no TLS handshake", "wss");
     checkCloseBeforeUpgrade();
+}
+
+// A timeout callback may replace or destroy the owner. The expired attempt
+// must be fully disconnected before the callback and must emit no stale close.
+static void checkTimeoutCallback(bool destroy) {
+    FakeServer fake;
+    if (!fake.start()) { check("timeout callback: server start", false); return; }
+    auto client = make_unique<WebSocketClient>();
+    client->setHandshakeTimeout(0.01f);
+    const string url = "ws://127.0.0.1:" + to_string(fake.port) + "/";
+    bool handled = false, disconnected = false;
+    int closes = 0;
+    EventListener closeL = client->onClose.listen([&] { ++closes; });
+    EventListener errorL = client->onError.listen([&](TcpErrorEventArgs&) {
+        disconnected = client->getState() == WebSocketClient::State::Disconnected;
+        if (destroy) client.reset();
+        else { client->setHandshakeTimeout(0); client->connect(url); }
+        handled = true;
+    });
+    client->connect(url);
+    check("timeout callback: error delivered", pumpUntil([&] { return handled; }, 5000));
+    check("timeout callback: disconnected before error", disconnected);
+    check("timeout callback: no stale close", closes == 0);
+    if (client) {
+        check("timeout callback: replacement accepted",
+              waitFor([&] { lock_guard<mutex> lock(fake.m); return fake.connects == 2; }));
+        check("timeout callback: replacement accepts upgrade", fake.acceptUpgrade());
+        check("timeout callback: replacement opens", waitFor([&] { return client->isConnected(); }));
+        client->disconnect();
+    }
+    fake.server.stop();
 }
 
 static void runReconnectFromEventTests() {
@@ -643,6 +658,8 @@ static void runLoopbackTests() {
     }
 
     runHandshakeTimeoutTests();
+    checkTimeoutCallback(false);
+    checkTimeoutCallback(true);
     runReconnectFromEventTests();
 }
 

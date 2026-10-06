@@ -12,6 +12,7 @@
 #include "tc/types/tcScrollBar.h"
 #include "tc/types/tcTweenMod.h"
 #include "tc/sound/tcSound.h"      // AudioEngine + AudioOutBuffer / AudioInBuffer
+#include "tc/utils/tcUtils.h"      // internal::resolveDataPathRootOnce
 #include "tc/events/tcEventListener.h"
 #include "tc/utils/tcAnnotations.h"
 #include <vector>
@@ -235,6 +236,11 @@ private:
     // Node's post-setup hook: subscribe audioOut() / audioIn() now that the
     // first setup() has returned (#426). final: apps override setup().
     void onSetupDone() final { internal::attachAppAudio(*this); }
+
+    // Node's pre-setup hook: resolve the data path root before setup() runs,
+    // not in _setup_cb (on iOS the executable path may not be available that
+    // early). getDataPath() also resolves it on first use from any thread.
+    void onSetupStart() final { internal::resolveDataPathRootOnce(); }
 
     // Framework lifecycle, next to Node's setupCalled_: true once the
     // framework has run cleanup() and let the App go

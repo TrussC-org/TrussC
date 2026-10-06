@@ -209,6 +209,7 @@ public:
         }
 
         fs::path resolved = getDataPath(path);
+        if (!internal::checkWriteTarget(path, resolved, "AudioRecorder")) return false;
         if (resolved.has_parent_path()) {   // same convenience as VideoWriter
             std::error_code ec;
             fs::create_directories(resolved.parent_path(), ec);

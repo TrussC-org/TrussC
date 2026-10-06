@@ -184,8 +184,20 @@ TC_CORE_TEST_MAIN() {
         return 1;
     }
     const int port = server.getPort();
-    check("start(0) then getPort() reports the port the OS picked", port != 0);
-    if (port == 0) return 1;
+    check("start(0) then getPort() reports the port the OS picked", port > 0);
+    if (port <= 0) return 1;
+
+    // Concurrent listeners must each get their own usable port.
+    {
+        TcpServer other;
+        const bool started = other.start(0);
+        check("another start(0) gets a distinct positive port",
+              started && other.getPort() > 0 && other.getPort() != port);
+        if (!started) return 1;
+        rawsocket_t peer = connectSilentPeer(other.getPort());
+        check("peer connects to the other OS-assigned port", peer != static_cast<rawsocket_t>(-1));
+        if (peer != static_cast<rawsocket_t>(-1)) TC_CLOSE(peer);
+    }
 
     // --- a peer that never reads -------------------------------------------
     rawsocket_t stalled = connectSilentPeer(port);

@@ -165,8 +165,11 @@ jobs:
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          # Include Objective-C++: the macOS platform .mm files need caching too.
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           # Hash the compiler by content, not mtime: a fresh runner VM installs
           # the same compiler at a different mtime, which otherwise invalidates
           # every restored ccache entry (macOS hit this: 8% hits despite a warm
@@ -471,13 +474,15 @@ jobs:
         if: always()
         run: ccache -s || true
 
-  # Compile-only iOS gate: AllFeaturesExample against the device SDK with code
-  # signing disabled — every documented core API compiled and linked for iOS
+  # Compile-only iOS gate: AllFeaturesExample and soundPlayerExample against
+  # the device SDK with code signing disabled — every documented core API
+  # compiled and linked for iOS
   # (the tcFileDialog attribute-order break once sat undetected for weeks
   # because nothing in CI compiled against the iOS SDK). Runtime behavior is
   # still verified on a real device by hand. (It used to be videoPlayerExample:
   # AllFeaturesExample linked tcxLua, whose generated bindings reference the
   # sync dialogs that don't compile on iOS. tcxLua is no longer in it.)
+  # soundPlayerExample also covers floating-point std::format (iOS 16.3+).
   # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
   build-ios:
     needs: changes
@@ -500,7 +505,16 @@ jobs:
           cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
+          cmake --build build-ios --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Build soundPlayerExample (iOS device SDK, unsigned)
+        run: |
+          cd examples/sound/soundPlayerExample
+          cmake -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
           cmake --build build-ios --config Release -- \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
@@ -540,6 +554,11 @@ jobs:
   # NSLog in core/include/tc/** and core/platform/**, so core's diagnostics go
   # through the Logger (log file, onLog, platform log). Textual too; the
   # Logger's own sinks carry a `log-check: allow` marker.
+  # And the third-party list check (#407): every row of docs/LICENSE.md
+  # "Third-Party Libraries" matches the build (FetchContent GIT_TAG / URL,
+  # vendored version lines, provenance commits), every FetchContent_Declare
+  # has a row, every listed path exists. Reads files only, no network. The
+  # weekly upstream check is upstream-check.yml.
   # Cheap and independent of the build — always runs (not gated).
   header-state-check:
     timeout-minutes: 5
@@ -553,6 +572,24 @@ jobs:
       - name: core logging check (no printf / cerr / cout / NSLog)
         if: always()
         run: python3 tools/check_core_logging.py
+
+      - name: third-party list check (docs/LICENSE.md vs the build)
+        if: always()
+        run: |
+          python3 -m unittest discover -s tools/tests -p test_dependencies.py -v
+          python3 tools/check_dependencies.py
+
+      - name: core test runner regression checks
+        if: always()
+        run: python3 tools/test_core_test_runner.py
+
+      - name: release workflow offline tests
+        if: always()
+        run: python3 tools/tests/test_release_workflow.py -v
+
+      - name: daily web sequencing regression checks
+        if: always()
+        run: python3 tools/tests/test_daily_workflow.py -v
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,

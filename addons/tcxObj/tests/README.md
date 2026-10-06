@@ -1,8 +1,8 @@
 # tcxObj tests
 
 Headless console test (no window). Each case writes a small `.obj` to a temp
-directory and loads it with `ObjLoader`, checking that face indices are
-validated before they are read:
+directory and loads it with `ObjLoader`, checking face index validation,
+computed normals and UTF-8 paths:
 
 - valid faces load as before: positive and relative (negative) indices,
   normals and texcoords, quads split into two triangles, a concave pentagon
@@ -16,7 +16,15 @@ validated before they are read:
   tinyobjloader's warning, and ear clipping of the pentagon never reads the
   missing vertex (AddressSanitizer builds check this); ObjLoader then skips
   the triangles that use it;
-- a normal index in a file with no normals is ignored, as before.
+- a normal index in a file with no normals is ignored, as before;
+- computed normals point in the same direction at scales of 0.001 and 100,
+  have unit length and retain the 1:4 area weighting of two adjoining faces;
+  degenerate faces and cancelling face normals keep the `(0, 0, 1)` fallback;
+- a Japanese-named folder, OBJ, MTL and PNG load together; exporting
+  `モデル.obj` writes a UTF-8 `mtllib` name and loads again with its texture.
+
+Texture cases use sokol's dummy graphics backend (no window or GPU). On
+Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.
 
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR across macOS / Windows / Linux; a non-zero exit fails the job. Run it

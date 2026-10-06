@@ -34,36 +34,144 @@ struct YCoCgVsParams {
 // loadPcmTrack - read a PCM audio track and decode it into a SoundBuffer
 // ---------------------------------------------------------------------------
 // The byte order and sample format come from the track: 'twos' and 'fl32'
-// without an 'enda' atom are big-endian, 'fl32' is 32-bit float.
+// without an 'enda' atom are big-endian, 'fl32' is 32-bit float, 'lpcm' uses
+// its format flags. A format that SoundBuffer does not decode (see
+// MovTrack::isPcmFormatSupported()) logs a warning and returns false.
+// The buffer is sized once and each table entry (a whole chunk for
+// constant-size PCM) is read straight into it.
 inline bool loadPcmTrack(MovParser& parser, const MovTrack& track, tc::SoundBuffer& buffer) {
     if (!track.isPcm()) return false;
 
-    // Read all audio samples. No size pre-pass: only samples that lie inside
-    // the file are read (see MovParser::readSample()).
-    std::vector<uint8_t> audioData;
+    std::string why;
+    if (!track.isPcmFormatSupported(why)) {
+        tc::logWarning("HapPlayer") << "PCM audio '" << MovParser::fourccToString(track.codecFourCC)
+            << "' not supported (" << why << "); loading without audio";
+        return false;
+    }
+
+    // Only entries that lie inside the file are read (their total is at most
+    // the file size, see MovParser::buildSamples())
+    uint64_t totalSize = 0;
     for (size_t i = 0; i < track.samples.size(); i++) {
-        std::vector<uint8_t> sampleData;
-        if (parser.readSample(track, i, sampleData)) {
-            audioData.insert(audioData.end(), sampleData.begin(), sampleData.end());
+        if (parser.isSampleInFile(track, i)) totalSize += track.samples[i].size;
+    }
+    if (totalSize > parser.getFileSize() || totalSize > SIZE_MAX) {
+        tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
+        return false;
+    }
+
+    std::vector<uint8_t> audioData(static_cast<size_t>(totalSize));
+    size_t used = 0;
+    for (size_t i = 0; i < track.samples.size(); i++) {
+        if (!parser.isSampleInFile(track, i)) continue;
+        if (parser.readSampleTo(track, i, audioData.data() + used)) {
+            used += track.samples[i].size;
         }
     }
+
+    // Whole frames only
+    const uint32_t frameBytes = track.getPcmFrameBytes();
+    if (frameBytes > 0) used -= used % frameBytes;
+    audioData.resize(used);
 
     if (audioData.empty()) {
         tc::logWarning("HapPlayer") << "Failed to read PCM audio data";
         return false;
     }
 
-    // Create SoundBuffer from PCM data
-    bool bigEndian = track.isBigEndianPcm();
-    int bitsPerSample = track.isFloatPcm() ? 32 : track.bitsPerSample;
-
     if (!buffer.loadPcmFromMemory(audioData.data(), audioData.size(),
-                                  track.channels, track.sampleRate,
-                                  bitsPerSample, bigEndian)) {
+                                  track.channels, static_cast<int>(track.sampleRate),
+                                  track.getPcmBits(), track.isBigEndianPcm())) {
         tc::logWarning("HapPlayer") << "Failed to load PCM audio";
         return false;
     }
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// stepPlaybackClock - one update() step of HapPlayer's playback time
+// ---------------------------------------------------------------------------
+// Pure function (no player state), so the clock can be checked headless.
+//
+// - Wall clock: time advances by dt * speed. Used for files without audio,
+//   for reverse playback (speed <= 0), and while the audio is not playing.
+// - Audio master (audioMaster true): time advances by dt * speed and is then
+//   pulled toward the audio position (audioTime), closing the difference
+//   with a time constant of kAudioSlewSeconds, so the video follows the
+//   audio clock without stepping at the mixer's buffer size. When the
+//   difference is above resyncThreshold (> 0), time is set to the audio
+//   position (hard re-sync).
+//
+// Sound::getPosition() returns positionF (in seconds), written back by the
+// mixer once per audio callback (one device period), without interpolation.
+// At speed 1 it steps by bufferSize / sampleRate: 2048 frames at 48 kHz is
+// 42.7 ms. Using it directly as the video clock makes 60 fps content advance
+// 0,0,2,0,0,3,... frames per 60 Hz refresh at that buffer size, and 1,2,0,...
+// even at ~10 ms periods. positionF is also the mixed position, ahead of what
+// is heard by at least one device buffer. Slewing smooths these coarse steps;
+// it does not compensate for the output latency.
+// kAudioSlewSeconds = 0.25: at 60 Hz each update closes 1/15 of the gap, so
+// even a full 42.7 ms step moves the video by under 3 ms per frame, while a
+// steady offset is still ~98% closed within a second.
+//
+// - The loop boundary is handled here (the video side): passing the end (or
+//   the start in reverse) wraps when loop is true and sets wrapped; the
+//   caller then moves the audio to the new time. Without loop, ended is set.
+struct PlaybackClockInput {
+    double time = 0.0;             // current playback time (s)
+    double dt = 0.0;               // wall-clock delta (s)
+    double speed = 1.0;
+    double duration = 0.0;         // video duration (s)
+    bool loop = false;
+    bool audioMaster = false;
+    double audioTime = 0.0;        // audio position (s), when audioMaster
+    double resyncThreshold = 0.5;  // <= 0: no hard re-sync
+};
+
+struct PlaybackClockStep {
+    double time = 0.0;
+    bool resynced = false;
+    bool wrapped = false;
+    bool ended = false;
+};
+
+constexpr double kAudioSlewSeconds = 0.25;
+
+inline PlaybackClockStep stepPlaybackClock(const PlaybackClockInput& in) {
+    PlaybackClockStep out;
+    double t = in.time + in.dt * in.speed;
+
+    if (in.audioMaster) {
+        const double diff = in.audioTime - t;
+        if (in.resyncThreshold > 0.0 && std::abs(diff) > in.resyncThreshold) {
+            t = in.audioTime;
+            out.resynced = true;
+        } else if (in.dt > 0.0) {
+            t += diff * std::min(1.0, in.dt / kAudioSlewSeconds);
+        }
+    }
+
+    if (in.duration > 0.0) {
+        if (t >= in.duration) {
+            if (in.loop) {
+                t = std::fmod(t, in.duration);
+                out.wrapped = true;
+            } else {
+                out.ended = true;
+            }
+        } else if (t < 0.0) {
+            if (in.loop) {
+                t = in.duration + std::fmod(t, in.duration);
+                if (t >= in.duration) t = 0.0;
+                out.wrapped = true;
+            } else {
+                t = 0.0;
+                out.ended = true;
+            }
+        }
+    }
+    out.time = t;
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +182,7 @@ public:
     HapPlayer() = default;
     ~HapPlayer() { close(); }
 
-    // Non-copyable, move-enabled
+    // Non-copyable, move-enabled. onError listeners are not moved.
     HapPlayer(const HapPlayer&) = delete;
     HapPlayer& operator=(const HapPlayer&) = delete;
 
@@ -110,24 +218,29 @@ public:
     // Load / Close
     // =========================================================================
 
-    tc::LoadResult load(const tc::fs::path& path) override {
+    // Relative paths resolve via getDataPath, like VideoPlayer::load.
+    tc::LoadResult load(const tc::fs::path& filePath) override {
+        const auto previousError = errorMessage_;
         if (initialized_) {
             close();
         }
+        errorMessage_ = previousError;
         resetStats();
+
+        const tc::fs::path path = tc::getDataPath(filePath);   // absolute paths pass through
 
         std::error_code ec;
         if (!tc::fs::exists(path, ec)) {
-            tc::logError("HapPlayer") << "file not found: " << tc::internal::pathToUtf8(path);
+            tc::logError("HapPlayer") << "file not found: " << path;
             return tc::LoadResult::fail(tc::LoadError::FileNotFound,
-                "file not found: " + tc::internal::pathToUtf8(path));
+                "file not found: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         // Parse MOV file
         if (!movParser_.open(path)) {
             tc::logError("HapPlayer") << "Failed to open: " << path;
             return tc::LoadResult::fail(tc::LoadError::DecodeFailed,
-                "failed to parse MOV: " + tc::internal::pathToUtf8(path));
+                "failed to parse MOV: " + tc::internal::pathToDisplayUtf8(path));
         }
 
         const auto& info = movParser_.getInfo();
@@ -194,6 +307,7 @@ public:
             << duration_ << "s, format: " << static_cast<int>(hapFormat_)
             << (hasAudio_ ? ", with audio" : ", no audio");
 
+        clearPlaybackError();
         initialized_ = true;
         applyCachedStateToPlatform();
         currentFrame_ = 0;
@@ -201,6 +315,7 @@ public:
     }
 
     void close() override {
+        clearPlaybackError();
         if (!initialized_) return;
 
         // Stop audio
@@ -217,6 +332,7 @@ public:
         videoTrack_ = nullptr;
         audioTrack_ = nullptr;
         hasAudio_ = false;
+        audioHeldForReverse_ = false;
 
         initialized_ = false;
         playing_ = false;
@@ -239,38 +355,39 @@ public:
 
     void update() override {
         if (!initialized_) return;
+        if (dispatchPlaybackError("HapPlayer")) return;
 
         // Only reset frameNew_ when actively playing
         // (preserve frameNew_ set by setFrame() for encoding workflows)
         if (playing_ && !paused_) {
             frameNew_ = false;
-            // Advance playback time (can be negative for reverse)
-            playbackTime_ += tc::getDeltaTime() * speed_;
+
+            // Slew wall time toward playing audio at positive speed. After a
+            // shorter audio track ends, wall time carries the video to its end.
+            PlaybackClockInput in;
+            in.time = playbackTime_;
+            in.dt = tc::getDeltaTime();
+            in.speed = speed_;
+            in.duration = duration_;
+            in.loop = loop_;
+            in.audioMaster = hasAudio_ && speed_ > 0 && audioPlayer_.isPlaying();
+            in.audioTime = in.audioMaster ? audioPlayer_.getPosition() : 0.0;
+            in.resyncThreshold = getResyncThreshold();
+            const PlaybackClockStep step = stepPlaybackClock(in);
+            playbackTime_ = step.time;
+
+            // The video drives the loop: the audio (which does not loop on
+            // its own) is moved to the wrapped time
+            if (step.wrapped && hasAudio_ && speed_ > 0) {
+                syncAudioTo(playbackTime_);
+            }
 
             // Calculate target frame
             int targetFrame = static_cast<int>(playbackTime_ / duration_ * totalFrames_);
-
-            // Handle forward end (reached last frame)
-            if (targetFrame >= totalFrames_) {
-                if (loop_) {
-                    playbackTime_ = fmod(playbackTime_, duration_);
-                    targetFrame = static_cast<int>(playbackTime_ / duration_ * totalFrames_);
-                } else {
-                    targetFrame = totalFrames_ - 1;
-                    markDone();
-                }
-            }
-            // Handle reverse end (reached first frame)
-            else if (targetFrame < 0) {
-                if (loop_) {
-                    playbackTime_ = duration_ + fmod(playbackTime_, duration_);
-                    targetFrame = static_cast<int>(playbackTime_ / duration_ * totalFrames_);
-                    if (targetFrame >= totalFrames_) targetFrame = totalFrames_ - 1;
-                } else {
-                    targetFrame = 0;
-                    playbackTime_ = 0;
-                    markDone();
-                }
+            if (targetFrame >= totalFrames_) targetFrame = totalFrames_ - 1;
+            if (targetFrame < 0) targetFrame = 0;
+            if (step.ended) {
+                markDone();
             }
 
             // Decode new frame if needed
@@ -282,6 +399,7 @@ public:
                 }
             }
         }
+        dispatchPlaybackError("HapPlayer");
     }
 
     // =========================================================================
@@ -439,6 +557,8 @@ protected:
         currentFrame_ = -1;  // Force first frame decode
         if (hasAudio_) {
             audioPlayer_.play();
+            audioHeldForReverse_ = speed_ <= 0;
+            if (audioHeldForReverse_) audioPlayer_.pause();
         }
     }
 
@@ -456,8 +576,10 @@ protected:
         if (hasAudio_) {
             if (paused) {
                 audioPlayer_.pause();
-            } else {
-                audioPlayer_.resume();
+            } else if (speed_ > 0) {
+                // Continue from the video time
+                syncAudioTo(playbackTime_);
+                audioHeldForReverse_ = false;
             }
         }
     }
@@ -468,7 +590,11 @@ protected:
         setFrame(targetFrame);
         // Sync audio position
         if (hasAudio_) {
-            audioPlayer_.setPosition(playbackTime_);
+            if (playing_ && !paused_ && speed_ > 0) {
+                syncAudioTo(playbackTime_);
+            } else {
+                audioPlayer_.setPosition(static_cast<float>(playbackTime_));
+            }
         }
     }
 
@@ -480,12 +606,18 @@ protected:
 
     void setSpeedImpl(float speed) override {
         if (hasAudio_) {
-            if (speed < 0) {
-                // Mute audio during reverse playback
-                audioPlayer_.setVolume(0);
+            if (speed <= 0) {
+                // No audio during reverse playback (the video runs on the
+                // wall clock)
+                audioPlayer_.pause();
+                audioHeldForReverse_ = true;
             } else {
-                audioPlayer_.setVolume(volume_);
                 audioPlayer_.setSpeed(speed);
+                // Back to forward: the audio continues from the video time
+                if (audioHeldForReverse_ && playing_ && !paused_) {
+                    syncAudioTo(playbackTime_);
+                    audioHeldForReverse_ = false;
+                }
             }
         }
     }
@@ -497,14 +629,16 @@ protected:
     }
 
     void setLoopImpl(bool loop) override {
-        if (hasAudio_) {
-            audioPlayer_.setLoop(loop);
-        }
+        // The video drives the loop (see update()); the audio does not loop
+        // on its own
+        (void)loop;
     }
 
 private:
     MovParser movParser_;
     HapDecoder hapDecoder_;
+    tc::OnceGate invalidFrameWarningGate_{5.0};
+    uint64_t skippedInvalidFrames_ = 0;
     const MovTrack* videoTrack_ = nullptr;
     const MovTrack* audioTrack_ = nullptr;
 
@@ -520,6 +654,8 @@ private:
     // Audio playback
     tc::Sound audioPlayer_;
     bool hasAudio_ = false;
+    // The audio is paused for reverse playback (speed <= 0)
+    bool audioHeldForReverse_ = false;
 
     // YCoCg shader for HAP-Q
     mutable tc::Shader ycocgShader_;
@@ -536,6 +672,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(HapPlayer&& other) {
+        movePlaybackErrorFrom(other);
         // Move base class state
         width_ = other.width_;
         height_ = other.height_;
@@ -565,6 +702,7 @@ private:
         playbackTime_ = other.playbackTime_;
         audioPlayer_ = std::move(other.audioPlayer_);
         hasAudio_ = other.hasAudio_;
+        audioHeldForReverse_ = other.audioHeldForReverse_;
         decodeTimeMs_ = other.decodeTimeMs_;
 
         // Invalidate source
@@ -576,6 +714,16 @@ private:
         other.width_ = 0;
         other.height_ = 0;
         other.decodeTimeMs_ = 0.0;
+    }
+
+    // Play the audio from the given time (starting it again if it has
+    // reached its end)
+    void syncAudioTo(double seconds) {
+        if (!hasAudio_) return;
+        if (!audioPlayer_.isPlaying()) {
+            audioPlayer_.play();
+        }
+        audioPlayer_.setPosition(static_cast<float>(seconds));
     }
 
     bool loadAudio() {
@@ -710,6 +858,7 @@ private:
 
         // Read sample data from MOV
         if (!movParser_.readSample(*videoTrack_, frameIndex, sampleBuffer_)) {
+            reportPlaybackError("Failed to read HAP video sample");
             return false;
         }
 
@@ -720,6 +869,17 @@ private:
                 width_, height_,
                 frameBuffer_.data(), frameBuffer_.size(),
                 outFormat)) {
+            if (hapDecoder_.lastErrorCode_ == HapResult_Bad_Frame) {
+                ++skippedInvalidFrames_;
+                if (invalidFrameWarningGate_.isFirstTime()) {
+                    tc::logWarning("HapPlayer") << "Skipping invalid HAP frame " << frameIndex
+                        << "; skipped " << skippedInvalidFrames_
+                        << " invalid frames since the last report";
+                    skippedInvalidFrames_ = 0;
+                }
+                return false;
+            }
+            reportPlaybackError("Failed to decode HAP video frame", hapDecoder_.lastErrorCode_);
             return false;
         }
 

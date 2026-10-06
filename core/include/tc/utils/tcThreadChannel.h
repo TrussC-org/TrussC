@@ -190,6 +190,7 @@ public:
 
     // Whether channel is closed
     bool isClosed() const {
+        std::unique_lock<std::mutex> lock(mutex_);
         return closed_;
     }
 
