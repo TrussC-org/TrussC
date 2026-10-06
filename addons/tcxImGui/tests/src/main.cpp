@@ -977,7 +977,42 @@ static void testInspectorRecord() {
           visible && std::find(recorded.begin(), recorded.end(), "visible") != recorded.end());
 }
 
+// A truncated capture must not split a valid code point (#324).
+static void testUtf8Capture() {
+    using tcx::imgui::WidgetValue;
+    const size_t cap = WidgetValue::kMaxTextBytes;
+    auto capture = [](std::string text, size_t expectedSize, bool truncated) {
+        char* data = text.data();
+        ImGuiTcItemValue item{};
+        item.Kind = ImGuiTcValueKind_Text;
+        item.Data = &data;
+        WidgetValue value;
+        tcx::imgui::detail::captureValue(value, item, nullptr);
+        bool validUtf8 = true;
+        try { (void)nlohmann::json(value.text).dump(); }
+        catch (const nlohmann::json::type_error&) { validUtf8 = false; }
+        check("text capture: valid UTF-8 and exact prefix at boundary",
+              validUtf8 && value.hasText && value.truncated == truncated &&
+              value.text == text.substr(0, expectedSize));
+    };
+    std::string cjk;
+    while (cjk.size() <= cap) cjk += "日";
+    capture(cjk, cap - cap % 3, true);
+    for (const std::string& cp : {std::string("é"), std::string("日"), std::string("😀")}) {
+        for (size_t split = 1; split < cp.size(); ++split)
+            capture(std::string(cap - split, 'a') + cp, cap - split, true);
+        // The mandated ImGui helper also respects ImWchar's range: a 16-bit
+        // build drops a complete non-BMP character at the cut, still valid UTF-8.
+        const size_t boundarySize = cp.size() == 4 && IM_UNICODE_CODEPOINT_MAX < 0x1F600
+            ? cap - cp.size() : cap;
+        capture(std::string(cap - cp.size(), 'a') + cp + "x", boundarySize, true);
+    }
+    capture(std::string(cap, 'a'), cap, false);
+    capture("日本語 😀", std::string("日本語 😀").size(), false);
+}
+
 int main() {
+    testUtf8Capture();
     testMenus();
     testPanel();
     testClippedCheckbox();
