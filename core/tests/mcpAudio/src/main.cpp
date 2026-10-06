@@ -29,22 +29,46 @@ void ringChecks() {
     ring.write(signal.data() + 10, 295, 2);
     s = ring.snapshot(500);
     check("oversized callback retains latest two seconds per channel", s.framesWritten == 300 && s.samples.size() == 256 && s.samples[0] == 172 && s.samples[255] == -299);
+    // Small callbacks every ~50 microseconds overlap full two-second reads. Seed history so
+    // every read must be nonempty, including the first. Values stay exact in
+    // float, and timestamp checks catch a coherent-looking but stale/torn range.
+    constexpr int historyFrames = 32768;
+    internal::AudioOutputRing concurrent(historyFrames / 2, 2);
+    vector<float> seed(historyFrames * 2);
+    for (int f = 0; f < historyFrames; ++f) { seed[2*f] = float(f); seed[2*f+1] = -float(f); }
+    concurrent.write(seed.data(), historyFrames, 2);
     atomic<bool> finished{false};
+    atomic<uint64_t> writes{0};
     thread writer([&] {
-        for (int i = 0; i < 2000; ++i) ring.write(signal.data(), 300, 2);
-        finished = true;
+        float block[64];
+        uint64_t frame = historyFrames;
+        while (!finished.load(memory_order_relaxed) && frame + 32 < (1u << 24)) {
+            for (int f = 0; f < 32; ++f) { block[2*f] = float(frame + f); block[2*f+1] = -float(frame + f); }
+            concurrent.write(block, 32, 2);
+            frame += 32;
+            writes.fetch_add(1, memory_order_relaxed);
+            this_thread::sleep_for(chrono::microseconds(50));
+        }
     });
-    bool consistent = true;
-    do {
-        s = ring.snapshot(128);
+    while (!writes.load(memory_order_relaxed)) this_thread::yield();
+    bool nonempty = true, consistent = true;
+    uint64_t first = 0, last = 0;
+    for (int i = 0; i < 30000; ++i) {
+        s = concurrent.snapshot(historyFrames);
+        nonempty &= s.samples.size() == historyFrames * 2;
+        if (i == 0) first = s.framesWritten;
+        last = s.framesWritten;
         for (size_t f = 0; f < s.samples.size()/2; ++f) {
             const auto frame = s.framesWritten - s.samples.size()/2 + f;
-            if (s.samples[2*f] != float(frame % 300) || s.samples[2*f+1] != -float(frame % 300)) consistent = false;
+            if (s.samples[2*f] != float(frame) || s.samples[2*f+1] != -float(frame)) consistent = false;
         }
-    } while (!finished.load());
+    }
+    finished.store(true, memory_order_relaxed);
     writer.join();
-    check("snapshot succeeds once writer is quiescent", ring.snapshot(128).samples.size() == 256);
-    check("concurrent snapshots keep timestamp, ordering and channels coherent", consistent);
+    check("30000 concurrent full-history snapshots are never empty", nonempty);
+    check("concurrent snapshots are contiguous with consistent channels", consistent);
+    check("stress reader overlaps writer progress and multiple wraps", last > first + 3 * (historyFrames * 5 / 4));
+    check("snapshot succeeds once writer is quiescent", concurrent.snapshot(historyFrames).samples.size() == historyFrames * 2);
 }
 } // namespace
 
@@ -71,11 +95,20 @@ TC_CORE_TEST_MAIN() {
     const auto deadline = chrono::steady_clock::now() + chrono::seconds(10);
     while (internal::AudioAnalysisAccess::snapshot(engine, 0).framesWritten < 4096 && chrono::steady_clock::now() < deadline) this_thread::yield();
     vector<float> mono(4096);
-    size_t copied = 0;
-    do { copied = engine.getAnalysisBuffer(mono.data(), mono.size()); }
-    while (!copied && chrono::steady_clock::now() < deadline);
+    const size_t copied = engine.getAnalysisBuffer(mono.data(), mono.size());
     check("legacy mono API reads the live output ring", copied == 4096 && all_of(mono.begin(), mono.end(), [](float x) { return x == 0.0625f; }));
+    vector<float> capped(5000, 42.0f);
+    check("legacy mono request stays capped at ANALYSIS_BUFFER_SIZE",
+        engine.getAnalysisBuffer(capped.data(), capped.size()) == AudioEngine::ANALYSIS_BUFFER_SIZE &&
+        all_of(capped.begin(), capped.begin() + 4096, [](float x) { return x == 0.0625f; }) && capped[4096] == 42.0f);
+    bool liveCopies = true;
+    for (int i = 0; i < 30000; ++i) {
+        liveCopies &= engine.getAnalysisBuffer(mono.data(), mono.size()) == mono.size();
+        liveCopies &= all_of(mono.begin(), mono.end(), [](float x) { return x == (0.25f - 0.125f) * 0.5f; });
+    }
+    check("30000 live mono copies retain the old stereo mix without empty reads", liveCopies);
     engine.shutdown();
+    check("legacy mono API returns zero when stopped", engine.getAnalysisBuffer(mono.data(), mono.size()) == 0);
     constant.disconnect();
     // With the device stopped, drive the same mixer synchronously. No sleeps,
     // callback timing assumptions or hardware are involved in numeric checks.
@@ -161,6 +194,30 @@ TC_CORE_TEST_MAIN() {
     const auto saved = call("tc_save_audio_capture", {{"path","startup.wav"},{"seconds",2}});
     check("startup capture writes only available history without padding", saved["frames"] == r["framesWritten"] && saved["frames"].get<size_t>() < 64000);
     startup.disconnect();
+    // A periodic ramp makes reversed ordering visible. With three channels,
+    // the third channel must not participate in the legacy L/R average.
+    for (int channels : {1, 3}) {
+        auto ramp = engine.audioOut.listen([](AudioOutBuffer& out) {
+            for (int f = 0; f < out.frameCount; ++f) {
+                const float x = float((out.framePosition + f) % 1024) / 2048.0f;
+                out.data[f * out.channels] = x;
+                if (out.channels > 1) out.data[f * out.channels + 1] = x * 0.5f;
+                if (out.channels > 2) out.data[f * out.channels + 2] = -1.0f;
+            }
+        });
+        const bool started = engine.init(AudioSettings{.sampleRate=48000,.channels=channels,.bufferSize=256});
+        const auto readyBy = chrono::steady_clock::now() + chrono::seconds(10);
+        while (internal::AudioAnalysisAccess::snapshot(engine, 0).framesWritten < 4096 && chrono::steady_clock::now() < readyBy) this_thread::yield();
+        const auto n = engine.getAnalysisBuffer(mono.data(), mono.size());
+        const float scale = channels == 1 ? 1.0f : 0.75f;
+        const int first = int(mono[0] * 2048.0f / scale);
+        bool ordered = started && n == mono.size();
+        for (size_t f = 0; f < n; ++f) ordered &= mono[f] == float((first + f) % 1024) / 2048.0f * scale;
+        check(channels == 1 ? "legacy mono preserves samples in oldest-first order" :
+            "legacy multichannel uses only L/R in oldest-first order", ordered);
+        engine.shutdown();
+        ramp.disconnect();
+    }
     internal::setNullAudioBackendForTests(false);
     fs::remove_all(dir);
     return failures ? 1 : 0;

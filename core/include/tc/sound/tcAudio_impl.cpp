@@ -256,14 +256,16 @@ size_t AudioEngine::getAnalysisBuffer(float* outBuffer, size_t numSamples) {
     if (!initialized_ || !outBuffer || numSamples == 0) return 0;
     numSamples = std::min(numSamples, size_t(ANALYSIS_BUFFER_SIZE));
     const auto data = internal::AudioAnalysisAccess::snapshot(*this, numSamples);
-    if (!data.channels) return 0;
-    const size_t count = data.samples.size() / data.channels;
-    const size_t padding = numSamples - count;
-    std::fill_n(outBuffer, padding, 0.0f);
-    for (size_t f = 0; f < count; ++f) {
-        const float* frame = &data.samples[f * data.channels];
-        outBuffer[padding + f] = data.channels > 1 ? (frame[0] + frame[1]) * 0.5f : frame[0];
+    if (data.channels) {
+        const size_t count = data.samples.size() / data.channels;
+        const size_t padding = ANALYSIS_BUFFER_SIZE - count;
+        std::fill_n(analysisCopy_, padding, 0.0f);
+        for (size_t f = 0; f < count; ++f) {
+            const float* frame = &data.samples[f * data.channels];
+            analysisCopy_[padding + f] = data.channels > 1 ? (frame[0] + frame[1]) * 0.5f : frame[0];
+        }
     }
+    std::copy_n(analysisCopy_ + ANALYSIS_BUFFER_SIZE - numSamples, numSamples, outBuffer);
     return numSamples;
 }
 
@@ -1766,6 +1768,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     {
         std::lock_guard<std::mutex> lock(analysisMutex_);
         analysisRing_ = std::make_unique<internal::AudioOutputRing>(sampleRate_, channels_);
+        std::fill_n(analysisCopy_, ANALYSIS_BUFFER_SIZE, 0.0f);
     }
 
     int polyphony = settings.maxPolyphony > 0

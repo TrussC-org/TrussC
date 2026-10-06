@@ -1166,7 +1166,8 @@ public:
 
     // FFT analysis: Get latest audio samples (mono, left+right average)
     // numSamples: Number of samples to get (max ANALYSIS_BUFFER_SIZE)
-    // Returns: Number of samples retrieved
+    // Main-thread use. Returns the requested count (capped), or 0 when stopped.
+    // Reuses the last successful copy if concurrent writes prevent a snapshot.
     size_t getAnalysisBuffer(float* outBuffer, size_t numSamples);
 
     // Add new playback instance. Accepts any SoundSource — eager
@@ -1476,6 +1477,8 @@ private:
     friend struct internal::AudioAnalysisAccess;
     std::unique_ptr<internal::AudioOutputRing> analysisRing_;
     std::mutex analysisMutex_;
+    // Main-thread mono fallback, right-aligned with startup padding on the left.
+    float analysisCopy_[ANALYSIS_BUFFER_SIZE]{};
 
     // Drop counters, output meters, audio-thread CPU usage and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
