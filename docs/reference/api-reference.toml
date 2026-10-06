@@ -18877,6 +18877,11 @@ description.en = "Hook to populate the sg_bindings before a draw; override for c
 description.ja = "描画前に sg_bindings を埋めるフック。カスタム入力用にオーバーライドする。"
 description.ko = "그리기 전 sg_bindings를 채우는 훅. 사용자 입력을 위해 재정의한다."
 
+["Shader::fillTextureBindings"]
+description.en = "Copy the textures set with setTexture() into sg_bindings; a sampler is written only for slots below sokol's sampler limit (12)."
+description.ja = "setTexture() で設定したテクスチャを sg_bindings に写す。サンプラーは sokol のサンプラー上限（12）未満のスロットにだけ書く。"
+description.ko = "setTexture()로 설정한 텍스처를 sg_bindings에 복사한다. 샘플러는 sokol 샘플러 한도(12) 미만 슬롯에만 쓴다."
+
 ["Shader::pipelineForCurrentTarget"]
 description.en = "Return the pipeline matching the current render target, building and caching one per (format, sampleCount)."
 description.ja = "現在のレンダーターゲットに合うパイプラインを返す。(フォーマット, サンプル数) ごとに生成・キャッシュ。"
