@@ -185,6 +185,39 @@ fs::path getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The bundle id names the app's folder (the executable name for a binary
+// that does not run from a bundle).
+fs::path appFolderName() {
+    NSString* bundleId = [[NSBundle mainBundle] bundleIdentifier];
+    if (bundleId.length > 0) return fs::path(bundleId.UTF8String);
+    fs::path name = getExecutablePath().filename();
+    return name.empty() ? fs::path("TrussC") : name;
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    NSString* support = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    fs::path base = support ? fs::path(support.UTF8String)
+                            : fs::path(NSHomeDirectory().UTF8String) / "Library" / "Application Support";
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    // NSTemporaryDirectory() is $TMPDIR (the per-user temp folder)
+    return fs::path(NSTemporaryDirectory().UTF8String) / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    NSString* bundle = [[NSBundle mainBundle] bundlePath];
+    if (!bundle || ![bundle.pathExtension isEqualToString:@"app"]) return {};
+    return fs::path(bundle.UTF8String);
+}
+
+// ---------------------------------------------------------------------------
 // スクリーンショット機能（Metal API を使用）
 // ---------------------------------------------------------------------------
 
@@ -347,16 +380,15 @@ bool captureWindow(Pixels& outPixels) {
     return ok;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    // Resolve relative paths
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
-    // Capture to Pixels
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     // CGImage を作成
     int width = pixels.getWidth();
@@ -364,7 +396,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
     CGContextRef context = CGBitmapContextCreate(
-        pixels.getData(),
+        const_cast<unsigned char*>(pixels.getData()),
         width, height,
         8,                          // bitsPerComponent
         width * 4,                  // bytesPerRow
@@ -397,7 +429,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     // ファイル拡張子から形式を判定
-    // Case-insensitive extension match (.PNG, .Jpg); the path is used as given
+    // Case-insensitive extension match on the resolved destination
     std::string ext = toLower(getFileExtension(path));
     NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
     if (ext == "jpg" || ext == "jpeg") {

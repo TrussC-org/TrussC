@@ -237,6 +237,9 @@ public:
                 {"type", arg.type},
                 {"description", arg.description}
             };
+            // Nullable file path used by tc_analyze_image's optional save.
+            if (arg.type == "string|null")
+                schema["properties"][arg.name]["type"] = json::array({"string", "null"});
             if (arg.required) {
                 schema["required"].push_back(arg.name);
             }

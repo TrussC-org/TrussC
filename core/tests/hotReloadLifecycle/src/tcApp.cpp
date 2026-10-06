@@ -69,6 +69,7 @@ GuestView tcApp::readSharedState() {
 // None of these calls touches the GPU: the caches are only looked up.
 GuestInstances tcApp::sharedInstances() {
     GuestInstances g;
+    g.version = getVersion();
     g.audioEngine = &AudioEngine::getInstance();
     g.screenRecorder = &tc::internal::globalScreenRecorder();
     g.asyncScheduler = &tc::internal::AsyncScheduler::get();

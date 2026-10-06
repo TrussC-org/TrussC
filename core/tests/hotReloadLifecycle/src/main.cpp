@@ -498,6 +498,7 @@ static int runCycles(const std::string& guestPath, int port) {
         const uint64_t timerAfter = internal::nextNodeTimerId();
         const uint64_t ownerAfter = internal::AsyncScheduler::newOwner();
         const struct { const void* guest; const void* host; const char* what; } same[] = {
+            {in.version, getVersion(), "getVersion() string"},
             {in.audioEngine, &AudioEngine::getInstance(), "AudioEngine::getInstance()"},
             {in.screenRecorder, &internal::globalScreenRecorder(), "screen recorder"},
             {in.asyncScheduler, &internal::AsyncScheduler::get(), "AsyncScheduler"},

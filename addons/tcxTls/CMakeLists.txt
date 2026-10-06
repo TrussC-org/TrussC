@@ -20,6 +20,12 @@ set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
 set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
 set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
+# The upstream self-test code counts ECC operations in unsynchronized globals,
+# even during ordinary handshakes. Omit those diagnostics in threaded clients.
+if(NOT MBEDTLS_USER_CONFIG_FILE)
+    set(MBEDTLS_USER_CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/mbedtls_user_config.h"
+        CACHE FILEPATH "Mbed TLS user configuration" FORCE)
+endif()
 FetchContent_MakeAvailable(mbedtls)
 
 # Embed the Mozilla CA bundle as a generated .cpp so a trust anchor fallback

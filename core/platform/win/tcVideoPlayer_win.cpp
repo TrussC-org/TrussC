@@ -2,7 +2,9 @@
 // tcVideoPlayer_win.cpp - Windows VideoPlayer implementation using Media Foundation
 // =============================================================================
 // Uses IMFMediaEngine for hardware-accelerated video decoding.
-// D3D11 textures are injected directly into sokol_gfx.
+// Each new frame is read back through a D3D11 staging texture and converted
+// from BGRA to RGBA on the CPU, then copied to VideoPlayer's pixel buffer.
+// VideoPlayer::update() uploads that buffer to a sokol_gfx texture.
 //
 // Reference: openFrameworks ofMediaFoundationPlayer (MIT License)
 // Based on code by Andrew Wright (https://github.com/axjxwright/AX-MediaPlayer/)
@@ -142,6 +144,7 @@ public:
     std::vector<uint8_t> getAudioData() const;
 
 private:
+    internal::VideoErrorQueue playbackErrors_;
     bool createD3D11Device();
     bool createMediaEngine(const std::string& path);
     bool createRenderTexture();
@@ -422,6 +425,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     );
 
     if (FAILED(hr)) {
+        HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
+        if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
         return false;
     }
 
@@ -455,6 +460,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
         return true;
     }
 
+    HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
+    if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
     return false;
 }
 
@@ -698,6 +705,16 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
 
     if (!isLoaded_ || !mediaEngine_) return;
 
+    if (d3dDevice_) {
+        HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
+        if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
+    }
+    auto error = playbackErrors_.take();
+    if (!error.message.empty()) {
+        if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
+        return;
+    }
+
     EnterCriticalSection(&criticalSection_);
 
     if (transferVideoFrame()) {
@@ -821,18 +838,16 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             isFinished_ = true;
             break;
 
-        case MF_MEDIA_ENGINE_EVENT_ERROR: {
-            MF_MEDIA_ENGINE_ERR err;
-            if (mediaEngine_) {
-                ComPtr<IMFMediaError> error;
-                mediaEngine_->GetError(&error);
-                if (error) {
-                    err = static_cast<MF_MEDIA_ENGINE_ERR>(error->GetErrorCode());
-                    logError("VideoPlayer") << "Media error: " << static_cast<int>(err);
-                }
-            }
+        case MF_MEDIA_ENGINE_EVENT_ERROR:
+            playbackErrors_.report("Media Foundation playback error (MF_MEDIA_ENGINE_ERR " +
+                                   std::to_string(param1) + ")",
+                                   param2 ? static_cast<int64_t>(static_cast<HRESULT>(param2))
+                                          : static_cast<int64_t>(param1));
             break;
-        }
+
+        case MF_MEDIA_ENGINE_EVENT_RESOURCELOST:
+            playbackErrors_.report("Media Foundation video resource lost");
+            break;
 
         default:
             break;

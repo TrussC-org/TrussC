@@ -117,6 +117,7 @@ public:
         pipeline = {};
         vertexBuffer = {};
         indexBuffer = {};
+        stream_.reset();
         loaded = false;
     }
 
@@ -285,7 +286,21 @@ public:
         // destroyed before present()) and later setUniform()/setTexture()
         // calls cannot retroactively change this draw. Same pattern as
         // PbrDrawCommand; executed by internal::executeDeferredShaderDraw().
+        // Grow before capturing any handles in this sokol frame. Later FBO
+        // flushes can request growth, but must not replace this frame's buffers.
+        if (stream_) {
+            const auto growth = stream_->beginFrame(vertexBuffer, indexBuffer);
+            if (growth == internal::ShaderStreamGrowth::Grown) {
+                logWarning("Shader") << "Stream buffers grew to "
+                    << sg_query_buffer_size(vertexBuffer) / sizeof(ShaderVertex)
+                    << " vertices and " << sg_query_buffer_size(indexBuffer) / sizeof(uint32_t)
+                    << " indices";
+            } else if (growth == internal::ShaderStreamGrowth::Failed) {
+                logError("Shader") << "Failed to grow stream buffers";
+            }
+        }
         internal::DeferredShaderDraw draw;
+        draw.stream = stream_;
         draw.pipeline = pipelineForCurrentTarget();  // target-resolved (swapchain vs FBO)
         draw.vertices.assign(data, data + count);
         draw.type = type;
@@ -381,61 +396,56 @@ protected:
         desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 
         // Index buffer for quad support
-        desc.index_type = SG_INDEXTYPE_UINT16;
+        desc.index_type = SG_INDEXTYPE_UINT32;
 
         desc.label = "tc_shader_pipeline";
         return desc;
     }
 
     virtual void createVertexBuffer() {
-        // Vertex buffer for append mode (stream usage)
-        sg_buffer_desc vbufDesc = {};
-        vbufDesc.size = 65536 * sizeof(ShaderVertex);
-        vbufDesc.usage.stream_update = true;  // Enable append mode
-        vbufDesc.label = "tc_shader_vertices";
-        vertexBuffer = sg_make_buffer(&vbufDesc);
-
-        // Index buffer for append mode
-        sg_buffer_desc ibufDesc = {};
-        ibufDesc.size = 65536 * sizeof(uint16_t);
-        ibufDesc.usage.index_buffer = true;
-        ibufDesc.usage.stream_update = true;  // Enable append mode
-        ibufDesc.label = "tc_shader_indices";
-        indexBuffer = sg_make_buffer(&ibufDesc);
+        vertexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(ShaderVertex), false);
+        indexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(uint32_t), true);
+        stream_ = std::make_shared<internal::ShaderStreamState>();
     }
 
     virtual void onBegin() {}
     virtual void onEnd() {}
     virtual void setupBindings(sg_bindings& bind) {}
 
-    // Pipeline matching the current render target. The swapchain uses the
-    // load()-time `pipeline`; an FBO pass needs a pipeline whose color format,
-    // sample count and depth match the FBO, so one is built lazily (from the same
-    // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
+    // Pipeline matching the current render target. The main swapchain uses the
+    // load()-time `pipeline`; secondary windows and FBOs need matching color
+    // format, sample count and depth. Build those pipelines lazily from the same
+    // createPipelineDesc() and cache per distinct (format, sampleCount) target.
     sg_pipeline pipelineForCurrentTarget() {
         auto& wctx = internal::currentWindowContext();
-        if (!wctx.inFboPass) return pipeline;
-        uint64_t key = ((uint64_t)wctx.currentFboColorFormat << 8)
-                     | (uint64_t)(wctx.currentFboSampleCount & 0xff);
+        if (!wctx.inFboPass && wctx.isMain) return pipeline;
+        const auto target = wctx.inFboPass
+            ? internal::SwapchainTargetFormat{wctx.currentFboColorFormat, wctx.currentFboSampleCount}
+            : internal::swapchainTargetFormat(wctx);
+        uint64_t key = ((uint64_t)target.colorFormat << 8)
+                     | (uint64_t)(target.sampleCount & 0xff);
         auto it = targetPipelines_.find(key);
         if (it != targetPipelines_.end()) return it->second;
         sg_pipeline_desc desc = createPipelineDesc();
         desc.shader = shader;
-        desc.colors[0].pixel_format = wctx.currentFboColorFormat;
-        desc.sample_count           = wctx.currentFboSampleCount;
-        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // Fbo always allocates depth-stencil
+        desc.colors[0].pixel_format = target.colorFormat;
+        desc.sample_count           = target.sampleCount;
+        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // FBOs and windows use depth-stencil
         sg_pipeline pip = sg_make_pipeline(&desc);
         targetPipelines_[key] = pip;
         return pip;
     }
 
 private:
+    std::shared_ptr<internal::ShaderStreamState> stream_;
+
     void moveFrom(Shader&& other) {
         shader = other.shader;
         pipeline = other.pipeline;
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
+        stream_ = std::move(other.stream_);
         pendingViews = std::move(other.pendingViews);
         pendingUniforms = std::move(other.pendingUniforms);
         imageViews_ = std::move(other.imageViews_);

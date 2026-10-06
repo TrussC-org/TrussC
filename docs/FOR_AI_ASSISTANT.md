@@ -689,7 +689,7 @@ img.load("photo.png");          // Loads bin/data/photo.png
 font.load("myfont.ttf", 24);   // Loads bin/data/myfont.ttf
 ```
 
-When building, `bin/` is the working directory. No need for absolute paths.
+Relative asset paths resolve against the data folder via `getDataPath()`, independently of the working directory or launch method. Absolute paths are used as given. Pass `"myfont.ttf"`, rather than `"data/myfont.ttf"`, for a file in `bin/data/`.
 
 File extensions are matched case-insensitively; file names keep their case as written.
 Wherever TrussC picks a format from the extension (`Sound::load`, `Pixels::save`,
@@ -770,6 +770,7 @@ void draw() override {
 - `Light`: Directional, Point, or Spot (with cone falloff). Also supports projector texture and IES profiles
 - `Material`: presets (`Material::gold()`, silver, copper, iron, bronze, emerald, ruby; `plastic(color, roughness)`, `rubber(color)`) or custom via `setBaseColor()` / `setMetallic()` (0–1) / `setRoughness()` (0.045–1) / `setNormalMap()`. Colors are 0–1. Up to 8 lights.
 - `setMaterial()` activates PBR for all subsequent `mesh.draw()` calls until `clearMaterial()`
+- Destroying a `Material` or `Environment` automatically clears its reference from every window context; later draws use unlit rendering or no IBL, respectively. Destruction touches window context state and must run on the main thread, like `Light` destruction.
 
 **Shadow mapping:**
 ```cpp
@@ -808,7 +809,7 @@ light.setIesProfile(&iesProfile);                           // Photometric profi
 
 ### How do I draw a point cloud / lots of points fast?
 
-Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once — only rebuild (or `markGpuDirty()`) when the data actually changes, not every frame.
+Put the points in a `Mesh` with `PrimitiveMode::Points` and call `draw()`. A Points-mode mesh is **GPU-resident**: the positions + per-vertex colors are uploaded to a GPU buffer once and drawn with a single draw call, so the per-frame CPU cost is ~constant no matter how many points (millions are fine). Build the cloud once and only rebuild it when the data actually changes, not every frame: every edit re-uploads the whole buffer on the next draw. Any change re-uploads automatically — every mutator (`clear()`, `add*`, `setNormal`, `translate`/`rotate*`/`scale`/`transform`, `append`, `setMode`) and every non-const getter (`getVertices()`, `getColors()`, ...) marks the mesh changed, so writes through `getVertices()[i]` need no `markGpuDirty()`. To only read a mesh, use a `const Mesh&` (or `std::as_const(mesh)`); reading through a non-const reference also re-uploads. If you keep a mutable reference across draws, call `markGpuDirty()` after later writes through it, since only fetching the reference marks the mesh changed.
 
 ```cpp
 Mesh cloud;
@@ -875,6 +876,61 @@ exposes screenshots, input injection, and live node-tree read/write over HTTP �
 AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
 (details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
+
+### Numeric image inspection
+
+Use `tc_analyze_image` to verify drawing without image content tokens:
+
+```cpp
+bloomFbo.setDebugName("bloom");
+photo.setDebugName("photo");
+```
+
+```json
+{"source":{"fbo":"bloom"},"ops":[{"op":"stats"}]}
+```
+
+`source` contains exactly one of `window` (index from `tc_list_windows`),
+`fbo` or `image` (debug name or index from `tc_list_fbos` / `tc_list_images`),
+or `path` (saved file). Lists contain index, name, width, height and format;
+unnamed objects remain discoverable by index. Moves transfer names and indices;
+moved-from objects and destroyed objects disappear from the lists. Duplicate
+names require an index. `Texture` is not a source: draw it into a named Fbo.
+VideoPlayer / VideoGrabber are not sources.
+
+The result contains `width`, `height`, `format` (`RGBA8` or `float`),
+`colorSpace` (`sRGB` for byte RGB/RGBA images, `linear` for float or R/RG pixels), and
+`results` in request order. RGBA values stay in their source encoding; byte
+values are normalized to 0–1 and float values (including values above 1)
+pass through. CPU grayscale becomes RGB with alpha 1 (gray+alpha preserves
+alpha); float Fbo R/RG readbacks fill missing GPU components with 0 and alpha 1.
+
+| Op | Arguments | Result |
+|---|---|---|
+| `pixel` | `x`, `y` | `color` (RGBA) |
+| `histogram` | `bins` | `histogram[channel][bin]`, equal bins over 0–1; float outliers go in end bins |
+| `count` | `color` (RGB/RGBA), `tolerance` (nonnegative scalar), or `min`, `max` (RGB/RGBA) | `count`, `bbox`, `centroid` |
+| `stats` | none | RGBA `mean`, `min`, `max` |
+| `grid` | `cols`, `rows` | mean RGBA `colors[row][col]`; integer boundaries cover the region, cells must be nonempty |
+| `diff` | `path`, `threshold`, optional `save` | `count`, `bbox`, `maxDifference`; optional difference image |
+| `line` | `x0`, `y0`, `x1`, `y1` | RGBA `colors` along an inclusive Bresenham line |
+
+Each op accepts optional `rect: [x,y,w,h]` (default: whole image). Coordinates
+use the top-left origin. Rectangles must be nonempty and inside the source.
+Pixel coordinates must be in the rect; line endpoints must be in the image,
+and only samples inside the rect are returned. Bounding boxes use `[x,y,w,h]`,
+centroids use `[x,y]` in image coordinates; no matches yield null bbox/centroid.
+`diff` requires equal dimensions, compares raw RGBA values without color-space
+conversion, and counts pixels whose maximum absolute channel difference is
+strictly greater than `threshold`.
+
+Top-level `save` is optional; omitted or null writes nothing. Both it and
+`diff.save` use the `tc_save_screenshot` path rules (UTF-8, relative to the data
+directory, create missing parents, unsupported extensions append `.png`).
+File output clamps float values to 0–1; analysis preserves them. Fbo and window
+readback run after the frame, so Fbo results include its final pass. Fbo readback
+on web and float Fbo readback on iOS return errors. The existing byte
+readback API supports RGBA8; other integer Fbo formats return an error.
 
 ## Why TrussC & Licensing
 
@@ -1708,6 +1764,8 @@ The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
 
+Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.
+
 For the other direction, path → string (display, `Font`, JSON, a string compare), use `pathToUtf8(path)`, not `path.string()`: it returns UTF-8 on every platform, while `path.string()` on Windows follows the process code page, and throws for characters outside it when that is not UTF-8. On Windows `pathToUtf8()` can still throw for a name that is not valid UTF-16 (an unpaired surrogate, which NTFS allows); to log a path, use `logNotice() << path`, which does not throw. The path helpers (`getFileName()`, `getBaseName()`, `getFileExtension()`, `getParentDirectory()`, `joinPath()`, `getAbsolutePath()`, `listDirectory()`) already return UTF-8 (without the manifest, turn a result back into a path with `utf8ToPath()` before passing it to `load()` / `save()`, not with `fs::path(str)`), and `logNotice() << path` writes the path as UTF-8 (without the quotes `std::ostream` adds). In a Windows console, `runApp()` and `runHeadlessApp()` switch the output code page to UTF-8 while the app runs, so non-ASCII log text prints correctly.
 
 ### "Window / media / basics" → which API?
@@ -2105,7 +2163,7 @@ int recordingFrameCount()  // Number of frames captured so far in the current re
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written.
+bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
@@ -2155,7 +2213,7 @@ Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflecte
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame. Each frame runs, in order, what was queued when its drain started; work queued during the drain runs in the next frame. Nothing is dropped and there is no limit (a callback may edit the tree or free something); the tc_get_health MCP tool reports the count as mainQueuePending. Code that may queue faster than the app runs it, and can drop values, keeps its own bounded or latest-value buffer
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
 void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
@@ -2194,13 +2252,13 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails
+bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 bool createDirectory(const fs::path & path)  // Create directory (and parents)
 bool directoryExists(const fs::path & path)  // Check if directory exists
 bool fileExists(const fs::path & path)  // Check if file exists
 std::string getAbsolutePath(const fs::path & path)  // Get absolute path
 std::string getBaseName(const fs::path & path)  // Get filename without extension
-fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged.
+fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread. This is the bundled data the app reads (bin/data in development, the bundle's Resources/data when packaged); files the app writes and keeps go to getUserDataPath().
 fs::path getDataPathRoot()  // Get the current data path root as fs::path.
 fs::path getExecutableDir()  // Get the directory containing the running executable.
 fs::path getExecutablePath()  // Get the absolute path of the running executable.
@@ -2208,6 +2266,8 @@ std::string getFileExtension(const fs::path & path)  // Get file extension witho
 std::string getFileName(const fs::path & path)  // Get filename from path
 int64_t getFileSize(const fs::path & path)  // Get file size in bytes
 std::string getParentDirectory(const fs::path & path)  // Get parent directory
+fs::path getTempPath(const fs::path & path = fs::path(""))  // Folder for temporary files, which the OS may delete at any time: $TMPDIR/<bundle id>/ on macOS, %TEMP%\<app>\ on Windows, $TMPDIR (or /tmp) /<app>/ on Linux, the app's tmp/ on iOS, the app's cache folder on Android, in-memory /tmp on web. Created on first use. A relative path is joined to it; an absolute path is returned as is.
+fs::path getUserDataPath(const fs::path & path = fs::path(""))  // Folder for files the app writes and keeps (settings, presets, logs, recordings): always the OS per-user app folder, in development and in a packaged app alike. macOS ~/Library/Application Support/<bundle id>/, Windows %LOCALAPPDATA%\<app>\, Linux $XDG_DATA_HOME/<app>/ (default ~/.local/share/<app>/), iOS the app's Library/Application Support/, Android the app's internal files folder; on web it is in memory and not kept. <app> is the executable name. Created on first use. A relative path is joined to it; an absolute path is returned as is. Write and read back through it: saveJson(j, getUserDataPath("settings.json")) then loadJson(getUserDataPath("settings.json")). setUserDataPathRoot() changes it.
 std::string joinPath(const fs::path & dir, const fs::path & file)  // Join directory and filename
 std::vector<std::string> listDirectory(const fs::path & path)  // List files in directory
 const char * loadErrorName(LoadError e)  // Short label for a LoadError value ("FileNotFound", ...). For log messages
@@ -2216,10 +2276,11 @@ std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
 std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
 bool removeFile(const fs::path & path)  // Remove file
-bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it.
-bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it
-void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is.
-void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms.
+bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup()).
+void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup()).
+void setUserDataPathRoot(const fs::path & path)  // Fix the folder getUserDataPath() returns, for installations, several instances of one app, or tests. Mirrors setDataPathRoot(): a relative root is resolved against the executable directory, an absolute root is used as is. The folder is created on first use. A root inside the app bundle (macOS / iOS) still gets its writes refused.
 fs::path utf8ToPath(std::string_view utf8)  // Convert a UTF-8 string to fs::path, decoding it as UTF-8 on every platform. fs::path(std::string) on Windows decodes in the process code page, which is UTF-8 only in apps built with TrussC's Windows manifest (Windows 10 1903 or later).
 ```
 
@@ -2508,7 +2569,7 @@ uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer 
 fs::path AudioRecorder::getPath() const  // Resolved path of the file being written
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
 bool AudioRecorder::isRecording() const  // True while recording
-bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened
+bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForAudioCallbacks(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
 ```
 
@@ -2718,7 +2779,7 @@ const Texture & Environment::getIrradianceMap() const  // Get irradiance cubemap
 const Texture & Environment::getPrefilterMap() const  // Get prefiltered environment cubemap for specular IBL
 int Environment::getPrefilterMipLevels() const  // Get number of mip levels in the prefilter map
 bool Environment::isLoaded() const  // Check if environment is loaded
-bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file
+bool Environment::loadFromHDR(const fs::path & path) [+1]  // Load environment from HDR image file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 bool Environment::loadProcedural()  // Generate a simple procedural sky environment
 void Environment::release()  // Release GPU resources
 ```
@@ -2796,7 +2857,7 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened
+bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
@@ -2850,7 +2911,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load font file
+LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load a font file or a system font name. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins.
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
@@ -2979,13 +3040,13 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface).
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths.
-bool Image::save(const fs::path & path) const  // Save image to file
+bool Image::save(const fs::path & path) const  // Save image to file. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
 void Image::setDirty()  // Mark image as needing update
 void Image::update()  // Apply pixel changes to GPU texture
@@ -3242,6 +3303,7 @@ void Mesh::drawNoLightingWithTexture(const Texture & texture) const  // Draw the
 void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
+uint64_t Mesh::getDataRevision() const  // Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only.
 sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
 int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
 sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
@@ -3267,7 +3329,7 @@ bool Mesh::hasNormals() const  // Check if mesh has normals
 bool Mesh::hasTangents() const  // Whether the mesh has tangents
 bool Mesh::hasTexCoords() const  // Check if mesh has texture coordinates
 bool Mesh::hasValidTexCoords() const  // Check if texture coordinates match vertex count
-void Mesh::markGpuDirty() const  // Mark GPU buffers stale after editing data in place
+void Mesh::markGpuDirty() const  // Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this.
 Mesh & Mesh::rotateX(float radians)  // Rotate mesh around X axis
 Mesh & Mesh::rotateY(float radians)  // Rotate mesh around Y axis
 Mesh & Mesh::rotateZ(float radians)  // Rotate mesh around Z axis
@@ -3528,15 +3590,15 @@ int Pixels::getWidth() const  // Get width
 void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Pixels::isAllocated() const  // Check if allocated
 bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
-LoadResult Pixels::load(const fs::path & path)  // Load image from file
+LoadResult Pixels::load(const fs::path & filePath)  // Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
-LoadResult Pixels::loadHDR(const fs::path & path)  // Load an HDR (.hdr) image into a float pixel buffer
+LoadResult Pixels::loadHDR(const fs::path & filePath)  // Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
 void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it
+bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
@@ -3822,9 +3884,9 @@ bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
 bool Sound::isPlaying() const  // Check if playing
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
-LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)
+LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
-LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count.
+LoadResult Sound::loadStream(const fs::path & path, int maxPolyphony = 1) [macos,windows,linux,android,ios]  // Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 void Sound::loadTestTone(float frequency = 440.0, float duration = 1.0)  // Load a generated sine test tone (no file needed). Handy for verifying audio output.
 void Sound::pause()  // Pause playback
 bool Sound::play()  // Play from the beginning (this Sound's previous voice is stopped first). Returns false when nothing will play: not loaded, or the engine dropped the play (every voice busy, the stream's maxPolyphony reached by a copy of a streamed Sound, the stream file could not be reopened, or no output device running). Drops are logged as warnings and counted in AudioEngine::getStats().
@@ -4411,7 +4473,7 @@ const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder setting
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath)
+bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath). A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 bool VideoWriter::submitFrame(double timeSec) [macos]  // Append the previously locked frame at the given presentation time (seconds)
 bool VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec)  // Append interleaved float32 samples to the audio track at an explicit PTS (seconds, same timeline as addFrameAt). Only meaningful when opened with settings.audio = true and audioSampleRate/audioChannels set; returns false otherwise
 ```
@@ -4464,7 +4526,7 @@ bool Xml::empty() const  // Return true if the document has no content.
 bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false.
+bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
 ```
 

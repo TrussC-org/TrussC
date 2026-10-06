@@ -174,6 +174,8 @@ addons/tcxMyAddon/
 │   │   └── tcApp.cpp
 │   ├── addons.make          # Addons used by this example
 │   └── CMakeLists.txt       # Shared template
+├── tests/                   # Optional console test harness (run by CI)
+├── tests-<name>/            # Optional extra harness, e.g. one needing a heavy dependency
 └── CMakeLists.txt           # Optional (only for FetchContent, etc.)
 ```
 
@@ -182,6 +184,8 @@ addons/tcxMyAddon/
 - `libs/`: External source code, git submodules, etc.
 - `example-xxx/`: Examples at same level as `src/`. CMakeLists.txt uses shared template
 - `CMakeLists.txt`: Usually not needed. Create only for special processing like FetchContent
+- `tests/`: Console test harness (`src/main.cpp`, non-zero exit fails). CI builds and runs it on every pull request; a `daily-only` marker file in the folder moves it to the daily run instead
+- `tests-<name>/`: An extra harness next to `tests/`, for tests that need a heavy dependency the per-PR `tests/` avoids (e.g. tcxCurl: `tests/` is curl-free, `tests-curl/` links libcurl). Put a `daily-only` marker in it. This applies to addons inside this repository; CI for an external addon repository runs only its `tests/`
 
 ### When CMakeLists.txt Is Not Needed
 
@@ -697,6 +701,16 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+Playback requires GPU support for the movie's BC-compressed texture format.
+TrussC's Metal backend (the vendored sokol_gfx) enables BC texture formats only
+on macOS, so HAP playback fails on iOS, both on the Simulator and on devices
+(checked on an iPhone 16, 2026-10-06). See #645 and
+[tcxHap GPU requirements](../addons/tcxHap/README.md#gpu-requirements).
+
+`HapPlayer::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
+there is no working-directory fallback.
+
 **Features:**
 - Hap, Hap Alpha, Hap Q codecs
 - GPU-side decompression (S3TC/DXT)
@@ -723,6 +737,10 @@ Dear ImGui integration.
 ### tcxLut
 
 3D LUT (Look-Up Table) color grading.
+
+`Lut3D::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `Image::load()`. Absolute paths pass through;
+there is no working-directory fallback.
 
 **Features:**
 - Load .cube LUT files
@@ -764,6 +782,8 @@ TLS/SSL communication support (mbedTLS).
 - Server certificate verification **required by default** (see [SECURITY.md](SECURITY.md))
 - Custom CA bundle via `setCACertificate()` / `setCACertificateFile()`
 - Dev-only opt-out via `setVerifyNone()` (don't ship)
+- TCP connect deadline: `setConnectTimeout(seconds)`, inherited from
+  `TcpClient` (default `0` = the OS deadline; applies from the next connect)
 - Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s, counted
   from the TCP connect; `0` = none). On expiry: `onError`, then
   `onConnect(false)` with "TLS handshake timeout"
@@ -779,6 +799,8 @@ WebSocket client and server.
 - For `wss://`: TLS cert verification **on by default**. Use
   `setTlsVerifyNone()` or `setTlsCACertificate(pem)` on the client if needed
   (see [SECURITY.md](SECURITY.md))
+- TCP connect deadline: `setConnectTimeout(seconds)` (default `0` = the OS
+  deadline; applies from the next connect), passed to the TCP/TLS transport
 - Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s), one
   deadline counted from the TCP connect that covers the TLS handshake and the
   server's `101`. On expiry: `onError`, then `onClose`

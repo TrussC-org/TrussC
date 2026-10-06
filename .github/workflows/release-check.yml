@@ -1,0 +1,23 @@
+name: Weekly release package check
+
+on:
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-check:
+    # A caller must grant every permission a called job requests, even one that
+    # is skipped: release.yml's release job asks for contents: write (it is
+    # skipped here, publish: false). The build jobs set contents: read themselves.
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      project-path: examples/input_output/cursorExample
+      trussc-ref: ${{ github.sha }}
+      publish: false
+      sign-identity: '-'
