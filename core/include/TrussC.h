@@ -2385,6 +2385,7 @@ namespace internal {
     // init-time failures sokol reports (e.g. no X display on Linux) and
     // setup-time log lines land in the file too.
     inline void openEnvLogFile() {
+        installCrashHandler();
         #ifndef __EMSCRIPTEN__
         if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
             if (envLog[0] != '\0' && !setLogFile(envLog)) {
@@ -2398,6 +2399,7 @@ namespace internal {
     bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
 
     inline void _setup_cb() {
+        CrashPhaseScope crashPhase("setup");
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
         // key off this. (sokol's init_cb runs on the main thread.)
@@ -2532,6 +2534,7 @@ namespace internal {
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
         if (appUpdateFunc) {
+            CrashPhaseScope crashPhase("update");
             EntryStackGuard guard(AppEntry::Update);
             appUpdateFunc();
         }
@@ -2668,6 +2671,8 @@ namespace internal {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
         frameReentryGuard = true;
+        crashFrame(sapp_frame_count());
+        CrashPhaseScope crashPhase("frame");
 
         // Frame time, queued work, independent updates and the draw decision.
         bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
@@ -2690,7 +2695,10 @@ namespace internal {
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
 
-            if (appDrawFunc) appDrawFunc();
+            {
+                CrashPhaseScope drawPhase("draw");
+                if (appDrawFunc) appDrawFunc();
+            }
 
             // Reset shader stack if any shaders are still pushed
             internal::resetShaderStack();
@@ -2728,6 +2736,7 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        CrashPhaseScope crashPhase("cleanup");
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2783,6 +2792,14 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
+        CrashPhaseScope crashPhase("event dispatch");
+        if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
+            crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
+                       static_cast<int>(ev->mouse_y),
+                       ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP
+                           ? static_cast<int>(ev->key_code) : static_cast<int>(ev->mouse_button),
+                       ev->frame_count);
+        }
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they
         // found them.

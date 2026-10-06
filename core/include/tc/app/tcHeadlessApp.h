@@ -142,6 +142,9 @@ struct HeadlessSettings {
 // ---------------------------------------------------------------------------
 template<typename AppClass>
 int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
+    internal::openEnvLogFile();
+    internal::CrashPhaseScope crashPhase("headless");
+
     // Set target FPS
     headless::targetFps = settings.targetFps;
 
@@ -178,7 +181,10 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // setup() once, then the framework's post-setup hook, as the windowed
     // App gets them on its first tree update: the App's audioOut() /
     // audioIn() are subscribed only once setup() has returned (#426).
-    internal::setupNodeOnce(*app);
+    {
+        internal::CrashPhaseScope setupPhase("setup");
+        internal::setupNodeOnce(*app);
+    }
 
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main
@@ -221,6 +227,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         for (int i = 0; i < adv.steps; ++i) {
             ctx.updateDeltaTime = targetDelta;
             internal::EntryStackGuard guard(internal::AppEntry::Update);
+            internal::crashFrame(headless::frameCount);
+            internal::CrashPhaseScope updatePhase("update");
             app->update();
             headless::frameCount++;
         }
