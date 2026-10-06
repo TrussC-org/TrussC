@@ -234,6 +234,7 @@ private:
     struct ErrorLogState {
         OnceGate gate{5.0};
         std::atomic<uint64_t> suppressed{0};
+        std::atomic<bool> failedSinceSuccess{false};
     };
 
     void receiveThreadFunc();

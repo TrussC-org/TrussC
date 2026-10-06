@@ -92,16 +92,26 @@ void accounting() {
         Access::recover(socket, kind);
         check("report resets the count", logs.take().empty());
         Access::fail(socket, kind);
+        check("single logged failure then success re-arms the gate", logs.take() ==
+              std::vector<std::string>{"UdpSocket: injected failure (code: 42)"});
         Access::fail(socket, kind);
         Access::fail(socket, kind);
         Access::recover(socket, kind);
         const std::string name = kind == Kind::Resolve ? "resolve" : kind == Kind::Send ? "send" : "receive";
         check("recovery reports the held count", logs.take() ==
-              std::vector<std::string>{"UdpSocket: " + name + " recovered after 3 more failures"});
+              std::vector<std::string>{"UdpSocket: " + name + " recovered after 2 more failures"});
         Access::recover(socket, kind);
         check("recovery resets the count", logs.take().empty());
+        Access::fail(socket, kind);
+        check("first failure after recovery logs immediately", logs.take() ==
+              std::vector<std::string>{"UdpSocket: injected failure (code: 42)"});
+        Access::recover(socket, kind);
+        check("single-failure recovery needs no recovery line", logs.take().empty());
+        Access::fail(socket, kind);
+        check("single-failure recovery also re-arms immediately", logs.take() ==
+              std::vector<std::string>{"UdpSocket: injected failure (code: 42)"});
     }
-    check("every failure fires onError", callbacks == 21);
+    check("every failure fires onError", callbacks == 27);
     UdpSocket other;
     Access::freezeGates(other);
     Access::fail(other, Kind::Send);
@@ -137,6 +147,9 @@ void concurrentAccounting() {
           std::vector<std::string>{"UdpSocket: send recovered after 3999 more failures"});
 
     // Both callback types can re-enter error bookkeeping without deadlocking.
+    Access::fail(socket, Kind::Send);
+    Access::fail(socket, Kind::Send);
+    logs.take();
     auto errorListener = socket.onError.listen([&](UdpErrorEventArgs&) { Access::recover(socket, Kind::Send); });
     bool reentered = false;
     auto logListener = getLogger().onLog.listen([&](LogEventArgs& args) {
@@ -145,8 +158,34 @@ void concurrentAccounting() {
             Access::fail(socket, Kind::Send);
         }
     });
-    Access::fail(socket, Kind::Send);
-    check("log and error listeners may re-enter", reentered && callbacks == 4002 && logs.take().size() == 2);
+    Access::recover(socket, Kind::Send);
+    check("log and error listeners may re-enter", reentered && callbacks == 4003 && logs.take().size() == 2);
+}
+
+void racingRecovery() {
+    Logs logs;
+    UdpSocket socket;
+    Access::freezeGates(socket);
+    bool reopened = true;
+    for (int round = 0; round < 200; ++round) {
+        std::atomic<bool> go{false};
+        std::thread failing([&] {
+            while (!go.load()) std::this_thread::yield();
+            for (int i = 0; i < 100; ++i) Access::fail(socket, Kind::Send);
+        });
+        std::thread recovering([&] {
+            while (!go.load()) std::this_thread::yield();
+            for (int i = 0; i < 100; ++i) Access::recover(socket, Kind::Send);
+        });
+        go = true;
+        failing.join();
+        recovering.join();
+        Access::recover(socket, Kind::Send);
+        logs.take();
+        Access::fail(socket, Kind::Send);
+        if (logs.take() != std::vector<std::string>{"UdpSocket: injected failure (code: 42)"}) reopened = false;
+    }
+    check("racing failures and recoveries never leave a stuck gate (200 rounds)", reopened);
 }
 
 void loopback() {
@@ -171,19 +210,22 @@ void loopback() {
           "UdpSocket: resolve recovered after 1 more failures", "UdpSocket: send recovered after 1 more failures"});
     check("receive loopback data", receiver.receive(buffer, sizeof(buffer)) == 1);
 
-    inject(sender, Kind::Resolve); // gate is still closed: two suppressed failures
+    inject(sender, Kind::Resolve); // recovery re-opened the gate: one suppressed failure
     logs.take();
     check("connect succeeds", sender.connect("127.0.0.1", port));
     check("connect flushes resolve counts", logs.take() ==
-          std::vector<std::string>{"UdpSocket: resolve recovered after 2 more failures"});
+          std::vector<std::string>{"UdpSocket: resolve recovered after 1 more failures"});
     // A datagram larger than IPv4 UDP permits fails deterministically.
     const std::string oversized(65536, 'x');
     check("send rejects an oversized datagram", !sender.send(oversized));
+    const auto sendErrors = logs.take();
+    check("first send failure after loopback recovery logs immediately", sendErrors.size() == 1 &&
+          sendErrors[0].find("UdpSocket: Failed to send data (code: ") == 0);
     check("sendTo rejects an oversized datagram", !sender.sendTo("127.0.0.1", port, oversized));
     check("both send variants use the same gate", logs.take().empty());
     check("connected send succeeds", sender.send("x"));
     check("send flushes its count", logs.take() ==
-          std::vector<std::string>{"UdpSocket: send recovered after 2 more failures"});
+          std::vector<std::string>{"UdpSocket: send recovered after 1 more failures"});
     check("drain connected datagram", receiver.receive(buffer, sizeof(buffer)) == 1);
 
     for (int mode = 0; mode < 3; ++mode) {
@@ -218,6 +260,7 @@ TC_CORE_TEST_MAIN() {
     trussc::getLogger().setConsoleLogLevel(trussc::LogLevel::Silent);
     accounting();
     concurrentAccounting();
+    racingRecovery();
     loopback();
     trussc::getLogger().setConsoleLogLevel(oldLevel);
     return failures ? 1 : 0;

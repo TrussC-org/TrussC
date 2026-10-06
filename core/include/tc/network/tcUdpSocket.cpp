@@ -670,22 +670,29 @@ bool UdpSocket::setReceiveTimeout(int timeoutMs) {
 // ---------------------------------------------------------------------------
 // Error notification
 // ---------------------------------------------------------------------------
-// Gate and counter are atomic so a suppressed failure takes no mutex. Only
+// Gate, counter and failure flag are atomic so a suppressed failure takes no mutex. Only
 // reports/recoveries take the small bookkeeping lock. Emit outside it: logger
 // listeners and onError listeners may call back into this socket.
 void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code) {
     auto& state = errorLogs_[static_cast<size_t>(kind)];
-    if (state.gate.isFirstTime()) {
-        uint64_t count;
-        {
-            std::lock_guard<std::mutex> lock(errorLogMutex_);
-            count = state.suppressed.exchange(0);
-        }
+    const bool report = state.gate.isFirstTime();
+    uint64_t count = 0;
+    if (report) {
+        std::lock_guard<std::mutex> lock(errorLogMutex_);
+        count = state.suppressed.exchange(0);
+    } else {
+        state.suppressed.fetch_add(1);
+    }
+    // Publish AFTER touching the gate/counter. Recovery clears this flag BEFORE
+    // resetting the gate: a racing failure is either covered by that reset, or
+    // publishes true after the clear so the next success resets again. Publishing
+    // before the gate check could let a failure consume the reset with no flag
+    // left to re-arm it. Release/acquire orders bookkeeping across threads.
+    state.failedSinceSuccess.store(true, std::memory_order_release);
+    if (report) {
         auto line = logError();
         line << "UdpSocket: " << message << " (code: " << code << ")";
         if (count > 0) line << " (+" << count << " more since the last report)";
-    } else {
-        state.suppressed.fetch_add(1);
     }
 
     UdpErrorEventArgs args;
@@ -696,12 +703,14 @@ void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code
 
 void UdpSocket::notifyRecovery(ErrorKind kind) {
     auto& state = errorLogs_[static_cast<size_t>(kind)];
-    if (state.suppressed.load() == 0) return;
+    if (!state.failedSinceSuccess.load(std::memory_order_acquire)) return;
 
     uint64_t count;
     {
         std::lock_guard<std::mutex> lock(errorLogMutex_);
+        if (!state.failedSinceSuccess.exchange(false, std::memory_order_acq_rel)) return;
         count = state.suppressed.exchange(0);
+        state.gate.reset();
     }
     if (count > 0) {
         const char* name = kind == ErrorKind::Resolve ? "resolve" :

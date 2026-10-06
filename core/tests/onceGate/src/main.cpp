@@ -10,6 +10,7 @@
 //     the last true, and not before; an interval of 0 or below means once.
 //   - Thread-safe: many threads calling one gate get exactly one true between
 //     them (also for an interval gate).
+//   - reset() re-opens once-only and interval gates, including never-fired gates.
 //   - A static gate works from a static destructor (it is constexpr-
 //     constructible and trivially destructible), checked at process exit.
 // =============================================================================
@@ -37,6 +38,7 @@ static_assert(!is_copy_constructible_v<OnceGate> && !is_copy_assignable_v<OnceGa
               "OnceGate: not copyable");
 static_assert(!is_move_constructible_v<OnceGate> && !is_move_assignable_v<OnceGate>,
               "OnceGate: not movable");
+static_assert(noexcept(declval<OnceGate&>().reset()), "OnceGate: reset is noexcept");
 constinit OnceGate g_constantInitialized;          // constexpr-constructible
 constinit OnceGate g_constantInitializedInterval{1.0};
 
@@ -108,6 +110,21 @@ TC_CORE_TEST_MAIN() {
         check("once: later calls are false", !second && !third);
         check("once: a constinit global gate works",
               g_constantInitialized.isFirstTime() && !g_constantInitialized.isFirstTime());
+    }
+
+    // --- reset (no elapsed-time assumptions) ---------------------------------
+    for (double interval : {0.0, 1e300}) {
+        OnceGate g{interval};
+        g.reset();
+        check("reset: never-fired gate still returns true once",
+              g.isFirstTime() && !g.isFirstTime());
+        g.reset();
+        check("reset: fired gate re-opens immediately, then closes",
+              g.isFirstTime() && !g.isFirstTime());
+        std::thread resetter([&] { g.reset(); });
+        resetter.join();
+        check("reset: callable from another thread",
+              g.isFirstTime() && !g.isFirstTime());
     }
 
     // --- each gate is its own key --------------------------------------------

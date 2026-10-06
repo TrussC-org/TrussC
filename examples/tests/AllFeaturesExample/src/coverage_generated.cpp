@@ -2103,6 +2103,7 @@ struct Cover_OnceGate : af::Scope<OnceGate> {
         (void)OnceGate();
         (void)OnceGate(af::val<double>());
         (void)af::val<OnceGate>().isFirstTime();
+        (void)af::val<OnceGate>().reset();
     }
 };
 

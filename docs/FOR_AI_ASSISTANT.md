@@ -3537,6 +3537,7 @@ bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
 
 ```cpp
 bool OnceGate::isFirstTime()  // True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false
+void OnceGate::reset()  // Restore the never-fired state so the next isFirstTime() returns true immediately, for both once-only and interval gates. Lock-free and safe from any thread
 ```
 
 ### Path — Path/Polyline for lines and curves
