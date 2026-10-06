@@ -1,4 +1,4 @@
-// #270: run with --gpu-check (Xvfb works on Linux; Metal needs a Mac).
+// #270 / #641: run with --gpu-check (Xvfb works on Linux; Metal needs a Mac).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -57,15 +57,19 @@ public:
         setColor(1, 0, 0);
         drawRect(8, 8, 48, 48);
         // Deferred screen 2D must survive readback before any swapchain pass.
-        renderFbo();
+        renderFbo(false);
         readAll(false);
 
         fullscreen_.setTexture(0, fbo_.getTextureView(), fbo_.getSampler());
         fullscreen_.draw();
         check("FullscreenShader opens swapchain pass", isInSwapchainPass());
+        const uint32_t firstVersion = fbo_.getColorImage().id;
+        setColor(1, 1, 1);
+        fbo_.draw(184, 56, 8, 8); // marks this version as used by a recorded draw
         setColor(1, 0, 0);
         drawRect(72, 8, 48, 48);
-        renderFbo(); // suspends and resumes the pass before readback does so
+        renderFbo(true); // suspends and resumes the pass before readback does so
+        check("second begin uses a different pool texture", fbo_.getColorImage().id != firstVersion);
         readAll(true);
 
         half_.begin(0.25f, 0.5f, 1.0f, 1.0f);
@@ -123,21 +127,25 @@ private:
               internal::currentWindowContext().inFboPass && half_.isActive());
     }
 
-    void renderFbo() {
-        // Alternate contents each frame to expose stale GPU reads.
-        fbo_.begin(frames_ % 2 ? 1.0f : 0.0f, 0, frames_ % 2 ? 0.0f : 1.0f, 1);
+    void renderFbo(bool secondPass) {
+        // Change colour both between frames and between versions in one frame.
+        // Reading the previous pool texture must not accidentally pass (#641).
+        expectRed_ = (frames_ % 2 != 0) != secondPass;
+        fbo_.begin(expectRed_ ? 1.0f : 0.0f, 0, expectRed_ ? 0.0f : 1.0f, 1);
         fbo_.end();
     }
     bool expected(const unsigned char* p) const {
-        return p[0] == (frames_ % 2 ? 255 : 0) && p[1] == 0
-            && p[2] == (frames_ % 2 ? 0 : 255) && p[3] == 255;
+        return p[0] == (expectRed_ ? 255 : 0) && p[1] == 0
+            && p[2] == (expectRed_ ? 0 : 255) && p[3] == 255;
     }
     void readAll(bool passOpen) {
         const int vertices = sgl_num_vertices();
         const int before = commits;
         vector<unsigned char> bytes(16 * 16 * 4);
         check("RGBA8 readPixels succeeds", fbo_.readPixels(bytes.data()));
-        check("readPixels sees this frame's render", expected(bytes.data()));
+        bool correct = true;
+        for (size_t i = 0; i < bytes.size(); i += 4) correct &= expected(bytes.data() + i);
+        check("readPixels sees the current version at every pixel", correct);
         vector<float> floats(16 * 16 * 4);
         check("RGBA8 float readback succeeds", fbo_.readPixelsFloat(floats.data()));
         check("RGBA8 float conversion is correct", floats[0] == bytes[0] / 255.0f && floats[2] == bytes[2] / 255.0f);
@@ -156,6 +164,7 @@ private:
     FullscreenShader fullscreen_;
     filesystem::path path_, screenPath_;
     int frames_ = 0;
+    bool expectRed_ = false;
 };
 } // namespace
 
