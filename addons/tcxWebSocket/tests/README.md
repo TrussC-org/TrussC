@@ -31,6 +31,19 @@ ephemeral port range (`TcpServer` cannot report a port the OS picked).
   1009, then `onError`, then `onClose`;
 - an `onError` listener that calls `disconnect()` -> one `onClose`.
 
+Frame header validation (#514) uses the same in-process server:
+
+- each RSV bit, every reserved opcode, fragmented Close/Ping/Pong, control
+  payloads over 125 bytes, and masked server frames -> exactly one Close
+  1002, one `onError` naming the violation, and one `onClose`, in that order;
+- both complete frames and headers without their advertised payload are
+  rejected; oversized control frames use 1002 even above the message limit;
+- valid 125-byte Ping/Pong/Close frames and unfragmented text/binary keep
+  their existing behavior, including a masked Pong echoing the Ping.
+
+These checks wait on conditions with deadlines, then join the transport
+threads before asserting exact event and frame counts.
+
 Handshake deadline and reconnecting from the events (#262). The test pumps
 the update event, as the app's frame loop would, for the 101 deadline:
 
