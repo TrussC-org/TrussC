@@ -41,6 +41,8 @@
 //   - A plain onError listener that reconnects after a failed handshake ends
 //     up connected. The failed connection used to be torn down after the
 //     listener returned, taking the new connection with it.
+//   - A TLS setup failure reports onError then onConnect(false) once, closes
+//     the socket and permits a new connection, with or without threads (#384).
 //   - An onError listener that reconnects after a refused connect() keeps
 //     its connection: connect() closes the failed socket before notifying.
 //   - A connection attempt that a newer attempt replaced (an onError
@@ -564,6 +566,82 @@ static void scenario() {
     rawsocket_t listener = listenLoopback(port);
     check("loopback listener is up", listener != kNoSocket);
     if (g_fail) bail();
+
+    // --- setup failure before the handshake (#384) ---------------------------
+    for (bool threads : {true, false}) {
+        g_phase = "the TLS setup failure";
+        const string name = threads ? "setup failure" : "setup failure, no threads";
+        TlsClient setup;
+        setup.setVerifyNone();
+        setup.setUseThread(threads);
+        setup.setHostname(std::string(300, 'a'));
+        mutex evMutex;
+        vector<string> evs;
+        bool stoppedBeforeError = false;
+        bool hostnameError = false;
+        EventListener errSub = setup.onError.listen([&](TcpErrorEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            stoppedBeforeError = !setup.isConnected() && !setup.isConnecting();
+            hostnameError = e.message.find("TLS hostname set failed: ") == 0 &&
+                            e.errorCode == MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+            evs.push_back("error");
+        });
+        EventListener conSub = setup.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back(e.success ? "connected" : "failed");
+        });
+        check((name + ": connect() with an invalid hostname").c_str(),
+              setup.connect("127.0.0.1", port));
+        rawsocket_t failedPeer = acceptWithin(listener, 2000);
+        check((name + ": the peer accepted TCP").c_str(), failedPeer != kNoSocket);
+        if (g_fail) bail();
+        check((name + ": failure reported").c_str(), waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 2;
+        }));
+        if (g_fail) bail();
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": stopped before hostname error").c_str(),
+                  stoppedBeforeError && hostnameError);
+            check((name + ": onError then onConnect(false) once").c_str(),
+                  evs == vector<string>{"error", "failed"});
+        }
+        check((name + ": disconnected without disconnect()").c_str(),
+              !setup.isConnected() && !setup.isConnecting());
+        setRecvTimeout(failedPeer, 2000);
+        char byte;
+        check((name + ": peer observes the closed socket").c_str(),
+              ::recv(failedPeer, &byte, 1, 0) == 0);
+        TC_CLOSE(failedPeer);
+        if (g_fail) bail();
+
+        // connect() joins the previous receive thread itself. No explicit
+        // disconnect() hides a setup failure that left work pending.
+        setup.setHostname("localhost");
+        check((name + ": reconnect() with a valid hostname").c_str(),
+              setup.connect("127.0.0.1", port));
+        if (g_fail) bail();
+        TlsPeer recovered;
+        bool handshook = false;
+        thread acceptThread([&] { handshook = recovered.accept(listener, server.conf, 5000); });
+        const bool connected = waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 3;
+        });
+        acceptThread.join();
+        check((name + ": valid hostname completes TLS").c_str(),
+              connected && handshook && setup.isConnected());
+        setup.disconnect(); // join before checking the complete event sequence
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": no duplicate failure after reconnect").c_str(),
+                  evs == vector<string>{"error", "failed", "connected"});
+        }
+        if (g_fail) bail();
+    }
 
     // Everything the client receives, from its receive thread
     mutex rxMutex;

@@ -371,8 +371,9 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
         if (ret != 0) {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS config failed: ") + errBuf, ret);
-            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
+            failHandshake(std::string("TLS config failed: ") + errBuf,
+                          std::string("TLS config failed: ") + errBuf, ret, alive);
+            return HandshakeStep::Stopped;
         }
 
         // Certificate verification settings.
@@ -400,8 +401,9 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
         if (ret != 0) {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS setup failed: ") + errBuf, ret);
-            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
+            failHandshake(std::string("TLS setup failed: ") + errBuf,
+                          std::string("TLS setup failed: ") + errBuf, ret, alive);
+            return HandshakeStep::Stopped;
         }
 
         // Set hostname (SNI)
@@ -410,8 +412,9 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
         if (ret != 0) {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS hostname set failed: ") + errBuf, ret);
-            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
+            failHandshake(std::string("TLS hostname set failed: ") + errBuf,
+                          std::string("TLS hostname set failed: ") + errBuf, ret, alive);
+            return HandshakeStep::Stopped;
         }
 
         // Set BIO callbacks
