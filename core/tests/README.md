@@ -138,6 +138,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
 ## Tests
 
+- `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
+  rejected view/image slots leave pending bindings and the image cache unchanged;
+  every valid view slot binds, but only supported sampler slots are written.
+  Checks the entire bindings object and surrounding guards, including the end
+  canary, with zero and nonzero sentinels. Uniform slots retain their bytes or
+  are rejected before copying; repeated invalid calls warn only once.
 - `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
   replay (#271): pre-append overflow detection, growth on the next sokol frame,
   32-bit relative indices, multiple passes, and captured-resource lifetime.

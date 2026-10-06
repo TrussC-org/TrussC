@@ -3858,6 +3858,7 @@ void Shader::clear()  // Destroy the shader's GPU resources and reset it to the 
 sg_pipeline_desc Shader::createPipelineDesc()  // Build the pipeline descriptor (standard vertex layout); overridable by subclasses.
 void Shader::createVertexBuffer()  // Create the dynamic vertex/index buffers; overridable by subclasses.
 void Shader::end()  // End shader (pops from stack)
+void Shader::fillTextureBindings(sg_bindings & bind) const  // Copy the textures set with setTexture() into sg_bindings; a sampler is written only for slots below sokol's sampler limit (12).
 bool Shader::isLoaded() const  // Check if shader is loaded
 bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load from sokol-shdc generated function
 void Shader::onBegin()  // Hook called when the shader scope begins; override to set up bindings.
