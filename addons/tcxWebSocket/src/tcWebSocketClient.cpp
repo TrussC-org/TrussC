@@ -189,6 +189,8 @@ void WebSocketClient::setupClient(bool useTls) {
         client_ = std::make_unique<TcpClient>();
     }
 
+    client_->setConnectTimeout(connectTimeout_);
+
     // Connect event
     connectListener_ = client_->onConnect.listen(this, &WebSocketClient::handleTcpConnect);
     // Receive event
@@ -252,8 +254,10 @@ void WebSocketClient::checkHandshakeTimeout() {
     // side ends the wait
     if (!awaitingUpgrade_.exchange(false)) return;
 
-    // onError first, then disconnect(), which fires onClose. A listener may
-    // reconnect or destroy the client (as in failConnection()).
+    // Stop and join the transport before user callbacks can reconnect. Suppress
+    // its synchronous onDisconnect so onError still precedes onClose.
+    disconnectListener_.disconnect();
+    disconnect();
     std::shared_ptr<bool> alive = alive_;
     unsigned connection = connection_;
     char seconds[32];
@@ -263,7 +267,7 @@ void WebSocketClient::checkHandshakeTimeout() {
                   seconds + " s of the TCP connect";
     onError.notify(err);
     if (!*alive || connection_ != connection) return;
-    disconnect();
+    onClose.notify();
 #endif
 }
 
