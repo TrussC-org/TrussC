@@ -257,6 +257,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   is checked up to its `.cube` parse; `Font::load` needs a GPU and is not run.
   The data-root base is normalized without changing filename components
   (including `symlink/..`), and absolute inputs pass through unchanged (#365 P2).
+- `fboWindowContext/` — Fbo::end() in a secondary window returns sokol_gl to
+  that window's own context (#653). Draws 2D, an Fbo pass, then 2D in both
+  windows and reads each back: both shapes are present and nothing leaks into
+  the main window. The default run is a skip; `allCoreTests fboWindowContext
+  --gpu-check` needs a display (Linux/Xvfb, macOS Debug).
 - `fileSave/` — the save helpers report write errors (#274): `saveJson`
   serializes before it opens the file, so a string that is not valid UTF-8
   returns false, logs an error and leaves the saved `{"a":1}` loadable, and it
