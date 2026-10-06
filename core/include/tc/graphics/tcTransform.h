@@ -12,6 +12,7 @@
 
 #include "tcMath.h"                        // Vec3, Quaternion, Mat4
 #include "tc/graphics/tcRenderContext.h"   // RenderContext + getDefaultContext()
+#include "tc/utils/tcAnnotations.h"
 
 namespace trussc {
 
@@ -50,10 +51,10 @@ inline void popStyle() {
 
 class MatrixScope;
 class StyleScope;
-[[nodiscard]] inline MatrixScope scopedMatrix();
-[[nodiscard]] inline StyleScope scopedStyle();
+TC_LUA_SKIP [[nodiscard]] inline MatrixScope scopedMatrix();
+TC_LUA_SKIP [[nodiscard]] inline StyleScope scopedStyle();
 
-class [[nodiscard]] MatrixScope {
+class [[nodiscard]] TC_LUA_SKIP MatrixScope {
 public:
     ~MatrixScope() { ctx_.popMatrix(); }
     MatrixScope(const MatrixScope&) = delete;
@@ -67,7 +68,7 @@ private:
     internal::RenderContext& ctx_;
 };
 
-class [[nodiscard]] StyleScope {
+class [[nodiscard]] TC_LUA_SKIP StyleScope {
 public:
     ~StyleScope() { ctx_.popStyle(); }
     StyleScope(const StyleScope&) = delete;
@@ -82,12 +83,12 @@ private:
 };
 
 // pushMatrix() now, popMatrix() when the returned guard goes out of scope
-[[nodiscard]] inline MatrixScope scopedMatrix() {
+TC_LUA_SKIP [[nodiscard]] inline MatrixScope scopedMatrix() {
     return MatrixScope(getDefaultContext());
 }
 
 // pushStyle() now, popStyle() when the returned guard goes out of scope
-[[nodiscard]] inline StyleScope scopedStyle() {
+TC_LUA_SKIP [[nodiscard]] inline StyleScope scopedStyle() {
     return StyleScope(getDefaultContext());
 }
 

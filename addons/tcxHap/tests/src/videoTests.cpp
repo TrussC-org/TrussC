@@ -110,7 +110,7 @@ tc::Vec4 clipPosition(const tcx::hap::detail::YCoCgDrawData& data, int index) {
     return matrix.transposed() * tc::Vec4(vertex.x, vertex.y, vertex.z, 1);
 }
 
-bool near(float a, float b) { return std::abs(a - b) < 1e-5f; }
+bool approxEq(float a, float b) { return std::abs(a - b) < 1e-5f; }
 
 void drawTests() {
     using namespace tc;
@@ -124,10 +124,10 @@ void drawTests() {
     for (int i = 0; i < 4; ++i) {
         const auto clip = clipPosition(data, i);
         const auto& vertex = data.vertices[i];
-        cornersOk &= near(clip.x, corners[i].x) && near(clip.y, corners[i].y) && near(clip.w, 1);
-        colorsOk &= near(vertex.r, color.r) && near(vertex.g, color.g) &&
-                    near(vertex.b, color.b) && near(vertex.a, color.a);
-        uvOk &= near(vertex.u, uv[i].x) && near(vertex.v, uv[i].y);
+        cornersOk &= approxEq(clip.x, corners[i].x) && approxEq(clip.y, corners[i].y) && approxEq(clip.w, 1);
+        colorsOk &= approxEq(vertex.r, color.r) && approxEq(vertex.g, color.g) &&
+                    approxEq(vertex.b, color.b) && approxEq(vertex.a, color.a);
+        uvOk &= approxEq(vertex.u, uv[i].x) && approxEq(vertex.v, uv[i].y);
     }
     check("HAP-Q: translate + scale applied once via column-major MVP", cornersOk);
     check("HAP-Q: tint and alpha on every vertex", colorsOk);
@@ -138,7 +138,7 @@ void drawTests() {
         Mat4::ortho(0, 1920, 1080, 0, -1, 1), Mat4::identity(), Mat4::identity(), color);
     const auto tl = clipPosition(fbo, 0), br = clipPosition(fbo, 2);
     check("HAP-Q: Fbo-sized projection maps corners to clip bounds",
-          near(tl.x, -1) && near(tl.y, 1) && near(br.x, 1) && near(br.y, -1));
+          approxEq(tl.x, -1) && approxEq(tl.y, 1) && approxEq(br.x, 1) && approxEq(br.y, -1));
 
     const Mat4 projection = Mat4::perspective(TAU / 6, 1.5f, 1, 100);
     const Mat4 view = Mat4::lookAt(Vec3(0, 0, 10), Vec3(0, 0, 0), Vec3(0, 1, 0));
@@ -146,8 +146,8 @@ void drawTests() {
     const auto clip = clipPosition(camera, 0);
     const Vec4 expected = projection * (view * Vec4(12, 24, 0, 1));
     check("HAP-Q: perspective camera uses projection, view and model",
-          near(clip.x, expected.x) && near(clip.y, expected.y) &&
-          near(clip.z, expected.z) && near(clip.w, expected.w) && !near(clip.w, 1));
+          approxEq(clip.x, expected.x) && approxEq(clip.y, expected.y) &&
+          approxEq(clip.z, expected.z) && approxEq(clip.w, expected.w) && !approxEq(clip.w, 1));
 
     static_assert(sizeof(tcx::hap::YCoCgVsParams) == sizeof(vs_params_t));
 }

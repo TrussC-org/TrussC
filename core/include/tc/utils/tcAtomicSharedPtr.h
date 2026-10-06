@@ -19,10 +19,9 @@ namespace trussc {
 // channelGains) that the UI thread updates and the audio thread reads.
 // Reads are acquire, writes release (the RCU pattern). We'd
 // like to use the C++20 std::atomic<std::shared_ptr<T>> specialization,
-// but Apple libc++ doesn't ship it yet (verified 2026-05). We fall back
-// to the (C++20-deprecated) std::atomic_load / std::atomic_store free
-// functions, suppressing the deprecation warning locally — when the
-// specialization lands the storage type and accessors auto-switch.
+// but Apple libc++ doesn't ship it yet. The fallback guards a shared_ptr
+// with a short spinlock — when the specialization lands the storage type
+// and accessors auto-switch.
 // ---------------------------------------------------------------------------
 namespace internal {
 
@@ -41,50 +40,53 @@ namespace internal {
         p.store(std::move(v), std::memory_order_release);
     }
 #else
-    // Fallback: a plain shared_ptr accessed via the deprecated free-
-    // function atomic API. Still lock-free for shared_ptr on common
-    // platforms; the deprecation is for ergonomics only.
+    // Only copying or swapping the shared_ptr happens under the lock.
+    // In particular, store releases the old value after unlocking: its
+    // destructor / deleter may do arbitrary work, including another load.
     template<class T>
-    using AtomicSharedPtr = std::shared_ptr<T>;
+    class AtomicSharedPtr {
+    public:
+        AtomicSharedPtr() noexcept = default;
+        AtomicSharedPtr(std::shared_ptr<T> value) noexcept
+            : value_(std::move(value)) {}
 
-    // Use the *_explicit forms with matching acquire/release ordering so
-    // this path is symmetric with the C++20 specialization branch above
-    // — without the explicit, the free functions default to seq_cst and
-    // we'd silently take a stronger fence on Apple while GCC / MSVC ran
-    // with the weaker order. Identical observable behavior for our 1
-    // producer (UI) / 1 consumer (audio) usage, but keeps the two
-    // branches honest.
+        AtomicSharedPtr(const AtomicSharedPtr&) = delete;
+        AtomicSharedPtr& operator=(const AtomicSharedPtr&) = delete;
+
+        std::shared_ptr<T> load() const noexcept {
+            lock();
+            auto value = value_;
+            unlock();
+            return value;
+        }
+
+        void store(std::shared_ptr<T> value) noexcept {
+            lock();
+            value_.swap(value);
+            unlock();
+        }
+
+    private:
+        void lock() const noexcept {
+            while (lock_.test_and_set(std::memory_order_acquire)) {}
+        }
+        void unlock() const noexcept {
+            lock_.clear(std::memory_order_release);
+        }
+
+        mutable std::atomic_flag lock_ = ATOMIC_FLAG_INIT;
+        std::shared_ptr<T> value_;
+    };
+
+    // The lock's acquire/release synchronizes snapshot publication, matching
+    // the ordering of the native accessors above.
     template<class T>
-    inline std::shared_ptr<T> sharedLoad(const std::shared_ptr<T>& p) {
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic push
-#           pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#       elif defined(_MSC_VER)
-#           pragma warning(push)
-#           pragma warning(disable: 4996)
-#       endif
-        return std::atomic_load_explicit(&p, std::memory_order_acquire);
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic pop
-#       elif defined(_MSC_VER)
-#           pragma warning(pop)
-#       endif
+    inline std::shared_ptr<T> sharedLoad(const AtomicSharedPtr<T>& p) {
+        return p.load();
     }
     template<class T>
-    inline void sharedStore(std::shared_ptr<T>& p, std::shared_ptr<T> v) {
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic push
-#           pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#       elif defined(_MSC_VER)
-#           pragma warning(push)
-#           pragma warning(disable: 4996)
-#       endif
-        std::atomic_store_explicit(&p, std::move(v), std::memory_order_release);
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic pop
-#       elif defined(_MSC_VER)
-#           pragma warning(pop)
-#       endif
+    inline void sharedStore(AtomicSharedPtr<T>& p, std::shared_ptr<T> v) {
+        p.store(std::move(v));
     }
 #endif
 

@@ -279,3 +279,12 @@ myProject/
   - ダイアログを出さずにクラッシュダンプを残す方法
   - 自動起動と再起動
 - **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) を参照してください。
+
+相手機器の電源が切れる構成では、`connectAsync()` の前に
+`client.setConnectTimeout(5)` を設定します。既定では OS の TCP 接続期限
+（Linux では約127秒）に任せるため、次の再試行まで約1分待つことがあります。
+展示では IP アドレスで接続し、DNS を待たないようにします。
+接続中の同じホスト・ポートへの `connectAsync()` は何もせず、`isConnecting()`
+で進行中か確認できます。描画ループでは `sendAsync()` を使うと、相手が読まなく
+なっても描画を止めずに送信できます。送信は既定で進捗なし60秒でタイムアウトし、
+エラーを通知して切断します。

@@ -29,8 +29,17 @@ fi
 cd "$SOURCE_DIR/build"
 
 # CMake configuration
+# Pass configured launchers explicitly so restored CMake caches pick up CI's
+# timing/cache launcher too (environment defaults apply only to a fresh cache).
+LAUNCHER_ARGS=()
+for lang in C CXX OBJC OBJCXX; do
+    launcher_var="CMAKE_${lang}_COMPILER_LAUNCHER"
+    if [ -n "${!launcher_var:-}" ]; then
+        LAUNCHER_ARGS+=("-D${launcher_var}=${!launcher_var}")
+    fi
+done
 echo "Running CMake..."
-cmake ..
+cmake .. "${LAUNCHER_ARGS[@]}"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: CMake configuration failed!"
@@ -42,9 +51,12 @@ if [ $? -ne 0 ]; then
 fi
 
 # Build
+# Unix Makefiles treats a bare --parallel as make -j (unlimited). Match the
+# machine's CPU count by default, while honoring CMake's explicit job override.
+JOBS="${CMAKE_BUILD_PARALLEL_LEVEL:-$(sysctl -n hw.ncpu)}"
 echo ""
-echo "Building..."
-cmake --build . --parallel
+echo "Building (parallel jobs: $JOBS)..."
+cmake --build . --parallel "$JOBS"
 if [ $? -ne 0 ]; then
     echo ""
     echo "ERROR: Build failed!"

@@ -280,9 +280,9 @@ description.ko = "현재 엔진 출력 샘플레이트 (Hz). init() 전에는 �
 ["AudioEngine::getStats"]
 category = "audioengine"
 keywords = ["diagnostics", "dropped", "clipping", "peak", "rms", "cpu usage", "cpu load", "health"]
-description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
-description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの CPU 使用率。atomic を読むだけなので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
-description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 CPU 사용률. atomic 만 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
+description.en = "Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; stream underrun frames, stalled callbacks and voices stopped by re-init; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Reads atomics and a steady clock, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers."
+description.ja = "エンジンの健全性スナップショット (AudioStats): 起動以降に捨てた再生の総数と理由別の数、ストリームの underrun フレーム数、コールバックの停止状態、再初期化で停止した再生数、クリップした出力サンプル数、マスターの peak / RMS、オーディオスレッドの CPU 使用率。atomic と単調時計を読むので、どのスレッドからでも軽い。MCP ツール tc_get_audio_state も同じ値を返す"
+description.ko = "엔진 상태 스냅샷 (AudioStats): 시작 이후 버려진 재생의 총수와 이유별 수, 스트림 underrun 프레임 수, 콜백 정지 상태, 재초기화로 정지한 재생 수, 클리핑된 출력 샘플 수, 마스터 peak / RMS, 오디오 스레드 CPU 사용률. atomic 과 단조 시계를 읽으므로 어느 스레드에서든 가볍다. MCP 도구 tc_get_audio_state 도 같은 값을 보고한다"
 related = ["AudioStats", "AudioEngine::getPlayingSounds", "Sound::play"]
 
 ["AudioEngine::init"]
@@ -435,9 +435,9 @@ related = ["AudioRecordSettings", "AudioEngine", "ScreenRecorder"]
 ["AudioRecorder::start"]
 category = "sound"
 keywords = ["begin", "record", "wav"]
-description.en = "Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened"
-description.ja = "マスターミックスのWAV録音を開始（相対パスは getDataPath で解決）。オーディオエンジンが初期化済みであること。未初期化またはファイルが開けない場合は false"
-description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getDataPath로 해석). 오디오 엔진이 초기화되어 있어야 하며, 아니면(또는 파일을 열 수 없으면) false 반환"
+description.en = "Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "マスターミックスのWAV録音を開始（相対パスは getDataPath で解決）。オーディオエンジンが初期化済みであること。未初期化またはファイルが開けない場合は false。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "마스터 믹스의 WAV 녹음을 시작(상대 경로는 getDataPath로 해석). 오디오 엔진이 초기화되어 있어야 하며, 아니면(또는 파일을 열 수 없으면) false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["AudioRecorder::stop"]
 category = "sound"
@@ -507,11 +507,26 @@ description.ja = "エンジン出力サンプルレート (Hz、0 = エンジン
 description.ko = "엔진 출력 샘플레이트 (Hz, 0 = 엔진 기본값 48000)"
 
 ["AudioStats"]
-keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu usage", "cpu load", "meter"]
+keywords = ["audio diagnostics", "dropped plays", "clipping", "cpu usage", "cpu load", "meter", "underrun", "stall", "re-init"]
 description.en = "Audio engine health counters and meters, returned by AudioEngine::getStats(). Counters are cumulative since the process started (they survive re-init); peak / rms / cpuUsage describe the recent output."
 description.ja = "AudioEngine::getStats() が返すオーディオエンジンの健全性カウンタとメーター。カウンタはプロセス起動からの累計 (再初期化でも消えない)。peak / rms / cpuUsage は直近の出力を表す"
 description.ko = "AudioEngine::getStats() 가 반환하는 오디오 엔진 상태 카운터와 미터. 카운터는 프로세스 시작 이후 누계 (재초기화해도 유지). peak / rms / cpuUsage 는 최근 출력을 나타낸다"
 related = ["AudioEngine::getStats", "PlayingSoundInfo"]
+
+["AudioStats::underrunFrames"]
+description.en = "Cumulative silent output frames per streaming voice because the decoder fell behind. A new voice's wait before its first decoded frame, pauses, pending seeks, refill waits after an applied seek and a normal end are excluded. Warnings are aggregated on the main thread at most once per two seconds, with remaining counts flushed at exit."
+description.ja = "デコーダーが遅れてストリーム再生が無音になった出力フレーム数の累計 (再生インスタンスごと)。新しい再生の最初のデコード待ち、一時停止、処理待ちのシーク、シーク適用後のデータ補充待ち、正常な終端は含まない。警告はメインスレッドで2秒に最大1回集約し、終了時に残りを報告する"
+description.ko = "디코더가 늦어 스트림 재생이 무음이 된 출력 프레임 수 누계 (재생 인스턴스별). 새 재생의 첫 디코딩 대기, 일시 정지, 처리 대기 중인 탐색, 탐색 적용 후 데이터 보충 대기, 정상 종료는 제외한다. 경고는 메인 스레드에서 2초에 최대 한 번 집계하며 종료 시 나머지를 보고한다"
+
+["AudioStats::stalled"]
+description.en = "True while the engine is running but no mix callback has finished for max(250 ms, four granted device periods). Master meters, CPU usage meters and playing-sound levels read zero while stalled. Clears when a callback finishes or the device stops; the main thread reports stall episodes with rate-limited warnings."
+description.ja = "エンジン動作中にミックスコールバックが max(250 ms, デバイスが実際に与えた4周期) の間完了しなければ true。停止状態ではマスターメーター、CPU 使用率メーター、再生インスタンスのレベルは0。コールバックの完了またはデバイス停止で解除される。メインスレッドが停止の発生を間隔制限付きの警告で報告する"
+description.ko = "엔진 동작 중 믹스 콜백이 max(250 ms, 디바이스가 실제 부여한 4주기) 동안 완료되지 않으면 true. 이 상태에서는 마스터 미터, CPU 사용률 미터, 재생 인스턴스 레벨이 0이다. 콜백 완료 또는 디바이스 정지로 해제되며 메인 스레드가 발생을 간격 제한 경고로 보고한다"
+
+["AudioStats::voicesStoppedByReinit"]
+description.en = "Cumulative streaming voices stopped because a live sample-rate re-init could not reopen their decoder. Separate from droppedPlays: these voices had already started successfully. Each failure keeps the existing warning with its file path and decoder result on the thread calling init(); this counter adds no summary warning."
+description.ja = "動作中のサンプルレート再初期化でデコーダーを開き直せず停止したストリーム再生インスタンスの累計。再生開始は成功していたため droppedPlays とは別に数える。各失敗は init() を呼んだスレッドでファイルパスとデコーダーの結果値を含む既存の警告を出す。このカウンタによる集約警告は追加しない"
+description.ko = "동작 중 샘플 레이트 재초기화에서 디코더를 다시 열 수 없어 정지한 스트림 재생 인스턴스 누계. 재생 시작은 성공했으므로 droppedPlays 와 별도로 센다. 각 실패는 init() 을 호출한 스레드에서 파일 경로와 디코더 결과 값을 포함하는 기존 경고를 남긴다. 이 카운터는 요약 경고를 추가하지 않는다"
 
 ["AudioStats::clippedSamples"]
 description.en = "Output samples beyond +/-1.0 that the final clamp cut off (counted per channel sample)."
@@ -520,16 +535,16 @@ description.ko = "최종 클램프에서 잘린 ±1.0 을 넘는 출력 샘플 �
 
 ["AudioStats::cpuUsage"]
 keywords = ["cpu usage", "cpu load", "audio thread", "dropout", "overrun"]
-description.en = "Fraction of audio-thread time: time spent mixing the playing sounds and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio. 1.0 means the callback took as long as the audio it produced (0.25 = a quarter of the time budget). 0 while the engine is not running."
-description.ja = "オーディオスレッドの時間の割合: 再生中のサウンドと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均。1.0 はコールバックが生成した音と同じだけの時間がかかったことを表す (0.25 = 時間予算の 4 分の 1)。エンジン停止中は 0"
-description.ko = "오디오 스레드 시간의 비율: 재생 중인 사운드와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균. 1.0 은 콜백이 생성한 오디오만큼의 시간이 걸렸다는 뜻 (0.25 = 시간 예산의 4 분의 1). 엔진이 정지 상태면 0"
+description.en = "Fraction of audio-thread time: time spent mixing the playing sounds and audioOut listeners divided by the audio time produced, averaged over ~0.5 s of audio. 1.0 means the callback took as long as the audio it produced (0.25 = a quarter of the time budget). 0 while the engine is not running or callbacks are stalled."
+description.ja = "オーディオスレッドの時間の割合: 再生中のサウンドと audioOut リスナーのミックスにかかった時間 ÷ 生成した音の時間。約 0.5 秒分の音の平均。1.0 はコールバックが生成した音と同じだけの時間がかかったことを表す (0.25 = 時間予算の 4 分の 1)。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "오디오 스레드 시간의 비율: 재생 중인 사운드와 audioOut 리스너 믹스에 걸린 시간 ÷ 생성한 오디오 시간. 약 0.5 초 분량의 오디오 평균. 1.0 은 콜백이 생성한 오디오만큼의 시간이 걸렸다는 뜻 (0.25 = 시간 예산의 4 분의 1). 엔진 또는 콜백이 정지 상태면 0"
 related = ["AudioStats::cpuUsagePeak"]
 
 ["AudioStats::cpuUsagePeak"]
 keywords = ["cpu usage", "peak", "dropout", "overrun"]
-description.en = "CPU usage of the worst single callback in the same window; above 1 the callback took longer than the audio it produced (a dropout). 0 while the engine is not running."
-description.ja = "同じ区間で最も重かったコールバック 1 回の CPU 使用率。1 を超えたらコールバックが生成した音より長くかかった (音切れ)。エンジン停止中は 0"
-description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 CPU 사용률. 1 을 넘으면 콜백이 생성한 오디오보다 오래 걸린 것 (끊김). 엔진이 정지 상태면 0"
+description.en = "CPU usage of the worst single callback in the same window; above 1 the callback took longer than the audio it produced (a dropout). 0 while the engine is not running or callbacks are stalled."
+description.ja = "同じ区間で最も重かったコールバック 1 回の CPU 使用率。1 を超えたらコールバックが生成した音より長くかかった (音切れ)。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "같은 구간에서 가장 무거웠던 콜백 한 번의 CPU 사용률. 1 을 넘으면 콜백이 생성한 오디오보다 오래 걸린 것 (끊김). 엔진 또는 콜백이 정지 상태면 0"
 related = ["AudioStats::cpuUsage"]
 
 ["AudioStats::droppedDecoderError"]
@@ -559,14 +574,14 @@ description.ja = "SoundStream が既に maxPolyphony 本の再生を持ってい
 description.ko = "SoundStream 이 이미 maxPolyphony 개의 재생을 갖고 있어 버려진 재생 수. 스트리밍 Sound 의 복사본에서만 발생 (단일 Sound 는 이전 재생을 먼저 정지)"
 
 ["AudioStats::peak"]
-description.en = "Master output peak over the last ~100 ms, linear (1.0 = full scale). Measured before the clamp, so a value above 1 shows how far the mix overshoots. 0 while the engine is not running."
-description.ja = "直近約 100 ms のマスター出力のピーク (リニア、1.0 = フルスケール)。クランプ前に測るので、1 を超えた値はミックスのはみ出し量を示す。エンジン停止中は 0"
-description.ko = "최근 약 100 ms 의 마스터 출력 피크 (선형, 1.0 = 풀 스케일). 클램프 전에 측정하므로 1 을 넘는 값은 믹스가 얼마나 넘쳤는지를 보여준다. 엔진이 정지 상태면 0"
+description.en = "Master output peak over the last ~100 ms, linear (1.0 = full scale). Measured before the clamp, so a value above 1 shows how far the mix overshoots. 0 while the engine is not running or callbacks are stalled."
+description.ja = "直近約 100 ms のマスター出力のピーク (リニア、1.0 = フルスケール)。クランプ前に測るので、1 を超えた値はミックスのはみ出し量を示す。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "최근 약 100 ms 의 마스터 출력 피크 (선형, 1.0 = 풀 스케일). 클램프 전에 측정하므로 1 을 넘는 값은 믹스가 얼마나 넘쳤는지를 보여준다. 엔진 또는 콜백이 정지 상태면 0"
 
 ["AudioStats::rms"]
-description.en = "Master output RMS over the same ~100 ms window, linear. 0 while the engine is not running."
-description.ja = "同じ約 100 ms 区間のマスター出力の RMS (リニア)。エンジン停止中は 0"
-description.ko = "같은 약 100 ms 구간의 마스터 출력 RMS (선형). 엔진이 정지 상태면 0"
+description.en = "Master output RMS over the same ~100 ms window, linear. 0 while the engine is not running or callbacks are stalled."
+description.ja = "同じ約 100 ms 区間のマスター出力の RMS (リニア)。エンジン停止中、またはコールバックが停止状態なら 0"
+description.ko = "같은 약 100 ms 구간의 마스터 출력 RMS (선형). 엔진 또는 콜백이 정지 상태면 0"
 
 ["AxisMode"]
 description.en = "Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children)."
@@ -1330,6 +1345,27 @@ description.ja = "フレームワークの全コアイベントのハブ。各�
 description.ko = "프레임워크의 모든 코어 이벤트 허브. 각 멤버는 .listen(callback) 으로 구독하는 Event. 전역 인스턴스는 events() 로 접근"
 related = ["events", "Event<T>", "EventListener"]
 
+["CoreEvents::deviceLost"]
+description.en = "Fired once when the shared Windows D3D11 device is lost. args.reason contains the GetDeviceRemovedReason HRESULT bits. Set args.cancel = true to keep running and handle the loss yourself; otherwise the app logs an error and exits with code 1. GPU resources are not recreated."
+description.ja = "Windows の共有 D3D11 デバイス喪失時に一度発火。args.reason は GetDeviceRemovedReason の HRESULT ビット値。args.cancel = true で終了を抑止し、アプリ自身で対処できる。既定ではエラーを記録してコード 1 で終了。GPU リソースは再作成しない。"
+description.ko = "Windows 공유 D3D11 장치가 손실되면 한 번 발생. args.reason은 GetDeviceRemovedReason의 HRESULT 비트 값. args.cancel = true로 종료를 취소하고 앱이 직접 처리할 수 있다. 기본값은 오류 기록 후 코드 1로 종료. GPU 리소스는 재생성하지 않는다."
+related = ["DeviceLostEventArgs", "exitApp"]
+
+["DeviceLostEventArgs"]
+description.en = "Arguments for the deviceLost event (Windows D3D11)."
+description.ja = "deviceLost イベントの引数 (Windows D3D11)。"
+description.ko = "deviceLost 이벤트의 인자 (Windows D3D11)."
+
+["DeviceLostEventArgs::reason"]
+description.en = "GetDeviceRemovedReason HRESULT bits, stored as uint32_t."
+description.ja = "GetDeviceRemovedReason の HRESULT ビット値を uint32_t で保持。"
+description.ko = "GetDeviceRemovedReason의 HRESULT 비트 값을 uint32_t로 저장."
+
+["DeviceLostEventArgs::cancel"]
+description.en = "Set true to cancel the default failure exit and handle device loss in the app."
+description.ja = "true にすると既定の異常終了を抑止し、デバイス喪失をアプリで処理する。"
+description.ko = "true로 설정하면 기본 실패 종료를 취소하고 앱에서 장치 손실을 처리."
+
 ["CoreEvents::afterFrame"]
 description.en = "Fired after present() (swapchain committed, outside any pass)"
 description.ja = "present() 後に発火 (スワップチェーンコミット済み、いかなるパスの外)"
@@ -1986,9 +2022,9 @@ description.ko = "줌 감도를 설정"
 
 ["Environment"]
 keywords = ["ibl", "skybox", "hdr"]
-description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)"
-description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）"
-description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT)"
+description.en = "IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR ambient用IBL environment map（irradiance + prefilter + BRDF LUT）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 앰비언트용 IBL 환경맵 (이래디언스 + 프리필터 + BRDF LUT). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "light-types"
 related = ["setEnvironment", "getEnvironment", "Light", "Material", "Fbo"]
 details = '''
@@ -2025,9 +2061,9 @@ description.ja = "environment mapが読み込み済みか確認"
 description.ko = "환경맵이 로드되었는지 확인"
 
 ["Environment::loadFromHDR"]
-description.en = "Load environment from HDR image file"
-description.ja = "HDR画像からIBL environment mapを生成"
-description.ko = "HDR 이미지에서 IBL 환경맵을 생성"
+description.en = "Load environment from HDR image file. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "HDR画像からIBL environment mapを生成。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "HDR 이미지에서 IBL 환경맵을 생성. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 
 ["Environment::loadProcedural"]
 description.en = "Generate a simple procedural sky environment"
@@ -2210,6 +2246,9 @@ keywords = ["download", "cpu"]
 description.en = "Read FBO contents into a CPU buffer (8-bit per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり8ビット）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 8비트)"
+details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
+details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
+details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
 related = ["Fbo::readPixelsFloat", "Pixels"]
 
 ["Fbo::readPixelsFloat"]
@@ -2218,6 +2257,9 @@ keywords = ["download", "cpu"]
 description.en = "Read FBO contents into a CPU buffer (32-bit float per channel)"
 description.ja = "FBOの内容をCPUバッファに読み出す（チャンネルあたり32ビット浮動小数点）"
 description.ko = "FBO 내용을 CPU 버퍼로 읽음 (채널당 32비트 부동소수점)"
+details.en = "Call after rendering is complete (after end()). Called inside any Fbo pass (between begin() and end()) it logs an error and returns false, on every platform."
+details.ja = "描画が終わってから(end() のあとに)呼ぶ。Fbo のパスの中(begin() と end() の間)で呼ぶと、どのプラットフォームでもエラーを出して false を返す。"
+details.ko = "렌더링이 끝난 뒤(end() 이후)에 호출한다. Fbo 패스 안(begin()과 end() 사이)에서 호출하면 모든 플랫폼에서 오류를 기록하고 false를 반환한다."
 related = ["Fbo::readPixels"]
 
 ["Fbo::save"]
@@ -2389,9 +2431,9 @@ description.ja = "ファイルが開いているか確認"
 description.ko = "파일이 열려 있는지 확인"
 
 ["FileWriter::open"]
-description.en = "Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened"
-description.ja = "書き込み用にファイルを開く（append = true で既存ファイルに追記）。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す"
-description.ko = "쓰기용으로 파일을 엶 (append = true면 기존 파일에 추가). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환"
+description.en = "Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "書き込み用にファイルを開く（append = true で既存ファイルに追記）。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないときやファイルを開けないときはエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "쓰기용으로 파일을 엶 (append = true면 기존 파일에 추가). 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나 파일을 열 수 없으면 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["FileWriter::write"]
 description.en = "Write data to file"
@@ -2599,9 +2641,9 @@ description.ko = "줄 바꿈이 활성화되었는지 확인"
 ["Font::load"]
 category = "font"
 keywords = ["open", "read", "file"]
-description.en = "Load font file"
-description.ja = "フォントファイルを読み込む"
-description.ko = "폰트 파일을 로드"
+description.en = "Load a font file or a system font name. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins."
+description.ja = "フォントファイルまたはシステムフォント名を読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う"
+description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용"
 
 ["Font::resetLineHeight"]
 keywords = ["line height", "default", "leading"]
@@ -3083,9 +3125,9 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
@@ -3114,9 +3156,9 @@ description.ja = "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bic
 description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용"
 
 ["Image::save"]
-description.en = "Save image to file"
-description.ja = "ファイルに画像を保存"
-description.ko = "이미지를 파일로 저장"
+description.en = "Save image to file. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ファイルに画像を保存。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "이미지를 파일로 저장. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["Image::setColor"]
 description.en = "Set pixel color at position (marks image as dirty)"
@@ -4037,9 +4079,9 @@ description.ja = "現在のシステム（OS ログ）レベルを取得"
 description.ko = "현재 시스템(OS 로그) 레벨을 얻음"
 
 ["Logger::getLogFilePath"]
-description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)"
-description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）"
-description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열)"
+description.en = "Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display"
+description.ja = "現在のログファイルのパスを取得（setLogFile が解決したパス、UTF-8。ファイルを開いていなければ空）。Windows では対にならない UTF-16 サロゲートを表示用に U+FFFD に置き換える"
+description.ko = "현재 로그 파일의 경로를 얻음 (setLogFile이 해석한 경로, UTF-8. 열린 파일이 없으면 빈 문자열). Windows에서는 짝이 없는 UTF-16 서로게이트를 표시용 U+FFFD로 바꿈"
 
 ["Logger::isFileOpen"]
 description.en = "Check whether a log file is currently open"
@@ -4410,9 +4452,9 @@ description.ko = "전치 행렬을 얻음"
 ["Material"]
 keywords = ["pbr", "shader surface", "metallic", "roughness", "gltf"]
 of = ["ofMaterial"]
-description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible)"
-description.ja = "PBR material（metallic-roughness、glTF 2.0互換）"
-description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환)"
+description.en = "PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction."
+description.ja = "PBR material（metallic-roughness、glTF 2.0互換）。破棄はウィンドウコンテキストの状態に触れるため、Light と同様にメインスレッドで行う必要がある。"
+description.ko = "PBR 재질 (메탈릭-러프니스 워크플로우, glTF 2.0 호환). 소멸 시 윈도우 컨텍스트 상태에 접근하므로 Light와 마찬가지로 메인 스레드에서 소멸시켜야 함."
 of_category = "material-types"
 related = ["setMaterial", "calculateLighting", "Light", "Mesh", "Environment"]
 
@@ -4603,7 +4645,6 @@ description.ko = "은 프리셋"
 
 ["MatrixScope"]
 hide = true
-lua = false
 keywords = ["raii", "guard", "scope"]
 
 ["Mesh"]
@@ -4855,13 +4896,28 @@ related = ["Mesh::drawNoLighting"]
 description.en = "Get all vertex colors"
 description.ja = "全頂点カラーを取得"
 description.ko = "모든 정점 색상을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getGpuIndexCount"]
 category = "types_mesh"
 keywords = ["gpu", "buffer", "interop"]
-description.en = "Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering."
-description.ja = "現在 GPU インデックスバッファにアップロードされているインデックス数（非インデックスメッシュなら 0）。自前描画では getGpuIndexBuffer と組で使う。"
-description.ko = "현재 GPU 인덱스 버퍼에 업로드된 인덱스 수(비인덱스 메시면 0). 커스텀 렌더링에서는 getGpuIndexBuffer와 짝으로 쓴다."
+description.en = "Number of indices in the uploaded GPU list; pairs with getGpuIndexBuffer for custom rendering. TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists."
+description.ja = "GPU にアップロードしたリストのインデックス数。自前描画では getGpuIndexBuffer と組で使う。TriangleStrip と TriangleFan は三角形リストに、LineStrip と LineLoop は線リストに展開する。元のインデックスが無ければ 0..N-1（N は頂点数）を入力列とし、Points でも同じ連番を使う。独自のパイプラインでは三角形モードを三角形リスト、線モードを線リストとして描画する。"
+description.ko = "GPU에 업로드한 리스트의 인덱스 수. 커스텀 렌더링에서는 getGpuIndexBuffer와 함께 쓴다. TriangleStrip과 TriangleFan은 삼각형 리스트로, LineStrip과 LineLoop는 선 리스트로 확장한다. 원본 인덱스가 없으면 0..N-1(N은 정점 수)을 입력 시퀀스로 사용하며, Points에서도 같은 순차 인덱스를 사용한다. 커스텀 파이프라인에서는 삼각형 모드를 삼각형 리스트로, 선 모드를 선 리스트로 그려야 한다."
 related = ["Mesh::uploadToGpu", "Mesh::getGpuIndexBuffer", "Mesh::getGpuVertexCount"]
 
 ["Mesh::getGpuVertexCount"]
@@ -4884,6 +4940,21 @@ related = ["Mesh::uploadPointsToGpu", "Mesh::getGpuPointBuffer", "Mesh::getGpuVe
 description.en = "Get all indices"
 description.ja = "全インデックスを取得"
 description.ko = "모든 인덱스를 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getMode"]
 description.en = "Get current primitive mode"
@@ -4899,6 +4970,21 @@ description.ko = "지정 인덱스의 법선을 얻음"
 description.en = "Get all normals"
 description.ja = "全法線を取得"
 description.ko = "모든 법선을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getNumColors"]
 description.en = "Get vertex color count"
@@ -4940,16 +5026,61 @@ description.en = "Get the tangent array (mutable)"
 description.ja = "接線配列を取得（変更可能）"
 description.ko = "탄젠트 배열을 얻음 (변경 가능)"
 related = ["Mesh::addTangent", "Mesh::getNumTangents"]
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getTexCoords"]
 description.en = "Get all texture coordinates"
 description.ja = "全テクスチャ座標を取得"
 description.ko = "모든 텍스처 좌표를 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::getVertices"]
 description.en = "Get all vertices"
 description.ja = "全頂点を取得"
 description.ko = "모든 정점을 얻음"
+details.en = '''
+The non-const overload marks the mesh changed, so writes through the returned
+reference are uploaded on the next GPU (Points / PBR) draw. Reading through it
+also re-uploads; to only read, use a `const Mesh&` (or `std::as_const(mesh)`).
+'''
+details.ja = '''
+非 const 版はメッシュを変更済みにするので、返された参照経由の書き込みは次の GPU
+（Points / PBR）描画でアップロードされる。読むだけでも再アップロードになるため、
+読むだけなら `const Mesh&`（または `std::as_const(mesh)`）を使う。
+'''
+details.ko = '''
+non-const 버전은 메시를 변경됨으로 표시하므로, 반환된 참조를 통한 쓰기는 다음 GPU
+(Points / PBR) 그리기에서 업로드된다. 읽기만 해도 다시 업로드되므로, 읽기만 할
+때는 `const Mesh&`(또는 `std::as_const(mesh)`)를 사용한다.
+'''
 
 ["Mesh::hasColors"]
 description.en = "Check if mesh has vertex colors"
@@ -4987,10 +5118,21 @@ description.ko = "텍스처 좌표 개수가 정점 개수와 일치하는지 �
 ["Mesh::markGpuDirty"]
 category = "types_mesh"
 keywords = ["upload", "invalidate"]
-description.en = "Mark GPU buffers stale after editing data in place"
-description.ja = "データを直接編集した後にGPUバッファを古い扱いにする"
-description.ko = "데이터를 직접 수정한 후 GPU 버퍼를 오래된 것으로 표시"
-related = ["Mesh::uploadToGpu"]
+description.en = "Force a GPU re-upload on the next draw (bumps the data revision). Not needed after normal edits: every mutator and non-const getter already does this."
+details.en = "If you retain a mutable getter reference across draws, call markGpuDirty() after later writes through it. Only fetching the reference marks the mesh changed."
+details.ja = "非 const ゲッターの参照を描画をまたいで保持する場合、後からその参照経由で書き込んだ後に markGpuDirty() を呼ぶ。参照を取得するときだけメッシュが変更済みになる。"
+details.ko = "non-const getter 참조를 여러 그리기에 걸쳐 유지한다면, 나중에 그 참조를 통해 쓴 후 markGpuDirty()를 호출한다. 참조를 가져올 때만 메시가 변경됨으로 표시된다."
+description.ja = "次の描画で GPU への再アップロードを強制する（データリビジョンを進める）。通常の編集後は不要：すべての変更関数と非 const ゲッターが自動で行う。"
+description.ko = "다음 그리기에서 GPU 재업로드를 강제한다(데이터 리비전을 올림). 일반적인 편집 후에는 필요 없다: 모든 변경 함수와 non-const getter가 이미 수행한다."
+related = ["Mesh::uploadToGpu", "Mesh::getDataRevision"]
+
+["Mesh::getDataRevision"]
+category = "types_mesh"
+keywords = ["revision", "dirty", "changed", "upload", "version"]
+description.en = "Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only."
+description.ja = "現在のデータリビジョン。メッシュのデータが変わるたび（変更関数、非 const ゲッター、markGpuDirty）に変わる。GPU バッファはアップロード時のリビジョンと異なると再アップロードされる。比較は != のみで行う。"
+description.ko = "현재 데이터 리비전. 메시 데이터가 바뀔 때마다(변경 함수, non-const getter, markGpuDirty) 바뀐다. GPU 버퍼는 업로드 당시의 리비전과 다르면 다시 업로드된다. 비교는 != 로만 한다."
+related = ["Mesh::markGpuDirty", "Mesh::uploadToGpu", "Mesh::uploadPointsToGpu"]
 
 ["Mesh::rotateX"]
 description.en = "Rotate mesh around X axis"
@@ -5043,28 +5185,30 @@ description.ja = "メッシュの頂点・インデックスデータを今す�
 description.ko = "메시의 정점·인덱스 데이터를 지금 GPU 버퍼에 업로드한다(PBR / 커스텀 렌더링 경로용)."
 related = ["Mesh::markGpuDirty", "Mesh::drawGpuPbr", "Mesh::getGpuVertexBuffer"]
 details.en = '''
-Lazy: it only re-uploads when the data is dirty, so calling it every frame is
+Lazy: it only re-uploads when the data changed since the last upload (see
+[`getDataRevision()`](#Mesh::getDataRevision)), so calling it every frame is
 cheap. [`drawGpuPbr()`](#Mesh::drawGpuPbr) calls it for you, so you only need it
 when accessing [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer) directly for
-custom GPU work. If you mutate vertices in place (e.g. through
-[`getVertices()`](#Mesh::getVertices)), call
-[`markGpuDirty()`](#Mesh::markGpuDirty) first so the next upload actually runs.
+custom GPU work. Every mutator and every non-const getter (e.g.
+[`getVertices()`](#Mesh::getVertices)) marks the data changed, including a
+`clear()` followed by re-adding the same number of vertices.
 '''
 details.ja = '''
-遅延実行で、データが dirty なときだけ再アップロードするので毎フレーム呼んでも
+遅延実行で、前回のアップロード以降にデータが変わったときだけ再アップロードする
+（[`getDataRevision()`](#Mesh::getDataRevision) 参照）ので毎フレーム呼んでも
 安価。[`drawGpuPbr()`](#Mesh::drawGpuPbr) が内部で呼ぶため、明示的に必要なのは
 [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer) を直接触って自前 GPU 処理を
-するときだけ。[`getVertices()`](#Mesh::getVertices) 経由などで頂点をその場で
-書き換えた場合は、先に [`markGpuDirty()`](#Mesh::markGpuDirty) を呼んで次回の
-アップロードを発火させること。
+するときだけ。すべての変更関数と非 const ゲッター（[`getVertices()`](#Mesh::getVertices)
+など）がデータを変更済みにする。`clear()` して同じ数の頂点を追加し直した場合も同様。
 '''
 details.ko = '''
-지연 실행이라 데이터가 dirty일 때만 다시 업로드하므로 매 프레임 호출해도
+지연 실행이라 마지막 업로드 이후 데이터가 바뀌었을 때만 다시 업로드하므로
+([`getDataRevision()`](#Mesh::getDataRevision) 참고) 매 프레임 호출해도
 저렴하다. [`drawGpuPbr()`](#Mesh::drawGpuPbr)이 내부에서 호출하므로, 명시적으로
 필요한 경우는 [`getGpuVertexBuffer`](#Mesh::getGpuVertexBuffer)를 직접 다뤄
-커스텀 GPU 작업을 할 때뿐이다. [`getVertices()`](#Mesh::getVertices) 등으로
-정점을 제자리에서 수정했다면 먼저 [`markGpuDirty()`](#Mesh::markGpuDirty)를
-호출해 다음 업로드가 실제로 실행되게 해야 한다.
+커스텀 GPU 작업을 할 때뿐이다. 모든 변경 함수와 non-const getter
+([`getVertices()`](#Mesh::getVertices) 등)가 데이터를 변경됨으로 표시한다.
+`clear()` 후 같은 수의 정점을 다시 추가한 경우도 마찬가지다.
 '''
 
 ["Mesh::uploadPointsToGpu"]
@@ -5078,27 +5222,31 @@ details.en = '''
 The point-cloud counterpart of [`uploadToGpu`](#Mesh::uploadToGpu): it packs the
 mesh's positions and per-vertex colors into a separate GPU buffer used by the
 [`PrimitiveMode`](#PrimitiveMode)`::Points` path. Lazy — only re-uploads when
-dirty. [`drawGpuPoints()`](#Mesh::drawGpuPoints) calls it for you; call it
+the data changed since the last upload (see
+[`getDataRevision()`](#Mesh::getDataRevision)).
+[`drawGpuPoints()`](#Mesh::drawGpuPoints) calls it for you; call it
 directly only when reading [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer) for a
-custom shader/compute pass. After mutating the cloud in place, call
-[`markGpuDirty()`](#Mesh::markGpuDirty) first.
+custom shader/compute pass. Every mutator and non-const getter marks the data
+changed.
 '''
 details.ja = '''
 [`uploadToGpu`](#Mesh::uploadToGpu) の点群版。メッシュの位置と頂点ごとの色を、
 [`PrimitiveMode`](#PrimitiveMode)`::Points` パスが使う専用 GPU バッファに詰める。
-遅延実行で dirty なときだけ再アップロード。[`drawGpuPoints()`](#Mesh::drawGpuPoints)
+遅延実行で、前回のアップロード以降にデータが変わったときだけ再アップロード
+（[`getDataRevision()`](#Mesh::getDataRevision) 参照）。[`drawGpuPoints()`](#Mesh::drawGpuPoints)
 が内部で呼ぶため、直接必要なのは [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer)
-を自前のシェーダ／コンピュートパスで読むときだけ。点群をその場で書き換えたら
-先に [`markGpuDirty()`](#Mesh::markGpuDirty) を呼ぶこと。
+を自前のシェーダ／コンピュートパスで読むときだけ。すべての変更関数と非 const
+ゲッターがデータを変更済みにする。
 '''
 details.ko = '''
 [`uploadToGpu`](#Mesh::uploadToGpu)의 포인트 클라우드 버전이다. 메시의 위치와
 정점별 색상을 [`PrimitiveMode`](#PrimitiveMode)`::Points` 경로가 사용하는 전용
-GPU 버퍼에 채운다. 지연 실행이라 dirty일 때만 다시 업로드한다.
+GPU 버퍼에 채운다. 지연 실행이라 마지막 업로드 이후 데이터가 바뀌었을 때만
+다시 업로드한다([`getDataRevision()`](#Mesh::getDataRevision) 참고).
 [`drawGpuPoints()`](#Mesh::drawGpuPoints)가 내부에서 호출하므로, 직접 필요한
 경우는 [`getGpuPointBuffer`](#Mesh::getGpuPointBuffer)를 커스텀 셰이더/컴퓨트
-패스에서 읽을 때뿐이다. 포인트 클라우드를 제자리에서 수정했다면 먼저
-[`markGpuDirty()`](#Mesh::markGpuDirty)를 호출한다.
+패스에서 읽을 때뿐이다. 모든 변경 함수와 non-const getter가 데이터를 변경됨으로
+표시한다.
 '''
 
 ["MicInput"]
@@ -6733,9 +6881,9 @@ description.ko = "픽셀 데이터가 32비트 부동소수점인지 여부"
 related = ["Pixels::getFormat", "Pixels::getDataF32"]
 
 ["Pixels::load"]
-description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`)."
-description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)"
-description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`)"
+description.en = "Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ファイルから画像を CPU メモリに読み込む。GPU を使わないのでワーカースレッドで呼んでよい。結果はメインスレッドでアップロードする (`Texture::allocate(pixels)`)。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "파일에서 이미지를 CPU 메모리로 로드. GPU를 쓰지 않으므로 워커 스레드에서 호출 가능. 결과는 메인 스레드에서 업로드 (`Texture::allocate(pixels)`). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Image::load", "Texture::allocate"]
 
 ["Pixels::loadFromMemory"]
@@ -6746,9 +6894,9 @@ description.ko = "메모리의 이미지를 CPU 메모리로 디코딩. GPU를 �
 ["Pixels::loadHDR"]
 category = "graphics_pixels"
 keywords = ["float", "radiance"]
-description.en = "Load an HDR (.hdr) image into a float pixel buffer"
-description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む"
-description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드"
+description.en = "Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "HDR(.hdr)画像をfloatピクセルバッファに読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "HDR(.hdr) 이미지를 float 픽셀 버퍼로 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Pixels::loadPlatform", "Pixels::isFloat"]
 
 ["Pixels::loadPlatform"]
@@ -6782,9 +6930,9 @@ description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom �
 ["Pixels::save"]
 category = "graphics_pixels"
 keywords = ["write", "export", "file", "png", "store"]
-description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it"
-description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。ファイルを開く前にメモリ上でエンコードするので、エンコードに失敗しても既存のファイルはそのまま残る。エンコードに失敗したとき、フォルダを作れないとき、ファイルのオープン・書き込み・close に失敗したときはエラーをログに出して false を返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する"
-description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 파일을 열기 전에 메모리에서 인코딩하므로 인코딩에 실패해도 기존 파일은 그대로 남는다. 인코딩에 실패하거나, 폴더를 만들 수 없거나, 파일 열기·쓰기·닫기에 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다"
+description.en = "Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ファイルに画像を保存。形式は拡張子で決まり、大文字小文字は区別しない: .png, .jpg/.jpeg, .bmp（それ以外はPNGで書く）。ファイル名は指定どおりに使う。相対パスは getDataPath で解決し、親フォルダがなければ作る。ファイルを開く前にメモリ上でエンコードするので、エンコードに失敗しても既存のファイルはそのまま残る。エンコードに失敗したとき、フォルダを作れないとき、ファイルのオープン・書き込み・close に失敗したときはエラーをログに出して false を返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "이미지를 파일로 저장. 형식은 확장자로 정해지며 대소문자 무시: .png, .jpg/.jpeg, .bmp (그 외는 PNG로 저장). 파일 이름은 지정한 그대로 사용. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 파일을 열기 전에 메모리에서 인코딩하므로 인코딩에 실패해도 기존 파일은 그대로 남는다. 인코딩에 실패하거나, 폴더를 만들 수 없거나, 파일 열기·쓰기·닫기에 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["Pixels::setColor"]
 category = "graphics_pixels"
@@ -7011,9 +7159,9 @@ description.ja = "ソースの長さ (秒)"
 description.ko = "소스 길이 (초)"
 
 ["PlayingSoundInfo::level"]
-description.en = "Peak absolute value of this playback's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, and while the engine is not running."
-description.ja = "直近のオーディオコールバックでのこの再生の出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中と、エンジン停止中は 0"
-description.ko = "최근 오디오 콜백에서 이 재생 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 그리고 엔진이 정지 상태일 때는 0"
+description.en = "Peak absolute value of this playback's output in the last audio callback, after volume / pan / channel gains (linear, 1.0 = full scale; can exceed 1). 0 while paused, while the engine is not running, or while callbacks are stalled."
+description.ja = "直近のオーディオコールバックでのこの再生の出力のピーク絶対値。volume / pan / チャンネルゲイン適用後 (リニア、1.0 = フルスケール、1 を超えることもある)。一時停止中、エンジン停止中、コールバックが停止状態なら 0"
+description.ko = "최근 오디오 콜백에서 이 재생 출력의 피크 절댓값. volume / pan / 채널 게인 적용 후 (선형, 1.0 = 풀 스케일, 1 을 넘을 수 있음). 일시 정지 중, 엔진 정지 중, 또는 콜백 정지 상태일 때는 0"
 
 ["PlayingSoundInfo::loop"]
 description.en = "Loop flag of the playback."
@@ -8705,9 +8853,19 @@ description.ko = "일시정지 상태인지 확인"
 ["Sound::isPlaying"]
 category = "sound"
 keywords = ["active", "running", "status"]
-description.en = "Check if playing"
-description.ja = "再生中か確認"
-description.ko = "재생 중인지 확인"
+description.en = "Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically."
+description.ja = "再生中か確認（一時停止中は false）。デコーダの失敗で停止したストリームは、バッファ内の音声を再生し終えるとループ中でも false になる。エラーは一度ログに記録され、TrussC は自動で再試行しない。"
+description.ko = "재생 중인지 확인 (일시정지 중에는 false). 디코더 오류로 중단된 스트림은 버퍼의 오디오를 재생한 뒤 반복 재생 중에도 멈춘다. 오류는 한 번 기록되며 TrussC는 자동으로 재시도하지 않는다."
+details.en = '''
+For a long-running app that expects continuous music, check `isPlaying()` while the sound is not intentionally paused or stopped. If it becomes false, schedule a reload with `loadStream()` and call `play()` only if loading succeeds. Check the play result too. The app chooses when to retry, including after another load or play failure.
+'''
+details.ja = '''
+長時間動作するアプリで音楽を継続再生する場合は、意図的に一時停止・停止していないときに `isPlaying()` を確認する。false になったらアプリ側で `loadStream()` による再読み込みを予定し、読み込みが成功した場合だけ `play()` を呼ぶ。再生開始の結果も確認する。再読み込みや再生開始が失敗した場合も含め、再試行のタイミングはアプリが決める。
+'''
+details.ko = '''
+장시간 실행되는 앱에서 음악을 계속 재생하려면 의도적으로 일시정지하거나 정지하지 않은 상태에서 `isPlaying()`을 확인한다. false가 되면 앱에서 `loadStream()`으로 다시 로드할 시점을 정하고, 로드가 성공했을 때만 `play()`를 호출한다. 재생 시작 결과도 확인한다. 다시 로드하거나 재생을 시작하는 데 실패한 경우를 포함해 재시도 시점은 앱이 결정한다.
+'''
+related = ["Sound::loadStream", "Sound::play", "Sound::isPaused"]
 
 ["Sound::isStreaming"]
 category = "sound"
@@ -8719,9 +8877,9 @@ description.ko = "loadStream()으로 로드되었으면 true"
 ["Sound::load"]
 category = "sound"
 keywords = ["open", "read", "file"]
-description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written)"
-description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）"
-description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지)"
+description.en = "Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "音声ファイルを読み込む。拡張子で自動判別: .wav .mp3 .ogg .flac .aac .m4a（大文字小文字を区別しない。ファイル名の大文字小文字は書いたとおりに保つ）。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "오디오 파일을 로드. 확장자로 자동 판별: .wav .mp3 .ogg .flac .aac .m4a (대소문자 무시, 파일 이름의 대소문자는 쓴 그대로 유지). 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 
 ["Sound::loadFromBuffer"]
 description.en = "Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr."
@@ -8731,9 +8889,9 @@ description.ko = "미리 생성한 SoundBuffer (ChipSound나 절차적 파형 �
 ["Sound::loadStream"]
 category = "sound"
 keywords = ["streaming", "disk", "music"]
-description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count."
-description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数"
-description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수"
+description.en = "Stream sound from disk (WAV/MP3/FLAC). Best for long files; cuts memory. maxPolyphony = simultaneous play() count. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
+description.ja = "ディスクからストリーミング再生 (WAV/MP3/FLAC)。長尺ファイル向け、メモリ節約。maxPolyphony は同時再生数。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
+description.ko = "디스크에서 스트리밍 재생 (WAV/MP3/FLAC). 긴 파일 적합, 메모리 절약. maxPolyphony는 동시 재생 수. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
 related = ["Sound::isStreaming"]
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
@@ -9221,7 +9379,6 @@ description.ko = "내부 삼각형 메시를 재구축(편집 후 draw 전에 �
 
 ["StyleScope"]
 hide = true
-lua = false
 keywords = ["raii", "guard", "scope"]
 
 ["TcpClient"]
@@ -9241,9 +9398,12 @@ description.ja = "サーバへ接続（ブロッキング）"
 description.ko = "서버에 연결 (블로킹)"
 
 ["TcpClient::connectAsync"]
-description.en = "Connect asynchronously (notifies via onConnect)"
-description.ja = "非同期に接続（onConnectで通知）"
-description.ko = "비동기로 연결 (onConnect로 통지)"
+description.en = "Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it"
+description.ja = "キャンセル可能な接続を開始。接続中の同じ宛先は何もせず、別の宛先なら置き換える"
+description.ko = "취소 가능한 연결 시작. 같은 대기 대상은 무시하고 다른 대상은 기존 시도를 대체"
+details.en = "Uses a non-blocking TCP connect and short poll slices even with threads. Repeating the same host and port while isConnecting() is true does nothing, without a warning. Changing the target, disconnect() and destruction cancel the old TCP wait before joining its worker. The default TCP deadline is the OS deadline; setConnectTimeout() opts into a shorter one. DNS resolution and user listeners can still delay teardown. Without threads, call processNetwork() through the update event to advance the attempt and asynchronous sends."
+details.ja = "スレッドありでも非ブロッキング TCP 接続を短い poll で待つ。isConnecting() が true の間は同じホストとポートへの再呼び出しは警告なしで何もしない。宛先変更、disconnect()、破棄は TCP 接続待ちをキャンセルしてからワーカーを join する。接続期限は既定では OS に任せ、setConnectTimeout() で短縮できる。DNS 解決やユーザーのリスナーを待つことはある。スレッドなしでは update イベントから processNetwork() を呼び、接続と非同期送信を進める。"
+details.ko = "스레드 사용 시에도 비차단 TCP 연결을 짧은 poll로 기다린다. isConnecting()이 true이면 같은 호스트와 포트 재호출은 경고 없이 무시한다. 대상 변경, disconnect(), 소멸은 TCP 대기를 취소한 뒤 작업자를 join한다. 기본 연결 기한은 OS에 맡기며 setConnectTimeout()으로 단축할 수 있다. DNS 해석과 사용자 리스너는 종료를 지연시킬 수 있다. 스레드 없이 update 이벤트에서 processNetwork()을 호출해 연결과 비동기 전송을 진행한다."
 
 ["TcpClient::disconnect"]
 description.en = "Disconnect"
@@ -9329,6 +9489,8 @@ details.en = '''
   connection. Fires on the receive thread.
 - `"Connection error"` (`wasClean` false; `TlsClient`: `"TLS error: ..."`) —
   an error ended it. Fires on the receive thread.
+- `"Send failed"` (`wasClean` false) — a send failed or timed out. Fires
+  on the writer thread, or inline without threads.
 - `"Disconnected by client"` (`wasClean` true) — the app ended it, with
   [`disconnect()`](#TcpClient::disconnect) or with
   [`connect()`](#TcpClient::connect) on a connected client. Fires
@@ -9355,7 +9517,7 @@ disconnect anyway is overruled: `connect()` closes that connection again,
 without another notification, and connects where it was asked to. With
 threads, do not call [`connectAsync()`](#TcpClient::connectAsync) from such a
 listener: the connect thread it starts runs `connect()` at the same time as the
-outer `connect()`, which can end in `std::terminate` (#261). Without threads
+outer `connect()`, which is unsupported. Without threads
 `connectAsync()` is `connect()`, and is overruled the same way.
 
 When the event fires on the receive thread, a plain (inline) listener that
@@ -9363,9 +9525,8 @@ calls `connect()` runs it on that thread, which cannot join itself. A
 listener that calls `disconnect()` there is in the same position. The client
 keeps that thread and joins it from another thread: the next `connect()` or
 `disconnect()` returns only once the thread has ended (the rest of the
-listener and of its receive loop), and so does the destructor. Until
-#261 lands, do not call `disconnect()` on the client from another
-thread until the listener's call has returned.
+listener and of its receive loop), and so does the destructor. Do not run reentrant connection management from another thread until the
+listener's connection call has returned.
 
 A listener on the receive thread may also destroy the client (an owner that
 replaces it, as `WebSocketClient::connect()` does). The destructor cannot
@@ -9411,7 +9572,7 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 スレッドありのときは、このリスナーから
 [`connectAsync()`](#TcpClient::connectAsync) を呼ばないこと：それが起こす接続
 スレッドが、外側の `connect()` と同時に `connect()` を走らせ、`std::terminate`
-に至ることがある（#261）。スレッドなしでは `connectAsync()` は `connect()` と
+に至り得るため未対応。スレッドなしでは `connectAsync()` は `connect()` と
 同じで、同じように閉じ直される。
 
 受信スレッドで発火したとき、そこで `connect()` を呼ぶ通常の（inline の）
@@ -9420,8 +9581,8 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 そのスレッドを手元に置いておき、別のスレッドから join する：次の
 `connect()` か `disconnect()` は、そのスレッドが終わってから（リスナーの
 残りと受信ループを抜けるまで）戻り、デストラクタも同じように待つ。
-#261 が入るまでは、リスナーの呼び出しが返るまで、別スレッドから
-`disconnect()` を呼ばないこと。
+リスナーの接続操作が返るまで、別スレッドから同時に
+接続を操作しないこと。
 
 受信スレッドのリスナーはクライアントを破棄してもよい（`WebSocketClient::connect()`
 のように、持ち主がクライアントを置き換える場合）。デストラクタは自分が動いて
@@ -9442,6 +9603,8 @@ details.ko = '''
   수신 스레드에서 발생한다.
 - `"Connection error"` (`wasClean`은 false, `TlsClient`에서는
   `"TLS error: ..."`) — 오류로 끊겼다. 수신 스레드에서 발생한다.
+- `"Send failed"` (`wasClean`은 false) — 전송 실패 또는 기한 만료.
+  전송 스레드에서, 스레드 없으면 호출한 스레드에서 발생한다.
 - `"Disconnected by client"` (`wasClean`은 true) — 앱이
   [`disconnect()`](#TcpClient::disconnect) 또는 연결 중인
   [`connect()`](#TcpClient::connect)로 끊었다. 호출한 스레드에서, 그 호출이
@@ -9466,7 +9629,7 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 스레드를 사용할 때는 이 리스너에서
 [`connectAsync()`](#TcpClient::connectAsync)를 호출하지 말 것: 그것이 시작하는
 연결 스레드가 바깥 `connect()`와 동시에 `connect()`를 실행하여
-`std::terminate`에 이를 수 있다(#261). 스레드 없이는 `connectAsync()`가
+이런 동시 연결 관리는 지원하지 않는다. 스레드 없이는 `connectAsync()`가
 `connect()`와 같으며, 같은 방식으로 다시 닫힌다.
 
 수신 스레드에서 발생했을 때 그 자리에서 `connect()`를 호출하는 일반(inline)
@@ -9475,8 +9638,8 @@ listener = client.onDisconnect.listen([&](TcpDisconnectEventArgs& e) {
 클라이언트는 그 스레드를 보관해 두었다가 다른 스레드에서 join한다: 다음
 `connect()`나 `disconnect()`는 그 스레드가 끝난 뒤에(리스너의 나머지와 수신
 루프를 빠져나올 때까지) 반환하며, 소멸자도 같은 방식으로 기다린다.
-#261이 들어오기 전까지는 리스너의 호출이 반환될 때까지 다른 스레드에서
-`disconnect()`를 호출하지 말 것.
+리스너의 연결 관리 호출이 반환되기 전에는 다른 스레드에서 동시에 연결을
+관리하지 말 것.
 
 수신 스레드의 리스너는 클라이언트를 파괴해도 된다(`WebSocketClient::connect()`
 처럼 소유자가 클라이언트를 교체하는 경우). 소멸자는 자신이 실행 중인 스레드를
@@ -9504,11 +9667,17 @@ description.ko = "데이터 수신 시 발생"
 description.en = "Send data to the server"
 description.ja = "サーバへ送信"
 description.ko = "서버로 전송"
+details.en = "Queues the payload on the same FIFO as sendAsync() and waits for completion, lending the caller's bytes. After 60 seconds without progress by default, returns false, fires onError and disconnects; setSendTimeout(0) disables that deadline. The same path handles TLS writes."
+details.ja = "sendAsync() と同じ FIFO にデータを借用して追加し完了を待つ。既定では進捗なし60秒で false を返し、onError と切断を通知。setSendTimeout(0) で期限を無効にする。TLS 送信も同じ経路。"
+details.ko = "sendAsync()와 같은 FIFO에 호출자의 데이터를 빌려 추가하고 완료 대기. 기본 무진행60초 후 false 반환, onError 및 연결 해제. setSendTimeout(0)으로 기한 해제. TLS도 같은 경로."
 
 ["TcpClient::setBlocking"]
 description.en = "Set blocking mode"
 description.ja = "ブロッキングモードを設定"
 description.ko = "블로킹 모드를 설정"
+details.en = "Active sockets stay non-blocking so connect, receive and send can be cancelled. A request to make an active socket blocking is ignored with a warning."
+details.ja = "接続・受信・送信をキャンセルできるよう稼働中のソケットは非ブロッキングを保つ。稼働中にブロッキングへ変更する要求は警告して無視する。"
+details.ko = "연결/수신/전송 취소를 위해 동작 중 소켓은 비차단 유지. 동작 중 차단 모드 요청은 경고 후 무시."
 
 ["TcpClient::setReceiveBufferSize"]
 description.en = "Set the receive buffer size"
@@ -9651,7 +9820,7 @@ value_desc.ClientNotFound.en = "No client is registered under that id"
 value_desc.Disconnected.en = "The connection went away before the payload was written"
 value_desc.Timeout.en = "The peer stopped reading long enough to trip the send timeout; the connection is still up"
 value_desc.QueueFull.en = "The send queue is already at its high-water mark"
-value_desc.NotRunning.en = "The server is not running"
+value_desc.NotRunning.en = "The server is not running, or the client is not connected"
 
 ["SendResult"]
 category = "network"
@@ -12212,9 +12381,9 @@ description.ko = "일시정지 상태인지 확인"
 ["VideoPlayerBase::isPlaying"]
 category = "video"
 keywords = ["active", "running", "status"]
-description.en = "Check if video is currently playing (not paused)"
-description.ja = "再生中か確認（一時停止中は false）"
-description.ko = "현재 재생 중인지 확인 (일시정지 시 false)"
+description.en = "Check if video is currently playing (not paused). False after a runtime playback error."
+description.ja = "再生中か確認（一時停止中および再生時エラーによる停止後は false）。"
+description.ko = "현재 재생 중인지 확인한다. 일시정지 중이거나 재생 오류로 정지하면 false."
 
 ["VideoPlayerBase::isReady"]
 category = "video"
@@ -12556,9 +12725,9 @@ related = ["VideoWriter::submitFrame"]
 ["VideoWriter::open"]
 category = "video"
 keywords = ["create", "begin", "init", "encoder"]
-description.en = "Open the encoder at the given size (path resolved via getDataPath)"
-description.ja = "指定サイズでエンコーダを開く（パスはgetDataPathで解決）"
-description.ko = "지정 크기로 인코더를 엽니다 (경로는 getDataPath로 해석)"
+description.en = "Open the encoder at the given size (path resolved via getDataPath). A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "指定サイズでエンコーダを開く（パスはgetDataPathで解決）。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "지정 크기로 인코더를 엽니다 (경로는 getDataPath로 해석). 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["VideoRecordSettings"]
 
 ["VideoWriter::submitFrame"]
@@ -13019,9 +13188,9 @@ description.ja = "ドキュメントのルート要素ノードを取得"
 description.ko = "문서의 루트 요소 노드를 얻음"
 
 ["Xml::save"]
-description.en = "Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false."
-description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決され、親フォルダがなければ作られる。indent は各レベルのインデント文字列を設定する。成功時に true を返し、失敗時はエラーをログに出して false を返す"
-description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석되고, 상위 폴더가 없으면 만들어진다. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환"
+description.en = "Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ドキュメントをファイルに保存する。相対パスは getDataPath で解決され、親フォルダがなければ作られる。indent は各レベルのインデント文字列を設定する。成功時に true を返し、失敗時はエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "문서를 파일에 저장. 상대 경로는 getDataPath로 해석되고, 상위 폴더가 없으면 만들어진다. indent는 레벨별 들여쓰기 문자열을 설정. 성공 시 true 반환, 실패 시 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 
 ["Xml::toString"]
 description.en = "Serialize the document to an XML string. indent sets the per-level indentation string."
@@ -13164,9 +13333,9 @@ related = ["drawSuperellipse", "appendArc", "beginShape"]
 ["appendToFile"]
 category = "file"
 keywords = ["write", "add", "concat"]
-description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails"
-description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないとき、ファイルを開けないとき、書き込みや close に失敗したときはエラーをログに出して false を返す"
-description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나, 파일을 열 수 없거나, 쓰기 또는 닫기에 실패하면 오류를 로그에 남기고 false 반환"
+description.en = "Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ファイルに追記。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないとき、ファイルを開けないとき、書き込みや close に失敗したときはエラーをログに出して false を返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "파일에 문자열을 추가. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나, 파일을 열 수 없거나, 쓰기 또는 닫기에 실패하면 오류를 로그에 남기고 false 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["saveTextFile"]
 
 ["applyWindow"]
@@ -14256,9 +14425,9 @@ related = ["CoreEvents", "setup"]
 ["exitApp"]
 category = "window_input"
 keywords = ["quit", "close", "terminate", "shutdown", "kill"]
-description.en = "Immediately exit the application (cannot be cancelled)"
-description.ja = "アプリケーションを即座に終了（キャンセル不可）"
-description.ko = "어플리케이션을 즉시 종료 (취소 불가)"
+description.en = "Exit the application with normal cleanup (cannot be cancelled). code defaults to 0. On Windows/Linux, runApp returns this code to its caller; on macOS, the process exits with this code after cleanup without returning from runApp. Use a non-zero code for failures."
+description.ja = "通常のクリーンアップを行ってアプリを終了（キャンセル不可）。code の既定値は 0。Windows/Linux では runApp がこの値を呼び出し元へ返す。macOS では runApp から戻らず、クリーンアップ後にこの終了コードでプロセスを終了する。異常終了には非ゼロを指定。"
+description.ko = "정상 정리 후 앱 종료 (취소 불가). code의 기본값은 0. Windows/Linux에서는 runApp이 이 값을 호출자에게 반환하며, macOS에서는 runApp이 반환하지 않고 정리 후 이 코드로 프로세스가 종료됨. 실패 시 0이 아닌 값 사용."
 related = ["requestExitApp"]
 
 ["exp"]
@@ -14593,18 +14762,37 @@ related = ["setCurveTolerance"]
 category = "file"
 keywords = ["resource", "asset", "resolve"]
 of = ["ofToDataPath"]
-description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged."
-description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る"
-description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨"
-related = ["getDataPathRoot", "getAbsolutePath", "joinPath"]
+description.en = "Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread. This is the bundled data the app reads (bin/data in development, the bundle's Resources/data when packaged); files the app writes and keeps go to getUserDataPath()."
+description.ja = "相対パスをデータディレクトリ基準で解決して fs::path で返す。絶対パスはそのまま返る。データディレクトリの基準部分だけを字句的に正規化し、ファイル名の構成要素は保つ。どのスレッドから呼んでもよい。アプリが読む同梱データの場所（開発中は bin/data、パッケージ後はバンドルの Resources/data）。アプリが書いて残すファイルは getUserDataPath() へ"
+description.ko = "상대 경로를 데이터 디렉터리 기준으로 해석해 fs::path로 반환. 절대 경로는 그대로 반환됨. 데이터 디렉터리 기준 부분만 어휘적으로 정규화하고 파일 이름의 구성 요소는 유지. 어느 스레드에서 호출해도 됨. 앱이 읽는 동봉 데이터의 위치(개발 중에는 bin/data, 패키지 후에는 번들의 Resources/data). 앱이 쓰고 보관하는 파일은 getUserDataPath()로"
+related = ["getDataPathRoot", "getUserDataPath", "getAbsolutePath", "joinPath"]
 
 ["getDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Get the current data path root as fs::path."
-description.ja = "現在のデータパスルートを fs::path で取得"
-description.ko = "현재 데이터 경로 루트를 fs::path로 얻음"
+description.en = "Get the current data path root as fs::path. Unless explicitly set, Apple platforms choose one existing folder on first use, in order: <exe>/data (iOS), <exe>/../Resources/data (macOS release), <exe>/../../../data (macOS development). The choice is kept for the process; missing files never fall back to another folder. Only the release workflow copies bin/data into the macOS bundle; normal builds keep using bin/data."
+description.ja = "現在のデータパスルートを fs::path で取得。明示的に設定しない場合、Apple では最初の使用時に存在するフォルダを <exe>/data（iOS）、<exe>/../Resources/data（macOS 配布）、<exe>/../../../data（macOS 開発）の順で一つ選ぶ。この選択はプロセス中保持され、見つからないファイルを別フォルダで探すことはない。macOS バンドルに bin/data をコピーするのはリリース workflow のみで、通常のビルドでは bin/data を使う"
+description.ko = "현재 데이터 경로 루트를 fs::path로 얻음. 명시적으로 설정하지 않으면 Apple에서는 최초 사용 시 존재하는 폴더를 <exe>/data(iOS), <exe>/../Resources/data(macOS 배포), <exe>/../../../data(macOS 개발) 순으로 하나 선택한다. 이 선택은 프로세스 동안 유지되며, 없는 파일을 다른 폴더에서 찾지 않는다. macOS 번들에 bin/data를 복사하는 것은 릴리스 workflow뿐이며 일반 빌드에서는 bin/data를 사용한다"
 related = ["setDataPathRoot", "getDataPath"]
+
+["getTempPath"]
+category = "file"
+keywords = ["temporary", "cache", "tmp", "scratch"]
+description.en = "Folder for temporary files, which the OS may delete at any time: $TMPDIR/<bundle id>/ on macOS, %TEMP%\\<app>\\ on Windows, $TMPDIR (or /tmp) /<app>/ on Linux, the app's tmp/ on iOS, the app's cache folder on Android, in-memory /tmp on web. Created on first use. A relative path is joined to it; an absolute path is returned as is."
+description.ja = "一時ファイル用のフォルダ。OS がいつ消してもよいもの。macOS は $TMPDIR/<bundle id>/、Windows は %TEMP%\\<app>\\、Linux は $TMPDIR（なければ /tmp）/<app>/、iOS はアプリの tmp/、Android はアプリのキャッシュフォルダ、web はメモリ上の /tmp。初回使用時に作られる。相対パスはこのフォルダにつなげ、絶対パスはそのまま返す"
+description.ko = "임시 파일용 폴더. OS가 언제든 지울 수 있다. macOS는 $TMPDIR/<bundle id>/, Windows는 %TEMP%\\<app>\\, Linux는 $TMPDIR(없으면 /tmp)/<app>/, iOS는 앱의 tmp/, Android는 앱의 캐시 폴더, web은 메모리상의 /tmp. 처음 사용할 때 만들어진다. 상대 경로는 이 폴더에 이어 붙이고, 절대 경로는 그대로 반환"
+related = ["getUserDataPath", "getDataPath"]
+
+["getUserDataPath"]
+category = "file"
+keywords = ["save", "settings", "preferences", "writable", "application support", "appdata", "user folder"]
+description.en = "Folder for files the app writes and keeps (settings, presets, logs, recordings): always the OS per-user app folder, in development and in a packaged app alike. macOS ~/Library/Application Support/<bundle id>/, Windows %LOCALAPPDATA%\\<app>\\, Linux $XDG_DATA_HOME/<app>/ (default ~/.local/share/<app>/), iOS the app's Library/Application Support/, Android the app's internal files folder; on web it is in memory and not kept. <app> is the executable name. Created on first use. A relative path is joined to it; an absolute path is returned as is. Write and read back through it: saveJson(j, getUserDataPath(\"settings.json\")) then loadJson(getUserDataPath(\"settings.json\")). setUserDataPathRoot() changes it."
+description.ja = "アプリが書いて残すファイル（設定、プリセット、ログ、録画）用のフォルダ。開発中もパッケージ後も常に OS のユーザーごとのアプリフォルダ。macOS は ~/Library/Application Support/<bundle id>/、Windows は %LOCALAPPDATA%\\<app>\\、Linux は $XDG_DATA_HOME/<app>/（既定は ~/.local/share/<app>/）、iOS はアプリの Library/Application Support/、Android はアプリの内部ファイルフォルダ。web ではメモリ上にあり残らない。<app> は実行ファイル名。初回使用時に作られる。相対パスはこのフォルダにつなげ、絶対パスはそのまま返す。書くときも読み戻すときもこれを通す: saveJson(j, getUserDataPath(\"settings.json\")) の後 loadJson(getUserDataPath(\"settings.json\"))。setUserDataPathRoot() で変えられる"
+description.ko = "앱이 쓰고 보관하는 파일(설정, 프리셋, 로그, 녹화)용 폴더. 개발 중이든 패키지 후든 항상 OS의 사용자별 앱 폴더. macOS는 ~/Library/Application Support/<bundle id>/, Windows는 %LOCALAPPDATA%\\<app>\\, Linux는 $XDG_DATA_HOME/<app>/(기본 ~/.local/share/<app>/), iOS는 앱의 Library/Application Support/, Android는 앱의 내부 파일 폴더. web에서는 메모리에 있고 남지 않는다. <app>은 실행 파일 이름. 처음 사용할 때 만들어진다. 상대 경로는 이 폴더에 이어 붙이고, 절대 경로는 그대로 반환. 쓸 때도 다시 읽을 때도 이것을 거친다: saveJson(j, getUserDataPath(\"settings.json\")) 후 loadJson(getUserDataPath(\"settings.json\")). setUserDataPathRoot()로 바꿀 수 있다"
+related = ["setUserDataPathRoot", "getTempPath", "getDataPath", "saveJson"]
+platform_note.en = "On the desktop the folder survives an uninstall; on iOS and Android it survives app updates but not an uninstall. Apple platforms only: a write whose path resolves inside the app bundle is refused by every core writer, with an error naming getUserDataPath(); during development (data folder outside a bundle) the first relative write into the data folder logs one notice. Folders macOS protects (Desktop, Documents, Downloads, removable or network volumes) ask the user once on first access; an unattended installation accepts that prompt during setup."
+platform_note.ja = "デスクトップではアンインストール後もフォルダは残る。iOS と Android ではアプリ更新では残るがアンインストールで消える。Apple のみ: パスがアプリバンドル内に解決される書き込みは、どのコアの書き込み関数でも拒否され、getUserDataPath() を案内するエラーが出る。開発中（データフォルダがバンドル外）は、相対パスでデータフォルダに書いた最初の 1 回に notice を出す。macOS が保護するフォルダ（デスクトップ、書類、ダウンロード、リムーバブル / ネットワークボリューム）は初回アクセス時に一度ユーザーに許可を求める。無人のインストールでは設置時にその許可を済ませておく"
+platform_note.ko = "데스크톱에서는 제거 후에도 폴더가 남는다. iOS와 Android에서는 앱 업데이트에는 남지만 제거하면 사라진다. Apple 전용: 경로가 앱 번들 안으로 해석되는 쓰기는 모든 코어 쓰기 함수에서 거부되며 getUserDataPath()를 안내하는 오류가 남는다. 개발 중(데이터 폴더가 번들 밖)에는 상대 경로로 데이터 폴더에 쓴 첫 1회에 notice를 남긴다. macOS가 보호하는 폴더(데스크톱, 문서, 다운로드, 이동식 / 네트워크 볼륨)는 처음 접근할 때 한 번 사용자에게 허락을 구한다. 무인 설치에서는 설치 시 그 허락을 미리 해 둔다"
 
 ["getDay"]
 category = "time_current"
@@ -16243,9 +16431,9 @@ related = ["floor", "ceil"]
 ["runApp"]
 category = "lifecycle"
 keywords = ["main", "start", "launch", "boot", "entry"]
-description.en = "Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main()."
-description.ja = "App サブクラスを指定してアプリのメインループを開始。アプリ型でテンプレート化されているので、main() から TC_RUN_APP(MyApp)（または runApp<MyApp>()）で呼ぶ。"
-description.ko = "App 서브클래스로 애플리케이션 메인 루프를 시작. 앱 타입으로 템플릿화되어 있으므로 main()에서 TC_RUN_APP(MyApp)(또는 runApp<MyApp>())로 호출."
+description.en = "Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main(). On desktop, returns 1 if window or GPU startup fails before setup() runs, otherwise 0. On Linux, no available X display causes an abort (a nonzero process status). TC_RUN_APP passes this status to main(); Android and Web use OS/browser-owned loops and do not report shutdown through this return value."
+description.ja = "App サブクラスを指定してアプリのメインループを開始。アプリ型でテンプレート化されているので、main() から TC_RUN_APP(MyApp)（または runApp<MyApp>()）で呼ぶ。 デスクトップでは、ウィンドウや GPU の起動に失敗して setup() が実行されなかった場合は 1、それ以外は 0 を返す。Linux で X のディスプレイが無い場合は abort で終了する（終了ステータスは 0 ではない）。TC_RUN_APP はこの終了コードを main() に渡す。Android と Web は OS／ブラウザがループを管理するため、この戻り値で終了を通知しない。"
+description.ko = "App 서브클래스로 애플리케이션 메인 루프를 시작. 앱 타입으로 템플릿화되어 있으므로 main()에서 TC_RUN_APP(MyApp)(또는 runApp<MyApp>())로 호출. 데스크톱에서는 창 또는 GPU 시작 실패로 setup()이 실행되지 않으면 1, 그 외에는 0을 반환한다. Linux에서 X 디스플레이가 없으면 abort로 종료한다(종료 상태는 0이 아님). TC_RUN_APP은 이 종료 코드를 main()에 전달한다. Android와 Web은 OS/브라우저가 루프를 관리하므로 이 반환값으로 종료를 보고하지 않는다."
 related = ["WindowSettings", "runHeadlessApp", "events"]
 
 ["runHeadlessApp"]
@@ -16296,29 +16484,29 @@ platform_note.ja = "非同期のファイル保存。iOS は UIDocumentPickerVie
 ["saveJson"]
 category = "file"
 keywords = ["write", "store", "serialize"]
-description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it."
-description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。ファイルを開く前にシリアライズするので、シリアライズに失敗しても既存のファイルはそのまま残る。バイナリモードで書く(どのプラットフォームでも改行はLF)。成功時trueを返し、シリアライズ・オープン・書き込み・closeのいずれかに失敗したときはエラーをログに出してfalseを返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する"
-description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 파일을 열기 전에 직렬화하므로 직렬화에 실패해도 기존 파일은 그대로 남는다. 바이너리 모드로 기록(모든 플랫폼에서 줄바꿈은 LF). 성공 시 true 반환, 직렬화·열기·쓰기·닫기 중 하나라도 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다"
+description.en = "Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "Jsonオブジェクトをファイルに書き出す。相対パスはgetDataPathで解決し、親フォルダがなければ作る。indentはpretty-print幅を指定(負の値でcompact)。ファイルを開く前にシリアライズするので、シリアライズに失敗しても既存のファイルはそのまま残る。バイナリモードで書く(どのプラットフォームでも改行はLF)。成功時trueを返し、シリアライズ・オープン・書き込み・closeのいずれかに失敗したときはエラーをログに出してfalseを返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "Json 객체를 파일로 기록. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. indent는 pretty-print 폭을 지정(음수면 compact). 파일을 열기 전에 직렬화하므로 직렬화에 실패해도 기존 파일은 그대로 남는다. 바이너리 모드로 기록(모든 플랫폼에서 줄바꿈은 LF). 성공 시 true 반환, 직렬화·열기·쓰기·닫기 중 하나라도 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["Json", "loadJson", "toJsonString", "saveTextFile"]
 
 ["saveScreenshot"]
 category = "window_system"
 keywords = ["capture", "png", "export", "save image"]
-description.en = "Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written."
-description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueは「保存先を準備しキューに積めた（親フォルダ生成・書き込み可）」の意味で、ファイル書き込み完了ではない"
-description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 '대상 준비 및 캡처 큐 등록 성공(상위 폴더 생성·쓰기 가능)'을 의미하며 파일 기록 완료가 아님"
+description.en = "Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when capture is queued; on native platforms the destination folder is prepared first. This does not mean the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "描画済みフレームのスクショを保存（形式は拡張子で判別し大文字小文字は区別しない。多くのプラットフォームでpng/jpg/bmp、詳細はプラットフォーム注記を参照）。どこから呼んでもよく、キャプチャはpresent()後に遅延実行。戻り値trueはキャプチャをキューに積めた意味で、ファイル書き込み完了ではない。ネイティブ環境では先に保存先フォルダを準備する。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "렌더링된 프레임의 스크린샷 저장(형식은 확장자로 판별하며 대소문자 무시. 대부분의 플랫폼에서 png/jpg/bmp, 자세한 내용은 플랫폼 노트 참조). 어디서든 호출 가능하며 캡처는 present() 이후로 지연. 반환값 true는 캡처 큐 등록 성공을 의미하며 파일 기록 완료가 아님. 네이티브 플랫폼에서는 먼저 대상 폴더를 준비한다. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["grabScreen", "startRecording", "captureWindow"]
-platform_note.en = "Formats: png/jpg/bmp on Linux and Android; macOS also writes tiff/tif and gif; Windows also writes tga; iOS writes only png and jpg/jpeg. Any other extension saves PNG data at the given path, except on Windows, which appends \".png\" to it. Not implemented on web (no canvas readback): always returns false without queuing anything, since no file could be written, and logs a one-time warning pointing to the browser's own screenshot feature."
-platform_note.ja = "対応形式: Linux と Android は png/jpg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。iOS は png と jpg/jpeg のみ。それ以外の拡張子は指定パスに PNG データで保存する（Windows のみパスに \".png\" を付け足す）。Web では未実装（canvas の読み戻しはない）: ファイルを書けないので何もキューに積まず常に false を返し、ブラウザ自身のスクリーンショット機能を案内する警告を1回だけ出す。"
-platform_note.ko = "지원 형식: Linux와 Android는 png/jpg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. iOS는 png와 jpg/jpeg만 지원. 그 밖의 확장자는 지정한 경로에 PNG 데이터로 저장(Windows만 경로에 \".png\"를 덧붙임). Web에서는 미구현(canvas 읽기 불가): 파일을 쓸 수 없으므로 아무것도 큐에 넣지 않고 항상 false를 반환하며, 브라우저 자체 스크린샷 기능을 안내하는 경고를 한 번만 출력."
+platform_note.en = "Formats: png/jpg/jpeg/bmp on Linux, Android and iOS; macOS also writes tiff/tif and gif; Windows also writes tga. On every native platform, an unsupported extension or no extension saves PNG with \".png\" appended to the path (shot.xyz → shot.xyz.png; shot → shot.png), and logs a warning naming the actual destination and supported formats. Reported paths (including MCP responses) name the actual destination; the bool return value still indicates whether capture was queued. On web, downloads the canvas as PNG or JPEG (png/jpg/jpeg, case-insensitive); other or missing extensions append .png with a warning. Only the filename is used, directories are ignored, and an empty filename gets a timestamped PNG name. Returns true when queued; later encoding/download failures, including a tainted canvas from cross-origin content without CORS, are logged as errors. The browser may ask to allow multiple downloads. grabScreen() remains unsupported on web."
+platform_note.ja = "対応形式: Linux・Android・iOS は png/jpg/jpeg/bmp。macOS はさらに tiff/tif と gif、Windows はさらに tga に対応。すべてのネイティブ環境で、未対応の拡張子または拡張子なしの場合はパスに \".png\" を追加して PNG を保存（shot.xyz → shot.xyz.png、shot → shot.png）し、実際の保存先と対応形式を警告に出す。報告するパス（MCP 応答を含む）は実際の保存先で、bool の戻り値は引き続きキャプチャをキューに積めたかを表す。Web では canvas を PNG または JPEG としてダウンロードする（png/jpg/jpeg、大文字小文字を区別しない）。未対応または拡張子なしの場合は .png を追加して警告する。ファイル名のみを使い、ディレクトリは無視する。空のファイル名にはタイムスタンプ付きの PNG 名を使う。キューに積めたら true を返し、その後のエンコード・ダウンロード失敗（CORS なしの別オリジンの内容で汚染された canvas を含む）はエラーとしてログに出す。ブラウザが「複数ファイルのダウンロードを許可」の確認を出すことがある。grabScreen() は引き続き Web 非対応。"
+platform_note.ko = "지원 형식: Linux, Android, iOS는 png/jpg/jpeg/bmp. macOS는 추가로 tiff/tif와 gif, Windows는 추가로 tga를 지원. 모든 네이티브 플랫폼에서 지원하지 않는 확장자이거나 확장자가 없으면 경로에 \".png\"를 덧붙여 PNG로 저장(shot.xyz → shot.xyz.png, shot → shot.png)하고, 실제 저장 경로와 지원 형식을 경고로 출력. 보고되는 경로(MCP 응답 포함)는 실제 저장 경로이며 bool 반환값은 계속 캡처 큐 등록 여부를 나타냄. Web에서는 canvas를 PNG 또는 JPEG로 다운로드한다(png/jpg/jpeg, 대소문자 무시). 미지원 또는 확장자 없음은 .png를 추가하고 경고한다. 파일명만 사용하고 디렉터리는 무시하며, 빈 파일명에는 타임스탬프가 포함된 PNG 이름을 사용한다. 큐 등록 시 true를 반환하고 이후 인코딩·다운로드 실패(CORS 없는 다른 출처 콘텐츠로 오염된 canvas 포함)는 오류로 기록한다. 브라우저가 여러 파일 다운로드 허용을 요청할 수 있다. grabScreen()은 Web에서 계속 미지원."
 
 ["saveTextFile"]
 category = "file"
 keywords = ["write", "store"]
 of = ["ofBufferToFile"]
-description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it"
-description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないとき、ファイルを開けないとき、書き込みや close に失敗したときはエラーをログに出して false を返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する"
-description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나, 파일을 열 수 없거나, 쓰기 또는 닫기에 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다"
+description.en = "Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "文字列をファイルに保存。相対パスは getDataPath で解決し、親フォルダがなければ作る。フォルダを作れないとき、ファイルを開けないとき、書き込みや close に失敗したときはエラーをログに出して false を返す。ファイルはその場で上書きするので、保存中のクラッシュ・電源断・ディスクフルで途中までのファイルが残ることがある。クラッシュに強い保存が必要なアプリは、新しいファイルに書いてから rename するなど自前で対応する。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "문자열을 텍스트 파일로 저장. 상대 경로는 getDataPath로 해석하고, 상위 폴더가 없으면 만든다. 폴더를 만들 수 없거나, 파일을 열 수 없거나, 쓰기 또는 닫기에 실패하면 오류를 로그에 남기고 false 반환. 파일을 그 자리에서 덮어쓰므로 저장 중 크래시, 전원 차단, 디스크 가득 참이 일어나면 잘린 파일이 남을 수 있다. 크래시에 안전한 저장이 필요한 앱은 새 파일에 쓴 뒤 이름을 바꾸는 등 직접 처리한다. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["loadTextFile", "appendToFile", "saveJson"]
 
 ["scale"]
@@ -16331,7 +16519,6 @@ description.ko = "크기 조절"
 related = ["translate", "rotate"]
 
 ["scopedMatrix"]
-lua = false
 category = "transform"
 keywords = ["raii", "scope", "guard", "save", "restore", "transform", "stack", "push", "pop", "early return"]
 description.en = "pushMatrix() now, popMatrix() at the end of the scope: `auto m = scopedMatrix();` returns a MatrixScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushMatrix() / popMatrix() remain the main form. [[nodiscard]]: `scopedMatrix();` alone would pop at once and is a compiler warning"
@@ -16343,7 +16530,6 @@ details.ja = "C++ だけ。Lua にはスコープで閉じるガードが無い�
 details.ko = "C++ 전용. Lua에는 스코프로 닫는 가드가 없으므로 Lua에서는 pushMatrix() / popMatrix()를 사용한다."
 
 ["scopedStyle"]
-lua = false
 category = "graphics_style"
 keywords = ["raii", "scope", "guard", "save", "restore", "state", "stack", "push", "pop", "early return"]
 description.en = "pushStyle() now, popStyle() at the end of the scope: `auto s = scopedStyle();` returns a StyleScope guard that pops when it goes out of scope, also on an early return or an exception. For code with several exits or long blocks; pushStyle() / popStyle() remain the main form. [[nodiscard]]: `scopedStyle();` alone would pop at once and is a compiler warning"
@@ -16508,18 +16694,26 @@ related = ["getCurveTolerance", "setCurveResolution", "drawBezier", "drawCurve"]
 ["setDataPathRoot"]
 category = "file"
 keywords = ["resource", "directory", "base"]
-description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is."
-description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる"
-description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨"
+description.en = "Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup())."
+description.ja = "相対データパスの解決に使うルートディレクトリを設定。相対ルートは実行ファイルのディレクトリ基準で解決され、絶対ルート(fs::path::is_absolute 判定、Windows の C:/ も可)はそのまま使われる。ファイルを読み込むスレッドを開始する前に呼ぶ (例: setup() 内)"
+description.ko = "상대 데이터 경로 해석에 사용할 루트 디렉터리를 설정. 상대 루트는 실행 파일 디렉터리 기준으로 해석되고, 절대 루트(fs::path::is_absolute 판정, Windows의 C:/ 포함)는 그대로 사용됨. 파일을 로드하는 스레드를 시작하기 전에 호출 (예: setup() 안)"
 related = ["getDataPathRoot", "setDataPathToResources", "getDataPath"]
 
 ["setDataPathToResources"]
 category = "file"
 keywords = ["bundle", "macos", "app"]
-description.en = "Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms."
-description.ja = "配布用にデータパスルートをmacOSアプリバンドルのContents/Resources/dataフォルダに向ける。macOS以外のプラットフォームでは何もしない"
-description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음"
+description.en = "Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup())."
+description.ja = "配布用にデータパスルートをmacOSアプリバンドルのContents/Resources/dataフォルダに向ける。macOS以外のプラットフォームでは何もしない。ファイルを読み込むスレッドを開始する前に呼ぶ (例: setup() 内)"
+description.ko = "배포용으로 데이터 경로 루트를 macOS 앱 번들의 Contents/Resources/data 폴더로 지정. macOS 외 플랫폼에서는 동작하지 않음. 파일을 로드하는 스레드를 시작하기 전에 호출 (예: setup() 안)"
 related = ["setDataPathRoot", "getExecutableDir"]
+
+["setUserDataPathRoot"]
+category = "file"
+keywords = ["save", "writable", "override", "installation", "instance"]
+description.en = "Fix the folder getUserDataPath() returns, for installations, several instances of one app, or tests. Mirrors setDataPathRoot(): a relative root is resolved against the executable directory, an absolute root is used as is. The folder is created on first use. A root inside the app bundle (macOS / iOS) still gets its writes refused."
+description.ja = "getUserDataPath() が返すフォルダを固定する。設置作品、同じアプリの複数起動、テスト向け。setDataPathRoot() と同じく、相対ルートは実行ファイルのディレクトリ基準で解決し、絶対ルートはそのまま使う。フォルダは初回使用時に作られる。アプリバンドル内のルート（macOS / iOS）への書き込みはやはり拒否される"
+description.ko = "getUserDataPath()가 반환하는 폴더를 고정. 설치 작품, 같은 앱의 여러 인스턴스, 테스트용. setDataPathRoot()와 같이 상대 루트는 실행 파일 디렉터리 기준으로 해석하고 절대 루트는 그대로 사용. 폴더는 처음 사용할 때 만들어진다. 앱 번들 안의 루트(macOS / iOS)로의 쓰기는 여전히 거부된다"
+related = ["getUserDataPath", "setDataPathRoot"]
 
 ["setDefaultScreenFov"]
 category = "graphics_3d_setup"
@@ -16629,9 +16823,9 @@ platform_note.ja = "Linux / Web では no-op（xdg-screensaver / Wake Lock API �
 ["setLogFile"]
 category = "utility"
 keywords = ["output", "write", "path"]
-description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path"
-description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す"
-description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환"
+description.en = "Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned."
+description.ja = "ログ出力を受けるファイルを開く（追記モード）。相対パスはデータフォルダ（getDataPath）で解決し、親フォルダがなければ作る。失敗時はエラーをログに出して false を返し、今のログファイルは開いたまま残る（エラー行もそこに入る）。成功後の getLogFilePath() は解決済みのパスを返す。アプリバンドル内のパス（macOS / iOS）は拒否され、getUserDataPath() を案内するエラーをログに出して false を返す"
+description.ko = "로그 출력을 받을 파일을 엶 (추가 모드). 상대 경로는 데이터 폴더(getDataPath)로 해석하고, 상위 폴더가 없으면 만든다. 실패하면 오류를 로그에 남기고 false를 반환하며, 현재 로그 파일은 열린 채로 남는다 (오류 줄도 거기에 기록됨). 성공 후 getLogFilePath()는 해석된 경로를 반환. 앱 번들 안의 경로(macOS / iOS)는 거부되며, getUserDataPath()를 안내하는 오류를 로그에 남기고 false 반환"
 related = ["closeLogFile", "setFileLogLevel"]
 
 ["setLogLevel"]
@@ -17106,17 +17300,17 @@ related = ["startRecording", "isRecording", "recordingPath"]
 category = "utility"
 keywords = ["substitute", "find replace", "swap", "sub"]
 of = ["ofStringReplace"]
-description.en = "Replace substring in place"
-description.ja = "部分文字列を置換（直接変更）"
-description.ko = "부분 문자열을 직접 치환"
+description.en = "Replace substrings in place, left to right without overlapping or searching the replacement. An empty search string leaves the input unchanged."
+description.ja = "部分文字列を左から重なりなしで置換（直接変更）。置換後の文字列は再検索しない。検索文字列が空なら入力は変更しない。"
+description.ko = "부분 문자열을 왼쪽부터 겹치지 않게 직접 치환하며 치환 결과는 다시 검색하지 않음. 검색 문자열이 비어 있으면 입력을 변경하지 않음."
 related = ["splitString", "isStringInString", "trim"]
 
 ["stringTimesInString"]
 category = "utility"
 keywords = ["count", "occurrences", "frequency", "tally", "substring"]
-description.en = "Count occurrences of a substring in a string"
-description.ja = "文字列中の部分文字列の出現回数を数える"
-description.ko = "문자열 내 부분 문자열의 출현 횟수를 셈"
+description.en = "Count nonoverlapping occurrences of a substring in a string. An empty substring matches nothing and returns 0."
+description.ja = "文字列中の部分文字列の出現回数を重なりなしで数える。部分文字列が空なら一致なしとして 0 を返す。"
+description.ko = "문자열 내 부분 문자열의 출현 횟수를 겹치지 않게 셈. 부분 문자열이 비어 있으면 일치 없음으로 0을 반환함."
 related = ["isStringInString", "splitString"]
 
 ["systemFontPath"]
@@ -18071,9 +18265,9 @@ id가 `0`이다.
 ["Mesh::getGpuIndexBuffer"]
 category = "types_mesh"
 keywords = ["gpu", "buffer", "interop", "sokol", "sg_buffer"]
-description.en = "The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop)."
-description.ja = "メッシュを支える sokol-gfx インデックスバッファハンドル（非インデックスなら空ハンドル、高度な相互運用向け）。"
-description.ko = "메시를 뒷받침하는 sokol-gfx 인덱스 버퍼 핸들(비인덱스면 빈 핸들, 고급 상호운용용)."
+description.en = "The sokol-gfx buffer handle holding the uploaded list indices (advanced interop). TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Use getGpuIndexCount for the uploaded count. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists."
+description.ja = "アップロードしたリストのインデックスを保持する sokol-gfx バッファハンドル（高度な相互運用向け）。TriangleStrip と TriangleFan は三角形リストに、LineStrip と LineLoop は線リストに展開する。元のインデックスが無ければ 0..N-1（N は頂点数）を入力列とし、Points でも同じ連番を使う。アップロード済みの数は getGpuIndexCount で取得する。独自のパイプラインでは三角形モードを三角形リスト、線モードを線リストとして描画する。"
+description.ko = "업로드한 리스트 인덱스를 담는 sokol-gfx 버퍼 핸들(고급 상호운용용). TriangleStrip과 TriangleFan은 삼각형 리스트로, LineStrip과 LineLoop는 선 리스트로 확장한다. 원본 인덱스가 없으면 0..N-1(N은 정점 수)을 입력 시퀀스로 사용하며, Points에서도 같은 순차 인덱스를 사용한다. 업로드된 개수는 getGpuIndexCount로 얻는다. 커스텀 파이프라인에서는 삼각형 모드를 삼각형 리스트로, 선 모드를 선 리스트로 그려야 한다."
 related = ["Mesh::getGpuIndexCount", "Mesh::getGpuVertexBuffer", "Mesh::uploadToGpu"]
 
 ["Mesh::getGpuPointBuffer"]
@@ -19149,3 +19343,158 @@ description.ko = "그리드 피팅이 실제로 픽셀 격자에 맞는지 여�
 description.en = "Snap a baseline offset accumulated from the anchor to the pixel grid, or pass it through unchanged when grid fit does not land. Callers must accumulate first and round once: rounding the line height and stepping by it would compound into a whole-pixel layout drift."
 description.ja = "アンカーからの累積ベースラインオフセットをピクセル境界にスナップする。グリッドフィットが働かない場合はそのまま返す。呼び出し側は必ず累積してから1回だけ丸めること。行の高さを丸めてから加算すると誤差が積み上がり、レイアウトが1ピクセル分ずれてしまう。"
 description.ko = "앵커에서 누적된 베이스라인 오프셋을 픽셀 격자에 맞추고, 그리드 피팅이 유효하지 않으면 그대로 돌려준다. 호출자는 반드시 먼저 누적한 뒤 한 번만 반올림해야 한다. 줄 높이를 반올림해 더해 나가면 오차가 쌓여 레이아웃이 한 픽셀만큼 어긋난다."
+
+["TcpClient::isConnecting"]
+description.en = "Whether a TCP connection attempt or TLS handshake is in progress"
+description.ja = "TCP 接続または TLS ハンドシェイクの進行中か"
+description.ko = "TCP 연결 또는 TLS 핸드셰이크 진행 중인지"
+
+["TcpClient::setConnectTimeout"]
+description.en = "Set the TCP connect deadline in seconds; default 0 uses the OS deadline"
+description.ja = "TCP 接続期限を秒で設定。既定の 0 は OS の期限に任せる"
+description.ko = "TCP 연결 기한을 초로 설정. 기본 0은 OS 기한 사용"
+details.en = "The deadline covers TCP connect, not DNS resolution or the TLS handshake. In installations, connect by IP address so nothing waits for DNS. Default 0 preserves the OS SYN timeout (roughly 21 seconds on Windows, 127 on Linux). For installations whose peer device may power off, setConnectTimeout(5) lets a reconnect loop attempt again sooner; waiting for the Linux OS deadline can delay recovery by about a minute. Cancellation works even with 0. Applies to the current pending connect as well as later attempts."
+details.ja = "期限は TCP 接続だけに適用し、DNS 解決や TLS ハンドシェイクを含まない。展示では IP アドレスで接続し、DNS を待たないようにする。既定の 0 は OS の SYN タイムアウト（Windows 約21秒、Linux 約127秒）を保つ。相手機器の電源が切れる展示では setConnectTimeout(5) にすると次の再試行を早く始められる。Linux の OS の期限を待つと復旧が約1分遅れることがある。0 でもキャンセル可能。現在保留中の接続と次の試行に適用。"
+details.ko = "기한은 TCP 연결에만 적용되며 DNS 해석이나 TLS 핸드셰이크는 포함하지 않는다. 설치 환경에서는 IP 주소로 연결하여 DNS를 기다리지 않도록 한다. 기본 0은 OS SYN 타임아웃(Windows 약21초, Linux 약127초)을 유지한다. 상대 장치가 꺼질 수 있는 설치에서는 setConnectTimeout(5)로 다음 재시도를 빨리 시작할 수 있다. Linux OS 기한을 기다리면 복구가 약1분 늦어질 수 있다. 0에서도 취소 가능. 현재 대기 연결과 이후 시도에 적용."
+
+["TcpClient::setSendTimeout"]
+description.en = "Set the idle send timeout in seconds; default 60, 0 waits forever"
+description.ja = "送信に進捗がない時間の上限を秒で設定。既定 60、0 は無期限"
+description.ko = "전송 진행 없는 시간 제한을 초로 설정. 기본 60, 0은 무기한"
+
+["TcpClient::sendAsync"]
+description.en = "Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete"
+description.ja = "データを所有するキューに待たずに追加。SendResult を返し onSendComplete で1回通知"
+description.ko = "데이터를 소유하는 큐에 대기 없이 추가. SendResult 반환 및 onSendComplete로 한 번 알림"
+details.en = "Shares the FIFO queue and idle deadline with send(). Pointer/string overloads copy; vector&& takes ownership. An empty queue accepts any payload size. Once pending bytes reach the high-water mark, further calls return QueueFull without disconnecting. With threads, completions run on the writer thread; without threads, processNetwork() drains the queue without waiting and emits completions inline. A send timeout closes this client, so completion reports Disconnected (onError describes the timeout), following SendError's existing connection-state vocabulary. Do not call send() inline from a send completion/error listener; use sendAsync()."
+details.ja = "send() と FIFO キューおよび無進捗の期限を共有。ポインターと文字列はコピー、vector&& は所有権を移す。空のキューは任意のサイズを受け入れ、高水位に達したあとの呼び出しは切断せず QueueFull を返す。スレッドありの完了通知は送信スレッド上、なしでは processNetwork() が待たずにキューを進めてその場で通知する。送信期限が切れると接続を閉じるため、完了は Disconnected（onError はタイムアウトを説明）となる。送信の完了・エラーリスナーから send() をその場で呼ばず sendAsync() を使う。"
+details.ko = "send()와 FIFO 큐 및 무진행 기한을 공유. 포인터/문자열은 복사하고 vector&&는 소유권 이동. 빈 큐는 모든 크기를 받으며 기준에 도달한 뒤에는 연결을 끊지 않고 QueueFull 반환. 스레드 사용 시 완료는 전송 스레드에서, 없으면 processNetwork()이 대기 없이 진행하고 즉시 알린다. 전송 기한 만료 시 연결을 닫으므로 완료는 Disconnected이며 onError가 타임아웃을 설명한다. 전송 완료/오류 리스너에서 send() 대신 sendAsync() 사용."
+
+["TcpClient::onSendComplete"]
+description.en = "A queued send completed; clientId is -1, sendId identifies the payload"
+description.ja = "キュー済みの送信の完了。clientId は -1、sendId がデータを識別"
+description.ko = "큐에 든 전송 완료. clientId는 -1, sendId가 데이터를 식별"
+details.en = "Every queued id completes once while the client is alive, including pending sends cancelled by disconnect(). With threads it fires on the writer; without threads it fires from processNetwork(), send() or disconnect(). Destruction stops workers and wakes blocked senders without firing new events."
+details.ja = "クライアントが生存している間、キュー済み id は disconnect() でのキャンセルを含め1回完了を通知する。スレッドありでは送信スレッド上、なしでは processNetwork()、send()、disconnect() から通知。破棄は新たなイベントを出さずにワーカーを停止し、待機中の送信元を起こす。"
+details.ko = "클라이언트가 살아 있는 동안 큐 id는 disconnect() 취소를 포함해 한 번 완료를 알린다. 스레드 사용 시 전송 스레드에서, 없으면 processNetwork(), send(), disconnect()에서 발생. 소멸은 새 이벤트 없이 작업자를 멈추고 대기 송신자를 깨운다."
+
+["TcpClient::setSendAsyncBufferSize"]
+description.en = "Set the send queue high-water mark; default 16 MB, 0 unlimited"
+description.ja = "送信キューの高水位を設定。既定 16 MB、0 は無制限"
+description.ko = "전송 큐의 상한 기준 설정. 기본 16 MB, 0은 무제한"
+
+["TcpClient::getSendAsyncBufferSize"]
+description.en = "Get the send queue high-water mark in bytes"
+description.ja = "送信キューの高水位をバイト数で取得"
+description.ko = "전송 큐의 상한 기준을 바이트로 가져오기"
+
+["TcpClient::getSendAsyncPendingBytes"]
+description.en = "Bytes queued but not yet completed"
+description.ja = "キュー済みで未完了のバイト数"
+description.ko = "큐에 있고 아직 완료되지 않은 바이트 수"
+
+["TcpClient::stopConnectThread"]
+hide = true
+
+["TcpClient::prepareConnect"]
+hide = true
+
+["TcpClient::connectSocket"]
+hide = true
+
+["TcpClient::checkPendingConnect"]
+hide = true
+
+["TcpClient::closeClientSocket"]
+hide = true
+
+["TcpClient::startSendChannel"]
+hide = true
+
+["TcpClient::stopSendChannel"]
+hide = true
+
+["TcpClient::writeSendStep"]
+hide = true
+
+["TcpClient::processSendQueue"]
+hide = true
+
+["TcpClient::waitClientSocket"]
+hide = true
+
+["Fbo::setDebugName"]
+category = "graphics_fbo"
+description.en = "Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo."
+description.ja = "MCP 検査用の名前を設定。tc_list_fbos は生存中のオブジェクトの index、name、width、height、format を一覧化。tc_analyze_image は source={fbo:名前またはインデックス} を受け、フレーム終了後に最後の Fbo パスを読む。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。空の名前もインデックスで取得可能。Web の読み戻しと iOS の float 読み戻しはエラー。byte Fbo の読み戻しは既存 API の RGBA8 のみ対応し、他の整数形式はエラー。Texture はソースにできないため、名前付き Fbo に描画する。"
+description.ko = "MCP 검사 이름을 설정. tc_list_fbos 는 살아 있는 객체의 index, name, width, height, format 을 나열. tc_analyze_image 는 source={fbo:이름 또는 인덱스} 로 프레임 종료 후 마지막 Fbo 패스를 읽는다. 이동하면 이름과 인덱스가 이전되고 이동 원본 및 파괴된 항목은 사라진다. 빈 이름도 인덱스로 접근 가능. Web 읽기 및 iOS float 읽기는 오류. byte Fbo 읽기는 기존 API 의 RGBA8 만 지원하며 다른 정수 형식은 오류. Texture 는 소스가 아니므로 이름 있는 Fbo 에 그린다."
+related = ["Fbo::getDebugName", "Image::setDebugName"]
+
+["Fbo::getDebugName"]
+category = "graphics_fbo"
+description.en = "Return the MCP inspection name (empty for unnamed or moved-from objects)."
+description.ja = "MCP 検査用の名前を返す（名前なし、または移動元は空文字列）。"
+description.ko = "MCP 검사 이름을 반환 (이름이 없거나 이동된 원본이면 빈 문자열)."
+related = ["Fbo::setDebugName"]
+
+["Image::setDebugName"]
+description.en = "Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources."
+description.ja = "MCP 検査用の名前を設定。tc_list_images は生存中の Image の index、name、width、height、format を一覧化。移動で名前とインデックスを引き継ぎ、移動元と破棄済みの項目は消える。名前なしもインデックスで取得可能。tc_analyze_image は source={image:名前またはインデックス} で CPU ピクセルを読む。他のソースは window:インデックス、fbo:名前またはインデックス、path:ファイル。width、height、format（RGBA8/float）、colorSpace（sRGB/linear）、ops 順の results を返す。byte は RGBA 0–1、float は 1 を超える値も保持。操作: pixel(x,y):color、histogram(bins):histogram[channel][bin]（0–1 の等幅区間、範囲外は端の bin）、count(color,tolerance または min,max):count,bbox,centroid、stats():mean,min,max、grid(cols,rows):平均 colors[row][col]、diff(path,threshold,任意の save):count,bbox,maxDifference、line(x0,y0,x1,y1):両端を含む Bresenham 線上の colors。各操作に任意の rect=[x,y,w,h]（既定は画像全体）。座標は左上原点、bbox=[x,y,w,h]、centroid=[x,y]、一致なしは bbox/centroid が null。rect とセルは空にできない。線の両端は画像内、rect 内のサンプルだけを返す。count は RGB/RGBA の範囲または色と非負のスカラー tolerance。diff は同寸法の RGBA 生値を比較し、最大絶対チャネル差が threshold を超えたピクセルを数える。任意のトップレベル save（省略/null は保存なし）と diff.save は tc_save_screenshot と同じ UTF-8・data 相対パス・親作成・未対応拡張子に .png 追加の規則。float の保存は 0–1 に制限するが解析値は保持。Texture、VideoPlayer、VideoGrabber はソースではない。"
+description.ko = "MCP 검사 이름을 설정. tc_list_images 는 살아 있는 Image 의 index, name, width, height, format 을 나열. 이동하면 이름과 인덱스가 이전되며 이동 원본 및 파괴된 항목은 사라진다. 이름 없는 객체도 인덱스로 접근 가능. tc_analyze_image 는 source={image:이름 또는 인덱스} 로 CPU 픽셀을 읽는다. 다른 소스는 window:인덱스, fbo:이름 또는 인덱스, path:파일. width, height, format (RGBA8/float), colorSpace (sRGB/linear), ops 순서의 results 를 반환. byte 색은 RGBA 0–1, float 는 1 초과 값도 유지. 연산: pixel(x,y):color; histogram(bins):histogram[channel][bin] (0–1 등간격, 범위 밖은 끝 bin); count(color,tolerance 또는 min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):평균 colors[row][col]; diff(path,threshold,선택 save):count,bbox,maxDifference; line(x0,y0,x1,y1):양 끝점을 포함한 Bresenham 색 배열. 모든 연산에 선택 rect=[x,y,w,h], 기본값은 전체 이미지. 좌표는 왼쪽 위 원점, bbox=[x,y,w,h], centroid=[x,y]; 일치 없으면 bbox/centroid 는 null. rect 와 셀은 비어 있을 수 없다. 선 끝점은 이미지 내부, rect 내부 샘플만 반환. count 는 RGB/RGBA 범위 또는 색과 음이 아닌 스칼라 tolerance. diff 는 동일 크기 RGBA 원시 값을 비교하며 최대 절대 채널 차이가 threshold 보다 큰 픽셀을 센다. 선택 최상위 save (생략/null 은 저장 안 함) 와 diff.save 는 tc_save_screenshot 의 UTF-8, data 상대 경로, 부모 생성, 미지원 확장자에 .png 추가 규칙을 따른다. float 저장은 0–1 로 제한하지만 분석 값은 유지. Texture, VideoPlayer, VideoGrabber 는 소스가 아니다."
+related = ["Image::getDebugName", "Fbo::setDebugName"]
+
+["Image::getDebugName"]
+description.en = "Return the MCP inspection name (empty for unnamed or moved-from objects)."
+description.ja = "MCP 検査用の名前を返す（名前なし、または移動元は空文字列）。"
+description.ko = "MCP 검사 이름을 반환 (이름이 없거나 이동된 원본이면 빈 문자열)."
+related = ["Image::setDebugName"]
+
+["VideoErrorEventArgs"]
+description.en = "Runtime video error event payload."
+description.ja = "動画の再生時エラーのイベント引数。"
+description.ko = "동영상 재생 오류 이벤트 인자."
+
+["VideoErrorEventArgs::message"]
+description.en = "Backend error message."
+description.ja = "バックエンドのエラーメッセージ。"
+description.ko = "백엔드 오류 메시지."
+
+["VideoErrorEventArgs::errorCode"]
+description.en = "Backend-specific error code; zero when unavailable. Codes are not portable between backends."
+description.ja = "バックエンド固有のエラーコード。取得できない場合は 0。バックエンド間で共通の値ではない。"
+description.ko = "백엔드별 오류 코드. 코드가 없으면 0이며 백엔드 간 공통 값이 아니다."
+
+["VideoPlayerBase::onError"]
+description.en = "Runtime failure event, delivered once per error stop by update() on the main thread. Playback stops without unloading, rewinding, or replacing the last frame. The app may seek, play again, or reload; there is no automatic retry. Keep calling update() on the main thread to receive errors. Normal EOF and stalls alone are not errors. Isolated invalid packets/frames are warned and skipped. onError listeners are not moved."
+description.ja = "再生時エラーによる停止ごとに一度、メインスレッドの update() から通知する。読み込み状態・位置・最後のフレームを保持して停止する。アプリ側でシーク・再生再開・再読み込みを選択でき、自動再試行はしない。通知を受け取るにはメインスレッドで update() を呼び続ける。正常な EOF や単なる停滞はエラーではない。単独の破損パケット・フレームは警告して読み飛ばす。onError リスナーはムーブされない。"
+description.ko = "재생 오류로 정지할 때마다 메인 스레드의 update()에서 한 번 알린다. 로드 상태, 위치, 마지막 프레임을 유지한다. 앱이 탐색, 재생 재개, 다시 로드를 선택하며 자동 재시도는 없다. 오류를 받으려면 메인 스레드에서 update()를 계속 호출한다. 정상 EOF나 단순 정체는 오류가 아니다. 개별 손상 패킷/프레임은 경고 후 건너뛴다. onError 리스너는 이동되지 않는다."
+
+["VideoPlayerBase::hasError"]
+description.en = "Whether update() has delivered a runtime playback failure. Cleared by a successful load() or close(), retained through seek and play()."
+description.ja = "update() が再生時エラーを通知済みかを返す。成功した load() または close() で解除し、シークや play() では保持する。"
+description.ko = "update()가 재생 오류를 전달했는지 반환한다. load() 성공 또는 close()로 초기화하며 탐색과 play()에서는 유지한다."
+
+["VideoPlayerBase::getErrorMessage"]
+description.en = "Last runtime error message, or an empty string when there is no error. Query on the main thread after update()."
+description.ja = "最後の再生時エラーメッセージ。エラーがなければ空文字列。メインスレッドで update() 後に参照する。"
+description.ko = "마지막 재생 오류 메시지. 오류가 없으면 빈 문자열. 메인 스레드에서 update() 후 조회한다."
+
+["VideoPlayerBase::reportPlaybackError"]
+description.en = "Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them."
+description.ja = "派生クラス用：任意スレッドからバックエンドの失敗をキューに入れる。update() が通知するまでの重複をまとめる。"
+description.ko = "파생 클래스용: 임의 스레드에서 백엔드 오류를 큐에 넣는다. update() 전달 전 중복 보고를 합친다."
+
+["VideoPlayerBase::dispatchPlaybackError"]
+description.en = "Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player."
+description.ja = "派生クラス用：メインスレッドの update() でバックエンドのロック外から呼ぶ。バックエンドを一時停止してフレームを保持し、エラー状態を設定して通知する。リスナーが close/load できるため、true なら直ちに戻る。"
+description.ko = "파생 클래스용: 메인 스레드의 update()에서 백엔드 잠금 밖에서 호출한다. 백엔드를 일시정지하고 프레임을 유지하며 오류 상태를 설정해 알린다. 리스너가 close/load할 수 있으므로 true이면 즉시 반환한다."
+
+["VideoPlayerBase::clearPlaybackError"]
+description.en = "Subclass hook: clear pending and delivered errors on successful load and close."
+description.ja = "派生クラス用：load 成功時と close 時に通知待ちと通知済みのエラーを解除する。"
+description.ko = "파생 클래스용: load 성공 및 close 시 대기 중인 오류와 전달된 오류를 초기화한다."
+
+["VideoPlayerBase::movePlaybackErrorFrom"]
+description.en = "Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object."
+description.ja = "派生クラス用：ムーブ時に通知待ちと通知済みのエラー状態を移す。イベントリスナーは元のオブジェクトに残る。"
+description.ko = "파생 클래스용: 이동 시 대기 중인 오류와 전달된 오류 상태를 옮긴다. 이벤트 리스너는 원래 객체에 남는다."

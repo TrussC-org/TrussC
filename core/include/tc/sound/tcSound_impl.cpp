@@ -274,10 +274,10 @@ bool decodeFileWithMiniaudio(const fs::path& path,
                              SoundBuffer& out) {
     ma_decoder decoder;
     ma_decoder_config cfg = makeFloat32Config(hint);
-    std::string pathStr = internal::pathToUtf8(path);
+    std::string pathStr = internal::pathToDisplayUtf8(path);
     ma_result result = maDecoderInitPath(path, &cfg, &decoder);
     if (result != MA_SUCCESS) {
-        logError("SoundBuffer") << "failed to open " << label << " " << pathStr
+        logError("SoundBuffer") << "failed to open " << label << " " << path
                                 << " (result=" << (int)result << ")";
         return false;
     }
@@ -287,7 +287,7 @@ bool decodeFileWithMiniaudio(const fs::path& path,
                       reserveSamplesPerInputByte(hint))) {
         return false;
     }
-    logVerbose("SoundBuffer") << "loaded " << label << " " << pathStr << " (" << out.channels
+    logVerbose("SoundBuffer") << "loaded " << label << " " << path << " (" << out.channels
                               << " ch, " << out.sampleRate << " Hz, " << out.numSamples
                               << " samples)";
     return true;
@@ -322,12 +322,12 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::loadOgg(const fs::path& path) {
-    std::string pathStr = internal::pathToUtf8(path);
+    std::string pathStr = internal::pathToDisplayUtf8(path);
     // stb_vorbis has no UTF-8 filename mode on Windows — open the FILE*
     // ourselves (wide API) and hand it over (close_handle_on_close=TRUE).
     FILE* f = internal::openFile(path, "rb");
     if (!f) {
-        logError("SoundBuffer") << "failed to open " << pathStr;
+        logError("SoundBuffer") << "failed to open " << path;
         return LoadResult::fail(LoadError::FileNotFound,
                                 "failed to open: " + pathStr);
     }
@@ -336,7 +336,7 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     if (!vorbis) {
         // No fclose(f) here: with close_on_free=1, stb_vorbis owns f and has
         // already closed it when the open failed.
-        logError("SoundBuffer") << "failed to open " << pathStr << " (stb_vorbis error="
+        logError("SoundBuffer") << "failed to open " << path << " (stb_vorbis error="
                                 << error << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
                                 "stb_vorbis failed to open " + pathStr +
@@ -348,7 +348,7 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     LoadResult r = drainVorbis(vorbis, sizeEc ? 0 : (uint64_t)fileBytes, pathStr, *this);
     if (!r) return r;
     path_ = path;
-    logVerbose("SoundBuffer") << "loaded " << pathStr << " (" << channels << " ch, "
+    logVerbose("SoundBuffer") << "loaded " << path << " (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";
     return LoadResult::success();
 }
@@ -366,14 +366,14 @@ LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
                                 const char* label, SoundBuffer& out) {
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        logError("SoundBuffer") << "file not found: " << internal::pathToUtf8(path);
+        logError("SoundBuffer") << "file not found: " << path;
         return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
+                                "file not found: " + internal::pathToDisplayUtf8(path));
     }
     if (!decodeFileWithMiniaudio(path, hint, label, out)) {
         return LoadResult::fail(LoadError::DecodeFailed,
                                 std::string(label) + " decode failed: " +
-                                internal::pathToUtf8(path));
+                                internal::pathToDisplayUtf8(path));
     }
     return LoadResult::success();
 }
@@ -466,10 +466,10 @@ LoadResult SoundBuffer::load(const fs::path& path) {
     }
 
     logError("SoundBuffer") << "unsupported extension '." << ext << "' for "
-                            << internal::pathToUtf8(path);
+                            << path;
     return LoadResult::fail(LoadError::UnsupportedFormat,
                             "unsupported extension '." + ext + "' for " +
-                            internal::pathToUtf8(path));
+                            internal::pathToDisplayUtf8(path));
 }
 
 } // namespace trussc

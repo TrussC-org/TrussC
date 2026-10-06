@@ -133,3 +133,9 @@ trusscli run -p .          # from this directory
 # or from the repo root, run every addon test harness:
 ./examples/build_all.py --addon-tests-only --verbose
 ```
+
+The optional `tests --playback-errors` mode needs a graphics context (Xvfb is
+sufficient on Linux). It checks fatal truncated-sample reads and
+`HapResult_Buffer_Too_Small`: one event and one error log, stopped state and
+retained texture. A separate single `HapResult_Bad_Frame` fixture checks a
+warning, continued playback and decoding of the following frame.
