@@ -255,7 +255,10 @@ internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngin
 size_t AudioEngine::getAnalysisBuffer(float* outBuffer, size_t numSamples) {
     if (!initialized_ || !outBuffer || numSamples == 0) return 0;
     numSamples = std::min(numSamples, size_t(ANALYSIS_BUFFER_SIZE));
-    const auto data = internal::AudioAnalysisAccess::snapshot(*this, numSamples);
+    // Callable from any thread: the lock covers analysisCopy_ as well as the
+    // ring. Only readers and init() take it, never the audio callback.
+    std::lock_guard<std::mutex> lock(analysisMutex_);
+    const auto data = analysisRing_ ? analysisRing_->snapshot(numSamples) : internal::AudioOutputSnapshot{};
     if (data.channels) {
         const size_t count = data.samples.size() / data.channels;
         const size_t padding = ANALYSIS_BUFFER_SIZE - count;
