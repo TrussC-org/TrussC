@@ -44,7 +44,7 @@ public:
             "audio/x-raw,format=F32LE,rate=44100 ! "
             "appsink name=sink sync=false";
 
-        return runPipeline(pipelineStr, buffer);
+        return runPipeline(pipelineStr, buffer, path);
     }
 
     bool decodeMemory(const void* data, size_t dataSize, SoundBuffer& buffer) {
@@ -62,11 +62,12 @@ public:
             "audio/x-raw,format=F32LE,rate=44100 ! "
             "appsink name=sink sync=false";
 
-        return runPipeline(pipelineStr, buffer, true);
+        return runPipeline(pipelineStr, buffer, "memory", true);
     }
 
 private:
-    bool runPipeline(const std::string& pipelineStr, SoundBuffer& buffer, bool useAppsrc = false) {
+    bool runPipeline(const std::string& pipelineStr, SoundBuffer& buffer,
+                     const std::string& source, bool useAppsrc = false) {
         GError* error = nullptr;
         pipeline_ = gst_parse_launch(pipelineStr.c_str(), &error);
 
@@ -123,28 +124,33 @@ private:
         // Collect decoded samples
         std::vector<float> allSamples;
         int channels = 0;
+        GstBus* bus = gst_element_get_bus(pipeline_);
+        bool decodeFailed = false;
 
         while (true) {
-            GstSample* sample = gst_app_sink_pull_sample(GST_APP_SINK(sink));
+            GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink), 100 * GST_MSECOND);
             if (!sample) {
-                // Check if EOS or error
-                if (gst_app_sink_is_eos(GST_APP_SINK(sink))) {
-                    break;  // End of stream
-                }
-                // Check for errors
+                // A pipeline error need not send EOS to appsink. Check the bus
+                // after every empty try, including when appsink reports EOS.
+                bool eos = gst_app_sink_is_eos(GST_APP_SINK(sink));
                 GstMessage* msg = gst_bus_pop_filtered(
-                    gst_element_get_bus(pipeline_),
+                    bus,
                     static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
                 if (msg) {
                     if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
                         GError* err = nullptr;
                         gst_message_parse_error(msg, &err, nullptr);
-                        logError("SoundBuffer") << "GStreamer error: " << err->message;
+                        logError("SoundBuffer") << "GStreamer error for " << source << ": " << err->message;
                         g_error_free(err);
+                        decodeFailed = true;
                     }
+                    // A bus EOS can race with the last samples reaching
+                    // appsink; appsink reports EOS only once its queue is
+                    // drained, so keep pulling until it does.
                     gst_message_unref(msg);
                 }
-                break;
+                if (decodeFailed || eos) break;
+                continue;
             }
 
             // Get buffer info
@@ -171,8 +177,11 @@ private:
             gst_sample_unref(sample);
         }
 
+        gst_object_unref(bus);
         gst_object_unref(sink);
         cleanup();
+
+        if (decodeFailed) return false;
 
         if (allSamples.empty()) {
             logError("SoundBuffer") << "no audio samples decoded";
