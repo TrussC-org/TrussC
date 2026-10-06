@@ -26,14 +26,16 @@ public:
         half_.allocate(16, 16, 1, TextureFormat::RGBA16F);
         check("fullscreen shader loads", fullscreen_.load(tc_fbomip_blit_shader_desc));
         check("commit listener installed", sg_add_commit_listener(listener));
-        // Use the working directory, not a macOS app bundle's data folder.
-        path_ = filesystem::current_path() / "fbo-readback-test.png";
-        screenPath_ = filesystem::current_path() / "fbo-readback-screen.png";
+        // A writable temp folder: not a macOS app bundle's data folder, and
+        // not the working directory, which is "/" on iOS.
+        path_ = filesystem::temp_directory_path() / "fbo-readback-test.png";
+        screenPath_ = filesystem::temp_directory_path() / "fbo-readback-screen.png";
         filesystem::remove(path_);
         filesystem::remove(screenPath_);
     }
 
     void draw() override {
+        if (completed) return; // exitApp() is a no-op on iOS; draw keeps running
         if (frames_ > 0) {
             check("exactly one commit since previous draw", commits == frames_);
             Image screen;
