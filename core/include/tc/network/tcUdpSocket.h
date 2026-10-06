@@ -14,6 +14,7 @@
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
 #include "../utils/tcLog.h"
+#include "../utils/tcOnceGate.h"
 #include "tcKeptThreads.h"
 
 // Platform-specific socket type
@@ -28,6 +29,8 @@
 #endif
 
 namespace trussc {
+
+namespace internal { struct UdpSocketTestAccess; }
 
 // ---------------------------------------------------------------------------
 // UDP receive event arguments
@@ -225,9 +228,23 @@ public:
     int getConnectedPort() const { return connectedPort_; }
 
 private:
+    friend struct internal::UdpSocketTestAccess;
+
+    enum class ErrorKind { Resolve, Send, Receive };
+    struct ErrorLogState {
+        OnceGate gate{5.0};
+        std::atomic<uint64_t> suppressed{0};
+        std::atomic<bool> failedSinceSuccess{false};
+    };
+
     void receiveThreadFunc();
     bool ensureSocket();
     void notifyError(const std::string& message, int code = 0);
+    void notifyError(ErrorKind kind, const std::string& message, int code = 0);
+    void notifyRecovery(ErrorKind kind);
+
+    ErrorLogState errorLogs_[3];
+    std::mutex errorLogMutex_;
 
     SocketHandle socket_ = INVALID_SOCKET_HANDLE;
     int localPort_ = 0;

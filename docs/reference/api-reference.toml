@@ -16000,6 +16000,13 @@ description.ja = "初回は true。間隔を指定した場合は、前回 true 
 description.ko = "처음에는 true. 간격을 지정한 경우 마지막 true 이후 그 시간이 지나면 다시 true. 그 밖에는 false"
 related = ["OnceGate"]
 
+["OnceGate::reset"]
+keywords = ["once", "reset", "recovery", "rearm"]
+description.en = "Restore the never-fired state so the next isFirstTime() returns true immediately, for both once-only and interval gates. Lock-free and safe from any thread"
+description.ja = "未発火の状態に戻し、1回限り・間隔指定のどちらのゲートでも次の isFirstTime() が即座に true を返す。ロック不要でどのスレッドからでも安全に呼べる"
+description.ko = "아직 실행되지 않은 상태로 되돌려 일회성·간격 지정 게이트 모두 다음 isFirstTime()이 즉시 true를 반환하게 한다. 락 없이 어느 스레드에서나 안전하게 호출할 수 있다"
+related = ["OnceGate", "OnceGate::isFirstTime"]
+
 ["logVerbose"]
 category = "utility"
 keywords = ["trace", "debug", "print"]
