@@ -14,11 +14,13 @@
 
 #include <TrussC.h>
 #include "tcAnalyzeImage.h"
+#include "tcAudioTools.h"
 
 namespace trussc {
 namespace mcp {
 
 void registerInspectionTools() {
+    detail::registerAudioTools();
 
     // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
     // secondary windows in the order tc_list_windows reports). Returns the

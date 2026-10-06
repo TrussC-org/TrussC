@@ -38,6 +38,7 @@
 #include "../events/tcEvent.h"
 #include "../utils/tcAtomicSharedPtr.h"
 #include "../utils/tcLog.h"
+#include "tcAudioAnalysis.h"
 
 namespace trussc {
 
@@ -1166,22 +1167,7 @@ public:
     // FFT analysis: Get latest audio samples (mono, left+right average)
     // numSamples: Number of samples to get (max ANALYSIS_BUFFER_SIZE)
     // Returns: Number of samples retrieved
-    size_t getAnalysisBuffer(float* outBuffer, size_t numSamples) {
-        if (!initialized_ || numSamples == 0) return 0;
-
-        numSamples = std::min(numSamples, (size_t)ANALYSIS_BUFFER_SIZE);
-
-        std::lock_guard<std::mutex> lock(analysisMutex_);
-
-        // Copy latest samples from ring buffer
-        size_t readPos = (analysisWritePos_ + ANALYSIS_BUFFER_SIZE - numSamples) % ANALYSIS_BUFFER_SIZE;
-
-        for (size_t i = 0; i < numSamples; i++) {
-            outBuffer[i] = analysisBuffer_[(readPos + i) % ANALYSIS_BUFFER_SIZE];
-        }
-
-        return numSamples;
-    }
+    size_t getAnalysisBuffer(float* outBuffer, size_t numSamples);
 
     // Add new playback instance. Accepts any SoundSource — eager
     // SoundBuffer or streaming SoundStream. For streams, also allocates a
@@ -1457,20 +1443,8 @@ private:
             if (buffer[i] < -1.0f) buffer[i] = -1.0f;
         }
 
-        // Copy to FFT analysis ring buffer (mono: left+right average)
-        {
-            std::lock_guard<std::mutex> lock(analysisMutex_);
-            for (int frame = 0; frame < num_frames; frame++) {
-                float mono;
-                if (num_channels > 1) {
-                    mono = (buffer[frame * num_channels] + buffer[frame * num_channels + 1]) * 0.5f;
-                } else {
-                    mono = buffer[frame * num_channels];
-                }
-                analysisBuffer_[analysisWritePos_] = mono;
-                analysisWritePos_ = (analysisWritePos_ + 1) % ANALYSIS_BUFFER_SIZE;
-            }
-        }
+        // Keep the actual, post-clamp output, independently for every channel.
+        if (analysisRing_) analysisRing_->write(buffer, num_frames, num_channels);
     }
 
     void* device_ = nullptr;   // ma_device*
@@ -1497,9 +1471,10 @@ private:
     // touched on the audio thread (mixAudioInternal), no atomicity needed.
     uint64_t framePosition_ = 0;
 
-    // FFT analysis ring buffer
-    std::vector<float> analysisBuffer_;
-    size_t analysisWritePos_ = 0;
+    // Only readers and device reconfiguration take this mutex. The callback
+    // owns the writer; the device is stopped before replacing the ring.
+    friend struct internal::AudioAnalysisAccess;
+    std::unique_ptr<internal::AudioOutputRing> analysisRing_;
     std::mutex analysisMutex_;
 
     // Drop counters, output meters, audio-thread CPU usage and the log rate

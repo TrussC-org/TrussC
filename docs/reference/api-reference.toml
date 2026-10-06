@@ -230,9 +230,9 @@ description.ja = "リアルタイム再生コールバック event。listen() �
 description.ko = "실시간 재생 콜백 이벤트. listen()으로 신스 / 처리 리스너 추가. 버퍼별로 오디오 스레드에서 발화, RT-safe 유지"
 
 ["AudioEngine::getAnalysisBuffer"]
-description.en = "Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)"
-description.ja = "最新のミックス出力サンプル (モノラル、L+R 平均) を outBuffer にコピー。numSamples は 4096 に制限される。書き込んだサンプル数を返す (グローバルラッパー: getAudioAnalysisBuffer)"
-description.ko = "최신 믹스 출력 샘플 (모노, L+R 평균) 을 outBuffer 에 복사. numSamples 는 4096 으로 제한됨. 기록한 샘플 수를 반환 (전역 래퍼: getAudioAnalysisBuffer)"
+description.en = "Copy the latest post-clamp output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096; missing startup samples are zero padded. Returns the number of samples written, or 0 while stopped or if concurrent writes prevent a snapshot. Reads the same two-second, per-channel ring as the MCP-only tc_get_audio_spectrum (full FFT, selectable size/window/channels/frequency range/peak count) and tc_save_audio_capture (recent output as float32 WAV). The audio callback writes the ring without locks. Global wrapper: getAudioAnalysisBuffer."
+description.ja = "最新のクランプ後の出力サンプル (モノラル、L+R 平均) を outBuffer にコピー。numSamples の上限は4096、起動直後の不足分は0で埋める。書き込んだサンプル数を返し、停止中または同時書き込みでスナップショットを取得できない場合は0。MCP 専用の tc_get_audio_spectrum (サイズ・窓・チャンネル・周波数範囲・ピーク数を指定できる全 FFT) と tc_save_audio_capture (直近の出力を float32 WAV に保存) と同じ、チャンネルごとの2秒間のリングを読む。オーディオコールバックはロックせず書き込む。グローバルラッパー: getAudioAnalysisBuffer。"
+description.ko = "최신 클램프 후 출력 샘플 (모노, L+R 평균)을 outBuffer 에 복사한다. numSamples 의 상한은 4096이며 시작 직후 부족한 샘플은 0으로 채운다. 기록한 샘플 수를 반환하며 정지 중이거나 동시 쓰기로 스냅샷을 얻지 못하면 0이다. MCP 전용 tc_get_audio_spectrum (크기·윈도·채널·주파수 범위·피크 수를 선택하는 전체 FFT) 및 tc_save_audio_capture (최근 출력을 float32 WAV 로 저장)와 같은 채널별 2초 링을 읽는다. 오디오 콜백은 잠금 없이 링에 쓴다. 전역 래퍼: getAudioAnalysisBuffer."
 
 ["AudioEngine::getBufferSize"]
 category = "audioengine"
