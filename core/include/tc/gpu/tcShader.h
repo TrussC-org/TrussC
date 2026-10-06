@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <cstring>
 #include "../utils/tcAnnotations.h"
+#include "../utils/tcOnceGate.h"
 
 namespace trussc {
 
@@ -231,6 +232,14 @@ protected:
     // Internal uniform plumbing — protected so Shader subclasses can reuse it.
     // Store uniform data for later application
     void storeUniform(int slot, const void* data, size_t size) {
+        if (slot < 0 || slot >= SG_MAX_UNIFORMBLOCK_BINDSLOTS) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) {
+                logWarning("Shader") << "Uniform slot " << slot << " is outside [0, "
+                    << SG_MAX_UNIFORMBLOCK_BINDSLOTS << "); ignored";
+            }
+            return;
+        }
         pendingUniforms[slot].assign((const uint8_t*)data, (const uint8_t*)data + size);
     }
 
@@ -247,12 +256,19 @@ public:
     // Texture binding
     // -------------------------------------------------------------------------
 
+    // Both overloads accept view slots [0, SG_MAX_VIEW_BINDSLOTS). A sampler
+    // is bound at the same slot only below SG_MAX_SAMPLER_BINDSLOTS (12).
+    // Higher texture slots (12-31) ignore a supplied sampler with a warning;
+    // the shader must sample them with a sampler at binding 0-11, set by
+    // another setTexture() call or an overridden setupBindings().
+
     // Convenience overload taking a raw sg_image. sokol's binding model needs
     // an sg_view, so one is created here and cached per slot (recreated only
     // when the image changes; the old view goes through the deferred-destroy
     // queue since a recorded draw may still reference it). Prefer the sg_view
     // overload when a view is already available (e.g. Texture::getView()).
     void setTexture(int slot, sg_image image, sg_sampler sampler) {
+        if (!validateTextureSlot(slot, sampler)) return;
         auto& cached = imageViews_[slot];
         if (cached.image.id != image.id) {
             internal::deferGpuDestroy(cached.view);
@@ -265,6 +281,7 @@ public:
     }
 
     void setTexture(int slot, sg_view view, sg_sampler sampler) {
+        if (!validateTextureSlot(slot, sampler)) return;
         pendingViews[slot] = { view, sampler };
     }
 
@@ -315,10 +332,7 @@ public:
         // Snapshot bindings: stream buffers + texture view/sampler pairs.
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;
-        for (const auto& [slot, tex] : pendingViews) {
-            bind.views[slot] = tex.view;
-            bind.samplers[slot] = tex.sampler;
-        }
+        fillTextureBindings(bind);
         setupBindings(bind);  // subclass hook (runs at submission, object is alive)
         bind.index_buffer = indexBuffer;
         draw.bindings = bind;
@@ -341,6 +355,17 @@ public:
     }
 
 protected:
+    // Slots have been checked by setTexture(); views and samplers have
+    // different sokol limits, so high view slots must not write a sampler.
+    void fillTextureBindings(sg_bindings& bind) const {
+        for (const auto& [slot, tex] : pendingViews) {
+            bind.views[slot] = tex.view;
+            if (slot < SG_MAX_SAMPLER_BINDSLOTS) {
+                bind.samplers[slot] = tex.sampler;
+            }
+        }
+    }
+
     // Sokol resources
     sg_shader shader = {};
     sg_pipeline pipeline = {};   // targets the swapchain (created at load())
@@ -437,6 +462,26 @@ protected:
     }
 
 private:
+    static bool validateTextureSlot(int slot, sg_sampler sampler) {
+        if (slot < 0 || slot >= SG_MAX_VIEW_BINDSLOTS) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) {
+                logWarning("Shader") << "Texture slot " << slot << " is outside [0, "
+                    << SG_MAX_VIEW_BINDSLOTS << "); ignored";
+            }
+            return false;
+        }
+        if (slot >= SG_MAX_SAMPLER_BINDSLOTS && sampler.id != SG_INVALID_ID) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) {
+                logWarning("Shader") << "Sampler for texture slot " << slot
+                    << " is ignored; use a sampler at binding [0, "
+                    << SG_MAX_SAMPLER_BINDSLOTS << ")";
+            }
+        }
+        return true;
+    }
+
     std::shared_ptr<internal::ShaderStreamState> stream_;
 
     void moveFrom(Shader&& other) {
@@ -589,10 +634,7 @@ public:
         bind.index_buffer = indexBuffer;
         // Apply inputs set via setTexture(slot, view, sampler), so a plain
         // FullscreenShader can sample a source without a setupBindings() override.
-        for (auto& [slot, v] : pendingViews) {
-            bind.views[slot] = v.view;
-            bind.samplers[slot] = v.sampler;
-        }
+        fillTextureBindings(bind);
         setupBindings(bind);
         sg_apply_bindings(&bind);
 
