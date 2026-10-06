@@ -19,7 +19,7 @@ SCRIPTS = ("build-web.sh", "build-web.command", "build-web.bat")
 
 class CleanTests(unittest.TestCase):
     def setUp(self):
-        self.scratch = tempfile.TemporaryDirectory(prefix="clean-test-", dir=ROOT)
+        self.scratch = tempfile.TemporaryDirectory(prefix="clean-test-")
         self.addCleanup(self.scratch.cleanup)
         self.base = Path(self.scratch.name)
         self.project = self.base / "sample project"
@@ -99,23 +99,33 @@ class CleanTests(unittest.TestCase):
         self.assertIn(str(self.project), result.stdout)
         self.assertIn("Nothing to clean.", result.stdout)
 
+    def nested(self, depth):
+        path = self.project.joinpath(*(f"level{i}" for i in range(depth)))
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_project_five_levels_up_is_detected(self):
+        # CWD plus five parents: a project five levels up is found.
+        nested = self.nested(5)
+        result = self.cli("info", "project", "--json", cwd=nested)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["path"], str(self.project))
+
     def test_six_levels_below_project_is_not_detected(self):
         self.markers()
-        for depth in (5, 6):
-            with self.subTest(depth=depth):
-                nested = self.project.joinpath(*(f"level{i}" for i in range(depth)))
-                nested.mkdir(parents=True, exist_ok=True)
-                before = self.snapshot()
-                result = self.cli("clean", "--all", cwd=nested)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("not inside a TrussC project", result.stderr)
-                self.assertEqual(before, self.snapshot())
-                result = self.cli("info", "project", "--json", cwd=nested)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIsNone(json.loads(result.stdout))
+        nested = self.nested(6)
+        before = self.snapshot()
+        result = self.cli("clean", "--all", cwd=nested)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not inside a TrussC project", result.stderr)
+        self.assertEqual(before, self.snapshot())
+        result = self.cli("info", "project", "--json", cwd=nested)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout))
 
-    def test_fifth_search_level_still_uses_src_only(self):
-        # CWD is the first candidate, so four parents make five levels.
+    def test_search_uses_src_only(self):
+        # Detection still keys on src/ alone (update needs it), so a project
+        # without CMakeLists.txt / addons.make is found from inside it.
         nested = self.project / "bin/data/sounds/bgm"
         nested.mkdir(parents=True)
         result = self.cli("info", "project", "--json", cwd=nested)

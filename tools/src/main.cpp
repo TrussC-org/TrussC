@@ -99,7 +99,7 @@ static bool isTrussCProject(const fs::path& path) {
     return fs::exists(path / "CMakeLists.txt") && fs::exists(path / "addons.make");
 }
 
-// Check at most five levels, starting at `startPath` (or CWD if empty),
+// Check `startPath` (or CWD if empty) and up to five parents above it,
 // looking for a TrussC project marker (src/ directory).
 // CMakeLists.txt / CMakePresets.json / addons.make
 // are generated or optional, so we only rely on src/ here. Non-TrussC projects
@@ -107,7 +107,7 @@ static bool isTrussCProject(const fs::path& path) {
 static string autoDetectProjectRoot(const string& startPath) {
     fs::path searchPath = fs::absolute(
         startPath.empty() ? fs::current_path() : fs::path(startPath));
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i <= 5; ++i) {
         if (fs::is_directory(searchPath / "src")) {
             return searchPath.string();
         }
