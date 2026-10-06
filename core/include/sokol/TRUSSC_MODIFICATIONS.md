@@ -174,6 +174,21 @@ before dispatch so reentry cannot deliver the event twice.
 
 ## sokol_gfx.h
 
+### BC texture support on iOS (#645)
+
+**Purpose:** Allow HAP playback on iOS GPUs that report BC texture support.
+
+**Changes (marked `[TrussC]`, based on trussc-mac's experiment in #645):**
+- `_sg_mtl_pixel_format()` maps BC1–BC7 on iOS as well as macOS. The iOS
+  mappings are guarded by `@available(iOS 16.4, *)` so existing projects
+  targeting 16.3 compile without availability warnings.
+- `_sg_mtl_init_caps()` registers BC sampling/filtering on iOS only under
+  `@available(iOS 16.4, *)` when `supportsBCTextureCompression` returns true.
+  macOS keeps its existing BC support; iOS ETC/ASTC support is unchanged.
+- The trusscli iOS preset now defaults to 16.4. Devices without BC support
+  retain the existing HAP load failure. This is a local patch; no upstream
+  PR is planned at this time.
+
 ### Swapchain pass store-action hint (Metal)
 
 **Purpose:** Support TrussC's swapchain pass suspend/resume (Fbo / shadow /
