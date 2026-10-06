@@ -1809,7 +1809,7 @@ _Auto-generated C++ API index from `reference-data.json` (structure from the C++
 ### Lifecycle
 
 ```cpp
-int runApp(const WindowSettings & settings = WindowSettings())  // Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main().
+int runApp(const WindowSettings & settings = WindowSettings())  // Start the application main loop with your App subclass. Templated on the app type — call TC_RUN_APP(MyApp) (or runApp<MyApp>()) from main(). On desktop, returns 1 if window or GPU startup fails before setup() runs, otherwise 0. On Linux, no available X display causes an abort (a nonzero process status). TC_RUN_APP passes this status to main(); Android and Web use OS/browser-owned loops and do not report shutdown through this return value.
 ```
 
 ### Graphics - Color
@@ -1944,7 +1944,7 @@ void bindCursorImage(Cursor cursor, int width, int height, const unsigned char *
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Show Yes/No confirmation dialog. Returns true if Yes clicked
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Show Yes/No dialog asynchronously. Callback receives true if Yes clicked
 CoreEvents & events()  // Get the global CoreEvents hub holding all framework events (setup, update, draw, keyPressed, mousePressed, etc.); use events().eventName.listen(callback) to subscribe
-void exitApp()  // Immediately exit the application (cannot be cancelled)
+void exitApp(int code = 0)  // Exit the application with normal cleanup (cannot be cancelled). code defaults to 0. On Windows/Linux, runApp returns this code to its caller; on macOS, the process exits with this code after cleanup without returning from runApp. Use a non-zero code for failures.
 Cursor getCursor()  // Get the current mouse cursor shape
 Vec2 getGlobalMousePos()  // Get global mouse position as Vec2
 float getGlobalMouseX()  // Get global mouse X (screen coordinates, not window-relative)
@@ -2163,7 +2163,7 @@ int recordingFrameCount()  // Number of frames captured so far in the current re
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path) [macos,windows,linux,ios,android]  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when the destination was prepared and the capture queued (parent dir created/writable), not that the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when capture is queued; on native platforms the destination folder is prepared first. This does not mean the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
@@ -2218,8 +2218,8 @@ void setLogLevel(LogLevel level)  // Set the console, file and system log levels
 void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
 std::vector<std::string> splitString(const std::string & source, const std::string & delimiter, bool ignoreEmpty = false, bool trim = false)  // Split string by delimiter
-void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substring in place
-std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count occurrences of a substring in a string
+void stringReplace(std::string & input, const std::string & searchStr, const std::string & replaceStr)  // Replace substrings in place, left to right without overlapping or searching the replacement. An empty search string leaves the input unchanged.
+std::size_t stringTimesInString(const std::string & haystack, const std::string & needle)  // Count nonoverlapping occurrences of a substring in a string. An empty substring matches nothing and returns 0.
 void tcCloseLogFile() ⚠️deprecated  // Deprecated alias for closeLogFile()
 Logger & tcGetLogger() ⚠️deprecated  // Deprecated alias for getLogger()
 LogStream tcLog(LogLevel level = Notice) ⚠️deprecated  // Deprecated alias for logAt()
@@ -2259,7 +2259,7 @@ bool fileExists(const fs::path & path)  // Check if file exists
 std::string getAbsolutePath(const fs::path & path)  // Get absolute path
 std::string getBaseName(const fs::path & path)  // Get filename without extension
 fs::path getDataPath(const fs::path & filename)  // Resolve a relative path against the data directory and return it as fs::path. An absolute input is returned unchanged. Only the data-directory base is lexically normalized; filename components are preserved. Safe to call from any thread. This is the bundled data the app reads (bin/data in development, the bundle's Resources/data when packaged); files the app writes and keeps go to getUserDataPath().
-fs::path getDataPathRoot()  // Get the current data path root as fs::path.
+fs::path getDataPathRoot()  // Get the current data path root as fs::path. Unless explicitly set, Apple platforms choose one existing folder on first use, in order: <exe>/data (iOS), <exe>/../Resources/data (macOS release), <exe>/../../../data (macOS development). The choice is kept for the process; missing files never fall back to another folder. Only the release workflow copies bin/data into the macOS bundle; normal builds keep using bin/data.
 fs::path getExecutableDir()  // Get the directory containing the running executable.
 fs::path getExecutablePath()  // Get the absolute path of the running executable.
 std::string getFileExtension(const fs::path & path)  // Get file extension without dot, as written (case kept). Compare toLower(getFileExtension(path)) to match it case-insensitively, as TrussC's loaders do.
@@ -2537,7 +2537,7 @@ AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleto
 int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-playing Sound voices.
 std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
-AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Only reads atomics, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
+AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; stream underrun frames, stalled callbacks and voices stopped by re-init; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Reads atomics and a steady clock, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
 bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
@@ -2708,6 +2708,11 @@ Color ColorOKLab::toRGB() const  // Convert to sRGB Color
 ```cpp
 ```
 
+### DeviceLostEventArgs — Arguments for the deviceLost event (Windows D3D11).
+
+```cpp
+```
+
 ### DragDropEventArgs — Arguments for filesDropped events
 
 ```cpp
@@ -2771,7 +2776,7 @@ void EasyCam::setZoomSensitivity(float s)  // Set zoom sensitivity
 ```cpp
 ```
 
-### Environment — IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT)
+### Environment — IBL environment map for PBR ambient lighting (irradiance + prefilter + BRDF LUT). Destruction touches window context state and must run on the main thread, like Light destruction.
 
 ```cpp
 const Texture & Environment::getBrdfLut() const  // Get BRDF integration lookup texture
@@ -2816,6 +2821,7 @@ bool Fbo::copyTo(Image & image) const  // Copy FBO contents to Image
 void Fbo::draw(float x, float y) const [+1]  // Draw FBO contents
 void Fbo::end()  // End rendering to FBO
 sg_image Fbo::getColorImage() const  // Return the underlying sokol-gfx color image handle (advanced interop).
+const std::string & Fbo::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
 int Fbo::getHeight() const  // Get height
 int Fbo::getSampleCount() const  // Get MSAA sample count
 sg_sampler Fbo::getSampler() const  // Return the underlying sokol-gfx sampler handle (advanced interop).
@@ -2829,6 +2835,7 @@ std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observer
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
 bool Fbo::readPixelsFloat(float * pixels) const [macos,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
 bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
+void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo.
 ```
 
 ### FileDialogResult — Result of a load/save file dialog
@@ -3033,6 +3040,7 @@ void Image::clear()  // Release image resources
 void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
 int Image::getChannels() const  // Get number of channels
 Color Image::getColor(int x, int y) const  // Get pixel color at position
+const std::string & Image::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
 int Image::getHeight() const  // Get height
 Pixels & Image::getPixels() [+1]  // Get pixels reference for direct manipulation
 unsigned char * Image::getPixelsData() [+1]  // Get raw pixel data pointer
@@ -3041,13 +3049,14 @@ int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
 LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain.
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths.
 bool Image::save(const fs::path & path) const  // Save image to file. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
 void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
+void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources.
 void Image::setDirty()  // Mark image as needing update
 void Image::update()  // Apply pixel changes to GPU texture
 ```
@@ -3185,7 +3194,7 @@ LoadResult LoadResult::success()  // Make a success result (static)
 void Logger::closeFile()  // Close the current log file
 LogLevel Logger::getConsoleLogLevel() const  // Get the current console log level
 LogLevel Logger::getFileLogLevel() const  // Get the current file log level
-std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open)
+std::string Logger::getLogFilePath() const  // Get the path of the current log file, as setLogFile resolved it (UTF-8; empty when no file is open). On Windows, unpaired UTF-16 surrogates are replaced with U+FFFD for display
 LogLevel Logger::getSystemLogLevel() const  // Get the current system (OS log) level
 bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
@@ -3231,7 +3240,7 @@ Mat4 Mat4::transposed() const  // Get transposed matrix
 bool Mat4::tryInvert(Mat4 & out) const  // Checked inverse: writes the inverse to out and returns true, or returns false (out unchanged) when the matrix is degenerate, e.g. an axis scaled to 0. The test is relative to the matrix scale, so small but valid scales still invert
 ```
 
-### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible)
+### Material — PBR material (metallic-roughness workflow, glTF 2.0 compatible). Destruction touches window context state and must run on the main thread, like Light destruction.
 
 ```cpp
 Material Material::bronze()  // Bronze material preset
@@ -3304,8 +3313,8 @@ void Mesh::drawWireframe() const  // Draw mesh as wireframe
 void Mesh::drawWithLighting() const  // Draw the mesh with lighting
 std::vector<Color> & Mesh::getColors() [+1]  // Get all vertex colors
 uint64_t Mesh::getDataRevision() const  // Current data revision: changes whenever the mesh data changes (mutators, non-const getters, markGpuDirty). GPU buffers are re-uploaded when it differs from the revision they were uploaded from. Compare with != only.
-sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx index buffer handle backing the mesh, or an empty handle if non-indexed (advanced interop).
-int Mesh::getGpuIndexCount() const  // Number of indices currently uploaded to the GPU index buffer (0 if the mesh is non-indexed). Pairs with getGpuIndexBuffer for custom rendering.
+sg_buffer Mesh::getGpuIndexBuffer() const  // The sokol-gfx buffer handle holding the uploaded list indices (advanced interop). TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Use getGpuIndexCount for the uploaded count. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists.
+int Mesh::getGpuIndexCount() const  // Number of indices in the uploaded GPU list; pairs with getGpuIndexBuffer for custom rendering. TriangleStrip and TriangleFan expand to triangle lists; LineStrip and LineLoop expand to line lists. If the mesh has no indices, 0..N-1 (N = vertex count) supplies the source sequence, including for Points. Custom pipelines must draw triangle modes as triangle lists and line modes as line lists.
 sg_buffer Mesh::getGpuPointBuffer() const  // The sokol-gfx buffer handle holding the uploaded point data, position + color per point (advanced interop).
 int Mesh::getGpuPointCount() const  // Number of points currently uploaded to the GPU point buffer (PrimitiveMode::Points). Pairs with getGpuPointBuffer for custom rendering.
 sg_buffer Mesh::getGpuVertexBuffer() const  // The sokol-gfx vertex buffer handle backing the mesh (advanced interop).
@@ -3591,7 +3600,7 @@ void Pixels::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U
 bool Pixels::isAllocated() const  // Check if allocated
 bool Pixels::isFloat() const  // Whether the pixel data uses 32-bit floats
 LoadResult Pixels::load(const fs::path & filePath)  // Load image from file into CPU memory. No GPU work, so it is safe on a worker thread; upload the result on the main thread (`Texture::allocate(pixels)`). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Load image from memory
+LoadResult Pixels::loadFromMemory(const unsigned char * buffer, int len)  // Decode an image from memory into CPU pixels. No GPU work, so it is safe on a worker thread.
 LoadResult Pixels::loadHDR(const fs::path & filePath)  // Load an HDR (.hdr) image into a float pixel buffer. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 bool Pixels::loadPlatform(const fs::path & path)  // Load an image using the platform image decoder
 void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true is 180°.
@@ -3882,7 +3891,7 @@ float Sound::getVolume() const  // Get current volume
 bool Sound::isLoaded() const  // Check if loaded
 bool Sound::isLoop() const  // Check if loop mode is enabled
 bool Sound::isPaused() const  // Check if paused
-bool Sound::isPlaying() const  // Check if playing
+bool Sound::isPlaying() const  // Check if playing (false while paused). A stream halted by a decoder failure stops after its buffered audio drains, including looping streams. The error is logged once; TrussC does not retry automatically.
 bool Sound::isStreaming() const  // True if this Sound was loaded via loadStream() (vs eager load())
 LoadResult Sound::load(const fs::path & path)  // Load audio file. Format auto-detected by extension: .wav .mp3 .ogg .flac .aac .m4a (case-insensitive; the file name keeps its case as written). Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
 void Sound::loadFromBuffer(const SoundBuffer & buf) [+1]  // Load PCM directly from a pre-generated SoundBuffer (e.g. from ChipSound or a procedural waveform), copying it or adopting the shared_ptr.
@@ -3973,18 +3982,25 @@ void StrokeMesh::update()  // Rebuild the internal triangle mesh (call before dr
 
 ```cpp
 bool TcpClient::connect(const std::string & host, int port)  // Connect to a server (blocking)
-void TcpClient::connectAsync(const std::string & host, int port)  // Connect asynchronously (notifies via onConnect)
+void TcpClient::connectAsync(const std::string & host, int port)  // Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it
 void TcpClient::disconnect()  // Disconnect
 std::string TcpClient::getRemoteHost() const  // Remote host name
 int TcpClient::getRemotePort() const  // Remote port
+size_t TcpClient::getSendAsyncBufferSize() const  // Get the send queue high-water mark in bytes
+size_t TcpClient::getSendAsyncPendingBytes() const  // Bytes queued but not yet completed
 bool TcpClient::isConnected() const  // Whether currently connected
+bool TcpClient::isConnecting() const  // Whether a TCP connection attempt or TLS handshake is in progress
 bool TcpClient::isUsingThread() const  // Whether threading is in use
 void TcpClient::notifyError(const std::string & msg, int code = 0)  // Report an error (message + code) from a derived class.
 void TcpClient::processNetwork()  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
 bool TcpClient::processNetworkStep(const AliveToken & alive)  // processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client.
 bool TcpClient::send(const void * data, size_t size) [+2]  // Send data to the server
+SendResult TcpClient::sendAsync(const void * data, size_t size) [+2]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
 void TcpClient::setBlocking(bool blocking)  // Set blocking mode
+void TcpClient::setConnectTimeout(float seconds)  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
 void TcpClient::setReceiveBufferSize(size_t size)  // Set the receive buffer size
+void TcpClient::setSendAsyncBufferSize(size_t bytes)  // Set the send queue high-water mark; default 16 MB, 0 unlimited
+void TcpClient::setSendTimeout(float seconds)  // Set the idle send timeout in seconds; default 60, 0 waits forever
 void TcpClient::setUseThread(bool useThread)  // Whether to use threads (must be false on Wasm)
 ```
 
@@ -4321,6 +4337,11 @@ const std::string & VideoDeviceInfo::getDeviceName() const  // Get the human-rea
 const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable unique identifier for the device
 ```
 
+### VideoErrorEventArgs — Runtime video error event payload.
+
+```cpp
+```
+
 ### VideoGrabber — Webcam capture source. Call setup() once, then update() every frame; getTexture() (via HasTexture) gives the live frame. Move-only. Camera permission is requested automatically on macOS
 
 ```cpp
@@ -4397,7 +4418,9 @@ void VideoPlayer::update()  // Update the video frame. Call once per frame in up
 ### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
 
 ```cpp
+void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
 void VideoPlayerBase::close()  // Close the video and release its resources.
+bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
 void VideoPlayerBase::firstFrame()  // Go to the first frame
 int VideoPlayerBase::getAudioChannels() const  // Return the number of audio channels, or 0 if no audio.
 uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec as a FourCC ('aac ', 'mp3 ', ...), or 0 if no audio.
@@ -4406,6 +4429,7 @@ int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate
 int VideoPlayerBase::getCurrentFrame() const  // Return the index of the current frame.
 float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
 float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
+const std::string & VideoPlayerBase::getErrorMessage() const  // Last runtime error message, or an empty string when there is no error. Query on the main thread after update().
 float VideoPlayerBase::getHeight() const  // Get video height in pixels
 std::string VideoPlayerBase::getHwAccelName() const  // Return the name of the active decode backend (e.g. "videotoolbox", "software", "none").
 float VideoPlayerBase::getPan() const  // Get current stereo pan
@@ -4418,21 +4442,24 @@ int VideoPlayerBase::getTotalFrames() const  // Return the total number of frame
 float VideoPlayerBase::getVolume() const  // Get current volume
 float VideoPlayerBase::getWidth() const  // Get video width in pixels
 bool VideoPlayerBase::hasAudio() const  // Return true if the video has an audio track.
+bool VideoPlayerBase::hasError() const  // Whether update() has delivered a runtime playback failure. Cleared by a successful load() or close(), retained through seek and play().
 bool VideoPlayerBase::isDone() const  // Check if playback has reached the end
 bool VideoPlayerBase::isFrameNew() const  // Return true if a new frame was decoded since the last update.
 bool VideoPlayerBase::isLoaded() const  // Check if a video is loaded
 bool VideoPlayerBase::isLoop() const  // Check if looping is enabled
 bool VideoPlayerBase::isPaused() const  // Check if video is paused
-bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused)
+bool VideoPlayerBase::isPlaying() const  // Check if video is currently playing (not paused). False after a runtime playback error.
 bool VideoPlayerBase::isReady() const  // True while the texture holds a real picture — i.e. drawing shows actual video, not black. With the default auto poster this is true from load() on; false only if the poster failed and no frame has arrived yet
 bool VideoPlayerBase::isUsingHwAccel() const  // Return true if hardware-accelerated decoding is currently active.
 LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from the given file path; return true on success.
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
+void VideoPlayerBase::movePlaybackErrorFrom(VideoPlayerBase & other)  // Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object.
 void VideoPlayerBase::nextFrame()  // Advance to the next frame.
 void VideoPlayerBase::play()  // Start or resume playback
 void VideoPlayerBase::playImpl()  // Platform hook: start playback. Pure virtual, implemented per backend.
 void VideoPlayerBase::previousFrame()  // Step back to the previous frame.
+void VideoPlayerBase::reportPlaybackError(const std::string & message, int64_t code = 0)  // Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them.
 void VideoPlayerBase::setCurrentTime(float seconds)  // Seek to a specific time in seconds
 void VideoPlayerBase::setFrame(int frame)  // Seek to the given frame index.
 void VideoPlayerBase::setLoop(bool loop)  // Enable/disable looping
@@ -4443,7 +4470,7 @@ void VideoPlayerBase::setPaused(bool paused)  // Pause or resume playback
 void VideoPlayerBase::setPausedImpl(bool paused)  // Platform hook: set paused state. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPosition(float pct)  // Seek to a playback position given as a fraction (0-1).
 void VideoPlayerBase::setPositionImpl(float pct)  // Platform hook: seek to a normalized position. Pure virtual, implemented per backend.
-void VideoPlayerBase::setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync. When drift exceeds this threshold, video seeks to match audio position instead of catching up frame-by-frame. Set to 0 to disable. Default: 0.5s. Primarily affects Linux (FFmpeg) backend.
+void VideoPlayerBase::setResyncThreshold(float seconds)  // Set the maximum video/audio drift before hard re-sync (video seeks to the audio position). Set to 0 or negative to disable hard re-sync. Default: 0.5s. Affects the Linux (FFmpeg) backend and tcxHap's HapPlayer. HapPlayer advances by wall-clock dt * speed and slews toward playing audio with a 0.25s time constant; slewing remains enabled when hard re-sync is disabled.
 void VideoPlayerBase::setSpeed(float speed)  // Set playback speed (1.0 = normal, 2.0 = double speed)
 void VideoPlayerBase::setSpeedImpl(float speed)  // Platform hook: set playback speed. Pure virtual, implemented per backend.
 void VideoPlayerBase::setVolume(float vol)  // Set audio volume (0.0 to 1.0)
