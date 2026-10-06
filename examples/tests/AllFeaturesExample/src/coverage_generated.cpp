@@ -3167,6 +3167,13 @@ struct Cover_VideoDeviceInfo : af::Scope<VideoDeviceInfo> {
     }
 };
 
+struct Cover_VideoErrorEventArgs : af::Scope<VideoErrorEventArgs> {
+    static void run() {
+        (void)af::val<VideoErrorEventArgs>().message;
+        (void)af::val<VideoErrorEventArgs>().errorCode;
+    }
+};
+
 struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -3272,6 +3279,9 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<VideoPlayerBase>().setPaused(af::val<bool>());
         (void)af::val<VideoPlayerBase>().togglePause();
         (void)af::val<VideoPlayerBase>().update();
+        (void)af::val<VideoPlayerBase>().onError;
+        (void)af::val<VideoPlayerBase>().hasError();
+        (void)af::val<VideoPlayerBase>().getErrorMessage();
         (void)af::val<VideoPlayerBase>().isPlaying();
         (void)af::val<VideoPlayerBase>().isPaused();
         (void)af::val<VideoPlayerBase>().isFrameNew();
@@ -3585,6 +3595,7 @@ void af::coverGenerated() {
     af_generated::Cover_Vec3::run();
     af_generated::Cover_Vec4::run();
     af_generated::Cover_VideoDeviceInfo::run();
+    af_generated::Cover_VideoErrorEventArgs::run();
     af_generated::Cover_VideoGrabber::run();
     af_generated::Cover_VideoPlayer::run();
     af_generated::Cover_VideoPlayerBase::run();
