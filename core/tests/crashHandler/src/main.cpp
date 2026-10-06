@@ -88,11 +88,10 @@ int child(const std::string& selected, const fs::path& directory) {
     }
     const auto log = directory / "crash.log";
     if (mode == "setup" || mode == "update") {
-#ifdef _WIN32
-        _wputenv_s(L"TRUSSC_LOG_FILE", log.c_str());
-#else
-        setenv("TRUSSC_LOG_FILE", log.c_str(), 1);
-#endif
+        // Headless apps do not read TRUSSC_LOG_FILE (#266); an explicit
+        // setLogFile() still routes the crash report into the file. The
+        // "setup" phase comes from setupNodeOnce(), shared with windowed Apps.
+        if (!setLogFile(log)) return 90;
         return runHeadlessApp<CrashApp>();
     }
     internal::installCrashHandler();
