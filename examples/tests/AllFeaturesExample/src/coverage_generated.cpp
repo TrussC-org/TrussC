@@ -31,6 +31,7 @@ static void cover_audioengine() {
 }
 
 static void cover_file() {
+    (void)getDataPath(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
     (void)utf8ToPath(af::val<std::string_view>());
     (void)getExecutablePath();
@@ -38,7 +39,6 @@ static void cover_file() {
     (void)loadErrorName(af::val<LoadError>());
     (void)setDataPathRoot(af::val<const fs::path>());
     (void)getDataPathRoot();
-    (void)getDataPath(af::val<const fs::path>());
 #if defined(AF_MACOS) || defined(AF_IOS)
     (void)setDataPathToResources();
 #endif
@@ -720,9 +720,7 @@ static void cover_window_system() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)grabScreen(af::val<Pixels>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)saveScreenshot(af::val<const std::filesystem::path>());
-#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
     (void)startRecording(af::val<const fs::path>(), af::val<const VideoRecordSettings>());
     (void)startRecording(af::val<const fs::path>(), af::val<float>());
@@ -1209,10 +1207,10 @@ struct Cover_ExitRequestEventArgs : af::Scope<ExitRequestEventArgs> {
 struct Cover_Fbo : af::Scope<Fbo> {
     static void run() {
         (void)Fbo();
-        (void)af::val<Fbo>().lifetimeToken();
-        (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
         (void)af::val<Fbo>().getDebugName();
+        (void)af::val<Fbo>().lifetimeToken();
+        (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
         (void)af::val<Fbo>().clear();
         (void)af::val<Fbo>().begin();
         (void)af::val<Fbo>().begin(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1479,12 +1477,12 @@ struct Cover_IesProfile : af::Scope<IesProfile> {
 struct Cover_Image : af::Scope<Image> {
     static void run() {
         (void)Image();
+        (void)af::val<Image>().setDebugName(af::val<const std::string>());
+        (void)af::val<Image>().getDebugName();
         (void)af::val<Image>().load(af::val<const fs::path>(), af::val<bool>());
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().save(af::val<const fs::path>());
         (void)af::val<Image>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<bool>());
-        (void)af::val<Image>().setDebugName(af::val<const std::string>());
-        (void)af::val<Image>().getDebugName();
         (void)af::val<Image>().clear();
         (void)af::val<Image>().isAllocated();
         (void)af::val<Image>().getWidth();
