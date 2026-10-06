@@ -361,6 +361,32 @@ void WebSocketClient::processFrame() {
             headerSize = 10;
         }
 
+        // RFC 6455 requires failing these frames, as Chrome and Firefox do.
+        // The web build already uses the browser WebSocket; native matches
+        // that established behavior (no extensions are negotiated).
+        if (b1 & 0x70) {
+            failConnection(1002, "WebSocket protocol error: RSV bits set");
+            return;
+        }
+        if ((opcode >= 0x3 && opcode <= 0x7) || opcode >= 0xB) {
+            failConnection(1002, "WebSocket protocol error: reserved opcode");
+            return;
+        }
+        if (opcode >= 0x8) {
+            if (!fin) {
+                failConnection(1002, "WebSocket protocol error: fragmented control frame (FIN=0)");
+                return;
+            }
+            if (payloadLen > 125) {
+                failConnection(1002, "WebSocket protocol error: control frame payload over 125 bytes");
+                return;
+            }
+        }
+        if (masked) {
+            failConnection(1002, "WebSocket protocol error: masked frame from server");
+            return;
+        }
+
         // Size and fragmentation checks need only the header, so a bad frame
         // fails the connection before its payload is buffered. The size check
         // comes first, so headerSize + payloadLen below cannot overflow.
@@ -383,23 +409,11 @@ void WebSocketClient::processFrame() {
             return;
         }
 
-        uint8_t maskingKey[4] = {0, 0, 0, 0};
-        if (masked) {
-            if (receiveBuffer_.size() < headerSize + 4) return;
-            memcpy(maskingKey, &receiveBuffer_[headerSize], 4);
-            headerSize += 4;
-        }
-
         if (receiveBuffer_.size() < headerSize + payloadLen) return;
 
         std::vector<char> payload(payloadLen);
         if (payloadLen > 0) {
             memcpy(payload.data(), &receiveBuffer_[headerSize], payloadLen);
-            if (masked) {
-                for (size_t i = 0; i < payloadLen; ++i) {
-                    payload[i] ^= maskingKey[i % 4];
-                }
-            }
         }
 
         // Remove processed frame from buffer

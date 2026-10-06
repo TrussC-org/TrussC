@@ -5,6 +5,7 @@ ELF built through the normal TrussC build. Platform tool mocks verify staging
 and signing order; they do not claim macOS or Windows device coverage.
 """
 import binascii
+from itertools import product
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = yaml.load((ROOT / '.github/workflows/release.yml').read_text(), Loader=yaml.BaseLoader)
+ARCHIVE_REFS = [('v1.2.3', 'v1.2.3'), ('fix/a', 'fix-a'),
+                ('fix-a', 'fix-a'), ('fix/release/check', 'fix-release-check')]
 
 
 def step(job, name):
@@ -73,6 +76,18 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def ok(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + (result.stderr or ''))
 
+    def assert_upload_matches(self, job, archive):
+        pattern = step(job, 'Upload artifact')['with']['path']
+        pattern = pattern.replace('${{ runner.temp }}/', '').replace('${{ env.APP_NAME }}', 'Fixture')
+        self.assertEqual(list(self.runner.glob(pattern)), [archive])
+
+    def clear_runner(self):
+        for child in self.runner.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+
     def test_workflow_shell_syntax_and_contract(self):
         for job_name, job in WORKFLOW['jobs'].items():
             for item in job['steps']:
@@ -92,7 +107,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertEqual(WORKFLOW['jobs'][job]['runs-on'], runner)
             self.assertEqual(WORKFLOW['jobs'][job]['needs'], 'version')
             self.assertIn('RelWithDebInfo', step(job, 'Configure (CMake)')['run'])
-            self.assertEqual(step(job, 'Upload symbols')['with']['if-no-files-found'], 'error')
+            self.assertEqual(step(job, 'Clone TrussC')['with']['ref'], '${{ needs.version.outputs.ref }}')
+            for name in ['Upload artifact', 'Upload symbols', 'Upload TrussC revision']:
+                self.assertEqual(step(job, name)['with']['if-no-files-found'], 'error')
         plist = (ROOT / 'core/resources/Info.plist.in').read_bytes()
         self.assertEqual(plistlib.loads(plist)['LSMinimumSystemVersion'], '${CMAKE_OSX_DEPLOYMENT_TARGET}')
 
@@ -102,11 +119,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         "print(os.environ.get('LATEST_TAG', 'v0.7.5'))\n"
                         "sys.exit(int(os.environ.get('GH_EXIT', '0')))\n")
         log = self.root / 'gh-call'
-        env = dict(REQUESTED_REF='explicit-commit', GH_REPO='TrussC-org/TrussC', GH_CALL_LOG=str(log))
+        env = dict(REQUESTED_REF='fix/release/check', GH_REPO='TrussC-org/TrussC', GH_CALL_LOG=str(log))
         pin = self.project / '.trussc-version'
         pin.write_text('v0.7.4\n')
         self.ok(self.run_step('version', 'Resolve TrussC version', **env))
-        self.assertEqual((self.root / 'output').read_text(), 'ref=explicit-commit\n')
+        self.assertEqual((self.root / 'output').read_text(), 'ref=fix/release/check\n')
         self.assertFalse(log.exists())
         (self.root / 'output').unlink()
         env['REQUESTED_REF'] = ''
@@ -123,8 +140,9 @@ class ReleaseWorkflowTest(unittest.TestCase):
 
     def test_revision_and_release_notes_with_single_platform(self):
         self.mock('git', "import sys\nprint('0123456789abcdef' if 'rev-parse' in sys.argv else 'v0.7.5')\n")
-        self.ok(self.run_step('linux', 'Record TrussC revision', TRUSSC_REF='v0.7.5', RUNNER_OS='Linux'))
+        self.ok(self.run_step('linux', 'Record TrussC revision', TRUSSC_REF='fix/release/check', RUNNER_OS='Linux'))
         revision = (self.runner / 'revision/trussc-Linux.md').read_text()
+        self.assertIn('ref `fix/release/check`', revision)
         self.assertIn('tag `v0.7.5`, commit `0123456789abcdef`', revision)
         artifacts = self.project / 'artifacts'
         for name in ['trussc-revision-linux', 'linux-tar', 'linux-symbols']:
@@ -134,8 +152,11 @@ class ReleaseWorkflowTest(unittest.TestCase):
         (artifacts / 'linux-symbols/app-debug.tar.gz').write_text('symbols')
         self.mock('gh', "import json, os, sys\nfrom pathlib import Path\n"
                         "Path(os.environ['GH_CALL_LOG']).write_text(json.dumps(sys.argv[1:]))\n")
-        self.ok(self.run_step('release', 'Create GitHub Release', GH_CALL_LOG=str(self.root / 'gh-call')))
+        self.ok(self.run_step('release', 'Create GitHub Release', GITHUB_REF_NAME='fix/release/check',
+                              GH_CALL_LOG=str(self.root / 'gh-call')))
         args = json.loads((self.root / 'gh-call').read_text())
+        self.assertEqual(args[:3], ['release', 'create', 'fix/release/check'])
+        self.assertEqual(args[args.index('--title') + 1], 'fix/release/check')
         self.assertIn('artifacts/linux-tar/app.tar.gz', args)
         self.assertIn('artifacts/linux-symbols/app-debug.tar.gz', args)
         self.assertFalse(any('*' in arg or 'revision.md' in arg for arg in args))
@@ -244,16 +265,18 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         "else:\n"
                         "    with zipfile.ZipFile(args[1]) as z:\n"
                         "        z.extractall(args[2][2:])\n")
-        for layout in ['bin', 'bin/RelWithDebInfo']:
-            with self.subTest(layout=layout):
+        for layout, (ref, archive_ref) in product(['bin', 'bin/RelWithDebInfo'], ARCHIVE_REFS):
+            with self.subTest(layout=layout, ref=ref):
                 dist = self.project / layout
                 dist.mkdir(exist_ok=True)
                 (dist / 'Fixture.exe').write_bytes(b'fixture executable')
                 (dist / 'dependency.dll').write_bytes(b'fixture DLL')
                 (dist / 'Fixture.pdb').write_bytes(b'fixture symbols')
                 (self.project / 'build').mkdir(exist_ok=True)
-                self.ok(self.run_step('windows', 'Package (zip)'))
-                with zipfile.ZipFile(self.runner / 'Fixture-v1.2.3-windows.zip') as z:
+                self.ok(self.run_step('windows', 'Package (zip)', GITHUB_REF_NAME=ref))
+                archive = self.runner / f'Fixture-{archive_ref}-windows.zip'
+                self.assert_upload_matches('windows', archive)
+                with zipfile.ZipFile(archive) as z:
                     names = z.namelist()
                     self.assertIn('Fixture.exe', names)
                     self.assertIn('dependency.dll', names)
@@ -265,11 +288,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     self.assertEqual(z.read('Fixture.pdb'), b'fixture symbols')
                 for name in ['Fixture.exe', 'dependency.dll', 'Fixture.pdb']:
                     (dist / name).unlink()
-                for child in self.runner.iterdir():
-                    if child.is_dir():
-                        shutil.rmtree(child)
-                    else:
-                        child.unlink()
+                self.clear_runner()
 
     def test_mac_staging_and_older_plist_minimum(self):
         app = self.project / 'bin/Fixture.app'
@@ -378,32 +397,35 @@ class ReleaseWorkflowTest(unittest.TestCase):
     def test_linux_real_elf_archive_and_symbols(self):
         exe = Path(os.environ['RELEASE_TEST_EXECUTABLE']).resolve()
         shutil.copy2(exe, self.project / 'bin/Fixture')
-        self.ok(self.run_step('linux', 'Package (tar.gz)'))
-        with tarfile.open(self.runner / 'Fixture-v1.2.3-linux.tar.gz') as t:
-            names = t.getnames()
-            self.assertIn('./data/日本語 sub/asset.txt', names)
-            self.assertIn('./data/.hidden', names)
-            self.assertIn('./data/empty', names)
-            self.assertFalse(any(n.endswith('.debug') and n.count('/') == 1 for n in names))
-        packaged = self.runner / 'verify/Fixture'
-        sections = subprocess.check_output(['readelf', '-S', str(packaged)], text=True)
-        self.assertNotIn('.debug_info', sections)
-        self.assertIn('.gnu_debuglink', sections)
-        with tarfile.open(self.runner / 'Fixture-debug.tar.gz') as t:
-            self.assertIn('./Fixture.debug', t.getnames())
-        debug = self.runner / 'symbols/Fixture.debug'
-        self.assertIn('.debug_info', subprocess.check_output(['objdump', '-h', str(debug)], text=True))
-        link = self.root / 'debuglink'
-        subprocess.run(['objcopy', '--dump-section', f'.gnu_debuglink={link}', str(packaged)], check=True)
-        payload = link.read_bytes()
-        name, _ = payload.split(b'\0', 1)
-        self.assertEqual(name, b'Fixture.debug')
-        self.assertEqual(int.from_bytes(payload[-4:], 'little'), binascii.crc32(debug.read_bytes()))
+        for ref, archive_ref in ARCHIVE_REFS:
+            with self.subTest(ref=ref):
+                self.ok(self.run_step('linux', 'Package (tar.gz)', GITHUB_REF_NAME=ref))
+                archive = self.runner / f'Fixture-{archive_ref}-linux.tar.gz'
+                self.assert_upload_matches('linux', archive)
+                with tarfile.open(archive) as t:
+                    names = t.getnames()
+                    self.assertIn('./data/日本語 sub/asset.txt', names)
+                    self.assertIn('./data/.hidden', names)
+                    self.assertIn('./data/empty', names)
+                    self.assertFalse(any(n.endswith('.debug') and n.count('/') == 1 for n in names))
+                packaged = self.runner / 'verify/Fixture'
+                sections = subprocess.check_output(['readelf', '-S', str(packaged)], text=True)
+                self.assertNotIn('.debug_info', sections)
+                self.assertIn('.gnu_debuglink', sections)
+                with tarfile.open(self.runner / 'Fixture-debug.tar.gz') as t:
+                    self.assertIn('./Fixture.debug', t.getnames())
+                debug = self.runner / 'symbols/Fixture.debug'
+                self.assertIn('.debug_info', subprocess.check_output(['objdump', '-h', str(debug)], text=True))
+                link = self.root / 'debuglink'
+                subprocess.run(['objcopy', '--dump-section', f'.gnu_debuglink={link}', str(packaged)], check=True)
+                payload = link.read_bytes()
+                name, _ = payload.split(b'\0', 1)
+                self.assertEqual(name, b'Fixture.debug')
+                self.assertEqual(int.from_bytes(payload[-4:], 'little'), binascii.crc32(debug.read_bytes()))
+                self.clear_runner()
         # No-data apps must also package cleanly.
         shutil.rmtree(self.data)
-        for folder in ['package', 'symbols', 'verify']:
-            shutil.rmtree(self.runner / folder)
-        self.ok(self.run_step('linux', 'Package (tar.gz)'))
+        self.ok(self.run_step('linux', 'Package (tar.gz)', GITHUB_REF_NAME=ref))
 
 
 if __name__ == '__main__':

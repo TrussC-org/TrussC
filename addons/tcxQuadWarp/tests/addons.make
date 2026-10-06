@@ -1,2 +1,2 @@
 # TrussC addons - one addon per line
-tcxCurl
+tcxQuadWarp

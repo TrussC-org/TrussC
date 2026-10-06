@@ -2,14 +2,13 @@
 
 Headless console test (no window) for the code behind
 `HttpClient::setVerbose(true)`: which parts of curl's debug output are shown
-as `<redacted>`. It needs no libcurl.
+as `<redacted>`. Also checks the default SSL option bits: Windows uses native
+CAs and best-effort revocation without disabling revocation; other platforms
+keep curl defaults. No network or display is needed.
 
-`addons.make` lists no addons, and `src/main.cpp` includes
-`../../src/tcxCurl.h` by relative path, so `TCX_HTTP_CURL` stays undefined
-and only the curl-free functions in `tcx::curl::detail` are compiled. Listing
-tcxCurl would build curl from source on Windows on every PR; the libcurl glue
-in the `TCX_HTTP_CURL` block is compiled by the daily run through
-`example-curl`.
+`addons.make` lists tcxCurl, so the libcurl glue is compiled as well. On
+Windows this builds curl from source with Schannel; macOS/Linux use the
+system libcurl.
 
 Line rules (`redactCredentialLine`):
 
