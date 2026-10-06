@@ -32,6 +32,8 @@ vcpkg install curl:x64-windows
 cmake -DCMAKE_TOOLCHAIN_FILE=[vcpkg root]/scripts/buildsystems/vcpkg.cmake ..
 ```
 
+Windows では既定で OS の証明書ストアを使用し、失効確認はブラウザと同様に best-effort で行います。`setTlsCACertificate()` で PEM を指定すると、その PEM が OS の証明書ストアを置き換え、失効確認は引き続き best-effort で行います。証明書とホスト名の検証は常に有効です。
+
 ### WASM (Emscripten)
 
 Emscripten Fetch API support is planned but not yet implemented.
