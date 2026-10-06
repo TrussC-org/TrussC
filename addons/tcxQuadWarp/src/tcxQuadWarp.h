@@ -32,7 +32,8 @@ public:
     void setUISelectedColor(const tc::Color& c) { uiSelectedColor_ = c; }
 
     void save(const std::string& path = "quadwarp.json");
-    void load(const std::string& path = "quadwarp.json");
+    // Returns false without changing corners if either array is invalid.
+    bool load(const std::string& path = "quadwarp.json");
 
     tc::Vec2 srcPoints[4];
     tc::Vec2 dstPoints[4];
