@@ -90,6 +90,7 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
+#include "../../src/tcTlsCaInternal.h"
 #include <psa/crypto.h>
 
 #include <atomic>
@@ -381,6 +382,67 @@ struct TlsServer {
         return mbedtls_ssl_conf_own_cert(&conf, &cert, &key) == 0;
     }
 };
+
+// The same loader used by Windows, with an injected DER list: no OS store or
+// network needed. Run on every platform so Linux also exercises the union.
+static void testDefaultCaUnion() {
+    using namespace tcx::tls::tls_internal;
+    TlsServer dummy;
+    check("default CA union: self-signed OS certificate", dummy.setup());
+    if (g_fail) return;
+    const vector<unsigned char> der(dummy.cert.raw.p,
+                                   dummy.cert.raw.p + dummy.cert.raw.len);
+    mbedtls_x509_crt bundle;
+    mbedtls_x509_crt_init(&bundle);
+    check("default CA union: initialized chain counts as empty", countCerts(&bundle) == 0);
+    const char* pem = bundledCaPem();
+    check("default CA union: bundle parses completely",
+          mbedtls_x509_crt_parse(&bundle, reinterpret_cast<const unsigned char*>(pem),
+                                 strlen(pem) + 1) == 0);
+    const size_t bundledCount = countCerts(&bundle);
+    check("default CA union: bundle is nonempty", bundledCount > 0);
+    if (g_fail) {
+        mbedtls_x509_crt_free(&bundle);
+        return;
+    }
+
+    mbedtls_x509_crt anchors;
+    mbedtls_x509_crt_init(&anchors);
+    const auto counts = loadWindowsDefaultCAs(&anchors, {der});
+    check("default CA union: one OS anchor loaded", counts.windowsRoot == 1);
+    check("default CA union: all bundled anchors appended", counts.bundled == bundledCount);
+    check("default CA union: OS + bundled count", countCerts(&anchors) == 1 + bundledCount);
+    bool hasDummy = false, hasIsrg = false;
+    for (auto* cert = &anchors; cert != nullptr; cert = cert->next) {
+        if (cert->raw.len == der.size() && memcmp(cert->raw.p, der.data(), der.size()) == 0) {
+            hasDummy = true;
+        }
+        char subject[512]{};
+        mbedtls_x509_dn_gets(subject, sizeof(subject), &cert->subject);
+        if (string(subject).find("CN=ISRG Root X1") != string::npos) hasIsrg = true;
+    }
+    check("default CA union: OS-only anchor retained", hasDummy);
+    check("default CA union: bundle-only ISRG Root X1 retained", hasIsrg);
+    mbedtls_x509_crt_free(&anchors);
+
+    for (const vector<vector<unsigned char>>& os :
+         {vector<vector<unsigned char>>{}, vector<vector<unsigned char>>{{0x00}}}) {
+        mbedtls_x509_crt_init(&anchors);
+        const auto fallback = loadWindowsDefaultCAs(&anchors, os);
+        check("default CA union: absent/invalid OS anchors load zero", fallback.windowsRoot == 0);
+        check("default CA union: absent/invalid OS store still gets bundle",
+              fallback.bundled == bundledCount && countCerts(&anchors) == bundledCount);
+        mbedtls_x509_crt_free(&anchors);
+    }
+    mbedtls_x509_crt_init(&anchors);
+    const vector<unsigned char> duplicate(bundle.raw.p, bundle.raw.p + bundle.raw.len);
+    const auto duplicates = loadWindowsDefaultCAs(&anchors, {duplicate});
+    check("default CA union: duplicate OS/bundled root is harmless",
+          duplicates.windowsRoot == 1 && duplicates.bundled == bundledCount &&
+          countCerts(&anchors) == 1 + bundledCount);
+    mbedtls_x509_crt_free(&anchors);
+    mbedtls_x509_crt_free(&bundle);
+}
 
 static int peerSend(void* ctx, const unsigned char* buf, size_t len) {
     rawsocket_t fd = *static_cast<rawsocket_t*>(ctx);
@@ -1541,7 +1603,7 @@ static void scenario() {
     TC_CLOSE(listener);
 }
 
-int main() {
+int main(int argc, char** argv) {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);
@@ -1553,6 +1615,10 @@ int main() {
     if (psa_crypto_init() != PSA_SUCCESS) {
         check("psa_crypto_init()", false);
         bail();
+    }
+    testDefaultCaUnion();
+    if (g_fail || (argc == 2 && string(argv[1]) == "--default-ca-union")) {
+        return g_fail ? 1 : 0;
     }
 #ifdef __linux__
     // Include persistent sanitizer/runtime helpers in the thread baseline.
