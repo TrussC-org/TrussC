@@ -628,7 +628,7 @@ private:
 // ---------------------------------------------------------------------------
 // Per-voice decoder + ring-buffer state. Full definition lives in
 // tcAudio_impl.cpp (where miniaudio's headers are visible).
-namespace internal { struct StreamInstance; }
+namespace internal { struct StreamInstance; struct Mp3StreamData; }
 
 class SoundStream : public SoundSource {
 public:
@@ -653,6 +653,7 @@ private:
     int encodingFormatHint_ = 0;  // ma_encoding_format value, stored as int
                                   // to avoid pulling miniaudio.h into the header.
     float duration_ = 0.0f;
+    std::shared_ptr<const internal::Mp3StreamData> mp3Data_;
 
     friend struct internal::StreamInstance;
     friend class AudioEngine;
@@ -966,6 +967,10 @@ namespace internal {
     // has none (not an MP3). tcAudio_impl.cpp.
     uint32_t lastStreamSeekPointsForTests();
 
+    // Cumulative MP3 length scans and seek-table builds for streaming (#463).
+    uint64_t streamMp3ScansForTests();
+    uint64_t streamMp3TableBuildsForTests();
+
     // Test hook: the number of passes the StreamWorker has run since the
     // process started (one per wakeup: a notify or the end of its wait), so
     // a headless test can count how often it wakes (core/tests/streamWorkerIdle).
@@ -976,6 +981,8 @@ namespace internal {
     // advance between fields; this is diagnostic state, not a transaction.
     struct StreamSeekStateForTests {
         bool hasStream = false;
+        uint64_t totalFrames = 0;
+        const void* mp3SeekTable = nullptr;
         uint64_t request = 0;
         uint64_t served = 0;
         uint64_t published = 0;
