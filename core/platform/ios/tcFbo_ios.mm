@@ -1,5 +1,5 @@
 // =============================================================================
-// tcFbo_ios.mm - FBO byte readback (iOS / Metal)
+// tcFbo_ios.mm - FBO pixel readback (iOS / Metal)
 // Uses the same sokol queue, flush and versioned texture as macOS.
 // =============================================================================
 
