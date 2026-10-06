@@ -23,10 +23,16 @@ The real-player check waits for explicit failure or normal EOF. Run graphical
 checks under Xvfb on Linux and apply an external process timeout for hangs.
 A truncated file that the backend treats as normal EOF is intentionally not
 classified as an error; choose one that produces an explicit read failure.
-The `bad-packet` mode requires one invalid-packet/frame warning, no error event
-or error log, and playback reaching the last frame and normal EOF. The error
-mode also checks one runtime error log, retained pixels/texture, and a recovery
-seek uploading its poster on a subsequent update before `play()`.
+The `bad-packet` mode requires one invalid-packet/frame warning (except on
+Windows, where Media Foundation can hide the packet internally), no error event
+or error log, and playback reaching the last frame and normal EOF. Linux and
+the separate tcxHap tests still require the warning. The error mode checks one
+runtime error log and that the player stays loaded. Readiness, retained
+pixels/texture, and a recovery seek uploading its poster before `play()` are
+required only if a picture (including an auto poster) was available before the
+error. With or without a prior picture, seeking and the subsequent update must
+return safely, retain the loaded/stopped/error state and message, and produce
+no duplicate error event/log.
 The `bad-packets` mode uses two consecutive invalid packets, checks one warning
 for the burst, waits past the five-second warning interval, then replays and
 checks that the next warning includes the accumulated skip count.
