@@ -226,7 +226,11 @@ inline void captureValue(WidgetValue& out, const ImGuiTcItemValue& item, ImGuiCo
         if (!out.password && s) {
             size_t n = strnlen(s, WidgetValue::kMaxTextBytes + 1);
             out.truncated = n > WidgetValue::kMaxTextBytes;
-            out.text.assign(s, out.truncated ? WidgetValue::kMaxTextBytes : n);
+            size_t len = out.truncated
+                ? static_cast<size_t>(ImTextFindValidUtf8CodepointEnd(
+                      s, s + n, s + WidgetValue::kMaxTextBytes) - s)
+                : n;
+            out.text.assign(s, len);
         }
         out.hasText = !out.password;
         break;

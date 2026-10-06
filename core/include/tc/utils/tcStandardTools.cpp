@@ -398,7 +398,7 @@ void registerInspectionTools() {
 
             json playingSounds = json::array();
             for (const auto& v : engine.getPlayingSounds()) {
-                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToUtf8(v.path)},
+                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToDisplayUtf8(v.path)},
                                   {"streaming", v.streaming},
                                   {"position", v.position}, {"duration", v.duration},
                                   {"volume", v.volume}, {"pan", v.pan}, {"speed", v.speed},
