@@ -75,18 +75,24 @@ value pointer, hence this patch.
   "the ID of the label in that window", for composite widgets that have no
   item of their own), the label, the data type, a pointer to the data, the
   component count, the widget flags, and `EditCountAtEntry`.
-- `EditCountAtEntry` — the hooks count every edit they see. A composite
-  widget (`DragFloat3`, `ColorEdit4`, ...) compares the count at return with
-  the count at entry, so an edit of any of its parts marks the whole widget as
-  edited. `EndGroup()` forwards `ImGuiItemStatusFlags_Edited` only when
-  `g.ActiveId` still belongs to the group; a Ctrl+Click text input committed by
-  clicking another widget above it would otherwise go unrecorded.
+- Fixed-size values — exactly the kinds accepted by `isWritableKind()`,
+  with non-null `Data` — are snapshotted at entry, after any queued MCP
+  write, and compared byte-for-byte at return. Only a changed value counts
+  as edited, including a color drag-and-drop; an unchanged selection does
+  not. The per-context snapshot stack reuses its slots and byte buffers
+  across frames, with no component limit. Push and pop use the same
+  condition, independent of the collection switch; pop precedes early
+  returns, so disabling collection during a call keeps scopes paired.
+- `EditCountAtEntry` — text keeps the existing edit counter / Edited flag
+  detection rather than copying its potentially large, resizable buffer.
+  `BeginCombo` and `BeginListBox` remain openers with no variable to compare.
 - `IMGUI_TC_ITEM_VALUE(id, label, kind, data_type, data, components, flags)` —
   declares that scope object, then (a second statement, so the call sites
   stay one line each) calls `ImGuiTcHook_ItemEntry(&object)` at the widget's
   **entry**, before the widget reads its variable. The entry hook returns the
   edit count for `EditCountAtEntry`, and writes a value the MCP tools queued
-  for this widget through `Data` (the only write through `Data`). Inactive (a
+  for this widget through `Data` (the only write through `Data`), before
+  taking the snapshot. Inactive (a
   null context, no entry call, a no-op destructor) unless
   `GImGui->TestEngineHookItems` is set.
 - `Injected` and `IMGUI_TC_RETURN(ret)` — the entry hook sets `Injected` when
@@ -236,7 +242,14 @@ How the hooks behave (in `tcImGuiHooks.h`):
 - Only the value hook creates "touched" entries, plus the routing in
   `ItemInfo`: a pick inside a list box's child window (its `ChildId` is the
   list box ID, recorded by the `BeginListBox` hook) or inside a combo popup
-  (`BeginComboDepth`) goes to that list box / combo, the list box first. So an
+  (`BeginComboDepth`) goes to that list box / combo, the list box first.
+  Routing searches all active snapshots for a matching plain `Combo` or
+  `ListBox` (including the combo depth); if found, only that widget's own
+  value comparison decides. Custom `BeginCombo` / `BeginListBox` still route
+  picks, but skip `Inputable` items: a filter text field records itself.
+  When a `Combo` index changes, `mergeValue` omits the earlier preview text
+  from both frame and touched records until the next frame reports the new
+  preview. So an
   entry carries the value of a caller's variable, except one routed to a
   custom `BeginCombo` / `BeginListBox`, which has no variable: only its label
   (and a combo's item shown). `ItemInfo` also refreshes existing entries.
