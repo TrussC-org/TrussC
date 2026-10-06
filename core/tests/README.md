@@ -646,6 +646,33 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `windowAppSwap/` — a secondary window's `setApp()` and `close()` are
+  requests that land at the window's next frame boundary (#315). Called from
+  the window's own App (`update()`, `keyPressed()`) or from its child
+  (`update()`, `onKeyPress()`), the window is unchanged until the tick or
+  event ends (`getApp()`, `App::getWindow()`, `isOpen()`), the App and its
+  children stay alive for the rest of it, and then the swap lands; a request
+  from outside a tick lands when the next tick starts. Two `setApp()` in one
+  frame: the last wins and the other App is never attached. `close()` with a
+  `setApp()` in the same frame: `close()` wins (the pending App is dropped
+  with a warning; a `setApp()` after `close()` is an error at the call). The
+  checks run again when a request is applied (the same App requested on two
+  windows lands on the first only), and the teardown detaches the App before
+  its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
+  closed window. The tick / event bracket is the glue's
+  `internal::WindowDispatchScope`; build with `-fsanitize=address` for the
+  memory side. The same test also has real-window pipeline lifetime checks:
+  `allCoreTests windowAppSwap --pipeline-cycles self 100` closes from the
+  secondary App's third update; replace `self` with `main` to close from the
+  main App, or `early` to request close before the first secondary tick.
+  Each cycle checks `sg_query_stats().total.pipelines.alive` against the
+  warmed main-window baseline, retains the closed Window for three main
+  updates to catch late recreation, and checks debug pipeline ownership.
+  These modes require a desktop backend; on Linux/X11 run, for example,
+  `LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a core/tests/allCoreTests/bin/allCoreTests
+  windowAppSwap --pipeline-cycles self 100` from the repository root. They
+  are compiled into the normal core runner, but must be invoked explicitly
+  with a display; the default invocation retains the headless checks.
 - `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
   client that leaves (closes or resets) are joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200
