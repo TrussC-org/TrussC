@@ -484,6 +484,72 @@ TC_CORE_TEST_MAIN() {
           writeSilentMp3(shortMp3, 1300) && writeWav(endWav, {{11000.0f / kRate, 0.0f}, {1000.0f / kRate, 0.5f}}) &&
           longMp3Frames > 0 && writeSilentMp3(longMp3, longMp3Frames));
 
+    // --- MP3 preparation is per load, shared across voices and engine rates (#463) ---
+    {
+        const auto scans = internal::streamMp3ScansForTests();
+        const auto builds = internal::streamMp3TableBuildsForTests();
+        auto preparedOnce = [&] {
+            return internal::streamMp3ScansForTests() == scans + 1 &&
+                   internal::streamMp3TableBuildsForTests() == builds + 1;
+        };
+        AudioSettings loadSettings = settings;
+        loadSettings.sampleRate = 44100;
+        check("MP3 cache: load at a non-native engine rate", engine.init(loadSettings));
+        Sound m;
+        check("MP3 cache: load the long file", (bool)m.loadStream(longMp3, 2));
+        check("MP3 cache: load scans and builds once", preparedOnce());
+        Sound other = m; // same source; play() creates independent voices
+        for (int i = 0; i < 3; ++i) {
+            check("MP3 cache: repeated play succeeds", m.play());
+            check("MP3 cache: play does not scan or build", preparedOnce());
+            m.stop();
+        }
+        check("MP3 cache: two simultaneous voices play", m.play() && other.play());
+        const auto first = internal::streamSeekStateForTests(m);
+        const auto second = internal::streamSeekStateForTests(other);
+        check("MP3 cache: both voices bind the same table",
+              first.mp3SeekTable && first.mp3SeekTable == second.mp3SeekTable);
+        check("MP3 cache: initial length uses the engine rate",
+              first.totalFrames == longMp3Total * 44100 / kRate);
+        check("MP3 cache: simultaneous play does not scan or build", preparedOnce());
+        m.setSpeed(0.0f);
+        other.setSpeed(0.0f);
+        for (int rate : {96000, 44100, kRate}) {
+            AudioSettings changed = settings;
+            changed.sampleRate = rate;
+            check("MP3 cache: re-init at another rate", engine.init(changed));
+            const auto migrated = internal::streamSeekStateForTests(m);
+            const auto migratedOther = internal::streamSeekStateForTests(other);
+            check("MP3 cache: re-init retains the same table for both voices",
+                  migrated.mp3SeekTable == first.mp3SeekTable &&
+                  migratedOther.mp3SeekTable == first.mp3SeekTable);
+            // At these rates miniaudio truncates to whole output frames.
+            check("MP3 cache: length converts from the native frame count",
+                  migrated.totalFrames == longMp3Total * rate / kRate &&
+                  migratedOther.totalFrames == migrated.totalFrames);
+            check("MP3 cache: re-init does not scan or build", preparedOnce());
+            for (float target : {900.0f, 100.0f, 600.0f}) {
+                m.setPosition(target);
+                const bool applied = waitFor([&] {
+                    const auto state = internal::streamSeekStateForTests(m);
+                    return state.request != 0 && state.applied == state.request;
+                }, 2000);
+                check("MP3 cache: long forward/backward seek is applied at target",
+                      applied && m.isPlaying() && approx(m.getPosition(), target, 0.001f));
+            }
+        }
+        m.stop();
+        m = Sound{};
+        other.setPosition(800.0f);
+        check("MP3 cache: remaining voice can seek after the original is released",
+              waitFor([&] {
+                  const auto state = internal::streamSeekStateForTests(other);
+                  return state.request != 0 && state.applied == state.request;
+              }, 2000) && approx(other.getPosition(), 800.0f, 0.001f));
+        check("MP3 cache: seeks do not scan or build", preparedOnce());
+        other.stop();
+    }
+
     // --- seek while playing ------------------------------------------------------
     Sound s;
     check("loadStream() opens the DC file", (bool)s.loadStream(dcWav) && s.isStreaming());
