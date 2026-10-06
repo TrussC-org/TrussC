@@ -285,6 +285,203 @@ static void testListBoxInCombo() {
 }
 
 // ---------------------------------------------------------------------------
+// Entry/exit value comparisons and popup routing (#345).
+// ---------------------------------------------------------------------------
+static void testUnchangedPicksAndComboPreview() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+    int quality = 0, fruit = 0;
+    bool showCombo = true, hideOnPick = false;
+    bool pickFrameHasText = true;
+    static const char* qualities[] = {"Low", "Medium", "High"};
+    static const char* fruits[] = {"Apple", "Banana", "Cherry"};
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 30));
+        ImGui::SetNextWindowSize(ImVec2(500, 500));
+        ImGui::Begin("Picks");
+        if (showCombo && ImGui::Combo("quality", &quality, qualities, 3)) {
+            auto& cs = tcx::imgui::detail::contexts()[h.context()];
+            pickFrameHasText = cs.currentFrame[cs.currentIdMap.at(ImGui::GetID("quality"))].value.hasText;
+            if (hideOnPick) showCombo = false;
+        }
+        ImGui::ListBox("fruit", &fruit, fruits, 3);
+        ImGui::End();
+    });
+    h.frames(3);
+    h.click("quality");
+    h.click("Low");
+    check("combo: current item re-picked, nothing recorded",
+          quality == 0 && tcx::imgui::getTouched().empty());
+    h.click("Apple");
+    check("listbox: current item re-picked, nothing recorded",
+          fruit == 0 && tcx::imgui::getTouched().empty());
+    h.click("Banana");
+    check("listbox: new pick recorded", fruit == 1 && isValue(touchedJson("fruit"), "listbox", 1));
+    h.click("quality");
+    h.click("Medium");
+    check("combo: new pick recorded", quality == 1 && isValue(touchedJson("quality"), "combo", 1));
+    check("combo: pick frame does not pair index with old preview", !pickFrameHasText);
+    const auto* w = h.find("quality");
+    check("combo: next frame restores the matching item",
+          w && w->value.hasText && w->value.text == "Medium" && touchedJson("quality").value("item", "") == "Medium");
+    hideOnPick = true;
+    h.click("quality");
+    h.click("High");
+    const auto entry = touchedJson("quality");
+    check("combo: touched combo hidden after pick keeps new index",
+          quality == 2 && !showCombo && h.find("quality") == nullptr && isValue(entry, "combo", 2));
+    check("combo: hidden after pick retains no stale item", !pickFrameHasText && !entry.contains("item"));
+}
+
+static void testCustomFilters() {
+    // Both custom openers route picks, but an InputText belongs to itself.
+    for (bool listBox : {false, true}) {
+        ImGuiHarness h;
+        tcx::imgui::resetTouched();
+        char filter[32] = "";
+        bool picked = false;
+        const char* label = listBox ? "filtered list" : "filtered combo";
+        h.setUi([&] {
+            ImGui::SetNextWindowPos(ImVec2(10, 30));
+            ImGui::SetNextWindowSize(ImVec2(500, 500));
+            ImGui::Begin("Filter");
+            bool open = listBox ? ImGui::BeginListBox(label, ImVec2(300, 150)) : ImGui::BeginCombo(label, "Choose");
+            if (open) {
+                ImGui::InputText("##Filter", filter, sizeof(filter));
+                if (ImGui::Selectable("Pick me")) picked = true;
+                if (listBox) ImGui::EndListBox(); else ImGui::EndCombo();
+            }
+            ImGui::End();
+        });
+        h.frames(3);
+        if (!listBox) h.click(label);
+        check(string(label) + ": filter visible", h.click("##Filter"));
+        ImGui::GetIO().AddInputCharactersUTF8("ab");
+        h.frames(2);
+        check(string(label) + ": filter typing recorded alone",
+              strcmp(filter, "ab") == 0 && touched("##Filter") && !touched(label) && tcx::imgui::getTouched().size() == 1);
+        if (!listBox) {
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+            h.frame();
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+            h.frame();
+            h.clickAt(ImVec2(450, 400)); // close even if Escape only deactivated the input
+            check("filtered combo: closed without a touched combo", !h.find("##Filter") && !touched(label));
+            h.click(label);
+        }
+        h.click("Pick me");
+        // A custom list box reports its opener before the pick; redraw for its value kind.
+        h.frame();
+        check(string(label) + ": Selectable pick routes to owner", picked && touched(label) && !touched("Pick me"));
+    }
+}
+
+static void testColorDropAndLargeDrag() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+    const float payload[] = {0.8f, 0.2f, 0.4f, 0.6f};
+    float color[] = {0.1f, 0.3f, 0.5f, 1.0f};
+    double values[8] = {};
+    ImVec2 source, target, lastComponent;
+    bool delivered = false;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 30));
+        ImGui::SetNextWindowSize(ImVec2(850, 500));
+        ImGui::Begin("Drag and drop");
+        ImGui::Button("Color source");
+        source = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()).GetCenter();
+        if (ImGui::BeginDragDropSource()) {
+            ImGui::SetDragDropPayload(IMGUI_PAYLOAD_TYPE_COLOR_4F, payload, sizeof(payload));
+            ImGui::TextUnformatted("Color");
+            ImGui::EndDragDropSource();
+        }
+        if (ImGui::ColorEdit4("tint", color, ImGuiColorEditFlags_NoInputs)) delivered = true;
+        target = ImVec2(ImGui::GetItemRectMin().x + 8, ImGui::GetItemRectMin().y + 8);
+        ImGui::SetNextItemWidth(720);
+        ImVec2 start = ImGui::GetCursorScreenPos();
+        ImGui::DragScalarN("many doubles", ImGuiDataType_Double, values, 8, 1.0f);
+        lastComponent = ImVec2(start.x + 690, start.y + ImGui::GetFrameHeight() * 0.5f);
+        ImGui::End();
+    });
+    h.frames(3);
+    h.mouseMove(source);
+    h.mouseButton(true);
+    h.mouseMove(ImVec2(source.x + 20, source.y));
+    h.mouseMove(target);
+    h.frame(); // target accepts the payload before delivery
+    h.mouseButton(false);
+    h.frame();
+    check("color drop: payload delivered into the variable", delivered && memcmp(color, payload, sizeof(color)) == 0);
+    const auto* tint = touched("tint");
+    check("color drop: untouched ColorEdit4 recorded",
+          tint && tint->value.bytes.size() == sizeof(color) &&
+          memcmp(tint->value.bytes.data(), payload, sizeof(color)) == 0 &&
+          isValue(touchedJson("tint"), "color", nlohmann::json::array({0.8, 0.2, 0.4, 0.6})));
+    h.mouseMove(lastComponent);
+    h.mouseButton(true);
+    h.mouseMove(ImVec2(lastComponent.x + 30, lastComponent.y));
+    h.mouseMove(ImVec2(lastComponent.x + 60, lastComponent.y));
+    h.mouseButton(false);
+    const auto* entry = touched("many doubles");
+    check("DragScalarN: eighth double changed by dragging", values[7] != 0.0);
+    check("DragScalarN: all eight doubles recorded",
+          entry && entry->value.components == 8 && entry->value.bytes.size() == sizeof(values) &&
+          memcmp(entry->value.bytes.data(), values, sizeof(values)) == 0);
+}
+
+static void testSnapshotPairingAndRouting() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+    bool checked = false, disableDuringCall = false;
+    int selection = 0;
+    // A getter may submit another value widget while the enclosing Combo or
+    // ListBox is active. Its ItemInfo runs with that inner snapshot on top.
+    struct GetterData { bool* checked; bool* disable; } data{&checked, &disableDuringCall};
+    auto getter = [](void* ptr, int index) -> const char* {
+        auto& d = *static_cast<GetterData*>(ptr);
+        if (*d.disable) tcx::imgui::disableCollection();
+        if (index == 0 && (ImGui::GetCurrentContext()->BeginComboDepth > 0 ||
+                          (ImGui::GetCurrentWindow()->Flags & ImGuiWindowFlags_ChildWindow)))
+            ImGui::Checkbox("nested option", d.checked);
+        return index == 0 ? "First" : "Second";
+    };
+    bool listBox = false;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 30));
+        ImGui::SetNextWindowSize(ImVec2(500, 500));
+        ImGui::Begin("Nested snapshots");
+        if (listBox) ImGui::ListBox("owner", &selection, getter, &data, 2);
+        else ImGui::Combo("owner", &selection, getter, &data, 2);
+        ImGui::End();
+    });
+    h.frames(3);
+    h.click("owner");
+    h.click("nested option");
+    check("snapshot search: inner value does not touch plain Combo",
+          checked && touched("nested option") && !touched("owner") && selection == 0);
+    h.clickAt(ImVec2(450, 400));
+    listBox = true;
+    checked = false;
+    tcx::imgui::resetTouched();
+    h.frames(3);
+    h.click("nested option");
+    check("snapshot search: inner value does not touch plain ListBox",
+          checked && touched("nested option") && !touched("owner") && selection == 0);
+    auto& cs = tcx::imgui::detail::contexts()[h.context()];
+    check("snapshot stack: nested scopes all popped", cs.valueSnapshotDepth == 0);
+    const auto* storage = cs.valueSnapshots[0].bytes.data();
+    h.frame();
+    check("snapshot stack: byte storage reused across frames", storage == cs.valueSnapshots[0].bytes.data());
+    disableDuringCall = true;
+    h.frame();
+    check("snapshot stack: disabled during call still pops", cs.valueSnapshotDepth == 0);
+    disableDuringCall = false;
+    tcx::imgui::enableCollection();
+    h.frame();
+    check("snapshot stack: re-enabled collection stays paired", cs.valueSnapshotDepth == 0);
+}
+
+// ---------------------------------------------------------------------------
 // tcx_imgui_input writes values through the value hook (#321)
 // ---------------------------------------------------------------------------
 static nlohmann::json input(ImGuiHarness& h, const string& label, const string& text, bool* deferred = nullptr) {
@@ -982,6 +1179,10 @@ int main() {
     testPanel();
     testClippedCheckbox();
     testListBoxInCombo();
+    testUnchangedPicksAndComboPreview();
+    testCustomFilters();
+    testColorDropAndLargeDrag();
+    testSnapshotPairingAndRouting();
     testValueInput();
     testValueInputReturnsTrue();
     testCopyOnReturn();

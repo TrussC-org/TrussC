@@ -15,8 +15,8 @@
 // - "Touched": every value widget whose value was changed through the widget
 //   (drag, typing, a click) since startup or the last resetTouched(). Kept
 //   across frames with the last known value, so it survives the widget not
-//   being drawn (collapsed tree, closed window). ImGuiItemStatusFlags_Edited is
-//   only set by widget interaction, never by code assigning the variable.
+//   being drawn (collapsed tree, closed window). Fixed-size values are compared
+//   at entry and exit; text uses ImGui's Edited flag / edit counter.
 //   Only the value hook creates entries, plus the combo / list box routing in
 //   the ItemInfo hook: a pick inside a combo popup or a list box is an edit of
 //   that widget. So an entry carries the value of a caller's variable, except
@@ -31,8 +31,8 @@
 // (IMGUI_TC_RETURN) unless the variable already held the value. The variable is
 // read back at its return, and checked again at the widget's entry in the next
 // frame (or settled on the read-back at return, when that frame does not come
-// in time: settleOverdueValues()). Such a write sets no Edited flag, so it is
-// not recorded as touched.
+// in time: settleOverdueValues()). Snapshots are taken after that write, so
+// the injection is not recorded as touched.
 // =============================================================================
 
 #include "imgui/imgui.h"
@@ -150,6 +150,17 @@ struct ContextState {
     // Edits the hooks have seen so far (see ImGuiTcItemValue::EditCountAtEntry)
     unsigned int editCount = 0;
 
+    // Active fixed-size value widgets. Keep the slots and their byte buffers
+    // when popping so both allocations are reused across widgets and frames.
+    struct ValueSnapshot {
+        const ImGuiTcItemValue* item = nullptr;
+        ImGuiID id = 0;
+        int comboDepth = 0;
+        std::vector<unsigned char> bytes;
+    };
+    std::vector<ValueSnapshot> valueSnapshots;
+    size_t valueSnapshotDepth = 0;
+
     // The combo whose popup is open at each BeginComboDepth (index depth - 1):
     // a pick in the popup (a Selectable) is an edit of that combo.
     struct OpenCombo { ImGuiID id = 0; std::string label, windowName; };
@@ -258,9 +269,9 @@ inline void captureValue(WidgetValue& out, const ImGuiTcItemValue& item, ImGuiCo
     }
 }
 
-// Combo: BeginCombo (inside Combo) already reported the item shown; keep it.
-inline void mergeValue(WidgetValue& dst, WidgetValue&& src) {
-    if (src.kind == ImGuiTcValueKind_Combo &&
+// Combo's preview was read before the pick: keep it only if the index stayed.
+inline void mergeValue(WidgetValue& dst, WidgetValue&& src, bool edited) {
+    if (src.kind == ImGuiTcValueKind_Combo && !edited &&
         (dst.kind == ImGuiTcValueKind_ComboPreview || dst.kind == ImGuiTcValueKind_Combo)) {
         src.hasText = dst.hasText;
         src.text = std::move(dst.text);
@@ -290,6 +301,17 @@ inline bool isWritableKind(int kind) {
     default:
         return false;
     }
+}
+
+// Search all active scopes: a component or another value widget may be on
+// top while ItemInfo runs inside a plain Combo / ListBox.
+inline bool hasValueOwner(const ContextState& cs, int kind, ImGuiID id, int comboDepth = 0) {
+    for (size_t i = cs.valueSnapshotDepth; i > 0; --i) {
+        const auto& snapshot = cs.valueSnapshots[i - 1];
+        if (snapshot.item->Kind == kind && snapshot.id == id &&
+            (kind != ImGuiTcValueKind_Combo || snapshot.comboDepth == comboDepth)) return true;
+    }
+    return false;
 }
 
 // Queue `bytes` for the widget `id` of `ctx`, which reported `kind`,
@@ -653,7 +675,9 @@ inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const ch
     if (ImGuiWindow* cw = ctx->CurrentWindow; cw && (cw->Flags & ImGuiWindowFlags_ChildWindow)) {
         auto lb = cs.listBoxes.find(cw->ChildId);
         if (lb != cs.listBoxes.end()) {
+            if (d::hasValueOwner(cs, ImGuiTcValueKind_ListBox, lb->first)) return;
             if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
+                !(flags & ImGuiItemStatusFlags_Inputable) &&
                 !d::findTouched(ctx, lb->first)) {
                 auto& t = d::markTouched(ctx, lb->first);
                 t.label = lb->second.label;
@@ -667,8 +691,10 @@ inline void ImGuiTestEngineHook_ItemInfo(ImGuiContext* ctx, ImGuiID id, const ch
     // covers custom BeginCombo/Selectable combos).
     if (ctx->BeginComboDepth > 0) {
         if ((flags & ImGuiItemStatusFlags_Edited) && d::touchedExcludeDepth == 0 &&
+            !(flags & ImGuiItemStatusFlags_Inputable) &&
             (size_t)ctx->BeginComboDepth <= cs.openCombos.size()) {
             const auto& combo = cs.openCombos[ctx->BeginComboDepth - 1];
+            if (d::hasValueOwner(cs, ImGuiTcValueKind_Combo, combo.id, ctx->BeginComboDepth)) return;
             if (combo.id && !d::findTouched(ctx, combo.id)) {
                 auto& t = d::markTouched(ctx, combo.id);
                 t.label = combo.label;
@@ -720,6 +746,19 @@ inline unsigned int ImGuiTcHook_ItemEntry(ImGuiTcItemValue* item) {
     namespace d = tcx::imgui::detail;
     auto& cs = d::contexts()[item->Ctx];
     if (d::collecting && !cs.pendingValues.empty()) d::writePendingValue(cs, *item);
+    // Deliberately independent of collecting: Ctx pairs entry and exit even
+    // if collection is disabled while the widget is running.
+    if (item->Data && d::isWritableKind(item->Kind)) {
+        if (cs.valueSnapshotDepth == cs.valueSnapshots.size()) cs.valueSnapshots.emplace_back();
+        auto& snapshot = cs.valueSnapshots[cs.valueSnapshotDepth++];
+        snapshot.item = item;
+        auto* window = static_cast<ImGuiWindow*>(item->Window);
+        snapshot.id = item->Id ? item->Id : (window && item->Label ? window->GetID(item->Label) : 0);
+        snapshot.comboDepth = item->Ctx->BeginComboDepth + 1;
+        const size_t size = ImGui::DataTypeGetInfo(item->DataType)->Size * (size_t)item->Components;
+        const auto* bytes = static_cast<const unsigned char*>(item->Data);
+        snapshot.bytes.assign(bytes, bytes + size);
+    }
     return cs.editCount;
 }
 
@@ -727,24 +766,32 @@ inline unsigned int ImGuiTcHook_ItemEntry(ImGuiTcItemValue* item) {
 // composite widget, its group) is g.LastItemData at this point.
 inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
     namespace d = tcx::imgui::detail;
-    if (!d::collecting || !item || !item->Ctx) return;
+    if (!item || !item->Ctx) return;
     ImGuiContext* ctx = item->Ctx;
     ImGuiWindow* window = static_cast<ImGuiWindow*>(item->Window);
     auto& cs = d::contexts()[ctx];
+    const bool hasSnapshot = item->Data && d::isWritableKind(item->Kind);
+    bool edited = false;
+    if (hasSnapshot) {
+        IM_ASSERT(cs.valueSnapshotDepth > 0);
+        const auto& snapshot = cs.valueSnapshots[--cs.valueSnapshotDepth];
+        IM_ASSERT(snapshot.item == item);
+        edited = std::memcmp(item->Data, snapshot.bytes.data(), snapshot.bytes.size()) != 0;
+    }
+    if (!d::collecting) return;
 
     // A value the tools queued was written at this widget's entry: read it back.
     if (!cs.pendingValues.empty()) d::readBackPendingValue(cs, *item);
 
-    // Edited by this call: its own item, or any part of it (a component of
-    // DragFloat3, ##X inside ColorEdit). Counting it also lets an enclosing
-    // widget see this edit.
+    // Fixed-size values use only the comparison above. Text keeps the
+    // Edited flag / edit counter; its buffer can be large and may be resized.
     // BeginCombo and BeginListBox return with their popup / child window
     // current, before anything in it was picked: they only say which widget.
     const bool opener = item->Kind == ImGuiTcValueKind_ComboPreview ||
                         item->Kind == ImGuiTcValueKind_ListBoxBegin;
-    bool edited = cs.editCount != item->EditCountAtEntry;
-    if (!opener && (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Edited)) {
-        edited = true;
+    if (!hasSnapshot) {
+        edited = cs.editCount != item->EditCountAtEntry;
+        if (!opener && (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Edited)) edited = true;
     }
     if (edited) cs.editCount++;
 
@@ -786,7 +833,7 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
         // BeginCombo registers no label (no ItemInfo upstream); its hook runs
         // only once ItemAdd let the combo through, so name it here.
         if (item->Kind == ImGuiTcValueKind_ComboPreview && entry.label.empty()) entry.label = item->Label;
-        d::mergeValue(entry.value, tcx::imgui::WidgetValue(value));
+        d::mergeValue(entry.value, tcx::imgui::WidgetValue(value), edited);
     } else if (!item->Id && (ctx->LastItemData.StatusFlags & ImGuiItemStatusFlags_Visible)) {
         tcx::imgui::WidgetInfo info;
         info.id = id;
@@ -807,6 +854,6 @@ inline void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
     if (t) {
         t->label = item->Label;
         t->windowName = window->Name;
-        d::mergeValue(t->value, std::move(value));
+        d::mergeValue(t->value, std::move(value), edited);
     }
 }
