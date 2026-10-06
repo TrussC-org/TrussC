@@ -308,8 +308,8 @@ public:
         internal::reportSglStackErrors(sgl_context_error(shared.context), true);
         sgl_tc_context_reset(shared.context);
 
-        // Switch back to default context
-        sgl_set_context(sgl_default_context());
+        // Switch back to the current window's context
+        sgl_set_context(internal::currentWindowContext().swapchainTarget.context);
         active_ = false;
         auto& wctx = internal::currentWindowContext();
         wctx.inFboPass = false;
