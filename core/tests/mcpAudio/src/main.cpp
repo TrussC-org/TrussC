@@ -35,16 +35,20 @@ void ringChecks() {
     // and timestamp checks catch a coherent-looking but stale/torn range.
     //
     // No sleeps or timing: the two threads advance in lockstep through two
-    // counters. Before snapshot i the reader waits for the writer to have
-    // written i * kReadStride frames; before a block starting at frame F the
-    // writer waits for the reader to have taken (F - seed) / kWriteStride
-    // snapshots. kReadStride < kWriteStride, so neither wait can block the
-    // other, and every snapshot overlaps the writer's progress. The deadline
-    // only turns a stall (a bug) into a failure instead of a hang; in normal
-    // runs it is never reached and does not affect the result.
+    // counters. Before snapshot i the reader waits until the writer has
+    // written i * kStride frames; the writer starts a block only while it
+    // stays within kLead frames of snapshots * kStride. Neither wait can block
+    // the other (both stopping would need s*S + L < written < s*S), and every
+    // snapshot overlaps the writer's progress. During one snapshot the writer
+    // can advance at most kStride + kLead frames, kept below the ring's spare
+    // storage (2.5 s stored for a 2 s window = 8192 frames here) so it can
+    // never lap the copy, however fast the machine. The deadline only turns
+    // a stall (a bug) into a failure instead of a hang; in normal runs it is
+    // never reached and does not affect the result.
     constexpr int historyFrames = 32768;
     constexpr int kSnapshots = 30000;
-    constexpr uint64_t kReadStride = 256, kWriteStride = 512;
+    constexpr uint64_t kStride = 256, kLead = 1024;
+    static_assert(kStride + kLead < historyFrames / 4, "writer must not lap a snapshot copy");
     internal::AudioOutputRing concurrent(historyFrames / 2, 2);
     vector<float> seed(historyFrames * 2);
     for (int f = 0; f < historyFrames; ++f) { seed[2*f] = float(f); seed[2*f+1] = -float(f); }
@@ -69,7 +73,7 @@ void ringChecks() {
         while (frame + 32 < (1u << 24)) {
             const uint64_t done = frame - historyFrames;
             if (!waitUntil([&] { return readerDone.load(memory_order_acquire) ||
-                                        snapshots.load(memory_order_acquire) * kWriteStride >= done; })) break;
+                                        done + 32 <= snapshots.load(memory_order_acquire) * kStride + kLead; })) break;
             if (readerDone.load(memory_order_acquire)) break;
             for (int f = 0; f < 32; ++f) { block[2*f] = float(frame + f); block[2*f+1] = -float(frame + f); }
             concurrent.write(block, 32, 2);
@@ -80,7 +84,7 @@ void ringChecks() {
     bool nonempty = true, consistent = true;
     uint64_t first = 0, last = 0;
     for (int i = 0; i < kSnapshots; ++i) {
-        if (!waitUntil([&] { return written.load(memory_order_acquire) >= i * kReadStride; })) break;
+        if (!waitUntil([&] { return written.load(memory_order_acquire) >= i * kStride; })) break;
         s = concurrent.snapshot(historyFrames);
         snapshots.store(i + 1, memory_order_release);
         nonempty &= s.samples.size() == historyFrames * 2;
@@ -93,7 +97,7 @@ void ringChecks() {
     }
     readerDone.store(true, memory_order_release);
     writer.join();
-    // By the last snapshot the writer is at least (kSnapshots - 1) * kReadStride
+    // By the last snapshot the writer is at least (kSnapshots - 1) * kStride
     // frames past the seed: far more than three passes over the ring storage.
     const uint64_t wrapTarget = 3 * (historyFrames * 5 / 4);
     check("concurrent reader/writer handshake never stalls", !stalled.load());
