@@ -18932,6 +18932,11 @@ description.en = "Platform hook: set looping. Pure virtual, implemented per back
 description.ja = "プラットフォームフック：ループを設定する。純粋仮想、バックエンドごとに実装。"
 description.ko = "플랫폼 훅: 루프를 설정한다. 순수 가상, 백엔드별 구현."
 
+["VideoPlayerBase::applyCachedStateToPlatform"]
+description.en = "Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play()."
+description.ja = "サブクラス用フック：バックエンドの読み込み後に、load() の前に設定したループ・音量・パンを適用し直す。速度は play() で適用する。"
+description.ko = "서브클래스용 훅: 백엔드 로드 후, load() 전에 설정한 루프·볼륨·팬을 다시 적용한다. 속도는 play()에서 적용한다."
+
 ["VideoPlayerBase::markFrameNew"]
 description.en = "Mark that a new frame has arrived (sets frameNew and firstFrameReceived)."
 description.ja = "新フレーム到着をマークする（frameNew と firstFrameReceived を立てる）。"

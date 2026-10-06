@@ -4418,6 +4418,7 @@ void VideoPlayer::update()  // Update the video frame. Call once per frame in up
 ### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
 
 ```cpp
+void VideoPlayerBase::applyCachedStateToPlatform()  // Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play().
 void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
 void VideoPlayerBase::close()  // Close the video and release its resources.
 bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
