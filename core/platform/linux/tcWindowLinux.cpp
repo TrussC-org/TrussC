@@ -49,7 +49,9 @@ sg_swapchain acquireSecondarySwapchain(void* user) {
 // --- tick: drive this window's update/draw with its context active ---------
 void windowTick(sapp_window swin, void* user) {
     trussc::Window* win = static_cast<trussc::Window*>(user);
-    if (!win) return;
+    // A closed Window may outlive its native side. Never dispatch callbacks
+    // or lazily recreate GPU resources after teardown.
+    if (!win || !win->isOpen()) return;
     // Frame boundary: a setApp() requested before or during this tick is
     // applied when the scope is entered and left, never inside the tick.
     internal::WindowDispatchScope scope(*win);
@@ -269,7 +271,9 @@ void dispatchWindowEvent(const sapp_event* ev, sapp_window swin, trussc::Window*
 
 void windowEvent(const sapp_event* ev, sapp_window swin, void* user) {
     trussc::Window* win = static_cast<trussc::Window*>(user);
-    if (!win) return;
+    // A closed Window may outlive its native side. Never dispatch callbacks
+    // or lazily recreate GPU resources after teardown.
+    if (!win || !win->isOpen()) return;
     auto& ctx = win->context();
     auto* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &ctx;

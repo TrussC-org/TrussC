@@ -650,8 +650,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
   closed window. The tick / event bracket is the glue's
   `internal::WindowDispatchScope`; build with `-fsanitize=address` for the
-  memory side. Not covered: the native close (`sapp_window_request_close()`
-  landing through `close_cb` on X11 / Win32 / macOS), a manual check.
+  memory side. The same test also has real-window pipeline lifetime checks:
+  `allCoreTests windowAppSwap --pipeline-cycles self 100` closes from the
+  secondary App's third update; replace `self` with `main` to close from the
+  main App, or `early` to request close before the first secondary tick.
+  Each cycle checks `sg_query_stats().total.pipelines.alive` against the
+  warmed main-window baseline, retains the closed Window for three main
+  updates to catch late recreation, and checks debug pipeline ownership.
+  These modes require a desktop backend; on Linux/X11 run, for example,
+  `LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a core/tests/allCoreTests/bin/allCoreTests
+  windowAppSwap --pipeline-cycles self 100` from the repository root. They
+  are compiled into the normal core runner, but must be invoked explicitly
+  with a display; the default invocation retains the headless checks.
 - `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
   client that leaves (closes or resets) are joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200

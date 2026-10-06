@@ -28,18 +28,20 @@
 //   - The teardown detaches the App before its exit() / cleanup() run:
 //     setApp() and close() from the App's own exit() / cleanup() find a
 //     closed window with no App.
-// The native close (sapp_window_request_close() landing through close_cb) is
-// checked by hand (see the README entry).
+// --pipeline-cycles self|main|early [N] additionally exercises real native
+// close callbacks and checks live GPU resources under X11 / Win32 / macOS.
 // =============================================================================
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <functional>
 #include <string>
 #include <vector>
+#include "pipelineCycles.h"
 
 using namespace std;
 using namespace tc;
@@ -219,7 +221,10 @@ private:
 
 // -----------------------------------------------------------------------------
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc >= 3 && string(argv[1]) == "--pipeline-cycles") {
+        return pipelineCycles::run(argv[2], argc > 3 ? std::atoi(argv[3]) : 100);
+    }
     getMainThreadId();   // this thread is the main thread
 
     vector<string> warnings, errors;
