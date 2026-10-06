@@ -30,39 +30,59 @@ void ringChecks() {
     ring.write(signal.data() + 10, 295, 2);
     s = ring.snapshot(500);
     check("oversized callback retains latest two seconds per channel", s.framesWritten == 300 && s.samples.size() == 256 && s.samples[0] == 172 && s.samples[255] == -299);
-    // Small callbacks every ~50 microseconds overlap full two-second reads. Seed history so
-    // every read must be nonempty, including the first. Values stay exact in
-    // float, and timestamp checks catch a coherent-looking but stale/torn range.
+    // Small callbacks overlap full two-second reads. Seed history so every
+    // read must be nonempty, including the first. Values stay exact in float,
+    // and timestamp checks catch a coherent-looking but stale/torn range.
+    //
+    // No sleeps or timing: the two threads advance in lockstep through two
+    // counters. Before snapshot i the reader waits for the writer to have
+    // written i * kReadStride frames; before a block starting at frame F the
+    // writer waits for the reader to have taken (F - seed) / kWriteStride
+    // snapshots. kReadStride < kWriteStride, so neither wait can block the
+    // other, and every snapshot overlaps the writer's progress. The deadline
+    // only turns a stall (a bug) into a failure instead of a hang; in normal
+    // runs it is never reached and does not affect the result.
     constexpr int historyFrames = 32768;
+    constexpr int kSnapshots = 30000;
+    constexpr uint64_t kReadStride = 256, kWriteStride = 512;
     internal::AudioOutputRing concurrent(historyFrames / 2, 2);
     vector<float> seed(historyFrames * 2);
     for (int f = 0; f < historyFrames; ++f) { seed[2*f] = float(f); seed[2*f+1] = -float(f); }
     concurrent.write(seed.data(), historyFrames, 2);
-    atomic<bool> finished{false};
-    atomic<uint64_t> writes{0};
+    atomic<bool> readerDone{false}, stalled{false};
+    atomic<uint64_t> written{0}, snapshots{0};
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(120);
+    auto waitUntil = [&](auto ready) {
+        while (!ready()) {
+            if (stalled.load(memory_order_relaxed) || chrono::steady_clock::now() > deadline) {
+                stalled.store(true, memory_order_relaxed);
+                return false;
+            }
+            this_thread::yield();
+        }
+        return true;
+    };
     thread writer([&] {
         float block[64];
         uint64_t frame = historyFrames;
-        while (!finished.load(memory_order_relaxed) && frame + 32 < (1u << 24)) {
+        // Values must stay exact in float (below 2^24).
+        while (frame + 32 < (1u << 24)) {
+            const uint64_t done = frame - historyFrames;
+            if (!waitUntil([&] { return readerDone.load(memory_order_acquire) ||
+                                        snapshots.load(memory_order_acquire) * kWriteStride >= done; })) break;
+            if (readerDone.load(memory_order_acquire)) break;
             for (int f = 0; f < 32; ++f) { block[2*f] = float(frame + f); block[2*f+1] = -float(frame + f); }
             concurrent.write(block, 32, 2);
             frame += 32;
-            writes.fetch_add(1, memory_order_relaxed);
-            this_thread::sleep_for(chrono::microseconds(50));
+            written.store(frame - historyFrames, memory_order_release);
         }
     });
-    while (!writes.load(memory_order_relaxed)) this_thread::yield();
     bool nonempty = true, consistent = true;
     uint64_t first = 0, last = 0;
-    // Read at least 30000 times and until the writer has wrapped the ring
-    // several times: sleep_for(50us) can take a millisecond or more (Windows),
-    // so a fixed read count may finish before the writer wraps. The deadline
-    // only stops a stalled writer from hanging the test.
-    const uint64_t wrapTarget = 3 * (historyFrames * 5 / 4);
-    const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
-    for (int i = 0; i < 30000 || (last <= first + wrapTarget &&
-                                  chrono::steady_clock::now() < deadline); ++i) {
+    for (int i = 0; i < kSnapshots; ++i) {
+        if (!waitUntil([&] { return written.load(memory_order_acquire) >= i * kReadStride; })) break;
         s = concurrent.snapshot(historyFrames);
+        snapshots.store(i + 1, memory_order_release);
         nonempty &= s.samples.size() == historyFrames * 2;
         if (i == 0) first = s.framesWritten;
         last = s.framesWritten;
@@ -71,8 +91,12 @@ void ringChecks() {
             if (s.samples[2*f] != float(frame) || s.samples[2*f+1] != -float(frame)) consistent = false;
         }
     }
-    finished.store(true, memory_order_relaxed);
+    readerDone.store(true, memory_order_release);
     writer.join();
+    // By the last snapshot the writer is at least (kSnapshots - 1) * kReadStride
+    // frames past the seed: far more than three passes over the ring storage.
+    const uint64_t wrapTarget = 3 * (historyFrames * 5 / 4);
+    check("concurrent reader/writer handshake never stalls", !stalled.load());
     check("30000 concurrent full-history snapshots are never empty", nonempty);
     check("concurrent snapshots are contiguous with consistent channels", consistent);
     check("stress reader overlaps writer progress and multiple wraps", last > first + wrapTarget);
