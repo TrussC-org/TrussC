@@ -129,6 +129,40 @@ through `allCoreTests`). It still runs natively under `--core-tests-only`, so
 give the native side something real to check (or an explicit skip).
 Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
+### Display modes (`display-test` marker, daily Linux only)
+
+After the normal core build, daily CI runs every `core/tests/*/display-test`
+under Xvfb with Mesa software GL. PR CI does not run these modes. Each marker
+line is one process invocation, with shell-style quoting and `#` comments,
+but no shell expansion. The token `{test}` expands to the test executable
+(plus its name for `allCoreTests`); the working directory is the test's own
+directory. For example:
+
+```text
+{test} --gpu-check
+```
+
+Use multiple lines for multiple modes. A line may prefix `{test}` with a
+launcher or test-local fixture helper (see `startupExit` and
+`videoPlayerError`). Keep arguments and any Mesa-specific skip reason next
+to the test, never in the workflow. To hold a mode back, prefix its line
+with `skip "<reason>"` (for example `skip "#707: no audio device on the
+runner" {test} --gpu-check`): it is not run, but it is listed as `SKIP` with
+the reason and counted in the summary, and it never fails the sweep. Interactive modes must have an automated
+equivalent that exits (`hotReloadLifecycle --reload-check`, for example).
+Missing binaries, nonzero exits and hangs fail the sweep; later modes still
+run. The 600-second per-process timeout only stops hangs. Printed wall times
+are informational.
+
+After building the core tests, run the same step locally on Linux with:
+
+```sh
+LIBGL_ALWAYS_SOFTWARE=1 \
+  __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
+  xvfb-run -a -s '-screen 0 1280x1024x24' \
+  python3 tools/run_core_display_tests.py
+```
+
 ## Keep it curated (avoid rot)
 
 - Default workflow: **when you fix a bug, add the regression test that would have
