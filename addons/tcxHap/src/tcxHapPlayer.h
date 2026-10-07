@@ -243,6 +243,7 @@ public:
 
     // Relative paths resolve via getDataPath, like VideoPlayer::load.
     tc::LoadResult load(const tc::fs::path& filePath) override {
+        ycocgShaderFailed_ = false;
         const auto previousError = errorMessage_;
         if (initialized_) {
             close();
@@ -682,6 +683,8 @@ private:
 
     // YCoCg shader for HAP-Q
     mutable tc::Shader ycocgShader_;
+    // A failed lazy load is retried only after the next load().
+    mutable bool ycocgShaderFailed_ = false;
 
     // RGBA pixel buffer for encoding (decoded from BC/DXT on demand)
     std::vector<uint8_t> pixels_;
@@ -727,6 +730,9 @@ private:
         hasAudio_ = other.hasAudio_;
         audioHeldForReverse_ = other.audioHeldForReverse_;
         decodeTimeMs_ = other.decodeTimeMs_;
+        ycocgShader_ = std::move(other.ycocgShader_);
+        ycocgShaderFailed_ = other.ycocgShaderFailed_;
+        other.ycocgShaderFailed_ = false;
 
         // Invalidate source
         other.initialized_ = false;
@@ -1075,10 +1081,11 @@ private:
     // -------------------------------------------------------------------------
 
     void initYCoCgShader() const {
-        if (!ycocgShader_.isLoaded()) {
+        if (!ycocgShader_.isLoaded() && !ycocgShaderFailed_) {
             tc::logNotice("HapPlayer") << "Loading YCoCg shader...";
             if (!ycocgShader_.load(ycocg_shader_desc)) {
-                tc::logError("HapPlayer") << "Failed to load YCoCg shader!";
+                ycocgShaderFailed_ = true;
+                tc::logError("HapPlayer") << "Failed to load YCoCg shader; HAP-Q is drawn without colour conversion until the next load()";
             } else {
                 tc::logNotice("HapPlayer") << "YCoCg shader loaded successfully";
             }
@@ -1090,11 +1097,6 @@ private:
         initYCoCgShader();
         if (!ycocgShader_.isLoaded()) {
             // Fallback to standard draw (will show wrong colors)
-            static bool warned = false;
-            if (!warned) {
-                tc::logWarning("HapPlayer") << "YCoCg shader not loaded, using fallback";
-                warned = true;
-            }
             texture_.draw(x, y, w, h);
             return;
         }

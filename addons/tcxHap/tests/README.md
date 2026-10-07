@@ -139,3 +139,13 @@ sufficient on Linux). It checks fatal truncated-sample reads and
 `HapResult_Buffer_Too_Small`: one event and one error log, stopped state and
 retained texture. A separate single `HapResult_Bad_Frame` fixture checks a
 warning, continued playback and decoding of the following frame.
+
+The optional `tests --shader-failure` mode also runs under Xvfb. It builds a
+4x4 HAP-Q movie locally and reserves the remaining shader slots to force a
+real shader load failure. Over 64 draws it checks one load attempt, one
+HapPlayer error explaining the fallback, no separate fallback warning, and
+raw texture pixels read back from an Fbo. It also checks independent players,
+one new attempt after `load()`, no retry merely because shader slots become
+available, successful recovery on the next `load()`, and preservation of
+shader state when moving a player. The existing lower-level Shader/Sokol
+failure diagnostics are left intact.

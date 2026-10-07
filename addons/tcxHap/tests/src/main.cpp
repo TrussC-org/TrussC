@@ -1263,7 +1263,130 @@ private:
     }
 };
 
+// A single 4x4 uncompressed HAP-Q block, with a red/opaque raw texture.
+// The movie is constructed locally so this regression needs no encoder or audio.
+static vector<char> buildShaderFailureMovie() {
+    vector<char> frame(20, 0);
+    frame[0] = 16;
+    frame[3] = char(0xAF); // no secondary compression, YCoCg DXT5
+    frame[4] = char(255); // BC3 alpha endpoint, all indices select it
+    frame[13] = char(0xF8); // BC3 RGB565 endpoint: red
+    const auto mdat = makeAtom("mdat", frame);
+    vector<char> entry(78, 0);
+    entry[7] = 1; // data reference index
+    entry[25] = 4; entry[27] = 4; // width, height (entry excludes atom header)
+    vector<char> stsd; appendU32(stsd, 0); appendU32(stsd, 1);
+    const auto description = makeAtom("HapY", entry);
+    stsd.insert(stsd.end(), description.begin(), description.end());
+    vector<char> stts; appendU32(stts, 0); appendU32(stts, 1);
+    appendU32(stts, 1); appendU32(stts, 1);
+    vector<char> stsc; appendU32(stsc, 0); appendU32(stsc, 1);
+    appendU32(stsc, 1); appendU32(stsc, 1); appendU32(stsc, 1);
+    vector<char> stsz; appendU32(stsz, 0); appendU32(stsz, frame.size()); appendU32(stsz, 1);
+    vector<char> stco; appendU32(stco, 0); appendU32(stco, 1); appendU32(stco, 8);
+    const auto stbl = makeAtom("stbl", concat({makeAtom("stsd", stsd), makeAtom("stts", stts),
+        makeAtom("stsc", stsc), makeAtom("stsz", stsz), makeAtom("stco", stco)}));
+    vector<char> mdhd; appendU32(mdhd, 0); appendU32(mdhd, 0); appendU32(mdhd, 0);
+    appendU32(mdhd, 1); appendU32(mdhd, 1); appendU32(mdhd, 0);
+    vector<char> hdlr(8, 0);
+    hdlr.insert(hdlr.end(), {'v', 'i', 'd', 'e'}); hdlr.resize(25, 0);
+    const auto moov = makeAtom("moov", makeAtom("trak", makeAtom("mdia",
+        concat({makeAtom("mdhd", mdhd), makeAtom("hdlr", hdlr), makeAtom("minf", stbl)}))));
+    return concat({mdat, moov});
+}
+
+class ShaderFailureApp : public App {
+public:
+    void draw() override {
+        const auto path = fs::temp_directory_path() / "tcxHap_shader_failure.mov";
+        check("HAP-Q shader failure fixture written", writeBytes(path, buildShaderFailureMovie()));
+        HapPlayer player, other;
+        if (!player.load(path) || !other.load(path)) {
+            check("HAP-Q shader failure fixture loads", false);
+            fs::remove(path);
+            exitApp();
+            return;
+        }
+        player.setFrame(0);
+        other.setFrame(0);
+        Fbo fbo;
+        fbo.allocate(4, 4);
+        // Warm the Fbo and the ordinary texture path before exhausting the pool.
+        fbo.begin();
+        player.getTexture().draw(0, 0, 4, 4);
+        fbo.end();
+
+        int attempts = 0, errors = 0, warnings = 0;
+        string error;
+        auto logger = getLogger().onLog.listen([&](LogEventArgs& log) {
+            if (log.message.find("[HapPlayer]") != 0) return;
+            if (log.message.find("Loading YCoCg shader...") != string::npos) ++attempts;
+            if (log.level == LogLevel::Error) { ++errors; error = log.message; }
+            if (log.level == LogLevel::Warning) ++warnings;
+        });
+        // Reserve every remaining shader slot. Shader::load must now fail.
+        vector<sg_shader> reserved;
+        for (;;) {
+            const auto shader = sg_alloc_shader();
+            if (!shader.id) break;
+            reserved.push_back(shader);
+        }
+
+        const auto drawMany = [&](const HapPlayer& p) {
+            fbo.begin();
+            clear(0, 0, 0, 1);
+            for (int i = 0; i < 64; ++i) p.draw(0, 0, 4, 4);
+            fbo.end();
+        };
+        drawMany(player);
+        check("HAP-Q: 64 draws attempt and report failure once",
+              attempts == 1 && errors == 1 && warnings == 0);
+        check("HAP-Q: error explains fallback and retry boundary",
+              error.find("without colour conversion until the next load()") != string::npos);
+        unsigned char pixels[4 * 4 * 4] = {};
+        const bool read = fbo.readPixels(pixels);
+        bool red = read;
+        for (int i = 0; i < 16; ++i) {
+            red &= pixels[4 * i] == 255 && pixels[4 * i + 1] == 0 &&
+                   pixels[4 * i + 2] == 0 && pixels[4 * i + 3] == 255;
+        }
+        check("HAP-Q: failed shader still draws the raw texture", red);
+        drawMany(other);
+        check("HAP-Q: failure is remembered separately for each player", attempts == 2 && errors == 2);
+        check("HAP-Q: reload succeeds with the shader pool full", bool(player.load(path)));
+        player.setFrame(0);
+        drawMany(player);
+        check("HAP-Q: reload allows exactly one more failed attempt", attempts == 3 && errors == 3);
+
+        for (auto shader : reserved) sg_dealloc_shader(shader);
+        drawMany(player);
+        check("HAP-Q: available resources alone do not trigger a retry", attempts == 3 && errors == 3);
+        HapPlayer moved(std::move(player));
+        drawMany(moved);
+        other = std::move(moved);
+        drawMany(other);
+        check("HAP-Q: moves preserve the remembered failure", attempts == 3 && errors == 3);
+        check("HAP-Q: reload after resources recover succeeds", bool(other.load(path)));
+        other.setFrame(0);
+        drawMany(other);
+        check("HAP-Q: next load retries successfully once", attempts == 4 && errors == 3 && warnings == 0);
+        HapPlayer loaded(std::move(other));
+        drawMany(loaded);
+        check("HAP-Q: moves preserve a successfully loaded shader", attempts == 4 && errors == 3);
+        loaded.close();
+        fs::remove(path);
+        exitApp();
+    }
+};
+
 int main(int argc, char** argv) {
+    if (argc > 1 && string(argv[1]) == "--shader-failure") {
+        WindowSettings settings;
+        settings.setSize(64, 64);
+        settings.setHighDpi(false);
+        runApp<ShaderFailureApp>(settings);
+        return g_fail ? 1 : 0;
+    }
     if (argc > 1 && string(argv[1]) == "--playback-errors") {
         WindowSettings settings;
         settings.setSize(64, 64);
