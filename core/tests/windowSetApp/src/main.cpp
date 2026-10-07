@@ -69,6 +69,10 @@ struct CountApp : App {
     bool requestKeptAppLive = false;
     bool removeInUpdate = false;        // update() calls window->setApp(nullptr)
     shared_ptr<App> swapInSetup;        // set: setup() calls window->setApp(it)
+    // What window->getApp() returned inside exit() / cleanup() (when window is set).
+    bool sawWindowAtExit = false, sawWindowAtCleanup = false;
+    App* appAtExit = nullptr;
+    App* appAtCleanup = nullptr;
 
     void setup() override {
         ++setups;
@@ -96,10 +100,15 @@ struct CountApp : App {
         requestKeptAppLive = window->getApp().get() == this &&
             exits.load() == 0 && cleanups.load() == 0;
     }
-    void exit() override { ++exits; order += 'E'; }
+    void exit() override {
+        ++exits;
+        order += 'E';
+        if (window) { sawWindowAtExit = true; appAtExit = window->getApp().get(); }
+    }
     void cleanup() override {
         ++cleanups;
         order += 'C';
+        if (window) { sawWindowAtCleanup = true; appAtCleanup = window->getApp().get(); }
         outHooksAtCleanup = AudioEngine::getInstance().audioOut.listenerCount();
     }
     void audioOut(AudioOutBuffer&) override { ++audioCalls; }
@@ -199,6 +208,8 @@ TC_CORE_TEST_MAIN() {
         OpenWindow win, other;
         auto a = make_shared<CountApp>();
         auto b = make_shared<CountApp>();
+        a->window = &win;   // records getApp() in exit() / cleanup(); a and b
+        b->window = &win;   // make no requests of their own here
         win.setApp(a);
         tickWindow(win);
         check("a: attached, setup() once, audioOut() called",
@@ -213,6 +224,11 @@ TC_CORE_TEST_MAIN() {
         check("swap: exit() before cleanup(), its hooks detached after cleanup()",
               a->order == "SEC" && a->outHooksAtCleanup == outBase + 1, a->order);
         check("swap: its audioOut() is not called again", audioStopped(*a) && hooksAtBase(), hooks());
+        // Like close(): the window drops the App before running its exit() /
+        // cleanup(), so getApp() there already returns the incoming App.
+        check("swap: inside the outgoing exit() / cleanup(), getApp() is the incoming App",
+              a->sawWindowAtExit && a->sawWindowAtCleanup &&
+              a->appAtExit == b.get() && a->appAtCleanup == b.get());
         check("swap: the window shows the incoming App",
               win.getApp() == b && b->setups.load() == 0 && b->exits.load() == 0);
         tickWindow(win);
@@ -236,6 +252,9 @@ TC_CORE_TEST_MAIN() {
         internal::applyPendingAppForTests(win);
         check("setApp(nullptr): exit() and cleanup() ran once each",
               b->order == "SEC" && b->exits.load() == 1 && b->cleanups.load() == 1, b->order);
+        check("setApp(nullptr): inside its exit() / cleanup(), getApp() is null",
+              b->sawWindowAtExit && b->sawWindowAtCleanup &&
+              b->appAtExit == nullptr && b->appAtCleanup == nullptr);
         check("setApp(nullptr): its audioOut() is not called again, the window is empty",
               audioStopped(*b) && hooksAtBase() && win.getApp() == nullptr, hooks());
         check("the earlier App was not ended a second time",

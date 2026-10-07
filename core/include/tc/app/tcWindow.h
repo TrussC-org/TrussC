@@ -440,6 +440,8 @@ inline void Window::applyPendingApp() {
     if (next) attached.insert(next.get());
     app_ = std::move(next);
     ctx_.rootNode = app_;
+    // Same shape as endApp() (close): the window drops the App first, then
+    // its exit() / cleanup() run, so getApp() there is already the next App.
     // An App runs once (#318): end it at the boundary, outside its own
     // callbacks, with this window's context still active. Keep it alive until
     // its audio hooks are detached and any callback in flight has returned.
