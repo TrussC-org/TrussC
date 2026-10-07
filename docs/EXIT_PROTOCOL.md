@@ -43,10 +43,11 @@ log records still obey the file level; the bypass is internal to the runtime.
 
 Known reason tokens are `window-close`, `request-exit-app`, `exit-app`,
 `tc-quit`, `os-session-end` (Windows), `os-logoff`, `os-restart`, `os-shutdown`
-(macOS when supplied by the quit Apple event), `sigterm`, `sigint`, and
-`device-lost` where the backend detects loss. A cancelled request clears its
-origin. Cleanup freezes it so callbacks cannot change the reason halfway
-through the pair. Unknown Apple event reasons are not inferred.
+(macOS when supplied by the quit Apple event), `app-quit` (macOS: a quit Apple
+event without one of those reasons, i.e. Cmd+Q, the Dock's Quit or an
+AppleScript `quit`), `sigterm`, `sigint`, and `device-lost` where the backend
+detects loss. A cancelled request clears its origin. Cleanup freezes it so
+callbacks cannot change the reason halfway through the pair.
 
 | Observed markers for a run | Meaning |
 | --- | --- |

@@ -3597,7 +3597,10 @@ static bool _sapp_tc_create_main_window(void) {
     (void)sender;
     if (!_sapp_tc.app.quit_ordered) {
         // Cocoa forwards the quit Apple event's reason for OS session exits.
-        // keyAEQuitReason ('why?'); absent/unknown means we omit the reason.
+        // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
+        // Quit, an AppleScript quit) carries no session reason: app-quit, so
+        // the main window's windowShouldClose: does not fill in window-close.
+        // IfEmpty keeps a reason an earlier exit request already recorded.
         NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
         const AEEventID why = [[event paramDescriptorForKeyword:0x7768793f] enumCodeValue];
         switch (why) {
@@ -3608,7 +3611,8 @@ static bool _sapp_tc_create_main_window(void) {
                 trussc::internal::setExitReason("os-restart"); break;
             case 0x73687574: // kAEShutDown ('shut')
                 trussc::internal::setExitReason("os-shutdown"); break;
-            default: break;
+            default:
+                trussc::internal::setExitReasonIfEmpty("app-quit"); break;
         }
     }
     return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;

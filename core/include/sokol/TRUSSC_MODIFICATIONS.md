@@ -451,7 +451,9 @@ All modifications by tettou771
   cleanup even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)`.
   Interrupted user code, DLL detach and guest static destructors do not resume.
 - macOS `applicationShouldTerminate:` uses the same cancellable request as
-  window close. Known quit Apple event reasons identify logoff/restart/shutdown.
+  window close. Known quit Apple event reasons identify logoff/restart/shutdown;
+  a quit without one (Cmd+Q, Dock, AppleScript) records `app-quit` if no origin
+  is recorded yet.
 - Backends identify native exit origins through internal `tcExit` state. Window
   close preserves an already recorded origin on Windows, macOS, X11 and EGL.
   `_cleanup_cb` guards cleanup once and freezes its reason; `sapp_run` retains
