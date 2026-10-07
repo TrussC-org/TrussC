@@ -215,7 +215,15 @@ jobs:
       # binary under a static key so runs stop re-downloading it (this also
       # pins the tool — bump the key to pick up a newer upstream build).
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -358,7 +366,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -446,7 +462,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -502,7 +526,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -597,6 +629,10 @@ jobs:
       - name: daily web sequencing regression checks
         if: always()
         run: python3 tools/tests/test_daily_workflow.py -v
+
+      - name: build workflow cache regression checks
+        if: always()
+        run: python3 tools/tests/test_build_workflow_caches.py -v
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
