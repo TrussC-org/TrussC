@@ -618,10 +618,10 @@ private:
 //     outputs engine-rate frames).
 //   - setPosition() posts a seek: the StreamWorker seeks the decoder and
 //     re-fills the ring buffer, and the audio moves once the mixer
-//     reaches the new data (~10 ms blackout, similar tradeoff to other
-//     engines; longer on slow storage or for an MP3 several hours long,
-//     whose seek table is capped). getPosition() reports the requested
-//     target meanwhile. A file whose length is unknown (duration 0, e.g.
+//     reaches the new data (see Sound::setPosition() for measured latency;
+//     longer on slow storage or for an MP3 several hours long, whose seek
+//     table is capped). getPosition() reports the requested target
+//     meanwhile. A file whose length is unknown (duration 0, e.g.
 //     a FLAC encoded to a pipe) cannot seek, and an engine re-init at
 //     another sample rate restarts it from the beginning.
 //   - Each polyphony slot costs one open file handle + one decoder +
@@ -1000,8 +1000,9 @@ namespace internal {
     // under the engine lock). A stream voice only gets a request: the
     // StreamWorker seeks its decoder and refills the ring from the new
     // position, and the mixer, the only writer of the ring's read side and
-    // of positionF, moves to it when it reaches that data (~10 ms). Until
-    // then the request is pending; a later request replaces it (the last
+    // of positionF, moves to it when it reaches that data (see
+    // Sound::setPosition() for measured latency). Until then the request
+    // is pending; a later request replaces it (the last
     // one wins). A stream whose length is unknown ignores it (one warning
     // per voice). Call it from one thread per voice, like the Sound API.
     // tcAudio_impl.cpp.
@@ -1593,8 +1594,9 @@ public:
     //
     // Limitations vs eager load():
     //   - setSpeed() is ignored (decoder outputs engine-rate frames).
-    //   - setPosition() incurs a seek + ring-buffer refill (usually
-    //     ~10 ms); getPosition() reports the requested position meanwhile.
+    //   - setPosition() incurs a seek + ring-buffer refill (see its comment
+    //     for measured latency); getPosition() reports the requested
+    //     position meanwhile.
     //     A file whose length is unknown (getDuration() is 0) cannot seek,
     //     and an engine re-init at another sample rate restarts it from the
     //     beginning.
@@ -1880,8 +1882,9 @@ public:
     }
 
     // Playback position in seconds. On a stream, after setPosition() and
-    // until the audio has moved there (usually ~10 ms), this is the requested
-    // position; otherwise it is the position being played.
+    // until the audio has moved there, this is the requested position;
+    // otherwise it is the position being played. See setPosition() for
+    // measured stream seek latency.
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
         const int rate = positionRate();
@@ -1889,8 +1892,12 @@ public:
     }
 
     // Seek to `seconds`. Eager sounds move at once. A stream moves after
-    // its decoder has seeked and the ring has refilled (~10 ms of silence;
-    // longer on slow storage or for an MP3 several hours long);
+    // its decoder has seeked and the ring has refilled. Measured seek to
+    // first post-seek output callback on WASAPI/CoreAudio: about 1.5 audio
+    // callbacks on average, about 2 at p95 (13-16 ms mean with 10 ms callbacks).
+    // PulseAudio on main averaged 25.4 ms. These are callback-level timings,
+    // not speaker/DAC latency or silence duration; slow storage or an MP3
+    // several hours long can take longer. See issue #550 for measurements.
     // getPosition() reports the new position right away, and if
     // setPosition() is called again before that, the last call wins. A
     // paused stream moves when it resumes. A stream whose length is
