@@ -8841,9 +8841,9 @@ description.ko = "현재 패닝을 얻음"
 ["Sound::getPosition"]
 category = "sound"
 keywords = ["progress", "playhead", "normalized", "seek"]
-description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (usually ~10 ms), this is the requested position."
-description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまで (通常 ~10ms) の間、要求した位置を返す"
-description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 (보통 ~10ms) 요청한 위치를 반환"
+description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there, this is the requested position. See Sound::setPosition() for measured stream seek latency."
+description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまでの間、要求した位置を返す。ストリームのシーク遅延の実測値は Sound::setPosition() を参照"
+description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 요청한 위치를 반환. 스트림 시크 지연의 측정값은 Sound::setPosition() 참조"
 
 ["Sound::getSpeed"]
 category = "sound"
@@ -8997,9 +8997,9 @@ related = ["EasyCam::setPanSensitivity"]
 ["Sound::setPosition"]
 category = "sound"
 keywords = ["seek", "jump", "scrub", "playhead", "normalized"]
-description.en = "Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning."
-description.ja = "指定秒数にシーク。ストリームではデコーダがシークして ring を補充するので、~10ms の無音の後に音が移る (遅いストレージや数時間の長さの MP3 ではもっとかかる)。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る。長さが不明なストリーム (getDuration() が 0) はシークできず、呼び出しは警告を出して無視される"
-description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전하므로 ~10ms 무음 후에 소리가 옮겨짐 (느린 저장소나 몇 시간 길이의 MP3에서는 더 걸림). getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생. 길이를 알 수 없는 스트림 (getDuration()이 0)은 시크할 수 없으며, 호출은 경고와 함께 무시됨"
+description.en = "Seek to a specific time in seconds. On streams the audio moves after the decoder seeks and the ring refills. Measured seek to first post-seek output callback on WASAPI/CoreAudio: about 1.5 audio callbacks on average, about 2 at p95 (13–16 ms mean with 10 ms callbacks). PulseAudio on main averaged 25.4 ms. These are callback-level timings, not speaker/DAC latency or silence duration; slow storage or an MP3 several hours long can take longer. See issue #550 for measurements. getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning."
+description.ja = "指定秒数にシーク。ストリームではデコーダのシークと ring の補充後に音が移る。シーク要求からシーク先の音を含む最初の出力コールバックまでの実測値は、WASAPI/CoreAudio で平均約 1.5 コールバック、p95 で約 2 コールバック (10 ms 間隔では平均 13–16 ms)。PulseAudio の main では平均 25.4 ms。これはコールバック単位の測定で、スピーカー/DAC までの遅延や無音時間ではない。遅いストレージや数時間の長さの MP3 ではもっとかかる。測定の詳細は issue #550 を参照。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る。長さが不明なストリーム (getDuration() が 0) はシークできず、呼び出しは警告を出して無視される"
+description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전한 뒤 소리가 옮겨짐. 시크 요청부터 새 위치의 오디오가 담긴 첫 출력 콜백까지의 측정값은 WASAPI/CoreAudio에서 평균 약 1.5 콜백, p95 약 2 콜백 (10 ms 간격에서 평균 13–16 ms). PulseAudio의 main에서는 평균 25.4 ms. 이는 콜백 단위 측정이며 스피커/DAC까지의 지연이나 무음 시간이 아님. 느린 저장소나 몇 시간 길이의 MP3에서는 더 걸릴 수 있음. 측정 상세는 issue #550 참조. getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생. 길이를 알 수 없는 스트림 (getDuration()이 0)은 시크할 수 없으며, 호출은 경고와 함께 무시됨"
 
 ["Sound::setSpeed"]
 category = "sound"
@@ -9215,9 +9215,9 @@ description.ko = "소스의 샘플레이트(Hz)"
 
 ["SoundStream"]
 keywords = ["streaming audio", "bgm", "music stream", "disk audio", "on demand"]
-description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer."
-description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は通常約10 msのrefillでseekし(長さが不明なファイルはseekできない)、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
-description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 보통 약 10 ms의 refill로 seek하며(길이를 알 수 없는 파일은 seek할 수 없음), polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
+description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ring-buffer refill (see Sound::setPosition() for measured latency; a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer."
+description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()はring bufferを補充してseekし(遅延の実測値はSound::setPosition()を参照。長さが不明なファイルはseekできない)、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
+description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 ring buffer를 재충전하여 seek하며(지연 측정값은 Sound::setPosition() 참조. 길이를 알 수 없는 파일은 seek할 수 없음), polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
 related = ["SoundBuffer", "SoundSource"]
 
 ["SoundStream::getDuration"]
