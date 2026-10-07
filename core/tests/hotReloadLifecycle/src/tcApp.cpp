@@ -30,7 +30,17 @@ void tcApp::draw() {
 }
 
 void tcApp::exit() {
+    if (unloadProbe) ++unloadProbe->exits;
     imguiShutdown();
+}
+
+void tcApp::cleanup() {
+    if (!unloadProbe) return;
+    ++unloadProbe->cleanups;
+    auto& engine = AudioEngine::getInstance();
+    unloadProbe->audioDetachedInCleanup = unloadProbe->exits == 1 &&
+        engine.audioOut.listenerCount() == (size_t)audioOutHooksInSetup &&
+        engine.audioIn.listenerCount() == (size_t)audioInHooksInSetup;
 }
 
 // Settings app code writes (usually in setup()) that the core loop, the event

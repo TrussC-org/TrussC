@@ -148,10 +148,13 @@ struct GuestLibrary {
             mcp::detail::setRegistrationOwner(nullptr);
             mcpOwner = nullptr;
         }
-        // Audio keeps running across a reload: detach the guest App's audio
-        // hooks and wait for a callback in flight before the App is
-        // destroyed (#256). On exit, appCleanupFunc has run cleanup() first.
-        if (app) internal::detachAppAudio(*app);
+        // Audio keeps running across a reload. End this generation before
+        // destroying it; normal host exit has already run this sequence.
+        if (app && !internal::appRanCleanup(*app)) {
+            app->exit();
+            internal::detachAppAudio(*app);
+            app->cleanup();
+        }
         app.reset();
     }
 
@@ -616,6 +619,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
             app->exit();
             // close() requests made so far land before the App's cleanup().
             internal::closeRequestedWindowsAtShutdown();
+            internal::detachAppAudio(*app);
             app->cleanup();
         }
         g_host.guest.unload();

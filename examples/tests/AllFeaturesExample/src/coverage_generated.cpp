@@ -1219,7 +1219,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixels(af::val<unsigned char *>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
+#if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixelsFloat(af::val<float *>());
 #endif
         (void)af::val<Fbo>().copyTo(af::val<Image>());
@@ -2617,7 +2617,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<SoundBuffer>().loadAac(af::val<const fs::path>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<SoundBuffer>().loadAacFromMemory(af::val<const void *>(), af::val<size_t>());
 #endif
         (void)af::val<SoundBuffer>().getAdtsSampleRateIndex(af::val<int>());
@@ -3228,11 +3228,7 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<VideoPlayer>().getDuration();
         (void)af::val<VideoPlayer>().getPosition();
-        (void)af::val<VideoPlayer>().getCurrentFrame();
-        (void)af::val<VideoPlayer>().getTotalFrames();
-        (void)af::val<VideoPlayer>().setFrame(af::val<int>());
-        (void)af::val<VideoPlayer>().nextFrame();
-        (void)af::val<VideoPlayer>().previousFrame();
+        (void)af::val<VideoPlayer>().getFrameRate();
         (void)af::val<VideoPlayer>().setGammaCorrection(af::val<float>());
         (void)af::val<VideoPlayer>().getGammaCorrection();
         (void)af::val<VideoPlayer>().setUseHwAccel(af::val<bool>());
@@ -3301,6 +3297,7 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<VideoPlayerBase>().getPan();
         (void)af::val<VideoPlayerBase>().setLoop(af::val<bool>());
         (void)af::val<VideoPlayerBase>().isLoop();
+        (void)af::val<VideoPlayerBase>().getFrameRate();
         (void)af::val<VideoPlayerBase>().getCurrentFrame();
         (void)af::val<VideoPlayerBase>().getTotalFrames();
         (void)af::val<VideoPlayerBase>().setFrame(af::val<int>());

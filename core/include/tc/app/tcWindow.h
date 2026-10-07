@@ -105,6 +105,9 @@ public:
     // return the App and the window. Safe to call from the window's own
     // App (update() / draw() / keyPressed() ...). Destroying the Window
     // (the last shared_ptr) still closes it immediately.
+    // At teardown: the native window is destroyed and isOpen() turns false,
+    // then events().exit fires, then the App's exit() / cleanup() run.
+    // App::getWindow() returns nullptr during those teardown callbacks.
     void close();
     bool isOpen() const { return native_ != nullptr; }
 
@@ -249,8 +252,9 @@ private:
     // running.
     void applyPendingApp();
     // Ends the window's App: drops a pending setApp() (logged when it held an
-    // App), detaches the App from the window, then runs its exit() /
-    // cleanup() and detaches its audio hooks. Part of the platform teardown.
+    // App), detaches the App from the window, then runs its exit(), detaches
+    // its audio hooks (waiting for a call in flight) and runs its cleanup().
+    // Part of the platform teardown.
     void endApp();
     // The platform teardown: destroys the native window right away, fires
     // events().exit, then endApp(). Runs when the backend closes the window
@@ -448,8 +452,8 @@ inline void Window::applyPendingApp() {
     if (outgoing && !internal::appRanCleanup(*outgoing)) {
         internal::EntryStackGuard guard(internal::AppEntry::Exit);
         outgoing->exit();
-        outgoing->cleanup();
         internal::detachAppAudio(*outgoing);
+        outgoing->cleanup();
     }
     outgoing.reset();
     internal::currentWindowCtx() = prev;
@@ -470,10 +474,10 @@ inline void Window::endApp() {
     if (!app) return;
     internal::attachedApps().erase(app.get());
     app->exit();
-    app->cleanup();
     // Audio keeps running for the other windows: detach this App's audio
-    // hooks and wait for a callback in flight before the App goes (#256).
+    // hooks and wait for a callback in flight before cleanup() releases its audio state (#698).
     internal::detachAppAudio(*app);
+    app->cleanup();
 }
 
 namespace internal {

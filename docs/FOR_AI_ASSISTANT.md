@@ -851,7 +851,7 @@ TC_HOT_RELOAD(tcApp)
 
 While the app is running, saving any source file in `src/` triggers an automatic rebuild and reload (1-3 seconds). The app window stays open — only the user code is swapped.
 
-- **State resets on each reload** (setup() runs again) — same model as Processing/p5.js
+- **State resets on each reload** (the old generation's exit() and cleanup() run, then setup() runs again) — same model as Processing/p5.js
 - **Disable**: comment out `TC_HOT_RELOAD` with `//`
 - **Build errors**: the previous version keeps running; fix and save again
 - Works on macOS, Linux, and Windows. Wasm/iOS/Android fall back to static mode
@@ -1217,7 +1217,7 @@ public:
 };
 ```
 
-The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework subscribes them right after the App's first `setup()` returns, not when the App is constructed (so what `setup()` prepares is ready in them, and an App that is never run gets no callbacks). It detaches them after `cleanup()` and waits before it destroys the App (on exit, on a hot reload, and when a secondary window closes, swaps its App, or removes it). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when it leaves its window (`close()`, `setApp(other)`, or `setApp(nullptr)`); leaving also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
+The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework subscribes them right after the App's first `setup()` returns, not when the App is constructed (so what `setup()` prepares is ready in them, and an App that is never run gets no callbacks). After `exit()`, it detaches them and waits before calling `cleanup()`, so cleanup may free their audio state (on exit, on a hot reload, and when a secondary window closes, swaps its App, or removes it). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when it leaves its window (`close()`, `setApp(other)`, or `setApp(nullptr)`); leaving also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
 
 ### Bubble events up, don't broadcast?
 
@@ -1279,7 +1279,7 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. Listening to `audioIn` gives mic input (`AudioInBuffer`, read-only). The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
 
-Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework detaches them after `cleanup()` and waits for a callback in flight, as long as it takes, before it destroys the App (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+Overriding `App::audioOut()` / `App::audioIn()` needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
 ### How long does a Sound play? (Sound lifetime)
 
@@ -1537,13 +1537,13 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 ### My app crashed — how do I find where? (getting a backtrace)
 
 Outside a debugger, a crash usually leaves very little: `Segmentation fault` / exit code 139 on macOS and Linux, or an "Application Error" entry (`0xc0000005`) in the Windows Event Log. That is also all an AI agent sees when it launches the app from a shell. To get the call stack:
-- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. CodeLLDB is used on macOS / Linux, the MSVC debugger on Windows.
+- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. VS Code uses CodeLLDB on macOS / Linux and the MSVC debugger (`cppvsdbg`) on Windows. Cursor and other forks use CodeLLDB on every OS (see [GET_STARTED.md](GET_STARTED.md)).
 - **From a terminal** (handy for agents), run the app under the debugger in batch mode so it prints the stack and exits:
-  - macOS: `lldb --batch -o run -o bt -- bin/MyApp.app/Contents/MacOS/MyApp`
+  - macOS: `lldb --batch -o run -k bt -k quit -- bin/MyApp.app/Contents/MacOS/MyApp`. After a crash, lldb skips the rest of the `-o` commands and runs only the `-k` ones, so `bt` must be a `-k` command. Use `-k "thread backtrace all"` for every thread.
   - Linux: `gdb -batch -ex run -ex bt --args bin/MyApp`
 - **After the fact:**
   - macOS writes a crash report on its own: `~/Library/Logs/DiagnosticReports/MyApp-*.ips`. The crashing thread's frames are in it.
-  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's apport keeps reports in `/var/crash`.
+  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's default crash handler, apport, ignores programs that don't come from a package, so a TrussC app leaves nothing in `/var/crash`. On Ubuntu, install `systemd-coredump` to get `coredumpctl`, or use the gdb line above.
   - Windows: Event Viewer → Windows Logs → Application → "Application Error" names the faulting module and offset. For a full dump, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).
 
 Apps build as RelWithDebInfo by default, which includes debug symbols, so the stack shows function names and line numbers.
@@ -1565,11 +1565,15 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 | `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
 | `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
 | `callAfterAsync` / `callEveryAsync` | background scheduler thread |
-| `TcpClient` / `TcpServer` / `UdpSocket` events (`onReceive`, `onConnect`, `onDisconnect`, `onError`) | a network thread (desktop) |
+| `TcpClient` events (`onConnect`, `onReceive`, `onDisconnect`, `onError`, `onSendComplete`) | the receive, connect or writer thread; events fired directly by an API call run on the calling thread. `onSendComplete` runs on the writer thread, or from `processNetwork()` without threads |
+| `TcpServer` events (`onClientConnect`, `onReceive`, `onClientDisconnect`, `onError`, `onSendComplete`) | the server's threads; errors reported directly by calls such as `start()` or `send()` run on the calling thread |
+| `UdpSocket` events (`onReceive`, `onError`) | the receive thread; errors reported directly by calls such as `bind()` or `sendTo()` run on the calling thread |
 | tcxOsc `onMessageReceived`, tcxMidi `MidiIn::onMessage` | the addon's receive thread. Their polling APIs run on the main thread |
 | `Thread::threadedFunction()` | your thread |
 
-On the web (wasm) there are no background threads, so these "async" callbacks run on the main thread during the update loop.
+With `setUseThread(false)`, `TcpClient` and `UdpSocket` poll from `update` on the main thread instead. Events fired directly by API calls still run on the calling thread.
+
+On the web (wasm) there are no background threads. `callAfterAsync` / `callEveryAsync`, `Thread` and `TcpServer` are native only; use `callAfter` / `callEvery` there.
 
 Rules for callbacks that are not on the main thread:
 1. **Don't touch nodes, GPU objects or drawing there.** Either copy the data into a mutex-protected member (or a `ThreadChannel`) and consume it in `update()`, or let the event deliver it on the main thread:
@@ -1580,7 +1584,13 @@ Rules for callbacks that are not on the main thread:
    ```
    `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
-3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener and wait for a callback in flight (`AudioEngine::getInstance().waitForAudioCallbacks()` for audio), and do it before the members the callback uses are destroyed. Dropping the listener alone does not wait for a callback already running on the other thread (see "Removing a listener while the event fires" above).
+3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
+   - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
+   - A `Thread` subclass calls `waitForThread()` in its own destructor.
+   - `cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for an in-flight `callAfterAsync` / `callEveryAsync` callback. `~Node` calls `cancelAllAsyncTimers()` too, but only after your members are gone, so call it yourself in your destructor or `cleanup()`.
+   - For audio, disconnect the listener, then call `AudioEngine::getInstance().waitForAudioCallbacks()` before destroying its state (see "Removing a listener while the event fires" above). Check its result: `false` means the wait timed out and the callback may still be using that state; it is not safe to destroy it yet.
+
+   `Deliver::Main` needs a copyable payload. For a payload type that can't be copied, it runs the listener inline on the firing thread, so it gives no cross-thread protection there.
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
@@ -1607,7 +1617,7 @@ Several Windows defaults can stop an unattended app, or hide why it stopped:
 - the display turns off even in fullscreen;
 - Windows Update restarts the PC at night;
 - a crash dialog keeps the dead process open;
-- a Task Scheduler start runs in `C:\Windows\System32`.
+- a Task Scheduler start runs in `C:\Windows\System32`, and the task is stopped after 3 days unless its time limit is turned off.
 
 Most of this is configuration, not code. Follow the checklist in [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md): Smart App Control, power and display, Windows Update, crash dumps without dialogs, auto-start and restart, working directory, GPU selection.
 
@@ -2172,7 +2182,7 @@ void setMaxUpdateSteps(int steps)  // Set the most fixed-rate update steps run i
 void setOrientation(Orientation mask) [android,ios]  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
 void setWindowDecorated(bool decorated)  // Toggle the window's standard decorations (title bar, borders, buttons). false = borderless but still focusable and closable. Desktop only
 void setWindowPosition(int x, int y) [macos,windows]  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
-void setWindowSize(int width, int height)  // Set window size
+void setWindowSize(int width, int height)  // Set window size. Resizing the main window is not implemented on Linux yet
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
 bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
@@ -2496,11 +2506,11 @@ VSYNC  // Frame-rate sentinel: sync to the monitor refresh rate
 ### App — Base application class: subclass it and override setup/update/draw and the input callbacks (mousePressed, keyPressed, etc.) to build a TrussC app
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached after cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here.
-void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
+void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached before cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here.
+void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework calls exit(), detaches it and waits as long as necessary for a call in flight before calling cleanup() (exit, hot reload, closing the App's window). cleanup() may free its audio state. Don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
-Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
+Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
 bool App::isExitRequested() const  // Whether an exit has been requested
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Key released
@@ -2510,7 +2520,7 @@ void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
 void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()
+void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet
 void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
 void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
 void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
@@ -2530,7 +2540,7 @@ void App::windowResized(int width, int height)  // Window resized
 ### AudioEngine — Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers.
 
 ```cpp
-size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)
+size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest post-clamp output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096; missing startup samples are zero padded. Safe from any thread. Returns the number of samples written, or 0 while stopped or uninitialized. Reuses the previous successful copy if concurrent writes prevent a snapshot. Reads the same two-second, per-channel ring as the MCP-only tc_get_audio_spectrum (full FFT, selectable size/window/channels/frequency range/peak count) and tc_save_audio_capture (recent output as float32 WAV). The audio callback writes the ring without locks. Global wrapper: getAudioAnalysisBuffer.
 int AudioEngine::getBufferSize() const  // Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize.
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
@@ -3931,7 +3941,7 @@ float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sam
 fs::path SoundBuffer::getPath() const  // File the samples were decoded from (for AAC, when loaded through load()); empty for memory, PCM and generated buffers.
 LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
 LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
-LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
 LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
 LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
 LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
@@ -4385,8 +4395,9 @@ uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
 int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
 bool VideoPlayer::getAutoPoster() const  // Return whether the auto poster is enabled (default true)
-int VideoPlayer::getCurrentFrame() const  // Get current frame number
+int VideoPlayer::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayer::getDuration() const  // Get total duration in seconds
+float VideoPlayer::getFrameRate() const  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
 std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
 fs::path VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
@@ -4394,17 +4405,17 @@ unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pi
 unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
 unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
 float VideoPlayer::getPosition() const  // Get current position (0.0 to 1.0)
-int VideoPlayer::getTotalFrames() const  // Get total number of frames
+int VideoPlayer::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
 bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
 bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
 LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file
-void VideoPlayer::nextFrame()  // Advance to the next frame
+void VideoPlayer::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
-void VideoPlayer::previousFrame()  // Go back to the previous frame
+void VideoPlayer::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::setAutoPoster(bool on)  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
-void VideoPlayer::setFrame(int frame)  // Seek to a specific frame number
+void VideoPlayer::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
 void VideoPlayer::setLoopImpl(bool loop)  // Backend implementation of setLoopImpl for this platform's video player.
 void VideoPlayer::setPanImpl(float pan)  // Backend implementation of setPanImpl for this platform's video player.
@@ -4421,6 +4432,7 @@ void VideoPlayer::update()  // Update the video frame. Call once per frame in up
 
 ```cpp
 void VideoPlayerBase::applyCachedStateToPlatform()  // Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play().
+bool VideoPlayerBase::canUseFrameApis() const  // Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate.
 void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
 void VideoPlayerBase::close()  // Close the video and release its resources.
 bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
@@ -4429,10 +4441,12 @@ int VideoPlayerBase::getAudioChannels() const  // Return the number of audio cha
 uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec as a FourCC ('aac ', 'mp3 ', ...), or 0 if no audio.
 std::vector<uint8_t> VideoPlayerBase::getAudioData() const  // Return the raw (undecoded) audio data, or an empty vector if no audio.
 int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate in Hz, or 0 if no audio.
-int VideoPlayerBase::getCurrentFrame() const  // Return the index of the current frame.
+int VideoPlayerBase::getCurrentFrame() const  // Get current frame number; 0 when the frame rate is unknown.
+int VideoPlayerBase::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
 float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
 const std::string & VideoPlayerBase::getErrorMessage() const  // Last runtime error message, or an empty string when there is no error. Query on the main thread after update().
+float VideoPlayerBase::getFrameRate() const  // Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player.
 float VideoPlayerBase::getHeight() const  // Get video height in pixels
 std::string VideoPlayerBase::getHwAccelName() const  // Return the name of the active decode backend (e.g. "videotoolbox", "software", "none").
 float VideoPlayerBase::getPan() const  // Get current stereo pan
@@ -4441,7 +4455,8 @@ float VideoPlayerBase::getPosition() const  // Return the current playback posit
 float VideoPlayerBase::getResyncThreshold() const  // Get the current resync threshold in seconds
 float VideoPlayerBase::getSpeed() const  // Get current playback speed
 Texture & VideoPlayerBase::getTexture() [+1]  // Return the texture holding the current video frame.
-int VideoPlayerBase::getTotalFrames() const  // Return the total number of frames in the video.
+int VideoPlayerBase::getTotalFrames() const  // Get total frame count; 0 when the frame rate is unknown.
+int VideoPlayerBase::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayerBase::getVolume() const  // Get current volume
 float VideoPlayerBase::getWidth() const  // Get video width in pixels
 bool VideoPlayerBase::hasAudio() const  // Return true if the video has an audio track.
@@ -4458,13 +4473,16 @@ LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from th
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
 void VideoPlayerBase::movePlaybackErrorFrom(VideoPlayerBase & other)  // Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object.
-void VideoPlayerBase::nextFrame()  // Advance to the next frame.
+void VideoPlayerBase::nextFrame()  // Advance one frame; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::play()  // Start or resume playback
 void VideoPlayerBase::playImpl()  // Platform hook: start playback. Pure virtual, implemented per backend.
-void VideoPlayerBase::previousFrame()  // Step back to the previous frame.
+void VideoPlayerBase::previousFrame()  // Go back one frame; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::reportPlaybackError(const std::string & message, int64_t code = 0)  // Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them.
 void VideoPlayerBase::setCurrentTime(float seconds)  // Seek to a specific time in seconds
-void VideoPlayerBase::setFrame(int frame)  // Seek to the given frame index.
+void VideoPlayerBase::setFrame(int frame)  // Seek to a frame number; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::setLoop(bool loop)  // Enable/disable looping
 void VideoPlayerBase::setLoopImpl(bool loop)  // Platform hook: set looping. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPan(float pan)  // Set stereo pan (-1.0 left, 0.0 center, 1.0 right)
@@ -4897,7 +4915,7 @@ EventListener synthListener;
 synthListener = AudioEngine::getInstance().audioOut.listen(
     [](AudioOutBuffer& buf) { /* ... */ });
 ```
-`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in). The App override is detached for you after `cleanup()`; a listener that captures `this` elsewhere is disconnected, then `AudioEngine::getInstance().waitForAudioCallbacks()` runs, in the owner's own destructor, before its members go.
+`audioOut` runs on the audio thread. Keep it RT-safe: no allocations, no engine API calls, no heavy locks. ADD to `buf.data` (other Sound voices already mixed in). The App override is detached for you before `cleanup()` (after `exit()`), and any callback in flight has returned; a listener that captures `this` elsewhere is disconnected, then `AudioEngine::getInstance().waitForAudioCallbacks()` runs, in the owner's own destructor, before its members go.
 
 ### audioDeviceChanged — Device / Rate Change Event
 Fires on every successful `init()` (initial AND re-init):
@@ -5259,10 +5277,11 @@ void tcApp::setup() {
 ### IDE Setup
 - Ask which IDE they use first: VSCode, Cursor, or Xcode
 - VSCode/Cursor: After generating, open the project in IDE. Three required extensions will be suggested automatically:
-  1. **C/C++** (`ms-vscode.cpptools`) — IntelliSense and syntax highlighting
-  2. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration
-  3. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger
+  1. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration (every editor)
+  2. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger (every editor)
+  3. IntelliSense: **C/C++** (`ms-vscode.cpptools`) in VSCode only; **clangd** (`llvm-vs-code-extensions.vscode-clangd`) in VS Code forks (Cursor, Antigravity, VSCodium, Windsurf). The C/C++ extension refuses to run outside the official VS Code, so don't suggest it for forks, and don't install clangd next to it in VSCode.
   - If the popup doesn't appear, open Extensions panel and search for each one
+  - For a VS Code fork, generate the project with `--ide cursor` (e.g. `trusscli update --ide cursor`): its popup suggests clangd, and its `launch.json` uses CodeLLDB on every OS. This matters on Windows, where the MSVC debugger (`cppvsdbg`) that VSCode projects use is not available in forks. See [GET_STARTED.md](GET_STARTED.md).
 - Build key is F5.
 - Xcode: Can build directly. The .xcodeproj file is inside the `xcode` folder within the project.
 

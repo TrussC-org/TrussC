@@ -246,7 +246,7 @@ public:
 
     // Load AAC data from memory (platform-specific implementation)
     // Fails on unsupported platforms
-    TC_PLATFORMS("macos,windows,linux,ios,web") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
+    TC_PLATFORMS("macos,windows,linux,ios") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
 
     // -------------------------------------------------------------------------
     // ADTS header utilities (for raw AAC from MOV containers)
@@ -1090,6 +1090,8 @@ public:
     // Enumerate available playback devices. Names from this list are
     // suitable for AudioSettings::deviceName. Returns an empty vector if
     // device enumeration is unsupported on the current platform.
+    // iOS enumeration leaves the audio session untouched, so before session
+    // activation (SoloAmbient), the current route may have no inputs.
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values
@@ -1142,7 +1144,7 @@ public:
     // Do it in the most-derived class (or in cleanup()), not in a base-class
     // destructor, which runs after the derived members are already gone. The
     // App's own audioOut() / audioIn() hooks are handled by the framework:
-    // they are detached after cleanup(), and before the App is destroyed
+    // they are detached before cleanup(), and before cleanup() begins
     // (exit, hot reload, closing a secondary window) the framework waits the
     // same way, but without the one-second limit below
     // (internal::waitForAudioCallbacksNoTimeout()).

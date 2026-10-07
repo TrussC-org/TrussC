@@ -22,6 +22,7 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["draw"] = sol::overload([](trussc::VideoPlayer& self, float x, float y) { return self.draw(x, y); }, [](trussc::VideoPlayer& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
         t["getDuration"] = &trussc::VideoPlayer::getDuration;
         t["getPosition"] = &trussc::VideoPlayer::getPosition;
+        t["getFrameRate"] = &trussc::VideoPlayer::getFrameRate;
         t["getCurrentFrame"] = &trussc::VideoPlayer::getCurrentFrame;
         t["getTotalFrames"] = &trussc::VideoPlayer::getTotalFrames;
         t["setFrame"] = &trussc::VideoPlayer::setFrame;
