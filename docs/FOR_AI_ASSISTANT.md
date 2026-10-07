@@ -1476,7 +1476,7 @@ self-contained copy-paste-able RectNode), and a plain code lambda.
 
 ### TCP / UDP networking? (brief)
 
-Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to `onReceive` / `onConnect` / `onDisconnect` / `onError` (`Event<T>`), and `connect` / `send` to transmit.
+Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to their `Event<T>` members, and `connect` / `send` to transmit. `TcpClient` has `onConnect` / `onReceive` / `onDisconnect` / `onError` / `onSendComplete`; `TcpServer` has `onClientConnect` / `onReceive` / `onClientDisconnect` / `onError` / `onSendComplete`; `UdpSocket` has `onReceive` / `onError`. Most of them fire on a network thread: see "Which thread does my callback run on?".
 - TCP: `client.connectAsync(host, port)` → `client.send("...")`. Server: `server.start(port)`, `broadcast(...)` to all clients.
 - UDP: `udp.bind(port)` (receive thread auto-starts) → `udp.sendTo(host, port, data)`. Broadcast (`setBroadcast`) and multicast (`joinMulticastGroup` / `setMulticastTTL`) supported.
 
@@ -1537,13 +1537,13 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 ### My app crashed — how do I find where? (getting a backtrace)
 
 Outside a debugger, a crash usually leaves very little: `Segmentation fault` / exit code 139 on macOS and Linux, or an "Application Error" entry (`0xc0000005`) in the Windows Event Log. That is also all an AI agent sees when it launches the app from a shell. To get the call stack:
-- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. CodeLLDB is used on macOS / Linux, the MSVC debugger on Windows.
+- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. VS Code uses CodeLLDB on macOS / Linux and the MSVC debugger (`cppvsdbg`) on Windows. Cursor and other forks use CodeLLDB on every OS (see [GET_STARTED.md](GET_STARTED.md)).
 - **From a terminal** (handy for agents), run the app under the debugger in batch mode so it prints the stack and exits:
-  - macOS: `lldb --batch -o run -o bt -- bin/MyApp.app/Contents/MacOS/MyApp`
+  - macOS: `lldb --batch -o run -k bt -k quit -- bin/MyApp.app/Contents/MacOS/MyApp`. After a crash, lldb skips the rest of the `-o` commands and runs only the `-k` ones, so `bt` must be a `-k` command. Use `-k "thread backtrace all"` for every thread.
   - Linux: `gdb -batch -ex run -ex bt --args bin/MyApp`
 - **After the fact:**
   - macOS writes a crash report on its own: `~/Library/Logs/DiagnosticReports/MyApp-*.ips`. The crashing thread's frames are in it.
-  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's apport keeps reports in `/var/crash`.
+  - Linux: `coredumpctl gdb MyApp` then `bt`, if systemd-coredump is installed. Ubuntu's default crash handler, apport, ignores programs that don't come from a package, so a TrussC app leaves nothing in `/var/crash`. On Ubuntu, install `systemd-coredump` to get `coredumpctl`, or use the gdb line above.
   - Windows: Event Viewer → Windows Logs → Application → "Application Error" names the faulting module and offset. For a full dump, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).
 
 Apps build as RelWithDebInfo by default, which includes debug symbols, so the stack shows function names and line numbers.
@@ -1565,11 +1565,15 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 | `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
 | `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
 | `callAfterAsync` / `callEveryAsync` | background scheduler thread |
-| `TcpClient` / `TcpServer` / `UdpSocket` events (`onReceive`, `onConnect`, `onDisconnect`, `onError`) | a network thread (desktop) |
+| `TcpClient` events (`onConnect`, `onReceive`, `onDisconnect`, `onError`, `onSendComplete`) | the receive, connect or writer thread; events fired directly by an API call run on the calling thread. `onSendComplete` runs on the writer thread, or from `processNetwork()` without threads |
+| `TcpServer` events (`onClientConnect`, `onReceive`, `onClientDisconnect`, `onError`, `onSendComplete`) | the server's threads; errors reported directly by calls such as `start()` or `send()` run on the calling thread |
+| `UdpSocket` events (`onReceive`, `onError`) | the receive thread; errors reported directly by calls such as `bind()` or `sendTo()` run on the calling thread |
 | tcxOsc `onMessageReceived`, tcxMidi `MidiIn::onMessage` | the addon's receive thread. Their polling APIs run on the main thread |
 | `Thread::threadedFunction()` | your thread |
 
-On the web (wasm) there are no background threads, so these "async" callbacks run on the main thread during the update loop.
+With `setUseThread(false)`, `TcpClient` and `UdpSocket` poll from `update` on the main thread instead. Events fired directly by API calls still run on the calling thread.
+
+On the web (wasm) there are no background threads. `callAfterAsync` / `callEveryAsync`, `Thread` and `TcpServer` are native only; use `callAfter` / `callEvery` there.
 
 Rules for callbacks that are not on the main thread:
 1. **Don't touch nodes, GPU objects or drawing there.** Either copy the data into a mutex-protected member (or a `ThreadChannel`) and consume it in `update()`, or let the event deliver it on the main thread:
@@ -1580,7 +1584,13 @@ Rules for callbacks that are not on the main thread:
    ```
    `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
-3. **When the receiving object goes away, stop the source first.** Disconnect the socket, call `waitForThread()`, or drop the listener and wait for a callback in flight (`AudioEngine::getInstance().waitForAudioCallbacks()` for audio), and do it before the members the callback uses are destroyed. Dropping the listener alone does not wait for a callback already running on the other thread (see "Removing a listener while the event fires" above).
+3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
+   - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
+   - A `Thread` subclass calls `waitForThread()` in its own destructor.
+   - `cancelAsyncTimer()` / `cancelAllAsyncTimers()` wait for an in-flight `callAfterAsync` / `callEveryAsync` callback. `~Node` calls `cancelAllAsyncTimers()` too, but only after your members are gone, so call it yourself in your destructor or `cleanup()`.
+   - For audio, disconnect the listener, then call `AudioEngine::getInstance().waitForAudioCallbacks()` before destroying its state (see "Removing a listener while the event fires" above). Check its result: `false` means the wait timed out and the callback may still be using that state; it is not safe to destroy it yet.
+
+   `Deliver::Main` needs a copyable payload. For a payload type that can't be copied, it runs the listener inline on the firing thread, so it gives no cross-thread protection there.
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
@@ -1607,7 +1617,7 @@ Several Windows defaults can stop an unattended app, or hide why it stopped:
 - the display turns off even in fullscreen;
 - Windows Update restarts the PC at night;
 - a crash dialog keeps the dead process open;
-- a Task Scheduler start runs in `C:\Windows\System32`.
+- a Task Scheduler start runs in `C:\Windows\System32`, and the task is stopped after 3 days unless its time limit is turned off.
 
 Most of this is configuration, not code. Follow the checklist in [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md): Smart App Control, power and display, Windows Update, crash dumps without dialogs, auto-start and restart, working directory, GPU selection.
 
@@ -2172,7 +2182,7 @@ void setMaxUpdateSteps(int steps)  // Set the most fixed-rate update steps run i
 void setOrientation(Orientation mask) [android,ios]  // Set allowed screen orientations (mobile). Values: Orientation::Portrait, Landscape, All
 void setWindowDecorated(bool decorated)  // Toggle the window's standard decorations (title bar, borders, buttons). false = borderless but still focusable and closable. Desktop only
 void setWindowPosition(int x, int y) [macos,windows]  // Set window position in screen coordinates (top-left origin). macOS/Windows only; no-op on other platforms
-void setWindowSize(int width, int height)  // Set window size
+void setWindowSize(int width, int height)  // Set window size. Resizing the main window is not implemented on Linux yet
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
 bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
@@ -2500,7 +2510,7 @@ void App::audioIn(const AudioInBuffer & buf)  // Real-time capture callback even
 void App::audioOut(AudioOutBuffer & buf)  // Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one
 void App::exit()  // App exit callback (override for cleanup before shutdown)
 void App::filesDropped(const std::vector<std::string> & files)  // Files were dropped onto the window
-Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
+Window * App::getWindow() const  // The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks
 bool App::isExitRequested() const  // Whether an exit has been requested
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Key pressed. Use KEY_* constants for special keys, or uppercase char literals for printable keys (e.g. key == 'A', key == '1')
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Key released
@@ -2510,7 +2520,7 @@ void App::mousePressed(const MouseEventArgs & e) [+1]  // Mouse button pressed
 void App::mouseReleased(const MouseEventArgs & e) [+1]  // Mouse button released
 void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Mouse wheel / trackpad scrolled
 void App::requestExit()  // Request the app to exit
-void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()
+void App::setSize(float w, float h)  // Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet
 void App::touchMoved(const TouchEventArgs & touch)  // Touch moved (Android/iOS, multi-touch)
 void App::touchPressed(const TouchEventArgs & touch)  // Touch began (Android/iOS, multi-touch)
 void App::touchReleased(const TouchEventArgs & touch)  // Touch ended or was cancelled (check touch.cancelled)
@@ -2530,7 +2540,7 @@ void App::windowResized(int width, int height)  // Window resized
 ### AudioEngine — Singleton miniaudio-based mixer engine. Owns the output device, mixes all playing Sound voices, exposes real-time audioOut / audioIn / audioDeviceChanged events, and an FFT analysis ring buffer. Access via AudioEngine::getInstance(); most apps drive it indirectly through the Sound class and the global initAudio() / shutdownAudio() helpers.
 
 ```cpp
-size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest mixed output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096. Returns the number of samples written. (Global wrapper: getAudioAnalysisBuffer.)
+size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copy the latest post-clamp output samples (mono, L+R average) into outBuffer. numSamples is capped at 4096; missing startup samples are zero padded. Safe from any thread. Returns the number of samples written, or 0 while stopped or uninitialized. Reuses the previous successful copy if concurrent writes prevent a snapshot. Reads the same two-second, per-channel ring as the MCP-only tc_get_audio_spectrum (full FFT, selectable size/window/channels/frequency range/peak count) and tc_save_audio_capture (recent output as float32 WAV). The audio callback writes the ring without locks. Global wrapper: getAudioAnalysisBuffer.
 int AudioEngine::getBufferSize() const  // Requested buffer size in frames, as passed in AudioSettings::bufferSize (0 = backend default). The size the device actually uses is AudioDeviceChangedArgs::bufferSize.
 int AudioEngine::getChannels() const  // Current engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Get the global AudioEngine singleton.
@@ -3931,7 +3941,7 @@ float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sam
 fs::path SoundBuffer::getPath() const  // File the samples were decoded from (for AAC, when loaded through load()); empty for memory, PCM and generated buffers.
 LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
 LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
-LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios,web]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
 LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
 LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
 LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
@@ -5267,10 +5277,11 @@ void tcApp::setup() {
 ### IDE Setup
 - Ask which IDE they use first: VSCode, Cursor, or Xcode
 - VSCode/Cursor: After generating, open the project in IDE. Three required extensions will be suggested automatically:
-  1. **C/C++** (`ms-vscode.cpptools`) — IntelliSense and syntax highlighting
-  2. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration
-  3. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger
+  1. **CMake Tools** (`ms-vscode.cmake-tools`) — Build integration (every editor)
+  2. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger (every editor)
+  3. IntelliSense: **C/C++** (`ms-vscode.cpptools`) in VSCode only; **clangd** (`llvm-vs-code-extensions.vscode-clangd`) in VS Code forks (Cursor, Antigravity, VSCodium, Windsurf). The C/C++ extension refuses to run outside the official VS Code, so don't suggest it for forks, and don't install clangd next to it in VSCode.
   - If the popup doesn't appear, open Extensions panel and search for each one
+  - For a VS Code fork, generate the project with `--ide cursor` (e.g. `trusscli update --ide cursor`): its popup suggests clangd, and its `launch.json` uses CodeLLDB on every OS. This matters on Windows, where the MSVC debugger (`cppvsdbg`) that VSCode projects use is not available in forks. See [GET_STARTED.md](GET_STARTED.md).
 - Build key is F5.
 - Xcode: Can build directly. The .xcodeproj file is inside the `xcode` folder within the project.
 

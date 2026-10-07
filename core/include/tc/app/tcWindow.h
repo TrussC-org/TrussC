@@ -105,6 +105,9 @@ public:
     // return the App and the window. Safe to call from the window's own
     // App (update() / draw() / keyPressed() ...). Destroying the Window
     // (the last shared_ptr) still closes it immediately.
+    // At teardown: the native window is destroyed and isOpen() turns false,
+    // then events().exit fires, then the App's exit() / cleanup() run.
+    // App::getWindow() returns nullptr during those teardown callbacks.
     void close();
     bool isOpen() const { return native_ != nullptr; }
 

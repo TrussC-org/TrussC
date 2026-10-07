@@ -1219,7 +1219,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixels(af::val<unsigned char *>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
+#if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixelsFloat(af::val<float *>());
 #endif
         (void)af::val<Fbo>().copyTo(af::val<Image>());
@@ -2617,7 +2617,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<SoundBuffer>().loadAac(af::val<const fs::path>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<SoundBuffer>().loadAacFromMemory(af::val<const void *>(), af::val<size_t>());
 #endif
         (void)af::val<SoundBuffer>().getAdtsSampleRateIndex(af::val<int>());

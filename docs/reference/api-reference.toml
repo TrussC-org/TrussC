@@ -40,9 +40,9 @@ description.ko = "윈도우에 파일이 드롭됨"
 
 ["App::getWindow"]
 keywords = ["multi window", "second window", "own window", "attach"]
-description.en = "The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks"
-description.ja = "Window::setApp() でこのAppが載っているWindow。載っていなければ nullptr (runApp() で起動したメインAppと、ウィンドウが閉じられたAppを含む)。App自身から引くので、どのウィンドウのコールバックから subApp->getWindow() を呼んでも正しいウィンドウが返る"
-description.ko = "Window::setApp()으로 이 App이 연결된 Window. 연결되어 있지 않으면 nullptr (runApp()으로 시작한 메인 App과 윈도우가 닫힌 App 포함). App 자체에서 조회하므로 어느 윈도우의 콜백에서 subApp->getWindow()를 호출해도 올바른 윈도우가 반환됨"
+description.en = "The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks"
+description.ja = "Window::setApp() でこのAppが載っているWindow。載っていなければ nullptr (runApp() で起動したメインAppと、ウィンドウが閉じられたAppを含む)。close() は終了要求のみで、破棄が始まるまではウィンドウを取得できる。破棄中はすでに nullptr になる: このApp自身の exit() / cleanup() の中と、そのウィンドウの events().exit リスナーの中。ネイティブウィンドウが先に破棄されるため。必要な情報 (タイトル、サイズ、フルスクリーン) は close() を呼ぶ前に読むか、update() で更新しておく。App自身から引くので、どのウィンドウのコールバックから subApp->getWindow() を呼んでも正しいウィンドウが返る"
+description.ko = "Window::setApp()으로 이 App이 연결된 Window. 연결되어 있지 않으면 nullptr (runApp()으로 시작한 메인 App과 윈도우가 닫힌 App 포함). close()는 닫기를 요청할 뿐이며 실제 정리가 시작되기 전까지 윈도우를 얻을 수 있음. 정리 중에는 이미 nullptr: 이 App 자신의 exit() / cleanup() 안과 그 윈도우의 events().exit 리스너 안. 네이티브 윈도우가 먼저 파괴되기 때문. 필요한 정보 (제목, 크기, 전체 화면)는 close()를 호출하기 전에 읽거나 update()에서 갱신해 둘 것. App 자체에서 조회하므로 어느 윈도우의 콜백에서 subApp->getWindow()를 호출해도 올바른 윈도우가 반환됨"
 related = ["Window::setApp", "Window::getApp", "createWindow"]
 
 ["App::isExitRequested"]
@@ -119,10 +119,13 @@ related = ["App::isExitRequested"]
 ["App::setSize"]
 category = "events"
 keywords = ["resize", "window", "dimensions"]
-description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()"
-description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。まだshared_ptrに所有されていないApp(コンストラクタ内など)も自分のサイズだけが変わり、一度だけ警告が出る。setup()で呼ぶ"
-description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. 아직 shared_ptr이 소유하지 않은 App(생성자 안 등)도 자신의 크기만 바뀌고 경고가 한 번 나옴. setup()에서 호출"
+description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet"
+description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。まだshared_ptrに所有されていないApp(コンストラクタ内など)も自分のサイズだけが変わり、一度だけ警告が出る。setup()で呼ぶ。メインウィンドウのリサイズは Linux ではまだ未実装"
+description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. 아직 shared_ptr이 소유하지 않은 App(생성자 안 등)도 자신의 크기만 바뀌고 경고가 한 번 나옴. setup()에서 호출. 메인 윈도우 리사이즈는 Linux에서 아직 미구현"
 related = ["getWindowSize", "setWindowSize", "App::getWindow"]
+platform_note.en = "Resizing the main window is a no-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas. A window created with createWindow() resizes on Linux too."
+platform_note.ja = "メインウィンドウのリサイズは Linux（未実装）/ iOS / Android（全画面固定）では no-op。Web は canvas をリサイズ。createWindow() で作ったウィンドウは Linux でもリサイズされる。"
+platform_note.ko = "메인 윈도우 리사이즈는 Linux(미구현) / iOS / Android(전체 화면 고정)에서 no-op. Web은 canvas를 리사이즈. createWindow()로 만든 윈도우는 Linux에서도 리사이즈됨."
 
 ["App::touchMoved"]
 category = "events"
@@ -17129,10 +17132,13 @@ platform_note.ja = "Linux（未実装）/ iOS / Android / Web では警告のみ
 ["setWindowSize"]
 category = "window_system"
 keywords = ["resize", "dimensions", "width height", "resolution"]
-description.en = "Set window size"
-description.ja = "ウィンドウのサイズを設定"
-description.ko = "윈도우 크기를 설정"
+description.en = "Set window size. Resizing the main window is not implemented on Linux yet"
+description.ja = "ウィンドウのサイズを設定。メインウィンドウのリサイズは Linux ではまだ未実装"
+description.ko = "윈도우 크기를 설정. 메인 윈도우 리사이즈는 Linux에서 아직 미구현"
 related = ["getWindowSize", "setWindowSizeLogical", "setWindowPosition"]
+platform_note.en = "Resizing the main window is a no-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas. A window created with createWindow() resizes on Linux too."
+platform_note.ja = "メインウィンドウのリサイズは Linux（未実装）/ iOS / Android（全画面固定）では no-op。Web は canvas をリサイズ。createWindow() で作ったウィンドウは Linux でもリサイズされる。"
+platform_note.ko = "메인 윈도우 리사이즈는 Linux(미구현) / iOS / Android(전체 화면 고정)에서 no-op. Web은 canvas를 리사이즈. createWindow()로 만든 윈도우는 Linux에서도 리사이즈됨."
 
 ["setWindowSizeLogical"]
 category = "window_system"
@@ -17143,6 +17149,7 @@ description.ko = "윈도우를 지정한 논리 크기(논리 픽셀)로 리사�
 related = ["setWindowSize", "getDpiScale"]
 platform_note.en = "No-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas."
 platform_note.ja = "Linux（未実装）/ iOS / Android（全画面固定）では no-op。Web は canvas をリサイズ。"
+platform_note.ko = "Linux(미구현) / iOS / Android(전체 화면 고정)에서는 no-op. Web은 canvas를 리사이즈."
 
 ["setWindowTitle"]
 category = "window_system"
