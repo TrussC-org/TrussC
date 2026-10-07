@@ -183,8 +183,8 @@ void runPath(TeardownPath path, const char* name) {
 
 TC_CORE_TEST_MAIN() {
     getMainThreadId();
-    internal::setNullAudioBackendForTests(true);
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;
