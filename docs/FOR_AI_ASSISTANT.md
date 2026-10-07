@@ -2305,7 +2305,7 @@ void shutdownAudio()  // Shut down the global AudioEngine and close the audio de
 
 ```cpp
 std::vector<std::string> listSystemFonts() [macos,windows,linux,ios]  // Enumerate names of all fonts known to the OS
-fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub.
+fs::path systemFontPath(const std::string & name) [macos,windows,linux,ios]  // Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite.
 ```
 
 ### Animation
@@ -2918,7 +2918,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-LoadResult Font::load(const fs::path & nameOrPath, int size)  // Load a font file or a system font name. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins.
+LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins.
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
