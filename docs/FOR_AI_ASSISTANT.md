@@ -1476,8 +1476,8 @@ self-contained copy-paste-able RectNode), and a plain code lambda.
 
 ### TCP / UDP networking? (brief)
 
-Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to `onReceive` / `onConnect` / `onDisconnect` / `onError` (`Event<T>`), and `connect` / `send` to transmit.
-- TCP: `client.connectAsync(host, port)` → `client.send("...")`. Server: `server.start(port)`, `broadcast(...)` to all clients.
+Core has `TcpClient` / `TcpServer` / `UdpSocket`. It's event-driven — `listen()` to their `Event<T>` members, and `connect` / `send` to transmit. `TcpClient` has `onConnect` / `onReceive` / `onDisconnect` / `onError`; `TcpServer` has `onClientConnect` / `onReceive` / `onClientDisconnect` / `onError` / `onSendComplete`; `UdpSocket` has `onReceive` / `onError`. Most of them fire on a network thread: see "Which thread does my callback run on?".
+- TCP: `client.connectAsync(host, port)` → after a successful `onConnect`, `client.sendAsync("...")`. Server: `server.start(port)`, `server.broadcastAsync(...)` to all clients. Use the async send variants on the main thread so a peer that stops reading cannot stall the frame. Check `SendResult` / `error` (including `QueueFull`) and the accepted-client count from `broadcastAsync()`; queued does not mean delivered.
 - UDP: `udp.bind(port)` (receive thread auto-starts) → `udp.sendTo(host, port, data)`. Broadcast (`setBroadcast`) and multicast (`joinMulticastGroup` / `setMulticastTTL`) supported.
 
 ### Send/receive OSC? (tcxOsc: polling vs callback)
