@@ -1170,10 +1170,6 @@ std::atomic<bool>& isRunning() {
     static std::atomic<bool> running{false};
     return running;
 }
-std::unique_ptr<std::thread>& getThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
-}
 } // namespace detail
 } // namespace console
 
