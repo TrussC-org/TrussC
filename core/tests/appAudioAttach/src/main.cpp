@@ -19,8 +19,8 @@
 //     audioOut and one audioIn hook are, until the exit detaches them.
 //   - A secondary window's App (Window::setApp(), setup() on the window's
 //     first tick): nothing is subscribed at setApp(), the hooks come right
-//     after that setup(), and further ticks, or a second window the App moves
-//     to, add no second hook and run no second setup().
+//     after that setup(), and further ticks add no second hook and run no
+//     second setup(); setApp(nullptr) removes them.
 //   - An App that is constructed but never run (make_shared or on the stack)
 //     is never subscribed and gets no callbacks.
 //   - The App's hooks still run ahead of the default-priority audioOut
@@ -280,27 +280,21 @@ TC_CORE_TEST_MAIN() {
               engine.audioIn.listenerCount() == inBase + 1 && p.setups.load() == 1,
               hooks(engine.audioOut.listenerCount()));
 
-        // Moved to another window without closing (no cleanup()): it is
-        // already set up, so it stays subscribed once.
+        // setApp(nullptr) ends the App as a close does (#318): both hooks go,
+        // and another window refuses it (an App runs once).
         win.setApp(nullptr);
         internal::applyPendingAppForTests(win);   // the frame boundary
+        win.native_ = nullptr;
+        check("window App: setApp(nullptr) removes both hooks",
+              engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase,
+              hooks(engine.audioOut.listenerCount()));
         other.setApp(sub);
         internal::applyPendingAppForTests(other);   // the frame boundary
         tickWindow(other);
-        check("window App moved to another window: no second hook, no second setup()",
-              other.getApp() == sub && engine.audioOut.listenerCount() == outBase + 1 &&
-              engine.audioIn.listenerCount() == inBase + 1 && p.setups.load() == 1,
-              hooks(engine.audioOut.listenerCount()));
-
-        // What the platform Window::close() does, its App part included.
-        sub->exit();
-        sub->cleanup();
-        internal::detachAppAudio(*sub);
-        other.setApp(nullptr);
-        internal::applyPendingAppForTests(other);   // the frame boundary
+        check("window App: another window refuses it, no hook, no second setup()",
+              other.getApp() == nullptr && engine.audioOut.listenerCount() == outBase &&
+              p.setups.load() == 1, hooks(engine.audioOut.listenerCount()));
         other.native_ = nullptr;
-        check("window App: closing its window removes both hooks",
-              engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase);
     }
 
     // --- order: the App's hooks before default listeners setup() subscribed -----------

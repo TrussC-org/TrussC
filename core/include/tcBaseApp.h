@@ -224,8 +224,8 @@ public:
     // don't wait on the main thread or on a lock the main thread may hold in
     // here: the teardown would hang (with an error in the log after one
     // second). An App runs once: setup() when first attached, exit() /
-    // cleanup() when its window closes (or, with #318, when it is swapped
-    // out). To show it again, create a new App.
+    // cleanup() when it leaves its window (the window closes, or setApp()
+    // swaps it out or removes it). To show it again, create a new App.
     virtual void audioOut(AudioOutBuffer& buf) { (void)buf; }
     virtual void audioIn(const AudioInBuffer& buf) { (void)buf; }
 
@@ -236,6 +236,10 @@ private:
     // Node's post-setup hook: subscribe audioOut() / audioIn() now that the
     // first setup() has returned (#426). final: apps override setup().
     void onSetupDone() final { internal::attachAppAudio(*this); }
+
+    // Node's post-cleanup hook: an App added as a child ends with its
+    // subtree's cleanupTree(), so its audio hooks are detached there too.
+    void onCleanupDone() final { internal::detachAppAudio(*this); }
 
     // Node's pre-setup hook: resolve the data path root before setup() runs,
     // not in _setup_cb (on iOS the executable path may not be available that

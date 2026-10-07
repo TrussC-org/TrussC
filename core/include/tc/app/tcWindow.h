@@ -77,8 +77,8 @@ public:
     // (standard Node lifecycle), i.e. on the window's first tick; its
     // audioOut() / audioIn() are subscribed right after that setup() returns,
     // not at setApp(). An App runs
-    // once: setup() when first attached, exit() / cleanup() when its window
-    // closes (or, with #318, when it is swapped out); closing the window also
+    // once: setup() when first attached, exit() / cleanup() when it leaves
+    // its window (close(), setApp(other), or setApp(nullptr)); leaving also
     // detaches its audioOut() / audioIn() for good. To show it again, create
     // a new App. setApp() refuses an App whose cleanup() already ran, and any
     // App on a window that is not open or is closing (both log an error and
@@ -440,9 +440,17 @@ inline void Window::applyPendingApp() {
     if (next) attached.insert(next.get());
     app_ = std::move(next);
     ctx_.rootNode = app_;
-    // The outgoing App leaves the window here, at the boundary, outside its
-    // own callbacks: ending it (#318: exit(), cleanup(), audio hooks) belongs
-    // at this point.
+    // Same shape as endApp() (close): the window drops the App first, then
+    // its exit() / cleanup() run, so getApp() there is already the next App.
+    // An App runs once (#318): end it at the boundary, outside its own
+    // callbacks, with this window's context still active. Keep it alive until
+    // its audio hooks are detached and any callback in flight has returned.
+    if (outgoing && !internal::appRanCleanup(*outgoing)) {
+        internal::EntryStackGuard guard(internal::AppEntry::Exit);
+        outgoing->exit();
+        outgoing->cleanup();
+        internal::detachAppAudio(*outgoing);
+    }
     outgoing.reset();
     internal::currentWindowCtx() = prev;
 }
