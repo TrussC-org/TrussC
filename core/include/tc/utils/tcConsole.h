@@ -26,7 +26,6 @@
 #include <atomic>
 #include <iostream>
 #include <sstream>
-#include <memory>
 #include "tcThreadChannel.h"
 #include "tcLog.h"
 #include "../events/tcEventArgs.h"
@@ -46,7 +45,6 @@ namespace detail {
 // Windows guest had its own (never started) copy, so stop() was a no-op (#249).
 ThreadChannel<ConsoleEventArgs>& getChannel();
 std::atomic<bool>& isRunning();
-std::unique_ptr<std::thread>& getThread();
 
 // Parse line by whitespace and create ConsoleEventArgs
 // Comments: everything after '#' is ignored
@@ -98,7 +96,9 @@ inline void start() {
     }
 
     detail::isRunning().store(true);
-    detail::getThread() = std::make_unique<std::thread>(detail::readThread);
+    // getline may block indefinitely; detach now so std::exit() cannot
+    // destroy a joinable thread even if stop() was never called.
+    std::thread(detail::readThread).detach();
 #endif
 }
 
@@ -115,13 +115,6 @@ inline void stop() {
 
     detail::isRunning().store(false);
     detail::getChannel().close();
-
-    // If thread is waiting on getline, it may block indefinitely
-    // unless stdin is closed, so detach it
-    if (detail::getThread() && detail::getThread()->joinable()) {
-        detail::getThread()->detach();
-    }
-    detail::getThread().reset();
 #endif
 }
 
