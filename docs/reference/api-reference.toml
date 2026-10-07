@@ -305,6 +305,9 @@ keywords = ["enumerate", "outputs", "playback", "available"]
 description.en = "Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform."
 description.ja = "利用可能な再生デバイスを列挙 (name + isDefault)。プラットフォームが非対応の場合は空"
 description.ko = "사용 가능한 재생 디바이스를 열거 (name + isDefault). 플랫폼이 미지원이면 비어 있음"
+details.en = "iOS enumeration leaves the audio session untouched, so before session activation (SoloAmbient), the current route may have no inputs."
+details.ja = "iOS の列挙はオーディオセッションを変更しないため、有効化前（SoloAmbient）の現在のルートには入力がない場合があります。"
+details.ko = "iOS 열거는 오디오 세션을 변경하지 않으므로 세션 활성화 전(SoloAmbient)에는 현재 경로에 입력이 없을 수 있습니다."
 related = ["AudioDeviceInfo"]
 
 ["AudioEngine::play"]

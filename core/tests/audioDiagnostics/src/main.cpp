@@ -968,8 +968,22 @@ int main() {
         g_logs.push_back({e.level, e.message, this_thread::get_id()});
     });
 
-    // --- engine start ---------------------------------------------------------
+    // --- enumeration before engine start (#360) -------------------------------
     auto& engine = AudioEngine::getInstance();
+    check("engine is uninitialized before enumeration", !engine.isInitialized());
+    {
+        const auto probe = internal::audioDeviceReport(true);
+        check("device report enumerates before engine start", probe.enumerated);
+        check("probe report names the Null backend", probe.backend == "Null", probe.backend);
+        check("device report leaves the engine uninitialized", !engine.isInitialized());
+        const auto devices = AudioEngine::listDevices();
+        check("listDevices returns the null playback device before engine start",
+              devices.size() == 1 && devices[0].name == "NULL Playback Device" &&
+              devices[0].isDefault);
+        check("listDevices leaves the engine uninitialized", !engine.isInitialized());
+    }
+
+    // --- engine start ---------------------------------------------------------
     AudioSettings settings;
     settings.sampleRate = 48000;
     settings.channels = 2;

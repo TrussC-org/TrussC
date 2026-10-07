@@ -1090,6 +1090,8 @@ public:
     // Enumerate available playback devices. Names from this list are
     // suitable for AudioSettings::deviceName. Returns an empty vector if
     // device enumeration is unsupported on the current platform.
+    // iOS enumeration leaves the audio session untouched, so before session
+    // activation (SoloAmbient), the current route may have no inputs.
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values

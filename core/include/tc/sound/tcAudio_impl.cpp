@@ -106,11 +106,18 @@ const ma_backend kNullBackend = ma_backend_null;
 
 // ma_context_init with miniaudio's default backend order for the platform,
 // or only the null backend under the test hook.
-ma_result initContext(ma_context* ctx) {
-    if (g_nullBackendForTests.load(std::memory_order_relaxed)) {
-        return ma_context_init(&kNullBackend, 1, NULL, ctx);
+ma_result initContext(ma_context* ctx, bool probe = false) {
+    ma_context_config cfg = ma_context_config_init();
+    if (probe) {
+        // Enumeration only observes the iOS session, including on uninit.
+        cfg.coreaudio.sessionCategory = ma_ios_session_category_none;
+        cfg.coreaudio.noAudioSessionActivate = MA_TRUE;
+        cfg.coreaudio.noAudioSessionDeactivate = MA_TRUE;
     }
-    return ma_context_init(NULL, 0, NULL, ctx);
+    if (g_nullBackendForTests.load(std::memory_order_relaxed)) {
+        return ma_context_init(&kNullBackend, 1, &cfg, ctx);
+    }
+    return ma_context_init(NULL, 0, &cfg, ctx);
 }
 } // namespace
 
@@ -527,7 +534,7 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
         // through a throwaway context, so asking never starts the engine.
         ma_context temp;
         bool tempInit = false;
-        if (!ctx && initContext(&temp) == MA_SUCCESS) {
+        if (!ctx && initContext(&temp, true) == MA_SUCCESS) {
             ctx = &temp;
             tempInit = true;
             r.backend = ma_get_backend_name(temp.backend);
@@ -2018,7 +2025,7 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
     std::vector<AudioDeviceInfo> result;
 
     ma_context context;
-    if (initContext(&context) != MA_SUCCESS) {
+    if (initContext(&context, true) != MA_SUCCESS) {
         return result;
     }
 
