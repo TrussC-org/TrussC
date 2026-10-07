@@ -31,8 +31,13 @@ def on_merge_group(expression):
 
 
 def can_save_on_merge_group(step):
-    return (on_merge_group(step.get('if', 'true'))
-            and on_merge_group(step.get('with', {}).get('save', 'true')))
+    if not on_merge_group(step.get('if', 'true')):
+        return False
+    # Only ccache-action has a `save` input; actions/cache ignores one, so for
+    # it (and cache/save) the step's `if:` alone decides.
+    if step.get('uses', '').startswith('hendrikmuhs/ccache-action@'):
+        return on_merge_group(step.get('with', {}).get('save', 'true'))
+    return True
 
 
 class BuildWorkflowCacheTests(unittest.TestCase):
@@ -69,15 +74,19 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                 self.assertEqual(restore['with'], expected)
 
     def test_guard_evaluation(self):
+        CCACHE = 'hendrikmuhs/ccache-action@v1.2'
         for step, expected in [
             ({}, True),
             ({'if': "github.event_name != 'merge_group'"}, False),
             ({'if': "${{ github.event_name != 'merge_group' }}"}, False),
-            ({'with': {'save': "${{ github.event_name != 'merge_group' }}"}}, False),
-            ({'with': {'save': 'false'}}, False),
+            ({'uses': CCACHE, 'with': {'save': "${{ github.event_name != 'merge_group' }}"}}, False),
+            ({'uses': CCACHE, 'with': {'save': 'false'}}, False),
             ({'if': "github.event_name == 'merge_group'"}, True),
             ({'if': "github.event_name != 'merge_group' || true"}, True),
-            ({'with': {'save': "${{ github.event_name == 'merge_group' }}"}}, True),
+            ({'uses': CCACHE, 'with': {'save': "${{ github.event_name == 'merge_group' }}"}}, True),
+            # actions/cache has no `save` input: it would still save.
+            ({'uses': 'actions/cache@v5', 'with': {'save': 'false'}}, True),
+            ({'uses': 'actions/cache/save@v5', 'with': {'save': 'false'}}, True),
         ]:
             with self.subTest(step=step):
                 self.assertEqual(can_save_on_merge_group(step), expected)
