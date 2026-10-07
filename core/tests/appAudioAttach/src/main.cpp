@@ -5,7 +5,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The real AudioEngine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the mixer callback on its own thread, so no sound card is needed.
 //
 // Before #426 the App constructor subscribed the hooks: with audio running,
@@ -187,12 +187,11 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;

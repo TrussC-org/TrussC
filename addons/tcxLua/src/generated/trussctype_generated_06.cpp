@@ -148,6 +148,11 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["raw"] = &trussc::ConsoleEventArgs::raw;
         t["args"] = &trussc::ConsoleEventArgs::args;
     }
+    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
+        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
+        "Default", sol::var(trussc::AudioBackend::Default),
+        "Null", sol::var(trussc::AudioBackend::Null));
+
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

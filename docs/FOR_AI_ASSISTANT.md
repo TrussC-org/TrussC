@@ -1273,7 +1273,9 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 ### How do I list / select audio devices?
 
-`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device.
+`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device. For headless runs, set `settings.backend = AudioBackend::Null` and call `init(settings)` before loading sounds; this runs the real mixer and callbacks silently and logs a Notice. Zero-argument `init()` selects `Default`. Enumeration and native `MicInput` follow the engine backend; before init, enumeration probes real backends.
+
+A backend context that opens but cannot open its device leaves the engine stopped; it does not switch to Null. miniaudio reaches Null automatically only when no real backend context can be created. `getStats()` records the last init failure (`initFailure`, `initFailureResult`, `initFailureBackend`) until an init succeeds, using only atomic state. `tc_get_audio_state` includes an `initFailure` object with the reason, result, backend and requested device name while that failure is recorded.
 
 ### Per-buffer synthesis / processing? (audioIn / audioOut)
 

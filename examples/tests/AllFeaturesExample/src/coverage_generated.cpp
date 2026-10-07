@@ -854,6 +854,7 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
         (void)af::val<AudioSettings>().bufferSize;
         (void)af::val<AudioSettings>().maxPolyphony;
         (void)af::val<AudioSettings>().deviceName;
+        (void)af::val<AudioSettings>().backend;
     }
 };
 
@@ -872,6 +873,9 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
         (void)af::val<AudioStats>().underrunFrames;
         (void)af::val<AudioStats>().stalled;
         (void)af::val<AudioStats>().voicesStoppedByReinit;
+        (void)af::val<AudioStats>().initFailure;
+        (void)af::val<AudioStats>().initFailureResult;
+        (void)af::val<AudioStats>().initFailureBackend;
     }
 };
 

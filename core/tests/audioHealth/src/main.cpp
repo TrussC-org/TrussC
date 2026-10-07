@@ -85,7 +85,6 @@ Json audioState() {
 
 TC_CORE_TEST_MAIN() {
     getMainThreadId();
-    internal::setNullAudioBackendForTests(true);
     auto& engine = AudioEngine::getInstance();
     mcp::registerInspectionTools();
     check("unused engine has no stall or diagnostic counts",
@@ -110,6 +109,7 @@ TC_CORE_TEST_MAIN() {
     };
 
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.bufferSize = 256;
     check("null backend starts", engine.init(settings));

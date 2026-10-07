@@ -777,6 +777,8 @@ struct PlayingSound {
 // Empty `deviceName` selects the system default playback device.
 // Use AudioEngine::listDevices() to enumerate available device names.
 // ---------------------------------------------------------------------------
+enum class AudioBackend { Default, Null };
+
 struct AudioSettings {
     int sampleRate   = 0;       // engine output sample rate (Hz);
                                 // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
@@ -784,6 +786,7 @@ struct AudioSettings {
     int bufferSize   = 0;       // requested device buffer size in frames; 0 = let miniaudio choose
     int maxPolyphony = 32;      // max simultaneously-playing Sound voices
     std::string deviceName;     // playback device name; empty = system default
+    AudioBackend backend = AudioBackend::Default; // Null = silent, device-less mixer clock
 };
 
 // ---------------------------------------------------------------------------
@@ -873,6 +876,8 @@ struct PlayingSoundInfo {
 // AudioEngine::getStats(). Counters are cumulative since the process
 // started (they survive re-init); meters describe the recent output.
 // ---------------------------------------------------------------------------
+enum class AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart };
+
 struct AudioStats {
     // Plays AudioEngine::play() refused (Sound::play() returned false),
     // in total and by reason.
@@ -895,6 +900,11 @@ struct AudioStats {
     uint64_t underrunFrames = 0;       // silent output frames per stream voice after playback began
     bool stalled = false;             // running, but no callback finished for max(250 ms, 4 periods)
     uint64_t voicesStoppedByReinit = 0; // stream voices whose decoder could not reopen at the new rate
+
+    // Last failed init(), cleared only by a successful init().
+    AudioInitFailure initFailure = AudioInitFailure::None;
+    int initFailureResult = 0;          // miniaudio ma_result
+    const char* initFailureBackend = ""; // static backend name; empty if no context opened
 };
 
 // Engine diagnostics state (counters, meters, report timers). Defined in
@@ -912,6 +922,7 @@ namespace internal {
 
     // Device details for tc_get_audio_state that need miniaudio types.
     struct AudioDeviceReport {
+        std::string initFailureDevice; // requested device name of the last failed init
         std::string backend;          // miniaudio backend ("Core Audio", "WASAPI", "PulseAudio", "Null", ...)
         std::string outputDevice;     // name of the open playback device; empty when not running
         bool outputIsDefault = false; // it is the OS default playback device
@@ -926,13 +937,9 @@ namespace internal {
     // backends. Main thread; does not initialize the engine.
     AudioDeviceReport audioDeviceReport(bool enumerate);
 
-    // Test hook, not a user setting: AudioEngine, listDevices(),
-    // audioDeviceReport() and (native) MicInput open miniaudio's null
-    // backend only, a device-less clock that still drives the real mixer
-    // callback, so a headless test runs without a sound card. Call it before
-    // anything opens an audio context: the engine keeps the context it
-    // opened first. State lives in tcAudio_impl.cpp.
-    void setNullAudioBackendForTests(bool on);
+    // Test hook: fail the engine's device open without changing its backend.
+    enum class AudioDeviceFaultForTests { None, OpenFails };
+    void setAudioDeviceFaultForTests(AudioDeviceFaultForTests fault);
 
     // Test hook, not a user setting: AudioRecorder's audio-thread capture
     // calls `hook` with the frame count of every buffer it takes, after
@@ -1063,12 +1070,14 @@ public:
     // so they are kept even when the open fails. init() with no arguments
     // reuses the settings of the last init(settings) call, failed or not
     // (the DEFAULT_* values if there was none), but always opens the system
-    // default device: deviceName is not kept. On a running
-    // engine it re-initializes live: the device is reopened with the new
+    // default device on AudioBackend::Default: deviceName and backend are
+    // not kept. On a running engine it re-initializes live: the device is reopened with the new
     // settings and playing voices move over, keeping their position.
     //
-    // With no usable audio backend, miniaudio falls back to its Null
-    // backend: init() succeeds on a silent device and logs a warning.
+    // miniaudio reaches Null only when no real backend context can be
+    // created. A context that opens but has no device makes init() return
+    // false, without switching to Null. Set AudioSettings::backend to
+    // AudioBackend::Null to run silently on purpose.
     // Returns false when no output device can be opened (none present, or
     // the requested one refused); the failure is logged
     // through logError("AudioEngine"), naming the requested device, and the
@@ -1222,6 +1231,7 @@ private:
     friend void internal::flushAudioDiagnostics();
     friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+    friend class MicInput;
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
     friend void internal::releaseVoice(PlayingSound&);

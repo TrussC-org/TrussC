@@ -134,8 +134,6 @@ TC_CORE_TEST_MAIN() {
     // A relative path that went through the CWD would land here instead
     fs::current_path(cwd);
 
-    internal::setNullAudioBackendForTests(true);
-
     // --- Pixels ---------------------------------------------------------------
     {
         Pixels px;
@@ -199,6 +197,9 @@ TC_CORE_TEST_MAIN() {
         check("Pixels::loadHDR: a file only in the CWD is not found",
               !rc.ok() && rc.error == LoadError::FileNotFound);
     }
+
+    check("null backend starts", AudioEngine::getInstance().init(
+        AudioSettings{.backend = AudioBackend::Null}));
 
     // --- Sound -----------------------------------------------------------------
     {

@@ -133,10 +133,10 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = kRate;
     settings.channels = 2;
     settings.bufferSize = 256;
