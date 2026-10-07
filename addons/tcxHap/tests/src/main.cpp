@@ -1154,6 +1154,8 @@ static void clockTests() {
     }
 }
 
+int runVideoTests();
+
 // Optional GPU-backed playback failure checks (run under Xvfb on Linux).
 class PlaybackErrorApp : public App {
 public:
@@ -1269,6 +1271,7 @@ int main(int argc, char** argv) {
         runApp<PlaybackErrorApp>(settings);
         return g_fail ? 1 : 0;
     }
+    g_fail += runVideoTests();
     const fs::path data = fs::path(getDataPath(""));
     printf("data: %s\n", data.string().c_str());
 
