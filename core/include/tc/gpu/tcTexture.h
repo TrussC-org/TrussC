@@ -424,11 +424,11 @@ public:
             // frame limit is a device constraint, so this must stay on
             // sapp_frame_count(), NOT the per-window getFrameCount().
             uint64_t currentFrame = sapp_frame_count();
-            if (lastUpdateFrame_ == currentFrame) {
+            if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
                 logWarning() << "[Texture] loadData() called twice in same frame, skipped";
                 return;
             }
-            lastUpdateFrame_ = currentFrame;
+            lastUpload_ = {image_.id, currentFrame};
 
             const size_t bpp = computeBytesPerPixel();
 
@@ -475,20 +475,20 @@ public:
     }
 
     // Upload pixel data to texture
-    // Note: Due to sokol limitations, can only be called once per frame
-    // Calling twice in same frame ignores second call and logs warning
+    // Note: Due to sokol limitations, can only update each image once per frame
+    // Updating the same image twice ignores the second call and logs a warning
     void loadData(const void* data, int width, int height, int channels) {
         if (!sg_isvalid()) return;
         if (!allocated_ || usage_ == TextureUsage::Immutable) return;
         if (width != width_ || height != height_ || channels != channels_) return;
 
-        // Can only update once per frame (sokol limitation)
+        // Can only update each image once per device frame (sokol limitation)
         uint64_t currentFrame = sapp_frame_count();
-        if (lastUpdateFrame_ == currentFrame) {
+        if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
             logWarning() << "[Texture] loadData() called twice in same frame, skipped";
             return;
         }
-        lastUpdateFrame_ = currentFrame;
+        lastUpload_ = {image_.id, currentFrame};
 
         size_t dataSize = (size_t)width * height * computeBytesPerPixel();
 
@@ -650,7 +650,10 @@ private:
     bool allocated_ = false;
     bool mipmapped_ = false;
     TextureUsage usage_ = TextureUsage::Immutable;
-    uint64_t lastUpdateFrame_ = UINT64_MAX;  // Last updated frame
+    struct {
+        uint32_t image = SG_INVALID_ID;
+        uint64_t frame = UINT64_MAX;
+    } lastUpload_;
     sg_pixel_format pixelFormat_ = SG_PIXELFORMAT_NONE;
 
     TextureFilter minFilter_ = TextureFilter::Linear;
@@ -979,7 +982,7 @@ private:
         mipAttachmentViews_ = std::move(other.mipAttachmentViews_);
         mipSamplingViews_ = std::move(other.mipSamplingViews_);
         usage_ = other.usage_;
-        lastUpdateFrame_ = other.lastUpdateFrame_;
+        lastUpload_ = other.lastUpload_;
         pixelFormat_ = other.pixelFormat_;
         minFilter_ = other.minFilter_;
         magFilter_ = other.magFilter_;
