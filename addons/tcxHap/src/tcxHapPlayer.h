@@ -309,6 +309,7 @@ public:
 
         clearPlaybackError();
         initialized_ = true;
+        applyCachedStateToPlatform();
         currentFrame_ = 0;
         return tc::LoadResult::success();
     }

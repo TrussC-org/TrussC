@@ -1,5 +1,8 @@
 #include "tcxQuadWarp.h"
 
+#include <cmath>
+#include <limits>
+
 namespace tcx::quadwarp {
 
 QuadWarp::QuadWarp() {
@@ -190,36 +193,64 @@ void QuadWarp::save(const std::string& path) {
     tc::logNotice("QuadWarp") << "Saved to " << path;
 }
 
-void QuadWarp::load(const std::string& path) {
-    tc::Json json = tc::loadJson(path);
-    if (json.is_null() || json.empty()) {
-        return;
-    }
+bool QuadWarp::load(const std::string& path) {
+    auto fail = [&path](const std::string& reason) {
+        tc::logWarning("QuadWarp") << "Cannot load " << path << ": " << reason;
+        return false;
+    };
 
-    if (json.contains("quadwarp")) {
-        auto& q = json["quadwarp"];
-        
-        if (q.contains("src") && q["src"].is_array()) {
-            int i = 0;
-            for (auto& p : q["src"]) {
-                if (i >= 4) break;
-                srcPoints[i].x = p["x"].get<float>();
-                srcPoints[i].y = p["y"].get<float>();
-                i++;
-            }
+    try {
+        const tc::Json json = tc::loadJson(path);
+        if (!json.is_object()) {
+            return fail("expected a JSON object (file missing, unreadable or invalid)");
+        }
+        const auto q = json.find("quadwarp");
+        if (q == json.end() || !q->is_object()) {
+            return fail("quadwarp must be an object");
         }
 
-        if (q.contains("dst") && q["dst"].is_array()) {
-            int i = 0;
-            for (auto& p : q["dst"]) {
-                if (i >= 4) break;
-                dstPoints[i].x = p["x"].get<float>();
-                dstPoints[i].y = p["y"].get<float>();
-                i++;
+        auto readPoints = [&](const char* name, tc::Vec2 (&points)[4]) {
+            const auto array = q->find(name);
+            if (array == q->end() || !array->is_array() || array->size() < 4) {
+                return fail(std::string(name) + " must be an array of at least 4 points");
             }
+            for (int i = 0; i < 4; ++i) {
+                const auto& p = array->at(i);
+                const std::string point = std::string(name) + " point " + std::to_string(i);
+                if (!p.is_object()) {
+                    return fail(point + " must be an object");
+                }
+                const auto x = p.find("x");
+                const auto y = p.find("y");
+                if (x == p.end() || y == p.end() || !x->is_number() || !y->is_number()) {
+                    return fail(point + " must have numeric x and y");
+                }
+                const double px = x->get<double>();
+                const double py = y->get<double>();
+                const double max = std::numeric_limits<float>::max();
+                if (!std::isfinite(px) || !std::isfinite(py) ||
+                    std::abs(px) > max || std::abs(py) > max) {
+                    return fail(point + " coordinates must be finite floats");
+                }
+                points[i].set(static_cast<float>(px), static_cast<float>(py));
+            }
+            return true;
+        };
+
+        tc::Vec2 src[4];
+        tc::Vec2 dst[4];
+        if (!readPoints("src", src) || !readPoints("dst", dst)) {
+            return false;
         }
-        tc::logNotice("QuadWarp") << "Loaded from " << path;
+        for (int i = 0; i < 4; ++i) {
+            srcPoints[i] = src[i];
+            dstPoints[i] = dst[i];
+        }
+    } catch (const tc::Json::exception& e) {
+        return fail(std::string("invalid JSON: ") + e.what());
     }
+    tc::logNotice("QuadWarp") << "Loaded from " << path;
+    return true;
 }
 
 } // namespace tcx::quadwarp

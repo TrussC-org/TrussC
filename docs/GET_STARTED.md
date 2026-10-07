@@ -24,11 +24,11 @@ Built on C++20 + sokol, it's simple to write and runs cross-platform.
 | OS | Compiler |
 |----|----------|
 | macOS 14+ (Sonoma) | Xcode Command Line Tools (`xcode-select --install`) |
-| iOS 16.3+ | Xcode on macOS (iOS SDK) |
+| iOS 16.4+ | Xcode on macOS (iOS SDK) |
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ or Clang 10+ |
 
-The iOS minimum is 16.3 so floating-point `std::format` is available.
+The iOS minimum is 16.4 for Metal BC texture support detection; floating-point `std::format` is also available.
 Run `trusscli update` to apply this deployment target to an existing iOS project.
 
 **CMake** is also required. Please install it — without it the build may fail

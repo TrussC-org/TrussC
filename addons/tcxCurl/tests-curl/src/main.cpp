@@ -133,11 +133,19 @@ static void testTlsOptions() {
         auto request = [&] { return upload ? http.uploadFile("/", "unused.txt") : http.get("/"); };
         auto reset = [&] { g_tlsTrace = {}; g_tlsTrace.enabled = true; };
         auto defaultOptions = [] {
-#if defined(_WIN32) && defined(CURLSSLOPT_NATIVE_CA)
-            return static_cast<long>(CURLSSLOPT_NATIVE_CA);
-#else
-            return 0L;
+            long options = 0;
+#ifdef _WIN32
+#ifdef CURLSSLOPT_NATIVE_CA
+            options |= CURLSSLOPT_NATIVE_CA;
 #endif
+#ifdef CURLSSLOPT_REVOKE_BEST_EFFORT
+            options |= CURLSSLOPT_REVOKE_BEST_EFFORT;
+#endif
+#endif
+            return options;
+        };
+        auto sslOptionCalls = [&] {
+            return std::count(g_tlsTrace.options.begin(), g_tlsTrace.options.end(), CURLOPT_SSL_OPTIONS);
         };
 
         reset();
@@ -147,6 +155,18 @@ static void testTlsOptions() {
         check(name + "default CA keeps existing TLS options",
               g_tlsTrace.pem.empty() && !g_tlsTrace.caFileCleared && !g_tlsTrace.caPathCleared &&
               g_tlsTrace.sslOptions == defaultOptions() && g_tlsTrace.performed);
+        check(name + "SSL options applied once, only when needed",
+              sslOptionCalls() == (defaultOptions() != 0 ? 1 : 0));
+        if (defaultOptions() != 0) {
+            for (auto rejection : {CURLE_UNKNOWN_OPTION, CURLE_NOT_BUILT_IN}) {
+                reset();
+                g_tlsTrace.reject = CURLOPT_SSL_OPTIONS;
+                g_tlsTrace.rejection = rejection;
+                const auto res = request();
+                check(name + "unsupported default SSL options stop before transfer",
+                      res.statusCode == 0 && !res.error.empty() && !g_tlsTrace.performed);
+            }
+        }
 
 #if LIBCURL_VERSION_NUM >= 0x074D00
         reset();
@@ -157,7 +177,10 @@ static void testTlsOptions() {
               !g_tlsTrace.verificationDisabled && g_tlsTrace.performed);
 #if defined(_WIN32) && defined(CURLSSLOPT_REVOKE_BEST_EFFORT)
         check(name + "PEM keeps best-effort revocation without native CA",
-              g_tlsTrace.sslOptions == static_cast<long>(CURLSSLOPT_REVOKE_BEST_EFFORT));
+              g_tlsTrace.sslOptions == static_cast<long>(CURLSSLOPT_REVOKE_BEST_EFFORT) &&
+              sslOptionCalls() == 1);
+#else
+        check(name + "PEM needs no SSL options", sslOptionCalls() == 0);
 #endif
         for (auto rejection : {CURLE_UNKNOWN_OPTION, CURLE_NOT_BUILT_IN}) {
             for (auto option : {CURLOPT_CAINFO_BLOB, CURLOPT_CAINFO, CURLOPT_CAPATH,

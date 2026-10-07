@@ -57,8 +57,8 @@ public:
 private:
     std::vector<ObjGroup> groups_;
 
-    // Compute per-vertex normals (averaged from face normals)
-    static void computeNormals(Mesh& mesh);
+    // Compute area-weighted normals, optionally replacing only marked entries.
+    static void computeNormals(Mesh& mesh, const std::vector<bool>& missingNormals = {});
 };
 
 }  // namespace tcx::obj

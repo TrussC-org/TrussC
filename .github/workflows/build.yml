@@ -250,6 +250,13 @@ jobs:
             find . -name trusscli.exe
           fi
 
+      # trusscli clean must refuse a folder that is not a TrussC project (#459).
+      # Runs against the trusscli just built from this commit.
+      - name: trusscli clean regression tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 tools/tests/test_trusscli_clean.py -v
+
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
       # other example is built daily (daily.yml).

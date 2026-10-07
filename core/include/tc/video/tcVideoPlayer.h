@@ -127,6 +127,7 @@ public:
 
         clearPlaybackError();
         initialized_ = true;
+        applyCachedStateToPlatform();
         firstFrameReceived_ = false;
         posterActive_ = false;
 

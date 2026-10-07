@@ -9,6 +9,7 @@ Hap Alpha / Hap Q. `HapPlayer` requires GPU sampling support for the movie's
 BC format. Without it, loading fails with
 `Compressed texture format not supported on this GPU`.
 
-TrussC's Metal backend (the vendored sokol_gfx) enables BC texture formats
-only on macOS, so HAP playback fails on iOS, both on the Simulator and on
-devices (checked on an iPhone 16, 2026-10-06). See #645.
+On iOS, TrussC's Metal backend enables BC texture formats when the GPU
+reports BC support. Hap1 and Hap Q playback with correct colours was checked
+on an iPhone 16 in the #645 experiment. Where BC is not supported, for example
+on the Simulator, loading fails cleanly with the message above, without a crash.
