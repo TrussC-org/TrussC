@@ -43,12 +43,50 @@ trusscli update -p path/to/myProject --android
 # Enable iOS build
 trusscli update -p path/to/myProject --ios
 
+# Drop a target again (also --no-android / --no-ios)
+trusscli update -p path/to/myProject --no-web
+
+# Switch the IDE (vscode, cursor, xcode, vs, cmake)
+trusscli update -p path/to/myProject --ide cursor
+
 # Specify TrussC root explicitly (if auto-detection fails)
 trusscli update -p path/to/myProject --tc-root path/to/TrussC
 
 # Generate a new project
 trusscli new path/to/myNewApp
 ```
+
+`trusscli build` configures the target's build folder itself when it has no
+CMake cache (after `trusscli clean`, or a deleted folder) or only the cache
+of a configure that failed, and prints one line saying so. On Windows it also
+notices when Visual Studio changed since the project was generated (a pinned
+MSVC, Windows SDK or ninja path in `CMakePresets.json` is gone): it detects
+Visual Studio again, replaces only those paths in the `windows` preset (the
+rest of the file stays), removes `build-windows` and configures again. When
+no usable Visual Studio is found it changes nothing and says so.
+`trusscli doctor` reports the same check.
+
+`update`, `addon add` and `addon remove` keep the project's IDE, its Web /
+Android / iOS targets and its web backend: they read them back from the
+project's `CMakePresets.json` (the IDE is stored there as
+`"vendor": {"trussc": {"ide": "..."}}`), then apply the flags you pass. So
+`trusscli update --web` once is enough, and `--no-web` / `--no-android` /
+`--no-ios` drop a target again. A kept target is configured again on every
+regeneration. Its toolchain path saved in `CMakePresets.json` is reused when
+the current shell has no emsdk / Android NDK set up and the file still
+exists; if its configure fails anyway, that is a warning naming
+`trusscli update --no-web` (or `--no-android` / `--no-ios`), and the rest of
+the regeneration (e.g. the addon change) stands. A target you pass as a flag
+must configure, or the command fails.
+Scripts that want an exact target set pass every flag, as
+`examples/build_all.py` does. `CMakePresets.json` is gitignored, so after a
+fresh clone the defaults apply (`vscode`, native only) until you pass the
+flags again. A saved setting that cannot be used — a file that does not
+parse, an unknown IDE id, or an IDE this OS cannot generate (`xcode` off
+macOS, `vs` off Windows, e.g. in a folder shared between machines) — is
+reported with a warning and replaced by the default. `TC_WEB_BACKEND` is read
+the way CMake builds it: `"WGPU"` (or unset) is WebGPU, any other value is
+GLES3 (WebGL), with a warning unless it is `"GLES3"`.
 
 ### Keeping `trusscli` in sync
 
@@ -263,6 +301,48 @@ int main() {
 ### Data Folder
 Place assets (images, fonts, sounds) in `bin/data/`.
 This path is automatically resolved at runtime via `tc::getDataPath()`.
+On Apple platforms, the first use chooses one existing folder relative to the
+executable: `data` (iOS), then `../Resources/data` (macOS release bundle), then
+`../../../data` (macOS development). An explicit `setDataPathRoot()` overrides
+this probe. The selected folder stays fixed for the process; a missing file
+never falls back to an asset outside the bundle. `setDataPathToResources()`
+continues to explicitly select `Contents/Resources/data`.
+
+The reusable [release workflow](../.github/workflows/release.yml) copies
+`bin/data` into `Contents/Resources/data` before signing a macOS app, and beside
+the executable on Windows and Linux. Normal macOS builds do not copy data into
+the bundle, so development continues to use `bin/data`.
+
+### Release Packages
+
+App repositories can call `.github/workflows/release.yml`. `trussc-ref` takes
+priority over the app's `.trussc-version`; without either, the workflow selects
+the latest GitHub release from `trussc-repository`. The actual ref, tag and commit
+for each platform are recorded in the release notes. This default follows new
+TrussC releases; pin a tag or commit when a rebuild must use a fixed version.
+
+Packages build with `RelWithDebInfo`, reject hot reload, and use `macos-15`,
+`windows-2025` and `ubuntu-24.04` runner images. macOS packages are arm64 only,
+with a deployment target and `LSMinimumSystemVersion` of 14.0. Signing uses
+hardened runtime, timestamps, and camera/microphone entitlements by default;
+`entitlements` replaces the defaults with an app-specific plist relative to
+`project-path`. Nested code is signed before the app, followed by the DMG.
+Data inside the signed bundle is part of the signature; changing it invalidates
+the signature.
+
+The Windows zip uses the dynamic MSVC runtime (`/MD`). Target machines need the
+Microsoft Visual C++ 2015–2022 Redistributable (x64) installed separately; the
+zip does not install or bundle it.
+
+Matching PDB, dSYM and Linux debug files are uploaded as separate symbol
+artifacts and release assets, outside the user packages. Keep them for crash
+analysis. On Linux the packaged executable contains a GNU debug link; extract
+the matching `.debug` file beside it (or into a `.debug` subdirectory) for GDB.
+
+`publish: false` builds and verifies packages without creating a GitHub Release.
+`project-path` defaults to `.`; the weekly package check uses `cursorExample`
+with its data folder and ad-hoc signing (`sign-identity: '-'`). Ad-hoc signing
+skips certificate import, notarization and stapling, and uses no timestamp.
 
 ### App Icon
 Place icon files in the `icon/` folder:
@@ -274,6 +354,14 @@ Place icon files in the `icon/` folder:
 - **Windows:**
   - `.ico` - Windows icon format
   - `.png` - Converted to `.ico` automatically (requires ImageMagick)
+
+### Windows Application Manifest (UTF-8)
+Every Windows executable built through `trussc_app()` embeds an application manifest (`core/resources/windows/app.manifest`), merged with the linker's default one:
+
+- `activeCodePage` = `UTF-8`: on Windows 10 version 1903 or later the process code page is UTF-8, so narrow strings are UTF-8 in every API that takes them (`fs::path(std::string)`, `path.string()`, `fopen`, `getenv`, the `-A` Win32 functions), in TrussC, addons and third-party libraries alike. A UTF-8 literal or `std::string` works as a file path: `img.load("写真.png")`. Older Windows ignores the setting. There, and in an executable not built through `trussc_app()`, narrow strings are in the system code page (CP932, CP1252): convert a UTF-8 string with `utf8ToPath()` before passing it to `fs::path`, `load()` or `save()`. That includes the UTF-8 strings the path helpers return (`getFileName()`, `joinPath()`, `listDirectory()`, ...).
+- `longPathAware`: paths longer than 260 characters work where Windows has long paths enabled (the `LongPathsEnabled` policy).
+
+The console output code page is UTF-8 as well: `runApp()` (through `sapp_desc.win32.console_utf8`) and `runHeadlessApp()` switch it to UTF-8 while the app runs, so UTF-8 log text reads correctly in the console of a Debug or `TRUSSC_SHOW_CONSOLE` build. This is done at run time, not by the manifest. The previous code page comes back when `runApp()` / `runHeadlessApp()` returns, and when Ctrl+C or Ctrl+Break ends the app. In a headless app, the first Ctrl+C or Ctrl+Break stops the loop; a second one ends a hung app right away. `std::exit()`, `abort()`, an uncaught exception or a crash leave the console in UTF-8; `chcp` with the old number (e.g. `chcp 932`) sets it back.
 
 ---
 
@@ -379,6 +467,10 @@ target_link_directories(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARIES})
 ```
 
+### Bundle Identifier (macOS / iOS)
+
+On macOS and iOS the app's bundle identifier defaults to `com.trussc.<project name>`. Set your own one in `local.cmake` before you distribute the app, e.g. `set(TC_BUNDLE_ID "com.example.myApp")`. `trussc_app()` reads `TC_BUNDLE_ID` after including `local.cmake` and uses it for `CFBundleIdentifier` in the generated Info.plist and for the Xcode `PRODUCT_BUNDLE_IDENTIFIER` setting, so it survives `trusscli update`. macOS keys privacy permissions and user defaults by this identifier, so two apps with the same project name and the default identifier share them. Other platforms ignore `TC_BUNDLE_ID`.
+
 ### `local.cmake` vs Addons
 
 | | `local.cmake` | Addon (`addons.make`) |
@@ -421,15 +513,25 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
-2. Old Guest is unloaded (`dlclose` / `FreeLibrary`)
+2. The old Guest's App is destroyed (`events().hotReloadUnload` fires first). Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
 3. New Guest is loaded (`dlopen` / `LoadLibrary`)
 4. A new App instance is created → `setup()` runs again
 
 ### State Reset (Stage 1)
 
-Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated. This is the same model as Processing / p5.js live coding.
+Currently, all state is reset on reload — `setup()` runs from scratch each time. Member variables, scene graph, loaded resources are all recreated, and hover, the mouse grab and the node selection (`getSelectedNode()`) start empty. This is the same model as Processing / p5.js live coding.
 
 For most creative coding use cases (adjusting colors, positions, animations), this is sufficient.
+
+State that outlives the App is the exception: singletons and function-local statics in your code (or in an addon) belong to the guest library, which stays loaded after a reload, so the previous build's copy keeps any listener it has on `events()`. Drop them on `events().hotReloadUnload`, which fires before the host unloads the current build while its App is still alive (and once more at exit, after `exit`):
+
+```cpp
+unloadListener_ = events().hotReloadUnload.listen([this] {
+    // release what this build registered (the same cleanup as on exit)
+});
+```
+
+tcxImGui and tcxNodeInspector do this themselves.
 
 ### Disabling Hot Reload
 
@@ -442,6 +544,7 @@ On the next build, cmake reconfigures back to a single static binary. The `TC_RU
 ### Limitations
 
 - **Supported platforms**: macOS (`.dylib`), Linux (`.so`), Windows (`.dll`). Wasm / iOS / Android fall back to static mode automatically.
+- **Windows guest state**: the guest DLL compiles its own copy of every header-inline variable, so framework state that host and app code share lives in the host behind non-inline functions ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)): MCP tools, events, timers, audio, recording, the main-thread queue, `setFps()` / `redraw()`, the clip / fov defaults, touch-as-mouse, the data path root, bitmap-font glyphs, the overlay (tcxImGui) queries, the debug counters behind `getNodeCount()` / `getTextureCount()` / `getFboCount()`, the current window context and the secondary windows' double-attach guard (so guest code sees the host's release when a window closes; a closed App is not attached again, so after that you attach a new App) all reach the host from a Windows guest too, and guest code sees the host's `WindowSettings::pixelPerfect` and sokol_gl budget. The GPU caches (FBO contexts and pipelines, IBL bake pipelines, font atlases and samplers) are the host's as well, so a reload reuses them instead of filling the host's sokol pools with a new set each time. What each module still keeps for itself is listed in `tools/header_state_allowlist.txt` with the reason it is harmless: small derived caches (demangled type names). Warn-once gates (`static OnceGate`) are per module too; after a reload a warning can show once more. Addons' own header-inline state is the guest's by design.
 - **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
 - **Build tool**: `trusscli build` handles hot reload state changes in one step. Raw `cmake --build` may require building twice when toggling `TC_HOT_RELOAD` on/off.
 - **Build errors**: If the code doesn't compile, the previous version keeps running. Fix the error and save again.

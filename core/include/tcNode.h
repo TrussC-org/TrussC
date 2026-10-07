@@ -31,6 +31,8 @@
 #include <vector>
 #include <functional>
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <typeindex>
 #include <unordered_map>
@@ -65,23 +67,65 @@ class Mod;
 using NodePtr = std::shared_ptr<Node>;
 using NodeWeakPtr = std::weak_ptr<Node>;
 
+// Frame timing the Node timers count down with (defined in tcGlobal.cpp,
+// declared in TrussC.h).
+double getDeltaTime();
+uint64_t getUpdateCount();
+namespace internal {
+    // The current window's update time (the wall time of the update call; a
+    // fixed-Hz step's nominal time), whether one of its updates is running,
+    // and whether that update is a fixed-Hz step (WindowContext::updateTime /
+    // inUpdate / fixedStepUpdate, tcGlobal.cpp).
+    std::chrono::steady_clock::time_point getUpdateTime();
+    bool isInUpdate();
+    bool isFixedStepUpdate();
+}
+
 // Hover state cache (updated once per frame): hoveredNode / prevHoveredNode /
 // grabbedNode / grabbedButton / selectedNode / rootNode moved to WindowContext
 // (tc/app/tcWindowContext.h) — each window's node tree has its own.
 namespace internal {
     // Overlay (e.g. tcxImGui) capture queries. An overlay registers these so the
     // framework knows when the pointer is over it / it owns keyboard focus. Null
-    // when no overlay is present, so plain apps are unaffected.
-    inline std::function<bool()> overlayHoveredQuery;
-    inline std::function<bool()> overlayFocusedQuery;
+    // when no overlay is present, so plain apps are unaffected. Defined in
+    // tcGlobal.cpp: the overlay (app code) installs them and the node tree's
+    // hover update, driven by the host, asks them, so both must reach one
+    // instance, also from a Windows hot reload guest DLL.
+    std::function<bool()>& overlayHoveredQuery();
+    std::function<bool()>& overlayFocusedQuery();
+
+    // Source of Node::getInstanceId(). Defined in tcGlobal.cpp so ids stay
+    // unique per process, not per module: a Windows hot reload guest DLL would
+    // otherwise count from 0 again in every generation.
+    uint64_t nextNodeInstanceId();
+
+    // Source of the ids callAfter() / callEvery() / callEveryCatchUp()
+    // return, starting at 1. Also one per process (tcGlobal.cpp): with a
+    // counter per module, host and guest code, or two guest generations, could
+    // give one node two timers with the same id, and cancelTimer(id) removes
+    // every timer with that id.
+    uint64_t nextNodeTimerId();
+
+    // Runs the node's setup() once and then the framework's post-setup hook,
+    // as the node's first updateTree() / drawTree() does (Node::setupOnce()),
+    // as the setup() entry point (#349): the stacks go back to their depth
+    // before it. For a window's root (the App): runHeadlessApp(), and
+    // App / Window before their tree walk. Defined below the Node class.
+    inline void setupNodeOnce(Node& node);
 }
 
 // True when an overlay currently has the pointer over it (e.g. cursor is over a
 // tcxImGui panel) / owns keyboard focus (e.g. an InputText is active). The node
 // tree's hover honors isOverlayHovered() automatically; guard raw input in user
 // code with these (e.g. `if (isOverlayFocused()) return;` in a key handler).
-inline bool isOverlayHovered() { return internal::overlayHoveredQuery && internal::overlayHoveredQuery(); }
-inline bool isOverlayFocused() { return internal::overlayFocusedQuery && internal::overlayFocusedQuery(); }
+inline bool isOverlayHovered() {
+    auto& query = internal::overlayHoveredQuery();
+    return query && query();
+}
+inline bool isOverlayFocused() {
+    auto& query = internal::overlayFocusedQuery();
+    return query && query();
+}
 
 // =============================================================================
 // Node - Scene graph base class
@@ -92,16 +136,17 @@ class Node : public std::enable_shared_from_this<Node> {
     friend class App;     // Allow App to call dispatch methods
     friend class Window;  // Secondary windows drive their own tree (tcWindow.h)
     friend class Mod;  // Allow Mod to access owner_
+    friend void internal::setupNodeOnce(Node& node);
 
 public:
     using Ptr = std::shared_ptr<Node>;
     using WeakPtr = std::weak_ptr<Node>;
 
-    Node() : instanceId_(nextInstanceId_++) { internal::nodeCount++; }
+    Node() : instanceId_(internal::nextNodeInstanceId()) { internal::nodeCount()++; }
     virtual ~Node() {
         cancelAllAsyncTimers();  // stop + await any in-flight async callbacks
         for (auto& [t, m] : mods_) m->onDestroy();  // mod cleanup on node destruction
-        internal::nodeCount--;
+        internal::nodeCount()--;
     }
 
     // -------------------------------------------------------------------------
@@ -139,6 +184,7 @@ public:
         }
 
         child->parent_ = weak_from_this();
+        child->markGlobalMatrixDirty();   // global matrix now depends on this node
         children_.push_back(child);
 
         // If preserving global position, recalculate local coordinates relative to new parent
@@ -172,6 +218,7 @@ public:
         }
 
         child->parent_ = weak_from_this();
+        child->markGlobalMatrixDirty();   // global matrix now depends on this node
 
         // Clamp index and insert
         if (index >= children_.size()) {
@@ -202,6 +249,7 @@ public:
             // the local iterator before we use it.
             children_.erase(it);
             child->parent_.reset();
+            child->markGlobalMatrixDirty();   // no parent: global == local
             onChildRemoved(child);
         }
     }
@@ -216,6 +264,7 @@ public:
         children_.clear();   // moved-from vector is "valid but unspecified"
         for (auto& child : cleared) {
             child->parent_.reset();
+            child->markGlobalMatrixDirty();   // no parent: global == local
             onChildRemoved(child);
         }
     }
@@ -337,8 +386,10 @@ public:
     void disableEvents() { eventsEnabled_ = false; }
     bool isEventsEnabled() const { return eventsEnabled_; }
 
-    // Whether mouse is over this node (auto-updated each frame, O(1))
-    bool isMouseOver() const { return internal::currentWindowContext().hoveredNode == this; }
+    // Whether mouse is over this node (auto-updated each frame, O(1)). The
+    // hovered node is held weakly, so a freed node that was hovered never
+    // matches a new node that happens to reuse its address.
+    bool isMouseOver() const { return internal::currentWindowContext().hoveredNode.lock().get() == this; }
 
     // -------------------------------------------------------------------------
     // Identity / Name
@@ -392,9 +443,12 @@ public:
     // Transform values go through their setters so the matrix cache / change
     // events stay correct. Subclasses extend with their own block, listing
     // their direct base: TC_REFLECT(Sprite, Node) { TC_VALUE(...) }
+    // globalPos is derived from pos: editable (inspector, MCP), not saved to
+    // JSON. It is listed before pos so that a write carrying both applies pos
+    // last, and pos wins.
     TC_REFLECT_ROOT(Node) {
+        TC_DERIVED(globalPos, getGlobalPos, setGlobalPos)
         TC_VALUE(pos,       getPos,       setPos)
-        TC_VALUE(globalPos, getGlobalPos, setGlobalPos)
         TC_VALUE(rotation,  getEulerDeg,  setEulerDeg)   // euler X/Y/Z, degrees
         TC_VALUE(scale,     getScale,     setScale)
         TC_VALUE(visible,   isVisible,    setVisible)
@@ -773,6 +827,27 @@ private:
     // Recursive update/draw (called by App via friend access)
     // -------------------------------------------------------------------------
 
+    // The node's first updateTree() / drawTree() runs setup() here, once,
+    // and then onSetupDone() (both paths share this, so they can't drift).
+    void setupOnce() {
+        if (setupCalled_) return;
+        setupCalled_ = true;
+        onSetupStart();
+        setup();
+        onSetupDone();
+    }
+
+    // Framework hook, not an app callback: runs once, right before the
+    // node's first setup(). App resolves the data path root here, so file
+    // loads started from setup() (including on worker threads) see it.
+    virtual void onSetupStart() {}
+
+    // Framework hook, not an app callback (apps override setup()): runs once,
+    // right after the node's first setup() has returned. App attaches its
+    // audioOut() / audioIn() here (#426), so the audio thread never runs them
+    // before or during setup().
+    virtual void onSetupDone() {}
+
     // Recursively update self and child nodes
     void updateTree() {
         if (!isActive_) return;
@@ -781,10 +856,7 @@ private:
         sweepDeadChildren();
 
         // Call setup() once on first update/draw
-        if (!setupCalled_) {
-            setupCalled_ = true;
-            setup();
-        }
+        setupOnce();
 
         // Mod early update (before Node::update). forEachMod snapshots types
         // and defers self-removal, so a mod may add/remove mods safely here.
@@ -829,6 +901,7 @@ private:
             c->cleanupTree();
             onChildRemoved(c);
             c->parent_.reset();
+            c->markGlobalMatrixDirty();   // no parent: global == local
         }
     }
 
@@ -843,14 +916,19 @@ private:
             child->cleanupTree();
         }
 
-        // Clear global references to this node (prevent dangling pointers)
-        if (internal::currentWindowContext().hoveredNode == this) internal::currentWindowContext().hoveredNode = nullptr;
-        if (internal::currentWindowContext().prevHoveredNode == this) internal::currentWindowContext().prevHoveredNode = nullptr;
-        if (internal::currentWindowContext().grabbedNode == this) {
-            internal::currentWindowContext().grabbedNode = nullptr;
-            internal::currentWindowContext().grabbedButton = -1;
+        // A destroyed node leaves hover, grab and selection at once, even
+        // while the app still holds it: it gets no mouseLeave, drag or
+        // release, and is no longer selected. (The references are weak, so
+        // this is behavior, not memory safety.)
+        auto& ctx = internal::currentWindowContext();
+        auto isThis = [this](const WeakPtr& ref) { return ref.lock().get() == this; };
+        if (isThis(ctx.hoveredNode)) ctx.hoveredNode.reset();
+        if (isThis(ctx.prevHoveredNode)) ctx.prevHoveredNode.reset();
+        if (isThis(ctx.grabbedNode)) {
+            ctx.grabbedNode.reset();
+            ctx.grabbedButton = -1;
         }
-        if (internal::currentWindowContext().selectedNode == this) internal::currentWindowContext().selectedNode = nullptr;
+        if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
         cleanup();
@@ -861,10 +939,7 @@ private:
         if (!isActive_) return;
 
         // Call setup() once on first update/draw
-        if (!setupCalled_) {
-            setupCalled_ = true;
-            setup();
-        }
+        setupOnce();
 
         // Stamp the camera scope this node is being drawn under (pointer
         // compare first — steady state is one assignment skip per frame).
@@ -893,11 +968,16 @@ private:
             auto& rc = internal::getDefaultContext();
             const size_t matrixDepth = rc.getMatrixStackDepth();
             const size_t styleDepth = rc.getStyleStackDepth();
+            // Stack floor (#348): a stray pop in draw() is refused (and names
+            // this node) instead of popping this node's own entry. Saved and
+            // restored, since a draw() can run another node's drawTree().
+            const auto prevFloor = rc.setStackFloor(matrixDepth, styleDepth, &typeid(*this));
             resetStyle();
             draw();
             forEachMod([](Mod* m) { m->draw(); });
-            // An unbalanced push/pop in draw() is named and contained here
-            // (#232): the pop below must undo THIS node's push, not the user's.
+            rc.setStackFloor(prevFloor);
+            // A missing pop in draw() is named and contained here (#232): the
+            // pop below must undo THIS node's push, not the user's.
             if (rc.getMatrixStackDepth() != matrixDepth || rc.getStyleStackDepth() != styleDepth) {
                 rc.restoreStackDepth(matrixDepth, styleDepth, getTypeName().c_str());
             }
@@ -960,26 +1040,30 @@ private:
     // press that previously died silently now reaches the ancestors instead.
     // Hover (enter/leave) is unaffected: it stays front-most-only, recomputed
     // per frame by updateHoverState().
+    //
+    // Lifetime (#255): a handler may remove its own node or an ancestor from
+    // the tree (the usual close button). Dispatch therefore walks the chain
+    // with Ptr, and uses the grabbed node through a Ptr locked from the
+    // window context, so a node removed inside its handler stays alive until
+    // the dispatch function returns, and is freed then if nothing else holds
+    // it (the same idea as destroy()).
     Ptr dispatchMousePress(const MouseEventArgs& e) {
+        auto& ctx = internal::currentWindowContext();
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
         // Selection: clicking a node selects it; clicking empty space clears it.
         // (Selection follows the front-most hit, not the consumer — it is a
         // debugger/inspector concept, independent of event consumption.)
-        internal::currentWindowContext().selectedNode = result.hit() ? result.node.get() : nullptr;
+        ctx.selectedNode = result.node;
 
-        if (result.hit()) {
-            // Bubble up from the hit node until consumed
-            Node* current = result.node.get();
-            while (current) {
-                MouseEventArgs local = current->localizeMouse(e);
-                if (current->fireMousePress(local)) {
-                    // The consumer grabs the pointer for drag tracking
-                    internal::currentWindowContext().grabbedNode = current;
-                    internal::currentWindowContext().grabbedButton = e.button;
-                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
-                }
-                current = current->getParent().get();
+        // Bubble up from the hit node until consumed
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            MouseEventArgs local = current->localizeMouse(e);
+            if (current->fireMousePress(local)) {
+                // The consumer grabs the pointer for drag tracking
+                ctx.grabbedNode = current;
+                ctx.grabbedButton = e.button;
+                return current;
             }
         }
 
@@ -987,32 +1071,32 @@ private:
     }
 
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
-        // Send release to grabbed node if it exists
-        if (internal::currentWindowContext().grabbedNode && internal::currentWindowContext().grabbedButton == e.button) {
-            MouseEventArgs local = internal::currentWindowContext().grabbedNode->localizeMouse(e);
-            internal::currentWindowContext().grabbedNode->fireMouseRelease(local);
+        auto& ctx = internal::currentWindowContext();
 
-            Ptr result = std::dynamic_pointer_cast<Node>(
-                internal::currentWindowContext().grabbedNode->shared_from_this());
+        // Send release to the grabbed node. A grab whose node is gone (freed
+        // after it was removed) is dropped, and the release falls back to the
+        // hit node below, as after destroy().
+        if (ctx.grabbedButton == e.button) {
+            Ptr grabbed = ctx.grabbedNode.lock();
+            if (grabbed) {
+                MouseEventArgs local = grabbed->localizeMouse(e);
+                grabbed->fireMouseRelease(local);
+            }
 
             // Clear grabbed state
-            internal::currentWindowContext().grabbedNode = nullptr;
-            internal::currentWindowContext().grabbedButton = -1;
+            ctx.grabbedNode.reset();
+            ctx.grabbedButton = -1;
 
-            return result;
+            if (grabbed) return grabbed;
         }
 
         // Fallback (no grab): bubble from the hit node like press
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
-        if (result.hit()) {
-            Node* current = result.node.get();
-            while (current) {
-                MouseEventArgs local = current->localizeMouse(e);
-                if (current->fireMouseRelease(local)) {
-                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
-                }
-                current = current->getParent().get();
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            MouseEventArgs local = current->localizeMouse(e);
+            if (current->fireMouseRelease(local)) {
+                return current;
             }
         }
 
@@ -1020,25 +1104,24 @@ private:
     }
 
     Ptr dispatchMouseMove(const internal::MouseEventRaw& e) {
+        auto& ctx = internal::currentWindowContext();
+
         // Send drag event to grabbed node
-        if (internal::currentWindowContext().grabbedNode) {
-            internal::MouseEventRaw local = internal::currentWindowContext().grabbedNode->localizeMouse(e);
-            local.button = internal::currentWindowContext().grabbedButton;
-            internal::currentWindowContext().grabbedNode->fireMouseDrag(internal::toDragArgs(local));
+        Ptr grabbed = ctx.grabbedNode.lock();
+        if (grabbed) {
+            internal::MouseEventRaw local = grabbed->localizeMouse(e);
+            local.button = ctx.grabbedButton;
+            grabbed->fireMouseDrag(internal::toDragArgs(local));
         }
 
         // Also send move event, bubbling from the hit node (hover itself is
         // handled separately by updateHoverState and stays front-most-only)
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
-        if (result.hit()) {
-            Node* current = result.node.get();
-            while (current) {
-                internal::MouseEventRaw local = current->localizeMouse(e);
-                if (current->fireMouseMove(internal::toMoveArgs(local))) {
-                    return std::dynamic_pointer_cast<Node>(current->shared_from_this());
-                }
-                current = current->getParent().get();
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            internal::MouseEventRaw local = current->localizeMouse(e);
+            if (current->fireMouseMove(internal::toMoveArgs(local))) {
+                return current;
             }
         }
 
@@ -1048,19 +1131,11 @@ private:
     Ptr dispatchMouseScroll(const ScrollEventArgs& e) {
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
-        if (result.hit()) {
-            // Bubble up from hit node to ancestors until consumed
-            Node* current = result.node.get();
-            while (current) {
-                ScrollEventArgs local = current->localizeScroll(e);
-                if (current->fireMouseScroll(local)) {
-                    // Event consumed
-                    return std::dynamic_pointer_cast<Node>(
-                        current->shared_from_this());
-                }
-
-                // Bubble up to parent
-                current = current->getParent().get();
+        // Bubble up from hit node to ancestors until consumed
+        for (Ptr current = result.node; current; current = current->getParent()) {
+            ScrollEventArgs local = current->localizeScroll(e);
+            if (current->fireMouseScroll(local)) {
+                return current;   // Event consumed
             }
         }
 
@@ -1079,28 +1154,28 @@ private:
 
     // Update hover state (call once per frame)
     void updateHoverState(float screenX, float screenY) {
-        // Save previous frame's hovered node
-        internal::currentWindowContext().prevHoveredNode = internal::currentWindowContext().hoveredNode;
+        auto& ctx = internal::currentWindowContext();
+
+        // Save previous frame's hovered node. Locked: a node freed since then
+        // gets no Leave, and a live one stays alive through its Leave handler
+        // even if that handler removes it.
+        Ptr prev = ctx.hoveredNode.lock();
+        ctx.prevHoveredNode = prev;
 
         // Search for new hovered node. When an overlay (e.g. a tcxImGui panel)
         // has the pointer, the tree hovers nothing — so a node under the panel
         // is not highlighted, and a previously-hovered node still gets its
         // Leave below (this is a per-frame recompute, so no stale hover).
-        Node* hit = nullptr;
+        Ptr hit;
         if (!isOverlayHovered()) {
-            HitResult result = findHitNodeFromScreen(screenX, screenY);
-            hit = result.hit() ? result.node.get() : nullptr;
+            hit = findHitNodeFromScreen(screenX, screenY).node;
         }
-        internal::currentWindowContext().hoveredNode = hit;
+        ctx.hoveredNode = hit;
 
         // Fire Enter/Leave events
-        if (internal::currentWindowContext().prevHoveredNode != internal::currentWindowContext().hoveredNode) {
-            if (internal::currentWindowContext().prevHoveredNode) {
-                internal::currentWindowContext().prevHoveredNode->fireMouseLeave();
-            }
-            if (internal::currentWindowContext().hoveredNode) {
-                internal::currentWindowContext().hoveredNode->fireMouseEnter();
-            }
+        if (prev != hit) {
+            if (prev) prev->fireMouseLeave();
+            if (hit) hit->fireMouseEnter();
         }
     }
 
@@ -1164,8 +1239,11 @@ protected:
         // Effective camera context for this subtree (own stamp or inherited)
         auto [ctx, ray] = resolvePickRay(pick, inheritedCtx, globalRay);
 
-        // Calculate inverse matrix for this node
-        Mat4 localInverse = getLocalMatrix().inverted();
+        // Calculate inverse matrix for this node. A degenerate local matrix
+        // (an axis scaled to 0) has no area, so neither this node nor its
+        // subtree can be hit.
+        Mat4 localInverse;
+        if (!getLocalMatrix().tryInvert(localInverse)) return HitResult{};
         Mat4 globalInverse = localInverse * parentInverseMatrix;
 
         // Convert global ray to local ray
@@ -1297,20 +1375,50 @@ public:
     // Timers — public API: schedule callbacks on a node (call from anywhere)
     // -------------------------------------------------------------------------
 
+    // Frame timers are countdowns driven by this node's updates (#228): each
+    // update subtracts getDeltaTime() (the nominal 1/updateFps per step in
+    // fixed-Hz mode), so they follow the loop, pause while the node is
+    // inactive, and are not affected by resetElapsedTimeCounter(). A timer
+    // starts counting with the next update after the one it was created in.
+    // In the main window it counts only the time after its creation, so time
+    // spent before the call (earlier in a long update or setup(), an idle gap,
+    // a stall) can't make it fire early; one created during a fixed-Hz step
+    // counts whole steps (step time). With a fixed update rate timers count
+    // steps, so when a frame runs several steps (after a stall, or when the
+    // update rate is above the display rate and the timer was made in an
+    // earlier step of the frame) a timer can fire within that frame, before
+    // its delay has passed in wall time. (A secondary window's tick doesn't
+    // record its update time or in-update mark yet, so there a timer created
+    // in or between its ticks counts the window's whole next delta, until
+    // #307.)
+
     // Execute callback once after specified delay in seconds
     uint64_t callAfter(double delay, std::function<void()> callback) {
-        uint64_t id = nextTimerId_++;
-        double triggerTime = getElapsedTime() + delay;
-        timers_.push_back({id, triggerTime, 0.0, callback, false});
-        return id;
+        return addTimer(delay, 0.0, false, std::move(callback));
     }
 
-    // Execute callback repeatedly at specified interval
+    // Execute callback repeatedly at specified interval. Keeps its phase (each
+    // due time = previous due time + interval); when late by more than one
+    // interval it fires once, not once per missed interval (callEveryCatchUp
+    // does that).
     uint64_t callEvery(double interval, std::function<void()> callback) {
-        uint64_t id = nextTimerId_++;
-        double triggerTime = getElapsedTime() + interval;
-        timers_.push_back({id, triggerTime, interval, callback, true});
-        return id;
+        return addTimer(interval, interval, true, std::move(callback));
+    }
+
+    // Like callEvery, but calls back once for every interval that came due,
+    // at most maxCatchUp times per update, so a
+    // counter or a simulation driven by it catches up after a late update.
+    // Past the limit the remaining due intervals are dropped; the phase is
+    // kept. Cancelling the timer from the callback stops the remaining calls.
+    // Without a limit, a long stall in a loop whose delta is measured (VSYNC or
+    // setFps(), including an EVENT_DRIVEN idle stretch) makes it fire that
+    // many times at once. In fixed-Hz update mode it counts step time, so time
+    // dropped by the update step cap is not counted. maxCatchUp has no
+    // default, so the caller decides: 0 or -1 (any value <= 0) means no limit.
+    uint64_t callEveryCatchUp(double interval, std::function<void()> callback,
+                              int maxCatchUp) {
+        return addTimer(interval, interval, true, std::move(callback),
+                        true, maxCatchUp);
     }
 
     // Cancel timer
@@ -1339,19 +1447,22 @@ public:
     // fine). Cancel them before the members the callback touches are destroyed
     // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
     // waits for an in-flight callback to finish.
-    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callAfterAsync(double delay, std::function<void()> callback) {
+    //
+    // TC_LUA_SKIP: not exposed to Lua. Lua code only runs on the main thread;
+    // Lua scripts use callAfter / callEvery.
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP uint64_t callAfterAsync(double delay, std::function<void()> callback) {
         return internal::AsyncScheduler::get().after(asyncOwner(), delay, std::move(callback));
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callEveryAsync(double interval, std::function<void()> callback) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP uint64_t callEveryAsync(double interval, std::function<void()> callback) {
         return internal::AsyncScheduler::get().every(asyncOwner(), interval, std::move(callback));
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAsyncTimer(uint64_t id) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP void cancelAsyncTimer(uint64_t id) {
         internal::AsyncScheduler::get().cancel(id);
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAllAsyncTimers() {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP void cancelAllAsyncTimers() {
         if (asyncOwner_) internal::AsyncScheduler::get().cancelOwner(asyncOwner_);
     }
 
@@ -1366,7 +1477,6 @@ private:
     std::atomic<bool> dead_{false};  // Marked for removal by destroy() (atomic: destroy() is thread-safe)
     std::string name_;            // Optional instance name (see getName())
     const uint64_t instanceId_;   // Per-process unique id, fixed at construction
-    inline static std::atomic<uint64_t> nextInstanceId_{0};  // id source
     WeakPtr parent_;
     std::vector<Ptr> children_;
     bool eventsEnabled_ = false;  // Enabled via enableEvents()
@@ -1437,32 +1547,127 @@ protected:
     // Override for custom behavior when local matrix changes
     virtual void onLocalMatrixChanged() {}
 
-    // Timer structure
+    // Timer structure (a countdown, see callAfter / callEvery)
     struct Timer {
         uint64_t id;
-        double triggerTime;
-        double interval;
+        double remaining;     // seconds until due; due when <= 0
+        double interval;      // repeat interval (callEvery), 0 for callAfter
         std::function<void()> callback;
         bool repeating;
+        // callEveryCatchUp: one call per due interval, at most maxCatchUp per
+        // update (<= 0: no limit). callEvery calls once however late it is.
+        bool catchUp;
+        int maxCatchUp;
+        uint64_t createdUpdate;  // getUpdateCount() when created
+        // Not counting yet: the first update after `created` is charged only
+        // the time since `created`. Every timer starts pending except one
+        // created during a fixed-Hz step, which counts whole steps from the
+        // next one.
+        bool pending;
+        // Created during a fixed-Hz step and not counted down yet. If its
+        // first countdown comes in a measured update (the step switched to
+        // VSYNC / setFps() after creating it), that update is charged only
+        // the time since `created`, like for a timer created in a measured
+        // update.
+        bool stepCreated;
+        std::chrono::steady_clock::time_point created;
     };
 
-    std::vector<Timer> timers_;
-    inline static uint64_t nextTimerId_ = 1;
+    std::vector<Timer> timers_;   // ids from internal::nextNodeTimerId()
+    // The update (getUpdateCount()) this node's timers were last counted down
+    // in. A node re-parented during an update under a parent that is
+    // traversed later runs updateTree() twice in that update; its timers are
+    // counted down only once.
+    uint64_t timersChargedUpdate_ = UINT64_MAX;
 
-    // Process timers (called within updateRecursive)
+private:
+    uint64_t addTimer(double delay, double interval, bool repeating,
+                      std::function<void()> callback,
+                      bool catchUp = false, int maxCatchUp = 0) {
+        uint64_t id = internal::nextNodeTimerId();
+        const bool inUpdate = internal::isInUpdate();
+        auto created = std::chrono::steady_clock::now();
+        // Created during an update: never before that update's time, so the
+        // update it was created in isn't charged for it (a nominal or simulated
+        // update time can be ahead of the clock).
+        if (inUpdate) created = std::max(created, internal::getUpdateTime());
+        const bool inFixedStep = inUpdate && internal::isFixedStepUpdate();
+        timers_.push_back({id, delay, interval, std::move(callback), repeating,
+                           catchUp, maxCatchUp,
+                           getUpdateCount(),
+                           !inFixedStep, inFixedStep,
+                           created});
+        return id;
+    }
+
+protected:
+    // Process timers (called within updateTree, before update())
+    //
+    // Countdown: every timer subtracts this update's delta time, except
+    // - a pending one (all but those created during a fixed-Hz step): the
+    //   first update after its creation subtracts only the time since then
+    //   (capped at the delta time), and the update it was created in (by this
+    //   node's setup(), which runs just before, or a parent's update())
+    //   subtracts nothing. Without this, the first measured delta would
+    //   include time from before the timer existed: after a long setup() or
+    //   a synchronous load earlier in its update, an EVENT_DRIVEN idle gap or
+    //   a stall (a blocking dialog in a key handler) it would fire on the
+    //   next update;
+    // - one created during a fixed-Hz step: it starts with the next step and
+    //   counts step time, so it can't fire a step early. If the step switched
+    //   to a measured mode after creating it, its first (measured) update is
+    //   charged only the time since its creation, as for a pending timer.
+    // A node's timers are counted down at most once per update, even if a
+    // re-parent makes updateTree() reach the node twice. A tiny epsilon
+    // absorbs rounding, so callAfter(1.0) created in an update at a fixed
+    // 60 Hz fires on exactly the 60th step.
     //
     // Reentrancy-safe: a callback may invoke callAfter / callEvery / cancelTimer
     // / cancelAllTimers on this same node. We snapshot the ready-timer IDs up
     // front, then look each one up by ID before firing, copying out the
     // callback and metadata so vector reallocation during the callback can't
-    // dangle the in-flight reference.
+    // dangle the in-flight reference. Timers added by a callback wait for the
+    // next update. A catch-up timer looks itself up again before each further
+    // call, so cancelling it from its callback stops the remaining calls.
     void processTimers() {
-        double currentTime = getElapsedTime();
+        if (timers_.empty()) return;
+        constexpr double dueEpsilon = 1e-9;
+        const double dt = getDeltaTime();
+        const uint64_t thisUpdate = getUpdateCount();
+        const bool chargedAlready = (timersChargedUpdate_ == thisUpdate);
+        timersChargedUpdate_ = thisUpdate;
+        const auto updateTime = internal::getUpdateTime();
+        // No update time (a loop that doesn't set one, e.g. a secondary
+        // window's tick): pending timers count whole deltas from the update
+        // after the one they were created in.
+        const bool haveUpdateTime = updateTime != std::chrono::steady_clock::time_point{};
+        const bool measuredUpdate = haveUpdateTime && !internal::isFixedStepUpdate();
 
         std::vector<uint64_t> readyIds;
         readyIds.reserve(timers_.size());
-        for (const auto& t : timers_) {
-            if (currentTime >= t.triggerTime) {
+        for (auto& t : timers_) {
+            double charge = 0.0;
+            if (chargedAlready) {
+                // Second traversal in this update (re-parented): no charge.
+            } else if (t.pending && haveUpdateTime) {
+                if (updateTime > t.created) {
+                    t.pending = false;
+                    charge = std::min(dt, std::chrono::duration<double>(updateTime - t.created).count());
+                }
+            } else if (t.createdUpdate != thisUpdate) {
+                t.pending = false;
+                charge = dt;
+                if (t.stepCreated && measuredUpdate) {
+                    // Created in a fixed step that then switched to a measured
+                    // mode: this update's dt runs from the step's start, so
+                    // count only the time since the timer's creation.
+                    const double since = std::chrono::duration<double>(updateTime - t.created).count();
+                    charge = std::min(dt, since > 0.0 ? since : 0.0);
+                }
+                t.stepCreated = false;
+            }
+            if (charge > 0.0) t.remaining -= charge;
+            if (t.remaining <= dueEpsilon) {
                 readyIds.push_back(t.id);
             }
         }
@@ -1473,21 +1678,56 @@ protected:
             if (it == timers_.end()) continue;  // cancelled by an earlier callback in this batch
 
             std::function<void()> callback = it->callback;
-            bool   repeating = it->repeating;
-            double interval  = it->interval;
 
-            if (repeating) {
-                it->triggerTime = currentTime + interval;
-                callback();  // safe: we already captured what we need from `it`
+            if (it->repeating) {
+                // Keep the phase: next due = this due time + interval, past
+                // every interval that came due in this update. callEvery
+                // fires once for them; callEveryCatchUp once per interval, up
+                // to its limit (the rest are dropped).
+                uint64_t calls = 1;
+                if (it->interval > 0.0) {
+                    double late = -it->remaining;
+                    double skipped = late > 0.0
+                        ? std::floor(late / it->interval + dueEpsilon) : 0.0;
+                    it->remaining += it->interval * (skipped + 1.0);
+                    if (it->catchUp) {
+                        double due = skipped + 1.0;
+                        calls = due < 1.8e19 ? (uint64_t)due : UINT64_MAX;
+                    }
+                } else {
+                    it->remaining = 0.0;   // interval <= 0: every update, once
+                }
+                if (it->catchUp && it->maxCatchUp > 0 && calls > (uint64_t)it->maxCatchUp) {
+                    calls = (uint64_t)it->maxCatchUp;
+                }
+                // safe: we already captured what we need from `it`
+                for (uint64_t n = 0; n < calls; ++n) {
+                    if (n > 0 && std::none_of(timers_.begin(), timers_.end(),
+                            [id](const Timer& t) { return t.id == id; })) {
+                        break;   // cancelled by the callback
+                    }
+                    if (callback) callback();
+                }
             } else {
                 // Remove before firing so the timer is gone even if the
                 // callback throws or registers a new timer that reallocates.
                 cancelTimer(id);
-                callback();
+                if (callback) callback();
             }
         }
     }
 };
+
+namespace internal {
+inline void setupNodeOnce(Node& node) {
+    if (node.setupCalled_) return;
+    EntryStackGuard guard(AppEntry::Setup);
+    // A windowed App's setup() runs inside its first update or draw; report
+    // a crash there as "setup", not as the enclosing phase.
+    CrashPhaseScope crashPhase("setup");
+    node.setupOnce();
+}
+}
 
 // Mod::removeSelf — defined here now that Node is complete. Uses the mod's
 // dynamic type so it removes the right entry without the mod naming its type.
@@ -1497,13 +1737,22 @@ inline void Mod::removeSelf() {
 
 // Selection — the last-clicked node, held by the Node system (set in
 // dispatchMousePress, cleared when the node is destroyed). A tool such as an
-// inspector can both read it and drive it via setSelectedNode().
-inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode; }
-inline void setSelectedNode(Node* n) { internal::currentWindowContext().selectedNode = n; }
+// inspector can both read it and drive it via setSelectedNode(). Held weakly:
+// once the node is freed, getSelectedNode() returns null. The pointer it
+// returns is for the current call; to keep the node, keep
+// n->weak_from_this(), not the pointer. setSelectedNode() with a node that is
+// not owned by a shared_ptr (weak_from_this() empty) clears the selection.
+inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode.lock().get(); }
+inline void setSelectedNode(Node* n) {
+    internal::currentWindowContext().selectedNode = n ? n->weak_from_this() : NodeWeakPtr();
+}
 
 // The running App as the root of the node tree (set by the framework while the
 // app is alive, null otherwise). Lets tools — e.g. the MCP node tools — walk
-// the whole tree without the app passing itself around.
-inline Node* getRootNode() { return internal::currentWindowContext().rootNode; }
+// the whole tree without the app passing itself around. Held weakly, so the
+// framework registers the App once it is made (runApp(), runHeadlessApp(),
+// the hot reload host): inside the App's own constructor this is not the App
+// yet. Use it from setup() on.
+inline Node* getRootNode() { return internal::currentWindowContext().rootNode.lock().get(); }
 
 } // namespace trussc

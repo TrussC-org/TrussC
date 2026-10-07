@@ -82,7 +82,10 @@ public:
     // Bounds (walls at screen edges)
     // -------------------------------------------------------------------------
 
-    // Create walls at screen edges
+    // Create walls at screen edges. The four walls are one static body, and
+    // collision events count per body pair: a RigidBody2D already touching
+    // one wall gets no new onCollisionEnter when it reaches another, and
+    // onCollisionExit only when it leaves the last one.
     void createBounds(float x, float y, float width, float height);
     void createBounds();  // Create with current window size
 

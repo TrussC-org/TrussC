@@ -69,6 +69,7 @@ for (const id in structure) {
         constructors: s.constructors,                      // public ctor signatures (types only)
         provider: s.provider,                              // 'std' for curated std:: symbols
         platforms: s.platforms, lua_bind: s.lua_bind,      // from TC_PLATFORMS / TC_LUA_BIND
+        lua_skip: s.lua_skip,                              // from TC_LUA_SKIP: not exposed to Lua (luagen, luagen-types, sketch emitters skip it)
 
         deprecated: s.deprecated,                          // from C++ [[deprecated]]
         category: p.category, keywords: p.keywords, of: p.of,

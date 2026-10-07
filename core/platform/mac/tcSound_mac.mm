@@ -53,6 +53,7 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 
     std::error_code ec;
     if (!fs::exists(path, ec)) {
+        logError("SoundBuffer") << "file not found: " << pathStr;
         return LoadResult::fail(LoadError::FileNotFound,
                                 "file not found: " + pathStr);
     }
@@ -130,11 +131,30 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
                                 std::to_string((int)status) + ")");
     }
 
-    // Allocate buffer
+    // Allocate buffer (the sample count is checked before it is formed)
+    size_t sampleCount = 0;
+    if (!internal::interleavedSampleCount(static_cast<uint64_t>(totalFrames),
+                                          static_cast<int>(dstFormat.mChannelsPerFrame),
+                                          samples.max_size(), sampleCount)) {
+        logError("SoundBuffer") << "AAC stream too large to load ("
+                                << dstFormat.mChannelsPerFrame << " ch, "
+                                << static_cast<long long>(totalFrames) << " frames)";
+        ExtAudioFileDispose(extAudioFile);
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC stream too large to load");
+    }
+    // The members change only once the buffer is allocated
+    try {
+        samples.resize(sampleCount);
+    } catch (const std::bad_alloc&) {
+        logError("SoundBuffer") << "not enough memory to load AAC ("
+                                << dstFormat.mChannelsPerFrame << " ch, "
+                                << static_cast<long long>(totalFrames) << " frames)";
+        ExtAudioFileDispose(extAudioFile);
+        return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
+    }
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
-    samples.resize(numSamples * channels);
 
     // Read all frames
     AudioBufferList bufferList;
@@ -156,9 +176,9 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
                                 std::to_string((int)status) + ")");
     }
 
-    // Update actual sample count
-    numSamples = framesToRead;
-    samples.resize(numSamples * channels);
+    // Update actual sample count (framesToRead <= totalFrames: at most sampleCount)
+    numSamples = std::min(static_cast<size_t>(framesToRead), static_cast<size_t>(totalFrames));
+    samples.resize(numSamples * static_cast<size_t>(channels));
 
     logVerbose("SoundBuffer") << "loaded AAC " << pathStr << " (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";
@@ -289,11 +309,32 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
                                 std::to_string((int)status) + ")");
     }
 
-    // Allocate buffer
+    // Allocate buffer (the sample count is checked before it is formed)
+    size_t sampleCount = 0;
+    if (!internal::interleavedSampleCount(static_cast<uint64_t>(totalFrames),
+                                          static_cast<int>(dstFormat.mChannelsPerFrame),
+                                          samples.max_size(), sampleCount)) {
+        logError("SoundBuffer") << "AAC stream too large to load ("
+                                << dstFormat.mChannelsPerFrame << " ch, "
+                                << static_cast<long long>(totalFrames) << " frames)";
+        ExtAudioFileDispose(extAudioFile);
+        AudioFileClose(audioFile);
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC stream too large to load");
+    }
+    // The members change only once the buffer is allocated
+    try {
+        samples.resize(sampleCount);
+    } catch (const std::bad_alloc&) {
+        logError("SoundBuffer") << "not enough memory to load AAC ("
+                                << dstFormat.mChannelsPerFrame << " ch, "
+                                << static_cast<long long>(totalFrames) << " frames)";
+        ExtAudioFileDispose(extAudioFile);
+        AudioFileClose(audioFile);
+        return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
+    }
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
-    samples.resize(numSamples * channels);
 
     // Read all frames
     AudioBufferList bufferList;
@@ -316,9 +357,9 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
                                 std::to_string((int)status) + ")");
     }
 
-    // Update actual sample count (in case fewer frames were read)
-    numSamples = framesToRead;
-    samples.resize(numSamples * channels);
+    // Update actual sample count (in case fewer frames were read; framesToRead <= totalFrames: at most sampleCount)
+    numSamples = std::min(static_cast<size_t>(framesToRead), static_cast<size_t>(totalFrames));
+    samples.resize(numSamples * static_cast<size_t>(channels));
 
     logVerbose("SoundBuffer") << "decoded AAC from memory (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";

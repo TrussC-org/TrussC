@@ -6,7 +6,9 @@
 
 #if defined(_WIN32)
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <dwrite.h>
 #include <wrl/client.h>
@@ -46,7 +48,7 @@ ComPtr<IDWriteFactory> getFactory() {
     return factory;
 }
 
-std::string fontFilePath(IDWriteFont* font) {
+fs::path fontFilePath(IDWriteFont* font) {
     if (!font) return "";
 
     ComPtr<IDWriteFontFace> face;
@@ -74,7 +76,11 @@ std::string fontFilePath(IDWriteFont* font) {
     std::wstring wpath(pathLen + 1, L'\0');
     if (FAILED(localLoader->GetFilePathFromKey(refKey, refKeySize, wpath.data(), pathLen + 1))) return "";
 
-    return wideToUtf8(wpath.c_str(), (int)pathLen);
+    // Keep the path wide. A UTF-8 std::string handed back as fs::path would be
+    // decoded in the active code page (a per-user font under a Japanese user
+    // name would resolve to a mangled path).
+    wpath.resize(pathLen);
+    return fs::path(wpath);
 }
 
 } // namespace
@@ -100,7 +106,7 @@ fs::path systemFontPath(const std::string& name) {
                     DWRITE_FONT_WEIGHT_REGULAR,
                     DWRITE_FONT_STRETCH_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL, &font))) {
-                std::string path = fontFilePath(font.Get());
+                fs::path path = fontFilePath(font.Get());
                 if (!path.empty()) return path;
             }
         }
@@ -134,7 +140,7 @@ fs::path systemFontPath(const std::string& name) {
                 psName.resize(len);
 
                 if (_wcsicmp(psName.c_str(), wname.c_str()) == 0) {
-                    std::string path = fontFilePath(font.Get());
+                    fs::path path = fontFilePath(font.Get());
                     if (!path.empty()) return path;
                 }
             }

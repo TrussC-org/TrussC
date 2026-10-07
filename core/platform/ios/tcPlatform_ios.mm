@@ -129,6 +129,25 @@ fs::path getExecutableDir() {
     return exePath.parent_path();
 }
 
+// User data / temp folders: the app's own container folders (they belong to
+// this app already, so no bundle id subfolder).
+fs::path internal::platformUserDataRoot() {
+    NSString* support = [NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+    if (support) return fs::path(support.UTF8String);
+    return fs::path(NSHomeDirectory().UTF8String) / "Library" / "Application Support";
+}
+
+fs::path internal::platformTempRoot() {
+    return fs::path(NSTemporaryDirectory().UTF8String);
+}
+
+fs::path internal::platformAppBundlePath() {
+    NSString* bundle = [[NSBundle mainBundle] bundlePath];
+    if (!bundle) return {};
+    return fs::path(bundle.UTF8String);
+}
+
 // ---------------------------------------------------------------------------
 // Screenshot (Metal API)
 // ---------------------------------------------------------------------------
@@ -225,21 +244,30 @@ bool captureWindow(Pixels& outPixels) {
     return true;
 }
 
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
+    const auto ext = toLower(getFileExtension(path));
+    if (ext == "bmp") {
+        // Pixels uses stbi_write_bmp, as on the other native platforms.
+        const bool success = pixels.save(path);
+        if (success) logVerbose("Screenshot") << "Saved: " << path;
+        else logError("Screenshot") << "Failed to save: " << path;
+        return success;
+    }
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
     CGContextRef context = CGBitmapContextCreate(
-        pixels.getData(),
+        const_cast<unsigned char*>(pixels.getData()),
         width, height,
         8,
         width * 4,
@@ -272,8 +300,7 @@ bool internal::captureWindowToFile(const std::filesystem::path& path) {
     }
 
     NSData* data = nil;
-    std::string ext = path.extension().string();
-    if (ext == ".jpg" || ext == ".jpeg") {
+    if (ext == "jpg" || ext == "jpeg") {
         data = UIImageJPEGRepresentation(image, 0.9);
     } else {
         data = UIImagePNGRepresentation(image);

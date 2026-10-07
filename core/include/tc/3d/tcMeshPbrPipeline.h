@@ -16,7 +16,7 @@
 //   6. tcMeshPbrPipeline.h        (this file; defines Mesh::drawGpuPbr())
 //
 // Draw submission:
-//   - Pipelines are cached per (color format, sample count), so both the
+//   - Pipelines are cached per (color format, sample count, primitive kind), so both the
 //     swapchain and Fbo passes are supported render targets.
 //   - ALL PBR draws are deferred: swapchain draws into the per-layer flush
 //     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
@@ -29,6 +29,7 @@
 
 #include <cstring>
 #include <map>
+#include <tuple>
 #include <vector>
 
 #include "tc/gpu/shaders/meshPbr.glsl.h"
@@ -50,6 +51,37 @@ struct PbrDrawCommand {
     int                indexCount;
     int                vertexCount;
 };
+
+// Which registered lights get the PBR shader's single projector slot and
+// single IES slot. The projector slot goes to the first Spot light with a
+// projection texture, the IES slot to the first light with an IES profile,
+// both among the first maxLights entries (the ones the shader sees). The
+// overflow flags are set when a further light of that kind gets no slot.
+// Pure (no GPU access), so it is testable headless.
+struct PbrSpecialLightSlots {
+    int projectorIndex = -1;          // index into the light list, -1 = none
+    int iesIndex = -1;                // index into the light list, -1 = none
+    bool projectorOverflow = false;   // another projector light got no slot
+    bool iesOverflow = false;         // another IES light got no slot
+};
+
+inline PbrSpecialLightSlots selectPbrSpecialLightSlots(const std::vector<Light*>& lights) {
+    PbrSpecialLightSlots r;
+    int n = static_cast<int>(lights.size());
+    if (n > maxLights) n = maxLights;
+    for (int i = 0; i < n; ++i) {
+        const Light& L = *lights[i];
+        if (L.getType() == LightType::Spot && L.hasProjectionTexture()) {
+            if (r.projectorIndex < 0) r.projectorIndex = i;
+            else r.projectorOverflow = true;
+        }
+        if (L.hasIesProfile()) {
+            if (r.iesIndex < 0) r.iesIndex = i;
+            else r.iesOverflow = true;
+        }
+    }
+    return r;
+}
 struct DeferredPbrDraw { int layerId; PbrDrawCommand cmd; };
 // deferredPbrDraws (swapchain) is now PER-WINDOW, held in WindowContext
 // (tc/app/tcWindowContext.h) and reached via currentWindowContext(). Replayed
@@ -73,13 +105,13 @@ public:
     void ensureInit() {
         if (initialized_) return;
         shader_ = sg_make_shader(tc_pbr_pbr_mesh_shader_desc(sg_query_backend()));
+        shaderReady_ = internal::internalShaderReady(shader_, "PBR");
         initialized_ = true;
     }
 
     // Get or create a pipeline for the given color pixel format and sample count.
-    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount) {
-        // キャッシュキー: colorFormat(下位16bit) + sampleCount(上位16bit)
-        int key = static_cast<int>(colorFormat) | (sampleCount << 16);
+    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount, bool lines = false) {
+        const auto key = std::make_tuple(colorFormat, sampleCount, lines);
         auto it = pipelineCache_.find(key);
         if (it != pipelineCache_.end()) return it->second;
 
@@ -101,6 +133,7 @@ public:
 
         pd.sample_count = sampleCount;
         pd.index_type = SG_INDEXTYPE_UINT32;
+        pd.primitive_type = lines ? SG_PRIMITIVETYPE_LINES : SG_PRIMITIVETYPE_TRIANGLES;
         pd.label = "tc_mesh_pbr_pipeline";
 
         sg_pipeline pip = sg_make_pipeline(&pd);
@@ -112,6 +145,7 @@ public:
     // Assumes mesh has uploaded GPU buffers and currentMaterial is set.
     void drawMesh(const Mesh& mesh) {
         ensureInit();
+        if (!shaderReady_) return;   // warned once in ensureInit()
 
         // Lighting / material / environment / shadow state is all per-window.
         auto& wctx = internal::currentWindowContext();
@@ -127,14 +161,15 @@ public:
             colorFmt = wctx.currentFboColorFormat;
             sampleCount = wctx.currentFboSampleCount;
         } else {
-            colorFmt = _SG_PIXELFORMAT_DEFAULT;
-            sampleCount = sapp_sample_count();
+            const auto target = swapchainTargetFormat(wctx);
+            colorFmt = target.colorFormat;
+            sampleCount = target.sampleCount;
         }
 
         // Resolve the pipeline now; GPU submission happens at the end of this
         // function — deferred for the swapchain (so it composites with sokol_gl
         // in submission order), immediate inside an FBO pass.
-        sg_pipeline pip = getPipeline(colorFmt, sampleCount);
+        sg_pipeline pip = getPipeline(colorFmt, sampleCount, isLineMesh(mesh.getMode()));
 
         // --- Bindings -------------------------------------------------------
         sg_bindings bind = {};
@@ -169,20 +204,20 @@ public:
         // Material reference (used for both normal map binding and uniform packing)
         const Material& pbrMat = *wctx.currentMaterial;
 
-        // Find the first projector-type light and the first IES-profiled light
-        int nActiveLights = static_cast<int>(activeLights.size());
-        if (nActiveLights > internal::maxLights) nActiveLights = internal::maxLights;
-        int projectorLightIdx = -1;
-        int iesLightIdx = -1;
-        for (int i = 0; i < nActiveLights; ++i) {
-            const Light& L = *activeLights[i];
-            if (projectorLightIdx < 0 &&
-                L.getType() == LightType::Spot && L.hasProjectionTexture()) {
-                projectorLightIdx = i;
-            }
-            if (iesLightIdx < 0 && L.hasIesProfile()) {
-                iesLightIdx = i;
-            }
+        // The shader has one projector slot and one IES slot: the first
+        // projector light and the first IES light get them.
+        const PbrSpecialLightSlots slots = selectPbrSpecialLightSlots(activeLights);
+        const int projectorLightIdx = slots.projectorIndex;
+        const int iesLightIdx = slots.iesIndex;
+        if (slots.projectorOverflow && projectorSlotWarned_.isFirstTime()) {
+            logWarning("TrussC") << "PBR: more than one projector light (Spot "
+                << "light with setProjectionTexture()); only the first gets the "
+                << "projector slot, the others light as plain spot lights";
+        }
+        if (slots.iesOverflow && iesSlotWarned_.isFirstTime()) {
+            logWarning("TrussC") << "PBR: more than one light with an IES "
+                << "profile; only the first gets the IES slot, the others light "
+                << "without their profile";
         }
 
         // Normal map from Material (or fallback flat normal)
@@ -543,6 +578,9 @@ private:
 public:
     void beginShadowPass(int lightIndex) {
         ensureShadowInit();
+        // No shadow shader (warned once): no pass; sh.inPass stays false, so
+        // shadowDraw()/endShadowPass() are no-ops.
+        if (!shadowReady_) return;
         auto& wctx = internal::currentWindowContext();
         auto& sh = wctx.shadow;
         const Light& light = *wctx.activeLights[lightIndex];
@@ -647,7 +685,7 @@ public:
 
     void shadowDrawMesh(const Mesh& mesh) {
         auto& sh = internal::currentWindowContext().shadow;
-        if (!sh.inPass) return;
+        if (!sh.inPass || isLineMesh(mesh.getMode())) return;
         mesh.uploadToGpu();
         if (mesh.getGpuVertexBuffer().id == 0) return;
 
@@ -709,6 +747,11 @@ private:
         if (shadowInitialized_) return;
 
         shadowShader_ = sg_make_shader(tc_shadow_shadow_depth_shader_desc(sg_query_backend()));
+        shadowReady_ = internal::internalShaderReady(shadowShader_, "shadow depth");
+        if (!shadowReady_) {
+            shadowInitialized_ = true;   // not retried
+            return;
+        }
 
         sg_pipeline_desc pd = {};
         pd.shader = shadowShader_;
@@ -810,12 +853,14 @@ private:
 
     // --- PBR pipeline state ---
     sg_shader shader_{};
-    std::map<int, sg_pipeline> pipelineCache_;  // keyed by sg_pixel_format
+    bool shaderReady_{false};
+    std::map<std::tuple<sg_pixel_format, int, bool>, sg_pipeline> pipelineCache_;
     bool initialized_{false};
 
     // --- Shadow pipeline state ---
     sg_shader shadowShader_{};
     sg_pipeline shadowPipeline_{};
+    bool shadowReady_{false};
     bool shadowInitialized_{false};
 
     sg_image shadowColorImage_{};   // SG_IMAGETYPE_ARRAY, maxShadowLights layers
@@ -837,6 +882,8 @@ private:
     // array / views / sampler / pipeline above stay shared — they are reused
     // serially across windows (see ShadowSlotState's comment).
     bool shadowOverflowWarned_{false};
+    OnceGate projectorSlotWarned_;   // a projector light got no slot
+    OnceGate iesSlotWarned_;         // an IES light got no slot
     bool shadowPointWarned_{false};
 
     // --- Fallback resources ---
@@ -856,11 +903,11 @@ private:
     bool fallbackInitialized_{false};
 };
 
-// Singleton accessor. The instance lives in the first TU that calls this.
-inline PbrPipeline& getPbrPipeline() {
-    static PbrPipeline instance;
-    return instance;
-}
+// Singleton accessor, defined in tcGlobal.cpp: one PBR pipeline (shaders,
+// fallback textures, shadow maps) per process. Header-inline, a hot reload
+// guest on Windows built its own copy, whose shadow passes and GPU objects the
+// host's flush never saw (#249).
+PbrPipeline& getPbrPipeline();
 
 // Flush the PBR draws deferred during an FBO pass, interleaved per-layer with the
 // FBO context's sokol_gl 2D content (mirror of flushDeferredShaderDraws but for a
@@ -899,7 +946,10 @@ inline void flushFboDeferredPbr(sgl_context ctx) {
 // forward declaration.
 inline void Mesh::drawGpuPbr() const {
     uploadToGpu();
-    if (vbuf_.id == 0) return;  // upload failed or mesh empty
+    if (vbuf_.id == 0) {
+        if (!vertices_.empty()) drawWithLighting();
+        return;
+    }
     internal::getPbrPipeline().drawMesh(*this);
 }
 

@@ -2,6 +2,7 @@
 #include "tiny_obj_loader.h"
 
 #include "tcxObjLoader.h"
+#include <algorithm>
 #include <fstream>
 #include <unordered_map>
 
@@ -23,7 +24,7 @@ bool ObjLoader::load(const fs::path& path) {
         return false;
     }
 
-    fs::path baseDir = objPath.parent_path().string() + "/";
+    fs::path baseDir = objPath.parent_path();
 
     tinyobj::attrib_t attrib;
     vector<tinyobj::shape_t> shapes;
@@ -31,8 +32,8 @@ bool ObjLoader::load(const fs::path& path) {
     string warn, err;
 
     bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
-                               objPath.string().c_str(),
-                               baseDir.string().c_str());
+                               pathToUtf8(objPath).c_str(),
+                               (pathToUtf8(baseDir) + "/").c_str());
 
     if (!warn.empty()) {
         logWarning() << "ObjLoader: " << warn;
@@ -48,9 +49,11 @@ bool ObjLoader::load(const fs::path& path) {
     vector<fs::path> texturePaths(materials.size());
     for (size_t i = 0; i < materials.size(); i++) {
         if (!materials[i].diffuse_texname.empty()) {
-            texturePaths[i] = baseDir / materials[i].diffuse_texname;
+            texturePaths[i] = baseDir / utf8ToPath(materials[i].diffuse_texname);
         }
     }
+
+    size_t skippedFaces = 0;
 
     // Process each shape
     for (auto& shape : shapes) {
@@ -70,10 +73,41 @@ bool ObjLoader::load(const fs::path& path) {
 
         bool hasNormals = !attrib.normals.empty();
         bool hasTexCoords = !attrib.texcoords.empty();
+        vector<bool> missingNormals;
+
+        // Check each face index against the list it is read from.
+        const size_t numPositions = attrib.vertices.size() / 3;
+        const size_t numNormals = attrib.normals.size() / 3;
+        const size_t numTexCoords = attrib.texcoords.size() / 2;
+        auto indexInRange = [&](const tinyobj::index_t& idx) {
+            if (idx.vertex_index < 0 || static_cast<size_t>(idx.vertex_index) >= numPositions) {
+                return false;
+            }
+            if (hasNormals && idx.normal_index >= 0 &&
+                static_cast<size_t>(idx.normal_index) >= numNormals) {
+                return false;
+            }
+            if (hasTexCoords && idx.texcoord_index >= 0 &&
+                static_cast<size_t>(idx.texcoord_index) >= numTexCoords) {
+                return false;
+            }
+            return true;
+        };
 
         size_t indexOffset = 0;
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
             int fv = shape.mesh.num_face_vertices[f];
+
+            // Skip a face with any index out of range
+            bool faceOk = true;
+            for (int v = 0; v < fv && faceOk; v++) {
+                faceOk = indexInRange(shape.mesh.indices[indexOffset + v]);
+            }
+            if (!faceOk) {
+                skippedFaces++;
+                indexOffset += fv;
+                continue;
+            }
 
             // Triangulate N-gon (fan triangulation)
             for (int v = 1; v < fv - 1; v++) {
@@ -91,33 +125,44 @@ bool ObjLoader::load(const fs::path& path) {
                     } else {
                         unsigned int newIdx = static_cast<unsigned int>(group.mesh.getNumVertices());
 
+                        // Offsets are computed in size_t
+                        size_t vi = static_cast<size_t>(idx.vertex_index);
+
                         // Position
-                        float vx = attrib.vertices[3 * idx.vertex_index + 0];
-                        float vy = attrib.vertices[3 * idx.vertex_index + 1];
-                        float vz = attrib.vertices[3 * idx.vertex_index + 2];
+                        float vx = attrib.vertices[3 * vi + 0];
+                        float vy = attrib.vertices[3 * vi + 1];
+                        float vz = attrib.vertices[3 * vi + 2];
                         group.mesh.addVertex(vx, vy, vz);
 
                         // Normal
                         if (hasNormals && idx.normal_index >= 0) {
-                            float nx = attrib.normals[3 * idx.normal_index + 0];
-                            float ny = attrib.normals[3 * idx.normal_index + 1];
-                            float nz = attrib.normals[3 * idx.normal_index + 2];
+                            size_t ni = static_cast<size_t>(idx.normal_index);
+                            float nx = attrib.normals[3 * ni + 0];
+                            float ny = attrib.normals[3 * ni + 1];
+                            float nz = attrib.normals[3 * ni + 2];
                             group.mesh.addNormal(nx, ny, nz);
+                            missingNormals.push_back(false);
+                        } else if (hasNormals) {
+                            group.mesh.addNormal(0, 0, 0);
+                            missingNormals.push_back(true);
                         }
 
                         // Texture coordinate
                         if (hasTexCoords && idx.texcoord_index >= 0) {
-                            float u = attrib.texcoords[2 * idx.texcoord_index + 0];
-                            float v_coord = attrib.texcoords[2 * idx.texcoord_index + 1];
+                            size_t ti = static_cast<size_t>(idx.texcoord_index);
+                            float u = attrib.texcoords[2 * ti + 0];
+                            float v_coord = attrib.texcoords[2 * ti + 1];
                             // OBJ V=0 is bottom, TrussC V=0 is top
                             group.mesh.addTexCoord(u, 1.0f - v_coord);
+                        } else if (hasTexCoords) {
+                            group.mesh.addTexCoord(0, 0);
                         }
 
                         // Vertex color (if present in OBJ)
-                        if (attrib.colors.size() > 3 * static_cast<size_t>(idx.vertex_index) + 2) {
-                            float cr = attrib.colors[3 * idx.vertex_index + 0];
-                            float cg = attrib.colors[3 * idx.vertex_index + 1];
-                            float cb = attrib.colors[3 * idx.vertex_index + 2];
+                        if (attrib.colors.size() > 3 * vi + 2) {
+                            float cr = attrib.colors[3 * vi + 0];
+                            float cg = attrib.colors[3 * vi + 1];
+                            float cb = attrib.colors[3 * vi + 2];
                             group.mesh.addColor(cr, cg, cb, 1.0f);
                         }
 
@@ -155,9 +200,17 @@ bool ObjLoader::load(const fs::path& path) {
         // Auto-compute normals if not present
         if (!group.mesh.hasNormals() && group.mesh.hasIndices()) {
             computeNormals(group.mesh);
+        } else if (find(missingNormals.begin(), missingNormals.end(), true) != missingNormals.end()) {
+            computeNormals(group.mesh, missingNormals);
         }
 
         groups_.push_back(std::move(group));
+    }
+
+    if (skippedFaces > 0) {
+        logWarning() << "ObjLoader: skipped " << skippedFaces
+                     << " face(s) with an index past the end of the vertex, normal or texcoord list: "
+                     << objPath;
     }
 
     // If no shapes but there are vertices, create a single group
@@ -190,7 +243,7 @@ Mesh ObjLoader::getMesh() const {
 // Compute per-vertex normals (smooth shading)
 // =============================================================================
 
-void ObjLoader::computeNormals(Mesh& mesh) {
+void ObjLoader::computeNormals(Mesh& mesh, const vector<bool>& missingNormals) {
     auto& vertices = mesh.getVertices();
     auto& indices = mesh.getIndices();
     int numVerts = mesh.getNumVertices();
@@ -211,20 +264,28 @@ void ObjLoader::computeNormals(Mesh& mesh) {
         Vec3 e2 = vertices[i2] - vertices[i0];
         Vec3 fn = e1.cross(e2);
 
-        normals[i0] = normals[i0] + fn;
-        normals[i1] = normals[i1] + fn;
-        normals[i2] = normals[i2] + fn;
+        for (auto index : {i0, i1, i2}) {
+            if (missingNormals.empty() || missingNormals[index]) {
+                normals[index] = normals[index] + fn;
+            }
+        }
     }
 
-    // Normalize and add to mesh
-    for (auto& n : normals) {
+    // Fill only missing normals; authored normals keep their exact values.
+    for (size_t i = 0; i < normals.size(); ++i) {
+        if (!missingNormals.empty() && !missingNormals[i]) continue;
+        auto& n = normals[i];
         float len = n.length();
-        if (len > 0.0001f) {
+        if (len > 0.0f) {
             n = n / len;
         } else {
             n = Vec3(0, 0, 1);
         }
-        mesh.addNormal(n);
+        if (missingNormals.empty()) {
+            mesh.addNormal(n);
+        } else {
+            mesh.setNormal(i, n);
+        }
     }
 }
 

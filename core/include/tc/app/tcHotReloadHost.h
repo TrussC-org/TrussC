@@ -29,7 +29,6 @@ extern char** environ;
 #include <chrono>
 #include <string>
 #include <vector>
-#include <iostream>
 #include <cstdlib>
 
 namespace trussc {
@@ -39,8 +38,6 @@ namespace fs = std::filesystem;
 using std::string;
 using std::vector;
 using std::ifstream;
-using std::cout;
-using std::cerr;
 using Clock = std::chrono::steady_clock;
 
 // Function pointer types for Guest exports
@@ -74,7 +71,7 @@ struct GuestLibrary {
         //               back the OLD code.
         //   - macOS:    dyld usually picks up the replacement, but copying to
         //               a unique path makes behavior identical across OSes.
-        static int loadCounter = 0;
+        static int loadCounter = 0;  // host-only: only the host loads guests
 #ifdef _WIN32
         const char* ext = ".tmp.dll";
 #else
@@ -82,19 +79,19 @@ struct GuestLibrary {
 #endif
         string tempPath = path + "." + std::to_string(loadCounter++) + ext;
         try { fs::copy_file(path, tempPath, fs::copy_options::overwrite_existing); }
-        catch (...) { cerr << "[HotReload] Failed to copy library to " << tempPath << "\n"; return false; }
+        catch (...) { logError("HotReload") << "Failed to copy library to " << tempPath; return false; }
 
 #ifdef _WIN32
         handle = LoadLibraryA(tempPath.c_str());
         if (!handle) {
-            cerr << "[HotReload] LoadLibrary failed (error " << GetLastError() << ")\n";
+            logError("HotReload") << "LoadLibrary failed (error " << GetLastError() << ")";
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
         createApp = (CreateAppFn)GetProcAddress(handle, "tcHotReloadCreateApp");
         destroyApp = (DestroyAppFn)GetProcAddress(handle, "tcHotReloadDestroyApp");
         if (!createApp || !destroyApp) {
-            cerr << "[HotReload] GetProcAddress failed\n";
+            logError("HotReload") << "GetProcAddress failed";
             FreeLibrary(handle);
             handle = nullptr;
             try { fs::remove(tempPath); } catch (...) {}
@@ -103,20 +100,21 @@ struct GuestLibrary {
 #else
         handle = dlopen(tempPath.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
-            cerr << "[HotReload] dlopen failed: " << dlerror() << "\n";
+            logError("HotReload") << "dlopen failed: " << dlerror();
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
         createApp = (CreateAppFn)dlsym(handle, "tcHotReloadCreateApp");
         destroyApp = (DestroyAppFn)dlsym(handle, "tcHotReloadDestroyApp");
         if (!createApp || !destroyApp) {
-            cerr << "[HotReload] dlsym failed: " << dlerror() << "\n";
+            logError("HotReload") << "dlsym failed: " << dlerror();
             dlclose(handle);
             handle = nullptr;
             try { fs::remove(tempPath); } catch (...) {}
             return false;
         }
 #endif
+        internal::refreshCrashModules();
         loadedPath = tempPath;
         return true;
     }
@@ -129,7 +127,7 @@ struct GuestLibrary {
             // is deleted — no stale tool from an old build lingers in
             // tools/list pointing at a freed App (#227). The tag is only an
             // identity, never dereferenced.
-            static uintptr_t generation = 0;
+            static uintptr_t generation = 0;  // host-only: only the host creates guests
             mcpOwner = reinterpret_cast<const void*>(++generation);
             mcp::detail::setRegistrationOwner(mcpOwner);
             App* raw = createApp();
@@ -137,6 +135,8 @@ struct GuestLibrary {
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
                 if (deleter) deleter(p);
             });
+            // The main window's scene-graph root (getRootNode()), held weakly
+            internal::mainWindowContext().rootNode = app;
             return raw;
         }
         return nullptr;
@@ -148,10 +148,32 @@ struct GuestLibrary {
             mcp::detail::setRegistrationOwner(nullptr);
             mcpOwner = nullptr;
         }
+        // Audio keeps running across a reload: detach the guest App's audio
+        // hooks and wait for a callback in flight before the App is
+        // destroyed (#256). On exit, appCleanupFunc has run cleanup() first.
+        if (app) internal::detachAppAudio(*app);
         app.reset();
     }
 
     void unload() {
+        // Tell guest code first, while its App and node references are still
+        // valid: singletons and other statics in the guest image outlive the
+        // App and keep their listeners on the host's events until they drop
+        // them (#416). Dispatched on the main window's events, whichever
+        // window context is current.
+        if (app) {
+            internal::WindowContext*& current = internal::currentWindowCtx();
+            internal::WindowContext* prev = current;
+            current = &internal::mainWindowContext();
+            events().hotReloadUnload.notify();
+            current = prev;
+        }
+        // Drop the window contexts' weak references first (hover, grab,
+        // selection, the main root; #255). Releasing the last weak reference
+        // to a make_shared node runs code of the module that created it, so
+        // none may outlive the guest. Hover, grab and selection start empty
+        // in the new generation.
+        internal::resetNodeRefsForUnload();
         destroy();
         // Intentionally NOT dlclose()d / FreeLibrary()d: the old guest's code
         // can still be referenced from host-owned state even after its App is
@@ -189,8 +211,9 @@ struct FileWatcher {
         if (!fs::exists(srcDir)) return;
         for (const auto& entry : fs::recursive_directory_iterator(srcDir)) {
             if (entry.is_regular_file()) {
-                auto ext = entry.path().extension().string();
-                if (ext == ".cpp" || ext == ".h" || ext == ".hpp" || ext == ".mm") {
+                // Case-insensitive extension match (.CPP, .H)
+                auto ext = toLower(getFileExtension(entry.path()));
+                if (ext == "cpp" || ext == "h" || ext == "hpp" || ext == "mm") {
                     watchPaths.push_back(entry.path());
                 }
             }
@@ -290,7 +313,7 @@ inline int runBuildCommand(const vector<string>& argv) {
     buf.push_back('\0');
     if (!CreateProcessA(argv[0].c_str(), buf.data(),
                         nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi)) {
-        cerr << "[HotReload] Failed to launch: " << argv[0] << "\n";
+        logError("HotReload") << "Failed to launch: " << argv[0];
         return -1;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
@@ -308,8 +331,8 @@ inline int runBuildCommand(const vector<string>& argv) {
     int err = posix_spawnp(&pid, cargv[0], nullptr, nullptr,
                             cargv.data(), environ);
     if (err != 0) {
-        std::cerr << "[HotReload] failed to spawn '" << argv[0]
-                  << "': " << std::strerror(err) << "\n";
+        logError("HotReload") << "Failed to spawn '" << argv[0]
+                              << "': " << std::strerror(err);
         return -1;
     }
     int status = 0;
@@ -377,7 +400,7 @@ struct Host {
         }
 
         if (!fs::exists(srcDir)) {
-            cerr << "[HotReload] src/ directory not found at " << srcDir << "\n";
+            logError("HotReload") << "src/ directory not found at " << srcDir;
             return false;
         }
 
@@ -416,17 +439,17 @@ struct Host {
 
         // Initial build of the Guest
         if (!rebuildGuest()) {
-            cerr << "[HotReload] Initial Guest build failed\n";
+            logError("HotReload") << "Initial Guest build failed";
             return false;
         }
 
         // Load the Guest and create the initial App instance
         if (!guest.load(guestLibPath)) {
-            cerr << "[HotReload] Failed to load Guest library\n";
+            logError("HotReload") << "Failed to load Guest library";
             return false;
         }
         if (!guest.create()) {
-            cerr << "[HotReload] Failed to create initial App instance\n";
+            logError("HotReload") << "Failed to create initial App instance";
             return false;
         }
 
@@ -497,7 +520,7 @@ struct Host {
             int w = sapp_width();
             int h = sapp_height();
             float dpiScale = sapp_dpi_scale();
-            float scale = internal::pixelPerfectMode ? 1.0f : (1.0f / dpiScale);
+            float scale = internal::pixelPerfectMode() ? 1.0f : (1.0f / dpiScale);
             newApp->handleWindowResized(static_cast<int>(w * scale),
                                         static_cast<int>(h * scale));
         }
@@ -537,7 +560,8 @@ struct Host {
 };
 
 // ---------------------------------------------------------------------------
-// Global host instance
+// Global host instance. Host-only: only the host's runHotReloadApp uses it; a
+// guest's copy (TrussC.h includes this header there too) is never used.
 // ---------------------------------------------------------------------------
 inline Host g_host;
 
@@ -590,6 +614,8 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         if (app) {
             events().exit.notify();
             app->exit();
+            // close() requests made so far land before the App's cleanup().
+            internal::closeRequestedWindowsAtShutdown();
             app->cleanup();
         }
         g_host.guest.unload();
@@ -633,7 +659,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     };
 
     // Build the sokol descriptor (without template — we handle App* manually)
-    internal::pixelPerfectMode = settings.pixelPerfect;
+    internal::pixelPerfectMode() = settings.pixelPerfect;
 
     sapp_desc desc = {};
     if (settings.pixelPerfect) {
@@ -653,16 +679,23 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.frame_cb = internal::_frame_cb;
     desc.cleanup_cb = internal::_cleanup_cb;
     desc.event_cb = internal::_event_cb;
-    desc.logger.func = slog_func;
+    desc.logger.func = internal::sokolLog;
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 16;
     desc.max_dropped_file_path_length = 2048;
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
+    desc.win32.console_utf8 = true;   // UTF-8 console output (see buildAppDescriptor)
 
+    openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
+#ifdef _WIN32
+    ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
+#endif
+    appExitCode() = 0;
+    appSetupCalled() = false;
     sapp_run(&desc);
-    return 0;
+    return appSetupCalled() ? appExitCode() : 1;
 }
 
 } // namespace internal

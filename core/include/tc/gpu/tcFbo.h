@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcDebugName.h"
 #include "tc/utils/tcAnnotations.h"
 
 // =============================================================================
@@ -19,13 +20,49 @@ class Fbo;
 // Static helper function for calling FBO's clearColor
 namespace internal { inline void _fboClearColorHelper(float r, float g, float b, float a); }
 
+namespace internal {
+
+// Rendering resources shared by every Fbo of the same (sampleCount, format):
+// one sokol_gl context and its role->pipeline cache (see Fbo::ensureShared).
+struct FboSharedResources {
+    sgl_context context = {};
+    RenderTarget target;  // role->pipeline cache for this FBO context
+    bool initialized = false;
+};
+
+// Mip-downsample resources shared per color format (see Fbo::ensureSharedMip).
+struct FboSharedMipResources {
+    bool ready = false;   // both shaders usable (internalShaderReady)
+    sg_shader shader = {};
+    sg_pipeline pipeline = {};
+    sg_shader blitShader = {};
+    sg_pipeline blitPipeline = {};
+    sg_buffer vbuf = {};
+    sg_sampler sampler = {};
+    bool initialized = false;
+};
+
+// Both caches are one per process, defined in tcGlobal.cpp. Nothing ever
+// destroys the contexts, shaders and pipelines they hold (each Fbo context
+// takes a slot in sokol_gl's context pool). Header-inline, each hot reload
+// guest generation that drew into an Fbo made a new set in the host's pools,
+// and a few reloads later FBO drawing silently stopped (#249).
+std::unordered_map<uint64_t, FboSharedResources>& fboSharedMap();
+std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap();
+
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Fbo Class - inherits from HasTexture
 // ---------------------------------------------------------------------------
 class Fbo : public HasTexture {
 public:
-    Fbo() { internal::fboCount++; }
-    ~Fbo() { clear(); internal::fboCount--; }
+    Fbo() { internal::fboCount()++; }
+    ~Fbo() { clear(); internal::fboCount()--; }
+
+    // Name this object for MCP inspection; empty names are listed by index.
+    void setDebugName(const std::string& name) { debugName_.set(name); }
+    const std::string& getDebugName() const { return debugName_.get(); }
 
     // Non-copyable
     Fbo(const Fbo&) = delete;
@@ -38,13 +75,15 @@ public:
     std::shared_ptr<void> lifetimeToken() const { return aliveToken_; }
 
     // Move-enabled
-    Fbo(Fbo&& other) noexcept {
+    Fbo(Fbo&& other) noexcept
+        : debugName_(std::move(other.debugName_), this) {
         moveFrom(std::move(other));
     }
 
     Fbo& operator=(Fbo&& other) noexcept {
         if (this != &other) {
             clear();
+            debugName_.moveFrom(other.debugName_);
             moveFrom(std::move(other));
         }
         return *this;
@@ -266,10 +305,11 @@ public:
         // Reset counters so the next FBO using this shared context starts clean.
         // Buffers stay allocated at their current (possibly grown) size — no
         // allocation or deallocation overhead between sequential FBO draws.
+        internal::reportSglStackErrors(sgl_context_error(shared.context), true);
         sgl_tc_context_reset(shared.context);
 
-        // Switch back to default context
-        sgl_set_context(sgl_default_context());
+        // Switch back to the current window's context
+        sgl_set_context(internal::currentWindowContext().swapchainTarget.context);
         active_ = false;
         auto& wctx = internal::currentWindowContext();
         wctx.inFboPass = false;
@@ -298,10 +338,14 @@ public:
     }
 
     // Read pixel data (RGBA8 only, for backward compatibility)
-    // Note: Call after rendering is complete (after end())
+    // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     // For MSAA, reads from resolved texture
     TC_PLATFORMS("macos,windows,linux,ios,android") bool readPixels(unsigned char* pixels) const {
         if (!allocated_ || !pixels) return false;
+        if (internal::currentWindowContext().inFboPass) {
+            logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
+            return false;
+        }
 
         // sokol_gfx doesn't have direct pixel reading API
         // Platform-specific implementation required
@@ -311,8 +355,13 @@ public:
 
     // Read pixel data as float (for float pixel formats: R16F, R32F, RGBA16F, RGBA32F, etc.)
     // Buffer must be large enough: width * height * channelCount(format) floats
-    TC_PLATFORMS("macos,windows,linux,android") bool readPixelsFloat(float* pixels) const {
+    // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
+    TC_PLATFORMS("macos,ios,windows,linux,android") bool readPixelsFloat(float* pixels) const {
         if (!allocated_ || !pixels) return false;
+        if (internal::currentWindowContext().inFboPass) {
+            logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
+            return false;
+        }
         return readPixelsFloatPlatform(pixels);
     }
 
@@ -390,6 +439,7 @@ public:
     sg_sampler getSampler() const { return curColorTex_().getSampler(); }
 
 private:
+    internal::DebugName debugName_{internal::DebugObjectKind::Fbo, this};
     static bool needsGlYFlip() {
         sg_backend be = sg_query_backend();
         return be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3;
@@ -569,6 +619,7 @@ private:
     void blitColorInto_(const Texture& src, Texture& dst) {
         ensureSharedMip(format_);
         auto& s = getSharedMip(format_);
+        if (!s.ready) return;
 
         sg_pass pass = {};
         pass.attachments.colors[0] = dst.getAttachmentView();
@@ -594,24 +645,16 @@ private:
     // Nested FBO begin/end is NOT supported (sokol doesn't support nested passes).
     // =========================================================================
 
-    struct SharedResources {
-        sgl_context context = {};
-        internal::RenderTarget target;  // role->pipeline cache for this FBO context
-        bool initialized = false;
-    };
+    // The cache itself is internal::fboSharedMap(), one per process.
+    using SharedResources = internal::FboSharedResources;
 
     // Pack (sampleCount, format) into a uint64_t key
     static uint64_t sharedKey(int sampleCount, TextureFormat format) {
         return ((uint64_t)sampleCount << 32) | (uint64_t)format;
     }
 
-    static std::unordered_map<uint64_t, SharedResources>& sharedMap() {
-        static std::unordered_map<uint64_t, SharedResources> map;
-        return map;
-    }
-
     static SharedResources& getShared(int sampleCount, TextureFormat format) {
-        return sharedMap()[sharedKey(sampleCount, format)];
+        return internal::fboSharedMap()[sharedKey(sampleCount, format)];
     }
 
     static void ensureShared(int sampleCount, TextureFormat format) {
@@ -622,18 +665,18 @@ private:
 
         // Create sgl context (match main context buffer sizes)
         sgl_context_desc_t ctx_desc = {};
-        ctx_desc.max_vertices = internal::sglMaxVertices;
-        ctx_desc.max_commands = internal::sglMaxCommands;
+        ctx_desc.max_vertices = internal::sglBudget().maxVertices;
+        ctx_desc.max_commands = internal::sglBudget().maxCommands;
         ctx_desc.color_format = sgFormat;
         ctx_desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         ctx_desc.sample_count = sampleCount;
-        s.context = sgl_make_context(&ctx_desc);
-
         // RenderTarget for this FBO context (lazy role->pipeline cache; FBO pipelines
         // create fine on first use inside a pass — unlike the swapchain path, which is
         // pre-warmed in tcGlobal because mid-frame creation in setupScreenFov corrupts
-        // the frame).
-        s.target.context = s.context;
+        // the frame). A failed context is warned once and not retried; this
+        // (sampleCount, format) then draws no sokol_gl shapes.
+        s.target.makeContext(ctx_desc, "an Fbo format");
+        s.context = s.target.context;
         s.target.isFbo = true;
 
         s.initialized = true;
@@ -643,25 +686,13 @@ private:
     // Shared mip-downsample resources (keyed by color format).
     // Independent of the sgl_context / sampleCount of SharedResources because
     // mip generation always runs on the resolved (non-MSAA) color texture
-    // with a tiny custom pipeline, not through sokol_gl.
+    // with a tiny custom pipeline, not through sokol_gl. The cache is
+    // internal::fboSharedMipMap(), one per process.
     // -------------------------------------------------------------------------
-    struct SharedMipResources {
-        sg_shader shader = {};
-        sg_pipeline pipeline = {};
-        sg_shader blitShader = {};
-        sg_pipeline blitPipeline = {};
-        sg_buffer vbuf = {};
-        sg_sampler sampler = {};
-        bool initialized = false;
-    };
-
-    static std::unordered_map<uint64_t, SharedMipResources>& sharedMipMap() {
-        static std::unordered_map<uint64_t, SharedMipResources> map;
-        return map;
-    }
+    using SharedMipResources = internal::FboSharedMipResources;
 
     static SharedMipResources& getSharedMip(TextureFormat format) {
-        return sharedMipMap()[(uint64_t)format];
+        return internal::fboSharedMipMap()[(uint64_t)format];
     }
 
     static void ensureSharedMip(TextureFormat format) {
@@ -674,7 +705,7 @@ private:
         // bilinear sample of the previous mip is enough to produce a 2x2
         // box-filtered destination level. textureLod() in the shader pins
         // the source level, so a single pipeline handles every level.
-        static const float quadVerts[] = {
+        static const float quadVerts[] = {  // immutable
             // x,     y,    u,    v
             -1.0f, -1.0f, 0.0f, 0.0f,
              1.0f, -1.0f, 1.0f, 0.0f,
@@ -695,6 +726,13 @@ private:
         s.sampler = sg_make_sampler(&smp_desc);
 
         s.shader = sg_make_shader(tc_fbomip_downsample_shader_desc(sg_query_backend()));
+        s.blitShader = sg_make_shader(tc_fbomip_blit_shader_desc(sg_query_backend()));
+        s.ready = internal::internalShaderReady(s.shader, "Fbo mipmap")
+               && internal::internalShaderReady(s.blitShader, "Fbo mipmap blit");
+        if (!s.ready) {
+            s.initialized = true;   // not retried; mipmaps/blits are skipped
+            return;
+        }
 
         sg_pipeline_desc pip_desc = {};
         pip_desc.shader = s.shader;
@@ -708,7 +746,6 @@ private:
         s.pipeline = sg_make_pipeline(&pip_desc);
 
         // 1:1 blit pipeline for copying scratch mip → main mip
-        s.blitShader = sg_make_shader(tc_fbomip_blit_shader_desc(sg_query_backend()));
         sg_pipeline_desc blit_pip_desc = {};
         blit_pip_desc.shader = s.blitShader;
         blit_pip_desc.layout.attrs[ATTR_tc_fbomip_blit_position].format = SG_VERTEXFORMAT_FLOAT2;
@@ -735,6 +772,7 @@ private:
         if (!mipmaps_ || numMipLevels_ <= 1) return;
         ensureSharedMip(format_);
         auto& s = getSharedMip(format_);
+        if (!s.ready) return;
 
         for (int level = 1; level < numMipLevels_; level++) {
             // Pass 1: downsample main[level-1] → scratch[level]
@@ -842,6 +880,7 @@ private:
 
         // Switch to shared FBO context and ensure buffers are allocated
         sgl_set_context(shared.context);
+        sgl_tc_reset_matrix_stacks();
         sgl_tc_context_ensure_buffers(shared.context);
         sgl_defaults();
 
@@ -869,7 +908,7 @@ private:
         // Setup screen projection using defaultScreenFov (like main screen).
         // pickable=false: geometry drawn into an offscreen target must not be
         // pickable from main-screen clicks (see tcCameraContext.h).
-        internal::setupScreenFovWithSize(internal::defaultScreenFov, (float)width_, (float)height_, 0.0f, 0.0f, false);
+        internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)width_, (float)height_, 0.0f, 0.0f, false);
 
         active_ = true;
         internal::currentWindowContext().inFboPass = true;

@@ -67,12 +67,14 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\MyAp
 1. **Automatic sign-in:** use Sysinternals Autologon, or `netplwiz`, so the PC reaches the desktop after a restart without anyone typing a password.
 2. **Start the app at sign-in:** create a Task Scheduler task with the trigger "At log on". In the action, set **"Start in"** to the folder that contains the exe (see section 6). Then change two defaults, or Windows stops the task:
    - **Settings** tab: uncheck **"Stop the task if it runs longer than"**. It is on by default with 3 days, so Windows ends the app (or the supervisor that restarts it) about 72 hours after sign-in.
-   - **Conditions** tab: uncheck **"Start the task only if the computer is on AC power"**. This matters on laptops.
+   - **Conditions** tab: uncheck **"Stop if the computer switches to battery power"**, then **"Start the task only if the computer is on AC power"**. This matters on laptops.
    - Without the GUI: in the task's XML, `<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>` means no limit. In PowerShell, pass `New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries` as `-Settings` to `Register-ScheduledTask`.
    - The task's process runs at priority 7 (below normal) by default. If that matters, set `<Priority>` in the XML, or `-Priority` on `New-ScheduledTaskSettingsSet`.
 3. **Restart it when it stops:**
    - **anchorbolt** ([tettou771/anchorbolt](https://github.com/tettou771/anchorbolt)): `anchorbolt start` supervises a TrussC app: it restarts the app when it exits or stops responding, collects the logs, and can report to a fleet dashboard. Start anchorbolt from the scheduled task instead of the app.
    - **Without anchorbolt:** a small loop script that restarts the exe when it exits works, as long as the crash dialog is suppressed (section 4).
+
+On D3D11 device loss, `events().deviceLost` fires once and the app exits with code 1 unless a listener cancels; project templates use `return TC_RUN_APP(...)` to propagate the exit code to a watchdog (ordinary exits return 0).
 
 ## 6. Working directory and file paths
 
@@ -80,7 +82,8 @@ A Task Scheduler task with an empty "Start in" runs with the working directory a
 
 - Set "Start in" to the exe folder in the task or shortcut.
 - Load assets with paths under `bin/data`, the way the examples do. `getDataPath("file")` gives the absolute path.
-- Give the log file an absolute path, e.g. `getLogger().setLogFile(getDataPath("app.log"))`, or an absolute `TRUSSC_LOG_FILE`. Check the return value: `setLogFile()` returns false when it can't open the file, and a Release or RelWithDebInfo app has no console to show the error.
+- Log file names resolve against `bin/data` too: `getLogger().setLogFile("logs/app.log")` writes `bin/data/logs/app.log` and creates `logs` if it is missing. A relative `TRUSSC_LOG_FILE` resolves the same way. Check the return value: on failure `setLogFile()` returns false and logs why.
+- If window or GPU startup fails before `setup()` runs, `runApp()` returns 1; otherwise it returns 0. `TC_RUN_APP` passes this status to `main()`. With `TRUSSC_LOG_FILE` set, D3D11 and main-window startup failures are recorded with their HRESULT or Win32 error code so a supervisor can identify a failed start.
 
 ## 7. GPU on dual-GPU machines
 

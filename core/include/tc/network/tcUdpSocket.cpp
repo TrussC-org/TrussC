@@ -3,7 +3,9 @@
 // =============================================================================
 
 #include "tc/network/tcUdpSocket.h"
+#include "tc/network/tcSocketInternal.h"
 
+#include <chrono>
 #include <cstring>
 
 #ifdef _WIN32
@@ -28,32 +30,11 @@
 
 namespace trussc {
 
-// Winsock initialization flag
-bool UdpSocket::winsockInitialized_ = false;
-
-// ---------------------------------------------------------------------------
-// Winsock initialization (Windows)
-// ---------------------------------------------------------------------------
-bool UdpSocket::initWinsock() {
-#ifdef _WIN32
-    if (!winsockInitialized_) {
-        WSADATA wsaData;
-        int result = WSAStartup(MAKEWORD(2, 2), &wsaData);
-        if (result != 0) {
-            logError() << "WSAStartup failed: " << result;
-            return false;
-        }
-        winsockInitialized_ = true;
-    }
-#endif
-    return true;
-}
-
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
 UdpSocket::UdpSocket() {
-    initWinsock();
+    internal::ensureWinsock();
 #ifdef __EMSCRIPTEN__
     useThread_ = false;
 #endif
@@ -176,9 +157,11 @@ bool UdpSocket::connect(const std::string& host, int port) {
 
     int status = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result);
     if (status != 0 || !result) {
-        notifyError("Failed to resolve host: " + host, status);
+        notifyError(ErrorKind::Resolve, "Failed to resolve host: " + host, status);
         return false;
     }
+
+    notifyRecovery(ErrorKind::Resolve);
 
     // Set destination with connect() (for UDP, this just fixes the destination for send(), not an actual connection)
     if (::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen)) < 0) {
@@ -212,10 +195,11 @@ void UdpSocket::close() {
         socket_ = INVALID_SOCKET_HANDLE;
     }
 
-    // Wait for thread to finish
-    if (receiveThread_.joinable()) {
-        receiveThread_.join();
-    }
+    // Wait for thread to finish. On that thread itself (an onReceive
+    // listener that closes the socket) it cannot join itself: keep it for a
+    // later join from another thread. Then join what earlier calls kept.
+    keptThreads_.release(receiveThread_);
+    keptThreads_.joinOthers();
     receiving_ = false;
 
     localPort_ = 0;
@@ -238,9 +222,11 @@ bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size
 
     int status = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result);
     if (status != 0 || !result) {
-        notifyError("Failed to resolve host: " + host, status);
+        notifyError(ErrorKind::Resolve, "Failed to resolve host: " + host, status);
         return false;
     }
+
+    notifyRecovery(ErrorKind::Resolve);
 
     auto sent = sendto(socket_,
                        static_cast<const char*>(data),
@@ -252,10 +238,11 @@ bool UdpSocket::sendTo(const std::string& host, int port, const void* data, size
     freeaddrinfo(result);
 
     if (sent < 0) {
-        notifyError("Failed to send data", SOCKET_ERROR_CODE);
+        notifyError(ErrorKind::Send, "Failed to send data", SOCKET_ERROR_CODE);
         return false;
     }
 
+    notifyRecovery(ErrorKind::Send);
     return true;
 }
 
@@ -265,21 +252,22 @@ bool UdpSocket::sendTo(const std::string& host, int port, const std::string& mes
 
 bool UdpSocket::send(const void* data, size_t size) {
     if (socket_ == INVALID_SOCKET_HANDLE) {
-        notifyError("Socket not created");
+        notifyError(ErrorKind::Send, "Socket not created");
         return false;
     }
 
     if (connectedHost_.empty()) {
-        notifyError("No destination set. Call connect() first.");
+        notifyError(ErrorKind::Send, "No destination set. Call connect() first.");
         return false;
     }
 
     auto sent = ::send(socket_, static_cast<const char*>(data), static_cast<int>(size), 0);
     if (sent < 0) {
-        notifyError("Failed to send data", SOCKET_ERROR_CODE);
+        notifyError(ErrorKind::Send, "Failed to send data", SOCKET_ERROR_CODE);
         return false;
     }
 
+    notifyRecovery(ErrorKind::Send);
     return true;
 }
 
@@ -311,6 +299,8 @@ int UdpSocket::receive(void* buffer, size_t bufferSize, std::string& remoteHost,
                              reinterpret_cast<sockaddr*>(&fromAddr),
                              &fromLen);
 
+    if (received >= 0) notifyRecovery(ErrorKind::Receive);
+
     if (received > 0) {
         char hostStr[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &fromAddr.sin_addr, hostStr, INET_ADDRSTRLEN);
@@ -328,6 +318,11 @@ void UdpSocket::startReceiving() {
     if (receiving_.load()) {
         return;  // Already receiving
     }
+
+    // A receive thread that a listener's stopReceiving() or close() let go
+    // of has been told to stop: wait for it before clearing shouldStop_ for
+    // the new one. The calling thread itself, if kept, stays.
+    keptThreads_.joinOthers();
 
     shouldStop_ = false;
     receiving_ = true;
@@ -347,18 +342,13 @@ void UdpSocket::stopReceiving() {
     shouldStop_ = true;
     updateListener_.disconnect();
 
-    if (receiveThread_.joinable()) {
-        // Avoid joining self
-        if (receiveThread_.get_id() == std::this_thread::get_id()) {
-            receiveThread_.detach();
-        } else {
-            // Close socket to unblock recvfrom if blocking
-            // (Note: close() calls stopReceiving, so we might be here via close())
-            // If called directly, we might need to interrupt recvfrom.
-            // On Windows shutdown() helps, on POSIX closing socket helps.
-            receiveThread_.join();
-        }
-    }
+    // The thread waits in slices of 100 ms and sees shouldStop_ there. On
+    // that thread itself (an onReceive listener) it cannot join itself: keep
+    // it, and the next startReceiving(), stopReceiving() or close() on
+    // another thread, or the destructor, joins it. Then join what earlier
+    // calls kept.
+    keptThreads_.release(receiveThread_);
+    keptThreads_.joinOthers();
 
     receiving_ = false;
 }
@@ -383,6 +373,8 @@ void UdpSocket::processNetwork() {
                                  0,
                                  reinterpret_cast<sockaddr*>(&fromAddr),
                                  &fromLen);
+
+        if (received >= 0) notifyRecovery(ErrorKind::Receive);
 
         if (received > 0) {
             UdpReceiveEventArgs args;
@@ -409,7 +401,7 @@ void UdpSocket::processNetwork() {
             // Check for actual error
             if (received < 0) {
                 if (!shouldStop_.load()) {
-                    notifyError("Receive error", err);
+                    notifyError(ErrorKind::Receive, "Receive error", err);
                 }
                 // Don't stop receiving on error, just log and wait for next
                 break; 
@@ -425,6 +417,7 @@ void UdpSocket::receiveThreadFunc() {
     // Re-implementing with select/poll to allow proper stopping
     
     std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
+    bool waitFailing = false;   // the previous wait failed too (report once per run)
 
     while (!shouldStop_.load()) {
         // Poll with timeout to allow checking shouldStop
@@ -447,6 +440,25 @@ void UdpSocket::receiveThreadFunc() {
 
         if (shouldStop_.load()) break;
 
+        // A failed wait returns at once, so looping straight back into it
+        // would spin a core at 100% for as long as the failure lasts (Winsock
+        // torn down under the socket, for one), silently, while isReceiving()
+        // still says true. Report the first failure of a run and back off for
+        // one wait slice before trying again.
+        if (res < 0) {
+            int err = SOCKET_ERROR_CODE;
+#ifndef _WIN32
+            if (err == EINTR) continue;   // interrupted by a signal, not a failure
+#endif
+            if (!waitFailing) {
+                notifyError(ErrorKind::Receive, "Receive wait failed", err);
+                waitFailing = true;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+        waitFailing = false;
+
         if (dataReady) {
             sockaddr_in fromAddr{};
             socklen_t fromLen = sizeof(fromAddr);
@@ -459,6 +471,8 @@ void UdpSocket::receiveThreadFunc() {
                                      &fromLen);
 
             if (shouldStop_.load()) break;
+
+            if (received >= 0) notifyRecovery(ErrorKind::Receive);
 
             if (received > 0) {
                 UdpReceiveEventArgs args;
@@ -479,7 +493,7 @@ void UdpSocket::receiveThreadFunc() {
                 if (err != EAGAIN && err != EWOULDBLOCK && err != EINTR)
 #endif
                 {
-                    notifyError("Receive error", err);
+                    notifyError(ErrorKind::Receive, "Receive error", err);
                 }
             }
         }
@@ -656,6 +670,55 @@ bool UdpSocket::setReceiveTimeout(int timeoutMs) {
 // ---------------------------------------------------------------------------
 // Error notification
 // ---------------------------------------------------------------------------
+// Gate, counter and failure flag are atomic so a suppressed failure takes no mutex. Only
+// reports/recoveries take the small bookkeeping lock. Emit outside it: logger
+// listeners and onError listeners may call back into this socket.
+void UdpSocket::notifyError(ErrorKind kind, const std::string& message, int code) {
+    auto& state = errorLogs_[static_cast<size_t>(kind)];
+    const bool report = state.gate.isFirstTime();
+    uint64_t count = 0;
+    if (report) {
+        std::lock_guard<std::mutex> lock(errorLogMutex_);
+        count = state.suppressed.exchange(0);
+    } else {
+        state.suppressed.fetch_add(1);
+    }
+    // Publish AFTER touching the gate/counter. Recovery clears this flag BEFORE
+    // resetting the gate: a racing failure is either covered by that reset, or
+    // publishes true after the clear so the next success resets again. Publishing
+    // before the gate check could let a failure consume the reset with no flag
+    // left to re-arm it. Release/acquire orders bookkeeping across threads.
+    state.failedSinceSuccess.store(true, std::memory_order_release);
+    if (report) {
+        auto line = logError();
+        line << "UdpSocket: " << message << " (code: " << code << ")";
+        if (count > 0) line << " (+" << count << " more since the last report)";
+    }
+
+    UdpErrorEventArgs args;
+    args.message = message;
+    args.errorCode = code;
+    onError.notify(args);
+}
+
+void UdpSocket::notifyRecovery(ErrorKind kind) {
+    auto& state = errorLogs_[static_cast<size_t>(kind)];
+    if (!state.failedSinceSuccess.load(std::memory_order_acquire)) return;
+
+    uint64_t count;
+    {
+        std::lock_guard<std::mutex> lock(errorLogMutex_);
+        if (!state.failedSinceSuccess.exchange(false, std::memory_order_acq_rel)) return;
+        count = state.suppressed.exchange(0);
+        state.gate.reset();
+    }
+    if (count > 0) {
+        const char* name = kind == ErrorKind::Resolve ? "resolve" :
+                           kind == ErrorKind::Send ? "send" : "receive";
+        logNotice() << "UdpSocket: " << name << " recovered after " << count << " more failures";
+    }
+}
+
 void UdpSocket::notifyError(const std::string& message, int code) {
     logError() << "UdpSocket: " << message << " (code: " << code << ")";
 

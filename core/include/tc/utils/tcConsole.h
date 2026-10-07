@@ -28,6 +28,7 @@
 #include <sstream>
 #include <memory>
 #include "tcThreadChannel.h"
+#include "tcLog.h"
 #include "../events/tcEventArgs.h"
 #include "../events/tcCoreEvents.h"
 
@@ -39,20 +40,13 @@ namespace console {
 // ---------------------------------------------------------------------------
 namespace detail {
 
-inline ThreadChannel<ConsoleEventArgs>& getChannel() {
-    static ThreadChannel<ConsoleEventArgs> channel;
-    return channel;
-}
-
-inline std::atomic<bool>& isRunning() {
-    static std::atomic<bool> running{false};
-    return running;
-}
-
-inline std::unique_ptr<std::thread>& getThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
-}
+// One stdin reader per process, defined in tcGlobal.cpp. The host starts it and
+// drains the channel every frame; console::stop() / isEnabled() are typically
+// called from setup(), which is guest code under hot reload. Header-inline, a
+// Windows guest had its own (never started) copy, so stop() was a no-op (#249).
+ThreadChannel<ConsoleEventArgs>& getChannel();
+std::atomic<bool>& isRunning();
+std::unique_ptr<std::thread>& getThread();
 
 // Parse line by whitespace and create ConsoleEventArgs
 // Comments: everything after '#' is ignored
@@ -96,7 +90,7 @@ inline void readThread() {
 inline void start() {
 #ifdef __EMSCRIPTEN__
     // Console input is not available on web (no stdin/threads)
-    std::cerr << "[TrussC] console::start() is not available on web platform" << std::endl;
+    logWarning("Console") << "console::start() is not available on web platform";
     return;
 #else
     if (detail::isRunning().load()) {

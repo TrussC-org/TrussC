@@ -5,6 +5,53 @@ namespace tcx::osc {
 
 using namespace osc_internal;
 
+namespace {
+
+// Move pos past the zero padding that aligns it to 4 bytes. Requires
+// pos <= size, and the result stays <= size. When the data ends before the
+// padding does, the result is size and paddingMissing is set; a read after
+// that then finds no data left and fails.
+size_t skipPadding(size_t pos, size_t size, bool& paddingMissing) {
+    size_t pad = (4 - (pos & 3)) & 3;
+    if (pad > size - pos) {
+        paddingMissing = true;
+        return size;
+    }
+    return pos + pad;
+}
+
+void appendBe32(std::vector<uint8_t>& out, uint32_t value) {
+    out.push_back(uint8_t(value >> 24));
+    out.push_back(uint8_t(value >> 16));
+    out.push_back(uint8_t(value >> 8));
+    out.push_back(uint8_t(value));
+}
+
+void appendBe64(std::vector<uint8_t>& out, uint64_t value) {
+    appendBe32(out, uint32_t(value >> 32));
+    appendBe32(out, uint32_t(value));
+}
+
+uint32_t readBe32(const uint8_t* p) {
+    uint32_t be;
+    std::memcpy(&be, p, 4);
+    return fromBigEndian(be);
+}
+
+uint64_t readBe64(const uint8_t* p) {
+    uint64_t be;
+    std::memcpy(&be, p, 8);
+    return fromBigEndian64(be);
+}
+
+void appendPaddedString(std::vector<uint8_t>& out, const std::string& str) {
+    out.insert(out.end(), str.begin(), str.end());
+    out.push_back(0);
+    while (out.size() % 4 != 0) out.push_back(0);
+}
+
+}  // namespace
+
 // =============================================================================
 // toBytes - Serialize message to byte array
 // =============================================================================
@@ -12,48 +59,58 @@ std::vector<uint8_t> OscMessage::toBytes() const {
     std::vector<uint8_t> result;
 
     // Address (null-terminated + padding)
-    result.insert(result.end(), address_.begin(), address_.end());
-    result.push_back(0);
-    while (result.size() % 4 != 0) result.push_back(0);
+    appendPaddedString(result, address_);
 
     // Type tags (comma + tags + null-terminated + padding)
-    result.push_back(',');
-    result.insert(result.end(), typeTags_.begin(), typeTags_.end());
-    result.push_back(0);
-    while (result.size() % 4 != 0) result.push_back(0);
+    appendPaddedString(result, "," + typeTags_);
 
-    // Argument data
-    for (size_t i = 0; i < args_.size(); ++i) {
-        char type = typeTags_[i];
-
-        if (type == 'i') {
-            int32_t value = std::get<int32_t>(args_[i]);
-            uint32_t be = toBigEndian(static_cast<uint32_t>(value));
-            auto* p = reinterpret_cast<uint8_t*>(&be);
-            result.insert(result.end(), p, p + 4);
+    // Argument data, written by tag. T F N I [ ] have no data and no
+    // stored argument.
+    for (const StoredArg& stored : args_) {
+        const ArgVariant& arg = stored.value;
+        switch (typeTags_[stored.index]) {
+            case 'i':
+                appendBe32(result, static_cast<uint32_t>(std::get<int32_t>(arg)));
+                break;
+            case 'f':
+                appendBe32(result, floatToUint32(std::get<float>(arg)));
+                break;
+            case 's':
+            case 'S':
+                appendPaddedString(result, std::get<std::string>(arg));
+                break;
+            case 'b': {
+                const auto& blob = std::get<std::vector<uint8_t>>(arg);
+                appendBe32(result, static_cast<uint32_t>(blob.size()));
+                result.insert(result.end(), blob.begin(), blob.end());
+                while (result.size() % 4 != 0) result.push_back(0);
+                break;
+            }
+            case 'h':
+                appendBe64(result, static_cast<uint64_t>(std::get<int64_t>(arg)));
+                break;
+            case 'd':
+                appendBe64(result, doubleToUint64(std::get<double>(arg)));
+                break;
+            case 't':
+                appendBe64(result, std::get<OscTimetag>(arg).value);
+                break;
+            case 'c':
+                appendBe32(result, static_cast<uint8_t>(std::get<char>(arg)));
+                break;
+            case 'r': {
+                const OscRgba& c = std::get<OscRgba>(arg);
+                result.insert(result.end(), { c.r, c.g, c.b, c.a });
+                break;
+            }
+            case 'm': {
+                const OscMidi& m = std::get<OscMidi>(arg);
+                result.insert(result.end(), { m.port, m.status, m.data1, m.data2 });
+                break;
+            }
+            default:
+                break;
         }
-        else if (type == 'f') {
-            float value = std::get<float>(args_[i]);
-            uint32_t be = toBigEndian(floatToUint32(value));
-            auto* p = reinterpret_cast<uint8_t*>(&be);
-            result.insert(result.end(), p, p + 4);
-        }
-        else if (type == 's') {
-            const std::string& str = std::get<std::string>(args_[i]);
-            result.insert(result.end(), str.begin(), str.end());
-            result.push_back(0);
-            while (result.size() % 4 != 0) result.push_back(0);
-        }
-        else if (type == 'b') {
-            const auto& blob = std::get<std::vector<uint8_t>>(args_[i]);
-            uint32_t size = static_cast<uint32_t>(blob.size());
-            uint32_t be = toBigEndian(size);
-            auto* p = reinterpret_cast<uint8_t*>(&be);
-            result.insert(result.end(), p, p + 4);
-            result.insert(result.end(), blob.begin(), blob.end());
-            while (result.size() % 4 != 0) result.push_back(0);
-        }
-        // 'T' and 'F' have no data
     }
 
     return result;
@@ -63,11 +120,20 @@ std::vector<uint8_t> OscMessage::toBytes() const {
 // fromBytes - Parse message from byte array (robust implementation)
 // =============================================================================
 OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
+    bool paddingMissing = false;
+    return fromBytes(data, size, ok, paddingMissing);
+}
+
+OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing) {
     ok = false;
+    paddingMissing = false;
     OscMessage msg;
 
     if (!data || size < 4) return msg;
 
+    // pos <= size holds throughout, and each size check subtracts from size
+    // instead of adding to pos, so none of them can wrap when size_t is 32
+    // bits. An argument that runs past the end fails the parse.
     size_t pos = 0;
 
     // Read address
@@ -77,7 +143,7 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     if (addrEnd == size_t(-1)) return msg;
 
     msg.address_ = std::string(reinterpret_cast<const char*>(data + pos), addrEnd - pos);
-    pos = alignTo4(addrEnd + 1);
+    pos = skipPadding(addrEnd + 1, size, paddingMissing);
 
     if (pos >= size) {
         // Messages without arguments (no type tags) are allowed
@@ -97,56 +163,91 @@ OscMessage OscMessage::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     if (typeTagEnd == size_t(-1)) return msg;
 
     msg.typeTags_ = std::string(reinterpret_cast<const char*>(data + typeTagStart), typeTagEnd - typeTagStart);
-    pos = alignTo4(typeTagEnd + 1);
+    pos = skipPadding(typeTagEnd + 1, size, paddingMissing);
 
-    // Read arguments
-    for (char type : msg.typeTags_) {
-        if (type == 'i') {
-            if (pos + 4 > size) return msg;  // Insufficient size
-            uint32_t be;
-            std::memcpy(&be, data + pos, 4);
-            int32_t value = static_cast<int32_t>(fromBigEndian(be));
-            msg.args_.emplace_back(value);
-            pos += 4;
-        }
-        else if (type == 'f') {
-            if (pos + 4 > size) return msg;
-            uint32_t be;
-            std::memcpy(&be, data + pos, 4);
-            float value = uint32ToFloat(fromBigEndian(be));
-            msg.args_.emplace_back(value);
-            pos += 4;
-        }
-        else if (type == 's') {
-            size_t strEnd = findNull(data, size, pos);
-            if (strEnd == size_t(-1)) return msg;
-            std::string str(reinterpret_cast<const char*>(data + pos), strEnd - pos);
-            msg.args_.emplace_back(std::move(str));
-            pos = alignTo4(strEnd + 1);
-        }
-        else if (type == 'b') {
-            if (pos + 4 > size) return msg;
-            uint32_t be;
-            std::memcpy(&be, data + pos, 4);
-            uint32_t blobSize = fromBigEndian(be);
-            pos += 4;
-            if (pos + blobSize > size) return msg;
-            std::vector<uint8_t> blob(data + pos, data + pos + blobSize);
-            msg.args_.emplace_back(std::move(blob));
-            pos = alignTo4(pos + blobSize);
-        }
-        else if (type == 'T') {
-            msg.args_.emplace_back(true);
-        }
-        else if (type == 'F') {
-            msg.args_.emplace_back(false);
-        }
-        else {
-            // Unknown type tags are skipped (for robustness)
-            // But size is unknown, so stop here
-            break;
+    // Read arguments: one stored argument per tag with data. Every tag must
+    // be an OSC 1.0 tag, and every argument's data must be there in full.
+    int arrayDepth = 0;
+    for (size_t index = 0; index < msg.typeTags_.size(); ++index) {
+        switch (msg.typeTags_[index]) {
+            case 'i':
+                if (4 > size - pos) return msg;
+                msg.storeArg<int32_t>(index, static_cast<int32_t>(readBe32(data + pos)));
+                pos += 4;
+                break;
+            case 'f':
+                if (4 > size - pos) return msg;
+                msg.storeArg<float>(index, uint32ToFloat(readBe32(data + pos)));
+                pos += 4;
+                break;
+            case 'c':
+                if (4 > size - pos) return msg;
+                // ASCII character in the low byte of 32 bits
+                msg.storeArg<char>(index, static_cast<char>(readBe32(data + pos) & 0xFF));
+                pos += 4;
+                break;
+            case 'r':
+                if (4 > size - pos) return msg;
+                msg.storeArg<OscRgba>(index, OscRgba{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
+                pos += 4;
+                break;
+            case 'm':
+                if (4 > size - pos) return msg;
+                msg.storeArg<OscMidi>(index, OscMidi{ data[pos], data[pos + 1], data[pos + 2], data[pos + 3] });
+                pos += 4;
+                break;
+            case 'h':
+                if (8 > size - pos) return msg;
+                msg.storeArg<int64_t>(index, static_cast<int64_t>(readBe64(data + pos)));
+                pos += 8;
+                break;
+            case 'd':
+                if (8 > size - pos) return msg;
+                msg.storeArg<double>(index, uint64ToDouble(readBe64(data + pos)));
+                pos += 8;
+                break;
+            case 't':
+                if (8 > size - pos) return msg;
+                msg.storeArg<OscTimetag>(index, OscTimetag{ readBe64(data + pos) });
+                pos += 8;
+                break;
+            case 's':
+            case 'S': {
+                size_t strEnd = findNull(data, size, pos);
+                if (strEnd == size_t(-1)) return msg;
+                msg.storeArg<std::string>(index, reinterpret_cast<const char*>(data + pos), strEnd - pos);
+                pos = skipPadding(strEnd + 1, size, paddingMissing);
+                break;
+            }
+            case 'b': {
+                if (4 > size - pos) return msg;
+                uint32_t blobSize = readBe32(data + pos);
+                pos += 4;
+                // The blob must fit in the data left
+                if (blobSize > size - pos) return msg;
+                msg.storeArg<std::vector<uint8_t>>(index, data + pos, data + pos + blobSize);
+                pos = skipPadding(pos + blobSize, size, paddingMissing);
+                break;
+            }
+            case 'T':
+            case 'F':
+            case 'N':
+            case 'I':
+                // No data: the type tag alone is the argument
+                break;
+            case '[':
+                ++arrayDepth;
+                break;
+            case ']':
+                if (arrayDepth == 0) return msg;  // ']' without a '['
+                --arrayDepth;
+                break;
+            default:
+                // Not an OSC 1.0 type tag: its size is unknown
+                return msg;
         }
     }
+    if (arrayDepth != 0) return msg;  // a '[' without its ']'
 
     ok = true;
     return msg;
@@ -159,27 +260,40 @@ std::string OscMessage::toString() const {
     std::ostringstream oss;
     oss << address_;
 
-    for (size_t i = 0; i < args_.size(); ++i) {
+    for (size_t i = 0; i < typeTags_.size(); ++i) {
         oss << " ";
-        char type = (i < typeTags_.size()) ? typeTags_[i] : '?';
+        const char type = typeTags_[i];
+        const ArgVariant* stored = findArg(i);
+        if (!stored) {
+            // T F N I [ ] are shown as their tag
+            oss << type;
+            continue;
+        }
+        const ArgVariant& arg = *stored;
 
-        if (type == 'i') {
-            oss << "i:" << std::get<int32_t>(args_[i]);
-        }
-        else if (type == 'f') {
-            oss << "f:" << std::get<float>(args_[i]);
-        }
-        else if (type == 's') {
-            oss << "s:\"" << std::get<std::string>(args_[i]) << "\"";
-        }
-        else if (type == 'b') {
-            oss << "b:[" << std::get<std::vector<uint8_t>>(args_[i]).size() << " bytes]";
-        }
-        else if (type == 'T') {
-            oss << "T";
-        }
-        else if (type == 'F') {
-            oss << "F";
+        switch (type) {
+            case 'i': oss << "i:" << std::get<int32_t>(arg); break;
+            case 'f': oss << "f:" << std::get<float>(arg); break;
+            case 's': oss << "s:\"" << std::get<std::string>(arg) << "\""; break;
+            case 'S': oss << "S:\"" << std::get<std::string>(arg) << "\""; break;
+            case 'b': oss << "b:[" << std::get<std::vector<uint8_t>>(arg).size() << " bytes]"; break;
+            case 'h': oss << "h:" << std::get<int64_t>(arg); break;
+            case 'd': oss << "d:" << std::get<double>(arg); break;
+            case 't': oss << "t:" << std::get<OscTimetag>(arg).value; break;
+            case 'c': oss << "c:'" << std::get<char>(arg) << "'"; break;
+            case 'r': {
+                const OscRgba& c = std::get<OscRgba>(arg);
+                oss << "r:" << int(c.r) << "," << int(c.g) << "," << int(c.b) << "," << int(c.a);
+                break;
+            }
+            case 'm': {
+                const OscMidi& m = std::get<OscMidi>(arg);
+                oss << "m:" << int(m.port) << "," << int(m.status) << "," << int(m.data1) << "," << int(m.data2);
+                break;
+            }
+            default:
+                oss << type;
+                break;
         }
     }
 

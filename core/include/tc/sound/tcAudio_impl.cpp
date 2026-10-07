@@ -22,9 +22,10 @@
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
 #define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
+#include "tc/sound/tcAudioDeviceInternal.h"
 
 #include "tc/sound/tcSound.h"
+#include "tc/utils/tcFile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -41,20 +42,66 @@
 namespace trussc {
 
 namespace {
+// Set by internal::setNullAudioBackendForTests(): the engine, device
+// enumeration and MicInput open miniaudio's null backend only.
+std::atomic<bool> g_nullBackendForTests{false};
+
+// Whether the engine's persistent context was opened with the null backend
+// on request (the test hook above), so landing on it is not a fallback.
+// Main thread only: written and read in AudioEngine::init().
+bool g_engineNullBackendRequested = false;
+
+// Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
+std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
+
+// Set by internal::setStreamFaultForTests(): an internal::StreamFaultForTests
+// value; None normally.
+std::atomic<int> g_streamFault{0};
+
+// StreamFaultForTests::MixerLags: the mixer has read a ring's write position
+// with a seek pending, which releases the worker.
+std::atomic<bool> g_mixerLagReleased{false};
+
+// Read by internal::lastStreamSeekPointsForTests(): the seek points of the
+// stream decoder opened last.
+std::atomic<uint32_t> g_lastStreamSeekPoints{0};
+std::atomic<uint64_t> g_streamMp3Scans{0};
+std::atomic<uint64_t> g_streamMp3TableBuilds{0};
+
+// Read by internal::streamWorkerPassesForTests(): the StreamWorker's passes.
+std::atomic<uint64_t> g_streamWorkerPasses{0};
+
 // Open a ma_decoder from a path. Wide entry point on Windows so non-ASCII
 // paths survive (same helper as tcSound_impl.cpp).
 ma_result maDecoderInitPathA(const fs::path& path,
                              const ma_decoder_config* cfg, ma_decoder* dec) {
 #ifdef _WIN32
-    return ma_decoder_init_file_w(path.c_str(), cfg, dec);
+    const ma_result r = ma_decoder_init_file_w(path.c_str(), cfg, dec);
 #else
-    return ma_decoder_init_file(path.c_str(), cfg, dec);
+    const ma_result r = ma_decoder_init_file(path.c_str(), cfg, dec);
 #endif
+    // Count automatic table generation too, so the regression test catches
+    // a nonzero seekPointCount accidentally returning to the play path.
+    if (r == MA_SUCCESS && cfg->seekPointCount != 0 &&
+            dec->pBackendVTable == &g_ma_decoding_backend_vtable_mp3) {
+        g_streamMp3TableBuilds.fetch_add(1, std::memory_order_relaxed);
+    }
+    return r;
 }
 
-// Set by internal::setNullAudioBackendForTests(): the engine, device
-// enumeration and MicInput open miniaudio's null backend only.
-std::atomic<bool> g_nullBackendForTests{false};
+// All streaming length queries use this seam, including non-MP3 decoders.
+ma_uint64 streamDecoderLength(ma_decoder& decoder, bool nativeRate = false) {
+    const bool mp3 = decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3;
+    if (mp3) g_streamMp3Scans.fetch_add(1, std::memory_order_relaxed);
+    ma_uint64 frames = 0;
+    if (nativeRate) {
+        ma_data_source_get_length_in_pcm_frames(decoder.pBackend, &frames);
+    } else {
+        ma_decoder_get_length_in_pcm_frames(&decoder, &frames);
+    }
+    return frames;
+}
+
 const ma_backend kNullBackend = ma_backend_null;
 
 // ma_context_init with miniaudio's default backend order for the platform,
@@ -68,8 +115,50 @@ ma_result initContext(ma_context* ctx) {
 } // namespace
 
 namespace internal {
+bool openedDeviceIsDefault(const ma_device_id* selectedID,
+                           const ma_device_info* infos, ma_uint32 count) {
+    // Some backends leave playback.id zeroed when opening the default.
+    if (!selectedID) return true;
+    for (ma_uint32 i = 0; i < count; ++i) {
+        if (std::memcmp(&infos[i].id, selectedID, sizeof(ma_device_id)) == 0) {
+            return infos[i].isDefault != 0;
+        }
+    }
+    return false;
+}
+
 void setNullAudioBackendForTests(bool on) {
     g_nullBackendForTests.store(on, std::memory_order_relaxed);
+}
+
+void setAudioRecorderCaptureHookForTests(void (*hook)(int frames)) {
+    g_recorderCaptureHook.store(hook, std::memory_order_release);
+}
+
+void runAudioRecorderCaptureHookForTests(int frames) {
+    // Audio thread, once per captured buffer: one load when unset.
+    if (auto hook = g_recorderCaptureHook.load(std::memory_order_acquire)) hook(frames);
+}
+
+void setStreamFaultForTests(StreamFaultForTests fault) {
+    g_mixerLagReleased.store(false, std::memory_order_relaxed);
+    g_streamFault.store((int)fault, std::memory_order_relaxed);
+}
+
+uint32_t lastStreamSeekPointsForTests() {
+    return g_lastStreamSeekPoints.load(std::memory_order_relaxed);
+}
+
+uint64_t streamMp3ScansForTests() {
+    return g_streamMp3Scans.load(std::memory_order_relaxed);
+}
+
+uint64_t streamMp3TableBuildsForTests() {
+    return g_streamMp3TableBuilds.load(std::memory_order_relaxed);
+}
+
+uint64_t streamWorkerPassesForTests() {
+    return g_streamWorkerPasses.load(std::memory_order_relaxed);
 }
 } // namespace internal
 
@@ -101,8 +190,16 @@ struct AudioDiagnostics {
     std::atomic<uint64_t> clippedSamples{0};
     std::atomic<float>    peak{0.0f};
     std::atomic<float>    rms{0.0f};
-    std::atomic<float>    load{0.0f};
-    std::atomic<float>    loadMax{0.0f};
+    std::atomic<float>    cpuUsage{0.0f};
+    std::atomic<float>    cpuUsagePeak{0.0f};
+    std::atomic<uint64_t> underrunFrames{0};
+    std::atomic<uint64_t> unreportedUnderruns{0};
+    std::atomic<uint64_t> voicesStoppedByReinit{0};
+    // Steady-clock nanoseconds, anchored before the device starts and
+    // updated only when a mix callback has finished. Readers need no lock.
+    std::atomic<int64_t> lastCallbackFinished{0};
+    std::atomic<int64_t> stallTimeout{250000000};
+    std::atomic<bool> running{false};
 
     // --- audio thread only (reset while no device runs): meter / load windows ---
     float    winPeak = 0.0f;
@@ -115,6 +212,10 @@ struct AudioDiagnostics {
 
     // --- main thread only: report state ---
     std::chrono::steady_clock::time_point lastDropLog[kDropReasons]{};
+    std::chrono::steady_clock::time_point lastUnderrunLog{};
+    std::chrono::steady_clock::time_point lastStallLog{};
+    bool wasStalled = false;
+    uint64_t unreportedStalls = 0;
     bool     deviceIsDefault = false;   // set by init()
 
     AudioDiagnostics() {
@@ -122,6 +223,18 @@ struct AudioDiagnostics {
         // (steady_clock's epoch is not guaranteed to be far in the past).
         const auto longAgo = std::chrono::steady_clock::now() - kReportInterval;
         for (auto& t : lastDropLog) t = longAgo;
+        lastUnderrunLog = lastStallLog = longAgo;
+    }
+
+    static int64_t clockNow() {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    bool isStalled() const {
+        return running.load(std::memory_order_acquire)
+            && clockNow() - lastCallbackFinished.load(std::memory_order_relaxed)
+                >= stallTimeout.load(std::memory_order_relaxed);
     }
 };
 
@@ -132,16 +245,16 @@ using internal::AudioDiagnostics;
 namespace {
 
 // Module name and summary text per AudioEngine::DropReason, by its index
-// (VoiceLimit, StreamLimit, DecoderError, NotRunning).
+// (PolyphonyLimit, StreamLimit, DecoderError, NotRunning).
 const char* dropModule(int reason) {
     return (reason == 1 || reason == 2) ? "SoundStream" : "AudioEngine";
 }
 
 const char* dropReasonText(int reason) {
     switch (reason) {
-        case 0: return "every voice slot busy (raise AudioSettings::maxPolyphony)";
+        case 0: return "every playback slot busy (raise AudioSettings::maxPolyphony)";
         case 1: return "a SoundStream reached its maxPolyphony (copies of a streamed Sound share it)";
-        case 2: return "a stream's file could not be reopened for a new voice";
+        case 2: return "a stream's file could not be reopened for a new playback";
         case 3: return "no output device running";
     }
     return "unknown";
@@ -154,7 +267,7 @@ std::string sourceLabel(const SoundSource* source) {
         ? static_cast<const SoundStream*>(source)->getPath()
         : static_cast<const SoundBuffer*>(source)->getPath();
     return p.empty() ? std::string("a generated / in-memory buffer")
-                     : internal::pathToUtf8(p);
+                     : internal::pathToDisplayUtf8(p);
 }
 
 } // namespace
@@ -162,7 +275,31 @@ std::string sourceLabel(const SoundSource* source) {
 AudioEngine::AudioEngine()
     : diag_(std::make_unique<AudioDiagnostics>()) {
     playingSounds_.resize(DEFAULT_MAX_PLAYING_SOUNDS);
-    analysisBuffer_.resize(ANALYSIS_BUFFER_SIZE, 0.0f);
+}
+
+internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngine& engine, size_t frames) {
+    std::lock_guard<std::mutex> lock(engine.analysisMutex_);
+    return engine.analysisRing_ ? engine.analysisRing_->snapshot(frames) : AudioOutputSnapshot{};
+}
+
+size_t AudioEngine::getAnalysisBuffer(float* outBuffer, size_t numSamples) {
+    if (!initialized_ || !outBuffer || numSamples == 0) return 0;
+    numSamples = std::min(numSamples, size_t(ANALYSIS_BUFFER_SIZE));
+    // Callable from any thread: the lock covers analysisCopy_ as well as the
+    // ring. Only readers and init() take it, never the audio callback.
+    std::lock_guard<std::mutex> lock(analysisMutex_);
+    const auto data = analysisRing_ ? analysisRing_->snapshot(numSamples) : internal::AudioOutputSnapshot{};
+    if (data.channels) {
+        const size_t count = data.samples.size() / data.channels;
+        const size_t padding = ANALYSIS_BUFFER_SIZE - count;
+        std::fill_n(analysisCopy_, padding, 0.0f);
+        for (size_t f = 0; f < count; ++f) {
+            const float* frame = &data.samples[f * data.channels];
+            analysisCopy_[padding + f] = data.channels > 1 ? (frame[0] + frame[1]) * 0.5f : frame[0];
+        }
+    }
+    std::copy_n(analysisCopy_ + ANALYSIS_BUFFER_SIZE - numSamples, numSamples, outBuffer);
+    return numSamples;
 }
 
 AudioEngine::~AudioEngine() {
@@ -191,8 +328,8 @@ void AudioEngine::noteDroppedPlay(DropReason reason, const SoundSource* source, 
 
     auto line = logWarning(dropModule(r));
     switch (reason) {
-        case DropReason::VoiceLimit:
-            line << "play dropped: all " << playingSounds_.size() << " voices are busy ("
+        case DropReason::PolyphonyLimit:
+            line << "play dropped: all " << playingSounds_.size() << " playback slots are busy ("
                  << sourceLabel(source) << "). Raise AudioSettings::maxPolyphony or stop "
                     "sounds that no longer need to play";
             break;
@@ -200,12 +337,12 @@ void AudioEngine::noteDroppedPlay(DropReason reason, const SoundSource* source, 
             line << "play dropped: maxPolyphony="
                  << static_cast<const SoundStream*>(source)->getMaxPolyphony()
                  << " reached for " << sourceLabel(source)
-                 << " (copies of a streamed Sound share its voices). Stop a previous "
+                 << " (copies of a streamed Sound share its playback slots). Stop a previous "
                     "instance or raise maxPolyphony in loadStream()";
             break;
         case DropReason::DecoderError:
             line << "play dropped: could not reopen " << sourceLabel(source)
-                 << " for a new voice (result=" << code << ")";
+                 << " for a new playback (result=" << code << ")";
             break;
         case DropReason::NotRunning:
             line << "play dropped: no output device is running (" << sourceLabel(source)
@@ -251,6 +388,28 @@ void AudioEngine::reportDiagnostics(bool force) {
     AudioDiagnostics& d = *diag_;
     const auto now = std::chrono::steady_clock::now();
 
+    const bool stalled = d.isStalled();
+    if (stalled && !d.wasStalled) ++d.unreportedStalls;
+    d.wasStalled = stalled;
+    if (d.unreportedStalls && (force || now - d.lastStallLog >= AudioDiagnostics::kReportInterval)) {
+        logWarning("AudioEngine") << d.unreportedStalls
+            << " audio stall(s) since the last report: no callback finished for 250 ms or 4 periods";
+        d.unreportedStalls = 0;
+        d.lastStallLog = now;
+    }
+    auto reportCount = [&](std::atomic<uint64_t>& pending,
+                           std::chrono::steady_clock::time_point& last,
+                           const char* module, const char* text) {
+        if (!pending.load(std::memory_order_relaxed)
+            || (!force && now - last < AudioDiagnostics::kReportInterval)) return;
+        const uint64_t n = pending.exchange(0, std::memory_order_relaxed);
+        if (!n) return;
+        last = now;
+        logWarning(module) << n << text;
+    };
+    reportCount(d.unreportedUnderruns, d.lastUnderrunLog, "SoundStream",
+                " stream underrun frames since the last report (decoder fell behind)");
+
     for (int r = 0; r < AudioDiagnostics::kDropReasons; ++r) {
         if (d.unreportedDrops[r].load(std::memory_order_relaxed) == 0) continue;
         if (!force && now - d.lastDropLog[r] < AudioDiagnostics::kReportInterval) continue;
@@ -264,10 +423,11 @@ void AudioEngine::reportDiagnostics(bool force) {
 
 void AudioEngine::resetMeters() {
     AudioDiagnostics& d = *diag_;
+    d.running.store(false, std::memory_order_release);
     d.peak.store(0.0f, std::memory_order_relaxed);
     d.rms.store(0.0f, std::memory_order_relaxed);
-    d.load.store(0.0f, std::memory_order_relaxed);
-    d.loadMax.store(0.0f, std::memory_order_relaxed);
+    d.cpuUsage.store(0.0f, std::memory_order_relaxed);
+    d.cpuUsagePeak.store(0.0f, std::memory_order_relaxed);
     d.winPeak = 0.0f;
     d.winSumSq = 0.0;
     d.winSamples = 0;
@@ -286,44 +446,52 @@ AudioStats AudioEngine::getStats() const {
     const AudioDiagnostics& d = *diag_;
     auto get = [](const std::atomic<uint64_t>& a) { return a.load(std::memory_order_relaxed); };
     AudioStats s;
-    s.droppedVoiceLimit   = get(d.dropped[(int)DropReason::VoiceLimit]);
-    s.droppedStreamLimit  = get(d.dropped[(int)DropReason::StreamLimit]);
-    s.droppedDecoderError = get(d.dropped[(int)DropReason::DecoderError]);
-    s.droppedNotRunning   = get(d.dropped[(int)DropReason::NotRunning]);
-    s.droppedPlays = s.droppedVoiceLimit + s.droppedStreamLimit
+    s.droppedPolyphonyLimit = get(d.dropped[(int)DropReason::PolyphonyLimit]);
+    s.droppedStreamLimit    = get(d.dropped[(int)DropReason::StreamLimit]);
+    s.droppedDecoderError   = get(d.dropped[(int)DropReason::DecoderError]);
+    s.droppedNotRunning     = get(d.dropped[(int)DropReason::NotRunning]);
+    s.droppedPlays = s.droppedPolyphonyLimit + s.droppedStreamLimit
                    + s.droppedDecoderError + s.droppedNotRunning;
     s.clippedSamples = get(d.clippedSamples);
-    s.peak    = d.peak.load(std::memory_order_relaxed);
-    s.rms     = d.rms.load(std::memory_order_relaxed);
-    s.load    = d.load.load(std::memory_order_relaxed);
-    s.loadMax = d.loadMax.load(std::memory_order_relaxed);
+    s.underrunFrames = get(d.underrunFrames);
+    s.voicesStoppedByReinit = get(d.voicesStoppedByReinit);
+    s.stalled = d.isStalled();
+    s.peak         = d.peak.load(std::memory_order_relaxed);
+    s.rms          = d.rms.load(std::memory_order_relaxed);
+    s.cpuUsage     = d.cpuUsage.load(std::memory_order_relaxed);
+    s.cpuUsagePeak = d.cpuUsagePeak.load(std::memory_order_relaxed);
+    if (s.stalled) s.peak = s.rms = s.cpuUsage = s.cpuUsagePeak = 0.0f;
     return s;
 }
 
-std::vector<AudioVoiceInfo> AudioEngine::getVoices() {
-    std::vector<AudioVoiceInfo> out;
+std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const {
+    std::vector<PlayingSoundInfo> out;
     std::lock_guard<std::mutex> lock(mutex_);
+    const bool stalled = diag_->isStalled();
     for (size_t i = 0; i < playingSounds_.size(); ++i) {
         const auto& v = playingSounds_[i];
         if (!v || !v->buffer || !v->playing) continue;  // paused voices keep playing = true
         const SoundSource& src = *v->buffer;
-        AudioVoiceInfo info;
+        PlayingSoundInfo info;
         info.slot      = (int)i;
         info.streaming = (src.kind() == SoundSource::Stream);
         const fs::path p = info.streaming ? static_cast<const SoundStream&>(src).getPath()
                                           : static_cast<const SoundBuffer&>(src).getPath();
-        info.path     = internal::pathToUtf8(p.lexically_normal());
+        info.path     = p;  // as given, same string as getPath() and the logs
         info.paused   = v->paused;
         info.loop     = v->loop;
-        // positionF counts source frames for eager voices and engine-rate
-        // frames for streams (their decoder outputs at the engine rate).
-        const int rate = info.streaming ? sampleRate_ : src.sampleRate;
+        // positionF counts source frames for eager voices and, for streams,
+        // frames at the voice's own position rate (the engine rate its
+        // decoder outputs at, which a voice the re-init migration did not
+        // rebuild keeps from before). Same rate as Sound::positionRate().
+        const int rate = info.streaming ? v->positionRateHz_.load(std::memory_order_relaxed)
+                                        : src.sampleRate;
         info.position = rate > 0 ? (float)(v->positionF / (double)rate) : 0.0f;
         info.duration = src.getDuration();
         info.volume   = v->volume;
         info.pan      = v->pan;
         info.speed    = v->speed;
-        info.level    = info.paused ? 0.0f : v->level.load(std::memory_order_relaxed);
+        info.level    = (info.paused || stalled) ? 0.0f : v->level.load(std::memory_order_relaxed);
         out.push_back(std::move(info));
     }
     return out;
@@ -404,9 +572,40 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
 // budget. Worker polls every ~5 ms so underrun is unlikely under normal
 // load. Bigger = more headroom + memory; smaller = less RAM but more
 // vulnerable to long decode stalls.
+//
+// Seek (#280) keeps the ring SPSC: only the worker writes writeFrame, only
+// the mixer writes readFrame, subFrame and the voice's positionF (besides
+// play() and the re-init migration, which set up a voice the mixer does
+// not run at that moment).
+//   1. internal::seekVoice() stores the target, then bumps seekRequestSeq
+//      (release). The request is pending while seekRequestSeq differs from
+//      seekAppliedSeq.
+//   2. The worker takes the latest request (once the mixer has applied the
+//      previous seek), seeks the decoder and publishes where the post-seek
+//      data starts: seekBaseFrame = the current writeFrame, the target and
+//      the request's seq, then seekEpoch (release). Only then does it write
+//      the post-seek data from that writeFrame on. Publishing first matters:
+//      the mixer loads writeFrame before seekEpoch, so a writeFrame that
+//      already covers post-seek data implies it also sees the new epoch,
+//      and it never plays post-seek frames as if they were old ones.
+//   3. The mixer, on a new epoch, sets readFrame = seekBaseFrame, subFrame
+//      = 0 and positionF = target, then stores seekAppliedEpoch and
+//      seekAppliedSeq (release). readFrame never moves backwards: a mixer
+//      that had run past writeFrame (it can overshoot by up to ceil(speed)-1
+//      frames on an underrun) keeps its readFrame, because the worker bounded
+//      its writes by that value. While a request is still pending it plays
+//      nothing, so a superseded position is never heard.
 // =============================================================================
 
 namespace internal {
+
+// Immutable after load, shared by the source and every bound decoder. The
+// worker can retain a decoder even after its PlayingSound releases the source.
+struct Mp3StreamData {
+    ma_uint64 nativeFrames = 0;
+    ma_uint32 nativeRate = 0;
+    std::vector<ma_dr_mp3_seek_point> seekPoints;
+};
 
 struct StreamInstance {
     static constexpr size_t RING_FRAMES = 16384;          // power of 2
@@ -416,6 +615,7 @@ struct StreamInstance {
                                                           // the mixer consumes
     ma_decoder decoder;
     bool decoderInitialized = false;
+    std::shared_ptr<const Mp3StreamData> mp3Data;
 
     // Interleaved stereo float, size = RING_FRAMES * CHANNELS.
     std::vector<float> ring;
@@ -426,18 +626,131 @@ struct StreamInstance {
     std::atomic<bool>     looping{false};
     std::atomic<bool>     disposed{false};   // set by AudioEngine to retire
                                               // the instance from the worker
-    // Seek request: writer side honors it before its next decode read.
-    std::atomic<bool>     seekRequested{false};
-    std::atomic<uint64_t> seekTargetFrame{0};
 
-    uint64_t totalFramesInFile = 0;           // duration in source frames
+    // Seek protocol (see the section comment above).
+    // Requester (internal::seekVoice()):
+    std::atomic<double>   seekTargetFrame{0.0};   // latest requested target
+    std::atomic<uint64_t> seekRequestSeq{0};      // bumped per request (release)
+    // Worker -> mixer, stable until the mixer has applied them:
+    std::atomic<uint64_t> seekBaseFrame{0};       // ring frame the post-seek data starts at
+    std::atomic<double>   seekPublishedTarget{0.0};
+    std::atomic<uint64_t> seekPublishedSeq{0};    // request this seek served
+    std::atomic<uint64_t> seekEpoch{0};           // bumped after the three above (release)
+    // Mixer -> worker / requester:
+    std::atomic<uint64_t> seekAppliedEpoch{0};
+    std::atomic<uint64_t> seekAppliedSeq{0};      // pending while != seekRequestSeq
+
+    // Worker writes; atomic so test diagnostics can observe it safely.
+    std::atomic<uint64_t> seekServedSeq{0};   // last request the worker took
+    // Under the worker's mutex: whether the worker has looked at this
+    // stream, and the read position it saw then (its poll interval, #550).
+    bool workerSeen = false;
+    uint64_t workerSeenReadFrame = 0;
+    // The stream ended on an error (published with endOfStream, cleared by
+    // an explicit seek request). The worker decodes nothing more for it
+    // until then. The mixer ends the voice once the ring has drained,
+    // including looping voices. Also set by the re-init migration before
+    // registration. Atomic because the mixer reads it too (see halt()).
+    std::atomic<bool> halted{false};
+    // The decoder returned no frames on a non-looping stream: nothing more
+    // to read until a seek request, or until the loop flag is set and the
+    // worker starts the file over. Unlike endOfStream it is cleared when the
+    // worker loops back, so a stream that looped after its end and then
+    // stops looping is read on to its real end.
+    std::atomic<bool> decoderAtEnd{false};   // worker writes; test diagnostics read
+
+    // Under the engine lock (internal::seekVoice()): a seek on this voice
+    // was refused because the length is unknown, and that was logged.
+    bool unknownLengthSeekLogged = false;
+
+    uint64_t totalFramesInFile = 0;           // decoder output (engine-rate) frames; 0 = unknown
+    std::string pathUtf8;                     // for the worker's log lines
 
     // Sub-frame position inside the ring for setSpeed-aware linear interp.
     // Only touched by the mixer (audio callback thread) — single-writer, no
     // atomicity needed.
     double subFrame = 0.0;
+    bool playbackStarted = false; // mixer only; initial/seek refill waits are not underruns
 
     StreamInstance() : ring(RING_FRAMES * CHANNELS, 0.0f) {}
+
+    // Open this voice's decoder for `src`, outputting stereo f32 at the
+    // engine rate `rate`, and read its length. play() and the re-init
+    // migration, on the caller's thread.
+    //
+    // MP3 length and seek points are prepared once by loadStream(). Binding
+    // them here does not scan the file, including during a rate migration.
+    ma_result openDecoder(const SoundStream& src, ma_uint32 rate) {
+        ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, CHANNELS, rate);
+        cfg.encodingFormat = (ma_encoding_format)src.encodingFormatHint_;
+        cfg.seekPointCount = 0;
+        const ma_result r = maDecoderInitPathA(src.path_, &cfg, &decoder);
+        if (r != MA_SUCCESS) return r;
+        decoderInitialized = true;
+        uint32_t seekPoints = 0;
+        if (decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3 && decoder.pBackend) {
+            mp3Data = src.mp3Data_;
+            if (!mp3Data) return MA_INVALID_DATA;
+            auto* mp3 = static_cast<ma_mp3*>(decoder.pBackend);
+            seekPoints = (ma_uint32)mp3Data->seekPoints.size();
+            // dr_mp3's binding API is non-const, but only reads the table.
+            // Leave ma_mp3::pSeekPoints null: ma_mp3_uninit frees that field.
+            if (!ma_dr_mp3_bind_seek_table(&mp3->dr, seekPoints,
+                    const_cast<ma_dr_mp3_seek_point*>(mp3Data->seekPoints.data()))) {
+                return MA_ERROR;
+            }
+            totalFramesInFile = ma_calculate_frame_count_after_resampling(
+                rate, mp3Data->nativeRate, mp3Data->nativeFrames);
+        } else {
+            totalFramesInFile = streamDecoderLength(decoder);
+        }
+        g_lastStreamSeekPoints.store(seekPoints, std::memory_order_relaxed);
+        pathUtf8 = internal::pathToDisplayUtf8(src.path_);
+        return MA_SUCCESS;
+    }
+
+    // Sound::setPosition() clamps to the float getDuration(), which on a
+    // file of ~17 minutes or more can land a few frames past the last one;
+    // dr_mp3 fails a seek past the end. Clamp to the last frame when the
+    // length is known. The worker and the re-init migration.
+    double clampSeekTarget(double target) const {
+        if (totalFramesInFile > 0 && target > (double)(totalFramesInFile - 1)) {
+            return (double)(totalFramesInFile - 1);
+        }
+        return target;
+    }
+
+    // Seek the decoder, with the test fault applied. The worker, and the
+    // re-init migration before it registers the instance.
+    ma_result seekDecoder(uint64_t frame) {
+        if (g_streamFault.load(std::memory_order_relaxed)
+                == (int)internal::StreamFaultForTests::SeekFails) {
+            return MA_IO_ERROR;
+        }
+        return ma_decoder_seek_to_pcm_frame(&decoder, frame);
+    }
+
+    // The stream cannot go on: the worker decodes nothing more for it until
+    // the next seek request. The mixer drains what the ring holds; then a
+    // voice ends, whether looping or not.
+    // Logged as an error once per halt: the audio stops for a reason the
+    // app cannot see otherwise. The worker, or the re-init migration before
+    // it registers the instance. endOfStream publishes halted to the mixer.
+    void halt(const std::string& why) {
+        halted.store(true, std::memory_order_relaxed);
+        endOfStream.store(true, std::memory_order_release);
+        logError("SoundStream") << pathUtf8 << ": " << why << "; the stream ends here";
+    }
+
+    // One seek point per second of audio, at least 1, at most 1024 (see
+    // loadStream()).
+    static ma_uint32 mp3SeekPointCount(float durationSec) {
+        constexpr ma_uint32 kMax = 1024;
+        if (!(durationSec > 1.0f)) return 1;
+        if (durationSec >= (float)kMax) return kMax;
+        return (ma_uint32)std::ceil(durationSec);
+    }
+
     ~StreamInstance() {
         if (decoderInitialized) {
             ma_decoder_uninit(&decoder);
@@ -447,14 +760,20 @@ struct StreamInstance {
 
     // Frames available for read (monotonic, never overflows in practice
     // — uint64 at 96 kHz lasts ~6 million years).
+    // Worker side. Acquire on readFrame: the mixer's reads of the slots it
+    // released happen before the worker overwrites them.
     uint64_t available() const {
-        return writeFrame.load(std::memory_order_acquire)
-             - readFrame.load(std::memory_order_relaxed);
+        return writeFrame.load(std::memory_order_relaxed)
+             - readFrame.load(std::memory_order_acquire);
     }
     uint64_t space() const { return RING_FRAMES - available(); }
 };
 
 } // namespace internal
+
+#if defined(_WIN32) && !defined(CREATE_WAITABLE_TIMER_HIGH_RESOLUTION)
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002   // Windows SDK 10.0.17134+
+#endif
 
 // Implementation detail: the rest of this TU refers to StreamInstance
 // unqualified. (This is a .cpp, not a public header.)
@@ -462,22 +781,51 @@ using internal::StreamInstance;
 
 // ---------------------------------------------------------------------------
 // StreamWorker — single thread + condition variable; refills any registered
-// StreamInstance whose ring buffer is below half capacity. Wakes up on a CV
-// signal whenever a new instance is registered, plus a periodic timeout so
-// long-running streams stay topped up.
+// StreamInstance whose ring has room for another chunk, and serves seek
+// requests (#280).
+//
+// It sleeps while there is no such work (#447): its wait ends on stop, when
+// some stream needs work (hasWork()), or after the poll interval, and it
+// runs a pass at every timeout too. The poll is 5 ms while a stream is live
+// (the mixer drained a ring, or a seek was pending, within the last
+// kIdleAfter), so a refill is never more than 5 ms late, and 50 ms
+// otherwise (#550), so an idle app does not wake the worker 200 times a
+// second. A registration, a seek request and stop() notify it. The mixer
+// notifies it once per seek it applies (the ring then turns from full of
+// old data to empty at once, and the worker can only write the new data
+// after that), when a callback takes a ring below half full, and when it
+// drains a ring while the worker is on its idle poll (a voice that starts,
+// resumes or leaves speed 0); that wait also ends when it sees a ring
+// drained. It does not notify at each refill threshold: a ring that is due
+// a refill (room for 1024 frames of 16384) still holds ~320 ms at 48 kHz,
+// so the timeout picks it up in time. A disposed stream leaves the list at
+// the worker's next look.
+//
+// On Windows the timed wait is a high-resolution waitable timer (Windows 10
+// 1803+, as in internal::HeadlessSleeper and the sokol run loop, #488), so
+// the 5 ms poll is 5 ms and not the 15.6 ms system timer tick that
+// condition_variable::wait_for rounds it to. The worker then waits on the
+// timer and an auto-reset event that the notifications set; without the
+// timer it falls back to the condition variable.
 // ---------------------------------------------------------------------------
 class StreamWorker {
 public:
     static StreamWorker& getInstance() {
-        static StreamWorker instance;
-        return instance;
+        // Never destroyed, only stopped: the engine is never destroyed
+        // either, and a device left running at exit (a headless app) still
+        // calls the mixer, which may wake the worker (wakeFromMixer()) after
+        // the static destructors ran. The Stopper joins the thread at the
+        // point this static was destroyed before.
+        static StreamWorker* instance = new StreamWorker();
+        static Stopper stopper{*instance};
+        return *instance;
     }
 
     void registerStream(std::weak_ptr<StreamInstance> w) {
         std::lock_guard<std::mutex> lock(mutex_);
         streams_.push_back(std::move(w));
         ensureRunningLocked();
-        cv_.notify_one();
+        signal();
     }
 
     void shutdown() {
@@ -485,13 +833,108 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             stop_ = true;
             cv_.notify_all();
+            signalEvent();
         }
         if (thread_.joinable()) thread_.join();
     }
 
+    // A stream has new work (a seek request was posted): end the worker's
+    // wait. Taking the lock after the caller's store orders that store
+    // before the worker's next look at hasWork(), so the wakeup is not lost
+    // between its check and its wait. Do not call it under the engine lock.
+    void wake() {
+        { std::lock_guard<std::mutex> lock(mutex_); }
+        signal();
+    }
+
+    // The mixer emptied a stream's ring (it applied a seek) or took it below
+    // half full. From the audio callback, so without the lock (the worker
+    // can hold it while it closes a stream's file): a wakeup that comes
+    // between the worker's check and its wait is lost (not on Windows with
+    // the timer: the event keeps it), and the poll covers it.
+    void wakeFromMixer() { signal(); }
+
+    // The mixer drained a stream's ring. From the audio callback, without
+    // the lock: one atomic load while the worker is on its 5 ms poll. On
+    // the idle poll, wake the worker once so that it switches to the 5 ms
+    // poll now rather than up to 50 ms later (a lost wakeup is covered by
+    // the half-full wake and then the 50 ms poll).
+    void noteDrainedFromMixer() {
+        if (idlePoll_.load(std::memory_order_relaxed)
+            && idlePoll_.exchange(false, std::memory_order_relaxed)) {
+            signal();
+        }
+    }
+
 private:
-    StreamWorker() = default;
-    ~StreamWorker() { shutdown(); }
+    StreamWorker() {
+#ifdef _WIN32
+        // nullptr before Windows 10 1803, which rejects the flag: the
+        // worker then waits on cv_ as elsewhere.
+        timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                        TIMER_MODIFY_STATE | SYNCHRONIZE);
+        if (timer_) {
+            event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);   // auto-reset
+            if (!event_) {
+                CloseHandle(timer_);
+                timer_ = nullptr;
+            }
+        }
+#endif
+    }
+    ~StreamWorker() = default;   // never called (see getInstance())
+
+    // The poll while a stream is live, and while none is.
+    static constexpr std::chrono::milliseconds kLivePoll{5};
+    static constexpr std::chrono::milliseconds kIdlePoll{50};
+    // A stream stays live this long after the worker last saw its ring
+    // drained or a seek pending: longer than the callback period, so a
+    // device that calls back every 10-20 ms keeps the 5 ms poll between
+    // its callbacks.
+    static constexpr std::chrono::milliseconds kIdleAfter{250};
+
+    // End the worker's wait.
+    void signal() {
+        cv_.notify_one();
+        signalEvent();
+    }
+
+    void signalEvent() {
+#ifdef _WIN32
+        if (event_) SetEvent(event_);
+#endif
+    }
+
+    // Wait until pred() or for `timeout`, like cv_.wait_for(lock, timeout,
+    // pred). On Windows on the high-resolution timer (see the class comment).
+    template <class Pred>
+    void waitFor(std::unique_lock<std::mutex>& lock, std::chrono::milliseconds timeout,
+                 Pred pred) {
+#ifdef _WIN32
+        if (timer_) {
+            if (pred()) return;
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)timeout.count() * 10000;   // relative, 100 ns units
+            if (SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE)) {
+                HANDLE handles[2] = {event_, timer_};
+                while (true) {
+                    lock.unlock();
+                    const DWORD r = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+                    lock.lock();
+                    if (r == WAIT_OBJECT_0 + 1) return;   // timed out: run a pass
+                    if (r != WAIT_OBJECT_0) break;        // the wait failed: cv_ below
+                    if (pred()) return;
+                }
+            }
+        }
+#endif
+        cv_.wait_for(lock, timeout, pred);
+    }
+
+    struct Stopper {
+        StreamWorker& worker;
+        ~Stopper() { worker.shutdown(); }
+    };
 
     void ensureRunningLocked() {
         if (running_) return;
@@ -500,41 +943,155 @@ private:
         thread_ = std::thread([this] { run(); });
     }
 
+    // Decoder calls of the refill, with the test fault applied.
+    static ma_result readFrames(StreamInstance& s, float* out, ma_uint64 frames,
+                                ma_uint64* read) {
+        const int fault = g_streamFault.load(std::memory_order_relaxed);
+        if (fault == (int)internal::StreamFaultForTests::ReadFails) {
+            *read = 0;
+            return MA_IO_ERROR;
+        }
+        const ma_result r = ma_decoder_read_pcm_frames(&s.decoder, out, frames, read);
+        if (fault == (int)internal::StreamFaultForTests::ReadFailsWithFrames && *read > 0) {
+            return MA_IO_ERROR;
+        }
+        return r;
+    }
+
+    static ma_result seekDecoder(StreamInstance& s, uint64_t frame) {
+        return s.seekDecoder(frame);
+    }
+
+    // See StreamInstance::halt().
+    static void endOnError(StreamInstance& s, const std::string& why) {
+        s.halt(why);
+    }
+
+    // Decoding goes in chunks of this many frames; a stream is due a refill
+    // once its ring has room for one.
+    static constexpr size_t kChunkFrames = 1024;
+
+    // refillOne() and hasWork() share these checks, so that hasWork() is
+    // true only when a pass does something for the stream (a true result
+    // with nothing to do would spin the worker).
+
+    // Whether the worker may touch the stream at all.
+    static bool serviceable(const StreamInstance& s) {
+        if (s.disposed.load(std::memory_order_acquire)) return false;
+        if (!s.decoderInitialized) return false;
+        const int fault = g_streamFault.load(std::memory_order_relaxed);
+        if (fault == (int)internal::StreamFaultForTests::Stalls) {
+            return false;   // test: a worker that falls behind (slow storage)
+        }
+        if (fault == (int)internal::StreamFaultForTests::MixerLags
+            && !g_mixerLagReleased.load(std::memory_order_acquire)) {
+            return false;   // test: held until the mixer has read the write position
+        }
+        return true;
+    }
+
+    // A seek request the worker can take now: a new one, and the mixer has
+    // applied the previous seek (the published fields stay put until then).
+    static bool seekTakeable(const StreamInstance& s) {
+        return s.seekRequestSeq.load(std::memory_order_acquire)
+                   != s.seekServedSeq.load(std::memory_order_relaxed)
+            && s.seekAppliedEpoch.load(std::memory_order_acquire)
+                   == s.seekEpoch.load(std::memory_order_relaxed);
+    }
+
+    // Whether the decoder can give more frames (after any seek is taken).
+    static bool readable(const StreamInstance& s) {
+        if (s.halted.load(std::memory_order_relaxed)) return false;
+        if (g_streamFault.load(std::memory_order_relaxed)
+                == (int)internal::StreamFaultForTests::SeekRefillStalls) {
+            return false;   // test: serve seeks, but hold back decoded frames
+        }
+        return !s.decoderAtEnd.load(std::memory_order_relaxed)
+            || s.looping.load(std::memory_order_acquire);
+    }
+
+    // The wait predicate's test for one stream: a seek to take, or a ring
+    // with room for a chunk that the decoder can fill. The worker thread,
+    // under mutex_ (seekServedSeq and decoderAtEnd are the worker's;
+    // the rest are atomics or fixed before registration).
+    static bool hasWork(const StreamInstance& s) {
+        if (!serviceable(s)) return false;
+        if (seekTakeable(s)) return true;
+        return readable(s) && s.space() >= kChunkFrames;
+    }
+
     // Refill one stream up to roughly full. Honor seek requests first.
     void refillOne(StreamInstance& s) {
-        if (s.disposed.load(std::memory_order_acquire)) return;
-        if (!s.decoderInitialized) return;
+        if (!serviceable(s)) return;
 
-        if (s.seekRequested.exchange(false, std::memory_order_acq_rel)) {
-            uint64_t target = s.seekTargetFrame.load(std::memory_order_relaxed);
-            ma_decoder_seek_to_pcm_frame(&s.decoder, target);
-            // Reset ring: drain any stale samples so the mixer sees the
-            // post-seek stream from this point. subFrame is owned by the
-            // mixer thread; clearing it from here is a benign race in
-            // practice (the mixer reads it again next callback and the
-            // worst case is one sample of phase wobble at the seek point).
-            s.readFrame.store(0, std::memory_order_relaxed);
-            s.writeFrame.store(0, std::memory_order_release);
+        // True right after a seek to frame 0: a read that then returns no
+        // frames means the stream is empty.
+        bool atStart = false;
+
+        // Take the latest seek request, once the mixer has applied the
+        // previous one.
+        if (seekTakeable(s)) {
+            const uint64_t req = s.seekRequestSeq.load(std::memory_order_acquire);
+            const uint64_t epoch = s.seekEpoch.load(std::memory_order_relaxed);
+            const double target =
+                s.clampSeekTarget(s.seekTargetFrame.load(std::memory_order_relaxed));
+            const uint64_t frame = (uint64_t)target;
+            s.seekServedSeq.store(req, std::memory_order_relaxed);
+            s.halted.store(false, std::memory_order_relaxed);
+            s.decoderAtEnd.store(false, std::memory_order_relaxed);
+            const ma_result sr = seekDecoder(s, frame);
+            // Publish before writing any post-seek data (see the section
+            // comment). endOfStream is reset before the epoch, so a mixer
+            // that sees the epoch does not see a stale end.
             s.endOfStream.store(false, std::memory_order_release);
-            s.subFrame = 0.0;
+            if (sr != MA_SUCCESS) {
+                endOnError(s, "seek to frame " + std::to_string(frame) + " failed (result="
+                              + std::to_string((int)sr) + ")");
+            }
+            s.seekBaseFrame.store(s.writeFrame.load(std::memory_order_relaxed),
+                                  std::memory_order_relaxed);
+            s.seekPublishedTarget.store(target, std::memory_order_relaxed);
+            s.seekPublishedSeq.store(req, std::memory_order_relaxed);
+            s.seekEpoch.store(epoch + 1, std::memory_order_release);
+            atStart = (frame == 0);
         }
+        if (!readable(s)) return;
 
         // Decode in chunks of up to scratchFrames frames at a time.
-        constexpr size_t scratchFrames = 1024;
+        constexpr size_t scratchFrames = kChunkFrames;
         float scratch[scratchFrames * StreamInstance::CHANNELS];
 
-        while (s.space() >= scratchFrames) {
+        while (!s.disposed.load(std::memory_order_acquire)
+               && !stop_.load(std::memory_order_relaxed)
+               && s.space() >= scratchFrames) {
             ma_uint64 read = 0;
-            ma_result r = ma_decoder_read_pcm_frames(
-                &s.decoder, scratch, scratchFrames, &read);
+            const ma_result r = readFrames(s, scratch, scratchFrames, &read);
+            const bool readFailed = (r != MA_SUCCESS && r != MA_AT_END);
+            if (readFailed && read == 0) {
+                endOnError(s, "decoder read failed (result=" + std::to_string((int)r) + ")");
+                break;
+            }
             if (read == 0) {
+                if (atStart) {
+                    endOnError(s, "no frames to read from the start of the file");
+                    break;
+                }
                 if (s.looping.load(std::memory_order_acquire)) {
-                    ma_decoder_seek_to_pcm_frame(&s.decoder, 0);
+                    const ma_result sr = seekDecoder(s, 0);
+                    if (sr != MA_SUCCESS) {
+                        endOnError(s, "seek to the start for the loop failed (result="
+                                      + std::to_string((int)sr) + ")");
+                        break;
+                    }
+                    atStart = true;
+                    s.decoderAtEnd.store(false, std::memory_order_relaxed);
                     continue;
                 }
+                s.decoderAtEnd.store(true, std::memory_order_relaxed);
                 s.endOfStream.store(true, std::memory_order_release);
                 break;
             }
+            atStart = false;
 
             // Copy `read` frames into the ring, splitting on wrap.
             uint64_t w = s.writeFrame.load(std::memory_order_relaxed);
@@ -549,6 +1106,13 @@ private:
                             (read - first) * StreamInstance::CHANNELS * sizeof(float));
             }
             s.writeFrame.store(w + read, std::memory_order_release);
+            if (readFailed) {
+                // End only now that the frames this read returned are
+                // published: an underrunning mixer that saw endOfStream first
+                // would end the voice without playing them.
+                endOnError(s, "decoder read failed (result=" + std::to_string((int)r) + ")");
+                break;
+            }
 
             if ((ma_uint64)read < (ma_uint64)scratchFrames) {
                 // Short read = end of file. Next iteration's read=0 path
@@ -558,38 +1122,101 @@ private:
                 }
                 break;
             }
-            (void)r;
         }
     }
 
+    // The wait predicate (besides stop): drop the entries of streams that
+    // are gone or disposed, and say whether any other one has work. Under
+    // mutex_.
+    bool anyWorkLocked() {
+        bool work = false;
+        auto it = streams_.begin();
+        while (it != streams_.end()) {
+            auto sp = it->lock();
+            if (!sp || sp->disposed.load(std::memory_order_acquire)) {
+                it = streams_.erase(it);
+                continue;
+            }
+            if (!work && hasWork(*sp)) work = true;
+            ++it;
+        }
+        return work;
+    }
+
+    // Whether a stream was live since the last look: its ring was drained
+    // (its read position moved) or a seek on it is pending. Also true for a
+    // stream the worker sees for the first time. Updates what the worker
+    // saw. Under mutex_.
+    bool anyLiveLocked() {
+        bool live = false;
+        for (auto& w : streams_) {
+            auto sp = w.lock();
+            if (!sp) continue;
+            StreamInstance& s = *sp;
+            const uint64_t r = s.readFrame.load(std::memory_order_acquire);
+            if (!s.workerSeen || r != s.workerSeenReadFrame
+                || s.seekRequestSeq.load(std::memory_order_acquire)
+                       != s.seekAppliedSeq.load(std::memory_order_acquire)) {
+                live = true;
+            }
+            s.workerSeen = true;
+            s.workerSeenReadFrame = r;
+        }
+        return live;
+    }
+
+    // The idle wait's extra predicate: a ring was drained since the last
+    // look. Under mutex_.
+    bool anyDrainedLocked() const {
+        for (auto& w : streams_) {
+            auto sp = w.lock();
+            if (sp && sp->workerSeen
+                && sp->readFrame.load(std::memory_order_acquire) != sp->workerSeenReadFrame) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void run() {
+        std::vector<std::shared_ptr<StreamInstance>> live;
+        std::unique_lock<std::mutex> lock(mutex_);
+        auto lastLive = std::chrono::steady_clock::now();
         while (true) {
-            std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait_for(lock, std::chrono::milliseconds(5),
-                         [this] { return stop_ || !streams_.empty(); });
-            if (stop_) break;
+            // Sleep until a stream has work, or for at most the poll: the
+            // pass below then runs anyway (see the class comment).
+            const auto now = std::chrono::steady_clock::now();
+            if (anyLiveLocked()) lastLive = now;
+            if (now - lastLive < kIdleAfter) {
+                idlePoll_.store(false, std::memory_order_relaxed);
+                waitFor(lock, kLivePoll, [this] { return stop_.load() || anyWorkLocked(); });
+            } else {
+                // Before the wait's first look, so that a drain after it
+                // notifies (see noteDrainedFromMixer()).
+                idlePoll_.store(true, std::memory_order_relaxed);
+                waitFor(lock, kIdlePoll, [this] {
+                    return stop_.load() || anyWorkLocked() || anyDrainedLocked();
+                });
+            }
+            if (stop_.load()) break;
+            g_streamWorkerPasses.fetch_add(1, std::memory_order_relaxed);
 
             // Snapshot strong refs while holding the lock, then drop the
             // lock for the actual decode work (which calls into miniaudio
             // and shouldn't block other registrations).
-            std::vector<std::shared_ptr<StreamInstance>> live;
             live.reserve(streams_.size());
-            auto it = streams_.begin();
-            while (it != streams_.end()) {
-                if (auto sp = it->lock()) {
-                    if (!sp->disposed.load(std::memory_order_acquire)) {
-                        live.push_back(std::move(sp));
-                    }
-                    ++it;
-                } else {
-                    it = streams_.erase(it);
-                }
+            for (auto& w : streams_) {
+                if (auto sp = w.lock()) live.push_back(std::move(sp));
             }
             lock.unlock();
 
             for (auto& sp : live) {
                 refillOne(*sp);
             }
+            // Drop the refs before taking the lock again: a stream whose last
+            // other owner let it go meanwhile closes its decoder here.
+            live.clear();
+            lock.lock();
         }
         running_ = false;
     }
@@ -598,8 +1225,14 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     std::vector<std::weak_ptr<StreamInstance>> streams_;
-    bool stop_ = false;
-    bool running_ = false;
+    std::atomic<bool> stop_{false};   // written under mutex_; refillOne() polls it
+    bool running_ = false;            // under mutex_
+    // The worker is on its idle poll; the mixer clears it when it wakes it.
+    std::atomic<bool> idlePoll_{false};
+#ifdef _WIN32
+    HANDLE timer_ = nullptr;   // high-resolution waitable timer, or nullptr
+    HANDLE event_ = nullptr;   // auto-reset; set with timer_
+#endif
 };
 
 // ---------------------------------------------------------------------------
@@ -614,9 +1247,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     // OGG support for streaming would need a separate code path. WAV /
     // MP3 / FLAC are routed through ma_decoder, which handles all three
     // with the same API.
-    std::string ext = path.extension().string();
-    if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-    for (auto& c : ext) c = (char)std::tolower((unsigned char)c);
+    std::string ext = toLower(getFileExtension(path));
 
     ma_encoding_format fmt = ma_encoding_format_unknown;
     if (ext == "wav")       fmt = ma_encoding_format_wav;
@@ -642,9 +1273,9 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     // error codes don't distinguish the two cases cheaply).
     std::error_code ec;
     if (!fs::exists(path, ec)) {
-        logError("SoundStream") << "file not found: " << internal::pathToUtf8(path);
+        logError("SoundStream") << "file not found: " << path;
         return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToUtf8(path));
+                                "file not found: " + internal::pathToDisplayUtf8(path));
     }
 
     // Probe decode: open, query, close. Per-voice decoders re-open later.
@@ -655,17 +1286,71 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                                                     StreamInstance::CHANNELS,
                                                     AudioEngine::getInstance().getSampleRate());
     cfg.encodingFormat = fmt;
+    cfg.seekPointCount = 0;
     ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
-        logError("SoundStream") << "failed to open " << internal::pathToUtf8(path)
+        logError("SoundStream") << "failed to open " << path
                                 << " (result=" << (int)r << ")";
         return LoadResult::fail(LoadError::DecodeFailed,
-                                "failed to open " + internal::pathToUtf8(path) +
+                                "failed to open " + internal::pathToDisplayUtf8(path) +
                                 " (result=" + std::to_string((int)r) + ")");
     }
 
     ma_uint64 totalFrames = 0;
-    ma_decoder_get_length_in_pcm_frames(&probe, &totalFrames);
+    std::shared_ptr<internal::Mp3StreamData> mp3Data;
+    if (fmt == ma_encoding_format_mp3) {
+        // An MP3 gets a seek table (#280): without one dr_mp3 seeks by
+        // decoding from the start (or forward from the current frame), which
+        // on a one-hour file took up to 2.5 s and blocked the single
+        // StreamWorker, so every other stream underran. With one point per
+        // second of audio a seek decodes at most ~1 s (~1 ms); the count is
+        // capped at 1024 (past ~17 minutes the points spread out: a one-hour
+        // file seeks in ~3 ms). Building it scans the frame headers once
+        // (~75 ms for a one-hour 192 kbps file), so it is done here, once per
+        // load, and shared by every voice and engine-rate re-init (#463).
+        auto* mp3 = static_cast<ma_mp3*>(probe.pBackend);
+        try {
+            mp3Data = std::make_shared<internal::Mp3StreamData>();
+            mp3Data->nativeRate = mp3->dr.sampleRate;
+            mp3Data->nativeFrames = streamDecoderLength(probe, true);
+            totalFrames = ma_calculate_frame_count_after_resampling(
+                probe.outputSampleRate, mp3Data->nativeRate, mp3Data->nativeFrames);
+            const float duration = (float)((double)totalFrames / probe.outputSampleRate);
+            ma_uint32 count = StreamInstance::mp3SeekPointCount(duration);
+            mp3Data->seekPoints.resize(count);
+            g_streamMp3TableBuilds.fetch_add(1, std::memory_order_relaxed);
+            if (!ma_dr_mp3_calculate_seek_points(&mp3->dr, &count, mp3Data->seekPoints.data())) {
+                r = MA_ERROR;
+            }
+            mp3Data->seekPoints.resize(count);
+        } catch (const std::bad_alloc&) {
+            r = MA_OUT_OF_MEMORY;
+        }
+        if (r != MA_SUCCESS) {
+            ma_decoder_uninit(&probe);
+            logError("SoundStream") << "failed to prepare MP3 seek table: " << path;
+            return LoadResult::fail(LoadError::DecodeFailed, "failed to prepare MP3 seek table: " +
+                                    internal::pathToDisplayUtf8(path));
+        }
+    } else {
+        totalFrames = streamDecoderLength(probe);
+    }
+    ma_uint64 probed = totalFrames;
+    if (totalFrames == 0) {
+        // A length of 0 can also mean "unknown" (a FLAC whose STREAMINFO
+        // leaves the total at 0, e.g. one encoded to a pipe): decide on a
+        // read. Such a file streams with a duration of 0.
+        float frames[16 * StreamInstance::CHANNELS];
+        ma_decoder_read_pcm_frames(&probe, frames, 16, &probed);
+    }
+    if (probed == 0) {
+        // Nothing to play (e.g. a WAV with an empty data chunk), like an
+        // eager load() that decodes no samples.
+        ma_decoder_uninit(&probe);
+        logError("SoundStream") << "no audio frames in " << path;
+        return LoadResult::fail(LoadError::DecodeFailed,
+                                "no audio frames in " + internal::pathToDisplayUtf8(path));
+    }
     channels = (int)probe.outputChannels;
     sampleRate = (int)probe.outputSampleRate;
     duration_ = (sampleRate > 0)
@@ -673,11 +1358,12 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                 : 0.0f;
     ma_decoder_uninit(&probe);
 
+    mp3Data_ = std::move(mp3Data);
     path_ = path;
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = (int)fmt;
 
-    logVerbose("SoundStream") << "ready " << internal::pathToUtf8(path) << " (" << channels
+    logVerbose("SoundStream") << "ready " << path << " (" << channels
                               << " ch, " << sampleRate << " Hz, " << duration_
                               << " s, maxPolyphony=" << maxPolyphony << ")";
     return LoadResult::success();
@@ -717,18 +1403,11 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
 
         // Open a fresh decoder for this voice.
         stream = std::make_shared<StreamInstance>();
-        ma_decoder_config cfg = ma_decoder_config_init(
-            ma_format_f32, StreamInstance::CHANNELS, sampleRate_);
-        cfg.encodingFormat = (ma_encoding_format)s->encodingFormatHint_;
-        ma_result r = maDecoderInitPathA(s->path_, &cfg, &stream->decoder);
+        ma_result r = stream->openDecoder(*s, (ma_uint32)sampleRate_);
         if (r != MA_SUCCESS) {
             noteDroppedPlay(DropReason::DecoderError, s, (int)r);
             return nullptr;
         }
-        stream->decoderInitialized = true;
-        ma_uint64 totalFrames = 0;
-        ma_decoder_get_length_in_pcm_frames(&stream->decoder, &totalFrames);
-        stream->totalFramesInFile = (uint64_t)totalFrames;
 
         StreamWorker::getInstance().registerStream(stream);
     }
@@ -742,6 +1421,11 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
                 slot->buffer = source;
                 slot->stream = stream;
                 slot->positionF = 0.0;
+                // A stream's positionF counts frames of its decoder's output,
+                // at the engine rate; an eager voice's counts source frames.
+                slot->positionRateHz_.store(
+                    source->kind() == SoundSource::Stream ? sampleRate_ : source->sampleRate,
+                    std::memory_order_relaxed);
                 slot->volume = 1.0f;
                 slot->pan = 0.0f;
                 slot->speed = 1.0f;
@@ -765,7 +1449,7 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
 
     // Mark the just-opened stream as disposed so the worker drops it.
     if (stream) stream->disposed.store(true, std::memory_order_release);
-    noteDroppedPlay(DropReason::VoiceLimit, source.get());
+    noteDroppedPlay(DropReason::PolyphonyLimit, source.get());
     return nullptr;
 }
 
@@ -818,25 +1502,89 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
     const int mapSize = map ? (int)map->size() : 0;
     const int gainsSize = gains ? (int)gains->size() : 0;
 
+    // writeFrame first, then the seek epoch: a writeFrame that covers
+    // post-seek data implies the epoch that precedes it is visible (see the
+    // seek protocol in the section comment).
     uint64_t writeFrame = stream->writeFrame.load(std::memory_order_acquire);
+    if (g_streamFault.load(std::memory_order_relaxed)
+            == (int)internal::StreamFaultForTests::MixerLags
+        && stream->seekRequestSeq.load(std::memory_order_acquire)
+            != stream->seekAppliedSeq.load(std::memory_order_relaxed)) {
+        // Test: the audio thread preempted right here while the worker
+        // serves the seek and writes on past the writeFrame just read, up
+        // to the stream's end.
+        g_mixerLagReleased.store(true, std::memory_order_release);
+        for (int i = 0; i < 50; ++i) {
+            if (stream->seekEpoch.load(std::memory_order_acquire)
+                    != stream->seekAppliedEpoch.load(std::memory_order_relaxed)
+                && stream->endOfStream.load(std::memory_order_acquire)) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    const uint64_t epoch = stream->seekEpoch.load(std::memory_order_acquire);
+    if (epoch != stream->seekAppliedEpoch.load(std::memory_order_relaxed)) {
+        // The worker seeked: skip what is left of the old data and play
+        // from where the post-seek data starts. Never backwards: after an
+        // underrun at speed > 1 readFrame can be a few frames past the base,
+        // and the worker bounded its writes by that readFrame, so moving it
+        // back would let the ring hold more than RING_FRAMES.
+        const uint64_t base = stream->seekBaseFrame.load(std::memory_order_relaxed);
+        const uint64_t current = stream->readFrame.load(std::memory_order_relaxed);
+        stream->readFrame.store(std::max(base, current), std::memory_order_release);
+        stream->subFrame = 0.0;
+        stream->playbackStarted = false; // wait for the first post-seek decoded frame
+        sound.positionF = stream->seekPublishedTarget.load(std::memory_order_relaxed);
+        const uint64_t servedSeq = stream->seekPublishedSeq.load(std::memory_order_relaxed);
+        stream->seekAppliedEpoch.store(epoch, std::memory_order_release);
+        stream->seekAppliedSeq.store(servedSeq, std::memory_order_release);   // not pending
+        // The ring is empty from here: the worker can write the new data now.
+        StreamWorker::getInstance().wakeFromMixer();
+    }
+    if (stream->seekRequestSeq.load(std::memory_order_acquire)
+            != stream->seekAppliedSeq.load(std::memory_order_relaxed)) {
+        // A seek is on its way: play nothing more of the position it
+        // replaces (nor end the voice at its end).
+        sound.level.store(0.0f, std::memory_order_relaxed);
+        return;
+    }
+
     uint64_t readFrame  = stream->readFrame.load(std::memory_order_relaxed);
+    const uint64_t readStart = readFrame;
     double   subFrame   = stream->subFrame;
 
     int produced = 0;
+    uint64_t underruns = 0;
     float level = 0.0f;       // peak of this voice's contribution (diagnostics)
     double posAdvance = 0.0;  // sum of consumed ring frames this callback
 
     for (int frame = 0; frame < num_frames; ++frame) {
         // Need both readFrame and readFrame+1 for interpolation.
         if (readFrame + 1 >= writeFrame) {
-            if (stream->endOfStream.load(std::memory_order_acquire)
-                && !sound.loop.load()) {
+            if (!stream->endOfStream.load(std::memory_order_acquire)
+                || (sound.loop.load() && !stream->halted.load(std::memory_order_relaxed))) {
+                // Underrun: emit nothing for this output frame, give the
+                // worker a chance to catch up. subFrame state preserved.
+                if (stream->playbackStarted) ++underruns;
+                continue;
+            }
+            // The end. writeFrame was read at the top of the callback, and
+            // the worker stores writeFrame before endOfStream, so a fresh
+            // read sees every frame it wrote before it ended (the tail
+            // after a seek near the end, say): play those first.
+            const uint64_t latest = stream->writeFrame.load(std::memory_order_acquire);
+            if (stream->seekEpoch.load(std::memory_order_acquire) != epoch) {
+                // A later seek was served meanwhile, so the endOfStream seen
+                // may be the one it reset and `latest` may cover its data:
+                // stop here, the next callback applies the seek.
+                break;
+            }
+            if (readFrame + 1 >= latest) {
                 sound.playing = false;
                 break;
             }
-            // Underrun: emit nothing for this output frame, give the
-            // worker a chance to catch up. subFrame state preserved.
-            continue;
+            writeFrame = latest;
         }
 
         size_t idx0 = (size_t)(readFrame & StreamInstance::RING_MASK)
@@ -886,10 +1634,24 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
             posAdvance += 1.0;
         }
         ++produced;
+        stream->playbackStarted = true;
     }
 
     stream->readFrame.store(readFrame, std::memory_order_release);
     stream->subFrame = subFrame;
+    if (readFrame != readStart) StreamWorker::getInstance().noteDrainedFromMixer();
+
+    // This callback took the ring below half full: wake the worker rather
+    // than wait for its poll (which a coarse system timer stretches, 15.6 ms
+    // on Windows without the high-resolution timer), e.g. at a high speed,
+    // or for its 50 ms idle poll. Once per crossing, so a ring that stays
+    // low (the end of the file) does not notify again.
+    // Signed: after an underrun at speed > 1 readFrame can be past it.
+    constexpr int64_t kLowWater = (int64_t)(StreamInstance::RING_FRAMES / 2);
+    if ((int64_t)(writeFrame - readStart) >= kLowWater
+        && (int64_t)(writeFrame - readFrame) < kLowWater) {
+        StreamWorker::getInstance().wakeFromMixer();
+    }
     sound.level.store(level, std::memory_order_relaxed);
 
     // positionF advances by the actual ring frames consumed (which equals
@@ -907,8 +1669,106 @@ void AudioEngine::mixStreamVoice(PlayingSound& sound, SoundStream& src,
             }
         }
     }
-    (void)produced;  // kept for potential telemetry; not used at present
+    if (underruns) {
+        diag_->underrunFrames.fetch_add(underruns, std::memory_order_relaxed);
+        diag_->unreportedUnderruns.fetch_add(underruns, std::memory_order_relaxed);
+    }
+    (void)produced;
 }
+
+// ---------------------------------------------------------------------------
+// Seek / position of a voice (Sound::setPosition() / getPosition())
+// ---------------------------------------------------------------------------
+namespace internal {
+
+StreamSeekStateForTests streamSeekStateForTests(const Sound& sound) {
+    StreamSeekStateForTests state;
+    AudioEngine& engine = AudioEngine::getInstance();
+    std::lock_guard<std::mutex> lock(engine.mutex_);
+    state.workerPasses = g_streamWorkerPasses.load(std::memory_order_relaxed);
+    if (!sound.playing_ || !sound.playing_->stream) return state;
+    const StreamInstance& s = *sound.playing_->stream;
+    state.hasStream = true;
+    state.totalFrames = s.totalFramesInFile;
+    state.mp3SeekTable = s.mp3Data
+        ? static_cast<const ma_mp3*>(s.decoder.pBackend)->dr.pSeekPoints : nullptr;
+    state.request = s.seekRequestSeq.load(std::memory_order_acquire);
+    state.served = s.seekServedSeq.load(std::memory_order_relaxed);
+    state.published = s.seekPublishedSeq.load(std::memory_order_relaxed);
+    state.applied = s.seekAppliedSeq.load(std::memory_order_acquire);
+    state.endOfStream = s.endOfStream.load(std::memory_order_acquire);
+    state.decoderAtEnd = s.decoderAtEnd.load(std::memory_order_relaxed);
+    return state;
+}
+
+void seekVoice(PlayingSound& voice, double frame) {
+    if (!(frame >= 0.0)) frame = 0.0;   // also NaN
+    AudioEngine& engine = AudioEngine::getInstance();
+    std::string refusedPath;   // logged after the engine lock is released
+    bool requested = false;    // the worker is woken after the engine lock is released
+    {
+        std::lock_guard<std::mutex> lock(engine.mutex_);
+        if (!voice.buffer || voice.buffer->kind() != SoundSource::Stream) {
+            voice.positionF = frame;
+            return;
+        }
+        // A request only; the mixer moves positionF when it applies it.
+        if (!voice.stream) return;   // the voice lost its decoder (re-init failed)
+        StreamInstance& s = *voice.stream;
+        if (s.totalFramesInFile > 0) {
+            s.seekTargetFrame.store(frame, std::memory_order_relaxed);
+            s.seekRequestSeq.fetch_add(1, std::memory_order_release);
+            requested = true;
+        } else {
+            // The length is unknown (e.g. a FLAC whose STREAMINFO total is
+            // 0): there is no known end to clamp the target to, so such a
+            // stream does not seek. Logged once per voice.
+            if (s.unknownLengthSeekLogged) return;
+            s.unknownLengthSeekLogged = true;
+            refusedPath = s.pathUtf8;
+        }
+    }
+    if (requested) {
+        // The worker sleeps while no stream needs it (#447).
+        StreamWorker::getInstance().wake();
+        return;
+    }
+    logWarning("SoundStream") << refusedPath
+                              << ": setPosition() is ignored, the stream's length is unknown";
+}
+
+double voicePosition(const PlayingSound& voice) {
+    AudioEngine& engine = AudioEngine::getInstance();
+    std::lock_guard<std::mutex> lock(engine.mutex_);
+    if (voice.stream) {
+        const StreamInstance& s = *voice.stream;
+        if (s.seekRequestSeq.load(std::memory_order_acquire)
+                != s.seekAppliedSeq.load(std::memory_order_acquire)) {
+            return s.seekTargetFrame.load(std::memory_order_relaxed);
+        }
+    }
+    return voice.positionF;
+}
+
+void releaseVoice(PlayingSound& voice) {
+    AudioEngine& engine = AudioEngine::getInstance();
+    std::shared_ptr<StreamInstance> stream;
+    {
+        // Under the engine lock: the mixer reads voice.stream under it.
+        std::lock_guard<std::mutex> lock(engine.mutex_);
+        voice.playing = false;
+        voice.paused = false;
+        stream = std::move(voice.stream);
+        voice.stream.reset();
+    }
+    // The worker skips a disposed stream. The decoder and file close when
+    // the last reference goes: here, or in the worker if it is refilling
+    // this stream right now. Not under the engine lock, so the mixer does
+    // not wait for the file to close.
+    if (stream) stream->disposed.store(true, std::memory_order_release);
+}
+
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // AudioEngine miniaudio callback
@@ -925,6 +1785,19 @@ static void playbackDataCallback(ma_device* pDevice, void* pOutput, const void* 
 // ---------------------------------------------------------------------------
 // AudioEngine implementation
 // ---------------------------------------------------------------------------
+
+AudioEngine& AudioEngine::getInstance() {
+    // Intentionally leaked. A plain function-local static registers its
+    // destructor against the __dso_handle of the image whose code runs the
+    // first call — under hot reload that used to be the guest dylib (when this
+    // was header-inline), so dlclose() of an old guest destroyed the engine the
+    // host was still using (the next listen() then died on the destroyed Event
+    // mutex). The heap instance has no exit-time destructor; the framework
+    // cleanup path calls shutdown() explicitly for a clean device stop on
+    // normal exit.
+    static AudioEngine* instance = new AudioEngine();
+    return *instance;
+}
 
 bool AudioEngine::init() {
     // Zero-arg path: use whatever's currently in the runtime fields
@@ -974,6 +1847,11 @@ bool AudioEngine::init(const AudioSettings& settings) {
     sampleRate_ = settings.sampleRate > 0 ? settings.sampleRate : DEFAULT_SAMPLE_RATE;
     channels_   = settings.channels   > 0 ? settings.channels   : DEFAULT_CHANNELS;
     bufferSize_ = settings.bufferSize  > 0 ? settings.bufferSize : DEFAULT_BUFFER_SIZE;
+    {
+        std::lock_guard<std::mutex> lock(analysisMutex_);
+        analysisRing_ = std::make_unique<internal::AudioOutputRing>(sampleRate_, channels_);
+        std::fill_n(analysisCopy_, ANALYSIS_BUFFER_SIZE, 0.0f);
+    }
 
     int polyphony = settings.maxPolyphony > 0
                   ? settings.maxPolyphony
@@ -1002,11 +1880,15 @@ bool AudioEngine::init(const AudioSettings& settings) {
         ma_result ctxResult = initContext(ctx);
         if (ctxResult != MA_SUCCESS) {
             logError("AudioEngine") << "no audio backend available (ma_context_init result="
-                                    << (int)ctxResult << "); sounds will not play";
+                                    << (int)ctxResult
+                                    << (settings.deviceName.empty() ? std::string()
+                                        : ", requested device '" + settings.deviceName + "'")
+                                    << "); sounds will not play";
             delete ctx;
             return false;
         }
         context_ = ctx;
+        g_engineNullBackendRequested = g_nullBackendForTests.load(std::memory_order_relaxed);
     }
     ma_context* ctxArg = static_cast<ma_context*>(context_);
 
@@ -1032,6 +1914,16 @@ bool AudioEngine::init(const AudioSettings& settings) {
         }
     }
 
+    // How the failure messages below name the device: the requested one, or
+    // the default it fell back to (#279).
+    std::string deviceDesc = "the output device";
+    if (!settings.deviceName.empty()) {
+        deviceDesc = deviceIDPtr
+            ? "the output device '" + settings.deviceName + "'"
+            : "the system default output device (requested '" + settings.deviceName
+              + "' was not found)";
+    }
+
     ma_device* device = new ma_device();
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
@@ -1047,15 +1939,24 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     ma_result result = ma_device_init(ctxArg, &config, device);
     if (result != MA_SUCCESS) {
-        logError("AudioEngine") << "failed to initialize the output device (result="
+        logError("AudioEngine") << "failed to initialize " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         delete device;
         return false;
     }
 
+    // Use the granted native period, including backend format conversion.
+    const int64_t periodNs = device->playback.internalSampleRate > 0
+        ? (int64_t)((uint64_t)device->playback.internalPeriodSizeInFrames * 1000000000
+                    / device->playback.internalSampleRate)
+        : 0;
+    diag_->stallTimeout.store(std::max<int64_t>(250000000, 4 * periodNs), std::memory_order_relaxed);
+    diag_->lastCallbackFinished.store(AudioDiagnostics::clockNow(), std::memory_order_relaxed);
+    diag_->running.store(true, std::memory_order_release);
     result = ma_device_start(device);
     if (result != MA_SUCCESS) {
-        logError("AudioEngine") << "failed to start the output device (result="
+        diag_->running.store(false, std::memory_order_release);
+        logError("AudioEngine") << "failed to start " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         ma_device_uninit(device);
         delete device;
@@ -1066,9 +1967,15 @@ bool AudioEngine::init(const AudioSettings& settings) {
     initialized_ = true;
 
     logNotice("AudioEngine") << "initialized (" << sampleRate_ << " Hz, " << channels_ << " ch, "
-                             << playingSounds_.size() << " voices, "
+                             << playingSounds_.size() << " playback slots, "
                              << ma_get_backend_name(ctxArg->backend) << ": "
                              << device->playback.name << ")";
+
+    // miniaudio's default backend order ends with the null backend, so with
+    // no usable real backend init() still succeeds on a silent device.
+    if (ctxArg->backend == ma_backend_null && !g_engineNullBackendRequested) {
+        logWarning("AudioEngine") << "no usable audio backend; output is silent (miniaudio Null device)";
+    }
 
     // Fire audioDeviceChanged with the resolved device's real info.
     // ma_device's playback.name is populated by ma_device_init even when
@@ -1077,28 +1984,28 @@ bool AudioEngine::init(const AudioSettings& settings) {
     args.deviceName   = std::string(device->playback.name);
     args.sampleRate   = sampleRate_;
     args.channels     = channels_;
-    args.bufferSize   = bufferSize_;
+    // The period the device runs with, in engine-rate frames: miniaudio
+    // reports it at the device's native rate, while the event's sampleRate
+    // is the engine rate, so bufferSize / sampleRate is the period in seconds.
+    {
+        const ma_uint32 period = device->playback.internalPeriodSizeInFrames;
+        const ma_uint32 deviceRate = device->playback.internalSampleRate;
+        args.bufferSize = (deviceRate > 0 && deviceRate != (ma_uint32)sampleRate_)
+            ? (int)(((uint64_t)period * (uint64_t)sampleRate_ + deviceRate / 2) / deviceRate)
+            : (int)period;
+    }
     args.maxPolyphony = (int)playingSounds_.size();
 
-    // Determine whether the opened device is the OS default by comparing
-    // its device ID against the isDefault flag from the playback device
-    // enumeration. We compare ma_device_id by raw bytes because its
-    // contents vary by backend (CoreAudio uses UID strings, WASAPI uses
-    // wide strings, ALSA uses device strings, etc.).
-    args.isDefaultDevice = false;
+    // Use the selection ID: playback.id may be zeroed for the default.
     {
         ma_device_info* infos = nullptr;
         ma_uint32 count = 0;
-        if (ma_context_get_devices(ctxArg, &infos, &count,
-                                    NULL, NULL) == MA_SUCCESS) {
-            for (ma_uint32 i = 0; i < count; ++i) {
-                if (std::memcmp(&infos[i].id, &device->playback.id,
-                                sizeof(ma_device_id)) == 0) {
-                    args.isDefaultDevice = (infos[i].isDefault != 0);
-                    break;
-                }
-            }
+        if (deviceIDPtr && ma_context_get_devices(ctxArg, &infos, &count,
+                                                NULL, NULL) != MA_SUCCESS) {
+            infos = nullptr;
+            count = 0;
         }
+        args.isDefaultDevice = internal::openedDeviceIsDefault(deviceIDPtr, infos, count);
     }
 
     diag_->deviceIsDefault = args.isDefaultDevice;
@@ -1143,7 +2050,8 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
 // Streaming voices: the per-voice ma_decoder was configured to OUTPUT at
 // the old engine rate, and the ring holds samples at that rate. Both are
 // stale. We rebuild the StreamInstance from scratch (new decoder
-// configured at newRate), seek it to the same wall-clock playback time,
+// configured at newRate), seek it to the same wall-clock playback time
+// (a stream whose length is unknown restarts from the beginning instead),
 // and rejoin the StreamWorker. The old StreamInstance is dropped — its
 // destructor uninits the old decoder. Worker's weak_ptr to it stops
 // locking and the entry self-evicts on the next iteration.
@@ -1155,7 +2063,14 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 
     for (auto& slot : playingSounds_) {
         if (!slot || !slot->buffer) continue;
-        if (!slot->playing && !slot->paused) continue;
+        if (!slot->playing && !slot->paused) {
+            // An ended voice is not rebuilt (nothing plays it again). It
+            // keeps positionF, a pending seek's target and positionRateHz_
+            // at the old rate, so Sound::getPosition() reads the same time,
+            // like an ended voice whose slot another play() took, which this
+            // loop never sees.
+            continue;
+        }
 
         if (slot->buffer->kind() == SoundSource::Eager) {
             // Pitch-preserving rate change. positionF is source-rate frames.
@@ -1166,34 +2081,66 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
             // Streaming voice — rebuild the per-voice decoder.
             auto* src = static_cast<SoundStream*>(slot->buffer.get());
 
-            // Current playback time in seconds, derived from the old engine rate.
-            double tSec = slot->positionF / (double)oldRate;
-            if (tSec < 0.0) tSec = 0.0;
+            // Current playback time in seconds, from the rate positionF
+            // counts: a pending seek's target, else the position played. The
+            // new StreamInstance starts at that time with no request pending.
+            int rate = slot->positionRateHz_.load(std::memory_order_relaxed);
+            if (rate <= 0) rate = oldRate;
+            double pos = slot->positionF;
+            if (slot->stream) {
+                const StreamInstance& old = *slot->stream;
+                if (old.seekRequestSeq.load(std::memory_order_acquire)
+                        != old.seekAppliedSeq.load(std::memory_order_acquire)) {
+                    pos = old.seekTargetFrame.load(std::memory_order_relaxed);
+                }
+            }
+            if (pos < 0.0) pos = 0.0;
+            const double tSec = pos / (double)rate;
 
             // Build a fresh StreamInstance + decoder at the new rate.
             auto newStream = std::make_shared<StreamInstance>();
-            ma_decoder_config cfg = ma_decoder_config_init(
-                ma_format_f32, StreamInstance::CHANNELS, newRate);
-            cfg.encodingFormat = (ma_encoding_format)src->encodingFormatHint_;
-            ma_result r = maDecoderInitPathA(src->path_, &cfg, &newStream->decoder);
+            // This is the same voice, not a new play's startup wait.
+            newStream->playbackStarted = slot->stream && slot->stream->playbackStarted;
+            ma_result r = (g_streamFault.load(std::memory_order_relaxed)
+                               == (int)internal::StreamFaultForTests::ReopenFails)
+                ? MA_IO_ERROR
+                : newStream->openDecoder(*src, (ma_uint32)newRate);
             if (r != MA_SUCCESS) {
-                logWarning("AudioEngine") << "stream voice migration failed for "
-                                          << internal::pathToUtf8(src->getPath())
-                                          << " (result=" << (int)r << "); stopping the voice";
+                diag_->voicesStoppedByReinit.fetch_add(1, std::memory_order_relaxed);
+                logWarning("AudioEngine") << "stream playback migration failed for "
+                                          << src->getPath()
+                                          << " (result=" << (int)r << "); stopping the playback";
                 slot->playing = false;
+                // The voice ends here and keeps its position at the old rate
+                // (positionRateHz_ stays). The request dies with the stream,
+                // so a pending target becomes the position getPosition()
+                // reports, as it did before the re-init.
+                slot->positionF = pos;
                 // Drop the stale stream so its old decoder is destroyed.
                 slot->stream.reset();
                 continue;
             }
-            newStream->decoderInitialized = true;
 
-            // Seek to the same wall-clock time in the new decoder's output frames.
-            ma_uint64 seekFrames = (ma_uint64)(tSec * (double)newRate);
-            ma_decoder_seek_to_pcm_frame(&newStream->decoder, seekFrames);
+            double startFrame = 0.0;
+            if (newStream->totalFramesInFile > 0) {
+                // Seek to the same time in the new decoder's output frames,
+                // clamped to the last frame like the worker's seeks (a target
+                // past the end fails in dr_mp3). A failed seek leaves the
+                // decoder at an unknown frame: halt the stream as the worker
+                // does (one error log; a later setPosition() retries).
+                startFrame = newStream->clampSeekTarget(tSec * (double)newRate);
+                const ma_result sr = newStream->seekDecoder((uint64_t)startFrame);
+                if (sr != MA_SUCCESS) {
+                    newStream->halt("seek to frame " + std::to_string((uint64_t)startFrame)
+                                    + " failed after an engine re-init (result="
+                                    + std::to_string((int)sr) + ")");
+                }
+            }
+            // An unknown length (e.g. a FLAC whose STREAMINFO total is 0)
+            // does not seek (there is no end to clamp to, as in seekVoice()):
+            // the new decoder starts the file from the beginning, and
+            // positionF says so.
 
-            ma_uint64 total = 0;
-            ma_decoder_get_length_in_pcm_frames(&newStream->decoder, &total);
-            newStream->totalFramesInFile = (uint64_t)total;
             newStream->subFrame = 0.0;
             // writeFrame / readFrame default to 0; ring will be filled fresh by worker.
 
@@ -1206,7 +2153,8 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 
             // Re-express positionF in new engine-rate frames so the
             // existing loop-modulo logic in mixStreamVoice keeps working.
-            slot->positionF = tSec * (double)newRate;
+            slot->positionF = startFrame;
+            slot->positionRateHz_.store(newRate, std::memory_order_relaxed);
         }
     }
 }
@@ -1241,12 +2189,14 @@ void AudioEngine::shutdown() {
 void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
     const auto t0 = std::chrono::steady_clock::now();
     mixAudioInternal(buffer, num_frames, num_channels);
-    const double busy = std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - t0).count();
+    const auto finished = std::chrono::steady_clock::now();
+    const double busy = std::chrono::duration<double>(finished - t0).count();
 
-    // Audio-thread load: time spent mixing (voices + audioOut listeners)
-    // relative to the audio time this callback produced.
+    // Audio-thread CPU usage: time spent mixing (playing sounds + audioOut
+    // listeners) relative to the audio time this callback produced.
     AudioDiagnostics& d = *diag_;
+    d.lastCallbackFinished.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        finished.time_since_epoch()).count(), std::memory_order_relaxed);
     const int rate = sampleRate_ > 0 ? sampleRate_ : DEFAULT_SAMPLE_RATE;
     const double audio = (double)num_frames / (double)rate;
     if (audio <= 0.0) return;
@@ -1255,12 +2205,102 @@ void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {
     d.loadBusy  += busy;
     d.loadAudio += audio;
     if (d.loadAudio >= 0.5) {
-        d.load.store((float)(d.loadBusy / d.loadAudio), std::memory_order_relaxed);
-        d.loadMax.store(d.loadWinMax, std::memory_order_relaxed);
+        d.cpuUsage.store((float)(d.loadBusy / d.loadAudio), std::memory_order_relaxed);
+        d.cpuUsagePeak.store(d.loadWinMax, std::memory_order_relaxed);
         d.loadBusy = 0.0;
         d.loadAudio = 0.0;
         d.loadWinMax = 0.0f;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Callbacks in flight and the teardown barrier (#256)
+// ---------------------------------------------------------------------------
+namespace {
+// audioOut / audioIn notifies running on this thread (nested when one device
+// callback fires both). Non-zero only on the audio thread inside a listener,
+// where waitForAudioCallbacks() must not wait for itself.
+thread_local int t_callbackDepth = 0;
+
+// How long waitForAudioCallbacks() waits. A buffer lasts ~1-100 ms, so a
+// callback still running after this is stuck, not slow.
+constexpr std::chrono::seconds kCallbackIdleTimeout{1};
+} // namespace
+
+int AudioEngine::beginCallback() {
+    ++t_callbackDepth;
+    // seq_cst, like the barrier's epoch advance and slot load, and ordered
+    // before the notify's load of the listener list: for a listener removed
+    // before a barrier, either the barrier counts this callback and waits
+    // for it, or this callback's notify no longer sees the listener.
+    const int slot = (int)(callbackEpoch_.load() & 1u);
+    callbacksInFlight_[slot].fetch_add(1);
+    return slot;
+}
+
+void AudioEngine::endCallback(int slot) {
+    // Release: what the listeners did happens-before the barrier returns.
+    callbacksInFlight_[slot].fetch_sub(1, std::memory_order_release);
+    --t_callbackDepth;
+}
+
+bool AudioEngine::waitForAudioCallbacks() {
+    return waitForCallbacks(true);
+}
+
+namespace internal {
+void waitForAudioCallbacksNoTimeout() {
+    AudioEngine::getInstance().waitForCallbacks(false);
+}
+} // namespace internal
+
+bool AudioEngine::waitForCallbacks(bool giveUp) {
+    if (t_callbackDepth > 0) return true;   // audio thread, inside a listener
+
+    auto warnGaveUp = [] {
+        logWarning("AudioEngine") << "waitForAudioCallbacks: an audioOut / audioIn "
+            "listener has been running for over "
+            << kCallbackIdleTimeout.count() << " s; continuing without "
+            "waiting for it. Is it waiting on this thread (a lock held here, "
+            "or work queued to it)?";
+    };
+    std::unique_lock<std::timed_mutex> lock(callbackBarrierMutex_, std::defer_lock);
+    auto deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    if (giveUp) {
+        // A framework teardown may hold the mutex while it waits for a stuck
+        // listener: the one-second limit covers this wait too.
+        if (!lock.try_lock_until(deadline)) { warnGaveUp(); return false; }
+    } else {
+        lock.lock();
+        deadline = std::chrono::steady_clock::now() + kCallbackIdleTimeout;
+    }
+    bool reported = false;
+    // Advance the epoch so new callbacks count in the other slot, then wait
+    // for the old slot to drain. Twice, so both slots are drained after the
+    // caller's disconnect: a callback that read the epoch just before an
+    // advance still counts in the slot it read.
+    for (int pass = 0; pass < 2; ++pass) {
+        const int slot = (int)(callbackEpoch_.fetch_add(1) & 1u);
+        while (callbacksInFlight_[slot].load() != 0) {
+            if (std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::yield();
+                continue;
+            }
+            if (giveUp) { warnGaveUp(); return false; }
+            // Framework teardown: keep waiting (a use-after-free would be
+            // worse than a hang), and say why the app is stuck, once.
+            if (!reported) {
+                reported = true;
+                logError("AudioEngine") << "an audioOut / audioIn listener has not "
+                    "returned for " << kCallbackIdleTimeout.count() << " s; the "
+                    "teardown keeps waiting for it before it destroys anything the "
+                    "listener may use. The listener is most likely waiting on the "
+                    "main thread or on a lock.";
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------

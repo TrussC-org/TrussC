@@ -6,6 +6,8 @@
 // `args[]` ({type, name, hasDefault, isRef?, isConst?, isPointer?, isArray?}), so
 // binding generation is fully DETERMINISTIC — no string parsing, no heuristics, no
 // denylist. Correctness is verified by COMPILING this output (witness).
+// `TC_LUA_SKIP` on the C++ declaration (e.lua_skip) marks symbols that have no
+// meaning in Lua, such as an RAII guard.
 //
 //   node luagen.js <reference-data.json> > trussc_generated.cpp   (report -> stderr)
 //
@@ -110,6 +112,7 @@ for (const id of Object.keys(data)) {
     const e = data[id];
     if (e.kind !== 'func') continue;
     if (e.hidden) { skip.hidden = (skip.hidden || 0) + 1; continue; }   // `hide = true`: public C++ but not API, don't bind
+    if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; continue; }   // TC_LUA_SKIP: not exposed to Lua
     if (e.owner) { skip.member++; continue; }    // type member -> Phase 2
     if (e.ns) { skip.ns++; continue; }           // sub-namespaced -> Phase 2 (Lua tables)
     const s = emit(e);
@@ -142,5 +145,5 @@ ${body}}
 #endif
 `);
 
-console.error(`[luagen] bound free functions: ${count} | skipped: members ${skip.member}, ns ${skip.ns}, templates ${skip.template}, unbindable ${skip.unbindable}, no-args(structure.js gap) ${skip.noargs}`);
+console.error(`[luagen] bound free functions: ${count} | skipped: members ${skip.member}, ns ${skip.ns}, templates ${skip.template}, unbindable ${skip.unbindable}, TC_LUA_SKIP ${skip.luaSkip || 0}, no-args(structure.js gap) ${skip.noargs}`);
 if (noargsFns.length) console.error(`  missing args[] (report to structure.js): ${[...new Set(noargsFns)].join(', ')}`);

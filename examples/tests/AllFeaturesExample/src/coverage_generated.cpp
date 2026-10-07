@@ -31,15 +31,20 @@ static void cover_audioengine() {
 }
 
 static void cover_file() {
+    (void)getDataPath(af::val<const fs::path>());
+    (void)pathToUtf8(af::val<const fs::path>());
+    (void)utf8ToPath(af::val<std::string_view>());
     (void)getExecutablePath();
     (void)getExecutableDir();
     (void)loadErrorName(af::val<LoadError>());
     (void)setDataPathRoot(af::val<const fs::path>());
     (void)getDataPathRoot();
-    (void)getDataPath(af::val<const fs::path>());
 #if defined(AF_MACOS) || defined(AF_IOS)
     (void)setDataPathToResources();
 #endif
+    (void)getUserDataPath(af::val<const fs::path>());
+    (void)getTempPath(af::val<const fs::path>());
+    (void)setUserDataPathRoot(af::val<const fs::path>());
     (void)loadJson(af::val<const fs::path>());
     (void)saveJson(af::val<const Json>(), af::val<const fs::path>(), af::val<int>());
     (void)loadXml(af::val<const fs::path>());
@@ -225,6 +230,7 @@ static void cover_graphics_shapes() {
 static void cover_graphics_style() {
     (void)pushStyle();
     (void)popStyle();
+    (void)scopedStyle();
     (void)resetStyle();
     (void)getColor();
     (void)fill();
@@ -502,6 +508,7 @@ static void cover_time_elapsed() {
     (void)getElapsedTimeMillis();
     (void)getElapsedTimeMicros();
     (void)getElapsedTime();
+    (void)getFrameElapsedTime();
 }
 
 static void cover_time_frame() {
@@ -527,6 +534,7 @@ static void cover_time_system() {
 static void cover_transform() {
     (void)pushMatrix();
     (void)popMatrix();
+    (void)scopedMatrix();
     (void)translate(af::val<Vec3>());
     (void)translate(af::val<float>(), af::val<float>(), af::val<float>());
     (void)translate(af::val<float>(), af::val<float>());
@@ -559,8 +567,10 @@ static void cover_utility() {
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)logLevelToString(af::val<LogLevel>());
     (void)getLogger();
+    (void)setLogLevel(af::val<LogLevel>());
     (void)setConsoleLogLevel(af::val<LogLevel>());
     (void)setFileLogLevel(af::val<LogLevel>());
+    (void)setSystemLogLevel(af::val<LogLevel>());
     (void)setLogFile(af::val<const fs::path>());
     (void)closeLogFile();
     (void)logAt(af::val<LogLevel>());
@@ -610,10 +620,10 @@ static void cover_utility() {
     (void)toJsonString(af::val<const Json>(), af::val<int>());
     (void)parseXml(af::val<const std::string>());
     (void)getVersion();
-    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)typeName(af::val<const std::type_info>());
     (void)shortTypeName(af::val<const std::type_info>());
-    (void)nodeToJson(af::val<Node>(), af::val<int>());
+    (void)intersectRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    (void)nodeToJson(af::val<Node>(), af::val<int>(), af::val<bool>());
 }
 
 static void cover_video() {
@@ -666,7 +676,7 @@ static void cover_window_input() {
     (void)setTouchAsMouse(af::val<bool>());
     (void)getTouchAsMouse();
     (void)requestExitApp();
-    (void)exitApp();
+    (void)exitApp(af::val<int>());
     (void)isOverlayHovered();
     (void)isOverlayFocused();
 }
@@ -704,13 +714,13 @@ static void cover_window_system() {
     (void)getAspectRatio();
     (void)getBackendName();
     (void)setIndependentFps(af::val<float>(), af::val<float>());
+    (void)setMaxUpdateSteps(af::val<int>());
+    (void)getMaxUpdateSteps();
     (void)redraw(af::val<int>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)grabScreen(af::val<Pixels>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)saveScreenshot(af::val<const std::filesystem::path>());
-#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
     (void)startRecording(af::val<const fs::path>(), af::val<const VideoRecordSettings>());
     (void)startRecording(af::val<const fs::path>(), af::val<float>());
@@ -786,9 +796,10 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().getBufferSize();
         (void)af::val<AudioEngine>().isInitialized();
         (void)af::val<AudioEngine>().getStats();
-        (void)af::val<AudioEngine>().getVoices();
+        (void)af::val<AudioEngine>().getPlayingSounds();
         (void)af::val<AudioEngine>().audioOut;
         (void)af::val<AudioEngine>().audioIn;
+        (void)af::val<AudioEngine>().waitForAudioCallbacks();
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().getAnalysisBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
@@ -849,31 +860,18 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
 struct Cover_AudioStats : af::Scope<AudioStats> {
     static void run() {
         (void)af::val<AudioStats>().droppedPlays;
-        (void)af::val<AudioStats>().droppedVoiceLimit;
+        (void)af::val<AudioStats>().droppedPolyphonyLimit;
         (void)af::val<AudioStats>().droppedStreamLimit;
         (void)af::val<AudioStats>().droppedDecoderError;
         (void)af::val<AudioStats>().droppedNotRunning;
         (void)af::val<AudioStats>().clippedSamples;
         (void)af::val<AudioStats>().peak;
         (void)af::val<AudioStats>().rms;
-        (void)af::val<AudioStats>().load;
-        (void)af::val<AudioStats>().loadMax;
-    }
-};
-
-struct Cover_AudioVoiceInfo : af::Scope<AudioVoiceInfo> {
-    static void run() {
-        (void)af::val<AudioVoiceInfo>().slot;
-        (void)af::val<AudioVoiceInfo>().path;
-        (void)af::val<AudioVoiceInfo>().streaming;
-        (void)af::val<AudioVoiceInfo>().paused;
-        (void)af::val<AudioVoiceInfo>().loop;
-        (void)af::val<AudioVoiceInfo>().position;
-        (void)af::val<AudioVoiceInfo>().duration;
-        (void)af::val<AudioVoiceInfo>().volume;
-        (void)af::val<AudioVoiceInfo>().pan;
-        (void)af::val<AudioVoiceInfo>().speed;
-        (void)af::val<AudioVoiceInfo>().level;
+        (void)af::val<AudioStats>().cpuUsage;
+        (void)af::val<AudioStats>().cpuUsagePeak;
+        (void)af::val<AudioStats>().underrunFrames;
+        (void)af::val<AudioStats>().stalled;
+        (void)af::val<AudioStats>().voicesStoppedByReinit;
     }
 };
 
@@ -1075,7 +1073,9 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().onRender;
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().exit;
+        (void)af::val<CoreEvents>().hotReloadUnload;
         (void)af::val<CoreEvents>().exitRequested;
+        (void)af::val<CoreEvents>().deviceLost;
         (void)af::val<CoreEvents>().keyPressed;
         (void)af::val<CoreEvents>().keyReleased;
         (void)af::val<CoreEvents>().mousePressed;
@@ -1099,6 +1099,13 @@ struct Cover_CurveStyle : af::Scope<CurveStyle> {
         (void)af::val<CurveStyle>().mode;
         (void)af::val<CurveStyle>().tolerance;
         (void)af::val<CurveStyle>().resolution;
+    }
+};
+
+struct Cover_DeviceLostEventArgs : af::Scope<DeviceLostEventArgs> {
+    static void run() {
+        (void)af::val<DeviceLostEventArgs>().reason;
+        (void)af::val<DeviceLostEventArgs>().cancel;
     }
 };
 
@@ -1200,6 +1207,8 @@ struct Cover_ExitRequestEventArgs : af::Scope<ExitRequestEventArgs> {
 struct Cover_Fbo : af::Scope<Fbo> {
     static void run() {
         (void)Fbo();
+        (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
+        (void)af::val<Fbo>().getDebugName();
         (void)af::val<Fbo>().lifetimeToken();
         (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
         (void)af::val<Fbo>().clear();
@@ -1210,7 +1219,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixels(af::val<unsigned char *>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<Fbo>().readPixelsFloat(af::val<float *>());
 #endif
         (void)af::val<Fbo>().copyTo(af::val<Image>());
@@ -1468,6 +1477,8 @@ struct Cover_IesProfile : af::Scope<IesProfile> {
 struct Cover_Image : af::Scope<Image> {
     static void run() {
         (void)Image();
+        (void)af::val<Image>().setDebugName(af::val<const std::string>());
+        (void)af::val<Image>().getDebugName();
         (void)af::val<Image>().load(af::val<const fs::path>(), af::val<bool>());
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().save(af::val<const fs::path>());
@@ -1519,6 +1530,8 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
 struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
     static void run() {
         (void)af::val<JsonWriteReflector>().members;
+        (void)af::val<JsonWriteReflector>().includeDerived;
+        (void)af::val<JsonWriteReflector>().derived;
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<float>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<int>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<bool>());
@@ -1671,12 +1684,15 @@ struct Cover_Logger : af::Scope<Logger> {
         (void)Logger();
         (void)af::val<Logger>().onLog;
         (void)af::val<Logger>().log(af::val<LogLevel>(), af::val<const std::string>());
+        (void)af::val<Logger>().setLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().setConsoleLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().getConsoleLogLevel();
         (void)af::val<Logger>().setLogFile(af::val<const fs::path>());
         (void)af::val<Logger>().closeFile();
         (void)af::val<Logger>().setFileLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().getFileLogLevel();
+        (void)af::val<Logger>().setSystemLogLevel(af::val<LogLevel>());
+        (void)af::val<Logger>().getSystemLogLevel();
         (void)af::val<Logger>().getLogFilePath();
         (void)af::val<Logger>().isFileOpen();
     }
@@ -1729,6 +1745,7 @@ struct Cover_Mat4 : af::Scope<Mat4> {
         (void)af::val<Mat4>().operator*(af::val<const Vec4>());
         (void)af::val<Mat4>().transposed();
         (void)af::val<Mat4>().inverted();
+        (void)af::val<Mat4>().tryInvert(af::val<Mat4>());
         (void)af::val<Mat4>().lookAt(af::val<const Vec3>(), af::val<const Vec3>(), af::val<const Vec3>());
         (void)af::val<Mat4>().ortho(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mat4>().perspective(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1855,6 +1872,7 @@ struct Cover_Mesh : af::Scope<Mesh> {
         (void)af::val<Mesh>().drawNoLightingWithTexture(af::val<const Texture>());
         (void)af::val<Mesh>().drawWireframe();
         (void)af::val<Mesh>().markGpuDirty();
+        (void)af::val<Mesh>().getDataRevision();
         (void)af::val<Mesh>().uploadToGpu();
         (void)af::val<Mesh>().drawGpuPbr();
         (void)af::val<Mesh>().drawGpuPoints();
@@ -2051,6 +2069,7 @@ struct Cover_Node : af::Scope<Node> {
         (void)af::val<Node>().getModByTypeName(af::val<const std::string>());
         (void)af::val<Node>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
         (void)af::val<Node>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<Node>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
         (void)af::val<Node>().cancelTimer(af::val<uint64_t>());
         (void)af::val<Node>().cancelAllTimers();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
@@ -2074,6 +2093,15 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
         (void)af::val<Node::HitResult>().distance;
         (void)af::val<Node::HitResult>().localPoint;
         (void)af::val<Node::HitResult>().hit();
+    }
+};
+
+struct Cover_OnceGate : af::Scope<OnceGate> {
+    static void run() {
+        (void)OnceGate();
+        (void)OnceGate(af::val<double>());
+        (void)af::val<OnceGate>().isFirstTime();
+        (void)af::val<OnceGate>().reset();
     }
 };
 
@@ -2206,6 +2234,22 @@ struct Cover_PlayingSound : af::Scope<PlayingSound> {
     }
 };
 
+struct Cover_PlayingSoundInfo : af::Scope<PlayingSoundInfo> {
+    static void run() {
+        (void)af::val<PlayingSoundInfo>().slot;
+        (void)af::val<PlayingSoundInfo>().path;
+        (void)af::val<PlayingSoundInfo>().streaming;
+        (void)af::val<PlayingSoundInfo>().paused;
+        (void)af::val<PlayingSoundInfo>().loop;
+        (void)af::val<PlayingSoundInfo>().position;
+        (void)af::val<PlayingSoundInfo>().duration;
+        (void)af::val<PlayingSoundInfo>().volume;
+        (void)af::val<PlayingSoundInfo>().pan;
+        (void)af::val<PlayingSoundInfo>().speed;
+        (void)af::val<PlayingSoundInfo>().level;
+    }
+};
+
 struct Cover_Quaternion : af::Scope<Quaternion> {
     static void run() {
         (void)Quaternion();
@@ -2333,6 +2377,9 @@ struct Cover_Reflector : af::Scope<Reflector> {
         (void)af::val<Reflector>().isReadOnly();
         (void)af::val<Reflector>().pushReadOnly();
         (void)af::val<Reflector>().popReadOnly();
+        (void)af::val<Reflector>().isDerived();
+        (void)af::val<Reflector>().pushDerived();
+        (void)af::val<Reflector>().popDerived();
         (void)af::val<Reflector>().beginGroup(af::val<const char *>());
         (void)af::val<Reflector>().endGroup();
     }
@@ -2430,11 +2477,13 @@ struct Cover_Serial : af::Scope<Serial> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)Serial();
 #endif
+        (void)af::val<Serial>().onDisconnect;
         (void)af::val<Serial>().printDevices();
         (void)af::val<Serial>().listDevices();
         (void)af::val<Serial>().setup(af::val<const std::string>(), af::val<int>());
         (void)af::val<Serial>().setup(af::val<int>(), af::val<int>());
         (void)af::val<Serial>().close();
+        (void)af::val<Serial>().isConnected();
         (void)af::val<Serial>().isInitialized();
         (void)af::val<Serial>().getDevicePath();
         (void)af::val<Serial>().available();
@@ -2459,6 +2508,15 @@ struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
         (void)af::val<SerialDeviceInfo>().getDeviceID();
         (void)af::val<SerialDeviceInfo>().getDevicePath();
         (void)af::val<SerialDeviceInfo>().getDeviceName();
+    }
+};
+
+struct Cover_SerialDisconnectEventArgs : af::Scope<SerialDisconnectEventArgs> {
+    static void run() {
+        (void)af::val<SerialDisconnectEventArgs>().portName;
+        (void)af::val<SerialDisconnectEventArgs>().baudRate;
+        (void)af::val<SerialDisconnectEventArgs>().reason;
+        (void)af::val<SerialDisconnectEventArgs>().wasClean;
     }
 };
 
@@ -2631,14 +2689,24 @@ struct Cover_TcpClient : af::Scope<TcpClient> {
         (void)af::val<TcpClient>().onConnect;
         (void)af::val<TcpClient>().onReceive;
         (void)af::val<TcpClient>().onDisconnect;
+        (void)af::val<TcpClient>().onSendComplete;
         (void)af::val<TcpClient>().onError;
         (void)af::val<TcpClient>().connect(af::val<const std::string>(), af::val<int>());
         (void)af::val<TcpClient>().connectAsync(af::val<const std::string>(), af::val<int>());
         (void)af::val<TcpClient>().disconnect();
         (void)af::val<TcpClient>().isConnected();
+        (void)af::val<TcpClient>().isConnecting();
         (void)af::val<TcpClient>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpClient>().send(af::val<const std::vector<char>>());
         (void)af::val<TcpClient>().send(af::val<const std::string>());
+        (void)af::val<TcpClient>().sendAsync(af::val<const void *>(), af::val<size_t>());
+        (void)af::val<TcpClient>().sendAsync(std::move(af::val<std::vector<char>>()));
+        (void)af::val<TcpClient>().sendAsync(af::val<const std::string>());
+        (void)af::val<TcpClient>().setSendTimeout(af::val<float>());
+        (void)af::val<TcpClient>().setConnectTimeout(af::val<float>());
+        (void)af::val<TcpClient>().setSendAsyncBufferSize(af::val<size_t>());
+        (void)af::val<TcpClient>().getSendAsyncBufferSize();
+        (void)af::val<TcpClient>().getSendAsyncPendingBytes();
         (void)af::val<TcpClient>().setReceiveBufferSize(af::val<size_t>());
         (void)af::val<TcpClient>().setBlocking(af::val<bool>());
         (void)af::val<TcpClient>().setUseThread(af::val<bool>());
@@ -3098,6 +3166,13 @@ struct Cover_VideoDeviceInfo : af::Scope<VideoDeviceInfo> {
     }
 };
 
+struct Cover_VideoErrorEventArgs : af::Scope<VideoErrorEventArgs> {
+    static void run() {
+        (void)af::val<VideoErrorEventArgs>().message;
+        (void)af::val<VideoErrorEventArgs>().errorCode;
+    }
+};
+
 struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -3203,6 +3278,9 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<VideoPlayerBase>().setPaused(af::val<bool>());
         (void)af::val<VideoPlayerBase>().togglePause();
         (void)af::val<VideoPlayerBase>().update();
+        (void)af::val<VideoPlayerBase>().onError;
+        (void)af::val<VideoPlayerBase>().hasError();
+        (void)af::val<VideoPlayerBase>().getErrorMessage();
         (void)af::val<VideoPlayerBase>().isPlaying();
         (void)af::val<VideoPlayerBase>().isPaused();
         (void)af::val<VideoPlayerBase>().isFrameNew();
@@ -3302,6 +3380,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().getTitle();
         (void)af::val<Window>().getWidth();
         (void)af::val<Window>().getHeight();
+        (void)af::val<Window>().isOccluded();
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
         (void)af::val<Window>().isFullscreen();
@@ -3403,7 +3482,6 @@ void af::coverGenerated() {
     af_generated::Cover_AudioRecorder::run();
     af_generated::Cover_AudioSettings::run();
     af_generated::Cover_AudioStats::run();
-    af_generated::Cover_AudioVoiceInfo::run();
     af_generated::Cover_BuildInfo::run();
     af_generated::Cover_CameraContext::run();
     af_generated::Cover_ChipSoundBundle::run();
@@ -3418,6 +3496,7 @@ void af::coverGenerated() {
     af_generated::Cover_ConsoleEventArgs::run();
     af_generated::Cover_CoreEvents::run();
     af_generated::Cover_CurveStyle::run();
+    af_generated::Cover_DeviceLostEventArgs::run();
     af_generated::Cover_DragDropEventArgs::run();
     af_generated::Cover_EasyCam::run();
     af_generated::Cover_EnumLabelSpan::run();
@@ -3462,10 +3541,12 @@ void af::coverGenerated() {
     af_generated::Cover_NetworkInterface::run();
     af_generated::Cover_Node::run();
     af_generated::Cover_Node__HitResult::run();
+    af_generated::Cover_OnceGate::run();
     af_generated::Cover_Path::run();
     af_generated::Cover_Pixels::run();
     af_generated::Cover_Platform::run();
     af_generated::Cover_PlayingSound::run();
+    af_generated::Cover_PlayingSoundInfo::run();
     af_generated::Cover_Quaternion::run();
     af_generated::Cover_Ray::run();
     af_generated::Cover_Ray__Hit::run();
@@ -3481,6 +3562,7 @@ void af::coverGenerated() {
     af_generated::Cover_SendResult::run();
     af_generated::Cover_Serial::run();
     af_generated::Cover_SerialDeviceInfo::run();
+    af_generated::Cover_SerialDisconnectEventArgs::run();
     af_generated::Cover_Shader::run();
     af_generated::Cover_ShaderVertex::run();
     af_generated::Cover_Sound::run();
@@ -3512,6 +3594,7 @@ void af::coverGenerated() {
     af_generated::Cover_Vec3::run();
     af_generated::Cover_Vec4::run();
     af_generated::Cover_VideoDeviceInfo::run();
+    af_generated::Cover_VideoErrorEventArgs::run();
     af_generated::Cover_VideoGrabber::run();
     af_generated::Cover_VideoPlayer::run();
     af_generated::Cover_VideoPlayerBase::run();

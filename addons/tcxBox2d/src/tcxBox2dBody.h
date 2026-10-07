@@ -6,6 +6,7 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxCollider2D.h"
+#include "tcxCollisionManager.h"
 #include <tcNode.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -261,15 +262,27 @@ public:
     // Body Type
     // -------------------------------------------------------------------------
     void setStatic() {
-        if (body_) body_->SetType(b2_staticBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetType(b2_staticBody);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     void setDynamic() {
-        if (body_) body_->SetType(b2_dynamicBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetType(b2_dynamicBody);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     void setKinematic() {
-        if (body_) body_->SetType(b2_kinematicBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetType(b2_kinematicBody);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     bool isStaticBody() const {
@@ -312,7 +325,11 @@ public:
     }
 
     void setEnabled(bool enabled) {
-        if (body_) body_->SetEnabled(enabled);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetEnabled(enabled);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     bool isBodyEnabled() const {
@@ -324,8 +341,17 @@ public:
     // -------------------------------------------------------------------------
     void destroy() {
         if (body_ && world_ && world_->getWorld()) {
-            world_->getWorld()->DestroyBody(body_);
-            body_ = nullptr;
+            // A deferred Exit must not reach this body's collider once it is
+            // freed (see CollisionManager)
+            auto* cm = world_->getCollisionManager();
+            b2Body* gone = body_;
+            if (cm) cm->forget(gone);
+            world_->getWorld()->DestroyBody(gone);
+            body_ = nullptr;   // listeners may call destroy() again
+            if (cm) {
+                cm->forgetBody(gone);
+                cm->flushPendingExits();
+            }
         }
     }
 
@@ -352,17 +378,19 @@ protected:
         return body_ ? body_->GetFixtureList() : nullptr;
     }
 
-    // Setup collider and link to fixture
+    // Setup collider and link it to every fixture of the body (a compound
+    // body has several; the collider stands for all of them)
     template<typename ColliderType>
     ColliderType* setupCollider() {
         auto collider = std::make_unique<ColliderType>();
         collider->body_ = this;
         collider->fixture_ = getFixture();
 
-        // Store collider pointer in fixture's UserData
-        if (collider->fixture_) {
-            collider->fixture_->GetUserData().pointer =
-                reinterpret_cast<uintptr_t>(collider.get());
+        // Store collider pointer in each fixture's UserData
+        if (body_) {
+            for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) {
+                f->GetUserData().pointer = reinterpret_cast<uintptr_t>(collider.get());
+            }
         }
 
         ColliderType* ptr = collider.get();

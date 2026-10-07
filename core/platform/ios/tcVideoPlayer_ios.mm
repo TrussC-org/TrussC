@@ -10,10 +10,21 @@
 
 #include "TrussC.h"
 
+// Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
+// description as UTF-8, or "(null)" for nil (what %@ formatting printed).
+static std::string tcLogText(id obj) {
+    if (!obj) return "(null)";
+    const char* text = [[obj description] UTF8String];
+    return text ? std::string(text) : std::string();
+}
+
 // =============================================================================
 // Internal Objective-C class for AVFoundation handling
 // =============================================================================
-@interface TCVideoPlayerImpl : NSObject
+@interface TCVideoPlayerImpl : NSObject {
+@public
+    trussc::internal::VideoErrorQueue playbackErrors_;
+}
 
 @property (nonatomic, strong) AVPlayer* player;
 @property (nonatomic, strong) AVPlayerItem* playerItem;
@@ -110,7 +121,7 @@
     // Create file URL
     NSURL* url = [NSURL fileURLWithPath:path];
     if (!url) {
-        NSLog(@"TCVideoPlayer: Failed to create URL for path: %@", path);
+        trussc::logError("VideoPlayer") << "Failed to create URL for path: " << tcLogText(path);
         return NO;
     }
 
@@ -121,7 +132,7 @@
     self.asset = [AVURLAsset URLAssetWithURL:url options:options];
 
     if (!self.asset) {
-        NSLog(@"TCVideoPlayer: Failed to create asset");
+        trussc::logError("VideoPlayer") << "Failed to create asset";
         return NO;
     }
 
@@ -137,7 +148,7 @@
         if (status == AVKeyValueStatusLoaded) {
             loadSuccess = YES;
         } else {
-            NSLog(@"TCVideoPlayer: Failed to load tracks: %@", error);
+            trussc::logError("VideoPlayer") << "Failed to load tracks: " << tcLogText(error);
         }
 
         dispatch_semaphore_signal(semaphore);
@@ -154,7 +165,7 @@
     // Get video track info
     NSArray* videoTracks = [self.asset tracksWithMediaType:AVMediaTypeVideo];
     if (videoTracks.count == 0) {
-        NSLog(@"TCVideoPlayer: No video tracks found");
+        trussc::logError("VideoPlayer") << "No video tracks found";
         self.asset = nil;
         return NO;
     }
@@ -180,8 +191,9 @@
     _frameRate = videoTrack.nominalFrameRate;
     _duration = (float)CMTimeGetSeconds(self.asset.duration);
 
-    NSLog(@"TCVideoPlayer: Loaded %ldx%ld @ %.2f fps, duration: %.2f sec",
-          (long)_videoWidth, (long)_videoHeight, _frameRate, _duration);
+    trussc::logVerbose("VideoPlayer") << "Loaded " << (long)_videoWidth << "x" << (long)_videoHeight
+        << " @ " << trussc::toString(_frameRate, 2) << " fps, duration: "
+        << trussc::toString(_duration, 2) << " sec";
 
     // Get audio track info
     NSArray* audioTracks = [self.asset tracksWithMediaType:AVMediaTypeAudio];
@@ -203,17 +215,17 @@
             FourCharCode mediaSubType = CMFormatDescriptionGetMediaSubType(desc);
             _audioCodecFourCC = mediaSubType;
 
-            NSLog(@"TCVideoPlayer: Audio track found - codec: %c%c%c%c, %d Hz, %d ch",
-                  (char)(mediaSubType >> 24), (char)(mediaSubType >> 16),
-                  (char)(mediaSubType >> 8), (char)mediaSubType,
-                  _audioSampleRate, _audioChannels);
+            trussc::logVerbose("VideoPlayer") << "Audio track found - codec: "
+                  << (char)(mediaSubType >> 24) << (char)(mediaSubType >> 16)
+                  << (char)(mediaSubType >> 8) << (char)mediaSubType
+                  << ", " << _audioSampleRate << " Hz, " << _audioChannels << " ch";
         }
     }
 
     // Create player item
     self.playerItem = [AVPlayerItem playerItemWithAsset:self.asset];
     if (!self.playerItem) {
-        NSLog(@"TCVideoPlayer: Failed to create player item");
+        trussc::logError("VideoPlayer") << "Failed to create player item";
         self.asset = nil;
         return NO;
     }
@@ -230,7 +242,7 @@
                         initWithPixelBufferAttributes:pixelBufferAttributes];
 
     if (!self.videoOutput) {
-        NSLog(@"TCVideoPlayer: Failed to create video output");
+        trussc::logError("VideoPlayer") << "Failed to create video output";
         self.playerItem = nil;
         self.asset = nil;
         return NO;
@@ -242,7 +254,7 @@
     // Create player
     self.player = [AVPlayer playerWithPlayerItem:self.playerItem];
     if (!self.player) {
-        NSLog(@"TCVideoPlayer: Failed to create player");
+        trussc::logError("VideoPlayer") << "Failed to create player";
         [self.playerItem removeOutput:self.videoOutput];
         self.videoOutput = nil;
         self.playerItem = nil;
@@ -260,6 +272,11 @@
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(playerDidFinishPlaying:)
                                                  name:AVPlayerItemDidPlayToEndTimeNotification
+                                               object:self.playerItem];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(playerFailedToFinish:)
+                                                 name:AVPlayerItemFailedToPlayToEndTimeNotification
                                                object:self.playerItem];
 
     // Allocate pixel buffer (RGBA)
@@ -303,6 +320,12 @@
     _isReady = NO;
     _isFinished = NO;
     _hasNewFrame = NO;
+}
+
+- (void)playerFailedToFinish:(NSNotification*)notification {
+    NSError* error = notification.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+    playbackErrors_.report(error ? tcLogText(error.localizedDescription) : "Video playback failed",
+                           error ? static_cast<int64_t>(error.code) : 0);
 }
 
 - (void)playerDidFinishPlaying:(NSNotification*)notification {
@@ -431,7 +454,7 @@
 
     // Note: Negative speed (reverse playback) not supported in this version
     if (speed < 0.0f) {
-        NSLog(@"TCVideoPlayer: Negative speed not supported");
+        trussc::logWarning("VideoPlayer") << "Negative speed not supported";
         speed = 0.0f;
     }
 
@@ -543,7 +566,7 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
     NSError* error = nil;
     AVAssetReader* reader = [[AVAssetReader alloc] initWithAsset:self.asset error:&error];
     if (!reader) {
-        NSLog(@"TCVideoPlayer: Failed to create asset reader: %@", error);
+        trussc::logWarning("VideoPlayer") << "Failed to create asset reader: " << tcLogText(error);
         return nil;
     }
 
@@ -554,14 +577,14 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
     trackOutput.alwaysCopiesSampleData = NO;
 
     if (![reader canAddOutput:trackOutput]) {
-        NSLog(@"TCVideoPlayer: Cannot add audio track output");
+        trussc::logWarning("VideoPlayer") << "Cannot add audio track output";
         return nil;
     }
     [reader addOutput:trackOutput];
 
     // Start reading
     if (![reader startReading]) {
-        NSLog(@"TCVideoPlayer: Failed to start reading audio: %@", reader.error);
+        trussc::logWarning("VideoPlayer") << "Failed to start reading audio: " << tcLogText(reader.error);
         return nil;
     }
 
@@ -624,12 +647,12 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
     }
 
     if (reader.status == AVAssetReaderStatusFailed) {
-        NSLog(@"TCVideoPlayer: Audio extraction failed: %@", reader.error);
+        trussc::logWarning("VideoPlayer") << "Audio extraction failed: " << tcLogText(reader.error);
         return nil;
     }
 
-    NSLog(@"TCVideoPlayer: Extracted %lu bytes of audio data (ADTS: %s)",
-          (unsigned long)audioData.length, isAAC ? "yes" : "no");
+    trussc::logVerbose("VideoPlayer") << "Extracted " << (unsigned long)audioData.length
+        << " bytes of audio data (ADTS: " << (isAAC ? "yes" : "no") << ")";
     return audioData;
 }
 
@@ -696,6 +719,16 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 void VideoPlayer::updatePlatform() {
     if (!platformHandle_) return;
     TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;
+    if (impl.playerItem.status == AVPlayerItemStatusFailed) {
+        NSError* error = impl.playerItem.error;
+        impl->playbackErrors_.report(error ? tcLogText(error.localizedDescription) : "Video playback failed",
+                                    error ? static_cast<int64_t>(error.code) : 0);
+    }
+    auto error = impl->playbackErrors_.take();
+    if (!error.message.empty()) {
+        reportPlaybackError(error.message, error.errorCode);
+        return;
+    }
     [impl update];
 
     // Copy pixels from Objective-C side
@@ -913,7 +946,7 @@ static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
         CGImageRef cgImage = tcv_copy_cgimage_at_time_ios(generator, requestTime, NULL, &error);
         if (!cgImage) {
             if (error) {
-                NSLog(@"TCVideoPlayer::extractFrame error: %@", error);
+                trussc::logWarning("VideoPlayer") << "extractFrame error: " << tcLogText(error);
             }
             return false;
         }

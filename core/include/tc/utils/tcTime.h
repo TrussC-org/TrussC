@@ -32,41 +32,58 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 namespace internal {
 
-// Clock for elapsed time measurement
-class ElapsedTimeClock {
-public:
-    ElapsedTimeClock() {
-        reset();
-    }
+// ---------------------------------------------------------------------------
+// The elapsed-time clock (#229)
+// ---------------------------------------------------------------------------
+// One clock for everything: std::chrono::steady_clock with a single origin
+// taken at program start (during static initialization of tcGlobal.cpp), not
+// at whichever call happens to come first. It is never reset: framework code
+// that needs a timestamp (ScreenRecorder, the tc_get_health uptime) reads
+// getUptime(), the loops measure steady_clock intervals, and Node timers
+// count down by getDeltaTime().
+//
+// resetElapsedTimeCounter() does not move the origin: it only sets a display
+// offset that the public getElapsedTime*() family subtracts, so resetting the
+// counter can never delay or starve framework timing.
+//
+// Non-inline (tcGlobal.cpp): the hot-reload Host and Guest share one clock.
 
-    void reset() {
-        startTime_ = std::chrono::steady_clock::now();
-    }
+// Time since program start. Monotonic, never reset.
+std::chrono::steady_clock::duration getUptime();
 
-    std::chrono::steady_clock::duration getElapsed() const {
-        return std::chrono::steady_clock::now() - startTime_;
-    }
+// Display offset subtracted by getElapsedTime*() (set by resetElapsedTimeCounter()).
+std::chrono::steady_clock::duration getElapsedTimeOffset();
+void setElapsedTimeOffset(std::chrono::steady_clock::duration offset);
 
-private:
-    std::chrono::steady_clock::time_point startTime_;
-};
+// Time since program start in seconds (double). Monotonic, never reset.
+inline double getUptimeSeconds() {
+    return std::chrono::duration<double>(getUptime()).count();
+}
 
-// Non-inline: Host/Guest share the same clock on Windows hot-reload
-ElapsedTimeClock& getElapsedClock();
+// What getElapsedTime*() report: uptime minus the display offset. Clamped at
+// zero so a reset racing with a read on another thread never goes negative.
+inline std::chrono::steady_clock::duration getElapsedDuration() {
+    auto d = getUptime() - getElapsedTimeOffset();
+    return d.count() < 0 ? std::chrono::steady_clock::duration::zero() : d;
+}
 
-// String replacement (for getTimestampString)
+// String replacement (for getTimestampString). Empty patterns match nothing;
+// replacements are left-to-right, nonoverlapping, and are not searched again.
 inline void stringReplace(std::string& input, const std::string& searchStr, const std::string& replaceStr) {
+    if (searchStr.empty()) return;
     auto pos = input.find(searchStr);
+    if (pos == std::string::npos) return;
+    std::string result;
+    result.reserve(input.size());
+    std::size_t start = 0;
     while (pos != std::string::npos) {
-        input.replace(pos, searchStr.size(), replaceStr);
-        pos += replaceStr.size();
-        std::string nextfind(input.begin() + pos, input.end());
-        auto nextpos = nextfind.find(searchStr);
-        if (nextpos == std::string::npos) {
-            break;
-        }
-        pos += nextpos;
+        result.append(input, start, pos - start);
+        result += replaceStr;
+        start = pos + searchStr.size();
+        pos = input.find(searchStr, start);
     }
+    result.append(input, start, std::string::npos);
+    input.swap(result);
 }
 // Platform-specific localtime (Windows: localtime_s, others: localtime)
 inline std::tm safeLocaltime(const std::time_t* t) {
@@ -85,39 +102,52 @@ inline std::tm safeLocaltime(const std::time_t* t) {
 // Elapsed time
 // ---------------------------------------------------------------------------
 
-/// Reset elapsed time counter
+/// Restart the counter that getElapsedTime(), getElapsedTimef(),
+/// getElapsedTimeMillis(), getElapsedTimeMicros() and getFrameElapsedTime()
+/// report. Display only: framework timing (Node timers, the loop, recording)
+/// keeps running on the underlying clock and is not affected. A difference of
+/// two getElapsedTime*() readings taken across a reset is wrong (negative, or
+/// wrapped for the unsigned Millis/Micros): measure durations with
+/// getSystemTimeMicros() differences as int64_t.
 inline void resetElapsedTimeCounter() {
-    internal::getElapsedClock().reset();
+    internal::setElapsedTimeOffset(internal::getUptime());
 }
 
-/// Get elapsed time in seconds (float)
+/// Get elapsed time in seconds (float). Same clock as getElapsedTime(); float
+/// loses precision after about a day of uptime (7.8 ms steps at 18 h), so use
+/// it for animation and display; getElapsedTime() (double) keeps full
+/// precision.
 inline float getElapsedTimef() {
-    return std::chrono::duration<float>(internal::getElapsedClock().getElapsed()).count();
+    return std::chrono::duration<float>(internal::getElapsedDuration()).count();
 }
 
 /// Get elapsed time in milliseconds
 inline uint64_t getElapsedTimeMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
-        internal::getElapsedClock().getElapsed()).count();
+        internal::getElapsedDuration()).count();
 }
 
 /// Get elapsed time in microseconds
 inline uint64_t getElapsedTimeMicros() {
     return std::chrono::duration_cast<std::chrono::microseconds>(
-        internal::getElapsedClock().getElapsed()).count();
+        internal::getElapsedDuration()).count();
 }
 
 // ---------------------------------------------------------------------------
 // System time
 // ---------------------------------------------------------------------------
 
-/// Get system time in milliseconds (Unix time)
+/// Get system time in milliseconds (Unix time). Wall clock: it follows clock
+/// adjustments (NTP steps, manual changes), so a later reading can be smaller.
+/// Take differences as int64_t, never as unsigned.
 inline uint64_t getSystemTimeMillis() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-/// Get system time in microseconds
+/// Get system time in microseconds (Unix time). Wall clock, like
+/// getSystemTimeMillis(): take differences as int64_t (a clock step can make
+/// t1 < t0, and an unsigned difference would wrap).
 inline uint64_t getSystemTimeMicros() {
     return std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();

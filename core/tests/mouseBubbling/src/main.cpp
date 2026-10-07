@@ -8,6 +8,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcCoreTest.h"
 
 #include <cstdio>
 #include <string>
@@ -15,6 +16,8 @@
 
 using namespace std;
 using namespace tc;
+
+namespace {
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -60,14 +63,14 @@ public:
 class Driver {
 public:
     Driver() {
-        prev_ = tc::internal::currentWindowCtx;
-        tc::internal::currentWindowCtx = &win_.context();   // grab state lands here
+        prev_ = tc::internal::currentWindowCtx();
+        tc::internal::currentWindowCtx() = &win_.context();   // grab state lands here
     }
     ~Driver() {
-        win_.context().rootNode = nullptr;
-        tc::internal::currentWindowCtx = prev_;
+        win_.context().rootNode.reset();
+        tc::internal::currentWindowCtx() = prev_;
     }
-    void setRoot(Node* root) { win_.context().rootNode = root; }
+    void setRoot(const Node::Ptr& root) { win_.context().rootNode = root; }
     tc::internal::WindowContext& ctx() { return win_.context(); }
 
     void press(float x, float y, int button = 0) {
@@ -93,7 +96,9 @@ private:
     tc::internal::WindowContext* prev_ = nullptr;
 };
 
-int main() {
+} // namespace
+
+TC_CORE_TEST_MAIN() {
     Driver drv;
 
     // Tree: root(0,0,800,600) > panel(100,100,400,300) > label(50,50,100,40)
@@ -107,7 +112,7 @@ int main() {
     root->addChild(panel);
     panel->addChild(label);
 
-    drv.setRoot(root.get());
+    drv.setRoot(root);
     auto& ctx = drv.ctx();
 
     // --- 1. press on the label bubbles to the consuming panel -------------
@@ -118,7 +123,7 @@ int main() {
     check("root not reached (panel consumed)", root->pressCount == 0);
     check("panel got PANEL-local coordinates",
           panel->lastLocal.x == 70.0f && panel->lastLocal.y == 60.0f);
-    check("grab goes to the consumer (panel)", ctx.grabbedNode == panel.get());
+    check("grab goes to the consumer (panel)", ctx.grabbedNode.lock() == panel);
 
     // --- 2. drag + release follow the grab --------------------------------
     drv.move(180, 165);
@@ -126,20 +131,20 @@ int main() {
     check("label gets no drag", label->dragCount == 0);
     drv.release(180, 165);
     check("release goes to the grabbed panel", panel->releaseCount == 1);
-    check("grab cleared after release", ctx.grabbedNode == nullptr);
+    check("grab cleared after release", ctx.grabbedNode.expired());
 
     // --- 3. nobody consumes: event bubbles through and dies ---------------
     label->consume_ = false; panel->consume_ = false;
     int rootBefore = root->pressCount;
     drv.press(170, 160);
     check("press walks the whole chain (root reached)", root->pressCount == rootBefore + 1);
-    check("unconsumed press grabs nothing", ctx.grabbedNode == nullptr);
+    check("unconsumed press grabs nothing", ctx.grabbedNode.expired());
 
     // --- 4. front-most consumer stops the walk ----------------------------
     label->consume_ = true;
     int panelBefore = panel->pressCount;
     drv.press(170, 160);
-    check("consuming label stops the bubble (grabs the pointer)", ctx.grabbedNode == label.get());
+    check("consuming label stops the bubble (grabs the pointer)", ctx.grabbedNode.lock() == label);
     check("panel not reached when label consumes", panel->pressCount == panelBefore);
     drv.release(170, 160);
 

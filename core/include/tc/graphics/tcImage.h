@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/utils/tcDebugName.h"
 
 // =============================================================================
 // tcImage.h - Image loading, drawing, and saving
@@ -27,13 +28,18 @@ public:
     Image() = default;
     ~Image() { clear(); }
 
+    // Name this object for MCP inspection; empty names are listed by index.
+    void setDebugName(const std::string& name) { debugName_.set(name); }
+    const std::string& getDebugName() const { return debugName_.get(); }
+
     // No copy
     Image(const Image&) = delete;
     Image& operator=(const Image&) = delete;
 
     // Move support
     Image(Image&& other) noexcept
-        : pixels_(std::move(other.pixels_))
+        : debugName_(std::move(other.debugName_), this)
+        , pixels_(std::move(other.pixels_))
         , texture_(std::move(other.texture_))
         , dirty_(other.dirty_)
         , mipmaps_(other.mipmaps_)
@@ -46,6 +52,7 @@ public:
 
     Image& operator=(Image&& other) noexcept {
         if (this != &other) {
+            debugName_.moveFrom(other.debugName_);
             pixels_ = std::move(other.pixels_);
             texture_ = std::move(other.texture_);
             dirty_ = other.dirty_;
@@ -115,6 +122,7 @@ public:
     void allocate(int width, int height, int channels = 4, bool mipmaps = false) {
         clear();
         pixels_.allocate(width, height, channels);
+        if (!pixels_.isAllocated()) return;  // Pixels logged why
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Dynamic;
         // Dynamic so the texture can be re-uploaded with update(). When
@@ -228,6 +236,7 @@ public:
     // draw() uses HasTexture default implementation
 
 private:
+    internal::DebugName debugName_{internal::DebugObjectKind::Image, this};
     // Re-allocate the GPU texture from the current pixels_ contents using the
     // Image's stored usage and mipmaps flag. Called by halve/resize/crop/
     // mirror; works whether the Image was originally Immutable (load) or

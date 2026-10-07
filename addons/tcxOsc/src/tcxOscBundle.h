@@ -17,6 +17,10 @@ public:
     // Timetag representing immediate execution
     static constexpr uint64_t TIMETAG_IMMEDIATELY = 1;
 
+    // Deepest bundle nesting fromBytes() accepts, counting the outermost
+    // bundle as level 1. Data nested deeper fails to parse as a whole.
+    static constexpr int MAX_NESTING_DEPTH = 16;
+
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
     explicit OscBundle(uint64_t timetag) : timetag_(timetag) {}
 
@@ -70,11 +74,26 @@ public:
         return OscBundle();
     }
 
+    // Child bundle without a copy; nullptr if the element is not a bundle.
+    // Valid while this bundle is alive and no element is added or removed.
+    const OscBundle* bundleAt(size_t index) const {
+        if (index >= elements_.size()) return nullptr;
+        return std::get_if<OscBundle>(&elements_[index]);
+    }
+
     // -------------------------------------------------------------------------
     // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
+    // ok is false when nesting exceeds MAX_NESTING_DEPTH, any element is
+    // truncated (its size runs past the end of the data), or any nested
+    // message or bundle fails to parse (see OscMessage::fromBytes()): the
+    // whole bundle is rejected, not a part of it.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
+    // Same, and paddingMissing tells whether any message in the bundle ends
+    // before its zero padding to 4 bytes (it still parses, as in
+    // OscMessage::fromBytes()).
+    static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing);
 
     // -------------------------------------------------------------------------
     // Bundle detection (check if data starts with "#bundle")
@@ -95,6 +114,10 @@ public:
     }
 
 private:
+    // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
+    static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
+                                      bool& paddingMissing, int depth);
+
     uint64_t timetag_;
     std::vector<Element> elements_;
 };

@@ -38,6 +38,16 @@ ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 # Helper Functions
 # =============================================================================
 
+def configure_output():
+    # Write our stdout/stderr as UTF-8 and replace what cannot be encoded,
+    # instead of raising. Test output is echoed through print() and carries
+    # non-ASCII text (filePath logs Japanese file names). On Windows a pipe
+    # defaults to the ANSI code page (cp1252 on the CI runners), where print()
+    # raised UnicodeEncodeError and ended the whole run.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
 def get_platform_info():
     system = platform.system()
     if system == "Windows":
@@ -88,6 +98,29 @@ def find_project_generator(root_dir, platform_info):
         print(f" - {p}")
     sys.exit(1)
 
+
+_target_flags_cache = {}
+
+def update_target_flags(pg_bin, web):
+    # `trusscli update` keeps the targets saved in a project's (gitignored)
+    # CMakePresets.json, so a native sweep after an earlier --web run would
+    # reconfigure build-web every time (and fail without emsdk). Name the
+    # exact target set instead: --web or --no-web, never android / ios.
+    # A trusscli older than --no-web does not keep targets and rejects the
+    # flag, so it gets --web only.
+    key = str(pg_bin)
+    if key not in _target_flags_cache:
+        try:
+            r = subprocess.run([key, "update", "--help"], stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, timeout=60)
+            _target_flags_cache[key] = "--no-web" in r.stdout
+        except (OSError, subprocess.SubprocessError):
+            _target_flags_cache[key] = False
+    supported = _target_flags_cache[key]
+    if web:
+        return ["--web", "--no-android", "--no-ios"] if supported else ["--web"]
+    return ["--no-web", "--no-android", "--no-ios"] if supported else []
+
 def find_examples(root_dir):
     examples_dir = os.path.join(root_dir, "examples")
     addons_dir = os.path.join(root_dir, "addons")
@@ -112,20 +145,47 @@ def find_examples(root_dir):
 
     return sorted(list(set(example_paths)))
 
-def find_addon_tests(root_dir):
+def find_addon_tests(root_dir, include_daily=False):
     # Behavioral test harnesses bundled with monorepo addons: addons/*/tests/
     # (a console TrussC project whose main() returns non-zero on failure). Same
     # convention as standalone addon repos (ci-actions runs tests/ if present).
+    # A harness with a `daily-only` marker file is heavy to build (e.g. tcxTls
+    # fetches and builds mbedTLS) and runs only with include_daily, which the
+    # daily workflow passes; the per-PR lane skips it.
+    # An addon may also ship tests-<name>/ next to tests/, e.g. a daily-only
+    # harness that needs a heavy dependency the per-PR tests/ avoids
+    # (tcxCurl: tests/ is curl-free, tests-curl/ links libcurl).
     addons_dir = os.path.join(root_dir, "addons")
     test_paths = []
     if os.path.exists(addons_dir):
         for addon in sorted(os.listdir(addons_dir)):
-            tdir = os.path.join(addons_dir, addon, "tests")
-            if os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src")):
+            addon_dir = os.path.join(addons_dir, addon)
+            if not os.path.isdir(addon_dir):
+                continue
+            names = sorted(n for n in os.listdir(addon_dir) if n == "tests" or n.startswith("tests-"))
+            for name in names:
+                tdir = os.path.join(addon_dir, name)
+                if not (os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src"))):
+                    continue
+                if not include_daily and os.path.isfile(os.path.join(tdir, "daily-only")):
+                    Colors.print(f"Skipping {os.path.relpath(tdir, root_dir)} (daily-only; pass --include-daily)", Colors.YELLOW)
+                    continue
                 test_paths.append(tdir)
     return test_paths
 
-def find_core_tests(root_dir):
+# core/tests/allCoreTests: one app that holds every combinable core test (see
+# its local.cmake and core/tests/common/tcCoreTest.h). It is the runner, not
+# a test itself.
+ALL_CORE_TESTS_NAME = "allCoreTests"
+
+def include_core_test(test_dir, include_daily):
+    if not include_daily and os.path.isfile(os.path.join(test_dir, "daily-only")):
+        Colors.print(f"Skipping core/tests/{os.path.basename(test_dir)} "
+                     "(daily-only; pass --include-daily)", Colors.YELLOW)
+        return False
+    return True
+
+def find_core_tests(root_dir, include_daily=False):
     # Headless behavioral regression tests for the core: core/tests/*/ (each a
     # console TrussC project whose main() returns non-zero on failure). Same
     # convention as addon tests, but owned by core.
@@ -134,18 +194,27 @@ def find_core_tests(root_dir):
     if os.path.exists(tests_dir):
         for name in sorted(os.listdir(tests_dir)):
             tdir = os.path.join(tests_dir, name)
-            if os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src")):
+            if name == ALL_CORE_TESTS_NAME:
+                continue
+            if (os.path.isdir(tdir) and os.path.exists(os.path.join(tdir, "src"))
+                    and include_core_test(tdir, include_daily)):
                 test_paths.append(tdir)
     return test_paths
 
-def find_core_web_tests(root_dir):
+def is_combined_core_test(test_dir):
+    # Built into allCoreTests: a src/main.cpp and no `own-binary` marker. The
+    # same rule as core/tests/allCoreTests/local.cmake; keep the two in sync.
+    return (os.path.isfile(os.path.join(test_dir, "src", "main.cpp"))
+            and not os.path.isfile(os.path.join(test_dir, "own-binary")))
+
+def find_core_web_tests(root_dir, include_daily=False):
     # The trusscli project core tests that ALSO run as a WebAssembly build under
     # node: those carrying a `web-test` marker file. Web-only behaviour
     # (#ifdef __EMSCRIPTEN__) is otherwise only ever compiled in CI, never run.
-    return [t for t in find_core_tests(root_dir)
+    return [t for t in find_core_tests(root_dir, include_daily=include_daily)
             if os.path.isfile(os.path.join(t, "web-test"))]
 
-def find_core_unit_tests(root_dir):
+def find_core_unit_tests(root_dir, include_daily=False):
     # Standalone headless unit tests for the core: core/tests/*/ dirs that ship
     # their OWN committed CMakeLists.txt (built with plain cmake, NOT trusscli).
     # Used for tests that must compile sokol/etc. directly (e.g. with the dummy
@@ -160,12 +229,14 @@ def find_core_unit_tests(root_dir):
             # tests have src/ and only a generated, gitignored CMakeLists.txt).
             if (os.path.isdir(tdir)
                     and os.path.exists(os.path.join(tdir, "CMakeLists.txt"))
-                    and not os.path.exists(os.path.join(tdir, "src"))):
+                    and not os.path.exists(os.path.join(tdir, "src"))
+                    and include_core_test(tdir, include_daily)):
                 test_paths.append(tdir)
     return test_paths
 
 def find_test_binary(test_dir, platform_info):
-    # trusscli names the binary after the project dir. addons/*/tests -> "tests";
+    # trusscli names the binary after the project dir. addons/*/tests -> "tests"
+    # (addons/*/tests-<name> -> "tests-<name>");
     # core/tests/<name> -> "<name>". On macOS a TrussC app is
     # <name>.app/Contents/MacOS/<name>; on Windows <name>.exe. Search the tree.
     base = os.path.basename(os.path.normpath(test_dir))
@@ -176,25 +247,35 @@ def find_test_binary(test_dir, platform_info):
                 return p
     return None
 
-def run_test_binary(binary, cwd, launcher=None):
+def run_test_binary(binary, cwd, launcher=None, args=(), timings=None, timing_name=None):
     # Run a test executable, CAPTURE its output and echo it through our own
     # (flushed) stdout. Inherited-handle child output gets lost or reordered
     # on the Windows CI runners, which made failing tests undiagnosable.
     # launcher: an interpreter to run it with (node for a web test's .js).
-    cmd = ([launcher] if launcher else []) + [binary]
+    # args: arguments after the binary (the test name for allCoreTests).
+    cmd = ([launcher] if launcher else []) + [binary] + list(args)
+    t0 = time.monotonic()
     try:
         r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT, timeout=600)
     except subprocess.TimeoutExpired as e:
+        r = None
+        timed_out = e
+    elapsed = time.monotonic() - t0
+    if r is None:
+        e = timed_out
         if e.stdout:
             print(e.stdout.decode('utf-8', errors='replace'), flush=True)
         print("  (test timed out after 600s)", flush=True)
-        return False
-    if r.stdout:
+    elif r.stdout:
         print(r.stdout.decode('utf-8', errors='replace'), flush=True)
-    if r.returncode != 0:
+    if r is not None and r.returncode != 0:
         print(f"  (exit code {r.returncode} / 0x{r.returncode & 0xFFFFFFFF:08X})", flush=True)
-    return r.returncode == 0
+    ok = r is not None and r.returncode == 0
+    if timings is not None:
+        timings.append((timing_name, elapsed, ok))
+        print(f"  Wall time: {elapsed:.3f}s ({timing_name})", flush=True)
+    return ok
 
 def run_command(cmd, cwd, verbose=False):
     try:
@@ -208,6 +289,26 @@ def run_command(cmd, cwd, verbose=False):
             if e.stdout:
                 print(e.stdout.decode('utf-8', errors='replace'))
         return False
+
+def run_timed_test_binary(binary, cwd, options, launcher=None, args=()):
+    # Only core sweeps collect timings. Measure the process run, excluding
+    # configure/build and output printing by the suite around this call.
+    timings = getattr(options, "core_test_timings", None)
+    if timings is None:
+        return run_test_binary(binary, cwd, launcher=launcher, args=args)
+    name = os.path.relpath(cwd, ROOT_DIR)
+    if launcher:
+        name += " (web)"
+    return run_test_binary(binary, cwd, launcher=launcher, args=args,
+                           timings=timings, timing_name=name)
+
+def print_core_test_timings(timings):
+    print("")
+    Colors.print("=== Core Test Wall Times (slowest first; runs only) ===", Colors.BLUE)
+    if not timings:
+        print("No core tests ran.")
+    for name, elapsed, ok in sorted(timings, key=lambda t: (-t[1], t[0])):
+        print(f"  {elapsed:9.3f}s  {name}" + (" (FAILED)" if not ok else ""))
 
 def cmake_config_cmd(build_dir_name, platform_info):
     # Assemble the `cmake -S . -B <dir>` configure command for the current
@@ -224,34 +325,124 @@ def cmake_config_cmd(build_dir_name, platform_info):
     return cmd
 
 
-def build_and_run_test(test_dir, pg_bin, platform_info, args):
-    # Build a native console test project, then RUN it (non-zero exit = failure).
-    # Returns (ok, stage) where stage names what failed for the summary.
+def build_test_project(test_dir, pg_bin, platform_info, args):
+    # trusscli update + configure + build a native console project. Returns
+    # (binary, stage): the built executable, or None and the stage that failed.
     pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+    pg_cmd += update_target_flags(pg_bin, web=False)
     if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
-        return False, "update"
+        return None, "update"
 
     build_dir_name = platform_info["build_dir"]
     cmd_config = cmake_config_cmd(build_dir_name, platform_info)
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
-        return False, "configure"
+        return None, "configure"
 
     cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
     if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
         import multiprocessing
         cmd_build.extend(["-j", str(multiprocessing.cpu_count())])
     if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
-        return False, "build"
+        return None, "build"
 
     binary = find_test_binary(test_dir, platform_info)
     if not binary:
         Colors.print("  Test binary not found after build!", Colors.RED)
-        return False, "binary-missing"
+        return None, "binary-missing"
+    return binary, None
+
+def build_and_run_test(test_dir, pg_bin, platform_info, args):
+    # Build a native console test project, then RUN it (non-zero exit = failure).
+    # Returns (ok, stage) where stage names what failed for the summary.
+    binary, stage = build_test_project(test_dir, pg_bin, platform_info, args)
+    if not binary:
+        return False, stage
 
     Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
-    if not run_test_binary(binary, cwd=test_dir):   # captured + echoed (see run_test_binary)
+    if not run_timed_test_binary(binary, test_dir, args):
         return False, "run"
     return True, None
+
+def run_combined_core_tests(tests, pg_bin, platform_info, args):
+    # Build core/tests/allCoreTests ONCE (every test in `tests` is compiled
+    # into it), then run each test as its own process: `allCoreTests <name>`
+    # with cwd = that test's own dir, so process-wide state is never shared
+    # and the test sees the same cwd as when built alone. Returns 0 if all
+    # pass, 1 otherwise (also when the build fails or a test is missing).
+    runner_dir = os.path.join(ROOT_DIR, "core", "tests", ALL_CORE_TESTS_NAME)
+    runner_name = os.path.relpath(runner_dir, ROOT_DIR)
+    by_name = {os.path.basename(t): t for t in tests}
+    # local.cmake deliberately compiles daily-only tests too. Validate the
+    # FULL inventory before selecting runs, so skipping a daily test cannot
+    # hide a missing registration or a stale CMake selection rule.
+    expected_names = {os.path.basename(t) for t in find_core_tests(ROOT_DIR, include_daily=True)
+                      if is_combined_core_test(t)}
+    Colors.print(f"Found {len(tests)} core test(s) for {ALL_CORE_TESTS_NAME}", Colors.YELLOW)
+    print("")
+
+    failed = []
+    Colors.print(f"Building: {runner_name}", Colors.YELLOW)
+    t0 = time.monotonic()
+    binary, stage = build_test_project(runner_dir, pg_bin, platform_info, args)
+    build_secs = time.monotonic() - t0
+    names = []
+    if binary:
+        Colors.print(f"  Built in {build_secs:.1f}s", Colors.GREEN)
+        try:
+            r = subprocess.run([binary, "--list"], cwd=runner_dir, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, timeout=60)
+            out = r.stdout.decode("utf-8", errors="replace")
+            if r.returncode != 0:
+                print(out, flush=True)
+                stage = "list"
+            else:
+                names = [n.strip() for n in out.splitlines() if n.strip()]
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"  {e}", flush=True)
+            stage = "list"
+        if not stage and not names:
+            Colors.print("  --list returned no tests", Colors.RED)
+            stage = "list-empty"
+    if stage:
+        Colors.print(f"  FAILED ({stage})", Colors.RED)
+        failed.append(f"{runner_name} ({stage})")
+
+    if stage:
+        failed.append(f"({len(tests)} core tests not run)")
+    else:
+        # Every combined test dir must be registered, and nothing else.
+        for n in sorted(expected_names - set(names)):
+            failed.append(f"core/tests/{n} (not registered in {ALL_CORE_TESTS_NAME})")
+        for n in sorted(set(names) - expected_names):
+            failed.append(f"core/tests/{n} (registered, but no such combined test dir)")
+
+    run_names = [n for n in names if n in by_name] if not stage else []
+    passed = 0
+    t0 = time.monotonic()
+    for i, n in enumerate(run_names):
+        tdir = by_name[n]
+        Colors.print(f"[{i+1}/{len(run_names)}] Running: {os.path.relpath(tdir, ROOT_DIR)} "
+                     f"({ALL_CORE_TESTS_NAME} {n})", Colors.YELLOW)
+        if run_timed_test_binary(binary, tdir, args, args=[n]):
+            Colors.print("  Passed!", Colors.GREEN)
+            passed += 1
+        else:
+            Colors.print("  FAILED (run)", Colors.RED)
+            failed.append(f"{os.path.relpath(tdir, ROOT_DIR)} (run)")
+    run_secs = time.monotonic() - t0
+
+    print("")
+    Colors.print("=== Core Test Summary ===", Colors.BLUE)
+    print(f"{ALL_CORE_TESTS_NAME} build: {build_secs:.1f}s, runs: {run_secs:.1f}s")
+    print(f"Total:  {len(tests)}")
+    Colors.print(f"Passed: {passed}", Colors.GREEN)
+    if failed:
+        Colors.print(f"Failed: {len(failed)}", Colors.RED)
+        for f in failed:
+            print(f"  - {f}")
+        return 1
+    Colors.print("All core tests passed!", Colors.GREEN)
+    return 0
 
 def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
     # Build a standalone CMake test (its own committed CMakeLists.txt, no
@@ -274,7 +465,7 @@ def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
         return False, "binary-missing"
 
     Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
-    if not run_test_binary(binary, cwd=test_dir):   # captured + echoed (see run_test_binary)
+    if not run_timed_test_binary(binary, test_dir, args):
         return False, "run"
     return True, None
 
@@ -297,7 +488,8 @@ def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
         Colors.print("  node not found (source emsdk_env or put node on PATH)", Colors.RED)
         return False, "node-missing"
 
-    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake", "--web"]
+    pg_cmd = [str(pg_bin), "update", "-p", test_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
+    pg_cmd += update_target_flags(pg_bin, web=True)
     if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
         return False, "update"
 
@@ -320,7 +512,7 @@ def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
         return False, "binary-missing"
 
     Colors.print(f"  Running node {os.path.relpath(js, test_dir)} ...", Colors.YELLOW)
-    if not run_test_binary(js, cwd=test_dir, launcher=node):
+    if not run_timed_test_binary(js, test_dir, args, launcher=node):
         return False, "web-run"
     return True, None
 
@@ -356,14 +548,16 @@ def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_
 # =============================================================================
 
 def main():
+    configure_output()
     parser = argparse.ArgumentParser(description="TrussC Batch Build Script")
     parser.add_argument('--clean', action='store_true', help="Clean build directories before building")
     parser.add_argument('--web', action='store_true', help="Also build for WebAssembly")
     parser.add_argument('--web-only', action='store_true', help="Build for WebAssembly only (skip native build)")
     parser.add_argument('--test-only', action='store_true', help="Build ONLY AllFeaturesExample for quick CI check")
     parser.add_argument('--one-per-addon', action='store_true', help="Build the first example-* of each bundled addon (per-addon dependency compile coverage)")
-    parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist.")
-    parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). No-op if none exist. With --web also, with --web-only instead: build the ones with a web-test marker for WebAssembly and run them under node.")
+    parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist. Harnesses with a daily-only marker are skipped unless --include-daily is given.")
+    parser.add_argument('--include-daily', action='store_true', help="With --addon-tests-only or --core-tests-only: also run harnesses marked daily-only (the daily workflow passes this)")
+    parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). Daily-only harnesses are skipped unless --include-daily is given. No-op if none exist. With --web also, with --web-only instead: build the ones with a web-test marker for WebAssembly and run them under node.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
 
@@ -393,35 +587,48 @@ def main():
     # behavioral gate meant to run on every CI, separate from the example
     # builds. No-op (exit 0) when no addon ships a tests/ dir.
     if args.addon_tests_only:
-        tests = find_addon_tests(ROOT_DIR)
+        tests = find_addon_tests(ROOT_DIR, include_daily=args.include_daily)
         if not tests:
             Colors.print("No addon tests found (addons/*/tests/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
         sys.exit(run_test_suite(tests, "addon", pg_bin, platform_info, args))
 
     # Core behavioral tests (core/tests/*/): same build+run gate, owned by core.
-    # Two flavours: trusscli project tests (src/, link libTrussC) and standalone
-    # CMake unit tests (committed CMakeLists.txt, no libTrussC link — e.g. sokol
-    # dummy-backend tests). Both run; the job fails if either has a failure.
+    # Two flavours: trusscli project tests (src/, link libTrussC; most are
+    # built into the one app core/tests/allCoreTests, see
+    # run_combined_core_tests) and standalone CMake unit tests (committed
+    # CMakeLists.txt, no libTrussC link — e.g. sokol dummy-backend tests).
+    # Both run; the job fails if either has a failure.
     # With --web / --web-only, the project tests carrying a `web-test` marker
     # are also / instead built for WebAssembly and run under node.
     if args.core_tests_only:
         native = not args.web_only
-        tests = find_core_tests(ROOT_DIR) if native else []
-        unit_tests = find_core_unit_tests(ROOT_DIR) if native else []
-        web_tests = find_core_web_tests(ROOT_DIR) if args.web else []
-        if not tests and not unit_tests and not web_tests:
+        tests = find_core_tests(ROOT_DIR, include_daily=args.include_daily) if native else []
+        unit_tests = find_core_unit_tests(ROOT_DIR, include_daily=args.include_daily) if native else []
+        web_tests = find_core_web_tests(ROOT_DIR, include_daily=args.include_daily) if args.web else []
+        all_combined = [t for t in find_core_tests(ROOT_DIR, include_daily=True)
+                        if is_combined_core_test(t)] if native else []
+        if not all_combined and not tests and not unit_tests and not web_tests:
             Colors.print("No core tests found (core/tests/*/); nothing to do.", Colors.YELLOW)
             sys.exit(0)
         rc = 0
-        if tests:
-            rc |= run_test_suite(tests, "core", pg_bin, platform_info, args)
+        args.core_test_timings = []
+        # Most project tests are built into ONE app (core/tests/allCoreTests)
+        # and run one process each; those with an `own-binary` marker are
+        # built and run alone, as before.
+        combined = [t for t in tests if is_combined_core_test(t)]
+        own = [t for t in tests if not is_combined_core_test(t)]
+        if all_combined:
+            rc |= run_combined_core_tests(combined, pg_bin, platform_info, args)
+        if own:
+            rc |= run_test_suite(own, "core own-binary", pg_bin, platform_info, args)
         if unit_tests:
             rc |= run_test_suite(unit_tests, "core unit", pg_bin, platform_info, args,
                                  builder=build_and_run_unit_test)
         if web_tests:
             rc |= run_test_suite(web_tests, "core web", pg_bin, platform_info, args,
                                  builder=build_and_run_web_test)
+        print_core_test_timings(args.core_test_timings)
         sys.exit(rc)
 
     if args.test_only:
@@ -483,8 +690,7 @@ def main():
 
         # Regenerate build files for each example before building
         pg_cmd = [str(pg_bin), "update", "-p", example_dir, "--tc-root", ROOT_DIR, "--ide", "cmake"]
-        if args.web:
-            pg_cmd.append("--web")
+        pg_cmd += update_target_flags(pg_bin, web=args.web)
         
         if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
             Colors.print(f"  Project update failed!", Colors.RED)

@@ -1,0 +1,2 @@
+Marker: build_all.py --web-only --core-tests-only also builds this test for
+WebAssembly and runs it under node (see core/tests/README.md).

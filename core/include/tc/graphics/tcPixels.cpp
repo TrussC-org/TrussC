@@ -14,24 +14,63 @@ bool Pixels::save(const fs::path& path) const {
     if (path.is_relative()) {
         savePath = getDataPath(path);
     }
+    // "" or "out/": fail before creating any folder
+    if (savePath.filename().empty()) {
+        logError("Pixels") << "No file name in path: " << savePath;
+        return false;
+    }
+    if (!internal::checkWriteTarget(path, savePath, "Pixels")) return false;
 
-    auto ext = savePath.extension().string();
-    // UTF-8 for stb (STBIW_WINDOWS_UTF8 makes stb wide-open it on Windows)
-    auto pathStr = internal::pathToUtf8(savePath);
+    // Encode to memory first: an encode error leaves an existing file
+    // untouched. The encoder follows the extension, whatever its case
+    // (.PNG, .Jpg); the file is written under the path as given.
+    auto ext = toLower(getFileExtension(savePath));
+    std::vector<unsigned char> encoded;
+    auto append = [](void* ctx, void* d, int size) {
+        auto* out = static_cast<std::vector<unsigned char>*>(ctx);
+        auto* bytes = static_cast<unsigned char*>(d);
+        out->insert(out->end(), bytes, bytes + size);
+    };
     int result = 0;
-
-    if (ext == ".png" || ext == ".PNG") {
-        result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
-    } else if (ext == ".jpg" || ext == ".jpeg" || ext == ".JPG" || ext == ".JPEG") {
-        result = stbi_write_jpg(pathStr.c_str(), width_, height_, channels_, data_, 90);
-    } else if (ext == ".bmp" || ext == ".BMP") {
-        result = stbi_write_bmp(pathStr.c_str(), width_, height_, channels_, data_);
+    if (ext == "jpg" || ext == "jpeg") {
+        result = stbi_write_jpg_to_func(append, &encoded, width_, height_, channels_, data_, 90);
+    } else if (ext == "bmp") {
+        result = stbi_write_bmp_to_func(append, &encoded, width_, height_, channels_, data_);
     } else {
         // Default is PNG
-        result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
+        result = stbi_write_png_to_func(append, &encoded, width_, height_, channels_, data_, width_ * channels_);
+    }
+    if (result == 0 || encoded.empty()) {
+        logError("Pixels") << "Cannot encode image: " << savePath;
+        return false;
     }
 
-    return result != 0;
+    // Create a missing parent folder, like saveScreenshot()
+    std::error_code ec;
+    fs::path parent = savePath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError("Pixels") << "Cannot create folder: " << parent
+                               << " (" << ec.message() << ")";
+            return false;
+        }
+    }
+
+    // fs::path keeps Windows paths wide; the write and the close are checked
+    std::ofstream file(savePath, std::ios::binary);
+    if (!file.is_open()) {
+        logError("Pixels") << "Cannot create file: " << savePath;
+        return false;
+    }
+    file.write(reinterpret_cast<const char*>(encoded.data()),
+               static_cast<std::streamsize>(encoded.size()));
+    file.close();
+    if (file.fail()) {
+        logError("Pixels") << "Write error: " << savePath;
+        return false;
+    }
+    return true;
 }
 
 // Platform-specific image loader fallback (non-Apple stub)
@@ -113,24 +152,25 @@ void Pixels::halve() {
             int sx0 = std::min(2 * x,     sw - 1);
             int sx1 = std::min(2 * x + 1, sw - 1);
             for (int c = 0; c < ch; c++) {
-                int i00 = (sy0 * sw + sx0) * ch + c;
-                int i01 = (sy0 * sw + sx1) * ch + c;
-                int i10 = (sy1 * sw + sx0) * ch + c;
-                int i11 = (sy1 * sw + sx1) * ch + c;
+                const size_t i00 = internal::pixelOffset(sx0, sy0, sw, ch) + c;
+                const size_t i01 = internal::pixelOffset(sx1, sy0, sw, ch) + c;
+                const size_t i10 = internal::pixelOffset(sx0, sy1, sw, ch) + c;
+                const size_t i11 = internal::pixelOffset(sx1, sy1, sw, ch) + c;
+                const size_t di  = internal::pixelOffset(x, y, newW, ch) + c;
                 if (isF32) {
                     // F32 = already linear, average directly.
                     float avg = (srcF[i00] + srcF[i01] + srcF[i10] + srcF[i11]) * 0.25f;
-                    dstF[(y * newW + x) * ch + c] = avg;
+                    dstF[di] = avg;
                 } else {
                     bool linear = isLinearChannel(ch, c);
-                    auto fetch = [&](int i) -> float {
+                    auto fetch = [&](size_t i) -> float {
                         float v = srcU[i] / 255.0f;
                         return linear ? v : sRGBToLinear(v);
                     };
                     float avg = (fetch(i00) + fetch(i01) + fetch(i10) + fetch(i11)) * 0.25f;
                     if (!linear) avg = linearToSRGB(avg);
                     avg = clampf(avg, 0.0f, 1.0f);
-                    dstU[(y * newW + x) * ch + c] = static_cast<unsigned char>(std::lround(avg * 255.0f));
+                    dstU[di] = static_cast<unsigned char>(std::lround(avg * 255.0f));
                 }
             }
         }
@@ -144,6 +184,7 @@ void Pixels::crop(int x, int y, int w, int h) {
 
     Pixels dst;
     dst.allocate(w, h, channels_, format_);
+    if (!dst.isAllocated()) return;
 
     const size_t bpp = (format_ == PixelFormat::F32)
                        ? (size_t)channels_ * sizeof(float)
@@ -385,10 +426,12 @@ void Pixels::resize(int newW, int newH) {
     // (newW x height_), then vertical into the final (newW x newH).
     Pixels intermediate;
     intermediate.allocate(newW, height_, channels_, format_);
+    if (!intermediate.isAllocated()) return;
     resample1D_X(*this, intermediate);
 
     Pixels final;
     final.allocate(newW, newH, channels_, format_);
+    if (!final.isAllocated()) return;
     resample1D_Y(intermediate, final);
 
     *this = std::move(final);

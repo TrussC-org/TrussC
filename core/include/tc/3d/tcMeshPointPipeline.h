@@ -66,6 +66,8 @@ public:
         if (initialized_) return;
         shader_     = sg_make_shader(tc_pointcloud_point_shader_desc(sg_query_backend()));
         shaderPrim_ = sg_make_shader(tc_pointcloud_point_prim_shader_desc(sg_query_backend()));
+        shaderReady_     = internal::internalShaderReady(shader_, "point");
+        shaderPrimReady_ = internal::internalShaderReady(shaderPrim_, "point primitive");
 
         // Unit quad corners as a triangle strip, in [-0.5, 0.5].
         const float corners[8] = {
@@ -153,12 +155,15 @@ public:
             colorFmt = wctx.currentFboColorFormat;
             sampleCount = wctx.currentFboSampleCount;
         } else {
-            colorFmt = _SG_PIXELFORMAT_DEFAULT;
-            sampleCount = sapp_sample_count();
+            const auto target = swapchainTargetFormat(wctx);
+            colorFmt = target.colorFormat;
+            sampleCount = target.sampleCount;
         }
 
         PointDrawCommand cmd{};
         cmd.vsp = makeParams();
+        // No shader for this style (warned once in ensureInit()): skip.
+        if (!(getPointStyle() == PointStyle::Pixel ? shaderPrimReady_ : shaderReady_)) return;
         if (getPointStyle() == PointStyle::Pixel) {
             // True 1px point primitive: draw the point buffer's positions directly.
             cmd.pip = getPrimPipeline(colorFmt, sampleCount);
@@ -220,16 +225,16 @@ private:
     bool initialized_ = false;
     sg_shader shader_{};       // quad splat (Square/Round)
     sg_shader shaderPrim_{};   // point primitive (Pixel)
+    bool shaderReady_ = false;
+    bool shaderPrimReady_ = false;
     sg_buffer quadBuf_{};
     std::map<int, sg_pipeline> pipelineCache_;
     std::map<int, sg_pipeline> primPipelineCache_;
 };
 
-// Singleton accessor. The instance lives in the first TU that calls this.
-inline PointPipeline& getPointPipeline() {
-    static PointPipeline instance;
-    return instance;
-}
+// Singleton accessor, defined in tcGlobal.cpp: one point pipeline per process
+// (see getPbrPipeline(); a Windows hot reload guest built its own, #249).
+PointPipeline& getPointPipeline();
 
 } // namespace internal
 

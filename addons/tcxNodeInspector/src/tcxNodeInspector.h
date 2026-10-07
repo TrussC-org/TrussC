@@ -30,6 +30,15 @@
 
 namespace tcx::nodeinspector {
 
+class NodeInspector;
+
+namespace internal {
+// Tests only: record a hand edit of `member` (of `mod` when non-null) the way
+// the Inspector panel does, without an ImGui frame (tcxNodeInspector/tests).
+void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod* mod,
+                           const std::string& member);
+}
+
 // Renders each reflected member as the matching ImGui widget. Read-only
 // values (getter-only TC_VALUE) render greyed out; enums render as a combo of
 // their labels. Public so an app can use it (or a subclass that overrides a
@@ -98,13 +107,17 @@ struct ImGuiReflector : ::trussc::Reflector {
 
 protected:
     // Run a widget; suppress inside a collapsed group, grey out when read-only.
-    // A change is recorded in `edited` under the member's path.
+    // A change is recorded in `edited` under the member's path. A value the
+    // MCP tools wrote (tcx_imgui_input) also makes the widget return true, so
+    // the change is applied, but it is not an edit by hand: not recorded.
     template <class F>
     bool edit(const char* name, F&& widget) {
         if (suppressDepth_ > 0) return false;
         if (!isReadOnly()) {
+            const unsigned int injectedBefore = tcx::imgui::detail::injectedValueCount();
             bool changed = widget();
-            if (changed && name) {
+            const bool injected = tcx::imgui::detail::injectedValueCount() != injectedBefore;
+            if (changed && name && !injected) {
                 std::string path;
                 for (auto& g : groupNames_) { path += g; path += '.'; }
                 edited.push_back(path + name);
@@ -204,6 +217,11 @@ public:
     // from an onRender listener — after the scene is drawn, so the gizmo's camera
     // projection is current-frame, and before tcxImGui's render. Root defaults to
     // getRootNode() (the running App); pass one to inspect a subtree instead.
+    // That root is held weakly (like every node the inspector keeps between
+    // frames): once it is freed, the inspector shows the parent the root was
+    // last seen under (updated every frame while the root lives, so adding
+    // or reparenting it after attach() is followed), and once that is gone
+    // too (or there was none), getRootNode().
     // Each returns the singleton, so a call chains into the instance API
     // (e.g. NodeInspector::attach(KEY_F1).setAccent(...)).
     //
@@ -258,6 +276,9 @@ public:
     void resetTouched() { touched_.clear(); }
 
 private:
+    friend void internal::recordTouchedForTests(NodeInspector&, ::tc::Node*, ::tc::Mod*,
+                                                const std::string&);
+
     Style    style_;
     bool     enabled_      = true;
     char     nameBuf_[128] = "";
@@ -275,12 +296,15 @@ private:
     void doAttach();                          // imguiSetup + onRender listener
     void doDetach();                          // drop the frame driver
     void ensureToggleKeyListener();
-    void ensureExitGuard();                   // drop listeners at exit (before teardown)
+    void ensureExitGuard();                   // drop listeners at exit / hot reload unload
+    void releaseListeners();                  // the cleanup both run
     ::tc::EventListener autoDraw_;             // onRender frame driver (attach)
-    ::tc::Node*         attachRoot_ = nullptr; // null => getRootNode() each frame
+    std::weak_ptr<::tc::Node> attachRoot_;     // empty or gone => attachParent_
+    std::weak_ptr<::tc::Node> attachParent_;   // attachRoot_'s last seen parent; gone => getRootNode()
     std::vector<int>    toggleKeys_;
     ::tc::EventListener toggleKeyListener_;    // installed once, then lives on
     ::tc::EventListener exitListener_;         // clears the above while events() is alive
+    ::tc::EventListener hotReloadUnloadListener_;   // same, before a hot reload unloads this generation
 
     // --- gizmo ---------------------------------------------------------------
     enum class GizmoMode { Translate, Rotate };
@@ -321,7 +345,7 @@ private:
     int        hoverAxis_ = -1;       // visual feedback (computed in drawGizmo)
     int        dragAxis_  = -1;       // claimed at press; -1 = not dragging
     GizmoMode  dragMode_  = GizmoMode::Translate;   // locked for the whole gesture
-    ::tc::Node* dragNode_ = nullptr;  // primary at press (cancel if selection dies)
+    std::weak_ptr<::tc::Node> dragNode_;   // primary at press (cancel if selection dies)
     ::tc::Vec3 dragWorldStart_;       // gizmo origin at press (node / centroid)
     ::tc::Vec3 dragAxisDir_;          // world unit axis (move dir / rotation normal)
     float      dragS0_ = 0.0f;        // translate: axis parameter of the grab point
@@ -336,20 +360,20 @@ private:
 
     // --- multi-selection -------------------------------------------------------
     std::vector<std::weak_ptr<::tc::Node>> selection_;
-    ::tc::Node* lastPrimary_ = nullptr;   // last core selectedNode we synced with
+    std::weak_ptr<::tc::Node> lastPrimary_;   // last core selectedNode we synced with
     void reconcileSelection();            // prune dead + collapse on external change
 
     // --- touched ---------------------------------------------------------------
-    // Keyed by node + mod + member path. The Inspector's widgets are reused
-    // for whichever node is selected (one ImGuiID for "radius" of every node),
-    // so the ImGui-level record can't say whose value it was — hence this one,
-    // and the Hierarchy / Inspector panels are kept out of the ImGui record.
+    // Keyed by node + mod type (short name, as getModByTypeName()) + member
+    // path. The Inspector's widgets are reused for whichever node is selected
+    // (one ImGuiID for "radius" of every node), so the ImGui-level record
+    // can't say whose value it was — hence this one, and the Hierarchy /
+    // Inspector panels are kept out of the ImGui record.
     struct TouchedMember {
         std::weak_ptr<::tc::Node> node;
         uint64_t          nodeId = 0;
         std::string       nodeType, nodeName;
-        const ::tc::Mod*  mod = nullptr;   // identity only (may have been removed since)
-        std::string       modType;
+        std::string       modType;         // short type name; empty = the node's own member
         std::string       member;          // "pos", "outline.color", "name"
         ::tc::Json        value;           // as of the last edit / read (reported once gone)
     };

@@ -106,8 +106,10 @@ jobs:
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       # The build directories' CMakeCache records absolute compiler paths (the
@@ -173,11 +175,11 @@ jobs:
       # The behavioral tests again, on top of the full build (cheap next to it).
       - name: Build & run addon tests
         shell: bash
-        run: ./examples/build_all.py --addon-tests-only --verbose
+        run: ./examples/build_all.py --addon-tests-only --include-daily --verbose
 
       - name: Build & run core tests
         shell: bash
-        run: ./examples/build_all.py --core-tests-only --verbose
+        run: ./examples/build_all.py --core-tests-only --include-daily --verbose
 
       - name: Compiler cache stats
         if: always()
@@ -246,6 +248,7 @@ jobs:
           ./tools/build_linux.sh
 
       - name: Build every example (Web)
+        id: web_examples
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --verbose
@@ -254,8 +257,11 @@ jobs:
       # marker (core/tests/*/web-test) are built for wasm and RUN under node, so
       # web-only behaviour (#ifdef __EMSCRIPTEN__) is exercised once a day. They
       # must not touch the canvas / GPU; a non-zero exit fails the job.
+      # An example failure must not hide web regressions; a skipped sweep means
+      # its prerequisites did not complete, so the tests cannot run either.
       - name: Build and run core tests (Web, under node)
-        run: ./examples/build_all.py --web-only --core-tests-only --verbose
+        if: ${{ !cancelled() && steps.web_examples.outcome != 'skipped' }}
+        run: ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
 
       - name: Compiler cache stats
         if: always()

@@ -26,17 +26,23 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <algorithm>
+#include <new>
 #include <cstdint>
+#include <cstdlib>
 #include <mutex>
 #include <atomic>
 #include <cstring>
 #include <cmath>
 #include "../../tcMath.h"
 #include "../events/tcEvent.h"
+#include "../utils/tcAtomicSharedPtr.h"
 #include "../utils/tcLog.h"
+#include "tcAudioAnalysis.h"
 
 namespace trussc {
 
+class Sound;
 
 // ---------------------------------------------------------------------------
 // SoundSource — abstract base for anything Sound::play() can consume.
@@ -73,6 +79,132 @@ protected:
 };
 
 
+namespace internal {
+
+// Interleaved sample count of `frames` frames of `channels` channels, for
+// sizing SoundBuffer::samples. False when channels < 1 or when the count
+// exceeds maxCount (pass samples.max_size()). The product is checked before
+// it is formed, so it cannot wrap where size_t is 32-bit (wasm32).
+inline bool interleavedSampleCount(uint64_t frames, int channels, size_t maxCount,
+                                   size_t& outCount) {
+    if (channels < 1) return false;
+    if (frames > maxCount / (size_t)channels) return false;
+    outCount = (size_t)frames * (size_t)channels;
+    return true;
+}
+
+// Most decoded samples per byte of encoded input that decodeReserveSamples
+// reserves for. The general rate, 16, is 48 kHz stereo down to 48 kbit/s.
+// MP3 frames run at 8 kbit/s or more (MPEG-2 / 2.5; MPEG-1 at 32 kbit/s or
+// more), so an MP3 decodes to at most 48 samples per byte (24 kHz stereo at
+// 8 kbit/s). Vorbis has no such floor; 32 covers its lowest common quality
+// settings (about 32 kbit/s for 44.1 kHz stereo). Streams that decode to
+// more still load: the buffer grows past the reservation.
+constexpr uint64_t kReserveSamplesPerInputByte = 16;
+constexpr uint64_t kReserveSamplesPerInputByteMp3 = 48;
+constexpr uint64_t kReserveSamplesPerInputByteVorbis = 32;
+
+// Interleaved samples to reserve before decoding a stream whose header states
+// `headerFrames` frames of `channels` channels, read from `inputBytes` bytes
+// of encoded input (0 when unknown). The stated length is only a hint: the
+// reservation is capped by what that much input plausibly decodes to
+// (samplesPerInputByte per byte, one of the kReserveSamplesPerInputByte*
+// rates) and by maxCount. Decoders append what actually decodes and grow the
+// buffer past the reservation when a stream holds more.
+inline size_t decodeReserveSamples(uint64_t headerFrames, int channels, uint64_t inputBytes,
+                                   uint64_t samplesPerInputByte, size_t maxCount) {
+    constexpr uint64_t kMax = ~(uint64_t)0;
+    if (channels < 1) return 0;
+    const uint64_t ch = (uint64_t)channels;
+    const uint64_t fromHeader = headerFrames > kMax / ch ? kMax : headerFrames * ch;
+    const uint64_t fromInput =
+        samplesPerInputByte != 0 && inputBytes > kMax / samplesPerInputByte
+            ? kMax : inputBytes * samplesPerInputByte;
+    uint64_t n = fromHeader < fromInput ? fromHeader : fromInput;
+    if (n > (uint64_t)maxCount) n = (uint64_t)maxCount;
+    return (size_t)n;
+}
+
+// Test hook, not a user setting: while nonzero, allocationFits() also
+// refuses any single allocation larger than this many bytes, so a headless
+// test can run the growth policy below against a memory limit on any
+// platform (core/tests/audioDiagnostics). 0, the default, turns it off.
+// State lives in tcSound_impl.cpp.
+void setAllocationLimitForTests(size_t bytes);
+size_t allocationLimitForTests();
+
+// Whether one allocation of `bytes` can be made right now. Web (wasm) builds
+// have exception catching off, so there a failed operator new aborts the page
+// instead of throwing std::bad_alloc; malloc, which returns null on failure
+// under ALLOW_MEMORY_GROWTH, is tried and released first. Elsewhere a failed
+// allocation throws and the callers catch it, so this is true unless a test
+// set a limit (setAllocationLimitForTests).
+inline bool allocationFits(size_t bytes) {
+    const size_t limit = allocationLimitForTests();
+    if (limit != 0 && bytes > limit) return false;
+#ifdef __EMSCRIPTEN__
+    // Held in a volatile: the compiler may otherwise drop an unused
+    // malloc / free pair and assume the allocation succeeded.
+    void* volatile p = std::malloc(bytes);
+    if (!p) return false;
+    std::free(p);
+#endif
+    return true;
+}
+
+// Grow the capacity of `buf` to hold at least `needed` samples. The new
+// capacity is twice the current one (geometric growth), or `preferred` when
+// it lies between `needed` and that (a decoder's stated length, so a stream
+// whose length is stated correctly ends without spare capacity). Never more
+// than twice the current capacity, so the growth follows what was actually
+// written.
+//
+// When that size cannot be allocated, smaller steps are tried, the current
+// capacity plus a half, a quarter, an eighth, ... of it, down to the
+// smallest one that still holds `needed`, and last `needed` itself; the
+// first that can be allocated is taken. On the web a size is checked before
+// it is allocated (allocationFits); elsewhere the std::bad_alloc of a failed
+// reserve is caught and the next size tried. A smaller step is only taken
+// after one at most twice its growth failed, so under a fixed memory limit
+// every such step leaves less than half of the room that was left before
+// it: near the limit the buffer is reallocated a logarithmic number of
+// times, not once per decode step, and a load that cannot finish fails as
+// soon as a step no longer fits. (`needed` itself needs no special rule: it
+// is only reached when a step at most twice its growth failed, too.)
+//
+// False, with `buf` unchanged, when even `needed` cannot be allocated.
+inline bool growSampleBuffer(std::vector<float>& buf, size_t needed, size_t preferred = 0) {
+    const size_t capacity = buf.capacity();
+    if (needed <= capacity) return true;
+    if (needed > buf.max_size()) return false;
+    size_t target = capacity > buf.max_size() / 2 ? buf.max_size() : capacity * 2;
+    if (preferred >= needed && preferred < target) target = preferred;
+    if (target < needed) target = needed;
+    // Reserve `n` samples if that can be allocated. target <= max_size(), and
+    // every size tried is at most target, so the byte count cannot wrap. (Web
+    // builds do not catch exceptions; there allocationFits decides.)
+    auto tryReserve = [&buf](size_t n) {
+        if (!allocationFits(n * sizeof(float))) return false;
+        try {
+            buf.reserve(n);
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+        return true;
+    };
+    if (tryReserve(target)) return true;
+    size_t smallestTried = target;
+    for (size_t step = capacity / 2; step > 0 && capacity + step >= needed; step /= 2) {
+        // Only sizes below what failed
+        if (capacity + step >= target) continue;
+        if (tryReserve(capacity + step)) return true;
+        smallestTried = capacity + step;
+    }
+    return smallestTried != needed && tryReserve(needed);
+}
+
+} // namespace internal
+
 // ---------------------------------------------------------------------------
 // Sound Buffer (decoded data)
 // ---------------------------------------------------------------------------
@@ -85,8 +217,8 @@ public:
 
     // File the samples were decoded from (set by the path-based loaders;
     // for AAC by load(), which Sound::load() uses). Empty for memory / PCM /
-    // generated buffers. Reported per voice by AudioEngine::getVoices() and
-    // tc_get_audio_state.
+    // generated buffers. Reported per playing sound by
+    // AudioEngine::getPlayingSounds() and tc_get_audio_state.
     fs::path getPath() const { return path_; }
 
     // File-based decoders (implemented in tcSound_impl.cpp).
@@ -121,6 +253,7 @@ public:
     // -------------------------------------------------------------------------
     // Get ADTS sample rate index
     static int getAdtsSampleRateIndex(int sampleRate) {
+        // Immutable lookup table (the same in every module's copy)
         static const int rates[] = {96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350};
         for (int i = 0; i < 13; i++) {
             if (rates[i] == sampleRate) return i;
@@ -157,7 +290,10 @@ public:
     std::string deferredAacPath_;  // Path for deferred AAC loading (Web only)
 #endif
 
-    // Load raw PCM data (16-bit signed, little-endian)
+    // Load raw interleaved PCM: 16-bit signed integer or 32-bit float,
+    // little-endian unless bigEndian is set. dataSize must be a whole number
+    // of frames (bitsPerSample / 8 * numChannels bytes each); anything else
+    // fails without touching the buffer.
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
@@ -166,34 +302,67 @@ public:
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "unsupported bits per sample: " + std::to_string(bitsPerSample));
         }
+        if (numChannels < 1) {
+            logError("SoundBuffer") << "invalid PCM channel count: " << numChannels;
+            return LoadResult::fail(LoadError::UnsupportedFormat,
+                                    "invalid PCM channel count: " + std::to_string(numChannels));
+        }
+        // Frame size in 64 bits: bytes * channels can exceed a 32-bit size_t.
+        const size_t bytesPerSample = (size_t)bitsPerSample / 8;
+        const uint64_t frameBytes = (uint64_t)bytesPerSample * (uint64_t)numChannels;
+        if ((uint64_t)dataSize % frameBytes != 0) {
+            logError("SoundBuffer") << "PCM data size " << dataSize
+                                    << " is not a whole number of " << frameBytes << "-byte frames";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data size " + std::to_string(dataSize) +
+                                    " is not a whole number of " + std::to_string(frameBytes) +
+                                    "-byte frames");
+        }
+        const uint64_t frameCount = (uint64_t)dataSize / frameBytes;
+        size_t sampleCount = 0;
+        if (!internal::interleavedSampleCount(frameCount, numChannels, samples.max_size(),
+                                              sampleCount)) {
+            logError("SoundBuffer") << "PCM data too large: " << dataSize << " bytes";
+            return LoadResult::fail(LoadError::DecodeFailed,
+                                    "PCM data too large: " + std::to_string(dataSize) + " bytes");
+        }
 
         path_.clear();
         channels = numChannels;
         sampleRate = rate;
+        numSamples = (size_t)frameCount;
 
         if (bitsPerSample == 16) {
             // 16-bit signed integer -> float
-            size_t sampleCount = dataSize / 2;
-            numSamples = sampleCount / channels;
             samples.resize(sampleCount);
 
-            const int16_t* src = static_cast<const int16_t*>(data);
+            // Read through memcpy (no alignment assumption on data) and swap
+            // on the unsigned value: a shift on a negative int16_t would
+            // sign-extend and corrupt the swapped sample.
+            const uint8_t* src8 = static_cast<const uint8_t*>(data);
             for (size_t i = 0; i < sampleCount; i++) {
-                int16_t s = src[i];
+                uint16_t u;
+                std::memcpy(&u, src8 + i * 2, sizeof(u));
                 if (bigEndian) {
-                    // Swap bytes for big-endian
-                    s = static_cast<int16_t>((s >> 8) | (s << 8));
+                    u = static_cast<uint16_t>((u >> 8) | (u << 8));
                 }
-                samples[i] = s / 32768.0f;
+                samples[i] = static_cast<int16_t>(u) / 32768.0f;
             }
         } else {
-            // 32-bit float
-            size_t sampleCount = dataSize / 4;
-            numSamples = sampleCount / channels;
+            // 32-bit float: dataSize == sampleCount * sizeof(float) here
             samples.resize(sampleCount);
-
-            const float* src = static_cast<const float*>(data);
-            std::memcpy(samples.data(), src, dataSize);
+            const size_t copyBytes = sampleCount * sizeof(float);
+            std::memcpy(samples.data(), data, copyBytes);
+            if (bigEndian) {
+                // Reverse the bytes of each sample
+                for (size_t i = 0; i < sampleCount; i++) {
+                    uint32_t u;
+                    std::memcpy(&u, &samples[i], sizeof(u));
+                    u = (u >> 24) | ((u >> 8) & 0x0000FF00u) |
+                        ((u << 8) & 0x00FF0000u) | (u << 24);
+                    std::memcpy(&samples[i], &u, sizeof(u));
+                }
+            }
         }
 
         logVerbose("SoundBuffer") << "loaded PCM from memory (" << channels << " ch, "
@@ -366,19 +535,57 @@ public:
     // -------------------------------------------------------------------------
     // Mixing
     // -------------------------------------------------------------------------
+    // Adds `other` into this buffer, scaled by volume, starting offsetSamples
+    // samples per channel in (the unit of numSamples: frames, not interleaved
+    // samples). Grows this buffer when `other` runs past its end. Both buffers
+    // must have the same channel count; a mismatch, or an end past what a
+    // buffer can hold (or what memory allows), is logged and nothing is mixed.
     void mixFrom(const SoundBuffer& other, size_t offsetSamples, float volume = 1.0f) {
         if (other.samples.empty()) return;
-
-        // Ensure we have enough space
-        size_t requiredSize = offsetSamples + other.numSamples;
-        if (samples.size() < requiredSize) {
-            samples.resize(requiredSize, 0.0f);
-            numSamples = requiredSize;
+        if (channels < 1 || other.channels != channels) {
+            logError("SoundBuffer") << "mixFrom: channel counts differ (" << other.channels
+                                    << " into " << channels << "), nothing mixed";
+            return;
         }
+        const size_t ch = (size_t)channels;
+        // Whole frames `other` actually holds
+        const size_t otherFrames = std::min(other.numSamples, other.samples.size() / ch);
+        if (otherFrames == 0) return;
 
-        // Mix (add) samples
-        for (size_t i = 0; i < other.numSamples && i < other.samples.size(); i++) {
-            samples[offsetSamples + i] += other.samples[i] * volume;
+        // End frame and the interleaved size it needs, checked before they are formed
+        size_t needed = 0;
+        if (offsetSamples > SIZE_MAX - otherFrames ||
+            !internal::interleavedSampleCount((uint64_t)(offsetSamples + otherFrames), channels,
+                                              samples.max_size(), needed)) {
+            logError("SoundBuffer") << "mixFrom: offset " << offsetSamples << " + "
+                                    << otherFrames << " frames is past what a buffer holds";
+            return;
+        }
+        const size_t endFrame = offsetSamples + otherFrames;
+        if (samples.size() < needed) {
+            // growSampleBuffer checks the allocation first on the web, where
+            // a failed one aborts instead of throwing
+            bool grown = false;
+            try {
+                grown = internal::growSampleBuffer(samples, needed);
+                if (grown) samples.resize(needed, 0.0f);
+            } catch (const std::bad_alloc&) {
+                grown = false;
+            }
+            if (!grown) {
+                logError("SoundBuffer") << "mixFrom: out of memory growing to " << endFrame
+                                        << " frames, nothing mixed";
+                return;
+            }
+        }
+        if (numSamples < endFrame) numSamples = endFrame;
+
+        // Mix (add) samples, frame by frame with the channel stride
+        float* dst = samples.data() + offsetSamples * ch;
+        const float* src = other.samples.data();
+        const size_t count = otherFrames * ch;
+        for (size_t i = 0; i < count; i++) {
+            dst[i] += src[i] * volume;
         }
     }
 
@@ -409,14 +616,20 @@ private:
 // Constraints (vs eager SoundBuffer):
 //   - setSpeed() is treated as 1.0 (no resampling on the fly — decoder
 //     outputs engine-rate frames).
-//   - setPosition() seeks the decoder and re-fills the ring buffer
-//     (~10 ms blackout, similar tradeoff to other engines).
+//   - setPosition() posts a seek: the StreamWorker seeks the decoder and
+//     re-fills the ring buffer, and the audio moves once the mixer
+//     reaches the new data (~10 ms blackout, similar tradeoff to other
+//     engines; longer on slow storage or for an MP3 several hours long,
+//     whose seek table is capped). getPosition() reports the requested
+//     target meanwhile. A file whose length is unknown (duration 0, e.g.
+//     a FLAC encoded to a pipe) cannot seek, and an engine re-init at
+//     another sample rate restarts it from the beginning.
 //   - Each polyphony slot costs one open file handle + one decoder +
 //     one ring buffer (default ~16 KB).
 // ---------------------------------------------------------------------------
 // Per-voice decoder + ring-buffer state. Full definition lives in
 // tcAudio_impl.cpp (where miniaudio's headers are visible).
-namespace internal { struct StreamInstance; }
+namespace internal { struct StreamInstance; struct Mp3StreamData; }
 
 class SoundStream : public SoundSource {
 public:
@@ -441,6 +654,7 @@ private:
     int encodingFormatHint_ = 0;  // ma_encoding_format value, stored as int
                                   // to avoid pulling miniaudio.h into the header.
     float duration_ = 0.0f;
+    std::shared_ptr<const internal::Mp3StreamData> mp3Data_;
 
     friend struct internal::StreamInstance;
     friend class AudioEngine;
@@ -477,82 +691,8 @@ enum class MixMode {
     DownmixMono = 1,
 };
 
-// ---------------------------------------------------------------------------
-// Atomic shared_ptr shim
-//
-// PlayingSound stores routing snapshots (channelMap / channelGains) as
-// shared_ptr that the UI thread updates and the audio thread reads. We'd
-// like to use the C++20 std::atomic<std::shared_ptr<T>> specialization,
-// but Apple libc++ doesn't ship it yet (verified 2026-05). We fall back
-// to the (C++20-deprecated) std::atomic_load / std::atomic_store free
-// functions, suppressing the deprecation warning locally — when the
-// specialization lands the storage type and accessors auto-switch.
-// ---------------------------------------------------------------------------
-namespace internal {
-
-#if defined(__cpp_lib_atomic_shared_ptr) && __cpp_lib_atomic_shared_ptr >= 201711L
-    // Native C++20 specialization path — lock-free where supported,
-    // no deprecation warnings.
-    template<class T>
-    using AtomicSharedPtr = std::atomic<std::shared_ptr<T>>;
-
-    template<class T>
-    inline std::shared_ptr<T> sharedLoad(const AtomicSharedPtr<T>& p) {
-        return p.load(std::memory_order_acquire);
-    }
-    template<class T>
-    inline void sharedStore(AtomicSharedPtr<T>& p, std::shared_ptr<T> v) {
-        p.store(std::move(v), std::memory_order_release);
-    }
-#else
-    // Fallback: a plain shared_ptr accessed via the deprecated free-
-    // function atomic API. Still lock-free for shared_ptr on common
-    // platforms; the deprecation is for ergonomics only.
-    template<class T>
-    using AtomicSharedPtr = std::shared_ptr<T>;
-
-    // Use the *_explicit forms with matching acquire/release ordering so
-    // this path is symmetric with the C++20 specialization branch above
-    // — without the explicit, the free functions default to seq_cst and
-    // we'd silently take a stronger fence on Apple while GCC / MSVC ran
-    // with the weaker order. Identical observable behavior for our 1
-    // producer (UI) / 1 consumer (audio) usage, but keeps the two
-    // branches honest.
-    template<class T>
-    inline std::shared_ptr<T> sharedLoad(const std::shared_ptr<T>& p) {
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic push
-#           pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#       elif defined(_MSC_VER)
-#           pragma warning(push)
-#           pragma warning(disable: 4996)
-#       endif
-        return std::atomic_load_explicit(&p, std::memory_order_acquire);
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic pop
-#       elif defined(_MSC_VER)
-#           pragma warning(pop)
-#       endif
-    }
-    template<class T>
-    inline void sharedStore(std::shared_ptr<T>& p, std::shared_ptr<T> v) {
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic push
-#           pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#       elif defined(_MSC_VER)
-#           pragma warning(push)
-#           pragma warning(disable: 4996)
-#       endif
-        std::atomic_store_explicit(&p, std::move(v), std::memory_order_release);
-#       if defined(__clang__) || defined(__GNUC__)
-#           pragma GCC diagnostic pop
-#       elif defined(_MSC_VER)
-#           pragma warning(pop)
-#       endif
-    }
-#endif
-
-} // namespace internal
+// Atomic shared_ptr shim (internal::AtomicSharedPtr / sharedLoad /
+// sharedStore): see tc/utils/tcAtomicSharedPtr.h
 
 // ---------------------------------------------------------------------------
 // Playing Sound Instance
@@ -580,8 +720,8 @@ struct PlayingSound {
     // installs new versions via internal::sharedStore and the
     // audio thread reads via internal::sharedLoad each callback.
     // The shim type auto-switches between C++20
-    // std::atomic<std::shared_ptr<T>> and the deprecated free-function
-    // atomic API based on __cpp_lib_atomic_shared_ptr.
+    // std::atomic<std::shared_ptr<T>> and a lock-based fallback based on
+    // __cpp_lib_atomic_shared_ptr.
     //
     // null map  → use mixMode rules
     // non-null  → map is the source of truth
@@ -590,8 +730,24 @@ struct PlayingSound {
     internal::AtomicSharedPtr<const std::vector<std::vector<int>>> channelMap;
     internal::AtomicSharedPtr<const std::vector<float>>            channelGains;
 
-    // Playback position (floating-point for speed adjustment)
+    // Playback position (floating-point for speed adjustment): source
+    // frames for an eager voice, engine-rate frames for a stream. While the
+    // device runs, code outside the mixer reads or writes it only under the
+    // engine lock (internal::seekVoice() / internal::voicePosition()). A
+    // stream voice's seek never writes it directly: the mixer sets it when
+    // it reaches the post-seek data.
     double positionF{0.0};
+
+    // Frames per second positionF counts (Sound::getPosition() /
+    // setPosition() convert with it). A stream's decoder outputs at the
+    // engine rate of the play() that opened it; the re-init migration
+    // re-expresses positionF at the new rate and updates this. A voice the
+    // migration does not rebuild (it had ended, or its decoder did not
+    // reopen) keeps positionF and this at the old rate, so its position in
+    // seconds does not change. 0 until play() sets it.
+    // internal: set by the engine, do not modify (the trailing underscore
+    // keeps it out of the reference and the Lua bindings).
+    std::atomic<int> positionRateHz_{0};
 
     // Buffer-to-engine sample-rate ratio, set when the sound is queued for
     // playback (buffer->sampleRate / AudioEngine::getInstance().getSampleRate()).
@@ -614,9 +770,9 @@ struct PlayingSound {
 // call to override the engine defaults (sample rate, channel count,
 // device, polyphony).
 //
-// Once init() succeeds, the engine is locked in — calling init() again
-// with different settings is currently a no-op + warning (avoiding the
-// disruption of tearing down a running device while sounds are playing).
+// Calling init(settings) again on a running engine re-initializes it live:
+// the device is reopened with the new settings and playing voices carry on
+// from their position (expect a short audible gap while the device is down).
 //
 // Empty `deviceName` selects the system default playback device.
 // Use AudioEngine::listDevices() to enumerate available device names.
@@ -656,7 +812,7 @@ struct AudioDeviceChangedArgs {
     bool        isDefaultDevice = false;
     int         sampleRate = 0;
     int         channels = 0;
-    int         bufferSize = 0;
+    int         bufferSize = 0;    // period the device runs with, in engine-rate frames (granted by the device)
     int         maxPolyphony = 0;
 };
 
@@ -693,13 +849,13 @@ struct AudioInBuffer {
 };
 
 // ---------------------------------------------------------------------------
-// AudioVoiceInfo — one active voice, as reported by AudioEngine::getVoices().
-// A snapshot: the values are copied under the engine lock, so later changes
-// to the voice are not reflected.
+// PlayingSoundInfo — one playing (or paused) sound, as reported by
+// AudioEngine::getPlayingSounds(). A snapshot: the values are copied under
+// the engine lock, so later changes to the playback are not reflected.
 // ---------------------------------------------------------------------------
-struct AudioVoiceInfo {
-    int         slot = 0;           // mixer slot index (0 .. maxPolyphony-1)
-    std::string path;               // source file (UTF-8, lexically normalized); empty for generated / memory buffers
+struct PlayingSoundInfo {
+    int         slot = 0;           // playback slot index (0 .. maxPolyphony-1)
+    fs::path    path;               // source file as given (same as getPath()); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;
@@ -708,8 +864,8 @@ struct AudioVoiceInfo {
     float       volume = 1.0f;
     float       pan = 0.0f;
     float       speed = 1.0f;
-    float       level = 0.0f;       // peak of this voice's output in the last callback
-                                    // (linear, 1.0 = full scale; 0 while paused)
+    float       level = 0.0f;       // peak of this playback's output in the last callback
+                                    // (linear, 1.0 = full scale; 0 while paused or stalled)
 };
 
 // ---------------------------------------------------------------------------
@@ -721,29 +877,35 @@ struct AudioStats {
     // Plays AudioEngine::play() refused (Sound::play() returned false),
     // in total and by reason.
     uint64_t droppedPlays = 0;
-    uint64_t droppedVoiceLimit = 0;    // every mixer slot busy (AudioSettings::maxPolyphony)
+    uint64_t droppedPolyphonyLimit = 0; // every playback slot busy (AudioSettings::maxPolyphony)
     uint64_t droppedStreamLimit = 0;   // the SoundStream's own maxPolyphony reached (copies of one streamed Sound)
-    uint64_t droppedDecoderError = 0;  // the stream's file could not be reopened for a new voice
+    uint64_t droppedDecoderError = 0;  // the stream's file could not be reopened for a new playback
     uint64_t droppedNotRunning = 0;    // no running output device (init failed or engine shut down)
 
     uint64_t clippedSamples = 0;       // output samples beyond +/-1.0 that were hard-clipped
 
-    // Meters: 0 while no device is running (before init, after shutdown).
+    // Meters: 0 while no device is running or callbacks are stalled.
     float peak = 0.0f;                 // master output peak over the last ~100 ms (linear, before clipping)
     float rms = 0.0f;                  // master output RMS over the same window
-    float load = 0.0f;                 // audio thread load: mix time / audio time, averaged over ~0.5 s
-    float loadMax = 0.0f;              // worst single callback in that window (> 1 = overrun)
+    // Fraction of audio-thread time: mix time / audio time, averaged over
+    // ~0.5 s. 1.0 means the callback took as long as the audio it produced.
+    float cpuUsage = 0.0f;
+    float cpuUsagePeak = 0.0f;         // worst single callback in that window (> 1 = a dropout)
+
+    uint64_t underrunFrames = 0;       // silent output frames per stream voice after playback began
+    bool stalled = false;             // running, but no callback finished for max(250 ms, 4 periods)
+    uint64_t voicesStoppedByReinit = 0; // stream voices whose decoder could not reopen at the new rate
 };
 
 // Engine diagnostics state (counters, meters, report timers). Defined in
 // tcAudio_impl.cpp so the audio-thread accumulators stay out of this header.
 namespace internal {
     struct AudioDiagnostics;
-    // Log the dropped plays that were only counted: drops off the main
+    // Log diagnostics that were only counted: drops off the main
     // thread, and repeats inside the rate limit. Rate limited. Called once
     // per frame by the app loop on the main thread.
     void pumpAudioDiagnostics();
-    // Same, ignoring the rate limit, so no counted drop is left unlogged:
+    // Same, ignoring the rate limit, so no counted diagnostic is left unlogged:
     // the exit paths call it (AudioEngine::shutdown(), runHeadlessApp()).
     // Main thread.
     void flushAudioDiagnostics();
@@ -771,6 +933,102 @@ namespace internal {
     // anything opens an audio context: the engine keeps the context it
     // opened first. State lives in tcAudio_impl.cpp.
     void setNullAudioBackendForTests(bool on);
+
+    // Test hook, not a user setting: AudioRecorder's audio-thread capture
+    // calls `hook` with the frame count of every buffer it takes, after
+    // copying it into the ring and before handing it to the writer, so a
+    // headless test can hold a capture in flight
+    // (core/tests/audioListenerTeardown). nullptr, the default, turns it off.
+    // State lives in tcAudio_impl.cpp.
+    void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+    void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
+
+    // Test hook, not a user setting: make the StreamWorker's decoder calls
+    // fail, or make the worker skip every stream (Stalls: a worker that falls
+    // behind, e.g. on slow storage; seek requests wait too), so a headless
+    // test can drive a stream's end-of-stream and seek paths
+    // (core/tests/streamSeek). ReadFails reads no frames; ReadFailsWithFrames
+    // decodes as usual and then reports an error for every read that
+    // returned frames. SeekFails also fails the re-init migration's seek,
+    // and ReopenFails fails the migration's decoder open. MixerLags holds
+    // the worker back until the mixer, with a seek pending, has read how far
+    // the stream's ring is written; the mixer then waits right there (up to
+    // 50 ms) until the worker has served the seek and reached the stream's
+    // end (an audio thread preempted at that point).
+    // SeekRefillStalls lets the worker serve seeks but holds back decoded
+    // frames, including after the mixer has applied the seek.
+    // Otherwise only the worker's refill is affected, not loadStream() or
+    // play(). State lives in tcAudio_impl.cpp.
+    enum class StreamFaultForTests { None, ReadFails, ReadFailsWithFrames, SeekFails, Stalls,
+                                     ReopenFails, MixerLags, SeekRefillStalls };
+    void setStreamFaultForTests(StreamFaultForTests fault);
+
+    // Test hook: the number of seek points in the seek table of the stream
+    // decoder opened last (by play() or by the re-init migration), 0 when it
+    // has none (not an MP3). tcAudio_impl.cpp.
+    uint32_t lastStreamSeekPointsForTests();
+
+    // Cumulative MP3 length scans and seek-table builds for streaming (#463).
+    uint64_t streamMp3ScansForTests();
+    uint64_t streamMp3TableBuildsForTests();
+
+    // Test hook: the number of passes the StreamWorker has run since the
+    // process started (one per wakeup: a notify or the end of its wait), so
+    // a headless test can count how often it wakes (core/tests/streamWorkerIdle).
+    // tcAudio_impl.cpp.
+    uint64_t streamWorkerPassesForTests();
+
+    // Test-only snapshot for pending-seek failures (#582). The worker can
+    // advance between fields; this is diagnostic state, not a transaction.
+    struct StreamSeekStateForTests {
+        bool hasStream = false;
+        uint64_t totalFrames = 0;
+        const void* mp3SeekTable = nullptr;
+        uint64_t request = 0;
+        uint64_t served = 0;
+        uint64_t published = 0;
+        uint64_t applied = 0;
+        bool endOfStream = false;
+        bool decoderAtEnd = false;
+        uint64_t workerPasses = 0;
+    };
+    StreamSeekStateForTests streamSeekStateForTests(const Sound& sound);
+
+    // Seek a voice (Sound::setPosition()). `frame` counts the voice's
+    // positionF units: source frames for an eager voice, engine-rate frames
+    // for a stream. An eager voice moves at once (positionF is written
+    // under the engine lock). A stream voice only gets a request: the
+    // StreamWorker seeks its decoder and refills the ring from the new
+    // position, and the mixer, the only writer of the ring's read side and
+    // of positionF, moves to it when it reaches that data (~10 ms). Until
+    // then the request is pending; a later request replaces it (the last
+    // one wins). A stream whose length is unknown ignores it (one warning
+    // per voice). Call it from one thread per voice, like the Sound API.
+    // tcAudio_impl.cpp.
+    void seekVoice(PlayingSound& voice, double frame);
+
+    // The voice's position in positionF units (Sound::getPosition()): the
+    // requested target while a stream seek is pending, otherwise positionF,
+    // the position the mixer is playing. tcAudio_impl.cpp.
+    double voicePosition(const PlayingSound& voice);
+
+    // Stop a voice and release what it holds (Sound::stop(), and the last
+    // Sound handle that shares the voice going away): `playing` and `paused`
+    // become false, so the engine slot is free for the next play(), and a
+    // stream voice gives up its decoder and file (closed on the calling
+    // thread, after the engine lock is released). Calling it again is a
+    // no-op. tcAudio_impl.cpp.
+    void releaseVoice(PlayingSound& voice);
+
+    // The framework's teardown barrier (#256): AudioEngine::waitForAudioCallbacks()
+    // without its one-second limit. internal::detachAppAudio() waits here
+    // before the framework destroys an App (exit, runHeadlessApp, hot reload,
+    // closing a secondary window). A listener that never returns is an app
+    // bug; the teardown keeps waiting for it (the app hangs where it can be
+    // seen) rather than destroy what the listener may still use. After one
+    // second it logs an error, once, and goes on waiting. Returns at once on
+    // the audio thread inside a listener. tcAudio_impl.cpp.
+    void waitForAudioCallbacksNoTimeout();
 }
 
 // ---------------------------------------------------------------------------
@@ -781,35 +1039,50 @@ public:
     // FFT analysis buffer is internal-only and unaffected by AudioSettings.
     static constexpr int ANALYSIS_BUFFER_SIZE = 4096;
 
-    // Default values used when init() is called without an explicit
-    // AudioSettings, and as initial values for the runtime fields. 48 kHz
-    // is the de-facto pro/video/web standard (DAWs, Web Audio, modern OS
-    // mixers, game engines all default to 48k), and avoids extra resampling
-    // on the way out of the engine. Use init({.sampleRate = 96000}) to opt
-    // into a higher rate when needed.
+    // Initial values of the runtime fields: init() with no arguments uses
+    // them only until init(settings) is first called (after that it reuses
+    // the last settings), and init(settings) picks them for a field given
+    // as 0 or less. 48 kHz is the de-facto pro/video/web standard (DAWs,
+    // Web Audio, modern OS mixers, game engines all default to 48k), and
+    // avoids extra resampling on the way out of the engine. Use
+    // init({.sampleRate = 96000}) to opt into a higher rate when needed.
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;
     static constexpr int DEFAULT_CHANNELS = 2;
     static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
     static constexpr int DEFAULT_BUFFER_SIZE = 0;  // 0 = let miniaudio choose
 
-    static AudioEngine& getInstance() {
-        // Intentionally leaked. A plain function-local static registers its
-        // destructor against the __dso_handle of the image whose code runs the
-        // first call — under hot reload that is the guest dylib, so dlclose()
-        // of an old guest destroys the engine the host is still using (the
-        // next listen() then dies on the destroyed Event mutex). The heap
-        // instance has no exit-time destructor; the framework cleanup path
-        // calls shutdown() explicitly for a clean device stop on normal exit.
-        static AudioEngine* instance = new AudioEngine();
-        return *instance;
-    }
+    // The one engine per process. Defined in tcAudio_impl.cpp, not inline: a
+    // hot reload guest on Windows compiles its own copy of every header-inline
+    // function, static included, and would run a second engine (#249).
+    static AudioEngine& getInstance();
 
     // Initialize and shutdown (implementation in tcAudio_impl.cpp).
     //
-    // init() with no arguments uses the defaults (DEFAULT_SAMPLE_RATE etc.).
-    // init(settings) writes the runtime config from `settings`. If the
-    // engine is already running, init returns true immediately with a
-    // warning (silent re-init would tear down playing voices).
+    // init(settings) stores sampleRate, channels, bufferSize and maxPolyphony
+    // from `settings` (0 or less picks DEFAULT_*) before it opens the device,
+    // so they are kept even when the open fails. init() with no arguments
+    // reuses the settings of the last init(settings) call, failed or not
+    // (the DEFAULT_* values if there was none), but always opens the system
+    // default device: deviceName is not kept. On a running
+    // engine it re-initializes live: the device is reopened with the new
+    // settings and playing voices move over, keeping their position.
+    //
+    // With no usable audio backend, miniaudio falls back to its Null
+    // backend: init() succeeds on a silent device and logs a warning.
+    // Returns false when no output device can be opened (none present, or
+    // the requested one refused); the failure is logged
+    // through logError("AudioEngine"), naming the requested device, and the
+    // engine is left uninitialized. That holds for a re-init too: the
+    // running device is closed before the new one is tried, so a failed
+    // switch leaves the engine stopped, not on the previous device. init()
+    // may be called again later (a device switched on after the app
+    // started, or other settings). Each failed try opens the device again
+    // and logs again, so retry on a timer (about once a second) or on a
+    // user action, not every frame. Sound::load*() also calls init() while
+    // the engine is not initialized; play() does not. After a failed
+    // init(settings), that implicit init() opens the system default device
+    // with those settings, so call init(settings) again before loading
+    // sounds if you want the requested device.
     bool init();
     bool init(const AudioSettings& settings);
     void shutdown();
@@ -820,10 +1093,11 @@ public:
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values
-    // passed to init(AudioSettings) — or the defaults if init() was called
-    // without an argument. They return the default even before init() is
-    // called, so video / audio code that needs the rate up front can rely
-    // on the value being sensible.
+    // stored by the last init(AudioSettings) call, whether it succeeded or
+    // failed (a zero-arg init() reuses them), or the DEFAULT_* values if
+    // init(settings) was never called. They are valid even before init(),
+    // so video / audio code that needs the rate up front can rely on the
+    // value being sensible.
     int getSampleRate()   const { return sampleRate_; }
     int getChannels()     const { return channels_; }
     int getMaxPolyphony() const { return (int)playingSounds_.size(); }
@@ -832,10 +1106,10 @@ public:
 
     // Diagnostics (the tc_get_audio_state MCP tool reports both).
     // getStats() only reads atomics: cheap, callable from any thread.
-    // getVoices() copies the active voices under the engine lock: call it
-    // from the main thread, never from an audioOut / audioIn listener.
+    // getPlayingSounds() copies the playing sounds under the engine lock:
+    // call it from the main thread, never from an audioOut / audioIn listener.
     AudioStats getStats() const;
-    std::vector<AudioVoiceInfo> getVoices();
+    std::vector<PlayingSoundInfo> getPlayingSounds() const;
 
     // Real-time audio listeners. audioOut fires once per audio device
     // callback AFTER all Sound voices have been mixed into the output
@@ -855,6 +1129,39 @@ public:
     Event<AudioOutBuffer> audioOut;
     Event<AudioInBuffer>  audioIn;
 
+    // Teardown barrier for audioOut / audioIn listeners (#256). Returns once
+    // every audioOut / audioIn notify that was running when it was called has
+    // finished. Event does not wait: when disconnect() returns, the callback
+    // may still be running on the audio thread. So an object whose listener
+    // touches its members disconnects, then waits here, then lets the members
+    // go:
+    //
+    //   ~Synth() { listener_.disconnect();
+    //              AudioEngine::getInstance().waitForAudioCallbacks(); }
+    //
+    // Do it in the most-derived class (or in cleanup()), not in a base-class
+    // destructor, which runs after the derived members are already gone. The
+    // App's own audioOut() / audioIn() hooks are handled by the framework:
+    // they are detached after cleanup(), and before the App is destroyed
+    // (exit, hot reload, closing a secondary window) the framework waits the
+    // same way, but without the one-second limit below
+    // (internal::waitForAudioCallbacksNoTimeout()).
+    //
+    //   - Returns at once when no callback is running: the device is stopped
+    //     or was never started, or the audio thread is between two buffers.
+    //   - Returns at once when called from inside an audioOut / audioIn
+    //     listener (the audio thread): waiting there would wait for itself.
+    //   - Otherwise waits only for callbacks already running (at most two
+    //     back-to-back buffers), not for later ones. Gives up after one
+    //     second, logs a warning and returns false: a listener that blocks
+    //     that long is stuck (e.g. on a lock the caller holds), and waiting
+    //     forever would hang the caller. Returns true otherwise. (The
+    //     framework's App teardown does wait forever, see above: there a hang
+    //     is better than destroying the App under a running listener.)
+    // It waits for every listener running at that moment, not only the
+    // caller's: call it without holding a lock that a listener takes.
+    bool waitForAudioCallbacks();
+
     // Fired on every successful init() — both the initial startup and any
     // subsequent live re-init. The args carry the new device's real name
     // (never empty), whether it's the system default, and the current
@@ -866,23 +1173,9 @@ public:
 
     // FFT analysis: Get latest audio samples (mono, left+right average)
     // numSamples: Number of samples to get (max ANALYSIS_BUFFER_SIZE)
-    // Returns: Number of samples retrieved
-    size_t getAnalysisBuffer(float* outBuffer, size_t numSamples) {
-        if (!initialized_ || numSamples == 0) return 0;
-
-        numSamples = std::min(numSamples, (size_t)ANALYSIS_BUFFER_SIZE);
-
-        std::lock_guard<std::mutex> lock(analysisMutex_);
-
-        // Copy latest samples from ring buffer
-        size_t readPos = (analysisWritePos_ + ANALYSIS_BUFFER_SIZE - numSamples) % ANALYSIS_BUFFER_SIZE;
-
-        for (size_t i = 0; i < numSamples; i++) {
-            outBuffer[i] = analysisBuffer_[(readPos + i) % ANALYSIS_BUFFER_SIZE];
-        }
-
-        return numSamples;
-    }
+    // Safe from any thread. Returns the requested count (capped), or 0 when
+    // stopped. Reuses the last successful copy if concurrent writes prevent a snapshot.
+    size_t getAnalysisBuffer(float* outBuffer, size_t numSamples);
 
     // Add new playback instance. Accepts any SoundSource — eager
     // SoundBuffer or streaming SoundStream. For streams, also allocates a
@@ -906,9 +1199,9 @@ private:
     AudioEngine();
     ~AudioEngine();
 
-    // Why AudioEngine::play() refused a voice (see AudioStats). The values
+    // Why AudioEngine::play() refused a play (see AudioStats). The values
     // index the diagnostics arrays in tcAudio_impl.cpp: keep the order.
-    enum class DropReason { VoiceLimit, StreamLimit, DecoderError, NotRunning };
+    enum class DropReason { PolyphonyLimit, StreamLimit, DecoderError, NotRunning };
 
     // Count a refused play; log it now when on the main thread and not rate
     // limited, otherwise leave it for reportDiagnostics(). `code` is the
@@ -925,12 +1218,29 @@ private:
     void reportDiagnostics(bool force = false);
     friend void internal::pumpAudioDiagnostics();
     friend void internal::flushAudioDiagnostics();
+    friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+    friend void internal::seekVoice(PlayingSound&, double);
+    friend double internal::voicePosition(const PlayingSound&);
+    friend void internal::releaseVoice(PlayingSound&);
+    friend internal::StreamSeekStateForTests internal::streamSeekStateForTests(const Sound&);
 
-    // Zero the output meters, the load window and every voice's level. Only
-    // while no device is running (init(), shutdown()), so the audio thread
-    // cannot race it.
+    // Zero the output meters, the CPU usage window and every playback's
+    // level. Only while no device is running (init(), shutdown()), so the
+    // audio thread cannot race it.
     void resetMeters();
+
+    // Mark an audioOut / audioIn notify in flight for waitForAudioCallbacks()
+    // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
+    // add each, no lock. beginCallback() returns the slot to pass to
+    // endCallback(). audioIn has no engine-side source yet: whatever fires it
+    // from the engine must enclose that notify the same way.
+    int  beginCallback();
+    void endCallback(int slot);
+
+    // Both barriers (tcAudio_impl.cpp): waitForAudioCallbacks() gives up after
+    // one second (giveUp), internal::waitForAudioCallbacksNoTimeout() does not.
+    bool waitForCallbacks(bool giveUp);
 
     // Eager mix path: linear interpolation over a fully-decoded SoundBuffer.
     //
@@ -955,6 +1265,17 @@ private:
     // of a negative double is UB).
     static void mixEagerVoice(PlayingSound& sound, const SoundBuffer& src,
                               float* buffer, int num_frames, int num_channels) {
+        // A buffer with no frames, or with fewer samples than numSamples *
+        // channels, has nothing to play: the voice stops, looping or not.
+        size_t srcCount = 0;
+        if (src.numSamples == 0 ||
+            !internal::interleavedSampleCount(src.numSamples, src.channels, src.samples.size(),
+                                              srcCount)) {
+            sound.playing = false;
+            sound.level.store(0.0f, std::memory_order_relaxed);
+            return;
+        }
+
         double posF = sound.positionF;
         float vol = sound.volume;
         float pan = sound.pan;
@@ -1058,7 +1379,7 @@ private:
     // Streaming mix path: full implementation in tcAudio_impl.cpp where
     // StreamInstance / ma_decoder types are visible. Declared here, body
     // is out-of-line.
-    static void mixStreamVoice(PlayingSound& sound, SoundStream& src,
+    void mixStreamVoice(PlayingSound& sound, SoundStream& src,
                                float* buffer, int num_frames, int num_channels);
 
     // Re-init helper: rate-adjust active voices so they keep playing from
@@ -1112,7 +1433,11 @@ private:
             ob.channels      = num_channels;
             ob.sampleRate    = sampleRate_;
             ob.framePosition = framePosition_;
+            // In flight for waitForAudioCallbacks(). Must enclose the notify:
+            // it is what loads the listener snapshot.
+            const int slot = beginCallback();
             audioOut.notify(ob);
+            endCallback(slot);
         }
         framePosition_ += (uint64_t)num_frames;
 
@@ -1126,20 +1451,8 @@ private:
             if (buffer[i] < -1.0f) buffer[i] = -1.0f;
         }
 
-        // Copy to FFT analysis ring buffer (mono: left+right average)
-        {
-            std::lock_guard<std::mutex> lock(analysisMutex_);
-            for (int frame = 0; frame < num_frames; frame++) {
-                float mono;
-                if (num_channels > 1) {
-                    mono = (buffer[frame * num_channels] + buffer[frame * num_channels + 1]) * 0.5f;
-                } else {
-                    mono = buffer[frame * num_channels];
-                }
-                analysisBuffer_[analysisWritePos_] = mono;
-                analysisWritePos_ = (analysisWritePos_ + 1) % ANALYSIS_BUFFER_SIZE;
-            }
-        }
+        // Keep the actual, post-clamp output, independently for every channel.
+        if (analysisRing_) analysisRing_->write(buffer, num_frames, num_channels);
     }
 
     void* device_ = nullptr;   // ma_device*
@@ -1148,10 +1461,11 @@ private:
                                // when devices are torn down + recreated.
     bool initialized_ = false;
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;  // mutable: getPlayingSounds() const locks it
 
-    // Runtime engine configuration. Initialized to defaults; replaced when
-    // init(AudioSettings) succeeds. Reading these before init() returns the
+    // Runtime engine configuration. Initialized to defaults; overwritten by
+    // every init(AudioSettings) call, success or failure, and reused by a
+    // zero-arg init(). Reading these before init() returns the
     // defaults (intentional — code that needs the rate up front, e.g. video
     // resampler setup in tcVideoPlayer_*, can pull the value without first
     // forcing engine startup).
@@ -1165,25 +1479,72 @@ private:
     // touched on the audio thread (mixAudioInternal), no atomicity needed.
     uint64_t framePosition_ = 0;
 
-    // FFT analysis ring buffer
-    std::vector<float> analysisBuffer_;
-    size_t analysisWritePos_ = 0;
+    // Only readers and device reconfiguration take this mutex. The callback
+    // owns the writer; the device is stopped before replacing the ring.
+    friend struct internal::AudioAnalysisAccess;
+    std::unique_ptr<internal::AudioOutputRing> analysisRing_;
     std::mutex analysisMutex_;
+    // Mono fallback for getAnalysisBuffer() (guarded by analysisMutex_),
+    // right-aligned with startup padding on the left.
+    float analysisCopy_[ANALYSIS_BUFFER_SIZE]{};
 
-    // Drop counters, output meters, audio-thread load and the log rate
+    // Drop counters, output meters, audio-thread CPU usage and the log rate
     // limiter (see getStats(), pumpAudioDiagnostics()).
     std::unique_ptr<internal::AudioDiagnostics> diag_;
+
+    // Callbacks in flight (beginCallback / endCallback), counted in one of two
+    // slots picked by the epoch's low bit. waitForAudioCallbacks() advances the
+    // epoch so new callbacks count in the other slot, then waits for the old
+    // slot to drain, twice (once per slot): it waits only for callbacks that
+    // were already running, and a callback that read the epoch just before an
+    // advance is still caught. The mutex serializes barriers (the epoch
+    // advances of two barriers must not interleave); the audio thread never
+    // takes it. Timed, so waitForAudioCallbacks() keeps its one-second limit
+    // while a framework teardown holds it waiting for a stuck listener.
+    std::atomic<uint32_t> callbackEpoch_{0};
+    std::atomic<int>      callbacksInFlight_[2]{};
+    std::timed_mutex      callbackBarrierMutex_;
 };
+
+namespace internal {
+    // The owner token of a voice started by Sound::play(). Sound copies share
+    // it (Sound::playing_ aliases it), so the voice is released when the last
+    // Sound handle that shares it is destroyed or overwritten.
+    struct VoiceOwner {
+        std::shared_ptr<PlayingSound> voice;
+        explicit VoiceOwner(std::shared_ptr<PlayingSound> v) : voice(std::move(v)) {}
+        ~VoiceOwner() { if (voice) releaseVoice(*voice); }
+        VoiceOwner(const VoiceOwner&) = delete;
+        VoiceOwner& operator=(const VoiceOwner&) = delete;
+    };
+}
 
 // ---------------------------------------------------------------------------
 // Sound Class (user-facing)
 // ---------------------------------------------------------------------------
+//
+// Lifetime: a Sound plays only while it, or a copy of it, is alive. Copies
+// share the voice that play() started; when the last Sound handle that
+// shares it is destroyed or overwritten (copy or move assignment), the voice
+// stops, looping or not, and its slot is free again. A temporary copy going
+// away does not stop the original. To play overlapping one-shots, keep the
+// Sound objects alive (for example as members):
+//
+//   Sound hits_[4];   // members, each loaded once
+//   int next_ = 0;
+//   hits_[next_].play(); next_ = (next_ + 1) % 4;   // up to 4 overlap
+//
+// `{ Sound s = hit; s.play(); }` stops at the closing brace.
+//
+// Stopped means released: stop(), and the last handle going away, also
+// close a streamed voice's decoder and file.
 class Sound {
 public:
     Sound() = default;
-    ~Sound() = default;
+    ~Sound() = default;   // releases the voice if this is its last handle
 
-    // Copy and move
+    // Copy and move. Copies share the voice; assignment releases the old
+    // voice when this was its last handle.
     Sound(const Sound&) = default;
     Sound& operator=(const Sound&) = default;
     Sound(Sound&&) = default;
@@ -1211,29 +1572,12 @@ public:
         if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 
         // Decode into a SoundBuffer, then store as the polymorphic source.
+        // SoundBuffer::load() picks the decoder from the extension, ignoring
+        // its case (the path itself is used as given), records the file for
+        // getPath() and logs a failure with the file name. Relative paths
+        // resolve via getDataPath, like Image::load.
         auto buf = std::make_shared<SoundBuffer>();
-
-        // Determine format by extension
-        std::string ext = path.extension().string();
-        if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
-        LoadResult result = LoadResult::fail(LoadError::UnsupportedFormat,
-                                             "unsupported extension '." + ext + "'");
-
-        if (ext == "ogg" || ext == "OGG") {
-            result = buf->loadOgg(path);
-        } else if (ext == "wav" || ext == "WAV") {
-            result = buf->loadWav(path);
-        } else if (ext == "mp3" || ext == "MP3") {
-            result = buf->loadMp3(path);
-        } else if (ext == "flac" || ext == "FLAC") {
-            result = buf->loadFlac(path);
-        } else if (ext == "aac" || ext == "AAC" || ext == "m4a" || ext == "M4A") {
-            // Through SoundBuffer::load(): the per-platform loadAac() does
-            // not record the file for getPath(), load() does.
-            result = buf->load(path);
-        } else {
-            logError("Sound") << "unsupported format: " << ext;
-        }
+        LoadResult result = buf->load(getDataPath(path));
 
         if (!result) {
             buffer_.reset();
@@ -1249,7 +1593,11 @@ public:
     //
     // Limitations vs eager load():
     //   - setSpeed() is ignored (decoder outputs engine-rate frames).
-    //   - setPosition() incurs a seek + ring-buffer refill (~10 ms).
+    //   - setPosition() incurs a seek + ring-buffer refill (usually
+    //     ~10 ms); getPosition() reports the requested position meanwhile.
+    //     A file whose length is unknown (getDuration() is 0) cannot seek,
+    //     and an engine re-init at another sample rate restarts it from the
+    //     beginning.
     //
     // Web (Emscripten): streaming relies on std::thread + on-disk file I/O,
     // neither of which is available in the default browser build. To keep
@@ -1267,7 +1615,8 @@ public:
         return load(path);
 #else
         auto stream = std::make_shared<SoundStream>();
-        LoadResult r = stream->loadStream(path, maxPolyphony);
+        // Relative paths resolve via getDataPath, like load().
+        LoadResult r = stream->loadStream(getDataPath(path), maxPolyphony);
         if (!r) {
             buffer_.reset();
             return r;
@@ -1309,7 +1658,7 @@ public:
 
     // Start playing from the beginning (this Sound's previous voice is
     // stopped first). Returns false when nothing will play: not loaded, or
-    // the engine dropped the play — every voice slot busy
+    // the engine dropped the play — every playback slot busy
     // (AudioSettings::maxPolyphony), the stream's own maxPolyphony reached
     // (copies of a streamed Sound share it), the stream file could not be
     // reopened, or no output device is running. Drops are logged as
@@ -1333,7 +1682,12 @@ public:
         // Stop if already playing
         stop();
 
-        playing_ = AudioEngine::getInstance().play(buffer_);
+        if (auto voice = AudioEngine::getInstance().play(buffer_)) {
+            // playing_ points at the voice and shares ownership of its
+            // VoiceOwner, which every copy of this Sound then shares too.
+            auto owner = std::make_shared<internal::VoiceOwner>(voice);
+            playing_ = std::shared_ptr<PlayingSound>(owner, voice.get());
+        }
         if (playing_) {
             playing_->volume = volume_;
             playing_->pan = pan_;
@@ -1346,9 +1700,11 @@ public:
         return playing_ != nullptr;
     }
 
+    // Stop and release the voice (a stream's decoder and file too). Copies
+    // that share the voice see it stopped.
     void stop() {
         if (playing_) {
-            playing_->playing = false;
+            internal::releaseVoice(*playing_);
             playing_.reset();
         }
     }
@@ -1523,27 +1879,43 @@ public:
         return playing_ && playing_->paused;
     }
 
+    // Playback position in seconds. On a stream, after setPosition() and
+    // until the audio has moved there (usually ~10 ms), this is the requested
+    // position; otherwise it is the position being played.
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
-        // For both eager and stream sources positionF is in source-rate
-        // frames so the division yields seconds either way.
-        return (float)playing_->positionF / buffer_->sampleRate;
+        const int rate = positionRate();
+        return rate > 0 ? (float)(internal::voicePosition(*playing_) / (double)rate) : 0.0f;
     }
 
+    // Seek to `seconds`. Eager sounds move at once. A stream moves after
+    // its decoder has seeked and the ring has refilled (~10 ms of silence;
+    // longer on slow storage or for an MP3 several hours long);
+    // getPosition() reports the new position right away, and if
+    // setPosition() is called again before that, the last call wins. A
+    // paused stream moves when it resumes. A stream whose length is
+    // unknown (getDuration() is 0) cannot seek: the call is ignored with a
+    // warning.
     void setPosition(float seconds) {
         if (!playing_ || !buffer_) return;
-        double pos = seconds * buffer_->sampleRate;
+        const int rate = positionRate();
+        double pos = seconds * (double)rate;
         if (pos < 0) pos = 0;
-        // For eager: clamp to numSamples. For streams: clamp to duration
-        // (decoder seek happens lazily in the stream mixer).
+        // For eager: clamp to numSamples. For streams: clamp to duration.
         if (buffer_->kind() == SoundSource::Eager) {
             auto* eager = static_cast<const SoundBuffer*>(buffer_.get());
-            if (pos >= (double)eager->numSamples) pos = (double)eager->numSamples - 1;
+            // An empty buffer clamps to 0.
+            if (pos >= (double)eager->numSamples) {
+                pos = eager->numSamples > 0 ? (double)eager->numSamples - 1 : 0.0;
+            }
         } else {
-            double maxPos = (double)buffer_->getDuration() * buffer_->sampleRate;
+            // The float duration can be a few frames past the last frame
+            // on a long file; the StreamWorker clamps to the decoder's
+            // length. An unknown length (0) is refused by seekVoice().
+            double maxPos = (double)buffer_->getDuration() * (double)rate;
             if (pos >= maxPos) pos = maxPos - 1;
         }
-        playing_->positionF = pos;
+        internal::seekVoice(*playing_, pos);
     }
 
     float getDuration() const {
@@ -1551,7 +1923,21 @@ public:
     }
 
 private:
+    // Frames per second of the voice's positionF: the source rate for eager
+    // sources; for streams the rate the voice's positionF counts
+    // (PlayingSound::positionRateHz_), the engine rate its decoder outputs
+    // at. Not the engine's current rate (a voice the re-init migration did
+    // not rebuild keeps the old one), nor the stream's sampleRate (the
+    // engine rate at loadStream(), stale after a re-init).
+    int positionRate() const {
+        if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
+        return playing_->positionRateHz_.load(std::memory_order_relaxed);
+    }
+
+    friend internal::StreamSeekStateForTests internal::streamSeekStateForTests(const Sound&);
+
     std::shared_ptr<SoundSource> buffer_;
+    // Points at the voice; owns (and shares with copies) its VoiceOwner.
     std::shared_ptr<PlayingSound> playing_;
     float   volume_  = 1.0f;
     float   pan_     = 0.0f;

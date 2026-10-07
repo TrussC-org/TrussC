@@ -9,6 +9,8 @@
 //
 // =============================================================================
 
+#include "../gpu/tcShaderStream.h"
+
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -17,25 +19,6 @@ namespace trussc {
 
 // Forward declaration
 class Shader;
-
-// ---------------------------------------------------------------------------
-// Standard vertex format for shader drawing
-// ---------------------------------------------------------------------------
-struct ShaderVertex {
-    float x, y, z;      // position
-    float u, v;         // texcoord
-    float r, g, b, a;   // color
-};
-
-// Primitive types
-enum class PrimitiveType {
-    Points,
-    Lines,
-    LineStrip,
-    Triangles,
-    TriangleStrip,
-    Quads
-};
 
 // The writer classes and shader-stack plumbing below are framework
 // internals. Draw functions reach them via internal::getActiveWriter();
@@ -135,124 +118,12 @@ private:
 };
 
 // ---------------------------------------------------------------------------
-// Deferred shader draw - for proper draw ordering
-// ---------------------------------------------------------------------------
-// A fully-resolved shader draw, captured at Shader::submitVertices() time and
-// replayed later (same pattern as PbrDrawCommand in tcMeshPbrPipeline.h).
-//
-// Capture contract: the flush must NEVER touch the Shader object — a
-// scope-local Shader destructed before present() is legal. Everything the
-// replay needs is snapshotted here at submission time:
-//   - pipeline resolved for the render target that was current at submission
-//   - bindings (vertex/index buffer handles + texture view/sampler pairs)
-//   - raw uniform-block bytes per slot
-//   - vertex data
-// The captured sg handles stay valid until the flush because Shader routes
-// its resource destruction through internal::deferGpuDestroy()
-// (tcGpuDestroyQueue.h), drained after sg_commit().
-//
-// NOTE: the per-draw heap snapshots (uniforms/vertices) churn the allocator
-// every frame; a pooled arena is a possible future optimization.
-struct DeferredShaderDraw {
-    int layerId = 0;                    // sokol_gl layer this draw follows
-    sg_pipeline pipeline = {};          // resolved for the target at submission
-    sg_bindings bindings = {};          // buffers + views/samplers snapshot
-    std::vector<std::pair<int, std::vector<uint8_t>>> uniforms;  // slot -> block bytes
-    std::vector<ShaderVertex> vertices; // vertex data
-    PrimitiveType type = PrimitiveType::Triangles;
-};
-
-// Replay a captured shader draw on the GPU. Self-contained: only reads the
-// snapshot, never a live Shader. Used by flushDeferredShaderDraws()
-// (swapchain, tcShader.h) and flushFboDeferredPbr() (FBO passes,
-// tcMeshPbrPipeline.h).
-inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
-    if (d.vertices.empty()) return;
-
-    sg_apply_pipeline(d.pipeline);
-
-    // Uniforms snapshotted at submission time (fixes last-write-wins: two
-    // draws with different setUniform values keep their own values).
-    for (const auto& [slot, data] : d.uniforms) {
-        sg_range range = { data.data(), data.size() };
-        sg_apply_uniforms(slot, &range);
-    }
-
-    // Append vertices to the captured stream buffer
-    sg_bindings bind = d.bindings;
-    sg_range range = { d.vertices.data(), d.vertices.size() * sizeof(ShaderVertex) };
-    int vertexOffset = sg_append_buffer(bind.vertex_buffers[0], &range);
-    if (vertexOffset < 0) {
-        logWarning("Shader") << "Vertex buffer overflow, skipping draw";
-        return;
-    }
-
-    // Generate triangle indices
-    std::vector<uint16_t> indices;
-    int count = (int)d.vertices.size();
-
-    if (d.type == PrimitiveType::Quads) {
-        int numQuads = count / 4;
-        indices.reserve(numQuads * 6);
-        for (int i = 0; i < numQuads; i++) {
-            int base = i * 4;
-            indices.push_back(base + 0);
-            indices.push_back(base + 1);
-            indices.push_back(base + 2);
-            indices.push_back(base + 0);
-            indices.push_back(base + 2);
-            indices.push_back(base + 3);
-        }
-    } else if (d.type == PrimitiveType::TriangleStrip) {
-        if (count >= 3) {
-            indices.reserve((count - 2) * 3);
-            for (int i = 0; i < count - 2; i++) {
-                if (i % 2 == 0) {
-                    indices.push_back(i);
-                    indices.push_back(i + 1);
-                    indices.push_back(i + 2);
-                } else {
-                    indices.push_back(i + 1);
-                    indices.push_back(i);
-                    indices.push_back(i + 2);
-                }
-            }
-        }
-    } else if (d.type == PrimitiveType::Triangles) {
-        indices.reserve(count);
-        for (int i = 0; i < count; i++) {
-            indices.push_back((uint16_t)i);
-        }
-    } else if (d.type == PrimitiveType::Points) {
-        return;
-    }
-
-    // Adjust indices for vertex buffer offset
-    int baseVertex = vertexOffset / sizeof(ShaderVertex);
-    for (auto& idx : indices) {
-        idx += baseVertex;
-    }
-
-    // Append to index buffer
-    sg_range idxRange = { indices.data(), indices.size() * sizeof(uint16_t) };
-    int indexOffset = sg_append_buffer(bind.index_buffer, &idxRange);
-    if (indexOffset < 0) {
-        logWarning("Shader") << "Index buffer overflow, skipping draw";
-        return;
-    }
-
-    bind.vertex_buffer_offsets[0] = 0;
-    sg_apply_bindings(&bind);
-
-    // Draw
-    int baseElement = indexOffset / sizeof(uint16_t);
-    sg_draw(baseElement, (int)indices.size(), 1);
-}
-
-// ---------------------------------------------------------------------------
 // Vertex writers (shared scratch — stateless singletons) and the per-window
 // shader-stack / layer-counter / deferred-draw accessors.
 // ---------------------------------------------------------------------------
+    // A per-module copy is harmless: SglWriter has no state, and ShaderWriter's
+    // vertices are scratch that one draw call fills and flushes (begin() to
+    // end()) inside a single function.
     inline SglWriter sglWriter;
     inline ShaderWriter shaderWriter;
 

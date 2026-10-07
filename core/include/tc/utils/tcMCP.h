@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <map>
 #include <functional>
@@ -56,6 +57,11 @@ namespace mcp {
 
 namespace detail {
 
+// Replies preserve valid UTF-8 and silently replace malformed bytes with U+FFFD.
+inline std::string dumpReply(const json& j) {
+    return j.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 // The promise carries a THUNK, not the reply string: the blocked HTTP worker
 // executes it (future.get()()) to obtain the reply. For ordinary tools the
 // thunk just returns a string built on the main thread; two-stage tools (see
@@ -70,6 +76,14 @@ struct DeferredResponse {
     const void* target = nullptr;                        // window to run in (null = main)
     std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
     std::function<std::string()> timeoutReply;           // targeted: reply when given up
+    // Registration owner of the code the producer runs (DeferralState::owner):
+    // a hot reload guest generation, or null for host code. When that owner
+    // is removed, removeRegistrationsOwnedBy() answers the entry with
+    // errorReply instead of running its producer, which may reach the App
+    // about to be deleted (a guest tool capturing `this`, a status-image
+    // getter). A host tool's deferral is not affected.
+    const void* owner = nullptr;
+    std::function<std::string(const std::string&)> errorReply;  // tool error with this message
 };
 
 // A targeted deferral whose window renders no frame in this time (minimized,
@@ -86,20 +100,28 @@ struct DeferralState {
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
     std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
+    std::function<std::string(const std::string&)> errorReply;  // deferral cancelled (unload)
+    // Registration owner of the code the deferred producer runs: the called
+    // tool's owner, set by handleToolsCall(); a host tool that runs code
+    // someone else registered (tc_get_status_image a status-image getter)
+    // names that code's owner with setDeferralOwner().
+    const void* owner = nullptr;
 };
-inline DeferralState& deferralState() { static DeferralState s; return s; }
+// The MCP state below is one per process, so it is defined non-inline in
+// tcMCP.cpp: a hot reload guest on Windows would otherwise get its own copy of
+// each, and a tool handler it runs would defer into a DeferralState the host
+// never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
+DeferralState& deferralState();
 
-inline std::vector<DeferredResponse>& deferredResponses() {
-    static std::vector<DeferredResponse> v;
-    return v;
-}
+// Call after deferring, in a tool handler whose deferred producer runs code
+// registered under another owner (see DeferralState::owner).
+inline void setDeferralOwner(const void* owner) { deferralState().owner = owner; }
+
+std::vector<DeferredResponse>& deferredResponses();
 
 // Set by registerControlTools() (which is web-available), so this flag must
 // live outside the server-only #ifndef block below.
-inline std::atomic<bool>& isDebuggerEnabled() {
-    static std::atomic<bool> enabled{false};
-    return enabled;
-}
+std::atomic<bool>& isDebuggerEnabled();
 
 } // namespace detail
 
@@ -153,7 +175,7 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
             try {
                 thunk = d.makeEnvelope();
             } catch (const std::exception& e) {
-                std::string err = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+                std::string err = detail::dumpReply(json{{"error", std::string("deferred response failed: ") + e.what()}});
                 thunk = [err]() { return err; };
             }
             d.response->set_value(std::move(thunk));
@@ -182,17 +204,13 @@ inline bool hasDeferredResponses() { return !detail::deferredResponses().empty()
 // The hot reload host sets one per guest generation, so a reload drops what
 // the old guest registered — handlers that capture the old App — before that
 // App is deleted. Plain apps never set one (tag null = permanent).
+// Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
+// registers under it, so they must see the same one on every platform.
 namespace detail {
-inline const void*& registrationOwner() {
-    static const void* owner = nullptr;
-    return owner;
-}
-// Registries defined elsewhere (status entries in tcStandardTools.h) hook
-// their own cleanup in here the first time they are used.
-inline std::vector<std::function<void(const void*)>>& ownerCleanupHooks() {
-    static std::vector<std::function<void(const void*)>> hooks;
-    return hooks;
-}
+const void*& registrationOwner();
+// Registries defined elsewhere (the status registries of tcStandardTools.h,
+// in tcMCP.cpp) hook their own cleanup in here the first time they are used.
+std::vector<std::function<void(const void*)>>& ownerCleanupHooks();
 inline void setRegistrationOwner(const void* owner) { registrationOwner() = owner; }
 inline void removeRegistrationsOwnedBy(const void* owner);   // after Server
 } // namespace detail
@@ -224,6 +242,9 @@ public:
                 {"type", arg.type},
                 {"description", arg.description}
             };
+            // Nullable file path used by tc_analyze_image's optional save.
+            if (arg.type == "string|null")
+                schema["properties"][arg.name]["type"] = json::array({"string", "null"});
             if (arg.required) {
                 schema["required"].push_back(arg.name);
             }
@@ -248,10 +269,9 @@ public:
 
 class Server {
 public:
-    static Server& instance() {
-        static Server server;
-        return server;
-    }
+    // The one registry every tool / resource goes into. Defined in tcMCP.cpp,
+    // so a hot reload guest registers into the host's server (#249).
+    static Server& instance();
 
     // --- Registration API ---
 
@@ -381,7 +401,7 @@ private:
             } else {
                 result = {{"content", {{
                     {"type", "text"},
-                    {"text", content.dump()}
+                    {"text", detail::dumpReply(content)}
                 }}}};
             }
             return makeResult(id, result);
@@ -391,12 +411,18 @@ private:
             auto& ds = detail::deferralState();
             ds.requested = false;
             ds.twoStageRequested = false;
+            ds.owner = tools_[name].owner;   // the handler may name another (setDeferralOwner)
 
             // Execute tool handler (may call deferToolResultUntilAfterFrame()
             // or deferToolResultTwoStage())
             json content = tools_[name].handler(args);
 
             // Handler asked to produce its result after the next present().
+            if (ds.requested || ds.twoStageRequested) {
+                ds.errorReply = [formatResult](const std::string& message) -> std::string {
+                    return formatResult(json{{"status", "error"}, {"message", message}});
+                };
+            }
             if (ds.target) {
                 ds.timeoutReply = [formatResult]() -> std::string {
                     return formatResult(json{{"status", "error"},
@@ -430,7 +456,7 @@ private:
                         try {
                             return formatResult(workerStage());
                         } catch (const std::exception& e) {
-                            return std::string("{\"error\":\"deferred worker stage failed: ") + e.what() + "\"}";
+                            return detail::dumpReply(json{{"error", std::string("deferred worker stage failed: ") + e.what()}});
                         }
                     };
                 };
@@ -485,7 +511,7 @@ private:
             {"id", id},
             {"result", result}
         };
-        return res.dump();
+        return detail::dumpReply(res);
     }
 
     std::string makeError(const json& id, int code, const std::string& message) {
@@ -498,7 +524,7 @@ private:
                 {"message", message}
             }}
         };
-        return res.dump();
+        return detail::dumpReply(res);
     }
 };
 
@@ -518,48 +544,17 @@ struct McpRequest {
 
 namespace detail {
 
-inline ThreadChannel<McpRequest>& getHttpChannel() {
-    static ThreadChannel<McpRequest> channel;
-    return channel;
-}
-
-inline std::unique_ptr<httplib::Server>& getHttpServer() {
-    static std::unique_ptr<httplib::Server> svr;
-    return svr;
-}
-
-inline std::unique_ptr<std::thread>& getHttpThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
-}
-
-inline std::atomic<int>& getHttpPort() {
-    static std::atomic<int> port{0};
-    return port;
-}
+// HTTP server state, one per process (defined in tcMCP.cpp, see above).
+ThreadChannel<McpRequest>& getHttpChannel();
+std::unique_ptr<httplib::Server>& getHttpServer();
+std::unique_ptr<std::thread>& getHttpThread();
+std::atomic<int>& getHttpPort();
 
 // Bearer token required on /mcp requests. Empty = no auth (localhost default).
-inline std::string& mcpAuthToken() {
-    static std::string token;
-    return token;
-}
+std::string& mcpAuthToken();
 
 // Whether the server is bound to a loopback address (the Host check applies).
-inline std::atomic<bool>& mcpLoopbackOnly() {
-    static std::atomic<bool> loopback{true};
-    return loopback;
-}
-
-// Browser origins allowed besides the server's own (mcp::allowOrigin()).
-// Read on HTTP worker threads, written from app code: guarded.
-inline std::vector<std::string>& allowedOrigins() {
-    static std::vector<std::string> origins;
-    return origins;
-}
-inline std::mutex& allowedOriginsMutex() {
-    static std::mutex m;
-    return m;
-}
+std::atomic<bool>& mcpLoopbackOnly();
 
 inline std::string asciiLower(std::string s) {
     for (auto& c : s) c = (char)std::tolower((unsigned char)c);
@@ -588,19 +583,14 @@ inline bool isLoopbackHostHeader(const std::string& hostHeader) {
     return name == "localhost" || name == "127.0.0.1" || name == "[::1]";
 }
 
-// The server's own origins, then the ones added with mcp::allowOrigin().
+// Only the server's own origins. The server is for native MCP clients: it
+// sends no CORS headers, so no web page can call it, neither directly nor
+// through a dev-server proxy that forwards the page's Origin (#346).
 inline bool isAllowedOrigin(const std::string& origin, int port) {
     std::string o = asciiLower(trimSpaces(origin));
     while (!o.empty() && o.back() == '/') o.pop_back();
     const std::string p = std::to_string(port);
-    if (o == "http://localhost:" + p || o == "http://127.0.0.1:" + p || o == "http://[::1]:" + p) {
-        return true;
-    }
-    std::lock_guard<std::mutex> lock(allowedOriginsMutex());
-    for (const auto& a : allowedOrigins()) {
-        if (o == a) return true;
-    }
-    return false;
+    return o == "http://localhost:" + p || o == "http://127.0.0.1:" + p || o == "http://[::1]:" + p;
 }
 
 // "application/json", optionally with parameters ("; charset=utf-8").
@@ -609,9 +599,33 @@ inline bool isJsonContentType(const std::string& contentType) {
     return asciiLower(trimSpaces(t)) == "application/json";
 }
 
+// Equality without an early exit: every byte of the longer input is visited
+// and the differences are OR-ed together, so the time taken does not depend
+// on where the inputs first differ. A length mismatch is folded into the
+// result instead of returning early; the time still follows the longer
+// length.
+inline bool constantTimeEquals(std::string_view a, std::string_view b) {
+    const size_t n = a.size() > b.size() ? a.size() : b.size();
+    unsigned int diff = (a.size() == b.size()) ? 0u : 1u;
+    for (size_t i = 0; i < n; ++i) {
+        unsigned char x = i < a.size() ? (unsigned char)a[i] : 0;
+        unsigned char y = i < b.size() ? (unsigned char)b[i] : 0;
+        diff |= (unsigned int)(x ^ y);
+    }
+    return diff == 0;
+}
+
+// Authorization header value "Bearer <token>". The scheme is not secret and
+// is checked first; the token part goes through constantTimeEquals().
+inline bool bearerTokenMatches(std::string_view header, std::string_view token) {
+    constexpr std::string_view scheme = "Bearer ";
+    if (header.substr(0, scheme.size()) != scheme) return false;
+    return constantTimeEquals(header.substr(scheme.size()), token);
+}
+
 inline void rejectRequest(httplib::Response& res, int status, const std::string& why) {
     res.status = status;
-    res.set_content(json{{"error", why}}.dump(), "application/json");
+    res.set_content(dumpReply(json{{"error", why}}), "application/json");
 }
 
 // Browser-facing checks every request passes before anything else runs (#238,
@@ -621,7 +635,7 @@ inline void rejectRequest(httplib::Response& res, int status, const std::string&
 // - Host: when bound to loopback, it must name a loopback host. A DNS
 //   rebinding page reaches 127.0.0.1 under its own domain name.
 // - Origin: native MCP clients send none. When present, it must be the
-//   server's own origin or one added with mcp::allowOrigin().
+//   server's own origin (http://localhost:PORT and the like).
 // - Content-Type (POST): application/json only. Anything else is a request a
 //   browser could send without a CORS preflight.
 // Returns false (response filled: 403 / 415) when the request is refused.
@@ -635,7 +649,7 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
     if (req.has_header("Origin") &&
         !isAllowedOrigin(req.get_header_value("Origin"), getHttpPort().load())) {
         rejectRequest(res, 403, "forbidden origin '" + req.get_header_value("Origin") +
-                                "': allow it from code with mcp::allowOrigin()");
+                                "': the MCP server is for native MCP clients, not web pages");
         return false;
     }
     if (requireJson && !isJsonContentType(req.get_header_value("Content-Type"))) {
@@ -648,29 +662,17 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
 
 } // namespace detail
 
-// Allow a web page served from `origin` ("http://localhost:5173") to call the
-// MCP server from a browser. Native MCP clients send no Origin and need
-// nothing. Only code can add origins — no environment variable does, by design
-// (environment variables may narrow the MCP surface, never widen it; #242).
-inline void allowOrigin(const std::string& origin) {
-    std::string o = detail::asciiLower(detail::trimSpaces(origin));
-    while (!o.empty() && o.back() == '/') o.pop_back();
-    if (o.empty()) return;
-    std::lock_guard<std::mutex> lock(detail::allowedOriginsMutex());
-    for (const auto& a : detail::allowedOrigins()) {
-        if (a == o) return;
-    }
-    detail::allowedOrigins().push_back(o);
-}
-
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
-//   host  : "localhost" (default) keeps it loopback-only; pass "0.0.0.0" to
-//           expose on all interfaces.
+//   host  : "127.0.0.1" (default) keeps it loopback-only. The default is an
+//           address, not "localhost": what "localhost" resolves to differs
+//           between OSes, so the default is one address everywhere. Pass
+//           "localhost" or "::1" for those, or "0.0.0.0" to expose on all
+//           interfaces.
 //   token : bearer token required on /mcp. MUST be non-empty when host is not
 //           a loopback address — binding non-local without a token is refused
 //           (fail-closed) so input injection is never silently network-exposed.
-inline void startHttpServer(int port = 0, const std::string& host = "localhost",
+inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
                             const std::string& token = "") {
     auto& svr = detail::getHttpServer();
     if (svr) return; // Already running
@@ -688,6 +690,20 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
 
     svr = std::make_unique<httplib::Server>();
 
+    // A fixed port that is already in use fails to bind and is reported below.
+    // POSIX: SO_REUSEADDR only, as TcpServer does. Windows: SO_EXCLUSIVEADDRUSE
+    // only, so a port another socket holds fails to bind.
+    svr->set_socket_options([](socket_t sock) {
+#ifdef _WIN32
+        BOOL opt = TRUE;
+        setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&opt), sizeof(opt));
+#else
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+    });
+
     // POST /mcp — JSON-RPC requests. No CORS header: MCP clients are native and
     // ignore CORS, while a wildcard origin would let any web page in the user's
     // browser drive the local server. (OPTIONS preflight handler dropped too.)
@@ -698,7 +714,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         const std::string& tok = detail::mcpAuthToken();
         if (!tok.empty()) {
             auto it = req.headers.find("Authorization");
-            if (it == req.headers.end() || it->second != ("Bearer " + tok)) {
+            if (it == req.headers.end() || !detail::bearerTokenMatches(it->second, tok)) {
                 res.status = 401;
                 res.set_content("{\"error\":\"unauthorized\"}", "application/json");
                 return;
@@ -722,7 +738,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         try {
             result = thunk();
         } catch (const std::exception& e) {
-            result = std::string("{\"error\":\"reply construction failed: ") + e.what() + "\"}";
+            result = detail::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
         }
 
         res.set_content(result, "application/json");
@@ -736,7 +752,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
             {"transport", "http"},
             {"endpoint", "/mcp"}
         };
-        res.set_content(info.dump(), "application/json");
+        res.set_content(detail::dumpReply(info), "application/json");
     });
 
     detail::getHttpThread() = std::make_unique<std::thread>([port, host]() {
@@ -761,7 +777,16 @@ inline void startHttpServer(int port = 0, const std::string& host = "localhost",
         }
         detail::getHttpPort().store(actualPort);
 
-        std::cerr << "[MCP] HTTP server listening on http://" << host << ":"
+        // The only line with the actual port (an OS-assigned port is known
+        // only here, after bind). Through the Logger so it also reaches the
+        // log file and onLog listeners: "[MCP] HTTP server listening on
+        // http://HOST:PORT/mcp" at Notice (stdout; hidden when the console
+        // level is Warning or higher). Set TRUSSC_MCP_PORT for a known port.
+        trussc::logNotice("MCP") << "HTTP server listening on http://" << host
+                                 << ":" << actualPort << "/mcp";
+        // The raw stderr copy stays for v0.7 so tools that read stderr keep
+        // working; it is removed in v0.8.0 (#414).
+        std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
                   << actualPort << "/mcp" << std::endl;
 
         svr->listen_after_bind();
@@ -776,9 +801,10 @@ inline void stopHttpServer() {
     {
         auto& list = detail::deferredResponses();
         for (auto& d : list) {
-            d.response->set_value([]() -> std::string {
-                return "{\"error\":\"server shutting down\"}";
-            });
+            const std::string message = "the MCP server shut down before the reply was produced";
+            std::string reply = d.errorReply ? d.errorReply(message)
+                                             : detail::dumpReply(json{{"error", message}});
+            d.response->set_value([reply]() { return reply; });
         }
         list.clear();
     }
@@ -806,6 +832,8 @@ inline void processHttpQueue() {
         ds.hasEnvelope = false;
         ds.target = nullptr;
         ds.timeoutReply = nullptr;
+        ds.errorReply = nullptr;
+        ds.owner = nullptr;
         std::string result = Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
@@ -817,6 +845,8 @@ inline void processHttpQueue() {
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
             d.timeoutReply = std::move(ds.timeoutReply);
+            d.owner = ds.owner;
+            d.errorReply = std::move(ds.errorReply);
             detail::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
             ds.target = nullptr;
@@ -840,9 +870,6 @@ inline int getHttpPort() {
 [[deprecated("registerControlTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
 inline void enableDebugger() {}
 
-#else
-// No MCP HTTP server on the web: a no-op, so app code calling it stays portable.
-inline void allowOrigin(const std::string&) {}
 #endif // __EMSCRIPTEN__
 
 namespace detail {
@@ -850,6 +877,26 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
     Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
+    // Deferred replies whose producers run this owner's code: answer them
+    // now, with an error, instead of running them at the next drain, after
+    // the App they may reach has been deleted (a reload runs between
+    // processHttpQueue() and drainDeferredResponses() in one frame). At exit
+    // stopHttpServer() runs before the guest is unloaded and has already
+    // answered every pending reply. Host tools' deferrals stay pending.
+    auto& pending = deferredResponses();
+    std::vector<DeferredResponse> keep;
+    for (auto& d : pending) {
+        if (d.owner != owner) {
+            keep.push_back(std::move(d));
+            continue;
+        }
+        const std::string message = "the app code behind this reply was unloaded by a hot reload "
+                                    "before the reply was produced";
+        std::string reply = d.errorReply ? d.errorReply(message)
+                                         : detail::dumpReply(json{{"error", message}});
+        d.response->set_value([reply]() { return reply; });
+    }
+    pending.swap(keep);
 }
 } // namespace detail
 

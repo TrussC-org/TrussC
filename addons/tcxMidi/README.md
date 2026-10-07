@@ -69,14 +69,30 @@ Enumeration follows the TrussC convention (`AudioEngine::listDevices()` etc.):
 **`MidiIn`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `closePort()`, `isOpen()`, `getName()` (open port), `getPort()` (open port
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,
-`onMessage` event, and the polling trio `hasNewMessage()` / `getNextMessage()` /
-`setBufferSize()`.
+`onMessage` event, and the polling API `hasNewMessage()` / `getNextMessage()` /
+`setBufferSize()` / `getDroppedMessageCount()`. The polling queue holds up to 1024
+messages by default; when it is full the oldest message is dropped (shrinking it
+with `setBufferSize()` also discards the oldest queued ones). Dropped messages are
+counted in `getDroppedMessageCount()` and logged as a warning (at most once every 2 s).
+Raise `setBufferSize()` if you see it.
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
 `sendControlChange`, `sendProgramChange`, `sendAftertouch`,
 `sendPolyAftertouch`, `sendPitchBend` (14-bit, or raw `lsb,msb`), `sendSysex`,
-`sendMidiByte`, `sendBytes`, `send(MidiMessage)`.
+`sendMidiByte`, `sendBytes`, `send(MidiMessage)`. All send helpers return `bool`:
+`true` when libremidi accepts the message, `false` with a warning when no output
+port is open, the message is empty, or the backend reports an error. Warnings are
+logged once per reason each time the port is opened. Closing also resets the
+warning gates. `true` does not guarantee delivery to the device.
+Existing calls may ignore the result;
+explicit member-function pointers must use a `bool` return type.
+
+```cpp
+if (!out.sendNoteOn(1, 60, 100)) {
+    // The send failed; the warning log includes the reason.
+}
+```
 
 **`MidiMessage`** — `bytes`, `deltatime` (seconds since previous event),
 `portName`, `portNum`, plus `getStatus()`, `getChannel()` (1-16), predicates

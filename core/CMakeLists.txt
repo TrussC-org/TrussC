@@ -101,33 +101,39 @@ file(GLOB_RECURSE TC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
 )
 
-# Common source files (platform-independent)
-file(GLOB TC_IMPL_SOURCES     ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
-file(GLOB TC_APP_SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
-file(GLOB TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
-file(GLOB TC_NETWORK_SOURCES  ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
-file(GLOB TC_SOUND_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
-file(GLOB TC_UTILS_SOURCES    ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/utils/*.cpp)
+# Common source files (platform-independent). CONFIGURE_DEPENDS: every app
+# builds TrussC in its own tree (trussc_app.cmake add_subdirectory()s core),
+# and a plain glob is evaluated only at configure time, so an existing tree
+# would keep building without a .cpp added to core later (and fail to link
+# whatever it defines) until something reconfigured it. With CONFIGURE_DEPENDS
+# each build re-checks these globs and reconfigures when their result changes.
+file(GLOB TC_IMPL_SOURCES     CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/*.cpp)
+file(GLOB TC_APP_SOURCES      CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/app/*.cpp)
+file(GLOB TC_COMM_SOURCES     CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/comm/*.cpp)
+file(GLOB TC_GRAPHICS_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/*.cpp)
+file(GLOB TC_NETWORK_SOURCES  CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/network/*.cpp)
+file(GLOB TC_SOUND_SOURCES    CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/sound/*.cpp)
+file(GLOB TC_UTILS_SOURCES    CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/utils/*.cpp)
 # Vendored single-file libs (e.g. lz4 for tc::compress)
-file(GLOB TC_VENDOR_SOURCES   ${CMAKE_CURRENT_SOURCE_DIR}/include/lz4/*.c)
+file(GLOB TC_VENDOR_SOURCES   CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/lz4/*.c)
 
 # Platform-specific source files
 if(TC_PLATFORM_EMSCRIPTEN)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/web/*.cpp)
 elseif(TC_PLATFORM_IOS)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/*.mm)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/ios/*.mm)
     # Shared with macOS: ImageIO loader (HEIC, TIFF, ...), no AppKit in it
     list(APPEND TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/tcPixels_mac.mm)
 elseif(TC_PLATFORM_ANDROID)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/android/*.cpp)
 elseif(TC_PLATFORM_MACOS)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/mac/*.mm)
 elseif(TC_PLATFORM_WINDOWS)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/win/*.cpp)
 elseif(TC_PLATFORM_LINUX OR TC_PLATFORM_RASPBIAN)
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 else()
-    file(GLOB TC_PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
+    file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 endif()
 
 # Combine all sources
@@ -135,6 +141,7 @@ set(TC_ALL_SOURCES
     ${TC_HEADERS}
     ${TC_IMPL_SOURCES}
     ${TC_APP_SOURCES}
+    ${TC_COMM_SOURCES}
     ${TC_GRAPHICS_SOURCES}
     ${TC_NETWORK_SOURCES}
     ${TC_SOUND_SOURCES}
@@ -159,9 +166,13 @@ endif()
 
 add_library(tc::TrussC ALIAS TrussC)
 
-# Bake the git-derived version into tc::getVersion() (tcVersion.h).
-# PUBLIC so user apps and addons see the same value.
-target_compile_definitions(TrussC PUBLIC TC_VERSION_STRING="${TC_VERSION}")
+# Only this small TU depends on the git-derived version. A changing PUBLIC
+# version string would change cache inputs for every core/app/addon TU.
+set_source_files_properties(include/tc/utils/tcVersion.cpp PROPERTIES
+    COMPILE_DEFINITIONS "TC_VERSION_STRING=\"${TC_VERSION}\"")
+# Callers (including hot-reload guests) use the library's out-of-line accessor.
+# Direct header use without CMake keeps the inline "unknown" fallback.
+target_compile_definitions(TrussC PUBLIC TC_VERSION_LINKED)
 
 # CI gate: promote uses of [[deprecated]] TrussC API to errors in the
 # framework's OWN sources (core lib TUs here; bundled examples/tests get the
@@ -642,6 +653,26 @@ function(_trussc_convert_png_to_ico PNG_FILE OUTPUT_ICO OUT_SUCCESS)
 endfunction()
 
 # =============================================================================
+# trussc_setup_manifest(<target>)
+# Windows: add TrussC's application manifest (resources/windows/app.manifest)
+# to an executable. CMake hands .manifest sources to the manifest tool, which
+# merges them with the linker's default manifest and embeds the result.
+#   - activeCodePage UTF-8: the process ANSI code page becomes UTF-8
+#     (Windows 10 1903+), so narrow strings are UTF-8 for fs::path(string),
+#     path::string(), fopen, getenv and the -A Win32 APIs, in TrussC, addons
+#     and third-party libraries alike. Older Windows ignores the setting.
+#   - longPathAware: paths beyond MAX_PATH work where the system allows it
+#     (LongPathsEnabled).
+# No-op on other platforms.
+# =============================================================================
+function(trussc_setup_manifest TARGET_NAME)
+    if(WIN32)
+        target_sources(${TARGET_NAME} PRIVATE
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/resources/windows/app.manifest")
+    endif()
+endfunction()
+
+# =============================================================================
 # Automatically include the addon macros (makes use_addon available)
 # =============================================================================
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
@@ -649,89 +680,9 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
 # =============================================================================
 # Built-in Shaders (compiled with sokol-shdc)
 # =============================================================================
-file(GLOB TC_SHADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.glsl")
-if(TC_SHADER_SOURCES)
-    # Select sokol-shdc binary based on host platform
-    set(_TC_SOKOL_SHDC_BASE_URL "https://raw.githubusercontent.com/floooh/sokol-tools-bin/master/bin")
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-        if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
-            set(_TC_SOKOL_SHDC_DIR "osx_arm64")
-        else()
-            set(_TC_SOKOL_SHDC_DIR "osx")
-        endif()
-    elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-        set(_TC_SOKOL_SHDC_DIR "win32")
-    else()
-        if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "aarch64")
-            set(_TC_SOKOL_SHDC_DIR "linux_arm64")
-        else()
-            set(_TC_SOKOL_SHDC_DIR "linux")
-        endif()
-    endif()
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-        set(_TC_SOKOL_SHDC_EXT ".exe")
-    else()
-        set(_TC_SOKOL_SHDC_EXT "")
-    endif()
-    set(_TC_SOKOL_SHDC_URL "${_TC_SOKOL_SHDC_BASE_URL}/${_TC_SOKOL_SHDC_DIR}/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
-    set(_TC_SOKOL_SHDC "${CMAKE_CURRENT_SOURCE_DIR}/tools/sokol-shdc/sokol-shdc${_TC_SOKOL_SHDC_EXT}")
-
-    # Download sokol-shdc if not present.
-    # raw.githubusercontent.com rate-limits anonymous requests (HTTP 429),
-    # especially from shared CI runner IPs, so retry with a pause before
-    # giving up. A failed file(DOWNLOAD) leaves a 0-byte file behind, which
-    # would satisfy the EXISTS guard on the next configure — remove it.
-    if(NOT EXISTS "${_TC_SOKOL_SHDC}")
-        message(STATUS "[TrussC] Downloading sokol-shdc...")
-        file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools/sokol-shdc")
-        foreach(_TC_ATTEMPT RANGE 1 3)
-            file(DOWNLOAD "${_TC_SOKOL_SHDC_URL}" "${_TC_SOKOL_SHDC}"
-                SHOW_PROGRESS
-                STATUS _TC_DOWNLOAD_STATUS)
-            list(GET _TC_DOWNLOAD_STATUS 0 _TC_DOWNLOAD_ERROR)
-            if(NOT _TC_DOWNLOAD_ERROR)
-                break()
-            endif()
-            file(REMOVE "${_TC_SOKOL_SHDC}")
-            if(_TC_ATTEMPT LESS 3)
-                message(STATUS "[TrussC] sokol-shdc download failed (${_TC_DOWNLOAD_STATUS}), retrying in 5s (attempt ${_TC_ATTEMPT}/3)...")
-                execute_process(COMMAND ${CMAKE_COMMAND} -E sleep 5)
-            endif()
-        endforeach()
-        if(_TC_DOWNLOAD_ERROR)
-            message(FATAL_ERROR "Failed to download sokol-shdc: ${_TC_DOWNLOAD_STATUS}")
-        endif()
-        if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-            file(CHMOD "${_TC_SOKOL_SHDC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-        endif()
-        message(STATUS "[TrussC] sokol-shdc downloaded successfully")
-    endif()
-
-    # Output directory for generated headers
-    set(_TC_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")
-    file(MAKE_DIRECTORY "${_TC_SHADER_OUTPUT_DIR}")
-
-    # metal_sim keeps apps runnable on the iOS simulator (sg_query_backend()
-    # reports SG_BACKEND_METAL_SIMULATOR there; without it shader lookup
-    # returns null sources and crashes in sg_make_shader).
-    set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl300es:glsl430:wgsl")
-
-    set(_TC_SHADER_OUTPUTS "")
-    foreach(_shader_src ${TC_SHADER_SOURCES})
-        get_filename_component(_shader_name ${_shader_src} NAME)
-        set(_shader_out "${_TC_SHADER_OUTPUT_DIR}/${_shader_name}.h")
-        list(APPEND _TC_SHADER_OUTPUTS ${_shader_out})
-
-        add_custom_command(
-            OUTPUT ${_shader_out}
-            COMMAND ${_TC_SOKOL_SHDC} -i ${_shader_src} -o ${_shader_out} -l ${_TC_SOKOL_SLANG} --ifdef
-            DEPENDS ${_shader_src}
-            COMMENT "[TrussC] Compiling shader: ${_shader_name}"
-        )
-    endforeach()
-
-    add_custom_target(TrussC_shaders DEPENDS ${_TC_SHADER_OUTPUTS})
-    add_dependencies(TrussC TrussC_shaders)
-    message(STATUS "[TrussC] Built-in shader compilation enabled")
-endif()
+# shaders/*.glsl -> include/tc/gpu/shaders/*.glsl.h (see trussc_shaders.cmake)
+# The shared helper pins sokol-shdc and verifies its host-specific SHA-256.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/trussc_shaders.cmake)
+trussc_compile_shaders(TrussC "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+    OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")
 

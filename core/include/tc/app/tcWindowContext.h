@@ -10,7 +10,7 @@
 // lives in one WindowContext instead of scattered process globals.
 // currentWindowContext() == mainWindowContext() while only the main window is
 // running; each secondary native window owns its own context and the native
-// layer switches internal::currentWindowCtx while dispatching that window's
+// layer switches internal::currentWindowCtx() while dispatching that window's
 // events and draw (see tcWindow.h / platform/*/tcWindow*).
 //
 // This file is included from TrussC.h AFTER tcRenderTarget.h (RenderTarget by
@@ -128,12 +128,20 @@ struct WindowContext {
     std::unordered_set<int> keysPressed;
 
     // --- scene / hover state (per window's node tree) ---
-    Node* rootNode = nullptr;         // The running App (set by the framework)
-    Node* hoveredNode = nullptr;      // Currently hovered node
-    Node* prevHoveredNode = nullptr;  // Previously hovered node
-    Node* grabbedNode = nullptr;      // Node grabbed by mouse press
-    int grabbedButton = -1;           // Mouse button that caused the grab
-    Node* selectedNode = nullptr;     // Last node clicked (selection)
+    // Weak references (#255): a node removed from the tree and freed while
+    // one of these still names it just makes lock() return null, so the next
+    // hover update, drag or selection read never touches freed memory. Use
+    // them through lock() and keep the resulting shared_ptr for as long as
+    // the node is used (e.g. across a handler that may remove it). A hot
+    // reload host resets them before it unloads a guest
+    // (resetNodeRefsForUnload): releasing the last weak reference to a
+    // make_shared node runs code of the module that created it.
+    std::weak_ptr<Node> rootNode;         // The running App (set by the framework)
+    std::weak_ptr<Node> hoveredNode;      // Currently hovered node
+    std::weak_ptr<Node> prevHoveredNode;  // Previously hovered node
+    std::weak_ptr<Node> grabbedNode;      // Node grabbed by mouse press
+    int grabbedButton = -1;               // Mouse button that caused the grab
+    std::weak_ptr<Node> selectedNode;     // Last node clicked (selection)
 
     // --- camera / projection state ---
     std::shared_ptr<const CameraContext> currentCameraContext;
@@ -230,13 +238,47 @@ struct WindowContext {
     ShadowSlotState shadow;
 
     // --- frame timing (per window) ---
-    // getDeltaTime()/getFrameRate() resolve through the current context, so a
-    // window ticking at 60 Hz next to a 120 Hz main window sees its own real
-    // per-tick delta (measured wall-clock between THIS window's update calls).
+    // getDeltaTime()/getFrameRate()/getFrameElapsedTime() resolve through the
+    // current context, so a window ticking at 60 Hz next to a 120 Hz main
+    // window sees its own real per-tick delta (measured wall-clock between THIS
+    // window's update calls; the nominal 1/updateFps in the main window's
+    // fixed-Hz update mode).
     double updateDeltaTime = 0.0;
+    // Secondary windows: their platform tick (windowTick) measures the delta
+    // with these, and records none of the frame time, update time or rate
+    // samples below. Left as is until the multi-window work that follows #219.
     std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
     bool lastUpdateCallTimeInitialized = false;
-    // Frame rate measurement (10-frame moving average)
+    // Main window: the main loop (beginMainUpdateCall in TrussC.h) measures
+    // the delta on the steady clock instead, so a wall-clock step can't skew
+    // the dt that Node timers count down with.
+    std::chrono::steady_clock::time_point mainUpdateCallTime;
+    bool mainUpdateCallTimeInitialized = false;
+    // Uptime sampled once at the start of this window's frame (getFrameElapsedTime).
+    std::chrono::steady_clock::duration frameUptime{};
+    bool frameUptimeSampled = false;
+    // Node timers (Node::processTimers): the time of the update being run
+    // (the wall time of the update call; a fixed-Hz step's nominal time on the
+    // loop's timeline), whether an update is running right now, and whether it
+    // is a fixed-Hz step. A timer is charged only the time after its creation,
+    // except one created during a fixed step, which counts whole steps from
+    // the next one.
+    std::chrono::steady_clock::time_point updateTime{};
+    bool inUpdate = false;
+    bool fixedStepUpdate = false;
+    // Measured update rate (getFrameRate): per frame, the wall time it covered
+    // and the update steps it ran. Recorded by the loops, read-only in the getter.
+    // Fixed-step loops record fractional steps (the time they consumed divided
+    // by the step interval), so the rate doesn't flicker between whole-step
+    // counts when the step rate isn't a multiple of the frame rate.
+    static constexpr int rateSampleCount = 10;
+    double rateDurations[rateSampleCount] = {};
+    double rateSteps[rateSampleCount] = {};
+    int rateIndex = 0;
+    int rateCount = 0;
+    // Frame rate measurement of a secondary window, which records no rate
+    // samples: getFrameRate() averages the last 10 deltas it read (10-frame
+    // moving average), as before.
     double frameTimeBuffer[10] = {};
     int frameTimeIndex = 0;
     bool frameTimeBufferFilled = false;
@@ -245,19 +287,20 @@ struct WindowContext {
     // A secondary window's native display link always fires at the display's
     // vsync; we cannot portably retune it, so a lower target rate is realised
     // by SKIPPING display ticks via a time accumulator (windowThrottleShouldTick
-    // in the native windowTick, before beginFrame). throttleFps <= 0 (or >= the
-    // display refresh rate, which the accumulator degenerates to) = free-run at
-    // vsync, the default and the pre-Phase-2 behavior. The MAIN window ignores
-    // this field entirely (its loop is driven by updateTargetFps/drawTargetFps
-    // in _frame_cb).
+    // in the native windowTick, before beginFrame). throttleFps <= 0 = free-run
+    // at vsync, the default and the pre-Phase-2 behavior; a target at or above
+    // the display rate also runs every tick (half-tick tolerance). The MAIN
+    // window ignores this field entirely (its loop is driven by
+    // updateTargetFps/drawTargetFps in _frame_cb).
     float throttleFps = 0.0f;
     double throttleAccumulator = 0.0;
-    std::chrono::high_resolution_clock::time_point throttleLastTime;
+    std::chrono::steady_clock::time_point throttleLastTime;
     bool throttleLastTimeInitialized = false;
 
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
-    // Resolved absolute paths queued by saveScreenshot() on THIS window, drained
+    // Resolved absolute paths (download names on web) queued by saveScreenshot()
+    // on THIS window, drained
     // right after present() while this context is current (so the capture reads
     // back this window's lastSwapchainDrawable, not the main window's). The main
     // window drains from the afterFrame listener in _setup_cb; each secondary
@@ -308,18 +351,53 @@ struct WindowContext {
     CoreEvents* coreEvents = nullptr;
 };
 
+// Pipeline target for swapchain draws. The main window keeps sokol's defaults.
+struct SwapchainTargetFormat {
+    sg_pixel_format colorFormat;
+    int sampleCount;
+};
+
+inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
+    return ctx.isMain
+        ? SwapchainTargetFormat{_SG_PIXELFORMAT_DEFAULT, sapp_sample_count()}
+        : SwapchainTargetFormat{ctx.swapchainColorFormat, ctx.swapchainSampleCount};
+}
+
 // Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
 WindowContext& mainWindowContext();
 
-// Active context while dispatching a window's events / draw. Null = main.
-// (An inline variable: a hot-reload guest may hold its own copy, which stays
-// null there and falls through to the shared mainWindowContext() — identical
-// behavior while single-window.)
-inline WindowContext* currentWindowCtx = nullptr;
+// Active context while dispatching a window's events / draw. Null = main. The
+// native window layer points it at a secondary window's context around that
+// window's tick. Non-inline (tcGlobal.cpp) like mainWindowContext(): a Windows
+// hot reload guest DLL would get its own copy of an inline variable, which
+// would stay null there and send the guest's drawing during a secondary
+// window's tick to the main window.
+WindowContext*& currentWindowCtx();
 
-inline WindowContext& currentWindowContext() {
-    return currentWindowCtx ? *currentWindowCtx : mainWindowContext();
-}
+// The context drawing and input calls act on. Also non-inline: it reads
+// currentWindowCtx(), and in a single-window app it costs the one out-of-line
+// call its inline version always made (to mainWindowContext()).
+WindowContext& currentWindowContext();
+
+// Drop the node references of every window context: hover, grab and
+// selection in the main window's context and each secondary window's, and
+// the main window's root. The hot reload host calls it before it unloads a
+// guest (tcHotReloadHost.h), so no weak reference to a node the guest created
+// outlives the guest. A secondary window's root stays: it names the App the
+// window itself holds (Window::setApp). Non-inline (tcGlobal.cpp): it walks
+// the window registry.
+void resetNodeRefsForUnload();
+
+// ---------------------------------------------------------------------------
+// Per-window frame timing. Non-inline (tcGlobal.cpp).
+// ---------------------------------------------------------------------------
+// Sample the uptime getFrameElapsedTime() reports for this window's frame.
+void sampleFrameTime(WindowContext& ctx);
+// Record one frame for getFrameRate(): the wall time it covered and the number
+// of update steps it ran (1 per update in VSYNC / synced modes; in fixed-step
+// loops the time the steps consumed divided by the step interval, which may be
+// fractional).
+void recordUpdateRateSample(WindowContext& ctx, double duration, double steps);
 
 // ---------------------------------------------------------------------------
 // Per-window frame-rate throttle (T1). Shared by every platform's windowTick.
@@ -327,13 +405,14 @@ inline WindowContext& currentWindowContext() {
 // this window's update/draw, false to skip it cheaply (the display link keeps
 // firing at vsync — this only decides whether we do the frame's work).
 // Free-run (throttleFps <= 0) always ticks. Otherwise accumulate real elapsed
-// wall-clock time and let one tick through per 1/fps interval; a target >= the
-// display rate degenerates to running every tick. Mirrors the main loop's
-// fixed-FPS draw-skip logic (TrussC.h _frame_cb).
+// time and let one tick through per 1/fps interval, with a half-tick
+// tolerance so a target at or above the display rate runs every tick. Same
+// decision as the main loop's fixed-FPS draw skip (frameSkipShouldTick,
+// tcFrameTiming.h).
 // ---------------------------------------------------------------------------
 inline bool windowThrottleShouldTick(WindowContext& ctx) {
     if (ctx.throttleFps <= 0.0f) return true;
-    auto now = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::steady_clock::now();
     if (!ctx.throttleLastTimeInitialized) {
         ctx.throttleLastTimeInitialized = true;
         ctx.throttleLastTime = now;
@@ -341,15 +420,7 @@ inline bool windowThrottleShouldTick(WindowContext& ctx) {
     }
     double elapsed = std::chrono::duration<double>(now - ctx.throttleLastTime).count();
     ctx.throttleLastTime = now;
-    ctx.throttleAccumulator += elapsed;
-    double interval = 1.0 / ctx.throttleFps;
-    if (ctx.throttleAccumulator >= interval) {
-        ctx.throttleAccumulator -= interval;
-        // Clamp after a long stall (occlusion) so we don't burst-catch-up.
-        if (ctx.throttleAccumulator > interval) ctx.throttleAccumulator = 0.0;
-        return true;
-    }
-    return false;
+    return frameSkipShouldTick(ctx.throttleAccumulator, elapsed, 1.0 / ctx.throttleFps);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +441,12 @@ inline sgl_pipeline activePremult() {
     bool depth = currentWindowContext().depthTestEnabled;
     return currentWindowContext().currentTarget->pipeline(
         (depth ? 0x1000u : 0x000u) | 0x100u, pipeDescPremult(depth));
+}
+// TrueType glyph atlas (R8 coverage): Alpha blend + sglCoverageShader().
+inline sgl_pipeline activeCoverage2D() {
+    bool depth = currentWindowContext().depthTestEnabled;
+    return currentWindowContext().currentTarget->pipeline(
+        (depth ? 0x1000u : 0x000u) | 0x400u, pipeDescCoverage2D(depth));
 }
 inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDescClear()); }
 inline sgl_pipeline active3D()            { return currentWindowContext().currentTarget->pipeline(0x300u, pipeDesc3D()); }

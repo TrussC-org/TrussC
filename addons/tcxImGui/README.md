@@ -48,6 +48,8 @@ void tcApp::draw() {
 ImGui renders on top of all TrussC content automatically via the `onRender` event.
 Teardown is automatic too — the addon listens to the framework's exit event and
 shuts itself down when the app closes, so there is nothing to call in `cleanup()`.
+With hot reload, the same teardown runs on `events().hotReloadUnload` before
+each reload, and the new build sets ImGui up again in its `setup()`.
 
 ## API
 
@@ -97,10 +99,10 @@ void tcApp::setup() {
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | List the widgets drawn in the last frame — in every window running imgui — with labels, types, positions and, for value widgets, their current values |
-| `tcx_imgui_get_touched` | — | The values the user changed by hand since startup (or the last reset), with their current value. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector |
+| `tcx_imgui_get_touched` | — | The value widgets the user changed by hand since startup (or the last reset), with the current value of their variable. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector. Items that change no variable (buttons, menu headers, action menu items) are not listed — see [Touched](#touched-what-the-user-changed-by-hand) |
 | `tcx_imgui_reset_touched` | — | Clear that record. No value is changed |
-| `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label |
-| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: replaces text in input widgets, and enters numeric values directly into slider/drag widgets (Ctrl+Click temp input) |
+| `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label. A composite widget (`DragFloat3`, `ColorEdit4`, ...) is an error: set it with `tcx_imgui_input` |
+| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: for widgets that hold a value (and text fields); buttons and other items without a variable are pressed with `tcx_imgui_click`. A value widget gets `text` as JSON, written into its variable and read back (see [Setting values](#setting-values)); a text field gets `text` typed in |
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
@@ -127,14 +129,102 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 | `DragFloat3`, `SliderInt2`, `InputFloat4`, ... | same | An array, `[x, y, z]`, listed under the widget's own label |
 | `SliderAngle` | `slider_angle` | Radians — the variable's value — with `"unit": "rad"`, although the widget displays degrees |
 | `ColorEdit3/4`, `ColorPicker3/4` | `color` | The variable as it is: `[r, g, b]` or `[r, g, b, a]`, 0-1. `colorSpace` is `"rgb"`, or `"hsv"` with `ImGuiColorEditFlags_InputHSV` (then the values are the raw HSV the variable holds, not converted) |
-| `Combo` | `combo` | The selected index. `item` is the text shown |
+| `Combo` | `combo` | The selected index. `item` is the text shown; omitted in the frame of a pick, until the next frame reports the new preview |
 | `BeginCombo` (a custom combo) | `combo` | Only `item`, the text shown |
 | `InputText`, `InputTextMultiline` | `text` | The string. A password field reports `"password": true` and never its text |
-| `Checkbox` | `checkbox` | `true` / `false` (also in `checked`) |
+| `Checkbox`, `MenuItem(label, shortcut, bool* p_selected)`, `Selectable(label, bool* p_selected)` | `checkbox` | `true` / `false`, the variable after the click (a `Checkbox` or toggle `MenuItem` also has `checked`) |
+| `RadioButton(label, int* v, int v_button)` | `radio` | The variable the button group sets (`valueType` `int`), under the label of each button in the group. `buttonValue` is that button's own value (`v_button`), the value pressing it sets |
+| `ListBox` | `listbox` | The selected index, under the list box's own label |
+| `BeginListBox` (a custom list box) | `listbox` | No value, only the label |
+
+Items that set no variable of yours carry no value: buttons, menu headers,
+action menu items (`MenuItem("Save")`), `MenuItem(label, shortcut, bool
+selected)` (the variable is yours, the widget never sees it), plain
+`Selectable`s and `RadioButton(label, bool active)`.
 
 The parts of a composite widget (the `##X` / `##Y` fields of a `ColorEdit`, the
 `-` / `+` buttons of `InputInt`) are still listed, so you can click or type
 into them, but carry no value — the widget reports under its own label.
+
+### Setting values
+
+`tcx_imgui_input` on a value widget (every row of the table above except the
+custom `BeginCombo` / `BeginListBox` and text fields) does not click or type.
+It hands the value to the value hook, which writes it into the app's variable
+the next time the widget runs, before the widget reads it. In that frame the
+widget returns `true`, as if the user had changed it, so the usual patterns
+take the value:
+
+```cpp
+if (ImGui::DragFloat3("pos", v)) recompute();            // recompute() runs once
+float x = node->getX();
+if (ImGui::DragFloat("x", &x)) node->setX(x);            // setX() gets the value
+```
+
+The reply waits for that frame and the next one: the variable is read back
+when the widget returns, and checked again when the widget runs in the next
+frame.
+
+```json
+{"label": "position", "window": "Params", "windowId": 0, "status": "ok",
+ "widget": "drag", "valueType": "float", "value": [0.5, -1, 2.25]}
+```
+
+- `text` is the value as JSON, in the units `tcx_imgui_get_widgets` reports: a
+  number; an array for a composite widget, one element per component
+  (`[x, y, z]`; a color `[r, g, b]` or `[r, g, b, a]` as floats 0-1, or the raw
+  HSV the variable holds with `colorSpace` `hsv`); `true` / `false` for a
+  `Checkbox` or a `bool*` `MenuItem` / `Selectable`; the item index for a
+  `Combo` or `ListBox`; for a `RadioButton(label, int* v, v_button)`, that
+  button's own value (its `buttonValue`): target the button whose value you
+  want. Another value is refused, because in ImGui `true` from a radio button
+  means the variable now holds that button's value (`if
+  (ImGui::RadioButton("B", &mode, 1)) onB();` must run for 1 only); radians
+  for `SliderAngle`.
+- A value the variable already holds changes nothing: the widget does not
+  return `true` (a toggle handler such as `if (ImGui::MenuItem("Fullscreen",
+  nullptr, &fs)) toggleFullscreen();` does not run), and the reply is `ok`. A
+  `CheckboxFlags` with only some of its bits set (drawn mixed, reported
+  `false`) holds neither value, so `false` clears its bits and `true` sets
+  them.
+- `status: ok` means the variable held the value when the widget returned, and
+  still held it when the widget ran in the next frame (if the widget is not
+  drawn in that next frame, or the app draws no imgui in it — say the value
+  hid the GUI — or its window renders no frame until 4 s after the call — a
+  window rendering less often than once every 2 s, or one that stopped — the
+  first read-back stands). If the app took the value and
+  changed it by the next frame (a clamp, a setter that converts it, such as
+  the inspector's `rotation` in degrees), the reply is still `ok`, with a
+  `message` saying so and `value` = what the variable holds.
+- Errors, with nothing written: a value of the wrong shape or type (component
+  count, not a number, a fraction for an int, out of the C++ type's range); a
+  widget that is not drawn in the frame after the call (collapsed header,
+  closed or hidden window, no imgui drawn in that frame); a disabled widget
+  (inside `BeginDisabled()`, `MenuItem(..., enabled = false)`,
+  `ImGuiSelectableFlags_Disabled`) or a read-only one; a `RadioButton` given
+  another button's value; an item with no variable that takes no text (a
+  button, an action `MenuItem`, `MenuItem(label, shortcut, bool selected)`,
+  `RadioButton(label, bool active)`, a plain `Selectable`, a tree node: it has
+  no value to set; press it with `tcx_imgui_click`); a widget that runs more than 2 s after the call (a window
+  rendering less often than once every 2 s, e.g. `Window::setFps` below 0.5),
+  since the value could not be checked before the reply.
+- Errors after the write, carrying what the variable holds: a hand edit that
+  changed the value again in the same frame; and a variable that holds its old
+  value again in the next frame — code that ignores the widget's return value
+  and copies its own value into the variable every frame (`float y = model.y;
+  ImGui::DragFloat("y", &y);`), so such a widget cannot be set from MCP (or an
+  app that turned the value back itself).
+- A value set this way is not an edit by hand: the Edited flag is not set, so
+  `ImGui::IsItemEdited()` and `IsItemDeactivatedAfterEdit()` do not fire for
+  it, and it does not go into `tcx_imgui_get_touched` (tcxNodeInspector's
+  record included). Only the return value says `true`.
+
+Known limits:
+
+- No range clamp: the hook does not see the widget's min / max, so a value out
+  of the slider's range is written as given.
+- Text fields (`InputText`) are still typed into (the hook does not see the
+  buffer size), and `tcx_imgui_click` still clicks buttons.
 
 ### Touched: what the user changed by hand
 
@@ -153,12 +243,30 @@ the code, and calls `tcx_imgui_reset_touched`.
  "inspector": []}
 ```
 
-- A widget is recorded when its value is changed through the widget: dragging,
-  typing, clicking — including input sent by the `tcx_imgui_*` tools. A value
-  assigned from code is never recorded; a recorded widget's value does follow
-  later changes from code.
+- A value widget (every row of the table above) is recorded when its value is
+  changed through the widget: dragging, typing, clicking — including a click by
+  `tcx_imgui_click` and text typed by `tcx_imgui_input`. A value assigned from
+  code, or set on a value widget by `tcx_imgui_input` (see
+  [Setting values](#setting-values)), is never recorded; a recorded widget's
+  value does follow later changes from code.
+- Only value widgets are recorded, each with the value of its variable. A click
+  that sets no variable of yours is not: buttons, menu headers, action menu
+  items, `MenuItem(label, shortcut, bool selected)` — even when your code uses
+  it as a toggle, since the widget never sees your variable (use the `bool*`
+  form to have it recorded) — plain `Selectable`s and `RadioButton(label, bool
+  active)`.
 - Changing a part (one component of a `DragFloat3`, the R field of a
-  `ColorEdit`) records the whole widget under its label.
+  `ColorEdit`) records the whole widget under its label. Likewise a pick in a
+  `Combo` or a `ListBox` records the combo / list box under its own label, not
+  the item picked. A custom list (`BeginListBox` + `Selectable`s) is recorded
+  under the list box label with no value, like a custom `BeginCombo`. A value
+  widget inside a custom list box or combo (a `Selectable(label, bool*)`, a
+  `Checkbox`) is recorded under its own label too, with its value.
+- A toggle `MenuItem` / `Selectable` with a `bool*` reports the state after the
+  click, even when the click closed its menu.
+- Each `RadioButton(label, int* v, v_button)` the user pressed gets its own
+  entry, and all of them show the same variable's current value (each with its
+  own `buttonValue`).
 - A widget that is not drawn right now (collapsed header, closed window) keeps
   its last known value and reports `"visible": false`.
 - The record starts when the MCP tools are registered (`TRUSSC_MCP=1`) and is
@@ -174,10 +282,13 @@ widget record with a `tcx::imgui::TouchedExclusionScope` while it draws them.
 
 ## How It Works
 
-tcxImGui connects to TrussC via two core events:
+tcxImGui connects to TrussC via these core events:
 
 - **`events().rawEvent`** (priority: BeforeApp) — Routes input events to ImGui
 - **`events().onRender`** (priority: 1000) — Renders ImGui after all sokol_gl content is flushed
+- **the main window's `events().afterFrame`** (priority: BeforeApp) — Answers a
+  `tcx_imgui_input` whose check frame did not come in time (see
+  [Setting values](#setting-values)), before the MCP server's own timeout
 
 This means ImGui always renders on top and receives input before your app.
 

@@ -14,6 +14,8 @@
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
 #include "../utils/tcLog.h"
+#include "../utils/tcOnceGate.h"
+#include "tcKeptThreads.h"
 
 // Platform-specific socket type
 #ifdef _WIN32
@@ -27,6 +29,8 @@
 #endif
 
 namespace trussc {
+
+namespace internal { struct UdpSocketTestAccess; }
 
 // ---------------------------------------------------------------------------
 // UDP receive event arguments
@@ -66,10 +70,23 @@ public:
     // receive thread — fastest, but you handle the synchronization.
     // With setUseThread(false) everything runs on the main thread and this
     // does not apply.
+    //
+    // An inline onReceive listener may call stopReceiving() or close(). The
+    // receive thread cannot join itself there: the socket keeps it, and the
+    // next startReceiving(), stopReceiving() or close() on another thread,
+    // or the destructor, waits for it (the rest of the listener). The
+    // destructor must not run on the receive thread itself (a listener that
+    // destroys the socket): it detaches the thread, which then returns from
+    // the listener into the destroyed socket, undefined behavior. Destroy it
+    // from another thread, or once the listener has returned.
     Event<UdpReceiveEventArgs> onReceive;   // On data receive
     Event<UdpErrorEventArgs> onError;       // On error
 
     UdpSocket();
+
+    // Closes the socket and returns once the receive thread has ended, one
+    // that a listener's stopReceiving() or close() let go of included. Must
+    // not run on the receive thread (see onReceive).
     ~UdpSocket();
 
     // Copy prohibited
@@ -94,7 +111,12 @@ public:
     // Set destination (after setting, can send via send(data, size))
     bool connect(const std::string& host, int port);
 
-    // Close socket
+    // Close socket. Returns once the receive thread has ended (see
+    // onReceive for a call on that thread itself).
+    // startReceiving() (bind() calls it), stopReceiving(), close() and the
+    // destructor can wait for a listener still running on the receive
+    // thread. Do not call them while holding a lock that such a listener
+    // takes: the call and the listener would wait for each other forever.
     void close();
 
     // -------------------------------------------------------------------------
@@ -121,7 +143,12 @@ public:
     // Start receive thread (called automatically after bind)
     void startReceiving();
 
-    // Stop receive thread
+    // Stop receive thread. Returns once it has ended (see onReceive for a
+    // call on that thread itself).
+    // startReceiving() (bind() calls it), stopReceiving(), close() and the
+    // destructor can wait for a listener still running on the receive
+    // thread. Do not call them while holding a lock that such a listener
+    // takes: the call and the listener would wait for each other forever.
     void stopReceiving();
 
     // Whether receiving
@@ -201,9 +228,23 @@ public:
     int getConnectedPort() const { return connectedPort_; }
 
 private:
+    friend struct internal::UdpSocketTestAccess;
+
+    enum class ErrorKind { Resolve, Send, Receive };
+    struct ErrorLogState {
+        OnceGate gate{5.0};
+        std::atomic<uint64_t> suppressed{0};
+        std::atomic<bool> failedSinceSuccess{false};
+    };
+
     void receiveThreadFunc();
     bool ensureSocket();
     void notifyError(const std::string& message, int code = 0);
+    void notifyError(ErrorKind kind, const std::string& message, int code = 0);
+    void notifyRecovery(ErrorKind kind);
+
+    ErrorLogState errorLogs_[3];
+    std::mutex errorLogMutex_;
 
     SocketHandle socket_ = INVALID_SOCKET_HANDLE;
     int localPort_ = 0;
@@ -212,6 +253,12 @@ private:
 
     // Receive thread
     std::thread receiveThread_;
+
+    // receiveThread_ when a call on that very thread (a listener's
+    // stopReceiving() or close(), or the destructor) let go of it. Joined by
+    // the next startReceiving(), stopReceiving() or close() on another
+    // thread, or by the destructor (see tcKeptThreads.h).
+    internal::KeptThreads keptThreads_;
     std::atomic<bool> receiving_{false};
     std::atomic<bool> shouldStop_{false};
     
@@ -224,10 +271,6 @@ private:
 
     // Receive buffer size
     static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
-
-    // Winsock initialization (Windows)
-    static bool initWinsock();
-    static bool winsockInitialized_;
 };
 
 } // namespace trussc

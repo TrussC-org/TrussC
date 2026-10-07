@@ -17,6 +17,22 @@ A lightweight creative coding environment optimized for the AI-native and GPU-na
 - `tc::` - Core & Official Modules
 - `tcx::` - Community Addons / Extensions
 
+### How design decisions are made
+
+When a change can take more than one reasonable shape, these rules decide it.
+
+- **Think of three kinds of apps.** TrussC apps are roughly:
+  1. personal projects, where trying things quickly matters most;
+  2. long-running installations (exhibitions), where maintenance comes first: recovering with nobody on site, logs, predictable behavior;
+  3. apps distributed to others, which run on other people's machines, so safety and integrity come first.
+
+  A convenience that puts any one of these at risk is not adopted, however useful it is. If it adds no security risk to any of them, it may be adopted for convenience.
+- **Simple and predictable.** Prefer the design that can be stated in one sentence. Count complexity as a cost, even when it brings an implementation benefit. Options and automatic behavior are added later, when there is a real need.
+- **Follow existing conventions.** Before adding a mechanism, look for code that already does the same thing, and do it the same way.
+- **Fix the code, not the docs.** When the code is wrong, fix the code. A documented workaround is only a stopgap until the fix lands.
+- **No arbitrary limits.** A size or count limit needs a concrete reason, such as a file format's own limit or the range the code can represent. Don't add one just to be safe.
+- **People decide behavior and API changes.** Choices that change behavior or the API are made by a person. AI agents may lay out the options and recommend one, but they don't make the call.
+
 ---
 
 ## 2. Tech Stack
@@ -184,6 +200,7 @@ namespace tc {
 
     // Time
     double getElapsedTime();
+    double getFrameElapsedTime();
     double getDeltaTime();
     uint64_t getFrameNum();
 
@@ -224,6 +241,15 @@ tc::setIndependentFps(60, 30);      // Update 60Hz, draw 30fps
 ```
 
 **Note:** In event-driven mode, the app doesn't freeze. Event handlers still fire normally.
+
+**Timing rules:**
+
+- **One clock.** `getElapsedTime()` (double), `getElapsedTimef()`, `getElapsedTimeMillis()` and `getElapsedTimeMicros()` read one `steady_clock` whose origin is taken at program start. `resetElapsedTimeCounter()` only restarts what these getters report; framework timing (Node timers, the loop, `ScreenRecorder`, the `tc_get_health` uptime) runs on the underlying clock and is never reset. `getFrameElapsedTime()` is the same value sampled once per frame, so every update step and the draw of a frame agree. `getElapsedTimef()` is a float that loses precision after about a day: use it for animation, and the double where precision matters. Because the counter can be reset, measure durations with `getSystemTimeMicros()` differences taken as `int64_t`.
+- **Delta time.** In VSYNC and `setFps()` modes `getDeltaTime()` is the measured time since the previous update. With a fixed update rate (`setIndependentFps(120, VSYNC)`, and `runHeadlessApp`) update runs as fixed steps and every step reports exactly `1 / updateFps`.
+- **Bounded catch-up.** A fixed-rate update runs at most `setMaxUpdateSteps()` steps per frame (default 10). Time beyond that (after a stall, when `update()` is slower than its own rate, or when the update rate is more than that many times the display rate) is dropped with a one-time warning, instead of freezing the app while it replays. `runHeadlessApp` applies the same cap per loop pass. Between passes it sleeps only until the next step is due (at most 1 ms), on a high-resolution timer on Windows, where a plain sleep rounds up to ~15.6 ms, so a fast headless rate stays within the cap per pass. `setMaxUpdateSteps(0)` (or less) removes the cap when every step must run, e.g. a deterministic simulation; a long stall is then replayed in full. `getFrameRate()` reports the measured rate, so it shows when that happens (fixed steps are counted by the time they consumed, which keeps the value steady when the update rate isn't a multiple of the frame rate).
+- **Switching modes at runtime** (`setFps()` / `setIndependentFps()`) starts the new rate from the moment of the switch; time spent in the previous mode is not replayed, neither as fixed steps nor as the first measured delta. Called between updates (a key handler, `draw()`), the next delta counts from the call: after an hour of `EVENT_DRIVEN`, the first `setFps(VSYNC)` update doesn't report the hour (so Node timers don't all fire at once), but the wait for the first `redraw()` after switching to `EVENT_DRIVEN` counts. Called inside an update (including a `setup()` that runs in one), it counts from that update's start, so work in that update counts whether it comes before or after the call. A `setup()` that runs in a `draw()` instead (a node added during `draw()`, or the App when it starts with `setIndependentFps(EVENT_DRIVEN, …)`; with `setFps(EVENT_DRIVEN)` the first frame runs an update) counts as between updates. So a switch between updates drops the time since the last update only when the update mode really changes into a measured one (VSYNC or `setFps()`). In the usual modes that is under a frame; it is long only when the previous mode ran no update for a while, like an `EVENT_DRIVEN` idle. Changing only the draw rate drops nothing; switching between a synced update (`setFps()`) and an independent one (`setIndependentFps()`) counts as a change of the update mode even at the same rate (`setFps(VSYNC)` to `setIndependentFps(VSYNC, 30)` drops up to a frame). Entering a fixed update rate restarts with one step: the first frame after the switch runs one fixed update step (and draws at a fixed draw rate), which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60 Hz, the step is ~9.7 ms longer than the 1/144 s since the last update). Calling them again with the current rates does nothing, so `setFps(guiValue)` every frame is fine; on the frame where the value changes, a call from `draw()` makes that update's delta count only from the call, shorter than the frame.
+- **Fixed draw rates** skip display frames with a half-frame tolerance: a target at or just above the display rate (`setFps(60)` on a 59.94 Hz display) draws every frame, and integer ratios (60 on 120 Hz, 30 on 60 Hz) draw every other frame. `Window::setFps()` throttles secondary windows the same way.
+- **Secondary windows** keep their own timing for now; the multi-window part follows in #307, which fixes these. A secondary window measures its own `getDeltaTime()`, still with `high_resolution_clock` (the system clock on Linux): a forward system clock step (NTP, a manual change) lands in one delta, so that window's due timers fire at once, and an uncapped `callEveryCatchUp` fires once per interval of the step; a backward step makes one delta negative, so `getDeltaTime()` is negative on that tick and the window's timers are not counted down on it. There `getFrameRate()` / `getFps()` average the last 10 calls (reading it once per second gives a ~10 s average), and `getFrameElapsedTime()` returns the live clock. A Node timer created in or between its ticks counts the window's whole next delta, time before the call included: after a 3 s `setup()` in a secondary window, `callAfter(2.0)` fires about one frame later (not 2 s).
 
 ### B. Scene Graph & Event System
 
@@ -325,8 +351,18 @@ this->callAfter(1.0, []{ cout << "1 second passed" << endl; });
 
 // Repeating timer
 this->callEvery(0.5, []{ cout << "Every 0.5 seconds" << endl; });
+
+// Repeating timer that calls back once for every interval that came due
+// (at most 5 per update), e.g. a fixed-rate simulation step
+this->callEveryCatchUp(0.01, [this]{ stepSimulation(0.01); }, 5);
 ```
 
+- Timers are countdowns: each update of the node subtracts `getDeltaTime()`, so they follow the loop (including fixed-rate steps), pause while the node is inactive, and are not affected by `resetElapsedTimeCounter()`. With a fixed update rate they count step time: time the loop drops after a stall (beyond the `setMaxUpdateSteps()` cap) is not counted, so the timer fires that much later in wall time
+- Only time after the call counts: a timer starts with the next update after the one it was created in (including an `events().update` listener). In the main window it is not charged for anything before the call: the earlier part of a long update or `setup()` (a synchronous load), an idle gap or a stall before an event handler, `draw()` or `runOnMainThread` work created it. One created during a fixed-rate step counts whole steps from the next one. In VSYNC and `setFps()` modes a timer fires on the first update that starts at least its delay after the call; with a fixed update rate it counts steps, so when a frame runs several steps (after a stall, or when the update rate is above the display rate: `callAfter(1.0 / 120)` made in the first step of a frame at a fixed 120 Hz on a 60 Hz display fires on the next step of the same frame) it can fire before its delay has passed in wall time. In a secondary window a timer created in or between its ticks still counts that window's whole next delta, until #307
+- A runtime `setFps()` / `setIndependentFps()` that switches the update into a measured mode (VSYNC or `setFps()`) between updates drops the time since the last update, so running timers fire that much later: under a frame in the usual modes, long only after an idle like `EVENT_DRIVEN`. Called inside an update, the time counts from that update's start. Changing only the draw rate drops nothing (switching between synced and independent update counts as an update-mode change even at the same rate); entering a fixed update rate restarts with one step, which can count a little more or less than the time since the last update
+- A node moved during an update, before that update reached it, under a parent the update has already traversed misses that update's countdown, so its timers run one delta late. A node that moves itself from its own `update()` has already been counted down and isn't delayed; one moved under a parent traversed later is counted down once
+- `callEvery` keeps its phase (next due = previous due + interval). If an update comes more than a whole interval late it fires once, not once per missed interval
+- `callEveryCatchUp(interval, callback, maxCatchUp)` keeps the phase too, but calls back once for every interval that came due, at most `maxCatchUp` times per update. `maxCatchUp` has no default: `0` or `-1` (any value `<= 0`) means no limit. Past the limit the remaining due intervals are dropped; cancelling the timer from the callback stops the remaining calls. Without a limit, a long stall in a VSYNC or `setFps()` loop (or an idle stretch in EVENT_DRIVEN mode) makes it fire that many times at once
 - Timers auto-destroyed when Node is deleted
 - Zero overhead when no timers are active
 
@@ -494,6 +530,48 @@ To enable, run with environment variable: `TRUSSC_MCP=1`.
 
 See [AI_AUTOMATION.md](AI_AUTOMATION.md) for full reference.
 
+### G. One Instance per Process (header-inline state)
+
+A hot reload build runs the core in the **host** executable and the app (plus its addons) in a **guest** shared library ([BUILD_SYSTEM.md §7](BUILD_SYSTEM.md#7-hot-reload-development)). The guest calls TrussC functions that live in the host, but it also compiles every **header-inline** function and variable it uses into itself. Whether those copies are merged with the host's depends on the platform:
+
+| Platform | How the guest reaches the host | Header-inline state used by the guest |
+|---|---|---|
+| Linux | unresolved symbols, bound at `dlopen` (host built with `-rdynamic` + `--whole-archive`) | if the host contains the definition too, the host's wins by symbol interposition: **one instance**. If only guest code uses it, the guest keeps its own: **a fresh instance per reloaded generation** |
+| macOS | `-undefined dynamic_lookup` (host built with `-export_dynamic`) | if the host contains the definition too, dyld coalesces the guest's weak definition with it: **one instance**. If only guest code uses it, the guest can keep its own |
+| Windows | the host EXE's import library (TrussC.lib's symbols exported through a generated `.def`) | only **non-inline** functions are imported; an inline function is compiled into the DLL with its own `static` locals, and an `inline` variable gets its own storage: **a second instance**, and a new one per reloaded generation |
+
+The host contains an inline definition when host code uses it: the core loop in `TrussC.h` (instantiated by the host's `main.cpp`) and the `.cpp` files of TrussC.lib. Everything the core loop reads is therefore shared on Linux and macOS, but state that only app code touches is not: the FBO context, font atlas and IBL bake caches, which only app code fills, were a guest's own there too until #249 moved them out of line.
+
+So on Windows, guest code that registers an MCP tool, calls `setBeepVolume()` or queues work with `runOnMainThread()` through header-inline state writes into its own copy, which the host's frame loop never reads. Nothing fails to compile or link; the feature silently does nothing (#249).
+
+**The rule:**
+
+- State that must be one per process (a singleton, a registry, a queue, a flag that both the core loop and app code touch) is defined **non-inline in a `.cpp`** of the core library, behind an accessor function declared in the header, as in `tcGlobal.cpp` and `tcMCP.cpp`:
+
+  ```cpp
+  // header
+  namespace internal { Registry& registry(); }
+  // tcGlobal.cpp (or a sibling .cpp)
+  namespace internal { Registry& registry() { static Registry r; return r; } }
+  ```
+
+  Expose it through a **function**, not an `extern` variable: a DLL reads another module's variable only through `__declspec(dllimport)`, which TrussC's headers do not use.
+- A `static` local in a header-inline function, or an `inline` variable, is allowed only when a per-module copy is harmless: a cache of derived data, immutable data, or state that only the core loop touches. Say so in a comment at the declaration, and list it in `tools/header_state_allowlist.txt` under one of its four categories (`harmless`, `immutable`, `host-only`, `no-hot-reload`) with the same reason. A cache of GPU objects that nothing frees (sokol_gl contexts, shaders, pipelines, samplers, font atlases) is not harmless: every reloaded generation builds and keeps a new set in the host's sokol pools (with sokol_gl's 4 context slots at the time, FBO drawing stopped after a few reloads).
+- Stateless inline code (math, getters, helpers that go through the accessors above) is unaffected and stays inline for speed. Moving state out of line costs one out-of-line call, which matters only on hot paths.
+
+**Added a `static` or `inline` variable to a core header?** Decide in this order:
+
+1. **A constant?** Make it `constexpr` (or a `const` at namespace scope). The check does not flag it; you are done.
+2. **A warn-once flag?** Make it a `static OnceGate` (`tc/utils/tcOnceGate.h`) and gate the log line with `isFirstTime()`. A per-module copy only means at most one more line after a hot reload, so the check accepts it by its type; you are done.
+3. **Otherwise, unsure?** Move it to a `.cpp` behind an accessor function, as above. This is always correct.
+4. **Only a cache of derived data, and you are sure** a separate copy breaks nothing? Keep it in the header and add it to `tools/header_state_allowlist.txt` with its category and reason. The check's failure message prints the line to paste.
+
+`tools/check_header_state.py` enforces this in CI: it scans `core/include`, every `#if` branch included, for `static` locals in functions, `inline` variables, class template static data members and variable templates defined in headers, mutable namespace-scope `static` / anonymous-namespace variables (every declarator of a declaration), and statics in `#define` bodies, and fails on any that is not in `tools/header_state_allowlist.txt` (a function-local `static OnceGate` is accepted by its type and needs no entry). It also fails on an allowlist entry whose category is not one of the four above, and on an entry that no longer matches anything. Its failure message is written for someone new to hot reload: what goes wrong in one sentence, the `.cpp` fix, then a ready-to-paste allowlist line for each finding and when each category applies. The scan is textual: before each run it checks itself against `tools/header_state_selftest.h`, which pins the constructs that once hid state from it (compound-assignment operators, braced default arguments and mem-initializers, ...), but unusual code can still get past it, so review stays the last gate. `constexpr` variables and `const` namespace-scope statics are not flagged: a constant with internal linkage is one copy per translation unit on every platform already. Addons are not scanned: their code lives only in the guest and is recreated on each reload by design.
+
+`core/tests/hotReloadLifecycle` checks the result at run time on every desktop platform: the guest's MCP tools, status entries, control tools and allowed browser origins must reach the host's registry and HTTP server, answer from the current guest generation, and disappear on reload (a deferred reply still pending then is answered with an error if its producer runs guest code, instead of being produced on the deleted App; a host tool's deferred reply survives); settings guest code writes (`setFps()`, `redraw()`, `setTouchAsMouse()`, the clip / fov defaults, `setDataPathRoot()`, a registered glyph, the overlay queries) must reach the host; guest code must see what the host sets (pixelPerfect, the sokol_gl budget, the bitmap-font sampler, the window context being ticked); node ids, and the timer ids guest code's `callAfter()` hands out, must keep counting across generations; the singletons and GPU caches guest code reaches (the AudioEngine, the screen recorder, the async scheduler and its owner numbering, the beep manager, the console state, the PBR and point pipelines, the FBO, IBL-bake and font caches, the node / texture / FBO debug counters) must be the host's instances; `setBeepVolume()` and `mcp::alert()` from guest code must reach the host; work a guest worker thread queues with `runOnMainThread()` must run when the host drains the main-thread queue; and when the host releases an App that guest code attached to a secondary window with `Window::setApp()`, as the platform `close()` does, guest code must see the release (the double-attach guard is one set per process); after that the test attaches a new App, since a closed App is not attached again. The test's host code uses every definition it checks, so on Linux and macOS these pass either way; the Windows run is the one that catches a split. Not everything is checked at run time: `Thread::getMainThreadId()` only indirectly (through `runOnMainThread()` from a guest worker thread), and `deferGpuDestroy()` not at all; for those the static check is the guard.
+
+To reproduce a Windows split on Linux, link the guest with `-Wl,-Bsymbolic` (for example, configure with `LDFLAGS=-Wl,-Bsymbolic`): the guest then binds its own copy of every header-inline definition, as a DLL does, and still reaches everything non-inline in the host. `hotReloadLifecycle` built that way fails on any of the shared state it checks that is header-inline, and passes on the accessors.
+
 ---
 
 ## 6. 3D Graphics
@@ -599,5 +677,5 @@ To avoid GPL contamination and size bloat, these features wrap OS-specific APIs:
 
 ### Serial Communication (No Boost)
 
-- **macOS/Linux:** POSIX (`open()`, `tcsetattr()`, `read()`)
+- **macOS/Linux:** POSIX (`open()`, `tcsetattr()`, `read()`); rates without a termios B-constant via `IOSSIOSPEED` (macOS) / `termios2` (Linux), device loss via `poll()` hangup and `EIO` / `ENXIO` / `ENODEV`
 - **Windows:** Win32 (`CreateFile()`, `SetCommState()`, `ReadFile()`)

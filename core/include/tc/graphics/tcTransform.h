@@ -12,6 +12,7 @@
 
 #include "tcMath.h"                        // Vec3, Quaternion, Mat4
 #include "tc/graphics/tcRenderContext.h"   // RenderContext + getDefaultContext()
+#include "tc/utils/tcAnnotations.h"
 
 namespace trussc {
 
@@ -37,6 +38,58 @@ inline void pushStyle() {
 // Restore style from stack
 inline void popStyle() {
     getDefaultContext().popStyle();
+}
+
+// ---------------------------------------------------------------------------
+// Scoped push / pop (RAII guards)
+// ---------------------------------------------------------------------------
+// auto m = scopedMatrix();  pushes now and pops at the end of the scope (also
+// on an early return); scopedStyle() does the same for pushStyle()/popStyle().
+// The guard pops on the RenderContext it pushed on. It can't be copied or
+// moved; `auto m = scopedMatrix();` works through guaranteed copy elision.
+// pushMatrix()/popMatrix() remain the main form.
+
+class MatrixScope;
+class StyleScope;
+TC_LUA_SKIP [[nodiscard]] inline MatrixScope scopedMatrix();
+TC_LUA_SKIP [[nodiscard]] inline StyleScope scopedStyle();
+
+class [[nodiscard]] TC_LUA_SKIP MatrixScope {
+public:
+    ~MatrixScope() { ctx_.popMatrix(); }
+    MatrixScope(const MatrixScope&) = delete;
+    MatrixScope& operator=(const MatrixScope&) = delete;
+    MatrixScope(MatrixScope&&) = delete;
+    MatrixScope& operator=(MatrixScope&&) = delete;
+
+private:
+    explicit MatrixScope(internal::RenderContext& ctx) : ctx_(ctx) { ctx_.pushMatrix(); }
+    friend MatrixScope scopedMatrix();
+    internal::RenderContext& ctx_;
+};
+
+class [[nodiscard]] TC_LUA_SKIP StyleScope {
+public:
+    ~StyleScope() { ctx_.popStyle(); }
+    StyleScope(const StyleScope&) = delete;
+    StyleScope& operator=(const StyleScope&) = delete;
+    StyleScope(StyleScope&&) = delete;
+    StyleScope& operator=(StyleScope&&) = delete;
+
+private:
+    explicit StyleScope(internal::RenderContext& ctx) : ctx_(ctx) { ctx_.pushStyle(); }
+    friend StyleScope scopedStyle();
+    internal::RenderContext& ctx_;
+};
+
+// pushMatrix() now, popMatrix() when the returned guard goes out of scope
+TC_LUA_SKIP [[nodiscard]] inline MatrixScope scopedMatrix() {
+    return MatrixScope(getDefaultContext());
+}
+
+// pushStyle() now, popStyle() when the returned guard goes out of scope
+TC_LUA_SKIP [[nodiscard]] inline StyleScope scopedStyle() {
+    return StyleScope(getDefaultContext());
 }
 
 // Reset style to default values (white color, fill enabled, etc.)

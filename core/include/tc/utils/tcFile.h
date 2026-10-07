@@ -16,20 +16,23 @@ namespace trussc {
 // =============================================================================
 // File Path Utilities
 // =============================================================================
+// The strings returned here are UTF-8 on every platform (pathToUtf8).
+// path::string() would return active-code-page bytes on Windows, and throw
+// for characters the code page cannot represent.
 
 // Get filename from path: "dir/test.txt" -> "test.txt"
 inline std::string getFileName(const fs::path& path) {
-    return path.filename().string();
+    return pathToUtf8(path.filename());
 }
 
 // Get filename without extension: "dir/test.txt" -> "test"
 inline std::string getBaseName(const fs::path& path) {
-    return path.stem().string();
+    return pathToUtf8(path.stem());
 }
 
 // Get file extension without dot: "dir/test.txt" -> "txt"
 inline std::string getFileExtension(const fs::path& path) {
-    std::string ext = path.extension().string();
+    std::string ext = pathToUtf8(path.extension());
     if (!ext.empty() && ext[0] == '.') {
         ext = ext.substr(1);
     }
@@ -38,17 +41,17 @@ inline std::string getFileExtension(const fs::path& path) {
 
 // Get parent directory: "dir/test.txt" -> "dir"
 inline std::string getParentDirectory(const fs::path& path) {
-    return path.parent_path().string();
+    return pathToUtf8(path.parent_path());
 }
 
 // Join paths: ("dir", "file.txt") -> "dir/file.txt"
 inline std::string joinPath(const fs::path& dir, const fs::path& file) {
-    return (dir / file).string();
+    return pathToUtf8(dir / file);
 }
 
 // Get absolute path
 inline std::string getAbsolutePath(const fs::path& path) {
-    return std::filesystem::absolute(path).string();
+    return pathToUtf8(std::filesystem::absolute(path));
 }
 
 // =============================================================================
@@ -92,12 +95,20 @@ inline std::vector<std::string> listDirectory(const fs::path& path) {
         return result;
     }
 
-    try {
-        for (const auto& entry : std::filesystem::directory_iterator(fullPath)) {
-            result.push_back(entry.path().filename().string());
+    // Error codes instead of exceptions, and one conversion per entry: an
+    // entry that fails is logged and skipped, the listing goes on.
+    std::error_code ec;
+    std::filesystem::directory_iterator it(fullPath, ec);
+    std::filesystem::directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        try {
+            result.push_back(pathToUtf8(it->path().filename()));
+        } catch (const std::exception& e) {
+            logWarning() << "listDirectory: skipped an entry in " << path << " - " << e.what();
         }
-    } catch (const std::exception& e) {
-        logError() << "Failed to list directory: " << path << " - " << e.what();
+    }
+    if (ec) {
+        logError() << "Failed to list directory: " << path << " - " << ec.message();
     }
 
     return result;
@@ -145,11 +156,28 @@ inline std::string loadTextFile(const fs::path& path) {
     return content;
 }
 
-// Save string to text file
+// Save string to text file. Relative paths resolve via getDataPath, and a
+// missing parent folder is created. A path inside the app bundle is refused
+// (use getUserDataPath()).
 // (binary mode: what you pass is what lands on disk on every platform;
 // Windows text mode would expand \n to \r\n, changing the file size)
 inline bool saveTextFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
+    // "" or "out/": fail before creating any folder
+    if (fullPath.filename().empty()) {
+        logError() << "No file name in path: " << fullPath;
+        return false;
+    }
+    if (!internal::checkWriteTarget(path, fullPath, "File")) return false;
+    std::error_code ec;
+    fs::path parent = fullPath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError() << "Cannot create folder: " << parent << " (" << ec.message() << ")";
+            return false;
+        }
+    }
     std::ofstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot create file: " << path;
@@ -157,12 +185,34 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
     }
 
     file << content;
+    file.close();
+    if (file.fail()) {
+        logError() << "Write error: " << path;
+        return false;
+    }
     return true;
 }
 
-// Append string to text file
+// Append string to text file. Relative paths resolve via getDataPath, and a
+// missing parent folder is created. A path inside the app bundle is refused
+// (use getUserDataPath()).
 inline bool appendToFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
+    // "" or "out/": fail before creating any folder
+    if (fullPath.filename().empty()) {
+        logError() << "No file name in path: " << fullPath;
+        return false;
+    }
+    if (!internal::checkWriteTarget(path, fullPath, "File")) return false;
+    std::error_code ec;
+    fs::path parent = fullPath.parent_path();
+    if (!parent.empty()) {
+        std::filesystem::create_directories(parent, ec);
+        if (ec) {
+            logError() << "Cannot create folder: " << parent << " (" << ec.message() << ")";
+            return false;
+        }
+    }
     std::ofstream file(fullPath, std::ios::app | std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot open file for append: " << path;
@@ -170,6 +220,11 @@ inline bool appendToFile(const fs::path& path, const std::string& content) {
     }
 
     file << content;
+    file.close();
+    if (file.fail()) {
+        logError() << "Write error: " << path;
+        return false;
+    }
     return true;
 }
 
@@ -199,10 +254,28 @@ public:
         return *this;
     }
 
-    // Open file (append = true to append to existing file)
+    // Open file (append = true to append to existing file). Relative paths
+    // resolve via getDataPath, and a missing parent folder is created. A
+    // path inside the app bundle is refused (use getUserDataPath()).
     bool open(const fs::path& path, bool append = false) {
         close();
         fs::path fullPath = getDataPath(path);
+        // "" or "out/": fail before creating any folder
+        if (fullPath.filename().empty()) {
+            logError() << "FileWriter: No file name in path: " << fullPath;
+            return false;
+        }
+        if (!internal::checkWriteTarget(path, fullPath, "FileWriter")) return false;
+        std::error_code ec;
+        fs::path parent = fullPath.parent_path();
+        if (!parent.empty()) {
+            std::filesystem::create_directories(parent, ec);
+            if (ec) {
+                logError() << "FileWriter: Cannot create folder: " << parent
+                           << " (" << ec.message() << ")";
+                return false;
+            }
+        }
         auto mode = std::ios::out | std::ios::binary;
         if (append) mode |= std::ios::app;
 

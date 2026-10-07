@@ -114,15 +114,18 @@ Never ship `setVerifyNone()` to end users — it silently allows MITM.
 ### Upstream mbedTLS version
 
 `tcxTls` pins mbedTLS to the v3.6.x LTS branch via FetchContent. When bumping
-to a newer patch release, also update the version row in `docs/LICENSE.md` and
-the note in `docs/ROADMAP.md`.
+to a newer patch release, also update its row in [LICENSE.md](LICENSE.md#third-party-libraries) (the one
+list of third-party versions; `tools/check_dependencies.py` checks it in CI).
 
 ---
 
 ## Safe defaults for HTTP and WebSocket
 
 - `tcxCurl` uses libcurl with `CURLOPT_SSL_VERIFYPEER` / `VERIFYHOST` at their
-  defaults (both enabled). Automatic redirect following is off.
+  defaults (both enabled). Automatic redirect following is off. For a device
+  with a self-signed certificate, pass its certificate (or CA) as PEM with
+  `HttpClient::setTlsCACertificate(pem)`; verification stays on and that PEM
+  replaces the OS default store. There is no option to turn verification off.
 - `tcxWebSocket` refuses to silently downgrade `wss://` to an unverified
   session. A user who wants that must call `setTlsVerifyNone()` explicitly.
 
@@ -156,6 +159,6 @@ debug-only main-thread assert).
 
 ## Reporting
 
-Security issues should be reported privately via GitHub Security Advisories on
-the repo, or by email to the maintainer (see `README.md`). Please do not open
-public issues for security bugs.
+Report security issues privately through the repository's **Security** tab:
+choose **Report a vulnerability** (GitHub's private vulnerability reporting).
+Please do not open public issues for security bugs.

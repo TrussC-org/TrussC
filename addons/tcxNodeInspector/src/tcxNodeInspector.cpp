@@ -42,11 +42,24 @@ struct StyleScope {
     }
 };
 
+// A weak reference to a node: empty for null (and for a node no shared_ptr
+// owns). The inspector keeps nodes between frames only this way (#255).
+weak_ptr<Node> weakOf(Node* n) {
+    return n ? n->weak_from_this() : weak_ptr<Node>();
+}
+
+// Same node, compared by ownership: a reference to a node that has been freed
+// never matches a new node that reuses its address, and still differs from
+// "no node".
+bool sameNode(const weak_ptr<Node>& a, const weak_ptr<Node>& b) {
+    return !a.owner_before(b) && !b.owner_before(a);
+}
+
 // The member's current value in the tc_get_node_tree encoding (null if the
 // path no longer resolves). "name" without a mod is the node's name field.
 Json memberValue(Node* node, Mod* mod, const string& member) {
     if (!mod && member == "name") return node->getName();
-    Json j = mod ? reflectToJson(*mod) : reflectToJson(*node);
+    Json j = mod ? reflectToJson(*mod, true) : reflectToJson(*node, true);   // derived included (live view)
     const Json* cur = &j;
     size_t start = 0;
     while (true) {
@@ -59,13 +72,6 @@ Json memberValue(Node* node, Mod* mod, const string& member) {
         if (dot == string::npos) return *cur;
         start = dot + 1;
     }
-}
-
-bool hasMod(Node* node, const Mod* mod) {
-    for (Mod* m : node->getMods()) {
-        if (m == mod) return true;
-    }
-    return false;
 }
 
 } // namespace
@@ -81,18 +87,22 @@ NodeInspector::NodeInspector() {
 void NodeInspector::recordTouched(Node* node, Mod* mod, const string& member) {
     if (!node) return;
     const uint64_t id = node->getInstanceId();
+    // A mod is identified by (node, short type name), as getModByTypeName()
+    // and tc_set_node_members do: a node holds at most one mod per type, and
+    // a mod of the same type added again continues the same entry.
+    string modType;
+    if (mod) { Mod& m = *mod; modType = shortTypeName(typeid(m)); }
     TouchedMember* t = nullptr;
     for (auto& e : touched_) {
-        if (e.nodeId == id && e.mod == mod && e.member == member) { t = &e; break; }
+        if (e.nodeId == id && e.modType == modType && e.member == member) { t = &e; break; }
     }
     if (!t) {
         touched_.push_back(TouchedMember{});
         t = &touched_.back();
         t->node = node->weak_from_this();
         t->nodeId = id;
-        t->mod = mod;
+        t->modType = modType;
         t->member = member;
-        if (mod) { Mod& m = *mod; t->modType = shortTypeName(typeid(m)); }
     }
     t->nodeType = node->getTypeName();
     t->nodeName = node->hasName() ? node->getName() : string();
@@ -103,25 +113,36 @@ Json NodeInspector::getTouched() {
     Json arr = Json::array();
     for (auto& t : touched_) {
         auto node = t.node.lock();
-        if (node) {   // current names / value while the node lives
+        // Destroyed: freed, or destroy()ed but still held elsewhere (e.g. a
+        // Ptr member of the app). isDead() stays true after the sweep, whose
+        // cleanupTree() also marks the children of a destroyed node.
+        const bool destroyed = !node || node->isDead();
+        if (!destroyed) {   // current names / value while the node lives
             t.nodeType = node->getTypeName();
             t.nodeName = node->hasName() ? node->getName() : string();
         }
         Json e = {{"nodeType", t.nodeType}, {"nodeId", t.nodeId}};
         if (!t.nodeName.empty()) e["nodeName"] = t.nodeName;
-        if (t.mod) e["mod"] = t.modType;
+        if (!t.modType.empty()) e["mod"] = t.modType;
         e["member"] = t.member;
-        if (!node) {
+        Mod* mod = nullptr;
+        if (!destroyed && !t.modType.empty()) mod = node->getModByTypeName(t.modType);
+        if (destroyed) {
             e["destroyed"] = true;             // value as of the last edit
-        } else if (t.mod && !hasMod(node.get(), t.mod)) {
+        } else if (!t.modType.empty() && !mod) {
             e["modRemoved"] = true;            // value as of the last edit
         } else {
-            t.value = memberValue(node.get(), const_cast<Mod*>(t.mod), t.member);
+            t.value = memberValue(node.get(), mod, t.member);
         }
         e["value"] = t.value;
         arr.push_back(std::move(e));
     }
     return arr;
+}
+
+void internal::recordTouchedForTests(NodeInspector& inspector, Node* node, Mod* mod,
+                                     const string& member) {
+    inspector.recordTouched(node, mod, member);
 }
 
 void NodeInspector::syncNameBuf(Node* node) {
@@ -143,10 +164,11 @@ void NodeInspector::reconcileSelection() {
                                [](const weak_ptr<Node>& w) { return w.expired(); }),
                      selection_.end());
     Node* primary = getSelectedNode();
-    if (primary != lastPrimary_) {
+    weak_ptr<Node> primaryRef = weakOf(primary);
+    if (!sameNode(primaryRef, lastPrimary_)) {
         selection_.clear();
-        if (primary) selection_.push_back(primary->weak_from_this());
-        lastPrimary_ = primary;
+        if (primary) selection_.push_back(primaryRef);
+        lastPrimary_ = primaryRef;
     }
 }
 
@@ -171,7 +193,7 @@ void NodeInspector::select(Node* n) {
     selection_.clear();
     if (n) selection_.push_back(n->weak_from_this());
     setSelectedNode(n);
-    lastPrimary_ = n;
+    lastPrimary_ = weakOf(n);
 }
 
 void NodeInspector::toggleInSelection(Node* n) {
@@ -185,19 +207,19 @@ void NodeInspector::toggleInSelection(Node* n) {
         if (getSelectedNode() == n) {
             Node* next = selection_.empty() ? nullptr : selection_.back().lock().get();
             setSelectedNode(next);
-            lastPrimary_ = next;
+            lastPrimary_ = weakOf(next);
         }
     } else {
         selection_.push_back(n->weak_from_this());
         setSelectedNode(n);
-        lastPrimary_ = n;
+        lastPrimary_ = weakOf(n);
     }
 }
 
 void NodeInspector::clearSelection() {
     selection_.clear();
     setSelectedNode(nullptr);
-    lastPrimary_ = nullptr;
+    lastPrimary_.reset();
 }
 
 void NodeInspector::draw(Node& root) {
@@ -657,13 +679,13 @@ bool NodeInspector::gizmoPressHandler(const MouseEventArgs& e) {
 
     dragAxis_ = axis;
     dragMode_ = mode;
-    dragNode_ = node;
+    dragNode_ = node->weak_from_this();
     dragWorldStart_ = g.origin;
     dragAxisDir_ = g.axis[axis].dir;
     if (mode == GizmoMode::Translate) {
         if (!axisParamForMouse(node->getCameraContext(), m, dragS0_)) {
             dragAxis_ = -1;          // axis at its vanishing point: refuse the grab
-            dragNode_ = nullptr;
+            dragNode_.reset();
             return false;
         }
         // World position of every selected node at press — the drag applies
@@ -673,7 +695,7 @@ bool NodeInspector::gizmoPressHandler(const MouseEventArgs& e) {
     } else {
         if (!ringAngleForMouse(node->getCameraContext(), m, dragV0_)) {
             dragAxis_ = -1;          // ring edge-on: cannot rotate meaningfully
-            dragNode_ = nullptr;
+            dragNode_.reset();
             return false;
         }
         dragVPrev_ = dragV0_;
@@ -686,9 +708,9 @@ bool NodeInspector::gizmoPressHandler(const MouseEventArgs& e) {
 void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
     if (dragAxis_ < 0) return;
     Node* node = getSelectedNode();
-    if (!node || node != dragNode_) {            // selection died mid-drag: cancel
+    if (!node || node != dragNode_.lock().get()) {   // selection died mid-drag: cancel
         dragAxis_ = -1;
-        dragNode_ = nullptr;
+        dragNode_.reset();
         return;
     }
 
@@ -746,7 +768,7 @@ void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
 void NodeInspector::gizmoReleaseHandler(MouseEventArgs& e) {
     if (dragAxis_ < 0) return;
     dragAxis_ = -1;
-    dragNode_ = nullptr;
+    dragNode_.reset();
     dragStarts_.clear();
     e.consumed = true;   // the gesture was ours, release included
 }
@@ -754,6 +776,7 @@ void NodeInspector::gizmoReleaseHandler(MouseEventArgs& e) {
 void NodeInspector::enableGizmoInput() {
     if (gizmoInputEnabled_) return;
     gizmoInputEnabled_ = true;
+    ensureExitGuard();
 
     // Slightly ahead of BeforeApp: the gizmo draws in ImGui's FOREGROUND layer
     // (over the panels), so it also wins input over them — what you see on top
@@ -803,42 +826,49 @@ void NodeInspector::drawGizmo() {
 
     const float scale = style_.gizmoScale;
     const float thick = style_.gizmoThickness * scale;
+    const ImU32 outlineCol = IM_COL32(20, 20, 20, 255);
+    const float outlineWidth = 2.0f * scale;
 
-    for (int i = 0; i < 3; ++i) {
-        if (!g.axis[i].valid) continue;
-        bool hot = (i == hoverAxis_);
-        const Color& c = hot ? hotColor : axisColor[i];
-        ImU32 col = ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, 1.0f));
-        float w = hot ? thick + 1.0f : thick;
-
-        if (mode == GizmoMode::Translate) {
-            ImVec2 a(g.axis[i].p0.x, g.axis[i].p0.y);
-            ImVec2 b(g.axis[i].p1.x, g.axis[i].p1.y);
-            dl->AddLine(a, b, col, w);
-
-            // Arrow head at the tip
-            Vec2 dpx = g.axis[i].p1 - g.axis[i].p0;
-            dpx = dpx * (1.0f / dpx.length());
-            Vec2 n(-dpx.y, dpx.x);
-            const float ah = 8.0f * scale, aw = 3.5f * scale;
-            ImVec2 tip(b.x + dpx.x * ah, b.y + dpx.y * ah);
-            ImVec2 b1(b.x + n.x * aw, b.y + n.y * aw);
-            ImVec2 b2(b.x - n.x * aw, b.y - n.y * aw);
-            dl->AddTriangleFilled(tip, b1, b2, col);
-        } else {
-            const auto& ring = g.axis[i].ring;
-            static std::vector<ImVec2> pts;
-            pts.clear();
-            pts.reserve(ring.size());
-            for (auto& p : ring) pts.emplace_back(p.x, p.y);
-            dl->AddPolyline(pts.data(), (int)pts.size(), col, w, ImDrawFlags_Closed);
-        }
-    }
-
-    // Origin pad
+    // Draw the complete dark underlay before any colored part. This keeps
+    // another axis's outline from cutting across already painted color.
     const Color& acc = style_.accent;
     ImU32 accCol = ImGui::ColorConvertFloat4ToU32(ImVec4(acc.r, acc.g, acc.b, 1.0f));
-    dl->AddCircleFilled(ImVec2(g.screenOrigin.x, g.screenOrigin.y), 3.5f * scale, accCol, 16);
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool outline = pass == 0;
+        for (int i = 0; i < 3; ++i) {
+            if (!g.axis[i].valid) continue;
+            bool hot = (i == hoverAxis_);
+            const Color& c = hot ? hotColor : axisColor[i];
+            ImU32 col = outline ? outlineCol : ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, 1.0f));
+            float w = (hot ? thick + 1.0f : thick) + (outline ? outlineWidth : 0.0f);
+
+            if (mode == GizmoMode::Translate) {
+                ImVec2 a(g.axis[i].p0.x, g.axis[i].p0.y);
+                ImVec2 b(g.axis[i].p1.x, g.axis[i].p1.y);
+                dl->AddLine(a, b, col, w);
+                Vec2 dpx = g.axis[i].p1 - g.axis[i].p0;
+                dpx = dpx * (1.0f / dpx.length());
+                Vec2 n(-dpx.y, dpx.x);
+                const float ah = 8.0f * scale, aw = 3.5f * scale;
+                ImVec2 tip(b.x + dpx.x * ah, b.y + dpx.y * ah);
+                ImVec2 b1(b.x + n.x * aw, b.y + n.y * aw);
+                ImVec2 b2(b.x - n.x * aw, b.y - n.y * aw);
+                if (outline) dl->AddTriangle(tip, b1, b2, col, outlineWidth);
+                dl->AddTriangleFilled(tip, b1, b2, col);
+            } else {
+                const auto& ring = g.axis[i].ring;
+                static std::vector<ImVec2> pts;
+                pts.clear();
+                pts.reserve(ring.size());
+                for (auto& p : ring) pts.emplace_back(p.x, p.y);
+                dl->AddPolyline(pts.data(), (int)pts.size(), col, w, ImDrawFlags_Closed);
+            }
+        }
+        // The origin belongs to the same underlay and color passes.
+        dl->AddCircleFilled(ImVec2(g.screenOrigin.x, g.screenOrigin.y),
+                            3.5f * scale + (outline ? outlineWidth * 0.5f : 0.0f),
+                            outline ? outlineCol : accCol, 16);
+    }
 
     // Multi-selection: a small ring on each member (projected through its own
     // camera context), so you can see what the centroid gizmo will move.
@@ -867,14 +897,16 @@ void NodeInspector::drawGizmo() {
 
 NodeInspector& NodeInspector::attach() {
     NodeInspector& s = instance();
-    s.attachRoot_ = nullptr;
+    s.attachRoot_.reset();
+    s.attachParent_.reset();
     s.doAttach();
     return s;
 }
 
 NodeInspector& NodeInspector::attach(Node& root) {
     NodeInspector& s = instance();
-    s.attachRoot_ = &root;
+    s.attachRoot_ = root.weak_from_this();
+    s.attachParent_ = root.getParent();
     s.doAttach();
     return s;
 }
@@ -923,7 +955,14 @@ void NodeInspector::doAttach() {
     // Building the frame at the default priority lands it in the same pass, on
     // top of the scene. Re-attaching just replaces the previous listener.
     autoDraw_ = events().onRender.listen([this] {
-        Node* r = attachRoot_ ? attachRoot_ : getRootNode();
+        // A root passed to attach(root) is held weakly: once it is freed the
+        // inspector shows the parent it was last seen under (tracked here
+        // every frame, so adding or reparenting it after attach() counts),
+        // and once that is gone too, the running App's tree.
+        Node::Ptr attached = attachRoot_.lock();
+        if (attached) attachParent_ = attached->getParent();
+        else attached = attachParent_.lock();
+        Node* r = attached ? attached.get() : getRootNode();
         if (!r) return;
         imguiBegin();
         draw(*r);
@@ -953,13 +992,32 @@ void NodeInspector::ensureToggleKeyListener() {
 // Drop them at the exit event instead, while everything is still alive (the
 // same pattern tcxImGui's ImGuiManager uses). Removing exitListener_ from
 // inside its own callback is fine: the dispatch list is snapshotted.
+//
+// Hot reload: the singleton is a static of the guest image, which the host
+// keeps loaded after a reload, so each generation has its own instance and
+// the old one is never destroyed. The same cleanup runs on hotReloadUnload,
+// before the host unloads this generation, so the old instance stops drawing
+// and taking input (#416).
 void NodeInspector::ensureExitGuard() {
     if (exitListener_) return;
-    exitListener_ = events().exit.listen([this] {
-        autoDraw_ = {};
-        toggleKeyListener_ = {};
-        exitListener_ = {};
-    });
+    exitListener_ = events().exit.listen([this] { releaseListeners(); });
+    hotReloadUnloadListener_ = events().hotReloadUnload.listen([this] { releaseListeners(); });
+}
+
+void NodeInspector::releaseListeners() {
+    autoDraw_ = {};
+    toggleKeyListener_ = {};
+    gizmoPress_ = {};
+    gizmoDrag_ = {};
+    gizmoRelease_ = {};
+    gizmoInputEnabled_ = false;
+    dragAxis_ = -1;
+    dragNode_.reset();
+    dragStarts_.clear();
+    attachRoot_.reset();
+    attachParent_.reset();
+    exitListener_ = {};
+    hotReloadUnloadListener_ = {};
 }
 
 } // namespace tcx::nodeinspector

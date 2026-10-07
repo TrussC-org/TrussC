@@ -5,8 +5,10 @@
 # tests) on desktop. AllFeaturesExample
 # references every documented public core API and the repo-contained bundled
 # addons without running them (its src/coverage.h), so each platform compiles
-# every call and links it against its own implementation. Target: about 10
-# minutes wall-clock (the slowest job). Building every example on every
+# every call and links it against its own implementation. A textual check
+# (tools/check_header_state.py) keeps new mutable state out of header-inline
+# code, where a Windows hot reload guest would get its own copy. Target: about
+# 10 minutes wall-clock (the slowest job). Building every example on every
 # platform lives in daily.yml, once a day on main, opening an issue on failure.
 #
 # Also runs for the merge queue (merge_group): each queued PR is built on top
@@ -163,8 +165,11 @@ jobs:
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          # Include Objective-C++: the macOS platform .mm files need caching too.
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           # Hash the compiler by content, not mtime: a fresh runner VM installs
           # the same compiler at a different mtime, which otherwise invalidates
           # every restored ccache entry (macOS hit this: 8% hits despite a warm
@@ -245,6 +250,13 @@ jobs:
             find . -name trusscli.exe
           fi
 
+      # trusscli clean must refuse a folder that is not a TrussC project (#459).
+      # Runs against the trusscli just built from this commit.
+      - name: trusscli clean regression tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 tools/tests/test_trusscli_clean.py -v
+
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
       # other example is built daily (daily.yml).
@@ -256,7 +268,8 @@ jobs:
 
       # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
       # built AND run (non-zero exit fails the job). The tests are small console
-      # projects. No-op when none exist.
+      # projects. No-op when none exist. Harnesses with a `daily-only` marker
+      # (heavy dependencies, e.g. tcxTls builds mbedTLS) run in daily.yml only.
       - name: Build & run addon tests
         shell: bash
         run: |
@@ -468,13 +481,15 @@ jobs:
         if: always()
         run: ccache -s || true
 
-  # Compile-only iOS gate: AllFeaturesExample against the device SDK with code
-  # signing disabled — every documented core API compiled and linked for iOS
+  # Compile-only iOS gate: AllFeaturesExample and soundPlayerExample against
+  # the device SDK with code signing disabled — every documented core API
+  # compiled and linked for iOS
   # (the tcFileDialog attribute-order break once sat undetected for weeks
   # because nothing in CI compiled against the iOS SDK). Runtime behavior is
   # still verified on a real device by hand. (It used to be videoPlayerExample:
   # AllFeaturesExample linked tcxLua, whose generated bindings reference the
   # sync dialogs that don't compile on iOS. tcxLua is no longer in it.)
+  # soundPlayerExample also covers floating-point std::format (iOS 16.3+).
   # No ccache: the Xcode generator ignores CMAKE_<LANG>_COMPILER_LAUNCHER.
   build-ios:
     needs: changes
@@ -497,7 +512,16 @@ jobs:
           cd examples/tests/AllFeaturesExample
           cmake -B build-ios -G Xcode \
             -DCMAKE_SYSTEM_NAME=iOS \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
+          cmake --build build-ios --config Release -- \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Build soundPlayerExample (iOS device SDK, unsigned)
+        run: |
+          cd examples/sound/soundPlayerExample
+          cmake -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=16.3
           cmake --build build-ios --config Release -- \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 
@@ -525,6 +549,55 @@ jobs:
       - name: reference check (dup / orphan / 100% documented gate)
         run: node docs/reference/check.js --strict
 
+  # Header-inline state check (#249): core/include must not grow new mutable
+  # header-inline state (a function-local static or an inline variable). A hot
+  # reload guest is a DLL on Windows and compiles its own copy of each, so state
+  # the host and app code share splits there, silently (e.g. the guest's MCP
+  # tools never reached the host). Textual scan that reads every #if branch, so
+  # one Linux run covers every platform's code; about a second. It first checks
+  # its own scanner against tools/header_state_selftest.h. Existing entries,
+  # each with its reason: tools/header_state_allowlist.txt.
+  # The same job runs the core logging check (#311): no printf / cerr / cout /
+  # NSLog in core/include/tc/** and core/platform/**, so core's diagnostics go
+  # through the Logger (log file, onLog, platform log). Textual too; the
+  # Logger's own sinks carry a `log-check: allow` marker.
+  # And the third-party list check (#407): every row of docs/LICENSE.md
+  # "Third-Party Libraries" matches the build (FetchContent GIT_TAG / URL,
+  # vendored version lines, provenance commits), every FetchContent_Declare
+  # has a row, every listed path exists. Reads files only, no network. The
+  # weekly upstream check is upstream-check.yml.
+  # Cheap and independent of the build — always runs (not gated).
+  header-state-check:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: header-inline state check
+        run: python3 tools/check_header_state.py
+
+      - name: core logging check (no printf / cerr / cout / NSLog)
+        if: always()
+        run: python3 tools/check_core_logging.py
+
+      - name: third-party list check (docs/LICENSE.md vs the build)
+        if: always()
+        run: |
+          python3 -m unittest discover -s tools/tests -p test_dependencies.py -v
+          python3 tools/check_dependencies.py
+
+      - name: core test runner regression checks
+        if: always()
+        run: python3 tools/test_core_test_runner.py
+
+      - name: release workflow offline tests
+        if: always()
+        run: python3 tools/tests/test_release_workflow.py -v
+
+      - name: daily web sequencing regression checks
+        if: always()
+        run: python3 tools/tests/test_daily_workflow.py -v
+
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
@@ -533,7 +606,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [changes, build, build-android, build-web, build-ios, reference-check]
+    needs: [changes, build, build-android, build-web, build-ios, reference-check, header-state-check]
     if: always()
     steps:
       - name: Verify job results
@@ -545,6 +618,7 @@ jobs:
           R_WEB: ${{ needs.build-web.result }}
           R_IOS: ${{ needs.build-ios.result }}
           R_REF: ${{ needs.reference-check.result }}
+          R_HDR: ${{ needs.header-state-check.result }}
         run: |
           ok=1
           check() { # name result skippable
@@ -565,5 +639,6 @@ jobs:
           check "build-web"       "$R_WEB"      skippable
           check "build-ios"       "$R_IOS"      skippable
           check "reference-check" "$R_REF"
+          check "header-state-check" "$R_HDR"
           [ "$ok" = "1" ] || { echo "ci-ok: FAILING"; exit 1; }
           echo "ci-ok: all good"

@@ -30,7 +30,7 @@ public:
         // Every manager owns a full sokol_imgui instance (own ImGui context,
         // font atlas, buffers). The classic single-window app just has one.
         simgui_desc_t desc = {};
-        desc.logger.func = slog_func;
+        desc.logger.func = tc::internal::sokolLog;
         // Secondary windows have their own swapchain formats (BGRA8/RGBA8,
         // not the main window's RGB10A2) -- the imgui pipeline must match
         // the pass it renders into or sg validation fails.
@@ -59,8 +59,34 @@ public:
                 simgui_tc_set_context(simguiCtx_);
                 simgui_render();
                 renderPending_ = false;
+            } else {
+                // No imgui frame in this window frame: the values the MCP
+                // tools queued for this context are settled now (swapFrames()
+                // settles them when imgui runs).
+                detail::settleWithoutImGuiFrame(imguiCtx_);
             }
         }, 1000);
+
+        // A value the MCP tools wrote into this context's widgets whose check
+        // frame does not come in time (this window renders very slowly, or
+        // stopped) is settled from the main window's afterFrame, before
+        // tc::mcp's timeout drain there (BeforeApp), whichever window this is.
+        {
+            auto& wctx = tc::internal::currentWindowContext();
+            tc::CoreEvents* mainEvents = wctx.isMain ? &tc::events()
+                                                     : tc::internal::mainWindowContext().coreEvents;
+            if (mainEvents) {
+                overdueListener_ = mainEvents->afterFrame.listen([this]() {
+                    detail::settleOverdueValues(imguiCtx_);
+                }, tc::EventPriority::BeforeApp);
+                // Hot reload: the manager registry is a static of the guest
+                // image, which outlives a reload. Tear down this generation's
+                // manager (the same cleanup as at exit) before the host
+                // unloads it, so no stale listener stays on the host's events
+                // (#416). The host fires it on the main window's events.
+                hotReloadUnloadListener_ = mainEvents->hotReloadUnload.listen([this]() { shutdown(); });
+            }
+        }
 
         // Listen to rawEvent for input handling
         eventListener_ = tc::events().rawEvent.listen([this](const sapp_event& ev) {
@@ -73,13 +99,13 @@ public:
         // user code can guard raw input (isOverlayHovered/isOverlayFocused).
         // Installed once, shared by all windows: the query resolves the
         // manager of the window whose context is current when it is asked.
-        tc::internal::overlayHoveredQuery = []() {
+        tc::internal::overlayHoveredQuery() = []() {
             ImGuiManager* m = ImGuiManager::findForCurrentWindow();
             if (!m || !m->isInitialized()) return false;
             simgui_tc_set_context(m->simguiCtx_);
             return ImGui::GetIO().WantCaptureMouse;
         };
-        tc::internal::overlayFocusedQuery = []() {
+        tc::internal::overlayFocusedQuery() = []() {
             ImGuiManager* m = ImGuiManager::findForCurrentWindow();
             if (!m || !m->isInitialized()) return false;
             simgui_tc_set_context(m->simguiCtx_);
@@ -130,7 +156,9 @@ public:
     void shutdown() {
         if (!initialized_) return;
         exitListener_ = {};
+        hotReloadUnloadListener_ = {};
         renderListener_ = {};
+        overdueListener_ = {};
         eventListener_ = {};
         mousePressConsume_ = {};
         mouseReleaseConsume_ = {};
@@ -143,11 +171,9 @@ public:
         // through the manager registry — they stay installed (no-op for
         // windows without an initialized manager).
         pointerCaptured_ = false;
-        // GPU teardown only while sokol_gfx is alive. If shutdown runs from the
-        // static destructor during exit() (e.g. an abnormal teardown path where
-        // the exit event never fired), sokol_gfx is already gone and its objects
-        // with it — skipping is the correct cleanup, touching them would crash.
-        // (The widget registry is a static too: only touched on the live path.)
+        // shutdown() runs only on live teardown paths, not static destruction.
+        // Keep this guard for an explicit imguiShutdown() after sokol_gfx is gone:
+        // its GPU objects are no longer valid to destroy.
         if (sg_isvalid()) {
             forgetContext(imguiCtx_);   // drop its widget registry before the context goes
             simgui_tc_destroy_context(simguiCtx_);
@@ -196,7 +222,9 @@ public:
     }
 
 public:
-    ~ImGuiManager() { shutdown(); }   // public: owned by unique_ptr in the registry
+    // Teardown runs only on live paths; at static destruction other statics
+    // may already be gone. Public: owned by unique_ptr in the registry.
+    ~ImGuiManager() = default;
 private:
     ImGuiManager() = default;
 
@@ -213,7 +241,9 @@ private:
     bool initialized_ = false;
     bool renderPending_ = false;
     tc::EventListener exitListener_;
+    tc::EventListener hotReloadUnloadListener_;   // on the main window's hotReloadUnload
     tc::EventListener renderListener_;
+    tc::EventListener overdueListener_;   // on the main window's afterFrame
     tc::EventListener eventListener_;
 
     // Input arbitration: consume listeners (BeforeApp) + pointer-gesture capture.
@@ -255,11 +285,11 @@ inline void imguiEnd() {
 }
 
 inline bool imguiWantsMouse() {
-    return tc::internal::overlayHoveredQuery ? tc::internal::overlayHoveredQuery() : false;
+    return tc::isOverlayHovered();
 }
 
 inline bool imguiWantsKeyboard() {
-    return tc::internal::overlayFocusedQuery ? tc::internal::overlayFocusedQuery() : false;
+    return tc::isOverlayFocused();
 }
 
 } // namespace tcx::imgui

@@ -47,8 +47,24 @@ std::vector<uint8_t> OscBundle::toBytes() const {
 // fromBytes - Parse bundle from byte array (robust implementation)
 // =============================================================================
 OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
+    bool paddingMissing = false;
+    return fromBytesAtDepth(data, size, ok, paddingMissing, 1);
+}
+
+OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok, bool& paddingMissing) {
+    paddingMissing = false;
+    return fromBytesAtDepth(data, size, ok, paddingMissing, 1);
+}
+
+// paddingMissing is only ever set here (the caller clears it), so each
+// nested level adds to the same flag.
+OscBundle OscBundle::fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
+                                      bool& paddingMissing, int depth) {
     ok = false;
     OscBundle bundle;
+
+    // Nesting limit (the outermost bundle is level 1)
+    if (depth > MAX_NESTING_DEPTH) return bundle;
 
     // Minimum size check: "#bundle\0" (8) + timetag (8) = 16
     if (!data || size < 16) return bundle;
@@ -64,35 +80,43 @@ OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok) {
     bundle.timetag_ = fromBigEndian64(be);
     pos += 8;
 
-    // Read elements
-    while (pos + 4 <= size) {
-        // Element size
+    // Read elements: each is a 4-byte size, then that many bytes. The bundle
+    // parses only if every element is there in full. pos <= size holds
+    // throughout, and each check subtracts from size instead of adding to pos,
+    // so none of them can wrap when size_t is 32 bits.
+    while (pos < size) {
+        // Element size (a size field cut short is a truncated element)
+        if (size - pos < 4) return OscBundle();
         uint32_t sizeBe;
         std::memcpy(&sizeBe, data + pos, 4);
         uint32_t elementSize = fromBigEndian(sizeBe);
         pos += 4;
 
-        if (pos + elementSize > size) {
-            // Invalid size (not enough remaining data)
-            break;
-        }
+        // An element larger than the data left is truncated
+        if (elementSize > size - pos) return OscBundle();
 
         const uint8_t* elementData = data + pos;
 
         // Determine if bundle or message
         if (isBundle(elementData, elementSize)) {
             bool elementOk = false;
-            OscBundle childBundle = fromBytes(elementData, elementSize, elementOk);
-            if (elementOk) {
-                bundle.elements_.emplace_back(std::move(childBundle));
-            }
+            OscBundle childBundle = fromBytesAtDepth(elementData, elementSize, elementOk,
+                                                     paddingMissing, depth + 1);
+            // A nested bundle that fails rejects this bundle too, so the
+            // caller sees one parse error instead of a partial bundle.
+            if (!elementOk) return OscBundle();
+            bundle.elements_.emplace_back(std::move(childBundle));
         }
         else {
             bool elementOk = false;
-            OscMessage msg = OscMessage::fromBytes(elementData, elementSize, elementOk);
-            if (elementOk) {
-                bundle.elements_.emplace_back(std::move(msg));
-            }
+            bool elementPaddingMissing = false;
+            OscMessage msg = OscMessage::fromBytes(elementData, elementSize, elementOk,
+                                                   elementPaddingMissing);
+            // A message that fails rejects the bundle too, as a nested
+            // bundle does.
+            if (!elementOk) return OscBundle();
+            if (elementPaddingMissing) paddingMissing = true;
+            bundle.elements_.emplace_back(std::move(msg));
         }
 
         pos += elementSize;

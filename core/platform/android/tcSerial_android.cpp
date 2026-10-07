@@ -42,6 +42,16 @@ namespace androidserial {
 
 namespace {
 
+// Where this thread's log lines go while Serial holds its port lock around a
+// backend call (see HoldLogs). nullptr: straight to the Logger, as on the USB
+// worker thread.
+thread_local internal::SerialHeldLog* t_heldLog = nullptr;
+
+// Every log line of the backend goes through here
+internal::SerialHeldLog::Line blog(LogLevel level) {
+    return internal::SerialHeldLog::line(t_heldLog, level);
+}
+
 // USB / CDC constants
 constexpr int USB_CLASS_COMM     = 2;    // CDC control interface
 constexpr int USB_CLASS_CDC_DATA = 10;   // CDC data interface
@@ -57,10 +67,10 @@ constexpr int CDC_LINE_DTR_RTS           = 0x03;
 constexpr int    PERMISSION_TIMEOUT_SEC = 60;   // give up on an unanswered dialog
 constexpr int    PERMISSION_POLL_MS     = 200;
 constexpr int    READ_TIMEOUT_MS        = 250;  // per-ioctl bulk read timeout
-constexpr int    WRITE_TIMEOUT_MS       = 1000;
+constexpr int    CONTROL_TIMEOUT_MS     = 1000; // CDC control requests
 constexpr size_t RX_BUFFER_CAP          = 1 << 20;  // drop oldest beyond 1 MiB
 constexpr int    READ_CHUNK             = 4096;     // multiple of bulk max packet
-constexpr int    WRITE_CHUNK            = 16384;    // usbfs per-urb limit
+constexpr int    WRITE_CHUNK            = internal::serialAndroidWriteChunk;  // usbfs per-urb limit
 
 enum class State : int { Idle = 0, Pending = 1, Connected = 2 };
 
@@ -105,7 +115,7 @@ struct JniScope {
 bool clearJniException(JNIEnv* env, const char* what) {
     if (env->ExceptionCheck()) {
         env->ExceptionClear();
-        logError() << "Serial: " << what << " threw a Java exception";
+        blog(LogLevel::Error) << "Serial: " << what << " threw a Java exception";
         return true;
     }
     return false;
@@ -238,6 +248,18 @@ struct Impl {
     std::mutex rxMutex;
     std::deque<uint8_t> rx;
     bool rxOverflowWarned = false;
+
+    // Set by the worker when it finds the device gone. Serial collects it
+    // with close() on the app's thread and fires onDisconnect there; the
+    // worker never notifies. lostReason is written before lost is set and
+    // not touched again until closeImpl() has joined the worker.
+    std::atomic<bool> lost{false};
+    std::string lostReason;
+
+    // Set by destroy() when it runs on the worker thread itself (a Logger
+    // listener destroyed the Serial): the worker then releases the
+    // connection and deletes this Impl when it stops (see workerMain()).
+    std::atomic<bool> orphaned{false};
 };
 
 namespace {
@@ -249,12 +271,12 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
 
     jobject usbManager = jni.getSystemService("usb");
     if (!usbManager) {
-        logError() << "Serial: UsbManager unavailable";
+        blog(LogLevel::Error) << "Serial: UsbManager unavailable";
         return false;
     }
     jobject device = findDeviceByPath(env, usbManager, impl->path);
     if (!device) {
-        logError() << "Serial: device not found: " << impl->path;
+        blog(LogLevel::Error) << "Serial: device not found: " << impl->path;
         env->DeleteLocalRef(usbManager);
         return false;
     }
@@ -266,7 +288,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
     env->DeleteLocalRef(umClass);
     env->DeleteLocalRef(usbManager);
     if (clearJniException(env, "openDevice") || !connection) {
-        logError() << "Serial: openDevice failed for " << impl->path;
+        blog(LogLevel::Error) << "Serial: openDevice failed for " << impl->path;
         env->DeleteLocalRef(device);
         return false;
     }
@@ -305,7 +327,7 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
     jmethodID connClose = env->GetMethodID(connClass, "close", "()V");
 
     auto fail = [&](const char* msg) {
-        logError() << "Serial: " << msg << " (" << impl->path << ")";
+        blog(LogLevel::Error) << "Serial: " << msg << " (" << impl->path << ")";
         env->CallVoidMethod(connection, connClose);
         clearJniException(env, "close");
         if (commIface) env->DeleteLocalRef(commIface);
@@ -371,15 +393,15 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
         jbyteArray arr = env->NewByteArray(7);
         env->SetByteArrayRegion(arr, 0, 7, (const jbyte*)coding);
         int r = env->CallIntMethod(connection, controlTransfer,
-            CDC_REQ_TYPE, CDC_SET_LINE_CODING, 0, commIfaceId, arr, 7, WRITE_TIMEOUT_MS);
+            CDC_REQ_TYPE, CDC_SET_LINE_CODING, 0, commIfaceId, arr, 7, CONTROL_TIMEOUT_MS);
         clearJniException(env, "controlTransfer(SET_LINE_CODING)");
         env->DeleteLocalRef(arr);
-        if (r < 0) logWarning() << "Serial: SET_LINE_CODING not accepted (continuing)";
+        if (r < 0) blog(LogLevel::Warning) << "Serial: SET_LINE_CODING not accepted (continuing)";
 
         // Assert DTR + RTS so the device starts sending
         env->CallIntMethod(connection, controlTransfer,
             CDC_REQ_TYPE, CDC_SET_CONTROL_LINE_STATE, CDC_LINE_DTR_RTS, commIfaceId,
-            (jbyteArray) nullptr, 0, WRITE_TIMEOUT_MS);
+            (jbyteArray) nullptr, 0, CONTROL_TIMEOUT_MS);
         clearJniException(env, "controlTransfer(SET_CONTROL_LINE_STATE)");
     }
 
@@ -400,9 +422,10 @@ bool openAndClaim(Impl* impl, JniScope& jni) {
     return true;
 }
 
-// Worker thread: waits for the permission dialog result (if pending),
+// Worker thread body: waits for the permission dialog result (if pending),
 // connects, then runs the bulk read loop on the raw fd (no JNI in the loop).
-void workerMain(Impl* impl) {
+// Returns once stopped, lost or failed (see workerMain()).
+void workerRun(Impl* impl) {
     if (impl->state.load() == (int)State::Pending) {
         JniScope jni;
         if (!jni) {
@@ -426,7 +449,7 @@ void workerMain(Impl* impl) {
                 break;
             }
             if (std::chrono::steady_clock::now() > deadline) {
-                logWarning() << "Serial: USB permission not granted within "
+                blog(LogLevel::Warning) << "Serial: USB permission not granted within "
                              << PERMISSION_TIMEOUT_SEC << "s for " << impl->path
                              << " (setup() will re-show the dialog)";
                 break;
@@ -444,8 +467,16 @@ void workerMain(Impl* impl) {
             impl->state = (int)State::Idle;
             return;
         }
+        // setup() or close() may have asked this worker to stop while it
+        // opened the device. Then do not publish a connection that nobody
+        // will read: closeImpl() releases it, and reports no connection the
+        // app could never have seen.
+        if (impl->stop.load()) {
+            impl->state = (int)State::Idle;
+            return;
+        }
         impl->state = (int)State::Connected;
-        logNotice() << "Serial: connected to " << impl->path << " at " << impl->baud << " baud";
+        blog(LogLevel::Notice) << "Serial: connected to " << impl->path << " at " << impl->baud << " baud";
     }
 
     // Bulk read loop. usbfs returns -ETIMEDOUT when no data arrived within
@@ -458,34 +489,44 @@ void workerMain(Impl* impl) {
         bt.timeout = READ_TIMEOUT_MS;
         bt.data = buf.data();
         int r = ioctl(impl->fd, USBDEVFS_BULK, &bt);
+        int err = errno;
         if (r > 0) {
-            std::lock_guard<std::mutex> lock(impl->rxMutex);
-            impl->rx.insert(impl->rx.end(), buf.begin(), buf.begin() + r);
-            if (impl->rx.size() > RX_BUFFER_CAP) {
-                if (!impl->rxOverflowWarned) {
-                    impl->rxOverflowWarned = true;
-                    logWarning() << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
+            bool warnOverflow = false;
+            {
+                std::lock_guard<std::mutex> lock(impl->rxMutex);
+                impl->rx.insert(impl->rx.end(), buf.begin(), buf.begin() + r);
+                if (impl->rx.size() > RX_BUFFER_CAP) {
+                    if (!impl->rxOverflowWarned) {
+                        impl->rxOverflowWarned = true;
+                        warnOverflow = true;
+                    }
+                    impl->rx.erase(impl->rx.begin(), impl->rx.begin() + (impl->rx.size() - RX_BUFFER_CAP));
                 }
-                impl->rx.erase(impl->rx.begin(), impl->rx.begin() + (impl->rx.size() - RX_BUFFER_CAP));
             }
-        } else if (r < 0 && (errno == ETIMEDOUT || errno == EAGAIN || errno == EINTR)) {
+            // Logged with rxMutex released: an inline Logger listener may call
+            // available() / readBytes() / flushInput(), which take it
+            if (warnOverflow) {
+                blog(LogLevel::Warning) << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
+            }
+        } else if (r < 0 && (err == ETIMEDOUT || err == EAGAIN || err == EINTR)) {
             continue;
         } else if (r < 0) {
-            // ENODEV / EIO / ESHUTDOWN: device unplugged or connection broken
-            logWarning() << "Serial: device lost: " << impl->path;
+            // ENODEV / EIO / ESHUTDOWN: device unplugged or connection broken.
+            // Only record it (see Impl::lost). lost goes up before state
+            // leaves Connected, so isConnected() never reads false before
+            // Serial has reported the loss.
+            impl->lostReason = std::string("bulk read: ") + strerror(err);
+            blog(LogLevel::Warning) << "Serial: lost connection to " << impl->path << " (" << impl->lostReason << ")";
+            impl->lost = true;
             impl->state = (int)State::Idle;
             return;
         }
     }
 }
 
-// Stop the worker and release the USB connection. Joins the thread, so it
-// must never be called from the worker itself.
-void closeImpl(Impl* impl) {
-    impl->stop = true;
-    if (impl->worker.joinable()) impl->worker.join();
-    impl->stop = false;
-
+// Release the USB connection and clear the connection state. The worker
+// must not be running: joined, or this is the worker itself as it ends.
+void releaseConnection(Impl* impl) {
     if (impl->connection) {
         JniScope jni;
         if (jni) {
@@ -498,7 +539,7 @@ void closeImpl(Impl* impl) {
         }
         impl->connection = nullptr;
         if (impl->state.load() == (int)State::Connected) {
-            logVerbose() << "Serial: disconnected from " << impl->path;
+            blog(LogLevel::Verbose) << "Serial: disconnected from " << impl->path;
         }
     }
     impl->fd = -1;
@@ -511,11 +552,75 @@ void closeImpl(Impl* impl) {
     impl->rxOverflowWarned = false;
 }
 
+// Whether this runs on impl's worker thread, which cannot wait for itself:
+// a Logger listener running inline there called into the Serial
+bool onWorker(const Impl* impl) {
+    return internal::isThisThread(impl->worker);
+}
+
+// setup() / close() on a USB worker thread (any Serial's; a Logger listener
+// running inline there called in) must not wait for a worker. Serial refuses
+// them before it calls in, logging once per thread; this shares that once.
+bool refusedOnWorkerThread(const char* what) {
+    if (!internal::onSerialWorkerThread()) return false;
+    if (internal::firstSerialWorkerRefusal()) {
+        blog(LogLevel::Error) << "Serial: " << what << " cannot run on a USB worker thread, which must not"
+                              << " wait for a worker (called from a Logger listener running there?), so it"
+                              << " does nothing. Listen with Deliver::Main";
+    }
+    return true;
+}
+
+// Stop the worker and release the USB connection. Returns how the connection
+// had ended; lostReason is filled for Lost. Never on impl's own worker
+// thread, where joining would throw: close() and setup() refuse on any worker
+// thread first, and destroy() hands impl to its own worker instead.
+CloseResult closeImpl(Impl* impl, std::string& lostReason) {
+    impl->stop = true;
+    if (impl->worker.joinable()) impl->worker.join();
+    impl->stop = false;
+
+    // The worker has stopped, so state and lost no longer change under us
+    CloseResult result = CloseResult::NotOpen;
+    if (impl->lost.load()) {
+        result = CloseResult::Lost;
+        lostReason = impl->lostReason;
+    } else if (impl->state.load() == (int)State::Connected) {
+        result = CloseResult::Closed;
+    }
+    impl->lost = false;
+    impl->lostReason.clear();
+
+    releaseConnection(impl);
+    return result;
+}
+
+// Worker thread. If destroy() ran on this thread meanwhile (a Logger listener
+// destroyed the Serial), it stopped and detached the thread and left impl to
+// it: release the connection and delete impl once the loop has ended.
+void workerMain(Impl* impl) {
+    // Serial::setup() / close() and the backend's refuse on this thread
+    internal::SerialWorkerThreadMark mark;
+    workerRun(impl);
+    if (impl->orphaned.load()) {
+        releaseConnection(impl);
+        delete impl;
+    }
+}
+
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
 // Public backend API (called from tcSerial.h)
 // ---------------------------------------------------------------------------
+
+HoldLogs::HoldLogs(internal::SerialHeldLog& held) : previous_(t_heldLog) {
+    t_heldLog = &held;
+}
+
+HoldLogs::~HoldLogs() {
+    t_heldLog = previous_;
+}
 
 Impl* create() {
     return new Impl();
@@ -523,7 +628,23 @@ Impl* create() {
 
 void destroy(Impl* impl) {
     if (!impl) return;
-    closeImpl(impl);
+    if (onWorker(impl)) {
+        // The Serial is being destroyed on its own worker thread (from a
+        // Logger listener running there). That thread cannot wait for
+        // itself, and once the listener returns it goes on reading impl, so
+        // impl must outlive this call. Stop and detach the thread, and let
+        // it release the connection and delete impl as it ends
+        // (workerMain()). Nothing else refers to impl after this.
+        blog(LogLevel::Error) << "Serial: destroyed on its USB worker thread (from a Logger listener"
+                              << " running there?); the connection closes when that thread stops."
+                              << " Listen with Deliver::Main";
+        impl->orphaned = true;
+        impl->stop = true;
+        impl->worker.detach();
+        return;
+    }
+    std::string lostReason;
+    closeImpl(impl, lostReason);  // Serial's destructor does not notify
     delete impl;
 }
 
@@ -591,43 +712,51 @@ std::vector<SerialDeviceInfo> listDevices() {
     return devices;
 }
 
-bool setup(Impl* impl, const std::string& devicePath, int baudRate) {
+internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int baudRate,
+                                  CloseResult& ended, std::string& lostReason) {
+    using Result = internal::SerialSetupResult;
+    ended = CloseResult::NotOpen;
+    // It would have to stop and replace a worker (Serial refuses first)
+    if (refusedOnWorkerThread("setup()")) return Result::Failed;
     // Reconnect-loop guard: while the permission dialog for this device is
-    // still pending, repeated setup() calls must not re-trigger it.
+    // still pending, repeated setup() calls must not re-trigger it. The
+    // connection that request starts is still under way.
     if (impl->state.load() == (int)State::Pending && impl->path == devicePath) {
-        logVerbose() << "Serial: USB permission still pending for " << devicePath;
-        return false;
+        blog(LogLevel::Verbose) << "Serial: USB permission still pending for " << devicePath;
+        return Result::KeptPending;
     }
 
-    closeImpl(impl);
+    // Serial::setup() has closed the previous connection already, unless the
+    // permission pending for this device came through since it checked
+    ended = closeImpl(impl, lostReason);
     impl->path = devicePath;
     impl->baud = baudRate;
 
     JniScope jni;
     if (!jni) {
-        logError() << "Serial: JNI unavailable";
-        return false;
+        blog(LogLevel::Error) << "Serial: JNI unavailable";
+        return Result::Failed;
     }
     jobject usbManager = jni.getSystemService("usb");
     if (!usbManager) {
-        logError() << "Serial: UsbManager unavailable";
-        return false;
+        blog(LogLevel::Error) << "Serial: UsbManager unavailable";
+        return Result::Failed;
     }
     jobject device = findDeviceByPath(jni.env, usbManager, devicePath);
     if (!device) {
-        logError() << "Serial: device not found: " << devicePath;
+        blog(LogLevel::Error) << "Serial: device not found: " << devicePath;
         jni.env->DeleteLocalRef(usbManager);
-        return false;
+        return Result::Failed;
     }
 
     if (hasPermission(jni.env, usbManager, device)) {
         jni.env->DeleteLocalRef(device);
         jni.env->DeleteLocalRef(usbManager);
-        if (!openAndClaim(impl, jni)) return false;
+        if (!openAndClaim(impl, jni)) return Result::Failed;
         impl->state = (int)State::Connected;
         impl->worker = std::thread(workerMain, impl);
-        logNotice() << "Serial: connected to " << devicePath << " at " << baudRate << " baud";
-        return true;
+        blog(LogLevel::Notice) << "Serial: connected to " << devicePath << " at " << baudRate << " baud";
+        return Result::Connected;
     }
 
     // No permission yet: show the dialog and finish connecting asynchronously
@@ -635,22 +764,41 @@ bool setup(Impl* impl, const std::string& devicePath, int baudRate) {
     jni.env->DeleteLocalRef(device);
     jni.env->DeleteLocalRef(usbManager);
     if (!requested) {
-        logError() << "Serial: USB permission request failed for " << devicePath;
-        return false;
+        blog(LogLevel::Error) << "Serial: USB permission request failed for " << devicePath;
+        return Result::Failed;
     }
     impl->state = (int)State::Pending;
     impl->worker = std::thread(workerMain, impl);
-    logNotice() << "Serial: requesting USB permission for " << devicePath
+    blog(LogLevel::Notice) << "Serial: requesting USB permission for " << devicePath
                 << " (isInitialized() becomes true once granted)";
-    return false;
+    // The worker checks the permission at once, so with one granted in the
+    // meantime it may be Connected already: the caller goes by this result
+    return Result::Pending;
 }
 
-void close(Impl* impl) {
-    closeImpl(impl);
+CloseResult close(Impl* impl, std::string& lostReason) {
+    // Serial refuses first on a worker thread (close(), setup(), and the
+    // close of a loss an I/O call found there); this only backs that up
+    if (refusedOnWorkerThread("close()")) return CloseResult::Refused;
+    return closeImpl(impl, lostReason);
 }
 
 bool isConnected(const Impl* impl) {
-    return impl->state.load() == (int)State::Connected;
+    // A recorded loss still counts until Serial reports it, so isConnected()
+    // turns false together with onDisconnect, on the app's thread
+    return impl->state.load() == (int)State::Connected || impl->lost.load();
+}
+
+bool isLost(const Impl* impl) {
+    return impl->lost.load();
+}
+
+bool isPendingFor(const Impl* impl, const std::string& devicePath) {
+    return impl->state.load() == (int)State::Pending && impl->path == devicePath;
+}
+
+int baudRate(const Impl* impl) {
+    return impl->baud;
 }
 
 int available(const Impl* impl) {
@@ -669,7 +817,9 @@ int readBytes(Impl* impl, void* buffer, int length) {
     return n;
 }
 
-int writeBytes(Impl* impl, const void* buffer, int length) {
+int writeBytes(Impl* impl, const void* buffer, int length, int& error, bool& timedOut) {
+    error = 0;
+    timedOut = false;
     if (impl->state.load() != (int)State::Connected) return -1;
     if (length <= 0) return 0;
 
@@ -679,11 +829,20 @@ int writeBytes(Impl* impl, const void* buffer, int length) {
         usbdevfs_bulktransfer bt{};
         bt.ep = (unsigned int)impl->epOut;
         bt.len = (unsigned int)chunk;
-        bt.timeout = WRITE_TIMEOUT_MS;
+        // From the rate, as on Windows: a 16 KB chunk takes about 17 s at
+        // 9600 baud on a CDC-to-UART bridge
+        bt.timeout = internal::serialWriteTimeoutMs(impl->baud, chunk);
         bt.data = (void*)((const unsigned char*)buffer + written);
         int r = ioctl(impl->fd, USBDEVFS_BULK, &bt);
         if (r < 0) {
-            logError() << "Serial: write failed (" << strerror(errno) << ")";
+            int err = errno;
+            if (err == ETIMEDOUT) {
+                // usbfs does not report how much of a timed-out transfer
+                // went out: count the completed chunks only. Serial warns.
+                timedOut = true;
+                return written;
+            }
+            error = err;  // Serial logs it, with its lock released
             return written > 0 ? written : -1;
         }
         written += r;

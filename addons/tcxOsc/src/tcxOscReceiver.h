@@ -5,9 +5,13 @@
 #include "tc/network/tcUdpSocket.h"
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
+#include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"
 #include <queue>
 #include <mutex>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 
 namespace tcx::osc {
 
@@ -18,8 +22,16 @@ class OscReceiver {
 public:
     // Events
     tc::Event<OscMessage> onMessageReceived;   // Message received
-    tc::Event<OscBundle> onBundleReceived;     // Bundle received
-    tc::Event<std::string> onParseError;       // Parse error (for robustness)
+    // Bundle received. The OscBundle& is the parsed bundle itself (not a
+    // copy) and is valid only during that call. A listener may edit that
+    // bundle, but must not keep a reference to an enclosing bundle (from an
+    // earlier call for the same packet) and modify it (e.g. addMessage() /
+    // clear()) while a nested bundle of that packet is being dispatched.
+    tc::Event<OscBundle> onBundleReceived;
+    // Parse error: a packet that is not a valid OSC message or bundle (for
+    // example an unknown type tag, data cut short, or a damaged message in a
+    // bundle). The packet is not delivered, not even in part.
+    tc::Event<std::string> onParseError;
 
     OscReceiver() = default;
     ~OscReceiver() { close(); }
@@ -87,18 +99,25 @@ public:
     bool isListening() const { return socket_.isReceiving(); }
 
     // -------------------------------------------------------------------------
-    // Polling API (buffer enabled on first call)
+    // Polling API (queue enabled on the first hasNewMessage()/getNextMessage())
     // -------------------------------------------------------------------------
+    // The queue holds up to getBufferSize() messages (default 1024). When a
+    // new message arrives while it is full, the oldest one is dropped and
+    // counted in getDroppedMessageCount(). Drops are also logged as a warning from
+    // these two calls, at most once every 2 s, summed since the last report.
 
-    // Check if there are unread messages (buffer enabled on first call)
+    // Check if there are unread messages (queue enabled on first call)
     bool hasNewMessage() {
         bufferEnabled_ = true;
+        reportDrops();
         std::lock_guard<std::mutex> lock(queueMutex_);
         return !messageQueue_.empty();
     }
 
-    // Get next message (removes from queue)
+    // Get next message (removes from queue; queue enabled on first call)
     bool getNextMessage(OscMessage& msg) {
+        bufferEnabled_ = true;
+        reportDrops();
         std::lock_guard<std::mutex> lock(queueMutex_);
         if (messageQueue_.empty()) return false;
         msg = std::move(messageQueue_.front());
@@ -106,19 +125,84 @@ public:
         return true;
     }
 
-    // Set buffer size (default 100)
+    // Set the queue limit (default 1024). Past it, the oldest message is
+    // dropped. Shrinking the limit discards the oldest queued messages now;
+    // they count as dropped too.
     void setBufferSize(size_t size) {
-        std::lock_guard<std::mutex> lock(queueMutex_);
-        bufferMax_ = size;
-        // Trim queue if over limit
-        while (messageQueue_.size() > bufferMax_) {
-            messageQueue_.pop();
+        uint64_t dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            bufferMax_ = size;
+            // Trim queue if over limit
+            while (messageQueue_.size() > bufferMax_) {
+                messageQueue_.pop();
+                ++dropped;
+            }
         }
+        countDrops(dropped);
     }
 
     size_t getBufferSize() const { return bufferMax_; }
 
+    // Messages received but never handed to the app, since this receiver was
+    // created: dropped from the full polling queue, or discarded when
+    // setBufferSize() shrank it (a running total, never reset). Cheap to
+    // call from any thread.
+    uint64_t getDroppedMessageCount() const {
+        return droppedMessages_.load(std::memory_order_relaxed);
+    }
+
 private:
+    // Receive thread: queue a message for polling, dropping the oldest while
+    // the queue is over its limit. Drops are only counted here; the polling
+    // calls log them on the caller's thread (reportDrops()).
+    void enqueue(const OscMessage& msg) {
+        if (!bufferEnabled_) return;
+        uint64_t dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            messageQueue_.push(msg);
+            while (messageQueue_.size() > bufferMax_) {
+                messageQueue_.pop();
+                ++dropped;
+            }
+        }
+        countDrops(dropped);
+    }
+
+    // Any thread: add drops to the total and to the next report. Only
+    // touches atomics (no lock, no log), so the receive thread can call it.
+    void countDrops(uint64_t dropped) {
+        if (dropped == 0) return;
+        droppedMessages_.fetch_add(dropped, std::memory_order_relaxed);
+        unreportedDrops_.fetch_add(dropped, std::memory_order_relaxed);
+    }
+
+    // Polling side: log the drops counted since the last report, at most
+    // once every kDropReportInterval. Drops in between are summed into the
+    // next line, so a queue that overflows every frame cannot flood the log.
+    void reportDrops() {
+        if (unreportedDrops_.load(std::memory_order_relaxed) == 0) return;
+        const int64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        int64_t last = lastDropReportNs_.load(std::memory_order_relaxed);
+        if (last != kNeverReported &&
+            now - last < std::chrono::nanoseconds(kDropReportInterval).count()) return;
+        // Only one polling thread reports a given interval
+        if (!lastDropReportNs_.compare_exchange_strong(last, now, std::memory_order_relaxed)) return;
+        const uint64_t n = unreportedDrops_.exchange(0, std::memory_order_relaxed);
+        if (n == 0) return;
+        size_t limit;
+        {
+            std::lock_guard<std::mutex> lock(queueMutex_);
+            limit = bufferMax_;
+        }
+        tc::logWarning("tcxOsc") << "OscReceiver on port " << port_ << ": " << n
+                                 << (n == 1 ? " message" : " messages")
+                                 << " dropped since the last report (queue limit "
+                                 << limit << ", oldest dropped first); raise setBufferSize()";
+    }
+
     void handleReceive(tc::UdpReceiveEventArgs& args) {
         if (args.data.empty()) return;
 
@@ -138,8 +222,10 @@ private:
         // Determine if bundle or message
         if (OscBundle::isBundle(data, size)) {
             bool ok = false;
-            OscBundle bundle = OscBundle::fromBytes(data, size, ok);
+            bool paddingMissing = false;
+            OscBundle bundle = OscBundle::fromBytes(data, size, ok, paddingMissing);
             if (ok) {
+                if (paddingMissing) warnPaddingMissing();
                 // Dispatch messages inside bundle individually
                 dispatchBundle(bundle);
             }
@@ -150,16 +236,11 @@ private:
         }
         else {
             bool ok = false;
-            OscMessage msg = OscMessage::fromBytes(data, size, ok);
+            bool paddingMissing = false;
+            OscMessage msg = OscMessage::fromBytes(data, size, ok, paddingMissing);
             if (ok) {
-                // Add to queue if buffer enabled
-                if (bufferEnabled_) {
-                    std::lock_guard<std::mutex> lock(queueMutex_);
-                    messageQueue_.push(msg);
-                    while (messageQueue_.size() > bufferMax_) {
-                        messageQueue_.pop();
-                    }
-                }
+                if (paddingMissing) warnPaddingMissing();
+                enqueue(msg);  // only if the polling queue is enabled
                 // Always notify listeners
                 onMessageReceived.notify(msg);
             }
@@ -170,25 +251,31 @@ private:
         }
     }
 
-    // Recursively dispatch messages inside bundle
-    void dispatchBundle(OscBundle bundle) {
-        onBundleReceived.notify(bundle);
+    // A message that ends before its zero padding to 4 bytes is accepted;
+    // this logs it once per receiver.
+    void warnPaddingMissing() {
+        if (!paddingWarned_.isFirstTime()) return;
+        tc::logWarning("tcxOsc") << "OscReceiver on port " << port_
+                                 << ": received a message that ends before its zero padding "
+                                    "to 4 bytes; accepted (logged once per receiver)";
+    }
+
+    // Recursively dispatch messages inside bundle. Walks the parsed tree in
+    // place (no per-level copy); fromBytes() bounds the depth.
+    void dispatchBundle(const OscBundle& bundle) {
+        // Event<T>::notify() takes T&, and listeners could always edit the
+        // bundle before its elements are dispatched. Every node belongs to
+        // the non-const bundle parsePacket() owns, so the cast is well-defined.
+        onBundleReceived.notify(const_cast<OscBundle&>(bundle));
 
         for (size_t i = 0; i < bundle.getElementCount(); ++i) {
             if (bundle.isMessage(i)) {
                 OscMessage msg = bundle.getMessageAt(i);
-                // Add to queue if buffer enabled
-                if (bufferEnabled_) {
-                    std::lock_guard<std::mutex> lock(queueMutex_);
-                    messageQueue_.push(msg);
-                    while (messageQueue_.size() > bufferMax_) {
-                        messageQueue_.pop();
-                    }
-                }
+                enqueue(msg);  // only if the polling queue is enabled
                 onMessageReceived.notify(msg);
             }
-            else if (bundle.isBundle(i)) {
-                dispatchBundle(bundle.getBundleAt(i));
+            else if (const OscBundle* child = bundle.bundleAt(i)) {
+                dispatchBundle(*child);
             }
         }
     }
@@ -202,7 +289,17 @@ private:
     std::queue<OscMessage> messageQueue_;
     std::mutex queueMutex_;
     std::atomic<bool> bufferEnabled_{false};
-    size_t bufferMax_ = 100;
+    size_t bufferMax_ = 1024;
+
+    // Drop accounting: the receive thread and setBufferSize() only add to
+    // the counters (countDrops()); the polling calls read and log them.
+    static constexpr std::chrono::seconds kDropReportInterval{2};
+    static constexpr int64_t kNeverReported = INT64_MIN;
+    std::atomic<uint64_t> droppedMessages_{0};   // running total
+    std::atomic<uint64_t> unreportedDrops_{0};   // counted, not logged yet
+    std::atomic<int64_t> lastDropReportNs_{kNeverReported};  // steady_clock
+
+    tc::OnceGate paddingWarned_;  // warnPaddingMissing()
 };
 
 }  // namespace tcx::osc

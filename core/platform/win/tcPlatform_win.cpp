@@ -196,6 +196,56 @@ fs::path getExecutableDir() {
 }
 
 // ---------------------------------------------------------------------------
+// User data / temp folders (getUserDataPath / getTempPath)
+// ---------------------------------------------------------------------------
+namespace {
+// The executable name (without .exe) names the app's folder.
+fs::path appFolderName() {
+    fs::path name = getExecutablePath().stem();
+    return name.empty() ? fs::path(L"TrussC") : name;
+}
+
+// An environment variable as a path (wide, so non-ASCII names survive)
+fs::path envPath(const wchar_t* name) {
+    DWORD cap = GetEnvironmentVariableW(name, nullptr, 0);
+    while (cap > 0) {
+        std::vector<wchar_t> buf(cap);
+        const DWORD n = GetEnvironmentVariableW(name, buf.data(), cap);
+        if (n == 0) return {};
+        if (n < cap) return fs::path(buf.data());
+        cap = n;   // the variable grew between the size query and the read
+    }
+    return {};
+}
+} // namespace
+
+fs::path internal::platformUserDataRoot() {
+    fs::path base = envPath(L"LOCALAPPDATA");
+    if (base.empty()) {
+        fs::path profile = envPath(L"USERPROFILE");
+        if (profile.empty()) return platformTempRoot();
+        base = profile / L"AppData" / L"Local";
+    }
+    return base / appFolderName();
+}
+
+fs::path internal::platformTempRoot() {
+    DWORD cap = GetTempPathW(0, nullptr);   // %TMP%, else %TEMP%, ...
+    while (cap > 0) {
+        std::vector<wchar_t> buf(cap);
+        const DWORD n = GetTempPathW(cap, buf.data());
+        if (n == 0) break;
+        if (n < cap) return fs::path(buf.data()) / appFolderName();
+        cap = n + 1;
+    }
+    return fs::path(L"C:\\Windows\\Temp") / appFolderName();
+}
+
+fs::path internal::platformAppBundlePath() {
+    return {};
+}
+
+// ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
 bool captureWindow(Pixels& outPixels) {
@@ -359,42 +409,37 @@ bool captureWindow(Pixels& outPixels) {
 // ---------------------------------------------------------------------------
 // saveScreenshot - スクリーンショットをファイルに保存
 // ---------------------------------------------------------------------------
-bool internal::captureWindowToFile(const std::filesystem::path& path) {
-    if (path.is_relative()) {
-        return internal::captureWindowToFile(getDataPath(path));
-    }
-    // Capture to Pixels
+bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
     Pixels pixels;
-    if (!captureWindow(pixels)) {
-        return false;
-    }
+    if (!captureWindow(pixels)) return false;
+    return internal::saveScreenshotPixels(pixels, path);
+}
+
+bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
+    const auto path = internal::resolveScreenshotPath(requestedPath);
 
     int width = pixels.getWidth();
     int height = pixels.getHeight();
-    unsigned char* data = pixels.getData();
+    const unsigned char* data = pixels.getData();
 
     // 拡張子から形式を判定
-    std::string ext = path.extension().string();
-
-    // 小文字に変換
-    for (char& c : ext) {
-        c = (char)std::tolower((unsigned char)c);
-    }
+    // Case-insensitive extension match on the resolved destination
+    std::string ext = toLower(getFileExtension(path));
 
     int result = 0;
     std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
 
-    if (ext == ".png") {
+    if (ext == "png") {
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == ".jpg" || ext == ".jpeg") {
+    } else if (ext == "jpg" || ext == "jpeg") {
         result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == ".bmp") {
+    } else if (ext == "bmp") {
         result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
-    } else if (ext == ".tga") {
+    } else if (ext == "tga") {
         result = stbi_write_tga(pathStr.c_str(), width, height, 4, data);
     } else {
         // デフォルトは PNG
-        pathStr += ".png";
         result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
     }
 

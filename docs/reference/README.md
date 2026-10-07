@@ -154,6 +154,7 @@ generator reads back from the AST:
 |-------|--------|
 | `TC_PLATFORMS("macos,windows,…")` | record the platforms a symbol exists on (`platforms` field) |
 | `TC_LUA_BIND("float,Vec2,…")` | template instantiations to bind for Lua (`lua_bind` field) |
+| `TC_LUA_SKIP` | not exposed to Lua (`lua_skip` field): luagen, luagen-types and the sketch reference emitters skip it. Used for API that is unsafe to call from Lua, such as a callback on another thread (`Node::callAfterAsync`) |
 
 **Hiding a symbol** (public C++ but not user API — internal plumbing) is done
 **doc-side**, not with a source macro: add `hide = true` to its `api-reference.toml`

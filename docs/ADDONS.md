@@ -174,6 +174,8 @@ addons/tcxMyAddon/
 │   │   └── tcApp.cpp
 │   ├── addons.make          # Addons used by this example
 │   └── CMakeLists.txt       # Shared template
+├── tests/                   # Optional console test harness (run by CI)
+├── tests-<name>/            # Optional extra harness, e.g. one needing a heavy dependency
 └── CMakeLists.txt           # Optional (only for FetchContent, etc.)
 ```
 
@@ -182,6 +184,8 @@ addons/tcxMyAddon/
 - `libs/`: External source code, git submodules, etc.
 - `example-xxx/`: Examples at same level as `src/`. CMakeLists.txt uses shared template
 - `CMakeLists.txt`: Usually not needed. Create only for special processing like FetchContent
+- `tests/`: Console test harness (`src/main.cpp`, non-zero exit fails). CI builds and runs it on every pull request; a `daily-only` marker file in the folder moves it to the daily run instead
+- `tests-<name>/`: An extra harness next to `tests/`, for tests that need a heavy dependency the per-PR `tests/` avoids (e.g. tcxCurl: `tests/` is curl-free, `tests-curl/` links libcurl). Put a `daily-only` marker in it. This applies to addons inside this repository; CI for an external addon repository runs only its `tests/`
 
 ### When CMakeLists.txt Is Not Needed
 
@@ -243,6 +247,28 @@ TrussC copies the file into whatever app consumes the addon — `.app/Contents/<
 no need to know the app target's name. For generated files, `add_dependencies()`
 your addon target on the generator so the file exists before the copy runs.
 
+### Shaders (`trussc_compile_shaders`)
+
+An addon with its own shaders keeps the `.glsl` sources in the addon (for
+example `src/shaders/`) and compiles them from its `CMakeLists.txt` with the
+same function apps and TrussC core use:
+
+```cmake
+# trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
+trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+```
+
+Every `*.glsl` under the source dir becomes `<name>.glsl.h` next to it (or in
+`OUTPUT_DIR`), compiled with sokol-shdc for every backend TrussC targets
+(Metal for macOS / iOS / the iOS simulator, HLSL, GLSL 4.30, GLSL ES 3, WGSL).
+The addon target depends on the headers, so they exist before anything that
+includes them compiles; on an `INTERFACE` (header-only) addon, every target
+that links it waits for them too. Include the header from your code
+(`#include "shaders/myShader.glsl.h"`, relative to the including file, or add
+the folder to the include path). The headers are build output: don't commit
+them (the repository ignores `*.glsl.h`) and don't ship a pre-generated copy.
+An addon with shaders therefore needs a `CMakeLists.txt`.
+
 ### Main Header (tcxMyAddon.h)
 
 ```cpp
@@ -279,6 +305,60 @@ private:
 
 } // namespace tcx::myaddon
 ```
+
+### Events, Threads and Teardown
+
+Addons often fire an `Event<T>` from a thread they own (a receive thread, a device callback), or listen to one that fires off the main thread (`AudioEngine::audioOut`). `Event` guarantees the first point below; the component that owns the thread takes care of the rest:
+
+1. **Same thread:** a listener removed during `notify()` on the notifying thread is not called again, also not later in the same pass. A listener added during a pass starts from the next `notify()`.
+2. **Across threads, `Event` does not wait.** `disconnect()` (or destroying the `EventListener`) returns while the callback may still be running on the other thread. Two safe patterns:
+   - The receiver listens with `Deliver::Main`: the callback runs on the main thread, and a queued call is dropped if the listener has died.
+   - For latency-critical sources such as audio, **the component that owns the thread provides a "stop and wait for in-flight callbacks" barrier and calls it during teardown**: `AudioEngine::waitForAudioCallbacks()` for `audioOut` / `audioIn`, the async timer scheduler for `callAfterAsync` / `callEveryAsync` (`cancelAllAsyncTimers()`, also run from `~Node`), and `TcpClient::disconnect()`, which joins the receive thread. If your addon owns a thread that fires events, give it such a stop-and-wait, and let it return at once when it is called from that thread itself.
+3. **Order:** the barrier runs before the state the callback touches is destroyed. Call it from the most-derived class's destructor (or from an explicit `close()` / `stop()`), not from a base-class destructor: by the time a base-class destructor runs, the derived members are already gone.
+4. **A listener must return.** The framework's own teardown (an App's `audioOut()` / `audioIn()` on exit, hot reload or window close) waits for a listener in flight without a time limit: one that never returns hangs the app, with an error in the log after one second, rather than letting the App be destroyed under it. The public `AudioEngine::waitForAudioCallbacks()` gives up after one second and returns `false` instead. Either way, a listener on the audio thread (or any thread you stop this way) must not wait on the main thread or on a lock the tearing-down thread may hold.
+
+An addon class that listens on the audio thread:
+
+```cpp
+class Scope {
+public:
+    Scope() {
+        listener_ = tc::AudioEngine::getInstance().audioOut.listen(
+            [this](tc::AudioOutBuffer& b) { push(b); },        // audio thread
+            tc::audio::priority::Monitor);
+    }
+    ~Scope() {
+        listener_.disconnect();                                // no new calls
+        tc::AudioEngine::getInstance().waitForAudioCallbacks();  // none still running
+    }                                                          // members go after this
+private:
+    void push(const tc::AudioOutBuffer& b);
+    std::vector<float> ring_;
+    tc::EventListener listener_;
+};
+```
+
+### Warning Once
+
+To log a warning only the first time (an unsupported format, a missing device), gate it with a `tc::OnceGate` instead of a `static bool warned` flag. `isFirstTime()` is true the first time; give the constructor an interval in seconds to make it true again once that much time has passed since the last true. It is thread-safe and lock-free, so audio and worker threads can use it too:
+
+```cpp
+static tc::OnceGate unsupportedWarned;
+if (unsupportedWarned.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "format not supported; skipping";
+}
+
+static tc::OnceGate queueFull{5.0};               // at most once per 5 s
+if (queueFull.isFirstTime()) {
+    tc::logWarning("tcxMyAddon") << "queue full, dropping frames";
+}
+```
+
+For a warning that should fire once per object (once per connection, say), make the gate a member of that object: `tc::OnceGate timeoutWarned_;`.
+
+### Holding on to Nodes
+
+An addon that keeps a `Node` beyond a single call (a target to follow, a selection, a root to draw) stores it as `std::weak_ptr<tc::Node>`, or as `Node::Ptr` when the addon means to own it, never as a raw `Node*`. The app can remove and free the node at any time, and a raw pointer then dangles. Call `lock()` for each use and keep the returned `shared_ptr` while you work with the node. `tcxNodeInspector` keeps its attached root, drag target and selection this way.
 
 ---
 
@@ -621,9 +701,32 @@ glTF 2.0 / GLB model loader using cgltf.
 
 Hap video codec for fast GPU-accelerated playback.
 
+Playback requires GPU support for the movie's BC-compressed texture format.
+On iOS, TrussC's Metal backend enables BC texture formats when the GPU reports
+BC support (Hap1 and Hap Q playback checked on an iPhone 16 in the #645
+experiment). Where BC is not supported, for example on the Simulator, loading
+fails cleanly with `Compressed texture format not supported on this GPU`,
+without a crash. See
+[tcxHap GPU requirements](../addons/tcxHap/README.md#gpu-requirements).
+
+`HapPlayer::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
+there is no working-directory fallback.
+
 **Features:**
 - Hap, Hap Alpha, Hap Q codecs
 - GPU-side decompression (S3TC/DXT)
+- Audio track: PCM (`sowt`, `twos`, `fl32`, `lpcm`; 16-bit integer or 32-bit
+  float, sound description v0/v1/v2), AAC, MP3. Other PCM formats load
+  without audio and log a warning.
+- A/V sync: video time advances by wall-clock `dt * speed`. While audio is
+  playing and speed is positive, it slews toward the audio position with a
+  0.25 s time constant, smoothing the mixer's device-period position steps.
+  Drift above `getResyncThreshold()` triggers hard re-sync; a threshold of
+  0 or less disables hard re-sync while keeping the slew. After shorter
+  audio ends, wall time carries video to its duration. The video drives the
+  loop and restarts/resyncs audio at wraps. Absent audio, reverse and
+  zero-speed playback use wall time alone.
 
 ### tcxImGui
 
@@ -636,6 +739,10 @@ Dear ImGui integration.
 ### tcxLut
 
 3D LUT (Look-Up Table) color grading.
+
+`Lut3D::load()` resolves relative paths against the data folder via
+`getDataPath()`, like `Image::load()`. Absolute paths pass through;
+there is no working-directory fallback.
 
 **Features:**
 - Load .cube LUT files
@@ -677,6 +784,11 @@ TLS/SSL communication support (mbedTLS).
 - Server certificate verification **required by default** (see [SECURITY.md](SECURITY.md))
 - Custom CA bundle via `setCACertificate()` / `setCACertificateFile()`
 - Dev-only opt-out via `setVerifyNone()` (don't ship)
+- TCP connect deadline: `setConnectTimeout(seconds)`, inherited from
+  `TcpClient` (default `0` = the OS deadline; applies from the next connect)
+- Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s, counted
+  from the TCP connect; `0` = none). On expiry: `onError`, then
+  `onConnect(false)` with "TLS handshake timeout"
 
 ### tcxWebSocket
 
@@ -689,3 +801,10 @@ WebSocket client and server.
 - For `wss://`: TLS cert verification **on by default**. Use
   `setTlsVerifyNone()` or `setTlsCACertificate(pem)` on the client if needed
   (see [SECURITY.md](SECURITY.md))
+- TCP connect deadline: `setConnectTimeout(seconds)` (default `0` = the OS
+  deadline; applies from the next connect), passed to the TCP/TLS transport
+- Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s), one
+  deadline counted from the TCP connect that covers the TLS handshake and the
+  server's `101`. On expiry: `onError`, then `onClose`
+- Events fire on the client's network threads; use `Deliver::Main` for
+  listeners that touch the scene or GPU (see `tcWebSocketClient.h`)
