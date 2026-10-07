@@ -41,7 +41,8 @@ inline Json loadJson(const fs::path& path) {
 // ---------------------------------------------------------------------------
 // JSON file writing
 // Relative paths are resolved via getDataPath (like oF), and a missing
-// parent folder is created
+// parent folder is created. A path inside the app bundle is refused (use
+// getUserDataPath()).
 // ---------------------------------------------------------------------------
 inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
     fs::path fullPath = getDataPath(path);
@@ -50,6 +51,17 @@ inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
         logError() << "No file name in JSON file path: " << fullPath;
         return false;
     }
+    if (!internal::checkWriteTarget(path, fullPath, "Json")) return false;
+    // Serialize before touching the disk: a serialization error (e.g. a
+    // string that is not valid UTF-8) leaves an existing file untouched.
+    std::string text;
+    try {
+        text = (indent >= 0) ? j.dump(indent) : j.dump();  // < 0: compact
+    } catch (const std::exception& e) {
+        logError() << "JSON serialize error: " << path << " - " << e.what();
+        return false;
+    }
+
     std::error_code ec;
     fs::path parent = fullPath.parent_path();
     if (!parent.empty()) {
@@ -60,24 +72,20 @@ inline bool saveJson(const Json& j, const fs::path& path, int indent = 2) {
             return false;
         }
     }
-    std::ofstream file(fullPath);
+    // Binary mode, like saveTextFile: the same bytes on every platform (LF)
+    std::ofstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
         logError() << "Cannot create JSON file: " << path;
         return false;
     }
-
-    try {
-        if (indent >= 0) {
-            file << j.dump(indent);
-        } else {
-            file << j.dump();  // Compact format
-        }
-        logVerbose() << "JSON saved: " << fullPath;
-        return true;
-    } catch (const std::exception& e) {
-        logError() << "JSON write error: " << path << " - " << e.what();
+    file.write(text.data(), static_cast<std::streamsize>(text.size()));
+    file.close();
+    if (file.fail()) {
+        logError() << "JSON write error: " << path;
         return false;
     }
+    logVerbose() << "JSON saved: " << fullPath;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

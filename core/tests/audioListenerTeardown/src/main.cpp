@@ -413,6 +413,7 @@ TC_CORE_TEST_MAIN() {
         Window closedWin;
 
         first.setApp(sub);
+        internal::applyPendingAppForTests(first);   // the frame boundary
         tickWindow(first);
         const bool firstAudio = waitFor([&] { return sub->audioCalls.load() > 0; }, 2000);
         check("a new App attached to an open window: setup() once, audioOut() called, one hook",
@@ -425,6 +426,7 @@ TC_CORE_TEST_MAIN() {
         sub->cleanup();
         internal::detachAppAudio(*sub);
         first.setApp(nullptr);
+        internal::applyPendingAppForTests(first);   // the frame boundary
         first.native_ = nullptr;
         const int callsAtClose = sub->audioCalls.load();
         this_thread::sleep_for(chrono::milliseconds(50));
@@ -434,9 +436,11 @@ TC_CORE_TEST_MAIN() {
         // The cleaned-up App on another open window, which already shows an App
         // (subscribed on this first tick).
         second.setApp(keeper);
+        internal::applyPendingAppForTests(second);   // the frame boundary
         tickWindow(second);
         const size_t cleanupErrors = countErrors("already ran cleanup()");
         second.setApp(sub);
+        internal::applyPendingAppForTests(second);   // the frame boundary
         tickWindow(second);
         this_thread::sleep_for(chrono::milliseconds(50));
         check("setApp() refuses an App whose cleanup() ran: one error",
@@ -450,21 +454,26 @@ TC_CORE_TEST_MAIN() {
         // A window that is not open: a closed one never runs close() again.
         const size_t closedErrors = countErrors("this window is closed");
         closedWin.setApp(stray);
+        internal::applyPendingAppForTests(closedWin);   // the frame boundary
         check("setApp() on a window that is not open is refused: one error",
               countErrors("this window is closed") == closedErrors + 1);
         check("... the window stays empty", closedWin.getApp() == nullptr);
         first.setApp(stray);   // closed above
+        internal::applyPendingAppForTests(first);   // the frame boundary
         check("... also one that was open before", first.getApp() == nullptr &&
               countErrors("this window is closed") == closedErrors + 2);
         // setApp(nullptr) ends keeper as a close does (#318): its hook goes.
         second.setApp(nullptr);
+        internal::applyPendingAppForTests(second);   // the frame boundary
         check("setApp(nullptr) ends the window's App: its hook is gone",
               internal::appRanCleanup(*keeper) && engine.audioOut.listenerCount() == hooks,
               to_string(engine.audioOut.listenerCount()) + " hooks");
         second.setApp(stray);   // the refusals left it free to attach
+        internal::applyPendingAppForTests(second);   // the frame boundary
         check("the refused App can still go to an open window",
               second.getApp() == stray && engine.audioOut.listenerCount() == hooks);
         second.setApp(nullptr);
+        internal::applyPendingAppForTests(second);   // the frame boundary
 
         // stray and mainApp never ran setup(), so they have no hook;
         // detaching them is harmless.

@@ -17,7 +17,8 @@
 //   - Windows: a missing UTF-8 activeCodePage manifest (the GetACP() check),
 //     a listDirectory that stops at an entry it cannot convert (a name
 //     holding an unpaired UTF-16 surrogate), and `log << path` or the
-//     loadJson / tcFile / Xml::load error paths throwing for such a name
+//     loadJson / tcFile / Xml / Pixels / VideoPlayer / SoundBuffer error
+//     paths or setLogFile throwing for such a name
 //     (log text must use pathToDisplayUtf8, not pathToUtf8).
 //   - every platform: `log << path` falling back to the std::ostream
 //     inserter, which quotes the path, and the UTF-16 -> UTF-8 conversion
@@ -38,6 +39,7 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -102,6 +104,79 @@ TC_CORE_TEST_MAIN() {
     std::error_code ec;
     fs::remove_all(sandbox, ec);
     fs::create_directories(sandbox);
+
+    // Apple data folders (#285): exercise the production probe on a fake
+    // bundle on every OS. It selects a folder once, not a folder per file.
+    {
+        const fs::path bin = sandbox / "bundle-layout";
+        const fs::path exe = bin / "MyApp.app/Contents/MacOS";
+        const fs::path resources = exe / "../Resources/data";
+        fs::create_directories(exe);
+        fs::create_directories(bin / "data");
+        { std::ofstream out(bin / "data/outside-only.txt"); out << "outside"; }
+
+        internal::DataPathState dev{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(dev, exe);
+        check("Apple probe: dev bin/data used without Resources/data",
+              dev.probed && dev.root == "../../../data");
+
+        fs::create_directories(resources);
+        internal::DataPathState release{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(release, exe);
+        check("Apple probe: Resources/data wins over dev bin/data",
+              release.probed && release.root == "../Resources/data");
+
+        // getDataPath must keep the chosen folder even for a missing file.
+        auto& live = internal::dataPathState();
+        // DataPathState holds a mutex and an atomic: save and restore by field.
+        const fs::path savedRoot = live.root;
+        const bool savedUserSet = live.userSet;
+        const bool savedProbed = live.probed.load();
+        live.userSet = release.userSet;
+        live.probed.store(release.probed.load());
+        live.root = (exe / release.root).lexically_normal();
+        check("Apple probe: no per-file fallback to outside-only asset",
+              getDataPath("outside-only.txt") == live.root / "outside-only.txt" &&
+              !fs::exists(getDataPath("outside-only.txt")) &&
+              fs::exists(bin / "data/outside-only.txt"));
+        live.root = savedRoot;
+        live.userSet = savedUserSet;
+        live.probed.store(savedProbed);
+
+        fs::remove_all(resources);
+        internal::resolveAppleDataPathRootOnce(release, exe);
+        check("Apple probe: selected root is latched after folder removal",
+              release.root == "../Resources/data");
+        fs::create_directories(resources);
+        internal::resolveAppleDataPathRootOnce(dev, exe);
+        check("Apple probe: dev root is latched after bundle data appears",
+              dev.root == "../../../data");
+
+        fs::create_directories(exe / "data");
+        internal::DataPathState flat{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(flat, exe);
+        check("Apple probe: flat data wins over both macOS folders",
+              flat.root == "data");
+
+        internal::DataPathState custom{"custom", true};
+        internal::resolveAppleDataPathRootOnce(custom, exe);
+        check("Apple probe: explicit root bypasses selection",
+              custom.root == "custom" && !custom.probed);
+        internal::DataPathState early{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(early, {});
+        internal::resolveAppleDataPathRootOnce(early, "/");
+        check("Apple probe: unavailable executable path does not latch", !early.probed);
+        internal::resolveAppleDataPathRootOnce(early, exe);
+        check("Apple probe: retries after executable path becomes available",
+              early.probed && early.root == "data");
+
+        fs::remove_all(exe / "data");
+        { std::ofstream out(exe / "data"); out << "not a folder"; }
+        internal::DataPathState notFolder{"../../../data"};
+        internal::resolveAppleDataPathRootOnce(notFolder, exe);
+        check("Apple probe: regular file named data is not selected",
+              notFolder.root == "../Resources/data");
+    }
 
     // --- 1. data-path root + getDataPath composition ---
     {
@@ -476,6 +551,77 @@ TC_CORE_TEST_MAIN() {
                 Xml xml;
                 return !xml.load(missing) && logged("XML load error: ", "e" + R + ".txt");
             });
+            checkNoThrow("Pixels::load(missing surrogate): FileNotFound, U+FFFD", [&] {
+                seen.clear();
+                Pixels pixels;
+                const LoadResult r = pixels.load(bad(L"missing", L".png"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".png") != string::npos &&
+                       logged("[Pixels] file not found: ", "missing" + R + ".png");
+            });
+            checkNoThrow("Pixels::loadHDR(missing surrogate): FileNotFound, U+FFFD", [&] {
+                seen.clear();
+                Pixels pixels;
+                const LoadResult r = pixels.loadHDR(bad(L"missing", L".hdr"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".hdr") != string::npos &&
+                       logged("[Pixels] file not found: ", "missing" + R + ".hdr");
+            });
+            checkNoThrow("VideoPlayer::load(missing surrogate): FileNotFound, U+FFFD", [&] {
+                seen.clear();
+                VideoPlayer video;
+                const LoadResult r = video.load(bad(L"missing", L".mp4"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".mp4") != string::npos &&
+                       logged("[VideoPlayer] file not found: ", "missing" + R + ".mp4");
+            });
+            checkNoThrow("SoundBuffer::load(missing surrogate WAV): failure, U+FFFD", [&] {
+                seen.clear();
+                SoundBuffer buffer;
+                const LoadResult r = buffer.load(bad(L"missing", L".wav"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".wav") != string::npos &&
+                       logged("[SoundBuffer] file not found: ", "missing" + R + ".wav");
+            });
+            checkNoThrow("SoundBuffer::load(missing surrogate OGG): failure, U+FFFD", [&] {
+                seen.clear();
+                SoundBuffer buffer;
+                const LoadResult r = buffer.load(bad(L"missing", L".ogg"));
+                return !r && r.error == LoadError::FileNotFound &&
+                       r.message.find("missing" + R + ".ogg") != string::npos &&
+                       logged("[SoundBuffer] failed to open ", "missing" + R + ".ogg");
+            });
+            const fs::path logPath = bad(L"g", L".log");
+            Logger& logger = getLogger();
+            const LogLevel previousFileLevel = logger.getFileLogLevel();
+            logger.setFileLogLevel(LogLevel::Notice);
+            checkNoThrow("setLogFile(surrogate): opens, reports U+FFFD, writes", [&] {
+                if (!logger.setLogFile(logPath)) return false;
+                const bool reported = logger.isFileOpen() &&
+                    logger.getLogFilePath().find("g" + R + ".log") != string::npos;
+                logNotice() << "surrogate log marker";
+                logger.closeFile();
+                std::ifstream in(logPath, std::ios::binary);
+                const string text((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+                return reported && text.find("surrogate log marker") != string::npos;
+            });
+            checkNoThrow("setLogFile(surrogate): failure logs U+FFFD, keeps file", [&] {
+                if (!logger.setLogFile(logPath)) return false;
+                seen.clear();
+                const string previousPath = logger.getLogFilePath();
+                // A directory cannot be opened as a log file.
+                const bool failed = !logger.setLogFile(fullDir);
+                const bool kept = logger.isFileOpen() && logger.getLogFilePath() == previousPath;
+                const bool displayed = logged("Failed to open log file: ", "f" + R);
+                logger.closeFile();
+                std::ifstream in(logPath, std::ios::binary);
+                const string text((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+                return failed && kept && displayed &&
+                       text.find("Failed to open log file: ") != string::npos &&
+                       text.find("f" + R) != string::npos;
+            });
+            logger.closeFile();
+            logger.setFileLogLevel(previousFileLevel);
         }
 #endif
 

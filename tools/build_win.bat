@@ -82,14 +82,14 @@ REM leftover cache unusable (the checks above can miss a case, #251), a fresh
 REM configure gets past it, and a real error simply fails twice.
 echo Running CMake...
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
-if errorlevel 1 (
+if %ERRORLEVEL% neq 0 (
     echo.
     echo CMake configuration failed - retrying once with a clean cache...
     if exist "CMakeCache.txt" del /q "CMakeCache.txt"
     if exist "CMakeFiles" rmdir /s /q "CMakeFiles"
     cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
 )
-if errorlevel 1 (
+if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: CMake configuration failed!
     echo Please make sure CMake is installed and in your PATH.
@@ -105,6 +105,7 @@ cmake --build . --parallel
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Build failed!
+    echo If this started after installing or upgrading Visual Studio, delete tools\build and run build_win.bat again.
     echo.
     pause
     exit /b 1

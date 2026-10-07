@@ -53,6 +53,10 @@
 //   - windowsToolchainPins() / repinWindowsToolchain(): the refresh replaces
 //     only the windows preset's pins, keeps TRUSSC_DIR, the other presets
 //     and the IDE, and the no-VS fallback entry cannot pin.
+// Guards (#354), on Windows: the build_win.bat configure/retry/build paths
+// and a generated build-web.bat stop on positive and negative CMake exits,
+// while zero exits and a successful configure retry still complete. Scratch
+// copies run in cmd with CMake calls replaced by `cmd /c exit <code>`.
 // Not covered: the argument parsing and output of the commands themselves
 // (tools/src/main.cpp), which call these functions; the IDE files and the
 // native CMake configure; the Visual Studio detection and the refresh on a
@@ -1354,6 +1358,99 @@ static void testToolchainCheck() {
 #endif
 }
 
+#ifdef _WIN32
+// Keep the real batch control flow. Only replace external CMake calls; omit
+// VS setup, interactive pause and installation/GUI steps in the scratch copy.
+// A fake cmake.cmd would not return to its caller without `call`.
+static string batchWithExits(const string& source, const vector<int>& codes, bool native) {
+    istringstream in(source);
+    string line, text;
+    size_t call = 0;
+    while (getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (native && line.find("REM Create symlink to binary") == 0) break;
+        if (native && (line.find("vswhere.exe") != string::npos ||
+                       line.find("if defined VS_PATH call") == 0 ||
+                       line.find("pause") != string::npos)) continue;
+        const size_t at = line.find_first_not_of(' ');
+        if (at != string::npos && line.compare(at, 6, "cmake ") == 0) {
+            if (call >= codes.size()) return {};
+            const string indent = line.substr(0, at);
+            text += indent + "echo CMAKE_CALL_" + to_string(call) + "\r\n";
+            line = indent + "cmd /d /c exit " + to_string(codes[call++]);
+        }
+        text += line + "\r\n";
+    }
+    if (call != codes.size()) return {};
+    if (native) text += "echo BUILD_SCRIPT_SUCCESS\r\nexit /b 0\r\n";
+    return text;
+}
+
+static void checkBatch(const string& name, const string& source, const vector<int>& codes,
+                       bool native, bool retry, bool build, const string& error) {
+    const fs::path project = makeProject("batch-" + name);
+    const fs::path script = project / "test.bat", log = project / "output.txt";
+    const string text = batchWithExits(source, codes, native);
+    check("batch " + name + ": scratch copy prepared", !text.empty());
+    if (text.empty()) return;
+    writeFile(script, text);
+    const string command = "cmd /d /c call \"" + script.string() + "\" > \"" +
+                           log.string() + "\" 2>&1";
+    const int status = std::system(command.c_str());
+    const string output = readFile(log);
+    auto has = [&](const string& marker) { return output.find(marker) != string::npos; };
+    const bool success = error.empty();
+    const string done = native ? "BUILD_SCRIPT_SUCCESS" : "Build complete!";
+    const bool ok = status == (success ? 0 : 1) && has(done) == success &&
+                    has("CMAKE_CALL_0") && has(native ? "CMAKE_CALL_2" : "CMAKE_CALL_1") == build &&
+                    (!native || (has("retrying once") == retry && has("CMAKE_CALL_1") == retry)) &&
+                    (success || !native || has(error));
+    check("batch " + name + ": exit and later steps", ok);
+    if (!ok) std::printf("  exit: %d\n%s\n", status, output.c_str());
+}
+
+static void testWindowsBatchExits() {
+    constexpr int crash = -1073741515;  // Windows DLL-not-found status
+    const fs::path repo = fs::path(__FILE__).parent_path().parent_path().parent_path().parent_path().parent_path();
+    const string native = readFile(repo / "tools/build_win.bat");
+    check("batch: repository build_win.bat read", !native.empty());
+    if (native.empty()) return;
+    checkBatch("native-zero", native, {0, 0, 0}, true, false, true, "");
+    checkBatch("native-negative-recovery", native, {crash, 0, 0}, true, true, true, "");
+    checkBatch("native-positive-recovery", native, {1, 0, 0}, true, true, true, "");
+    for (const auto& codes : vector<vector<int>>{{crash, crash, 0}, {1, crash, 0},
+                                                {crash, 1, 0}, {1, 1, 0}}) {
+        checkBatch("native-configure-" + to_string(codes[0]) + "-retry-" + to_string(codes[1]),
+                   native, codes, true, true, false, "ERROR: CMake configuration failed!");
+    }
+    for (int code : {crash, 1}) {
+        checkBatch("native-build-" + to_string(code), native, {0, 0, code},
+                   true, false, true, "ERROR: Build failed!");
+    }
+
+    // Exercise the real writer via the update path. A kept web target may
+    // fail to configure on this host without preventing script generation.
+    const fs::path project = makeProject("batch-web-generated");
+    ProjectSettings settings = baseSettings(project);
+    settings.ideType = IdeType::CMakeOnly;
+    settings.generateWebBuild = true;
+    settings.webKept = true;
+    ProjectGenerator generator(settings);
+    const string error = generator.update(project.string());
+    const string web = readFile(project / "build-web.bat");
+    check("batch: generated build-web.bat read", error.empty() && !web.empty());
+    if (!error.empty() || web.empty()) return;
+    EnvOverride emsdk("EMSDK", nullptr);  // no external SDK setup in scratch runs
+    checkBatch("web-zero", web, {0, 0}, false, false, true, "");
+    for (int code : {crash, 1}) {
+        checkBatch("web-configure-" + to_string(code), web, {code, 0},
+                   false, false, false, "configure failed");
+        checkBatch("web-build-" + to_string(code), web, {0, code},
+                   false, false, true, "build failed");
+    }
+}
+#endif
+
 } // namespace
 
 TC_CORE_TEST_MAIN() {
@@ -1375,6 +1472,9 @@ TC_CORE_TEST_MAIN() {
     testConfigurePlan();
     testBuildFolders();
     testToolchainCheck();
+#ifdef _WIN32
+    testWindowsBatchExits();
+#endif
 
     std::error_code ec;
     fs::remove_all(g_root, ec);

@@ -253,6 +253,7 @@ TC_CORE_TEST_MAIN() {
         auto sub = make_shared<SetupAllocApp>();
         OpenWindow win, other;
         win.setApp(sub);
+        internal::applyPendingAppForTests(win);   // the frame boundary
         this_thread::sleep_for(chrono::milliseconds(50));
         check("window App: setApp() alone subscribes nothing",
               engine.audioOut.listenerCount() == outBase && p.callsBeforeSetup.load() == 0,
@@ -282,11 +283,13 @@ TC_CORE_TEST_MAIN() {
         // setApp(nullptr) ends the App as a close does (#318): both hooks go,
         // and another window refuses it (an App runs once).
         win.setApp(nullptr);
+        internal::applyPendingAppForTests(win);   // the frame boundary
         win.native_ = nullptr;
         check("window App: setApp(nullptr) removes both hooks",
               engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase,
               hooks(engine.audioOut.listenerCount()));
         other.setApp(sub);
+        internal::applyPendingAppForTests(other);   // the frame boundary
         tickWindow(other);
         check("window App: another window refuses it, no hook, no second setup()",
               other.getApp() == nullptr && engine.audioOut.listenerCount() == outBase &&

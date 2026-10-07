@@ -40,35 +40,37 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["getBounds"] = &trussc::Path::getBounds;
         t["getPerimeter"] = &trussc::Path::getPerimeter;
     }
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    lua->new_usertype<trussc::LoadError>("LoadError",
+        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
+        "None", sol::var(trussc::LoadError::None),
+        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
+        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
+        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
+        "Unknown", sol::var(trussc::LoadError::Unknown));
     {
-        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["success"] = &trussc::LoadResult::success;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["id"] = &trussc::TouchPoint::id;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["changed"] = &trussc::TouchPoint::changed;
     }
-    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
-        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
-        "H264", sol::var(trussc::VideoCodec::H264),
-        "HEVC", sol::var(trussc::VideoCodec::HEVC),
-        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
-        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::WritingMode>("WritingMode",
+        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
+        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
+        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
-        t["message"] = &trussc::TcpServerErrorEventArgs::message;
-        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
-        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
-    }
-    {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
-    }
-    {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["success"] = &trussc::TcpConnectEventArgs::success;
-        t["message"] = &trussc::TcpConnectEventArgs::message;
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
 }
 #ifndef _MSC_VER

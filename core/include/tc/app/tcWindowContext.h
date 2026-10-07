@@ -299,7 +299,8 @@ struct WindowContext {
 
     // --- misc per-window ---
     int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
-    // Resolved absolute paths queued by saveScreenshot() on THIS window, drained
+    // Resolved absolute paths (download names on web) queued by saveScreenshot()
+    // on THIS window, drained
     // right after present() while this context is current (so the capture reads
     // back this window's lastSwapchainDrawable, not the main window's). The main
     // window drains from the afterFrame listener in _setup_cb; each secondary
@@ -349,6 +350,18 @@ struct WindowContext {
     RenderContext* render = nullptr;
     CoreEvents* coreEvents = nullptr;
 };
+
+// Pipeline target for swapchain draws. The main window keeps sokol's defaults.
+struct SwapchainTargetFormat {
+    sg_pixel_format colorFormat;
+    int sampleCount;
+};
+
+inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
+    return ctx.isMain
+        ? SwapchainTargetFormat{_SG_PIXELFORMAT_DEFAULT, sapp_sample_count()}
+        : SwapchainTargetFormat{ctx.swapchainColorFormat, ctx.swapchainSampleCount};
+}
 
 // Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
 WindowContext& mainWindowContext();
@@ -428,6 +441,12 @@ inline sgl_pipeline activePremult() {
     bool depth = currentWindowContext().depthTestEnabled;
     return currentWindowContext().currentTarget->pipeline(
         (depth ? 0x1000u : 0x000u) | 0x100u, pipeDescPremult(depth));
+}
+// TrueType glyph atlas (R8 coverage): Alpha blend + sglCoverageShader().
+inline sgl_pipeline activeCoverage2D() {
+    bool depth = currentWindowContext().depthTestEnabled;
+    return currentWindowContext().currentTarget->pipeline(
+        (depth ? 0x1000u : 0x000u) | 0x400u, pipeDescCoverage2D(depth));
 }
 inline sgl_pipeline activeClear()         { return currentWindowContext().currentTarget->pipeline(0x200u, pipeDescClear()); }
 inline sgl_pipeline active3D()            { return currentWindowContext().currentTarget->pipeline(0x300u, pipeDesc3D()); }

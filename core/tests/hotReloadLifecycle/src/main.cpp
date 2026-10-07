@@ -498,6 +498,7 @@ static int runCycles(const std::string& guestPath, int port) {
         const uint64_t timerAfter = internal::nextNodeTimerId();
         const uint64_t ownerAfter = internal::AsyncScheduler::newOwner();
         const struct { const void* guest; const void* host; const char* what; } same[] = {
+            {in.version, getVersion(), "getVersion() string"},
             {in.audioEngine, &AudioEngine::getInstance(), "AudioEngine::getInstance()"},
             {in.screenRecorder, &internal::globalScreenRecorder(), "screen recorder"},
             {in.asyncScheduler, &internal::AsyncScheduler::get(), "AsyncScheduler"},
@@ -562,9 +563,11 @@ static int runCycles(const std::string& guestPath, int port) {
             const bool attached = guest->attachApp(first, sub);
             const bool guestSawAttach = attached && guest->seesAttached(sub.get());
             first.setApp(nullptr);
+            internal::applyPendingAppForTests(first);   // the frame boundary
             const bool guestSawRelease = !guest->seesAttached(sub.get());
             const bool attachedNew = guest->attachApp(second, reopened);
             second.setApp(nullptr);
+            internal::applyPendingAppForTests(second);   // the frame boundary
             first.native_ = nullptr;
             second.native_ = nullptr;
             if (!attached || !guestSawAttach) {

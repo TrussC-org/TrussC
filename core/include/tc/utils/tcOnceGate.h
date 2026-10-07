@@ -11,6 +11,10 @@
 //   if (underrun.isFirstTime()) logWarning("Audio") << "...";
 //
 //   class Foo { OnceGate notWaitedWarned_; };    // once per object
+//
+//   static OnceGate sendFailed{5.0};
+//   if (failed) { if (sendFailed.isFirstTime()) logError() << "send failed"; }
+//   else        { sendFailed.reset(); }   // recovered: the next outage logs at once
 // =============================================================================
 
 #include <atomic>
@@ -25,7 +29,10 @@ namespace trussc {
 // has passed since the last true (steady clock). The gate object is the key:
 // one gate per call site (a `static`), or a member for once per object.
 // Thread-safe and lock-free: when several threads call it at once, exactly
-// one of them gets true. constexpr-constructible and trivially destructible,
+// one of them gets true (between resets). reset() restores the never-fired
+// state for either kind of gate: the next isFirstTime() returns true immediately.
+// reset() is also lock-free and safe from any thread.
+// constexpr-constructible and trivially destructible,
 // so a `static` gate has no initialization-order issue and still works
 // during static destruction. Not copyable, not movable.
 class OnceGate {
@@ -49,6 +56,10 @@ public:
         // Only one caller can swap `last` for `now`; the others see a changed
         // value and get false.
         return lastTrueNs_.compare_exchange_strong(last, now, std::memory_order_acq_rel);
+    }
+
+    void reset() noexcept {
+        lastTrueNs_.store(kNever, std::memory_order_release);
     }
 
 private:

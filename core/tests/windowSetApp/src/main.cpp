@@ -17,8 +17,8 @@
 //   - setApp(nullptr) runs the same teardown.
 //   - An App that already ran cleanup() is not ended a second time.
 //   - The same from the App's own update() (the window's tick).
-//   - An App whose own setup() swaps its window to another App gets no audio
-//     hooks afterwards.
+//   - An App whose own setup() requests a swap detaches its audio hooks
+//     when that swap lands at the boundary.
 //   - An App added as a child with addChild() and destroyed has its audio
 //     hooks detached by cleanupTree().
 // =============================================================================
@@ -66,13 +66,17 @@ struct CountApp : App {
     size_t outHooksAtCleanup = 0;
     Window* window = nullptr;           // the window the swaps below act on
     shared_ptr<App> swapInUpdate;       // set: update() calls window->setApp(it)
+    bool requestKeptAppLive = false;
     bool removeInUpdate = false;        // update() calls window->setApp(nullptr)
     shared_ptr<App> swapInSetup;        // set: setup() calls window->setApp(it)
 
     void setup() override {
         ++setups;
         order += 'S';
-        if (swapInSetup && window) window->setApp(swapInSetup);
+        if (swapInSetup && window) {
+            window->setApp(swapInSetup);
+            noteRequest();
+        }
     }
     void update() override {
         if (!window) return;
@@ -80,11 +84,17 @@ struct CountApp : App {
             auto next = swapInUpdate;
             swapInUpdate.reset();
             window->setApp(next);
+            noteRequest();
         }
         if (removeInUpdate) {
             removeInUpdate = false;
             window->setApp(nullptr);
+            noteRequest();
         }
+    }
+    void noteRequest() {
+        requestKeptAppLive = window->getApp().get() == this &&
+            exits.load() == 0 && cleanups.load() == 0;
     }
     void exit() override { ++exits; order += 'E'; }
     void cleanup() override {
@@ -111,16 +121,24 @@ struct OpenWindow : Window {
 static void tickWindow(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
-    w.tickTree();
+    {
+        internal::WindowDispatchScope scope(w);
+        w.tickTree();
+    }
     internal::currentWindowCtx() = prev;
 }
 
-// True if `app`'s audioOut() is not called during ~10 audio passes.
+// True if `app`'s audioOut() stays stopped while ten real audio passes finish.
 static bool audioStopped(CountApp& app) {
-    AudioEngine::getInstance().waitForAudioCallbacks();
+    auto& engine = AudioEngine::getInstance();
+    engine.waitForAudioCallbacks();
     const int calls = app.audioCalls.load();
-    this_thread::sleep_for(chrono::milliseconds(50));
-    return app.audioCalls.load() == calls;
+    atomic<int> passes{0};
+    auto monitor = engine.audioOut.listen([&](AudioOutBuffer&) { ++passes; });
+    const bool advanced = waitFor([&] { return passes.load() >= 10; }, 2000);
+    monitor.disconnect();
+    engine.waitForAudioCallbacks();
+    return advanced && app.audioCalls.load() == calls;
 }
 
 // True if `app`'s audioOut() is called a few more times.
@@ -187,6 +205,9 @@ TC_CORE_TEST_MAIN() {
               a->setups.load() == 1 && audioRuns(*a));
 
         win.setApp(b);
+        check("swap request: current App stays live until the boundary",
+              win.getApp() == a && a->exits.load() == 0 && a->cleanups.load() == 0);
+        internal::applyPendingAppForTests(win);
         check("swap: the outgoing App's exit() and cleanup() ran once each",
               a->exits.load() == 1 && a->cleanups.load() == 1, a->order);
         check("swap: exit() before cleanup(), its hooks detached after cleanup()",
@@ -212,6 +233,7 @@ TC_CORE_TEST_MAIN() {
               other.getApp() == nullptr && countErrors("already ran cleanup()") == refused + 2);
 
         win.setApp(nullptr);
+        internal::applyPendingAppForTests(win);
         check("setApp(nullptr): exit() and cleanup() ran once each",
               b->order == "SEC" && b->exits.load() == 1 && b->cleanups.load() == 1, b->order);
         check("setApp(nullptr): its audioOut() is not called again, the window is empty",
@@ -231,6 +253,7 @@ TC_CORE_TEST_MAIN() {
         a->cleanup();
         internal::detachAppAudio(*a);
         win.setApp(nullptr);
+        internal::applyPendingAppForTests(win);
         check("setApp(nullptr) after the App's end: no second exit() / cleanup()",
               a->exits.load() == 1 && a->cleanups.load() == 1, a->order);
     }
@@ -249,15 +272,23 @@ TC_CORE_TEST_MAIN() {
         c->swapInUpdate = d;
         tickWindow(win);
         check("in update(): setApp(other) ran c's exit() and cleanup() once each",
-              c->order == "SEC" && win.getApp() == d, c->order);
+              c->order == "SEC" && c->requestKeptAppLive && win.getApp() == d, c->order);
         check("in update(): c's audioOut() is not called again", audioStopped(*c), hooks());
         tickWindow(win);
         check("in update(): d is set up on the next tick", d->setups.load() == 1 && audioRuns(*d));
 
+        const size_t refused = countErrors("already ran cleanup()");
+        d->swapInUpdate = c;
+        tickWindow(win);
+        check("in update(): re-attach is refused and the current App keeps running",
+              countErrors("already ran cleanup()") == refused + 1 &&
+              win.getApp() == d && d->requestKeptAppLive && audioRuns(*d) &&
+              c->setups.load() == 1 && c->cleanups.load() == 1);
+
         d->removeInUpdate = true;
         tickWindow(win);
         check("in update(): setApp(nullptr) ran d's exit() and cleanup() once each",
-              d->order == "SEC" && win.getApp() == nullptr, d->order);
+              d->order == "SEC" && d->requestKeptAppLive && win.getApp() == nullptr, d->order);
         check("in update(): d's audioOut() is not called again",
               audioStopped(*d) && hooksAtBase(), hooks());
         tickWindow(win);
@@ -274,13 +305,14 @@ TC_CORE_TEST_MAIN() {
         win.setApp(f);
         tickWindow(win);
         check("in setup(): the swap ends the App (exit(), cleanup())",
-              f->order == "SEC" && win.getApp() == g, f->order);
+              f->order == "SEC" && f->requestKeptAppLive && win.getApp() == g, f->order);
         tickWindow(win);
-        check("in setup(): the swapped-out App gets no audio hooks",
-              audioStopped(*f) && f->audioCalls.load() == 0 && g->setups.load() == 1 &&
+        check("in setup(): the swapped-out App has no audio hooks after the boundary",
+              audioStopped(*f) && g->setups.load() == 1 &&
               engine.audioOut.listenerCount() == outBase + 1,
               to_string(f->audioCalls.load()) + " calls, " + hooks());
         win.setApp(nullptr);
+        internal::applyPendingAppForTests(win);
         check("in setup(): the incoming App ends on setApp(nullptr)",
               g->order == "SEC" && hooksAtBase(), g->order);
     }
@@ -301,6 +333,7 @@ TC_CORE_TEST_MAIN() {
         check("child App: its audioOut() is not called again",
               audioStopped(*child) && engine.audioOut.listenerCount() == outBase + 1, hooks());
         win.setApp(nullptr);
+        internal::applyPendingAppForTests(win);
         check("child App case: no hook left", hooksAtBase(), hooks());
     }
 

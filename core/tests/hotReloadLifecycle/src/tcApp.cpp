@@ -69,6 +69,7 @@ GuestView tcApp::readSharedState() {
 // None of these calls touches the GPU: the caches are only looked up.
 GuestInstances tcApp::sharedInstances() {
     GuestInstances g;
+    g.version = getVersion();
     g.audioEngine = &AudioEngine::getInstance();
     g.screenRecorder = &tc::internal::globalScreenRecorder();
     g.asyncScheduler = &tc::internal::AsyncScheduler::get();
@@ -100,11 +101,13 @@ void tcApp::queueFromWorker(std::atomic<int>* ran) {
     worker.join();
 }
 
-// Window::setApp() is inline, so this runs the guest's copy of it: the
-// double-attach guard it consults and adds to must be the one the host's
-// close() removes from.
+// Window::setApp() and applyPendingApp() are inline, so this runs the
+// guest's copies: the double-attach guard they consult and add to must be
+// the one the host's teardown removes from. applyPendingAppForTests() stands in for
+// the window's frame boundary (setApp() is a request).
 bool tcApp::attachApp(Window& window, std::shared_ptr<App> app) {
     window.setApp(app);
+    internal::applyPendingAppForTests(window);   // the frame boundary
     return window.getApp() == app;
 }
 
