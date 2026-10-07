@@ -3228,6 +3228,7 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<VideoPlayer>().getDuration();
         (void)af::val<VideoPlayer>().getPosition();
+        (void)af::val<VideoPlayer>().getFrameRate();
         (void)af::val<VideoPlayer>().getCurrentFrame();
         (void)af::val<VideoPlayer>().getTotalFrames();
         (void)af::val<VideoPlayer>().setFrame(af::val<int>());

@@ -12128,9 +12128,12 @@ description.ko = "오디오 샘플 레이트 (Hz, 오디오가 없으면 0)"
 ["VideoPlayer::getCurrentFrame"]
 category = "video"
 keywords = ["frame number", "playhead", "index"]
-description.en = "Get current frame number"
-description.ja = "現在のフレーム番号を取得"
-description.ko = "현재 프레임 번호를 가져옴"
+description.en = "Get current frame number; 0 when the frame rate is unknown."
+description.ja = "現在のフレーム番号を取得。フレームレートが不明なら 0。"
+description.ko = "현재 프레임 번호를 가져옴. 프레임 레이트를 알 수 없으면 0."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayer::getDuration"]
 category = "video"
@@ -12138,6 +12141,17 @@ keywords = ["length", "total time", "seconds", "runtime"]
 description.en = "Get total duration in seconds"
 description.ja = "総再生時間を秒単位で取得"
 description.ko = "전체 재생 시간을 초 단위로 가져옴"
+
+["VideoPlayer::getFrameRate"]
+category = "video"
+keywords = ["fps", "frame rate", "unknown"]
+description.en = "Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0."
+description.ja = "ファイルのフレームレート（fps）を取得。不明または未ロードなら 0。Web では 0。"
+description.ko = "파일의 프레임 레이트(fps)를 가져옴. 알 수 없거나 로드되지 않았으면 0. Web에서는 0."
+details.en = "Windows reads MF_MT_FRAME_RATE instead of assuming 30 fps. Linux uses average/nominal metadata; macOS/iOS use the nominal rate. Frame counts and seeks derived from a rate are approximate for variable-frame-rate files. Unknown rates are never replaced with 30: frame queries return 0 and frame operations do nothing, with one warning per player instance. This getter itself does not warn. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "Windows は 30 fps と仮定せず MF_MT_FRAME_RATE を読む。Linux は平均／公称レート、macOS/iOS は公称レートを使う。可変フレームレートのファイルではレートから求めるフレーム数やシークは近似。不明時に 30 で代用せず、フレーム取得は 0、操作は何もせず、インスタンスごとに一度だけ警告する。この getter 自体は警告しない。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "Windows는 30 fps로 가정하지 않고 MF_MT_FRAME_RATE를 읽음. Linux는 평균/명목 메타데이터, macOS/iOS는 명목 레이트를 사용. 가변 프레임 레이트 파일에서 레이트로 계산한 프레임 수와 탐색은 근사값임. 알 수 없는 레이트를 30으로 대체하지 않으며 프레임 조회는 0, 프레임 조작은 무동작이고 인스턴스당 한 번 경고함. 이 getter 자체는 경고하지 않음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
+related = ["VideoPlayer::getCurrentFrame", "VideoPlayer::getTotalFrames", "VideoPlayer::setFrame", "VideoPlayer::getPosition"]
 
 ["VideoPlayer::getGammaCorrection"]
 category = "video"
@@ -12196,9 +12210,12 @@ description.ko = "현재 재생 위치를 가져옴 (0.0~1.0)"
 ["VideoPlayer::getTotalFrames"]
 category = "video"
 keywords = ["frame count", "length"]
-description.en = "Get total number of frames"
-description.ja = "総フレーム数を取得"
-description.ko = "전체 프레임 수를 가져옴"
+description.en = "Get total frame count; 0 when the frame rate is unknown."
+description.ja = "総フレーム数を取得。フレームレートが不明なら 0。"
+description.ko = "전체 프레임 수를 가져옴. 프레임 레이트를 알 수 없으면 0."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayer::getUseHwAccel"]
 category = "video"
@@ -12251,23 +12268,32 @@ details.ja = '''
 ["VideoPlayer::nextFrame"]
 category = "video"
 keywords = ["advance", "step", "forward"]
-description.en = "Advance to the next frame"
-description.ja = "次のフレームに進む"
-description.ko = "다음 프레임으로 이동"
+description.en = "Advance one frame; does nothing when the frame rate is unknown (0)."
+description.ja = "次のフレームに進む。フレームレートが不明（0）なら何もしない。"
+description.ko = "다음 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayer::previousFrame"]
 category = "video"
 keywords = ["back", "step", "rewind"]
-description.en = "Go back to the previous frame"
-description.ja = "前のフレームに戻る"
-description.ko = "이전 프레임으로 이동"
+description.en = "Go back one frame; does nothing when the frame rate is unknown (0)."
+description.ja = "前のフレームに戻る。フレームレートが不明（0）なら何もしない。"
+description.ko = "이전 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayer::setFrame"]
 category = "video"
 keywords = ["seek", "jump", "frame number", "scrub"]
-description.en = "Seek to a specific frame number"
-description.ja = "指定フレームにシーク"
-description.ko = "지정된 프레임으로 이동"
+description.en = "Seek to a frame number; does nothing when the frame rate is unknown (0)."
+description.ja = "指定フレームにシーク。フレームレートが不明（0）なら何もしない。"
+description.ko = "지정된 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayer::setGammaCorrection"]
 category = "video"
@@ -12298,6 +12324,10 @@ keywords = ["start", "beginning", "rewind", "home"]
 description.en = "Go to the first frame"
 description.ja = "最初のフレームに移動"
 description.ko = "첫 프레임으로 이동"
+details.en = "For VideoPlayer, does nothing when the frame rate is unknown (0), sharing the one-per-instance frame API warning."
+details.ja = "VideoPlayer ではフレームレートが不明（0）なら何もしない。フレーム API のインスタンスごとに一度の警告を共有する。"
+details.ko = "VideoPlayer는 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않으며 프레임 API의 인스턴스당 한 번 경고를 공유함."
+
 
 ["VideoPlayerBase::getCurrentTime"]
 category = "video"
