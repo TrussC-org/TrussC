@@ -249,8 +249,9 @@ private:
     // running.
     void applyPendingApp();
     // Ends the window's App: drops a pending setApp() (logged when it held an
-    // App), detaches the App from the window, then runs its exit() /
-    // cleanup() and detaches its audio hooks. Part of the platform teardown.
+    // App), detaches the App from the window, then runs its exit(), detaches
+    // its audio hooks (waiting for a call in flight) and runs its cleanup().
+    // Part of the platform teardown.
     void endApp();
     // The platform teardown: destroys the native window right away, fires
     // events().exit, then endApp(). Runs when the backend closes the window
