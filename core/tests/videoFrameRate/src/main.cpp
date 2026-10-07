@@ -71,7 +71,7 @@ private:
     float seconds_ = 1.0f;
 };
 
-bool near(float a, float b) { return std::abs(a - b) < 0.00001f; }
+bool nearlyEqual(float a, float b) { return std::abs(a - b) < 0.00001f; }
 
 void exerciseUnknown(FakeVideoPlayer& player) {
     const int queriesBefore = player.rateQueries;
@@ -115,11 +115,11 @@ TC_CORE_TEST_MAIN() {
         check("known current frame matches one second",
               player.getCurrentFrame() == static_cast<int>(rate));
         player.setFrame(12);
-        check("setFrame uses reported rate", near(player.getCurrentTime(), 12.0f / rate));
+        check("setFrame uses reported rate", nearlyEqual(player.getCurrentTime(), 12.0f / rate));
         player.nextFrame();
-        check("nextFrame advances by one frame", near(player.getCurrentTime(), 13.0f / rate));
+        check("nextFrame advances by one frame", nearlyEqual(player.getCurrentTime(), 13.0f / rate));
         player.previousFrame();
-        check("previousFrame retreats by one frame", near(player.getCurrentTime(), 12.0f / rate));
+        check("previousFrame retreats by one frame", nearlyEqual(player.getCurrentTime(), 12.0f / rate));
         player.firstFrame();
         check("firstFrame seeks to zero", player.getPosition() == 0.0f);
         check("known frame APIs dispatch to Impl exactly once each", player.frameCalls == 6);
