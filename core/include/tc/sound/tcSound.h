@@ -1144,7 +1144,7 @@ public:
     // Do it in the most-derived class (or in cleanup()), not in a base-class
     // destructor, which runs after the derived members are already gone. The
     // App's own audioOut() / audioIn() hooks are handled by the framework:
-    // they are detached after cleanup(), and before the App is destroyed
+    // they are detached before cleanup(), and before cleanup() begins
     // (exit, hot reload, closing a secondary window) the framework waits the
     // same way, but without the one-second limit below
     // (internal::waitForAudioCallbacksNoTimeout()).

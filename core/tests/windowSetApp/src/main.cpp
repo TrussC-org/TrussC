@@ -10,7 +10,7 @@
 //
 // Guards the invariants:
 //   - setApp(other) runs the outgoing App's exit() and then cleanup(), once
-//     each, and detaches its audioOut() / audioIn(): it is not called again.
+//     each, with audioOut() / audioIn() detached before cleanup() (#698).
 //     The window shows the incoming App, whose setup() runs on its first tick.
 //   - Attaching the swapped-out App again is refused with one error, and the
 //     window keeps its current App; its setup() does not run again.
@@ -221,8 +221,8 @@ TC_CORE_TEST_MAIN() {
         internal::applyPendingAppForTests(win);
         check("swap: the outgoing App's exit() and cleanup() ran once each",
               a->exits.load() == 1 && a->cleanups.load() == 1, a->order);
-        check("swap: exit() before cleanup(), its hooks detached after cleanup()",
-              a->order == "SEC" && a->outHooksAtCleanup == outBase + 1, a->order);
+        check("swap: exit() before cleanup(), its hooks detached before cleanup()",
+              a->order == "SEC" && a->outHooksAtCleanup == outBase, a->order);
         check("swap: its audioOut() is not called again", audioStopped(*a) && hooksAtBase(), hooks());
         // Like close(): the window drops the App before running its exit() /
         // cleanup(), so getApp() there already returns the incoming App.
@@ -269,8 +269,8 @@ TC_CORE_TEST_MAIN() {
         tickWindow(win);
         // What the platform Window::close() does with the App before it lets go.
         a->exit();
-        a->cleanup();
         internal::detachAppAudio(*a);
+        a->cleanup();
         win.setApp(nullptr);
         internal::applyPendingAppForTests(win);
         check("setApp(nullptr) after the App's end: no second exit() / cleanup()",

@@ -10,17 +10,17 @@ description.ko = "기반 애플리케이션 클래스: 서브클래싱하여 set
 ["App::audioIn"]
 category = "audioengine"
 keywords = ["microphone", "mic", "capture"]
-description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached after cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here."
-description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく setup() が戻った直後から呼ばれ、cleanup() の後で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
-description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 setup() 이 반환된 직후부터 호출되고, cleanup() 후에 분리되어 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
+description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached before cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here."
+description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく setup() が戻った直後から呼ばれ、cleanup() の前で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
+description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 setup() 이 반환된 직후부터 호출되고, cleanup() 전에 분리되어 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
 related = ["Event<T>", "AudioInBuffer", "getMicInput", "getMicAnalysisBuffer"]
 
 ["App::audioOut"]
 category = "events"
 keywords = ["sound", "output", "buffer", "dsp", "synth"]
-description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
-description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。setup() が戻った直後から呼ばれるので、setup() で用意したものはここで使える。一度も動かさない App には呼ばれない。フレームワークが cleanup() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから App を破棄する (終了時、ホットリロード時、App のウィンドウを閉じたとき)。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
-description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. setup() 이 반환된 직후부터 호출되므로 setup() 에서 준비한 것은 여기서 쓸 수 있다. 한 번도 실행되지 않은 App 에는 호출되지 않는다. 프레임워크가 cleanup() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 App 을 파괴한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
+description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework calls exit(), detaches it and waits as long as necessary for a call in flight before calling cleanup() (exit, hot reload, closing the App's window). cleanup() may free its audio state. Don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
+description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。setup() が戻った直後から呼ばれるので、setup() で用意したものはここで使える。一度も動かさない App には呼ばれない。フレームワークが exit() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから cleanup() を呼ぶ (終了時、ホットリロード時、App のウィンドウを閉じたとき)。cleanup() ではオーディオの状態を解放できる。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
+description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. setup() 이 반환된 직후부터 호출되므로 setup() 에서 준비한 것은 여기서 쓸 수 있다. 한 번도 실행되지 않은 App 에는 호출되지 않는다. 프레임워크가 exit() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 cleanup() 을 호출한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). cleanup() 에서는 오디오 상태를 해제할 수 있다. 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
 related = ["AudioOutBuffer"]
 
 ["App::exit"]

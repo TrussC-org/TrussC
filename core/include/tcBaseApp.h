@@ -31,11 +31,11 @@ namespace internal {
 // setup() has returned (App::onSetupDone(), #426). Defined below the App
 // class.
 inline void attachAppAudio(App& app);
-// Teardown steps 2 and 3 wherever the framework lets an App go (exit, hot
-// reload, closing a secondary window; #256): after app.cleanup(), before the
-// App is destroyed. Defined below the App class.
+// Detach and wait wherever the framework lets an App go (exit, hot reload,
+// closing a secondary window): after exit(), before cleanup() (#698).
+// Defined below the App class.
 inline void detachAppAudio(App& app);
-// True once the framework has run the App's cleanup() (#256): Window::setApp()
+// True once the framework has begun the App's cleanup (#698): Window::setApp()
 // refuses such an App. Defined below the App class.
 inline bool appRanCleanup(const App& app);
 // Priority of the App's audioOut / audioIn hooks: just before Generator (the
@@ -224,8 +224,8 @@ public:
     // subscribes them then, not when the App is constructed), so state that
     // setup() prepares is ready in here. An App that is never run gets no
     // audio callbacks.
-    // They stop being called after cleanup(): the framework detaches them
-    // before it destroys the App (exit, hot reload, closing the App's
+    // They stop being called before cleanup(): the framework detaches them
+    // before cleanup() may free audio state (exit, hot reload, closing the App's
     // window), so the App adds nothing to the last few buffers before it
     // goes. It waits for a call already running, as long as it takes, so
     // don't wait on the main thread or on a lock the main thread may hold in
@@ -244,9 +244,9 @@ private:
     // first setup() has returned (#426). final: apps override setup().
     void onSetupDone() final { internal::attachAppAudio(*this); }
 
-    // Node's post-cleanup hook: an App added as a child ends with its
+    // Node's pre-cleanup hook: an App added as a child ends with its
     // subtree's cleanupTree(), so its audio hooks are detached there too.
-    void onCleanupDone() final { internal::detachAppAudio(*this); }
+    void onCleanupStart() final { internal::detachAppAudio(*this); }
 
     // Node's pre-setup hook: resolve the data path root before setup() runs,
     // not in _setup_cb (on iOS the executable path may not be available that
@@ -254,7 +254,7 @@ private:
     void onSetupStart() final { internal::resolveDataPathRootOnce(); }
 
     // Framework lifecycle, next to Node's setupCalled_: true once the
-    // framework has run cleanup() and let the App go
+    // framework has begun teardown, before running cleanup()
     // (internal::detachAppAudio()). An App runs once, so Window::setApp()
     // refuses it from then on (internal::appRanCleanup()).
     bool cleanupCalled_ = false;
@@ -357,13 +357,12 @@ inline void attachAppAudio(App& app) {
 // Detach the App's audioOut / audioIn hooks, then wait for a callback that is
 // already running on the audio thread (Event does not wait on disconnect).
 // Afterwards nothing on the audio thread reaches the App, so it can be
-// destroyed. The wait has no time limit: a listener that never returns hangs
+// cleaned up and destroyed. The wait has no time limit: a listener that never returns hangs
 // the teardown (with an error in the log after one second) instead of
 // letting the App be destroyed under it. Main thread; returns at once when no
 // audio is running.
 //
-// Every framework path calls it right after cleanup() (a hot reload, which
-// runs no cleanup(), destroys the App right after), so it also records that
+// Every framework path calls it before cleanup(), so it also records that
 // the App's lifecycle ended: Window::setApp() refuses it from then on, and
 // its hooks are never subscribed again.
 inline void detachAppAudio(App& app) {

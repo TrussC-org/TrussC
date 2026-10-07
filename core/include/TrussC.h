@@ -3133,11 +3133,11 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
             // close() requests made so far (e.g. from exit()) land here,
             // before the main App's cleanup().
             internal::closeRequestedWindowsAtShutdown();
-            app->cleanup();
             // The audio device is still running (it stops in _cleanup_cb, so
             // exit() can use audio): detach the App's audio hooks and wait
-            // for a callback in flight before the App goes (#256).
+            // for a callback in flight before cleanup() frees audio state (#698).
             internal::detachAppAudio(*app);
+            app->cleanup();
             app.reset();
         }
     };
