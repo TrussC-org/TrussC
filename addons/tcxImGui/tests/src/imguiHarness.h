@@ -180,6 +180,7 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
     if (frames) *frames = 0;
     if (ds.hasEnvelope) {
         md::DeferredResponse d;
+        d.id = std::move(ds.id);
         d.response = std::make_shared<std::promise<md::ReplyThunk>>();
         auto future = d.response->get_future();
         d.makeEnvelope = std::move(ds.envelope);
