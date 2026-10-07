@@ -66,10 +66,10 @@ TC_CORE_TEST_MAIN() {
             throw std::runtime_error(bad);
         });
         auto error = call("invalid_exception");
-        check("exception is a JSON-RPC error with escaped, repaired text",
+        check("exception is an MCP tool error with escaped, repaired text",
               error.at("id") == 324 && error.at("jsonrpc") == "2.0" &&
-              error.at("error").at("code") == -32000 &&
-              error.at("error").at("message") == "Tool execution error: " + repaired);
+              error.at("result").at("isError") == true &&
+              error.at("result").at("content").at(0).at("text") == "Tool execution error: " + repaired);
 
         const json valid = {{"s", "日本語 😀 \" \\ \n"}, {"n", 42}};
         mcp::tool("valid_reply", "").bind([valid]() { return valid; });
@@ -110,7 +110,7 @@ TC_CORE_TEST_MAIN() {
             });
             check(twoStage ? "worker exception keeps quotes, backslash and replacement"
                            : "deferred exception keeps quotes, backslash and replacement",
-                  deferredCall(name).at("error") ==
+                  deferredCall(name).at("result").at("content").at(0).at("text") ==
                       (twoStage ? "deferred worker stage failed: " : "deferred response failed: ") + repaired);
 
             const std::string resultName = name + "_result";
@@ -132,10 +132,11 @@ TC_CORE_TEST_MAIN() {
         check("HTTP error reply escapes and replaces its message",
               rejected.status == 403 && json::parse(rejected.body).at("error") == repaired);
 
-        // Exercise the fallback replies used during owner unload and normal shutdown.
+        // Exercise the cancellation replies used during owner unload and normal shutdown.
         int owner;
         for (bool shutdown : {false, true}) {
             mcp::detail::DeferredResponse pending;
+            pending.id = 324;
             pending.owner = &owner;
             pending.response = std::make_shared<std::promise<mcp::detail::ReplyThunk>>();
             auto future = pending.response->get_future();
@@ -143,8 +144,8 @@ TC_CORE_TEST_MAIN() {
             if (shutdown) mcp::stopHttpServer();
             else mcp::detail::removeRegistrationsOwnedBy(&owner);
             auto reply = json::parse(future.get()());
-            check("shutdown/unload fallback is valid JSON",
-                  reply.at("error").get<std::string>().find(shutdown ? "shut down" : "unloaded") != std::string::npos);
+            check("shutdown/unload cancellation is valid JSON",
+                  reply.at("result").at("content").at(0).at("text").get<std::string>().find(shutdown ? "shut down" : "unloaded") != std::string::npos);
         }
 #endif
         check("malformed reply bytes produce no warning or error log", logs == 0);

@@ -653,9 +653,13 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(41, "the unloaded guest App's audio hooks are still subscribed");
         }
         for (size_t k = 0; k < 2; k++) {
-            json cancelled = toolContent(replies[k]);
-            if (!cancelled.is_object() || cancelled.value("status", "") != "error" ||
-                cancelled.value("message", "").find("unloaded") == std::string::npos) {
+            json cancelled = json::parse(replies[k], nullptr, false);
+            const json expected = {{"jsonrpc", "2.0"},
+                {"id", json::parse(posts[k].ex->body).at("id")},
+                {"result", {{"content", {{{"type", "text"},
+                    {"text", "the app code behind this reply was unloaded by a hot reload before the reply was produced"}}}},
+                    {"isError", true}}}};
+            if (cancelled != expected) {
                 return fail(35, std::string("a deferred reply running guest code, pending when the guest was unloaded, "
                                             "was not answered with the unload error: ") +
                                 (cancelled.is_discarded() ? std::string("no reply") : cancelled.dump()));

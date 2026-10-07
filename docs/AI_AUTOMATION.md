@@ -321,6 +321,27 @@ curl -X POST http://127.0.0.1:8080/mcp \
 }
 ```
 
+Tool failures produced by the framework use a JSON-RPC `result` with
+`isError: true`. This includes exceptions thrown inline or in either deferred
+stage, cancellation during server shutdown or hot-reload unload, and a timeout
+waiting for a targeted window to render. The request's `id` is preserved and the
+message is plain text in `content`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [{ "type": "text", "text": "Tool execution error: example failure" }],
+    "isError": true
+  }
+}
+```
+
+Protocol errors (such as an unknown method or tool, or invalid parameters) remain
+JSON-RPC `error` replies. A tool's own `{"status":"error",...}` return value stays
+serialized as tool content; the framework does not reinterpret it.
+
 Image tools (`tc_get_screenshot`, `tc_get_status_image`) return an
 MCP-standard **image content block** — clients like Claude Code render it
 inline instead of receiving a Base64 wall — followed by a text block with

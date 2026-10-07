@@ -18,7 +18,11 @@ json call(const char* name, json args = json::object()) {
         {"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
         {"params", {{"name", name}, {"arguments", args}}}}.dump()));
     if (response.contains("error")) return {{"status", "error"}};
-    return json::parse(response.at("result").at("content").at(0).at("text").get<string>());
+    const auto& result = response.at("result");
+    const auto text = result.at("content").at(0).at("text").get<string>();
+    // A tool that throws answers with MCP's isError result and plain text (#683).
+    if (result.value("isError", false)) return {{"status", "error"}, {"message", text}};
+    return json::parse(text);
 }
 void ringChecks() {
     internal::AudioOutputRing ring(64, 2);
