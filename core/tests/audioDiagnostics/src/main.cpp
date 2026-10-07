@@ -4,7 +4,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The engine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the real mixer callback, so no sound card is needed.
 //
 // Guards the invariants:
@@ -959,8 +959,6 @@ void checkSurrogateSoundPath(const fs::path& directory) {
 #endif
 
 int main() {
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
@@ -974,17 +972,17 @@ int main() {
     {
         const auto probe = internal::audioDeviceReport(true);
         check("device report enumerates before engine start", probe.enumerated);
-        check("probe report names the Null backend", probe.backend == "Null", probe.backend);
+        check("probe report names an available backend", !probe.backend.empty(), probe.backend);
         check("device report leaves the engine uninitialized", !engine.isInitialized());
         const auto devices = AudioEngine::listDevices();
-        check("listDevices returns the null playback device before engine start",
-              devices.size() == 1 && devices[0].name == "NULL Playback Device" &&
-              devices[0].isDefault);
+        check("listDevices matches the default backend probe before engine start",
+              devices.size() == probe.playbackDevices.size());
         check("listDevices leaves the engine uninitialized", !engine.isInitialized());
     }
 
     // --- engine start ---------------------------------------------------------
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;
@@ -998,6 +996,8 @@ int main() {
     changedSub.disconnect();
     check("engine starts on the null backend", started && engine.isInitialized());
     if (!started) return 1;
+    check("explicit Null logs one Notice", countLogs(LogLevel::Notice,
+          "audio backend: Null (requested); output is silent") == 1);
     auto report = internal::audioDeviceReport(false);
     // getBufferSize() is the requested size; the event reports the period
     // the device runs with, in engine-rate frames.

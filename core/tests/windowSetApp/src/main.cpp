@@ -5,7 +5,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The real AudioEngine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), so an App's audioOut() is called
+// (AudioSettings::backend = AudioBackend::Null), so an App's audioOut() is called
 // on the audio thread without a sound card.
 //
 // Guards the invariants:
@@ -169,8 +169,6 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     mutex logMutex;
@@ -189,6 +187,7 @@ TC_CORE_TEST_MAIN() {
 
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;

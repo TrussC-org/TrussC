@@ -291,9 +291,9 @@ related = ["AudioStats", "AudioEngine::getPlayingSounds", "Sound::play"]
 ["AudioEngine::init"]
 category = "audioengine"
 keywords = ["initialize", "start", "open", "device", "setup"]
-description.en = "Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device."
-description.ja = "エンジンを初期化する、または AudioSettings の上書きで再初期化する。init(settings) はサンプルレート、チャンネル、バッファサイズ、ポリフォニーを失敗しても保持し、引数なしの init() は直前のそれらを再利用する (init(settings) を一度も呼んでいなければデフォルト) が、デバイスは常にシステム既定を開く。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。使えるオーディオバックエンドがないと miniaudio は無音の Null デバイスにフォールバックし、init() は成功して警告をログに出す。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること。Sound::load*() はエンジンが未初期化なら init() を呼ぶので、init(settings) が失敗した後はその設定でシステム既定のデバイスが開かれる。要求したデバイスを使いたいならサウンドを読み込む前に init(settings) を呼び直すこと"
-description.ko = "엔진을 초기화하거나 AudioSettings 오버라이드로 재초기화. init(settings) 는 샘플레이트, 채널, 버퍼 크기, 폴리포니를 실패해도 유지하고, 인수 없는 init() 은 마지막 값을 재사용하지만 (init(settings) 를 호출한 적이 없으면 기본값) 디바이스는 항상 시스템 기본 디바이스를 연다. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 사용할 수 있는 오디오 백엔드가 없으면 miniaudio 는 무음의 Null 디바이스로 폴백하고, init() 은 성공하며 경고를 로그에 남긴다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것. Sound::load*() 는 엔진이 초기화되지 않았으면 init() 을 호출하므로, init(settings) 가 실패한 뒤에는 그 설정으로 시스템 기본 디바이스가 열린다. 요청한 디바이스를 쓰려면 사운드를 로드하기 전에 init(settings) 를 다시 호출할 것"
+description.en = "Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device on AudioBackend::Default. Re-init on a running engine migrates active voices to the new settings. miniaudio reaches Null only when no real backend context can be created; if a context opens but its device cannot, init() returns false without switching backend. Set AudioSettings::backend = AudioBackend::Null for intentional silent operation (one Notice per init). getStats() retains the last init failure until a successful init. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device."
+description.ja = "エンジンを初期化する、または AudioSettings の上書きで再初期化する。init(settings) はサンプルレート、チャンネル、バッファサイズ、ポリフォニーを失敗しても保持し、引数なしの init() は直前のそれらを再利用する (init(settings) を一度も呼んでいなければデフォルト) が、バックエンドは常に AudioBackend::Default、デバイスはシステム既定を開く。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。miniaudio が Null に到達するのは実バックエンドのコンテキストを作れない場合だけ。コンテキストが開いてもデバイスを開けなければ、バックエンドを切り替えず false を返す。意図的に無音で動かすには AudioSettings::backend = AudioBackend::Null を指定する (init ごとに Notice を 1 回)。getStats() は次の初期化成功まで最後の失敗を保持する。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること。Sound::load*() はエンジンが未初期化なら init() を呼ぶので、init(settings) が失敗した後はその設定でシステム既定のデバイスが開かれる。要求したデバイスを使いたいならサウンドを読み込む前に init(settings) を呼び直すこと"
+description.ko = "엔진을 초기화하거나 AudioSettings 오버라이드로 재초기화. init(settings) 는 샘플레이트, 채널, 버퍼 크기, 폴리포니를 실패해도 유지하고, 인수 없는 init() 은 마지막 값을 재사용하지만 (init(settings) 를 호출한 적이 없으면 기본값) 백엔드는 항상 AudioBackend::Default이며 시스템 기본 디바이스를 연다. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. miniaudio 는 실제 백엔드 컨텍스트를 만들 수 없을 때만 Null 에 도달한다. 컨텍스트가 열려도 디바이스를 열 수 없으면 백엔드를 바꾸지 않고 false 를 반환한다. 의도적인 무음 실행에는 AudioSettings::backend = AudioBackend::Null 을 지정한다 (init 마다 Notice 한 번). getStats() 는 다음 초기화 성공까지 마지막 실패를 유지한다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것. Sound::load*() 는 엔진이 초기화되지 않았으면 init() 을 호출하므로, init(settings) 가 실패한 뒤에는 그 설정으로 시스템 기본 디바이스가 열린다. 요청한 디바이스를 쓰려면 사운드를 로드하기 전에 init(settings) 를 다시 호출할 것"
 related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]
@@ -19620,3 +19620,39 @@ description.ko = "파생 클래스용: load 성공 및 close 시 대기 중인 �
 description.en = "Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object."
 description.ja = "派生クラス用：ムーブ時に通知待ちと通知済みのエラー状態を移す。イベントリスナーは元のオブジェクトに残る。"
 description.ko = "파생 클래스용: 이동 시 대기 중인 오류와 전달된 오류 상태를 옮긴다. 이벤트 리스너는 원래 객체에 남는다."
+
+["AudioBackend"]
+category = "sound"
+description.en = "Audio backend selection: Default uses the platform backend order; Null explicitly runs the real mixer silently without a device."
+description.ja = "オーディオバックエンドの選択。Default はプラットフォームの順序、Null はデバイスなしで実際のミキサーを無音で動かす。"
+description.ko = "오디오 백엔드 선택. Default 는 플랫폼 순서, Null 은 디바이스 없이 실제 믹서를 무음으로 실행한다."
+
+["AudioSettings::backend"]
+category = "sound"
+description.en = "Backend to open (Default by default). Set Null and call init(settings) before loading sounds for headless use. Enumeration and native MicInput follow the engine backend; before init, enumeration uses real backends. Zero-argument init() uses Default."
+description.ja = "開くバックエンド (既定 Default)。ヘッドレス実行では Null を指定してサウンド読込前に init(settings) を呼ぶ。列挙とネイティブ MicInput はエンジンのバックエンドに従う。init 前の列挙は実バックエンドを使う。引数なしの init() は Default を使う。"
+description.ko = "열 백엔드 (기본 Default). 헤드리스 실행에는 Null 을 지정하고 사운드 로드 전에 init(settings) 를 호출한다. 열거와 네이티브 MicInput 은 엔진 백엔드를 따른다. init 전 열거는 실제 백엔드를 사용한다. 인수 없는 init() 은 Default 를 사용한다."
+
+["AudioInitFailure"]
+category = "sound"
+description.en = "Initialization failure stage: None, NoBackend (context creation), DeviceOpen, or DeviceStart."
+description.ja = "初期化失敗の段階: None、NoBackend (コンテキスト作成)、DeviceOpen、DeviceStart。"
+description.ko = "초기화 실패 단계: None, NoBackend (컨텍스트 생성), DeviceOpen, DeviceStart."
+
+["AudioStats::initFailure"]
+category = "sound"
+description.en = "Last init failure, retained through shutdown and cleared by successful init. tc_get_audio_state includes initFailure with reason, result, backend and requested device only while a failure is recorded."
+description.ja = "最後の初期化失敗。shutdown 後も保持し、init 成功でクリアする。tc_get_audio_state は失敗記録があるときだけ reason、result、backend、要求デバイス名を含む initFailure を返す。"
+description.ko = "마지막 초기화 실패. shutdown 후에도 유지하며 init 성공 시 지운다. tc_get_audio_state 는 실패 기록이 있을 때만 reason, result, backend, 요청 디바이스 이름을 담은 initFailure 를 반환한다."
+
+["AudioStats::initFailureResult"]
+category = "sound"
+description.en = "miniaudio result code of the last failed init (for example -401 for a device open failure); 0 when no failure is recorded."
+description.ja = "最後の初期化失敗の miniaudio 結果コード (例: デバイスを開けない場合 -401)。失敗記録がなければ 0。"
+description.ko = "마지막 초기화 실패의 miniaudio 결과 코드 (예: 디바이스 열기 실패 -401). 실패 기록이 없으면 0."
+
+["AudioStats::initFailureBackend"]
+category = "sound"
+description.en = "Static backend name resolved from the atomic failure snapshot. Empty when no backend context opened or no failure is recorded."
+description.ja = "atomic な失敗スナップショットから解決する静的なバックエンド名。コンテキストが開かなかった場合や失敗記録がない場合は空。"
+description.ko = "atomic 실패 스냅샷에서 해석한 정적 백엔드 이름. 컨텍스트를 열지 못했거나 실패 기록이 없으면 비어 있다."

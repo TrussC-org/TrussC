@@ -285,7 +285,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   playing sound's level / CPU usage) work and shutdown clears them, a reused `SoundBuffer`'s
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
-  miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
+  miniaudio's null backend (`AudioSettings::backend = AudioBackend::Null`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
   A missing `.wav` / `.ogg` / stream / image, and on Linux, macOS and

@@ -127,11 +127,10 @@ TC_CORE_TEST_MAIN() {
     check("spectrum without engine returns an error", call("tc_get_audio_spectrum")["status"] == "error");
     check("capture without engine returns an error", call("tc_save_audio_capture", {{"path","never.wav"}})["status"] == "error");
     check("tools never start audio", !engine.isInitialized());
-    internal::setNullAudioBackendForTests(true);
     auto constant = engine.audioOut.listen([](AudioOutBuffer& out) {
         for (int f = 0; f < out.frameCount; ++f) { out.data[f*2] = 0.25f; out.data[f*2+1] = -0.125f; }
     });
-    check("Null backend starts", engine.init(AudioSettings{.sampleRate=48000, .channels=2, .bufferSize=256}));
+    check("Null backend starts", engine.init(AudioSettings{.sampleRate=48000, .channels=2, .bufferSize=256, .backend=AudioBackend::Null}));
     const auto deadline = chrono::steady_clock::now() + chrono::seconds(10);
     while (internal::AudioAnalysisAccess::snapshot(engine, 0).framesWritten < 4096 && chrono::steady_clock::now() < deadline) this_thread::yield();
     vector<float> mono(4096);
@@ -219,7 +218,7 @@ TC_CORE_TEST_MAIN() {
     r = call("tc_get_audio_spectrum",{{"n",8192}});
     check("seeded noise has broadband energy", r["channels"][0]["rms"].get<double>() > 0.27 && r["channels"][0]["peaks"][0]["dbfs"].get<double>() < -20);
     listener.disconnect();
-    check("reinit to mono/new rate", engine.init(AudioSettings{.sampleRate=32000,.channels=1,.bufferSize=256}));
+    check("reinit to mono/new rate", engine.init(AudioSettings{.sampleRate=32000,.channels=1,.bufferSize=256, .backend=AudioBackend::Null}));
     engine.shutdown();
     r = call("tc_get_audio_spectrum");
     check("reinit clears old history and updates format", r["sampleRate"] == 32000 && r["framesWritten"].get<uint64_t>() < 100000 && r["channels"][0]["peak"] == 0);
@@ -245,7 +244,7 @@ TC_CORE_TEST_MAIN() {
                 if (out.channels > 2) out.data[f * out.channels + 2] = -1.0f;
             }
         });
-        const bool started = engine.init(AudioSettings{.sampleRate=48000,.channels=channels,.bufferSize=256});
+        const bool started = engine.init(AudioSettings{.sampleRate=48000,.channels=channels,.bufferSize=256, .backend=AudioBackend::Null});
         const auto readyBy = chrono::steady_clock::now() + chrono::seconds(10);
         while (internal::AudioAnalysisAccess::snapshot(engine, 0).framesWritten < 4096 && chrono::steady_clock::now() < readyBy) this_thread::yield();
         const auto n = engine.getAnalysisBuffer(mono.data(), mono.size());
@@ -258,7 +257,6 @@ TC_CORE_TEST_MAIN() {
         engine.shutdown();
         ramp.disconnect();
     }
-    internal::setNullAudioBackendForTests(false);
     fs::remove_all(dir);
     return failures ? 1 : 0;
 }
