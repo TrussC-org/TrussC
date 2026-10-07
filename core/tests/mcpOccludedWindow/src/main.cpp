@@ -77,18 +77,22 @@ static string toolCall(const string& name, const string& args) {
 }
 
 // The tool's own JSON reply: result.content[0].text, parsed. Null on any
-// other shape (transport error, timeout reply without text, ...).
+// other shape (transport error, missing text, ...). Framework errors retain
+// the MCP result so timeout assertions can check isError.
 static json toolReply(const httplib::Result& r) {
     if (!r || r->status != 200) return json();
     json body = json::parse(r->body, nullptr, false);
     if (body.is_discarded() || !body.contains("result")) return json();
     const json& content = body["result"]["content"];
     if (!content.is_array() || content.empty() || !content[0].contains("text")) return json();
+    if (body["result"].value("isError", false)) return body["result"];
     json j = json::parse(content[0]["text"].get<string>(), nullptr, false);
     return j.is_discarded() ? json() : j;
 }
 
 static string messageOf(const json& reply) {
+    if (reply.is_object() && reply.value("isError", false))
+        return reply.at("content").at(0).at("text").get<string>();
     return reply.is_object() && reply.contains("message") && reply["message"].is_string()
         ? reply["message"].get<string>() : string();
 }
@@ -190,10 +194,10 @@ TC_CORE_TEST_MAIN() {
         saver.join();
         const string timeoutMsg = "rendered no frame within 5 s";
         check("tc_get_screenshot visible window -> deferred, then timeout",
-              contains(messageOf(getReply), timeoutMsg), getReply.dump());
+              getReply.value("isError", false) && contains(messageOf(getReply), timeoutMsg), getReply.dump());
         check("  waited for the window's tick (>= 4.5 s)", getSec >= 4.5, to_string(getSec) + " s");
         check("tc_save_screenshot visible window -> deferred, then timeout",
-              contains(messageOf(saveReply), timeoutMsg), saveReply.dump());
+              saveReply.value("isError", false) && contains(messageOf(saveReply), timeoutMsg), saveReply.dump());
         check("  waited for the window's tick (>= 4.5 s)", saveSec >= 4.5, to_string(saveSec) + " s");
 
         // --- no hook: the native flag of a window the OS never hid --------
