@@ -132,7 +132,7 @@ TC_CORE_TEST_MAIN() {
         check("HTTP error reply escapes and replaces its message",
               rejected.status == 403 && json::parse(rejected.body).at("error") == repaired);
 
-        // Exercise the fallback replies used during owner unload and normal shutdown.
+        // Exercise the cancellation replies used during owner unload and normal shutdown.
         int owner;
         for (bool shutdown : {false, true}) {
             mcp::detail::DeferredResponse pending;
@@ -144,7 +144,7 @@ TC_CORE_TEST_MAIN() {
             if (shutdown) mcp::stopHttpServer();
             else mcp::detail::removeRegistrationsOwnedBy(&owner);
             auto reply = json::parse(future.get()());
-            check("shutdown/unload fallback is valid JSON",
+            check("shutdown/unload cancellation is valid JSON",
                   reply.at("result").at("content").at(0).at("text").get<std::string>().find(shutdown ? "shut down" : "unloaded") != std::string::npos);
         }
 #endif

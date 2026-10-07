@@ -172,8 +172,6 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
     auto& ds = md::deferralState();
     ds.hasEnvelope = false;
     ds.target = nullptr;
-    ds.timeoutReply = nullptr;
-    ds.errorReply = nullptr;
     ds.owner = nullptr;
     std::string reply = tc::mcp::Server::instance().processMessage(req.dump());
     if (deferred) *deferred = ds.hasEnvelope;
@@ -186,8 +184,6 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
         d.makeEnvelope = std::move(ds.envelope);
         d.target = ds.target;
         d.deadline = std::chrono::steady_clock::now() + md::kTargetedDeferralTimeout;
-        d.timeoutReply = std::move(ds.timeoutReply);
-        d.errorReply = std::move(ds.errorReply);
         md::deferredResponses().push_back(std::move(d));
         ds.hasEnvelope = false;
         ds.target = nullptr;

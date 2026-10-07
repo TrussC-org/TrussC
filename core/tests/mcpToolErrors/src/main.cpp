@@ -55,6 +55,12 @@ TC_CORE_TEST_MAIN() {
         });
         checkError("inline exception", json::parse(server.processMessage(request("throws_inline", 683))),
                    683, "Tool execution error: inline failed");
+        mcp::tool("throws_unknown", "").bind([]() -> json {
+            throw 42;
+        });
+        checkError("inline unknown exception",
+                   json::parse(server.processMessage(request("throws_unknown", "non-std"))),
+                   "non-std", "Tool execution error: unknown exception");
 
         auto unknown = json::parse(server.processMessage(request("missing_tool", "unknown")));
         check("unknown tool remains a JSON-RPC error",
@@ -74,11 +80,10 @@ TC_CORE_TEST_MAIN() {
             });
             return nullptr;
         });
-        for (bool fallback : {false, true}) {
+        {
             auto future = queue("throws_main", "main");
-            if (fallback) mcp::detail::deferredResponses().back().errorReply = nullptr;
             mcp::drainDeferredResponses();
-            checkError(fallback ? "main exception fallback" : "main exception", reply(future),
+            checkError("main exception", reply(future),
                        "main", "deferred response failed: main failed");
         }
         for (bool mainThrows : {false, true}) {
@@ -106,31 +111,25 @@ TC_CORE_TEST_MAIN() {
             mcp::detail::setDeferralOwner(&owner);
             return nullptr;
         });
-        for (bool fallback : {false, true}) {
+        {
             auto timed = queue("pending", "timeout");
             auto& pending = mcp::detail::deferredResponses().back();
-            if (fallback) pending.timeoutReply = nullptr;
             // Exercise expiry without depending on how long the test waited.
             pending.deadline = std::chrono::steady_clock::time_point::min();
             mcp::drainDeferredResponses();
-            checkError(fallback ? "timeout fallback" : "timeout", reply(timed), "timeout",
-                       fallback ? "window did not render" :
-                           "the window rendered no frame within 5 s (minimized, hidden or closed?)");
+            checkError("timeout", reply(timed), "timeout",
+                       "the window rendered no frame within 5 s (minimized, hidden or closed?)");
 
             auto unloaded = queue("pending", "unload");
-            if (fallback) mcp::detail::deferredResponses().back().errorReply = nullptr;
             mcp::detail::removeRegistrationsOwnedBy(&owner);
-            checkError(fallback ? "unload fallback" : "unload", reply(unloaded), "unload",
+            checkError("unload", reply(unloaded), "unload",
                        "the app code behind this reply was unloaded by a hot reload before the reply was produced");
         }
-        // Queue both variants before stopHttpServer closes the request channel.
+        // Queue before stopHttpServer closes the request channel.
         auto stopped = queue("pending", 686);
-        auto stoppedFallback = queue("pending", "shutdown fallback");
-        mcp::detail::deferredResponses().back().errorReply = nullptr;
         mcp::stopHttpServer();
         const std::string shutdown = "the MCP server shut down before the reply was produced";
         checkError("shutdown", reply(stopped), 686, shutdown);
-        checkError("shutdown fallback", reply(stoppedFallback), "shutdown fallback", shutdown);
         check("cancelled producers never run", !produced);
         check("all deferred responses completed", !mcp::hasDeferredResponses());
 #endif
