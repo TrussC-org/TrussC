@@ -1856,6 +1856,9 @@ bool AudioEngine::init(const AudioSettings& settings) {
             ma_device_uninit(device);
             delete device;
             device_ = nullptr;
+            // Not running until the new device starts; a failed reopen
+            // must not read as a stall next to initFailure.
+            diag_->running.store(false, std::memory_order_release);
         }
         initialized_ = false;
     }
@@ -1903,9 +1906,6 @@ bool AudioEngine::init(const AudioSettings& settings) {
         ma_context_uninit(ctx);
         delete ctx;
         context_ = nullptr;
-    }
-    if (nullRequested) {
-        logNotice("AudioEngine") << "audio backend: Null (requested); output is silent";
     }
     if (!context_) {
         ma_context* ctx = new ma_context();
@@ -2005,6 +2005,9 @@ bool AudioEngine::init(const AudioSettings& settings) {
     diag_->initFailureDevice.clear();
     diag_->initFailure.store(0, std::memory_order_relaxed);
 
+    if (g_engineNullBackendRequested) {
+        logNotice("AudioEngine") << "audio backend: Null (requested); output is silent";
+    }
     logNotice("AudioEngine") << "initialized (" << sampleRate_ << " Hz, " << channels_ << " ch, "
                              << playingSounds_.size() << " playback slots, "
                              << ma_get_backend_name(ctxArg->backend) << ": "
