@@ -124,6 +124,7 @@ public:
     void setSpeed(float speed);
     void setLoop(bool loop);
 
+    float getFrameRate() const { return static_cast<float>(frameRate_); }
     int getCurrentFrame() const;
     int getTotalFrames() const;
     void setFrame(int frame);
@@ -149,7 +150,7 @@ private:
     bool createMediaEngine(const std::string& path);
     bool createRenderTexture();
     bool transferVideoFrame();
-    bool loadAudioInfo(const std::string& path);
+    bool loadMediaInfo(const std::string& path);
 
     // D3D11 resources
     ComPtr<ID3D11Device> d3dDevice_;
@@ -170,7 +171,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     float duration_ = 0.0f;
-    float frameRate_ = 30.0f;
+    float frameRate_ = 0.0f;
     bool isLoaded_ = false;
     bool isReady_ = false;
     bool hasNewFrame_ = false;
@@ -465,8 +466,9 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     return false;
 }
 
-bool TCVideoPlayerImpl::loadAudioInfo(const std::string& path) {
-    // Use IMFSourceReader to get audio track info
+bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
+    frameRate_ = 0.0f;
+    // Reuse one source reader for video frame rate and audio track info.
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring widePath(wideLen, 0);
     MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &widePath[0], wideLen);
@@ -475,6 +477,17 @@ bool TCVideoPlayerImpl::loadAudioInfo(const std::string& path) {
     HRESULT hr = MFCreateSourceReaderFromURL(widePath.c_str(), nullptr, &reader);
     if (FAILED(hr)) {
         return false;
+    }
+
+    // Read video metadata before probing audio: silent videos need this too.
+    ComPtr<IMFMediaType> videoType;
+    UINT32 numerator = 0, denominator = 0;
+    if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                                            0, &videoType)) &&
+        SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE,
+                                      &numerator, &denominator)) &&
+        numerator > 0 && denominator > 0) {
+        frameRate_ = static_cast<float>(numerator) / denominator;
     }
 
     // Get native audio media type
@@ -622,8 +635,8 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         return false;
     }
 
-    // Load audio track info
-    loadAudioInfo(path);
+    // Load video frame rate and audio track info
+    loadMediaInfo(path);
 
     isLoaded_ = true;
     return true;
@@ -660,6 +673,7 @@ void TCVideoPlayerImpl::close() {
     isFinished_ = false;
     width_ = 0;
     height_ = 0;
+    frameRate_ = 0.0f;
     hasAudio_ = false;
     audioCodec_ = 0;
     audioSampleRate_ = 0;
@@ -964,6 +978,11 @@ void VideoPlayer::setLoopPlatform(bool loop) {
     if (platformHandle_) {
         static_cast<TCVideoPlayerImpl*>(platformHandle_)->setLoop(loop);
     }
+}
+
+float VideoPlayer::getFrameRatePlatform() const {
+    if (!platformHandle_) return 0.0f;
+    return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getFrameRate();
 }
 
 int VideoPlayer::getCurrentFramePlatform() const {

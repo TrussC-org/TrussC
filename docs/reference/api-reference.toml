@@ -12152,19 +12152,23 @@ description.en = "Audio sample rate in Hz (0 if no audio)"
 description.ja = "音声のサンプルレート（Hz、音声がなければ 0）"
 description.ko = "오디오 샘플 레이트 (Hz, 오디오가 없으면 0)"
 
-["VideoPlayer::getCurrentFrame"]
-category = "video"
-keywords = ["frame number", "playhead", "index"]
-description.en = "Get current frame number"
-description.ja = "現在のフレーム番号を取得"
-description.ko = "현재 프레임 번호를 가져옴"
-
 ["VideoPlayer::getDuration"]
 category = "video"
 keywords = ["length", "total time", "seconds", "runtime"]
 description.en = "Get total duration in seconds"
 description.ja = "総再生時間を秒単位で取得"
 description.ko = "전체 재생 시간을 초 단위로 가져옴"
+
+["VideoPlayer::getFrameRate"]
+category = "video"
+keywords = ["fps", "frame rate", "unknown"]
+description.en = "Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0."
+description.ja = "ファイルのフレームレート（fps）を取得。不明または未ロードなら 0。Web では 0。"
+description.ko = "파일의 프레임 레이트(fps)를 가져옴. 알 수 없거나 로드되지 않았으면 0. Web에서는 0."
+details.en = "Windows reads MF_MT_FRAME_RATE instead of assuming 30 fps. Linux uses average/nominal metadata; macOS/iOS use the nominal rate. Frame counts and seeks derived from a rate are approximate for variable-frame-rate files. Unknown rates are never replaced with 30: frame queries return 0 and frame operations do nothing, with one warning per player instance. This getter itself does not warn. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "Windows は 30 fps と仮定せず MF_MT_FRAME_RATE を読む。Linux は平均／公称レート、macOS/iOS は公称レートを使う。可変フレームレートのファイルではレートから求めるフレーム数やシークは近似。不明時に 30 で代用せず、フレーム取得は 0、操作は何もせず、インスタンスごとに一度だけ警告する。この getter 自体は警告しない。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "Windows는 30 fps로 가정하지 않고 MF_MT_FRAME_RATE를 읽음. Linux는 평균/명목 메타데이터, macOS/iOS는 명목 레이트를 사용. 가변 프레임 레이트 파일에서 레이트로 계산한 프레임 수와 탐색은 근사값임. 알 수 없는 레이트를 30으로 대체하지 않으며 프레임 조회는 0, 프레임 조작은 무동작이고 인스턴스당 한 번 경고함. 이 getter 자체는 경고하지 않음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
+related = ["VideoPlayerBase::getFrameRate", "VideoPlayerBase::getCurrentFrame", "VideoPlayerBase::getTotalFrames", "VideoPlayerBase::setFrame", "VideoPlayer::getPosition"]
 
 ["VideoPlayer::getGammaCorrection"]
 category = "video"
@@ -12220,13 +12224,6 @@ description.en = "Get current position (0.0 to 1.0)"
 description.ja = "現在の再生位置を取得（0.0〜1.0）"
 description.ko = "현재 재생 위치를 가져옴 (0.0~1.0)"
 
-["VideoPlayer::getTotalFrames"]
-category = "video"
-keywords = ["frame count", "length"]
-description.en = "Get total number of frames"
-description.ja = "総フレーム数を取得"
-description.ko = "전체 프레임 수를 가져옴"
-
 ["VideoPlayer::getUseHwAccel"]
 category = "video"
 keywords = ["hardware", "gpu decode", "acceleration", "preference"]
@@ -12275,27 +12272,6 @@ details.ja = '''
 [`isFrameNew`](#VideoPlayer::isFrameNew) が一度 true になったらライブ側へ切り替える。
 '''
 
-["VideoPlayer::nextFrame"]
-category = "video"
-keywords = ["advance", "step", "forward"]
-description.en = "Advance to the next frame"
-description.ja = "次のフレームに進む"
-description.ko = "다음 프레임으로 이동"
-
-["VideoPlayer::previousFrame"]
-category = "video"
-keywords = ["back", "step", "rewind"]
-description.en = "Go back to the previous frame"
-description.ja = "前のフレームに戻る"
-description.ko = "이전 프레임으로 이동"
-
-["VideoPlayer::setFrame"]
-category = "video"
-keywords = ["seek", "jump", "frame number", "scrub"]
-description.en = "Seek to a specific frame number"
-description.ja = "指定フレームにシーク"
-description.ko = "지정된 프레임으로 이동"
-
 ["VideoPlayer::setGammaCorrection"]
 category = "video"
 keywords = ["brightness", "tone", "color correction"]
@@ -12325,6 +12301,9 @@ keywords = ["start", "beginning", "rewind", "home"]
 description.en = "Go to the first frame"
 description.ja = "最初のフレームに移動"
 description.ko = "첫 프레임으로 이동"
+details.en = "For VideoPlayer, does nothing when the frame rate is unknown (0), sharing the one-per-instance frame API warning."
+details.ja = "VideoPlayer ではフレームレートが不明（0）なら何もしない。フレーム API のインスタンスごとに一度の警告を共有する。"
+details.ko = "VideoPlayer는 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않으며 프레임 API의 인스턴스당 한 번 경고를 공유함."
 
 ["VideoPlayerBase::getCurrentTime"]
 category = "video"
@@ -18070,30 +18049,71 @@ description.en = "Seek to a playback position given as a fraction (0-1)."
 description.ja = "0-1 の割合で指定した再生位置にシークする。"
 description.ko = "0-1 비율로 지정한 재생 위치로 이동한다."
 
+["VideoPlayerBase::getFrameRate"]
+category = "video"
+keywords = ["fps", "frame rate", "unknown"]
+description.en = "Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player."
+description.ja = "ファイルのフレームレート（fps）を返す。不明または未ロードなら 0。各動画プレイヤーが実装する。"
+description.ko = "파일의 프레임 레이트(fps)를 반환한다. 알 수 없거나 로드되지 않았으면 0. 각 비디오 플레이어가 구현한다."
+details.en = "Frame APIs return 0 or do nothing when the rate is unknown on every platform, sharing one warning per player instance across reloads. Unloaded players and this getter itself do not warn. Use getPosition()/setPosition() and getDuration() for time-based control. HapPlayer derives its average rate from the file's video sample count and duration."
+details.ja = "全プラットフォームで、レートが不明ならフレーム API は 0 を返すか何もせず、再ロードをまたいでインスタンスごとに一度だけ警告する。未ロード時とこの getter 自体は警告しない。時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。HapPlayer はファイルの動画サンプル数と長さから平均レートを求める。"
+details.ko = "모든 플랫폼에서 레이트를 알 수 없으면 프레임 API는 0을 반환하거나 아무 작업도 하지 않으며, 다시 로드해도 인스턴스당 한 번만 경고한다. 로드되지 않은 플레이어와 이 getter 자체는 경고하지 않는다. 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용한다. HapPlayer는 파일의 비디오 샘플 수와 길이로 평균 레이트를 계산한다."
+related = ["VideoPlayer::getFrameRate", "VideoPlayerBase::getCurrentFrame", "VideoPlayerBase::setPosition"]
+
+["VideoPlayerBase::canUseFrameApis"]
+description.en = "Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate."
+description.ja = "protected ヘルパー。未ロードまたは非正値・非有限のフレームレートを拒否し、ロード済みで不明ならインスタンスごとに一度だけ警告する。"
+description.ko = "protected 헬퍼. 로드되지 않았거나 프레임 레이트가 양의 유한값이 아니면 거부하며, 로드된 플레이어의 레이트를 알 수 없으면 인스턴스당 한 번만 경고한다."
+
 ["VideoPlayerBase::getCurrentFrame"]
-description.en = "Return the index of the current frame."
-description.ja = "現在のフレーム番号を返す。"
-description.ko = "현재 프레임 인덱스를 반환한다."
+category = "video"
+keywords = ["frame number", "playhead", "index"]
+description.en = "Get current frame number; 0 when the frame rate is unknown."
+description.ja = "現在のフレーム番号を取得。フレームレートが不明なら 0。"
+description.ko = "현재 프레임 번호를 가져옴. 프레임 레이트를 알 수 없으면 0."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::getTotalFrames"]
-description.en = "Return the total number of frames in the video."
-description.ja = "動画の総フレーム数を返す。"
-description.ko = "비디오의 전체 프레임 수를 반환한다."
+category = "video"
+keywords = ["frame count", "length"]
+description.en = "Get total frame count; 0 when the frame rate is unknown."
+description.ja = "総フレーム数を取得。フレームレートが不明なら 0。"
+description.ko = "전체 프레임 수를 가져옴. 프레임 레이트를 알 수 없으면 0."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::setFrame"]
-description.en = "Seek to the given frame index."
-description.ja = "指定したフレーム番号にシークする。"
-description.ko = "지정한 프레임 인덱스로 이동한다."
+category = "video"
+keywords = ["seek", "jump", "frame number", "scrub"]
+description.en = "Seek to a frame number; does nothing when the frame rate is unknown (0)."
+description.ja = "指定フレームにシーク。フレームレートが不明（0）なら何もしない。"
+description.ko = "지정된 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::nextFrame"]
-description.en = "Advance to the next frame."
-description.ja = "次のフレームへ進む。"
-description.ko = "다음 프레임으로 이동한다."
+category = "video"
+keywords = ["advance", "step", "forward"]
+description.en = "Advance one frame; does nothing when the frame rate is unknown (0)."
+description.ja = "次のフレームに進む。フレームレートが不明（0）なら何もしない。"
+description.ko = "다음 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::previousFrame"]
-description.en = "Step back to the previous frame."
-description.ja = "前のフレームへ戻る。"
-description.ko = "이전 프레임으로 돌아간다."
+category = "video"
+keywords = ["back", "step", "rewind"]
+description.en = "Go back one frame; does nothing when the frame rate is unknown (0)."
+description.ja = "前のフレームに戻る。フレームレートが不明（0）なら何もしない。"
+description.ko = "이전 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::getPixels"]
 description.en = "Return raw RGBA pixel data of the current frame, or nullptr if none decoded yet."
@@ -18932,6 +18952,31 @@ description.en = "Create the fullscreen-quad vertex/index buffers (overrides Sha
 description.ja = "フルスクリーンクワッド用の頂点・インデックスバッファを作成する（Shader をオーバーライド）。"
 description.ko = "전체 화면 쿼드용 정점·인덱스 버퍼를 생성한다(Shader 재정의)."
 
+["VideoPlayerBase::getCurrentFrameImpl"]
+description.en = "Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：現在のフレーム番号を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 현재 프레임 인덱스를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::getTotalFramesImpl"]
+description.en = "Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：総フレーム数を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 전체 프레임 수를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::setFrameImpl"]
+description.en = "Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：指定したフレーム番号にシークする。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 지정한 프레임 인덱스로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::nextFrameImpl"]
+description.en = "Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：次のフレームへ進む。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 다음 프레임으로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::previousFrameImpl"]
+description.en = "Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：前のフレームへ戻る。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 이전 프레임으로 돌아간다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
 ["VideoPlayerBase::playImpl"]
 description.en = "Platform hook: start playback. Pure virtual, implemented per backend."
 description.ja = "プラットフォームフック：再生を開始する。純粋仮想、バックエンドごとに実装。"
@@ -18986,6 +19031,31 @@ description.ko = "새 프레임 도착을 표시한다(frameNew, firstFrameRecei
 description.en = "Mark playback as done, clearing playing unless looping."
 description.ja = "再生終了をマークする。ループ中でなければ playing を下げる。"
 description.ko = "재생 종료를 표시한다. 루프 중이 아니면 playing을 해제한다."
+
+["VideoPlayer::getCurrentFrameImpl"]
+description.en = "Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：現在のフレーム番号を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 현재 프레임 인덱스를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::getTotalFramesImpl"]
+description.en = "Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：総フレーム数を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 전체 프레임 수를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::setFrameImpl"]
+description.en = "Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：指定したフレーム番号にシークする。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 지정한 프레임 인덱스로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::nextFrameImpl"]
+description.en = "Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：次のフレームへ進む。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 다음 프레임으로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::previousFrameImpl"]
+description.en = "Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：前のフレームへ戻る。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 이전 프레임으로 돌아간다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
 
 ["VideoPlayer::playImpl"]
 description.en = "Backend implementation of playImpl for this platform's video player."

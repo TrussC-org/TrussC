@@ -3228,11 +3228,7 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<VideoPlayer>().getDuration();
         (void)af::val<VideoPlayer>().getPosition();
-        (void)af::val<VideoPlayer>().getCurrentFrame();
-        (void)af::val<VideoPlayer>().getTotalFrames();
-        (void)af::val<VideoPlayer>().setFrame(af::val<int>());
-        (void)af::val<VideoPlayer>().nextFrame();
-        (void)af::val<VideoPlayer>().previousFrame();
+        (void)af::val<VideoPlayer>().getFrameRate();
         (void)af::val<VideoPlayer>().setGammaCorrection(af::val<float>());
         (void)af::val<VideoPlayer>().getGammaCorrection();
         (void)af::val<VideoPlayer>().setUseHwAccel(af::val<bool>());
@@ -3301,6 +3297,7 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<VideoPlayerBase>().getPan();
         (void)af::val<VideoPlayerBase>().setLoop(af::val<bool>());
         (void)af::val<VideoPlayerBase>().isLoop();
+        (void)af::val<VideoPlayerBase>().getFrameRate();
         (void)af::val<VideoPlayerBase>().getCurrentFrame();
         (void)af::val<VideoPlayerBase>().getTotalFrames();
         (void)af::val<VideoPlayerBase>().setFrame(af::val<int>());
