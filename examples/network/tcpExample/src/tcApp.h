@@ -35,9 +35,7 @@ private:
 
     // State
     int messageCount = 0;
-    bool queuingEcho = false;
     OnceGate echoFailed;
-    OnceGate broadcastFailed;
     OnceGate clientSendFailed;
 
     void addLog(const std::string& msg);

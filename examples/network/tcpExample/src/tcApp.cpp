@@ -43,18 +43,14 @@ void tcApp::setup() {
 
         // See tcpAsyncExample for the waiting (send) vs queued (sendAsync) difference.
         string reply = "Echo: " + msg;
-        queuingEcho = true;
         const SendResult result = server.sendAsync(e.clientId, reply);
-        queuingEcho = false;
         if (!result && echoFailed.isFirstTime()) {
             addLog(string("[Server] Echo not queued: ") + sendErrorName(result.error));
         }
     }, Deliver::Main);
 
     serverErrorListener = server.onError.listen([this](TcpServerErrorEventArgs& e) {
-        // sendAsync also reports rejection inline here on the main thread;
-        // its SendResult above logs that error once.
-        if (queuingEcho) return;
+        // A rejected sendAsync() is reported here too (#214), as send() does.
         ostringstream oss;
         oss << "[Server] Error: " << e.message;
         addLog(oss.str());
@@ -148,12 +144,9 @@ void tcApp::keyPressed(int key) {
     } else if (key == 'C') {
         // Client connect
         if (!client.isConnected()) {
+            // Non-blocking on the main thread; onConnect reports the result.
             addLog("[Client] Connecting to 127.0.0.1:9001...");
-            if (client.connect("127.0.0.1", 9001)) {
-                addLog("[Client] Connected!");
-            } else {
-                addLog("[Client] Connection failed");
-            }
+            client.connectAsync("127.0.0.1", 9001);
         } else {
             addLog("[Client] Already connected");
         }
@@ -164,13 +157,11 @@ void tcApp::keyPressed(int key) {
         if (server.isRunning() && server.getClientCount() > 0) {
             ostringstream oss;
             oss << "Server broadcast #" << messageCount;
+            // broadcastAsync() returns how many clients accepted it (no onError).
             const int clientCount = server.getClientCount();
             const int accepted = server.broadcastAsync(oss.str());
-            if (accepted < clientCount && broadcastFailed.isFirstTime()) {
-                // broadcastAsync returns a count, not a per-client SendResult.
-                addLog("[Server] Broadcast not queued for some clients (queue full or disconnected)");
-            }
-            addLog("[Server] Broadcast queued for " + to_string(accepted) + " clients: " + oss.str());
+            addLog("[Server] Broadcast queued for " + to_string(accepted) + "/" +
+                   to_string(clientCount) + " clients: " + oss.str());
         }
 
         // Send from client
