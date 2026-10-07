@@ -44,15 +44,18 @@ public:
     void update() override {}
     float getDuration() const override { return 0.0f; }
     float getPosition() const override { return 0.0f; }
-    int getCurrentFrame() const override { return 0; }
-    int getTotalFrames() const override { return 0; }
-    void setFrame(int) override {}
-    void nextFrame() override {}
-    void previousFrame() override {}
+    float getFrameRate() const override { return 0.0f; }
+
     unsigned char* getPixels() override { return nullptr; }
     const unsigned char* getPixels() const override { return nullptr; }
 
 protected:
+    int getCurrentFrameImpl() const override { return 0; }
+    int getTotalFramesImpl() const override { return 0; }
+    void setFrameImpl(int) override {}
+    void nextFrameImpl() override {}
+    void previousFrameImpl() override {}
+
     void playImpl() override {
         calls.push_back({Operation::Play, 0.0f, initialized_});
         backendSpeed = 1.0f; // Model AVPlayer's play resetting the rate.

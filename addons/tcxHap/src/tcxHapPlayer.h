@@ -443,31 +443,10 @@ public:
     // Frame control
     // =========================================================================
 
-    int getCurrentFrame() const override {
-        return currentFrame_;
-    }
-
-    int getTotalFrames() const override {
-        return totalFrames_;
-    }
-
-    void setFrame(int frame) override {
-        if (!initialized_) return;
-        frame = std::max(0, std::min(frame, totalFrames_ - 1));
-        if (decodeFrame(frame)) {
-            currentFrame_ = frame;
-            playbackTime_ = (duration_ * frame) / totalFrames_;
-            updateTexture();
-            markFrameNew();
-        }
-    }
-
-    void nextFrame() override {
-        setFrame(currentFrame_ + 1);
-    }
-
-    void previousFrame() override {
-        setFrame(currentFrame_ - 1);
+    float getFrameRate() const override {
+        if (!initialized_ || duration_ <= 0.0f) return 0.0f;
+        const float rate = totalFrames_ / duration_;
+        return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
     }
 
     // =========================================================================
@@ -575,6 +554,32 @@ protected:
     // -------------------------------------------------------------------------
     // Implementation methods
     // -------------------------------------------------------------------------
+
+    int getCurrentFrameImpl() const override {
+        return currentFrame_;
+    }
+
+    int getTotalFramesImpl() const override {
+        return totalFrames_;
+    }
+
+    void setFrameImpl(int frame) override {
+        frame = std::max(0, std::min(frame, totalFrames_ - 1));
+        if (decodeFrame(frame)) {
+            currentFrame_ = frame;
+            playbackTime_ = (duration_ * frame) / totalFrames_;
+            updateTexture();
+            markFrameNew();
+        }
+    }
+
+    void nextFrameImpl() override {
+        setFrameImpl(currentFrame_ + 1);
+    }
+
+    void previousFrameImpl() override {
+        setFrameImpl(currentFrame_ - 1);
+    }
 
     void playImpl() override {
         playbackTime_ = 0;

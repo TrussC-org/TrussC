@@ -849,9 +849,9 @@ private:
     virtual void onSetupDone() {}
 
     // Framework hook, not an app callback (apps override cleanup()): runs
-    // right after cleanupTree() has run this node's cleanup(). App detaches
-    // its audioOut() / audioIn() here when it is a destroyed child (#318).
-    virtual void onCleanupDone() {}
+    // right before cleanupTree() runs this node's cleanup(). App detaches
+    // its audioOut() / audioIn() here and waits for callbacks in flight.
+    virtual void onCleanupStart() {}
 
     // Recursively update self and child nodes
     void updateTree() {
@@ -936,8 +936,8 @@ private:
         if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
+        onCleanupStart();
         cleanup();
-        onCleanupDone();
     }
 
     // Recursively draw self and child nodes

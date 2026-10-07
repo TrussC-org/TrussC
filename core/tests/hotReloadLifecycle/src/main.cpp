@@ -612,6 +612,13 @@ static int runCycles(const std::string& guestPath, int port) {
         posts.push_back(startPost(port, toolCallBody("host_deferred", json::object())));
         bool unloadedWhileDeferred = false;
         auto replies = awaitPosts(posts, posts.size(), [&] {
+            if (i == kCycles) {
+                // Normal host shutdown ends the App before unloading it.
+                // unload() must not repeat exit() / cleanup().
+                app->exit();
+                internal::detachAppAudio(*app);
+                app->cleanup();
+            }
             lib.unload();
             unloadedWhileDeferred = true;
         });
@@ -639,6 +646,10 @@ static int runCycles(const std::string& guestPath, int port) {
         if (unloadProbe.fired != 1 || !unloadProbe.appWasRoot) {
             return fail(43, "hotReloadUnload did not fire once before the guest's App and node references were released "
                             "(fired " + std::to_string(unloadProbe.fired) + " time(s))");
+        }
+        if (unloadProbe.exits != 1 || unloadProbe.cleanups != 1 ||
+            !unloadProbe.audioDetachedInCleanup) {
+            return fail(45, "guest unload did not run exit, detach audio, cleanup once in order");
         }
         if (hostListenerCounts() != countsBeforeLoad) {
             const std::vector<size_t> after = hostListenerCounts();

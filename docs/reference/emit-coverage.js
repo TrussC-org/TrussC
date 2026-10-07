@@ -7,8 +7,8 @@
 // Every documented public core function, method, field, constant and
 // constructor is referenced once, with arguments of exactly the declared types,
 // inside code that never runs (af::never). That makes every CI platform that
-// builds AllFeaturesExample (Android, web and iOS on each PR; desktop daily)
-// compile each call against the headers AND link it against that platform's
+// builds AllFeaturesExample (desktop, Android, web and iOS on each PR and
+// merge-queue run; desktop and web again in the daily run) compile each call against the headers AND link it against that platform's
 // implementation — a missing per-platform implementation, or a TC_PLATFORMS
 // list that promises a platform which doesn't have it, fails the build.
 //
@@ -18,6 +18,13 @@
 // coverage_manual.cpp), non-public members, and the entries in SKIP below.
 //
 // Re-run after an API change, alongside emit-forai.js / emit-of.js.
+// Deprecating, removing or renaming a documented API, or dropping a
+// platform's implementation along with its TC_PLATFORMS entry, needs the
+// regenerated coverage_generated.cpp in the SAME PR: the committed file still
+// calls the old API, so CI fails (-Werror=deprecated-declarations via
+// TC_DEPRECATED_ERRORS, or a compile / link error). Steps from a fresh
+// checkout: build once (generates the shader headers generate.js needs), then
+// `node generate.js`, then `node emit-coverage.js`.
 
 'use strict';
 const fs = require('fs');
@@ -142,7 +149,9 @@ for (const cat of freeCats) {
 }
 // Methods run inside a struct derived from the owner, so owner-relative type
 // names in signatures (Node's Ptr, ...) resolve by ordinary member lookup.
-// Owners that can't be derived from (final) are listed in coverage.h.
+// An owner that can't be derived from (a final class) would not compile here.
+// None is documented today; if one appears, list both 'Foo' and 'Foo::*' in
+// SKIP (with the reason) — that drops all of Foo's coverage.
 const ownerNames = Object.keys(owners).sort();
 for (const o of ownerNames) {
     cpp += `struct Cover_${sanitize(o)} : af::Scope<${o}> {\n    static void run() {\n${emitBlock(owners[o], '        ')}    }\n};\n\n`;
