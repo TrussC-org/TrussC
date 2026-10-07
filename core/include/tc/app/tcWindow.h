@@ -448,8 +448,8 @@ inline void Window::applyPendingApp() {
     if (outgoing && !internal::appRanCleanup(*outgoing)) {
         internal::EntryStackGuard guard(internal::AppEntry::Exit);
         outgoing->exit();
-        outgoing->cleanup();
         internal::detachAppAudio(*outgoing);
+        outgoing->cleanup();
     }
     outgoing.reset();
     internal::currentWindowCtx() = prev;
@@ -470,10 +470,10 @@ inline void Window::endApp() {
     if (!app) return;
     internal::attachedApps().erase(app.get());
     app->exit();
-    app->cleanup();
     // Audio keeps running for the other windows: detach this App's audio
-    // hooks and wait for a callback in flight before the App goes (#256).
+    // hooks and wait for a callback in flight before cleanup() releases its audio state (#698).
     internal::detachAppAudio(*app);
+    app->cleanup();
 }
 
 namespace internal {
