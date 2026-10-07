@@ -1,12 +1,6 @@
 {test} --gpu-check
 # Use the bundled movie and generated error/bad-packet variants.
-# Disabled until #707 is fixed (by #613): with no audio output device the
-# Linux player's audio master clock never advances, so this mode never ends.
-# python3 display-video-check.py {test} --video-check normal
+skip "#707: no audio output device on the runner; back with #613" python3 display-video-check.py {test} --video-check normal
 python3 display-video-check.py {test} --video-check error
-# Disabled until #707 is fixed (by #613): with no audio output device the
-# Linux player's audio master clock never advances, so this mode never ends.
-# python3 display-video-check.py {test} --video-check bad-packet
-# Disabled until #707 is fixed (by #613): with no audio output device the
-# Linux player's audio master clock never advances, so this mode never ends.
-# python3 display-video-check.py {test} --video-check bad-packets
+skip "#707: no audio output device on the runner; back with #613" python3 display-video-check.py {test} --video-check bad-packet
+skip "#707: no audio output device on the runner; back with #613" python3 display-video-check.py {test} --video-check bad-packets

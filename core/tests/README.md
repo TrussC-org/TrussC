@@ -145,7 +145,10 @@ directory. For example:
 Use multiple lines for multiple modes. A line may prefix `{test}` with a
 launcher or test-local fixture helper (see `startupExit` and
 `videoPlayerError`). Keep arguments and any Mesa-specific skip reason next
-to the test, never in the workflow. Interactive modes must have an automated
+to the test, never in the workflow. To hold a mode back, prefix its line
+with `skip "<reason>"` (for example `skip "#707: no audio device on the
+runner" {test} --gpu-check`): it is not run, but it is listed as `SKIP` with
+the reason and counted in the summary, and it never fails the sweep. Interactive modes must have an automated
 equivalent that exits (`hotReloadLifecycle --reload-check`, for example).
 Missing binaries, nonzero exits and hangs fail the sweep; later modes still
 run. The 600-second per-process timeout only stops hangs. Printed wall times

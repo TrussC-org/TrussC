@@ -122,7 +122,8 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
                 (test / 'src').mkdir(parents=True)
                 (test / 'src/main.cpp').touch()
             (tests / 'fixture/display-test').write_text(
-                '# comments and quoted arguments\n{test} --fail\n{test} --window "two words"\n')
+                '# comments and quoted arguments\n{test} --fail\n{test} --window "two words"\n'
+                'skip "#707: known hang" {test} --skipped\n')
             (tests / 'own/own-binary').touch()
             (tests / 'own/display-test').write_text('{test} --gpu-check\n')
             # Real fixture processes record argv and cwd, then return the
@@ -146,7 +147,8 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
             self.assertFalse((tests / 'unmarked/calls').exists())
             self.assertIn('FAIL fixture:', output.getvalue())
             self.assertIn('--window', output.getvalue())
-            self.assertIn('3 modes, 1 failures', output.getvalue())
+            self.assertIn("SKIP fixture: '{test}' --skipped (#707: known hang)", output.getvalue())
+            self.assertIn('4 modes, 1 skipped, 1 failures', output.getvalue())
             (tests / 'fixture/display-test').write_text('{test} --window\n')
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(display.run_modes(root), 0)
@@ -175,6 +177,13 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
             marker.write_text('--window\n')
             with self.assertRaisesRegex(ValueError, 'expected one'):
                 list(display.discover_modes(root))
+            marker.write_text('skip "reason only"\n')
+            with self.assertRaisesRegex(ValueError, 'expected skip'):
+                list(display.discover_modes(root))
+            # A sweep where every mode is skipped ran nothing: it fails.
+            marker.write_text('skip "#707" {test} --window\n')
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(display.run_modes(root), 1)
 
 
 if __name__ == '__main__':

@@ -17,14 +17,25 @@ MODE_TIMEOUT = 600
 
 
 def discover_modes(root):
+    """Yield (test_dir, words, skip_reason) per marker line.
+
+    A line `skip "<reason>" <command...>` lists a mode that is not run (for
+    example a Mesa-only quirk, or a known bug with its issue number): it is
+    still reported, with its reason, so it stays visible in the summary.
+    """
     for marker in sorted((root / 'core/tests').glob('*/display-test')):
         for number, line in enumerate(marker.read_text().splitlines(), 1):
             words = shlex.split(line, comments=True)
             if not words:
                 continue
+            reason = None
+            if words[0] == 'skip':
+                if len(words) < 3:
+                    raise ValueError(f'{marker}:{number}: expected skip "<reason>" <command>')
+                reason, words = words[1], words[2:]
             if words.count('{test}') != 1:
                 raise ValueError(f'{marker}:{number}: expected one {{test}} token')
-            yield marker.parent, words
+            yield marker.parent, words, reason
 
 
 def run_mode(command, cwd):
@@ -45,8 +56,12 @@ def run_mode(command, cwd):
 
 def run_modes(root):
     timings = []
-    for test_dir, words in discover_modes(root):
+    for test_dir, words, reason in discover_modes(root):
         label = f'{test_dir.name}: {shlex.join(words)}'
+        if reason is not None:
+            print(f'SKIP {label} ({reason})', flush=True)
+            timings.append((label, 'SKIP', 0.0, reason))
+            continue
         print(f'RUN {label}', flush=True)
         started = time.monotonic()
         combined = is_combined_core_test(test_dir)
@@ -63,14 +78,21 @@ def run_modes(root):
         else:
             print(f'ERROR {label}: binary missing; build core tests first', flush=True)
         elapsed = time.monotonic() - started
-        timings.append((label, ok, elapsed))
-        print(f'{"PASS" if ok else "FAIL"} {label} ({elapsed:.3f}s)', flush=True)
+        status = 'PASS' if ok else 'FAIL'
+        timings.append((label, status, elapsed, None))
+        print(f'{status} {label} ({elapsed:.3f}s)', flush=True)
 
     print('\nDisplay modes (wall times are informational):', flush=True)
-    for label, ok, elapsed in timings:
-        print(f'{"PASS" if ok else "FAIL"} {elapsed:.3f}s {label}', flush=True)
-    print(f'{len(timings)} modes, {sum(not ok for _, ok, _ in timings)} failures', flush=True)
-    return 0 if timings and all(ok for _, ok, _ in timings) else 1
+    for label, status, elapsed, reason in timings:
+        if status == 'SKIP':
+            print(f'SKIP {label} ({reason})', flush=True)
+        else:
+            print(f'{status} {elapsed:.3f}s {label}', flush=True)
+    skipped = sum(status == 'SKIP' for _, status, _, _ in timings)
+    failures = sum(status == 'FAIL' for _, status, _, _ in timings)
+    print(f'{len(timings)} modes, {skipped} skipped, {failures} failures', flush=True)
+    # Skips never change the result; an empty sweep (nothing ran) fails.
+    return 0 if len(timings) > skipped and failures == 0 else 1
 
 
 if __name__ == '__main__':
