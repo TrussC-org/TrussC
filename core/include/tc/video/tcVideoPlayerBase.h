@@ -277,6 +277,14 @@ public:
     const Texture& getTexture() const override { return texture_; }
 
 protected:
+    // Reapply persistent settings once the derived player has loaded its backend.
+    // Speed is applied by play(): setting the rate can start native playback.
+    void applyCachedStateToPlatform() {
+        setLoopImpl(loop_);
+        setVolumeImpl(volume_);
+        setPanImpl(pan_);
+    }
+
     // Safe on decoder threads. No listeners or playback state are touched here.
     void reportPlaybackError(const std::string& message, int64_t code = 0) {
         playbackErrors_.report(message, code);

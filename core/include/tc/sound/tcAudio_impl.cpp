@@ -42,17 +42,6 @@
 namespace trussc {
 
 namespace {
-// Open a ma_decoder from a path. Wide entry point on Windows so non-ASCII
-// paths survive (same helper as tcSound_impl.cpp).
-ma_result maDecoderInitPathA(const fs::path& path,
-                             const ma_decoder_config* cfg, ma_decoder* dec) {
-#ifdef _WIN32
-    return ma_decoder_init_file_w(path.c_str(), cfg, dec);
-#else
-    return ma_decoder_init_file(path.c_str(), cfg, dec);
-#endif
-}
-
 // Set by internal::setNullAudioBackendForTests(): the engine, device
 // enumeration and MicInput open miniaudio's null backend only.
 std::atomic<bool> g_nullBackendForTests{false};
@@ -76,9 +65,42 @@ std::atomic<bool> g_mixerLagReleased{false};
 // Read by internal::lastStreamSeekPointsForTests(): the seek points of the
 // stream decoder opened last.
 std::atomic<uint32_t> g_lastStreamSeekPoints{0};
+std::atomic<uint64_t> g_streamMp3Scans{0};
+std::atomic<uint64_t> g_streamMp3TableBuilds{0};
 
 // Read by internal::streamWorkerPassesForTests(): the StreamWorker's passes.
 std::atomic<uint64_t> g_streamWorkerPasses{0};
+
+// Open a ma_decoder from a path. Wide entry point on Windows so non-ASCII
+// paths survive (same helper as tcSound_impl.cpp).
+ma_result maDecoderInitPathA(const fs::path& path,
+                             const ma_decoder_config* cfg, ma_decoder* dec) {
+#ifdef _WIN32
+    const ma_result r = ma_decoder_init_file_w(path.c_str(), cfg, dec);
+#else
+    const ma_result r = ma_decoder_init_file(path.c_str(), cfg, dec);
+#endif
+    // Count automatic table generation too, so the regression test catches
+    // a nonzero seekPointCount accidentally returning to the play path.
+    if (r == MA_SUCCESS && cfg->seekPointCount != 0 &&
+            dec->pBackendVTable == &g_ma_decoding_backend_vtable_mp3) {
+        g_streamMp3TableBuilds.fetch_add(1, std::memory_order_relaxed);
+    }
+    return r;
+}
+
+// All streaming length queries use this seam, including non-MP3 decoders.
+ma_uint64 streamDecoderLength(ma_decoder& decoder, bool nativeRate = false) {
+    const bool mp3 = decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3;
+    if (mp3) g_streamMp3Scans.fetch_add(1, std::memory_order_relaxed);
+    ma_uint64 frames = 0;
+    if (nativeRate) {
+        ma_data_source_get_length_in_pcm_frames(decoder.pBackend, &frames);
+    } else {
+        ma_decoder_get_length_in_pcm_frames(&decoder, &frames);
+    }
+    return frames;
+}
 
 const ma_backend kNullBackend = ma_backend_null;
 
@@ -125,6 +147,14 @@ void setStreamFaultForTests(StreamFaultForTests fault) {
 
 uint32_t lastStreamSeekPointsForTests() {
     return g_lastStreamSeekPoints.load(std::memory_order_relaxed);
+}
+
+uint64_t streamMp3ScansForTests() {
+    return g_streamMp3Scans.load(std::memory_order_relaxed);
+}
+
+uint64_t streamMp3TableBuildsForTests() {
+    return g_streamMp3TableBuilds.load(std::memory_order_relaxed);
 }
 
 uint64_t streamWorkerPassesForTests() {
@@ -245,7 +275,31 @@ std::string sourceLabel(const SoundSource* source) {
 AudioEngine::AudioEngine()
     : diag_(std::make_unique<AudioDiagnostics>()) {
     playingSounds_.resize(DEFAULT_MAX_PLAYING_SOUNDS);
-    analysisBuffer_.resize(ANALYSIS_BUFFER_SIZE, 0.0f);
+}
+
+internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngine& engine, size_t frames) {
+    std::lock_guard<std::mutex> lock(engine.analysisMutex_);
+    return engine.analysisRing_ ? engine.analysisRing_->snapshot(frames) : AudioOutputSnapshot{};
+}
+
+size_t AudioEngine::getAnalysisBuffer(float* outBuffer, size_t numSamples) {
+    if (!initialized_ || !outBuffer || numSamples == 0) return 0;
+    numSamples = std::min(numSamples, size_t(ANALYSIS_BUFFER_SIZE));
+    // Callable from any thread: the lock covers analysisCopy_ as well as the
+    // ring. Only readers and init() take it, never the audio callback.
+    std::lock_guard<std::mutex> lock(analysisMutex_);
+    const auto data = analysisRing_ ? analysisRing_->snapshot(numSamples) : internal::AudioOutputSnapshot{};
+    if (data.channels) {
+        const size_t count = data.samples.size() / data.channels;
+        const size_t padding = ANALYSIS_BUFFER_SIZE - count;
+        std::fill_n(analysisCopy_, padding, 0.0f);
+        for (size_t f = 0; f < count; ++f) {
+            const float* frame = &data.samples[f * data.channels];
+            analysisCopy_[padding + f] = data.channels > 1 ? (frame[0] + frame[1]) * 0.5f : frame[0];
+        }
+    }
+    std::copy_n(analysisCopy_ + ANALYSIS_BUFFER_SIZE - numSamples, numSamples, outBuffer);
+    return numSamples;
 }
 
 AudioEngine::~AudioEngine() {
@@ -545,6 +599,14 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
 
 namespace internal {
 
+// Immutable after load, shared by the source and every bound decoder. The
+// worker can retain a decoder even after its PlayingSound releases the source.
+struct Mp3StreamData {
+    ma_uint64 nativeFrames = 0;
+    ma_uint32 nativeRate = 0;
+    std::vector<ma_dr_mp3_seek_point> seekPoints;
+};
+
 struct StreamInstance {
     static constexpr size_t RING_FRAMES = 16384;          // power of 2
     static constexpr size_t RING_MASK   = RING_FRAMES - 1;
@@ -553,6 +615,7 @@ struct StreamInstance {
                                                           // the mixer consumes
     ma_decoder decoder;
     bool decoderInitialized = false;
+    std::shared_ptr<const Mp3StreamData> mp3Data;
 
     // Interleaved stereo float, size = RING_FRAMES * CHANNELS.
     std::vector<float> ring;
@@ -615,35 +678,33 @@ struct StreamInstance {
     // engine rate `rate`, and read its length. play() and the re-init
     // migration, on the caller's thread.
     //
-    // An MP3 gets a seek table (#280): without one dr_mp3 seeks by decoding
-    // from the start (or from the current frame, forward), which on a
-    // one-hour file took up to 2.5 s on a desktop CPU and blocks the single
-    // StreamWorker, so every other stream underruns meanwhile. With one
-    // point per second of audio a seek decodes at most ~1 s (~1 ms). The
-    // count is capped at 1024 (24 bytes each, 24 KB per voice): past ~17
-    // minutes the points spread out, a one-hour file seeks in ~3 ms and a
-    // three-hour one in ~10 ms. Building the table scans the file's frame
-    // headers once more, on this thread (~75 ms for a one-hour 192 kbps
-    // file in the page cache; reading its length already takes one such
-    // scan). WAV and FLAC seek on their own; only the MP3 backend reads
-    // seekPointCount.
+    // MP3 length and seek points are prepared once by loadStream(). Binding
+    // them here does not scan the file, including during a rate migration.
     ma_result openDecoder(const SoundStream& src, ma_uint32 rate) {
         ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, CHANNELS, rate);
         cfg.encodingFormat = (ma_encoding_format)src.encodingFormatHint_;
-        if (cfg.encodingFormat == ma_encoding_format_mp3) {
-            cfg.seekPointCount = mp3SeekPointCount(src.duration_);
-        }
+        cfg.seekPointCount = 0;
         const ma_result r = maDecoderInitPathA(src.path_, &cfg, &decoder);
         if (r != MA_SUCCESS) return r;
         decoderInitialized = true;
         uint32_t seekPoints = 0;
         if (decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3 && decoder.pBackend) {
-            seekPoints = static_cast<const ma_mp3*>(decoder.pBackend)->seekPointCount;
+            mp3Data = src.mp3Data_;
+            if (!mp3Data) return MA_INVALID_DATA;
+            auto* mp3 = static_cast<ma_mp3*>(decoder.pBackend);
+            seekPoints = (ma_uint32)mp3Data->seekPoints.size();
+            // dr_mp3's binding API is non-const, but only reads the table.
+            // Leave ma_mp3::pSeekPoints null: ma_mp3_uninit frees that field.
+            if (!ma_dr_mp3_bind_seek_table(&mp3->dr, seekPoints,
+                    const_cast<ma_dr_mp3_seek_point*>(mp3Data->seekPoints.data()))) {
+                return MA_ERROR;
+            }
+            totalFramesInFile = ma_calculate_frame_count_after_resampling(
+                rate, mp3Data->nativeRate, mp3Data->nativeFrames);
+        } else {
+            totalFramesInFile = streamDecoderLength(decoder);
         }
         g_lastStreamSeekPoints.store(seekPoints, std::memory_order_relaxed);
-        ma_uint64 total = 0;
-        ma_decoder_get_length_in_pcm_frames(&decoder, &total);
-        totalFramesInFile = (uint64_t)total;
         pathUtf8 = internal::pathToDisplayUtf8(src.path_);
         return MA_SUCCESS;
     }
@@ -682,7 +743,7 @@ struct StreamInstance {
     }
 
     // One seek point per second of audio, at least 1, at most 1024 (see
-    // openDecoder()).
+    // loadStream()).
     static ma_uint32 mp3SeekPointCount(float durationSec) {
         constexpr ma_uint32 kMax = 1024;
         if (!(durationSec > 1.0f)) return 1;
@@ -1225,6 +1286,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                                                     StreamInstance::CHANNELS,
                                                     AudioEngine::getInstance().getSampleRate());
     cfg.encodingFormat = fmt;
+    cfg.seekPointCount = 0;
     ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
         logError("SoundStream") << "failed to open " << path
@@ -1235,7 +1297,44 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     }
 
     ma_uint64 totalFrames = 0;
-    ma_decoder_get_length_in_pcm_frames(&probe, &totalFrames);
+    std::shared_ptr<internal::Mp3StreamData> mp3Data;
+    if (fmt == ma_encoding_format_mp3) {
+        // An MP3 gets a seek table (#280): without one dr_mp3 seeks by
+        // decoding from the start (or forward from the current frame), which
+        // on a one-hour file took up to 2.5 s and blocked the single
+        // StreamWorker, so every other stream underran. With one point per
+        // second of audio a seek decodes at most ~1 s (~1 ms); the count is
+        // capped at 1024 (past ~17 minutes the points spread out: a one-hour
+        // file seeks in ~3 ms). Building it scans the frame headers once
+        // (~75 ms for a one-hour 192 kbps file), so it is done here, once per
+        // load, and shared by every voice and engine-rate re-init (#463).
+        auto* mp3 = static_cast<ma_mp3*>(probe.pBackend);
+        try {
+            mp3Data = std::make_shared<internal::Mp3StreamData>();
+            mp3Data->nativeRate = mp3->dr.sampleRate;
+            mp3Data->nativeFrames = streamDecoderLength(probe, true);
+            totalFrames = ma_calculate_frame_count_after_resampling(
+                probe.outputSampleRate, mp3Data->nativeRate, mp3Data->nativeFrames);
+            const float duration = (float)((double)totalFrames / probe.outputSampleRate);
+            ma_uint32 count = StreamInstance::mp3SeekPointCount(duration);
+            mp3Data->seekPoints.resize(count);
+            g_streamMp3TableBuilds.fetch_add(1, std::memory_order_relaxed);
+            if (!ma_dr_mp3_calculate_seek_points(&mp3->dr, &count, mp3Data->seekPoints.data())) {
+                r = MA_ERROR;
+            }
+            mp3Data->seekPoints.resize(count);
+        } catch (const std::bad_alloc&) {
+            r = MA_OUT_OF_MEMORY;
+        }
+        if (r != MA_SUCCESS) {
+            ma_decoder_uninit(&probe);
+            logError("SoundStream") << "failed to prepare MP3 seek table: " << path;
+            return LoadResult::fail(LoadError::DecodeFailed, "failed to prepare MP3 seek table: " +
+                                    internal::pathToDisplayUtf8(path));
+        }
+    } else {
+        totalFrames = streamDecoderLength(probe);
+    }
     ma_uint64 probed = totalFrames;
     if (totalFrames == 0) {
         // A length of 0 can also mean "unknown" (a FLAC whose STREAMINFO
@@ -1259,6 +1358,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                 : 0.0f;
     ma_decoder_uninit(&probe);
 
+    mp3Data_ = std::move(mp3Data);
     path_ = path;
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = (int)fmt;
@@ -1589,6 +1689,9 @@ StreamSeekStateForTests streamSeekStateForTests(const Sound& sound) {
     if (!sound.playing_ || !sound.playing_->stream) return state;
     const StreamInstance& s = *sound.playing_->stream;
     state.hasStream = true;
+    state.totalFrames = s.totalFramesInFile;
+    state.mp3SeekTable = s.mp3Data
+        ? static_cast<const ma_mp3*>(s.decoder.pBackend)->dr.pSeekPoints : nullptr;
     state.request = s.seekRequestSeq.load(std::memory_order_acquire);
     state.served = s.seekServedSeq.load(std::memory_order_relaxed);
     state.published = s.seekPublishedSeq.load(std::memory_order_relaxed);
@@ -1744,6 +1847,11 @@ bool AudioEngine::init(const AudioSettings& settings) {
     sampleRate_ = settings.sampleRate > 0 ? settings.sampleRate : DEFAULT_SAMPLE_RATE;
     channels_   = settings.channels   > 0 ? settings.channels   : DEFAULT_CHANNELS;
     bufferSize_ = settings.bufferSize  > 0 ? settings.bufferSize : DEFAULT_BUFFER_SIZE;
+    {
+        std::lock_guard<std::mutex> lock(analysisMutex_);
+        analysisRing_ = std::make_unique<internal::AudioOutputRing>(sampleRate_, channels_);
+        std::fill_n(analysisCopy_, ANALYSIS_BUFFER_SIZE, 0.0f);
+    }
 
     int polyphony = settings.maxPolyphony > 0
                   ? settings.maxPolyphony

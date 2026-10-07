@@ -1584,7 +1584,7 @@ Rules for callbacks that are not on the main thread:
 
 ### Build error: "is not a full path to an existing compiler tool" (after updating Visual Studio)
 
-The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. The project's `CMakePresets.json` pins the same old MSVC, Windows SDK and ninja paths. `trusscli build` handles this: when a pinned path is gone, it detects Visual Studio again, replaces only those paths in the `windows` preset of `CMakePresets.json`, removes `build-windows` and configures again, and prints what it did. A project whose presets pin no Visual Studio path is not touched: delete `build-windows` and run `trusscli build`. `trusscli doctor` reports the missing path. A `--ide vs` project also has a `vs/` solution whose `CMakeCache.txt` still points at the old compiler: run `trusscli update` to regenerate it. With plain CMake, run `trusscli update` (or `trusscli build` once) first. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically.
+The build folder's `CMakeCache.txt` still points at the compiler of the old Visual Studio install, for example after moving from VS 2022 to VS 2026 or after an update that changed the MSVC version folder. The project's `CMakePresets.json` pins the same old MSVC, Windows SDK and ninja paths. `trusscli build` handles this: when a pinned path is gone, it detects Visual Studio again, replaces only those paths in the `windows` preset of `CMakePresets.json`, removes `build-windows` and configures again, and prints what it did. A project whose presets pin no Visual Studio path is not touched: delete `build-windows` and run `trusscli build`. `trusscli doctor` reports the missing path. A `--ide vs` project also has a `vs/` solution whose `CMakeCache.txt` still points at the old compiler: run `trusscli update` to regenerate it. With plain CMake, run `trusscli update` (or `trusscli build` once) first. `tools/build_win.bat` detects this for trusscli itself and cleans its cache automatically. When a new Visual Studio is installed next to the old one, the old compiler still exists, so the cache is kept and the build can fail; delete `tools/build` and run `build_win.bat` again.
 
 ### Build error: "... is not a directory", "could not load cache", or a missing Makefile / build.ninja
 
@@ -2833,7 +2833,7 @@ bool Fbo::isActive() const  // Check if currently rendering to FBO
 bool Fbo::isAllocated() const  // Check if allocated
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
-bool Fbo::readPixelsFloat(float * pixels) const [macos,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
+bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
 bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
 void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo.
 ```
@@ -3546,6 +3546,7 @@ bool Node::HitResult::hit() const  // Whether a node was hit (node is non-null).
 
 ```cpp
 bool OnceGate::isFirstTime()  // True the first time; with an interval, true again once that much time has passed since the last true. Otherwise false
+void OnceGate::reset()  // Restore the never-fired state so the next isFirstTime() returns true immediately, for both once-only and interval gates. Lock-free and safe from any thread
 ```
 
 ### Path — Path/Polyline for lines and curves
@@ -3858,6 +3859,7 @@ void Shader::clear()  // Destroy the shader's GPU resources and reset it to the 
 sg_pipeline_desc Shader::createPipelineDesc()  // Build the pipeline descriptor (standard vertex layout); overridable by subclasses.
 void Shader::createVertexBuffer()  // Create the dynamic vertex/index buffers; overridable by subclasses.
 void Shader::end()  // End shader (pops from stack)
+void Shader::fillTextureBindings(sg_bindings & bind) const  // Copy the textures set with setTexture() into sg_bindings; a sampler is written only for slots below sokol's sampler limit (12).
 bool Shader::isLoaded() const  // Check if shader is loaded
 bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Load from sokol-shdc generated function
 void Shader::onBegin()  // Hook called when the shader scope begins; override to set up bindings.
@@ -4418,6 +4420,7 @@ void VideoPlayer::update()  // Update the video frame. Call once per frame in up
 ### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
 
 ```cpp
+void VideoPlayerBase::applyCachedStateToPlatform()  // Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play().
 void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
 void VideoPlayerBase::close()  // Close the video and release its resources.
 bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
@@ -4508,7 +4511,7 @@ bool VideoWriter::writeAudio(const float * interleaved, int frames, double timeS
 ### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
 
 ```cpp
-void Window::close()  // Close the native window; the main window and other windows keep running
+void Window::close()  // Close the native window; the main window and other windows keep running. A request, like exitApp() for the main window: it returns at once and the window closes at its backend's next safe point (after the current run-loop pass on Linux / Windows, after the next main-window tick on macOS), through the same path as its close button. Until then isOpen() is true and getApp() / App::getWindow() still return the App and the window. Safe to call from the window's own App (update() / draw() / keyPressed()). Destroying the Window (its last shared_ptr) still closes it immediately
 CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
 std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
 float Window::getFps() const  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
@@ -4517,8 +4520,8 @@ const std::string & Window::getTitle() const  // Last title set for this window 
 int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
 bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
 bool Window::isOccluded() const  // Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window
-bool Window::isOpen() const  // Whether the native window is still open
-void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open (both log an error and leave the window as it is)
+bool Window::isOpen() const  // Whether the native window is still open (true until a requested close() lands)
+void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied
 void Window::setClearColor(const Color & c)  // Background clear color for this window
 void Window::setFps(float fps)  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
 void Window::setFullscreen(bool full)  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)

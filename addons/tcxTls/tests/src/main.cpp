@@ -41,6 +41,8 @@
 //   - A plain onError listener that reconnects after a failed handshake ends
 //     up connected. The failed connection used to be torn down after the
 //     listener returned, taking the new connection with it.
+//   - A TLS setup failure reports onError then onConnect(false) once, closes
+//     the socket and permits a new connection, with or without threads (#384).
 //   - An onError listener that reconnects after a refused connect() keeps
 //     its connection: connect() closes the failed socket before notifying.
 //   - A connection attempt that a newer attempt replaced (an onError
@@ -90,6 +92,7 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
+#include "../../src/tcTlsCaInternal.h"
 #include <psa/crypto.h>
 
 #include <atomic>
@@ -382,6 +385,67 @@ struct TlsServer {
     }
 };
 
+// The same loader used by Windows, with an injected DER list: no OS store or
+// network needed. Run on every platform so Linux also exercises the union.
+static void testDefaultCaUnion() {
+    using namespace tcx::tls::tls_internal;
+    TlsServer dummy;
+    check("default CA union: self-signed OS certificate", dummy.setup());
+    if (g_fail) return;
+    const vector<unsigned char> der(dummy.cert.raw.p,
+                                   dummy.cert.raw.p + dummy.cert.raw.len);
+    mbedtls_x509_crt bundle;
+    mbedtls_x509_crt_init(&bundle);
+    check("default CA union: initialized chain counts as empty", countCerts(&bundle) == 0);
+    const char* pem = bundledCaPem();
+    check("default CA union: bundle parses completely",
+          mbedtls_x509_crt_parse(&bundle, reinterpret_cast<const unsigned char*>(pem),
+                                 strlen(pem) + 1) == 0);
+    const size_t bundledCount = countCerts(&bundle);
+    check("default CA union: bundle is nonempty", bundledCount > 0);
+    if (g_fail) {
+        mbedtls_x509_crt_free(&bundle);
+        return;
+    }
+
+    mbedtls_x509_crt anchors;
+    mbedtls_x509_crt_init(&anchors);
+    const auto counts = loadWindowsDefaultCAs(&anchors, {der});
+    check("default CA union: one OS anchor loaded", counts.windowsRoot == 1);
+    check("default CA union: all bundled anchors appended", counts.bundled == bundledCount);
+    check("default CA union: OS + bundled count", countCerts(&anchors) == 1 + bundledCount);
+    bool hasDummy = false, hasIsrg = false;
+    for (auto* cert = &anchors; cert != nullptr; cert = cert->next) {
+        if (cert->raw.len == der.size() && memcmp(cert->raw.p, der.data(), der.size()) == 0) {
+            hasDummy = true;
+        }
+        char subject[512]{};
+        mbedtls_x509_dn_gets(subject, sizeof(subject), &cert->subject);
+        if (string(subject).find("CN=ISRG Root X1") != string::npos) hasIsrg = true;
+    }
+    check("default CA union: OS-only anchor retained", hasDummy);
+    check("default CA union: bundle-only ISRG Root X1 retained", hasIsrg);
+    mbedtls_x509_crt_free(&anchors);
+
+    for (const vector<vector<unsigned char>>& os :
+         {vector<vector<unsigned char>>{}, vector<vector<unsigned char>>{{0x00}}}) {
+        mbedtls_x509_crt_init(&anchors);
+        const auto fallback = loadWindowsDefaultCAs(&anchors, os);
+        check("default CA union: absent/invalid OS anchors load zero", fallback.windowsRoot == 0);
+        check("default CA union: absent/invalid OS store still gets bundle",
+              fallback.bundled == bundledCount && countCerts(&anchors) == bundledCount);
+        mbedtls_x509_crt_free(&anchors);
+    }
+    mbedtls_x509_crt_init(&anchors);
+    const vector<unsigned char> duplicate(bundle.raw.p, bundle.raw.p + bundle.raw.len);
+    const auto duplicates = loadWindowsDefaultCAs(&anchors, {duplicate});
+    check("default CA union: duplicate OS/bundled root is harmless",
+          duplicates.windowsRoot == 1 && duplicates.bundled == bundledCount &&
+          countCerts(&anchors) == 1 + bundledCount);
+    mbedtls_x509_crt_free(&anchors);
+    mbedtls_x509_crt_free(&bundle);
+}
+
 static int peerSend(void* ctx, const unsigned char* buf, size_t len) {
     rawsocket_t fd = *static_cast<rawsocket_t*>(ctx);
     int n = static_cast<int>(::send(fd, reinterpret_cast<const char*>(buf),
@@ -502,6 +566,82 @@ static void scenario() {
     rawsocket_t listener = listenLoopback(port);
     check("loopback listener is up", listener != kNoSocket);
     if (g_fail) bail();
+
+    // --- setup failure before the handshake (#384) ---------------------------
+    for (bool threads : {true, false}) {
+        g_phase = "the TLS setup failure";
+        const string name = threads ? "setup failure" : "setup failure, no threads";
+        TlsClient setup;
+        setup.setVerifyNone();
+        setup.setUseThread(threads);
+        setup.setHostname(std::string(300, 'a'));
+        mutex evMutex;
+        vector<string> evs;
+        bool stoppedBeforeError = false;
+        bool hostnameError = false;
+        EventListener errSub = setup.onError.listen([&](TcpErrorEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            stoppedBeforeError = !setup.isConnected() && !setup.isConnecting();
+            hostnameError = e.message.find("TLS hostname set failed: ") == 0 &&
+                            e.errorCode == MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+            evs.push_back("error");
+        });
+        EventListener conSub = setup.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back(e.success ? "connected" : "failed");
+        });
+        check((name + ": connect() with an invalid hostname").c_str(),
+              setup.connect("127.0.0.1", port));
+        rawsocket_t failedPeer = acceptWithin(listener, 2000);
+        check((name + ": the peer accepted TCP").c_str(), failedPeer != kNoSocket);
+        if (g_fail) bail();
+        check((name + ": failure reported").c_str(), waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 2;
+        }));
+        if (g_fail) bail();
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": stopped before hostname error").c_str(),
+                  stoppedBeforeError && hostnameError);
+            check((name + ": onError then onConnect(false) once").c_str(),
+                  evs == vector<string>{"error", "failed"});
+        }
+        check((name + ": disconnected without disconnect()").c_str(),
+              !setup.isConnected() && !setup.isConnecting());
+        setRecvTimeout(failedPeer, 2000);
+        char byte;
+        check((name + ": peer observes the closed socket").c_str(),
+              ::recv(failedPeer, &byte, 1, 0) == 0);
+        TC_CLOSE(failedPeer);
+        if (g_fail) bail();
+
+        // connect() joins the previous receive thread itself. No explicit
+        // disconnect() hides a setup failure that left work pending.
+        setup.setHostname("localhost");
+        check((name + ": reconnect() with a valid hostname").c_str(),
+              setup.connect("127.0.0.1", port));
+        if (g_fail) bail();
+        TlsPeer recovered;
+        bool handshook = false;
+        thread acceptThread([&] { handshook = recovered.accept(listener, server.conf, 5000); });
+        const bool connected = waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 3;
+        });
+        acceptThread.join();
+        check((name + ": valid hostname completes TLS").c_str(),
+              connected && handshook && setup.isConnected());
+        setup.disconnect(); // join before checking the complete event sequence
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": no duplicate failure after reconnect").c_str(),
+                  evs == vector<string>{"error", "failed", "connected"});
+        }
+        if (g_fail) bail();
+    }
 
     // Everything the client receives, from its receive thread
     mutex rxMutex;
@@ -1541,7 +1681,7 @@ static void scenario() {
     TC_CLOSE(listener);
 }
 
-int main() {
+int main(int argc, char** argv) {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);
@@ -1553,6 +1693,10 @@ int main() {
     if (psa_crypto_init() != PSA_SUCCESS) {
         check("psa_crypto_init()", false);
         bail();
+    }
+    testDefaultCaUnion();
+    if (g_fail || (argc == 2 && string(argv[1]) == "--default-ca-union")) {
+        return g_fail ? 1 : 0;
     }
 #ifdef __linux__
     // Include persistent sanitizer/runtime helpers in the thread baseline.

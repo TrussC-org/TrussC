@@ -24,11 +24,11 @@ C++20 + sokol で構築されており、シンプルに書けてクロスプラ
 | OS | コンパイラ |
 |----|----------|
 | macOS 14+ (Sonoma) | Xcode Command Line Tools (`xcode-select --install`) |
-| iOS 16.3+ | macOS 上の Xcode（iOS SDK） |
+| iOS 16.4+ | macOS 上の Xcode（iOS SDK） |
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ または Clang 10+ |
 
-iOS の最低バージョンは、浮動小数点の `std::format` が使える 16.3 です。
+iOS の最低バージョンは、Metal の BC テクスチャ対応を判定できる 16.4 です。浮動小数点の `std::format` も使えます。
 既存の iOS プロジェクトには `trusscli update` でこのデプロイメントターゲットを適用できます。
 
 **CMake** も必要です。インストールしてください（入れない場合、ビルドが通らないことがあります）:

@@ -114,6 +114,7 @@ struct GuestLibrary {
             return false;
         }
 #endif
+        internal::refreshCrashModules();
         loadedPath = tempPath;
         return true;
     }
@@ -613,6 +614,8 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         if (app) {
             events().exit.notify();
             app->exit();
+            // close() requests made so far land before the App's cleanup().
+            internal::closeRequestedWindowsAtShutdown();
             app->cleanup();
         }
         g_host.guest.unload();

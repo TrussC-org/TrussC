@@ -57,6 +57,11 @@ namespace mcp {
 
 namespace detail {
 
+// Replies preserve valid UTF-8 and silently replace malformed bytes with U+FFFD.
+inline std::string dumpReply(const json& j) {
+    return j.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 // The promise carries a THUNK, not the reply string: the blocked HTTP worker
 // executes it (future.get()()) to obtain the reply. For ordinary tools the
 // thunk just returns a string built on the main thread; two-stage tools (see
@@ -170,7 +175,7 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
             try {
                 thunk = d.makeEnvelope();
             } catch (const std::exception& e) {
-                std::string err = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+                std::string err = detail::dumpReply(json{{"error", std::string("deferred response failed: ") + e.what()}});
                 thunk = [err]() { return err; };
             }
             d.response->set_value(std::move(thunk));
@@ -396,7 +401,7 @@ private:
             } else {
                 result = {{"content", {{
                     {"type", "text"},
-                    {"text", content.dump()}
+                    {"text", detail::dumpReply(content)}
                 }}}};
             }
             return makeResult(id, result);
@@ -451,7 +456,7 @@ private:
                         try {
                             return formatResult(workerStage());
                         } catch (const std::exception& e) {
-                            return std::string("{\"error\":\"deferred worker stage failed: ") + e.what() + "\"}";
+                            return detail::dumpReply(json{{"error", std::string("deferred worker stage failed: ") + e.what()}});
                         }
                     };
                 };
@@ -506,7 +511,7 @@ private:
             {"id", id},
             {"result", result}
         };
-        return res.dump();
+        return detail::dumpReply(res);
     }
 
     std::string makeError(const json& id, int code, const std::string& message) {
@@ -519,7 +524,7 @@ private:
                 {"message", message}
             }}
         };
-        return res.dump();
+        return detail::dumpReply(res);
     }
 };
 
@@ -620,7 +625,7 @@ inline bool bearerTokenMatches(std::string_view header, std::string_view token) 
 
 inline void rejectRequest(httplib::Response& res, int status, const std::string& why) {
     res.status = status;
-    res.set_content(json{{"error", why}}.dump(), "application/json");
+    res.set_content(dumpReply(json{{"error", why}}), "application/json");
 }
 
 // Browser-facing checks every request passes before anything else runs (#238,
@@ -733,7 +738,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
         try {
             result = thunk();
         } catch (const std::exception& e) {
-            result = std::string("{\"error\":\"reply construction failed: ") + e.what() + "\"}";
+            result = detail::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
         }
 
         res.set_content(result, "application/json");
@@ -747,7 +752,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
             {"transport", "http"},
             {"endpoint", "/mcp"}
         };
-        res.set_content(info.dump(), "application/json");
+        res.set_content(detail::dumpReply(info), "application/json");
     });
 
     detail::getHttpThread() = std::make_unique<std::thread>([port, host]() {
@@ -798,7 +803,7 @@ inline void stopHttpServer() {
         for (auto& d : list) {
             const std::string message = "the MCP server shut down before the reply was produced";
             std::string reply = d.errorReply ? d.errorReply(message)
-                                             : "{\"error\":\"" + message + "\"}";
+                                             : detail::dumpReply(json{{"error", message}});
             d.response->set_value([reply]() { return reply; });
         }
         list.clear();
@@ -888,7 +893,7 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
         const std::string message = "the app code behind this reply was unloaded by a hot reload "
                                     "before the reply was produced";
         std::string reply = d.errorReply ? d.errorReply(message)
-                                         : "{\"error\":\"" + message + "\"}";
+                                         : detail::dumpReply(json{{"error", message}});
         d.response->set_value([reply]() { return reply; });
     }
     pending.swap(keep);

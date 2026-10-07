@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcTlsClient.h"
+#include "tcTlsCaInternal.h"
 #include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include "tc/events/tcCoreEvents.h"
@@ -32,11 +33,7 @@ using namespace tc;
 
 namespace tcx::tls {
 
-// Forward declarations for the generated bundle (see cmake/tcTlsCaBundle.cpp.in).
-namespace tls_internal {
-extern const char* bundledCaPem();
-extern const char* bundledCaBundleDate();
-} // namespace tls_internal
+using tls_internal::countCerts;
 
 // Upper bound on CA PEM file size. Real-world OS trust stores are well
 // under 1 MB (typically ~250 KB; the embedded Mozilla bundle is ~360 KB).
@@ -45,15 +42,6 @@ extern const char* bundledCaBundleDate();
 // the wrong target, or someone passed a non-PEM file to
 // setCACertificateFile() by mistake.
 inline constexpr std::streamsize kMaxCaPemBytes = 16 * 1024 * 1024;
-
-namespace {
-size_t countCerts(const mbedtls_x509_crt* chain) {
-    size_t n = 0;
-    for (const mbedtls_x509_crt* c = chain; c != nullptr; c = c->next) ++n;
-    return n;
-}
-} // namespace
-
 
 // =============================================================================
 // TLS Context Structure (PIMPL)
@@ -216,28 +204,28 @@ void TlsClient::setHandshakeTimeout(float seconds) {
 // =============================================================================
 void TlsClient::ensureDefaultCAsLoaded() {
     caAutoLoadAttempted_ = true;
-    const size_t before = countCerts(&ctx_->cacert);
 
 #ifdef _WIN32
     // Windows: enumerate the system ROOT store and feed each cert to mbedtls
     // as DER. Requires linking crypt32 (set in CMakeLists).
+    std::vector<std::vector<unsigned char>> osCertificates;
     HCERTSTORE store = CertOpenSystemStoreW(0, L"ROOT");
     if (store) {
         PCCERT_CONTEXT ctx = nullptr;
-        size_t parsed = 0;
         while ((ctx = CertEnumCertificatesInStore(store, ctx)) != nullptr) {
-            int r = mbedtls_x509_crt_parse_der(
-                &ctx_->cacert, ctx->pbCertEncoded, ctx->cbCertEncoded);
-            if (r == 0) ++parsed;
+            osCertificates.emplace_back(ctx->pbCertEncoded,
+                                        ctx->pbCertEncoded + ctx->cbCertEncoded);
         }
         CertCloseStore(store, 0);
-        if (parsed > 0) {
-            logNotice() << "TlsClient: loaded " << parsed
-                          << " CAs from Windows Cert Store (ROOT)";
-            return;
-        }
+    }
+    const auto counts = tls_internal::loadWindowsDefaultCAs(&ctx_->cacert, osCertificates);
+    if (counts.windowsRoot + counts.bundled > 0) {
+        logNotice() << "TlsClient: loaded " << counts.windowsRoot
+                      << " CAs from Windows ROOT + " << counts.bundled << " bundled";
+        return;
     }
 #else
+    const size_t before = countCerts(&ctx_->cacert);
     // POSIX: try well-known bundle paths in order. Works on macOS (/etc/ssl/cert.pem
     // is maintained by the OS), Linux distros, BSDs, Alpine, etc.
     static const char* kPaths[] = {
@@ -274,8 +262,6 @@ void TlsClient::ensureDefaultCAsLoaded() {
             return;
         }
     }
-#endif
-
     // Fallback: bundled Mozilla cacert.pem embedded at build time.
     const char* bundled = tls_internal::bundledCaPem();
     int ret = mbedtls_x509_crt_parse(
@@ -291,6 +277,7 @@ void TlsClient::ensureDefaultCAsLoaded() {
             return;
         }
     }
+#endif
 
     logError() << "TlsClient: failed to load any default CA certificates. "
                  << "TLS handshakes will fail unless setCACertificate() or "
@@ -384,8 +371,9 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
         if (ret != 0) {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS config failed: ") + errBuf, ret);
-            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
+            failHandshake(std::string("TLS config failed: ") + errBuf,
+                          std::string("TLS config failed: ") + errBuf, ret, alive);
+            return HandshakeStep::Stopped;
         }
 
         // Certificate verification settings.
@@ -397,7 +385,8 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
             mbedtls_ssl_conf_authmode(&ctx_->conf, MBEDTLS_SSL_VERIFY_NONE);
         } else {
             // If the user never called setCACertificate*(), lazy-load default
-            // trust anchors (OS store, then bundled fallback). Once-per-client.
+            // trust anchors (Windows ROOT + bundle; POSIX bundle paths with
+            // bundled fallback). Once-per-client.
             if (!caUserProvided_ && !caAutoLoadAttempted_) {
                 ensureDefaultCAsLoaded();
             }
@@ -412,8 +401,9 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
         if (ret != 0) {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS setup failed: ") + errBuf, ret);
-            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
+            failHandshake(std::string("TLS setup failed: ") + errBuf,
+                          std::string("TLS setup failed: ") + errBuf, ret, alive);
+            return HandshakeStep::Stopped;
         }
 
         // Set hostname (SNI)
@@ -422,8 +412,9 @@ TlsClient::HandshakeStep TlsClient::performHandshake(const AliveToken& alive) {
         if (ret != 0) {
             char errBuf[256];
             mbedtls_strerror(ret, errBuf, sizeof(errBuf));
-            notifyError(std::string("TLS hostname set failed: ") + errBuf, ret);
-            return *alive ? HandshakeStep::InProgress : HandshakeStep::Stopped;
+            failHandshake(std::string("TLS hostname set failed: ") + errBuf,
+                          std::string("TLS hostname set failed: ") + errBuf, ret, alive);
+            return HandshakeStep::Stopped;
         }
 
         // Set BIO callbacks

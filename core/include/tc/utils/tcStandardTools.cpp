@@ -14,11 +14,13 @@
 
 #include <TrussC.h>
 #include "tcAnalyzeImage.h"
+#include "tcAudioTools.h"
 
 namespace trussc {
 namespace mcp {
 
 void registerInspectionTools() {
+    detail::registerAudioTools();
 
     // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
     // secondary windows in the order tc_list_windows reports). Returns the
@@ -398,7 +400,7 @@ void registerInspectionTools() {
 
             json playingSounds = json::array();
             for (const auto& v : engine.getPlayingSounds()) {
-                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToUtf8(v.path)},
+                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToDisplayUtf8(v.path)},
                                   {"streaming", v.streaming},
                                   {"position", v.position}, {"duration", v.duration},
                                   {"volume", v.volume}, {"pan", v.pan}, {"speed", v.speed},

@@ -142,6 +142,9 @@ struct HeadlessSettings {
 // ---------------------------------------------------------------------------
 template<typename AppClass>
 int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
+    internal::installCrashHandler();
+    internal::CrashPhaseScope crashPhase("headless");
+
     // Set target FPS
     headless::targetFps = settings.targetFps;
 
@@ -221,6 +224,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         for (int i = 0; i < adv.steps; ++i) {
             ctx.updateDeltaTime = targetDelta;
             internal::EntryStackGuard guard(internal::AppEntry::Update);
+            internal::crashFrame(headless::frameCount);
+            internal::CrashPhaseScope updatePhase("update");
             app->update();
             headless::frameCount++;
         }

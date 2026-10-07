@@ -105,6 +105,7 @@ cmake --build . --parallel
 if %ERRORLEVEL% neq 0 (
     echo.
     echo ERROR: Build failed!
+    echo If this started after installing or upgrading Visual Studio, delete tools\build and run build_win.bat again.
     echo.
     pause
     exit /b 1

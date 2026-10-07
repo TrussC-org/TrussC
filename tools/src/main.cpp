@@ -95,14 +95,19 @@ static string autoDetectTcRoot() {
     return "";
 }
 
-// Walk up from `startPath` (or CWD if empty) looking for a TrussC project
-// marker (src/ directory). CMakeLists.txt / CMakePresets.json / addons.make
+static bool isTrussCProject(const fs::path& path) {
+    return fs::exists(path / "CMakeLists.txt") && fs::exists(path / "addons.make");
+}
+
+// Check `startPath` (or CWD if empty) and up to five parents above it,
+// looking for a TrussC project marker (src/ directory).
+// CMakeLists.txt / CMakePresets.json / addons.make
 // are generated or optional, so we only rely on src/ here. Non-TrussC projects
 // that happen to have src/ are guarded later by signature check in update().
 static string autoDetectProjectRoot(const string& startPath) {
     fs::path searchPath = fs::absolute(
         startPath.empty() ? fs::current_path() : fs::path(startPath));
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i <= 5; ++i) {
         if (fs::is_directory(searchPath / "src")) {
             return searchPath.string();
         }
@@ -971,8 +976,7 @@ static int cmdCp(const vector<string>& args) {
         cerr << "Error: source '" << srcArg << "' is not a directory\n";
         return 1;
     }
-    if (!fs::exists(srcPath / "CMakeLists.txt") ||
-        !fs::exists(srcPath / "addons.make")) {
+    if (!isTrussCProject(srcPath)) {
         cerr << "Error: source '" << srcArg << "' is not a TrussC project "
              << "(missing CMakeLists.txt or addons.make)\n";
         return 1;
@@ -3177,6 +3181,14 @@ static int cmdClean(const vector<string>& args) {
         cerr << "Error: not inside a TrussC project.\n";
         return 1;
     }
+    projectPath = fs::absolute(projectPath).string();
+    if (!isTrussCProject(projectPath)) {
+        cerr << "Error: '" << projectPath << "' is not a TrussC project "
+             << "(missing CMakeLists.txt or addons.make). Nothing was removed.\n";
+        return 1;
+    }
+
+    cout << "Cleaning project: " << projectPath << "\n";
 
     // The native folder and "build", or with --all every preset's folder (the
     // same mapping the presets are written with, so iOS's xcode-ios too)

@@ -50,6 +50,12 @@ public:
     // -------------------------------------------------------------------------
 
     // Set CA certificate (PEM format string)
+    // Without an explicitly supplied CA, default trust anchors are loaded
+    // lazily: Windows uses the union of the ROOT store and bundled Mozilla
+    // CAs; macOS/Linux use an OS bundle file, falling back to the bundled CAs.
+    // The Windows union also trusts bundled roots removed from the OS store;
+    // it does not filter the Windows Disallowed store. A successful explicit
+    // setCACertificate() / setCACertificateFile() skips default CA loading.
     bool setCACertificate(const std::string& pemData);
 
     // Load CA certificate from file
