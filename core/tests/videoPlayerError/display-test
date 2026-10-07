@@ -1,0 +1,6 @@
+{test} --gpu-check
+# Use the bundled movie and generated error/bad-packet variants.
+python3 display-video-check.py {test} --video-check normal
+python3 display-video-check.py {test} --video-check error
+python3 display-video-check.py {test} --video-check bad-packet
+python3 display-video-check.py {test} --video-check bad-packets

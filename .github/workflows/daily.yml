@@ -181,6 +181,16 @@ jobs:
         shell: bash
         run: ./examples/build_all.py --core-tests-only --include-daily --verbose
 
+      - name: Run core display modes (Xvfb + Mesa)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+          xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_core_display_tests.py
+
       - name: Compiler cache stats
         if: always()
         shell: bash

@@ -113,7 +113,7 @@
 // hotReloadUnload are the same as the first generation's, so the Hierarchy
 // is drawn once; a press over the panel is taken by ImGui, and a press away
 // from it, after a reload that happened while the cursor was over the panel,
-// is not. It needs a display (e.g. Xvfb) and cmake, so CI does not run it.
+// is not. It needs a display (e.g. Xvfb) and cmake; daily Linux CI runs it.
 // =============================================================================
 
 #include "tcApp.h"
