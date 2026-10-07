@@ -6,6 +6,7 @@
 // Common interface and state management for VideoPlayer and HapPlayer.
 
 #include <string>
+#include <cmath>
 #include <atomic>
 #include <mutex>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include "tc/events/tcEvent.h"
 #include "tc/utils/tcLoadResult.h"
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"
 
 namespace trussc {
 
@@ -199,6 +201,21 @@ public:
     // Frame control
     // =========================================================================
 
+    virtual float getFrameRate() const = 0;
+
+protected:
+    bool canUseFrameApis() const {
+        if (!initialized_) return false;
+        const float rate = getFrameRate();
+        if (std::isfinite(rate) && rate > 0.0f) return true;
+        if (unknownFrameRateWarning_.isFirstTime()) {
+            logWarning("VideoPlayer") << "Frame rate is unknown; frame APIs return 0 or do nothing. "
+                                      "Use getPosition()/setPosition() and getDuration().";
+        }
+        return false;
+    }
+
+public:
     virtual int getCurrentFrame() const = 0;
     virtual int getTotalFrames() const = 0;
     virtual void setFrame(int frame) = 0;
@@ -373,6 +390,8 @@ protected:
             playing_ = false;
         }
     }
+private:
+    mutable OnceGate unknownFrameRateWarning_;
 };
 
 } // namespace trussc

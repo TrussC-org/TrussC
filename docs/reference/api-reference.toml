@@ -12151,7 +12151,7 @@ description.ko = "파일의 프레임 레이트(fps)를 가져옴. 알 수 없�
 details.en = "Windows reads MF_MT_FRAME_RATE instead of assuming 30 fps. Linux uses average/nominal metadata; macOS/iOS use the nominal rate. Frame counts and seeks derived from a rate are approximate for variable-frame-rate files. Unknown rates are never replaced with 30: frame queries return 0 and frame operations do nothing, with one warning per player instance. This getter itself does not warn. Use getPosition()/setPosition() and getDuration() for portable time-based control."
 details.ja = "Windows は 30 fps と仮定せず MF_MT_FRAME_RATE を読む。Linux は平均／公称レート、macOS/iOS は公称レートを使う。可変フレームレートのファイルではレートから求めるフレーム数やシークは近似。不明時に 30 で代用せず、フレーム取得は 0、操作は何もせず、インスタンスごとに一度だけ警告する。この getter 自体は警告しない。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
 details.ko = "Windows는 30 fps로 가정하지 않고 MF_MT_FRAME_RATE를 읽음. Linux는 평균/명목 메타데이터, macOS/iOS는 명목 레이트를 사용. 가변 프레임 레이트 파일에서 레이트로 계산한 프레임 수와 탐색은 근사값임. 알 수 없는 레이트를 30으로 대체하지 않으며 프레임 조회는 0, 프레임 조작은 무동작이고 인스턴스당 한 번 경고함. 이 getter 자체는 경고하지 않음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
-related = ["VideoPlayer::getCurrentFrame", "VideoPlayer::getTotalFrames", "VideoPlayer::setFrame", "VideoPlayer::getPosition"]
+related = ["VideoPlayerBase::getFrameRate", "VideoPlayer::getCurrentFrame", "VideoPlayer::getTotalFrames", "VideoPlayer::setFrame", "VideoPlayer::getPosition"]
 
 ["VideoPlayer::getGammaCorrection"]
 category = "video"
@@ -18072,6 +18072,22 @@ description.ko = "현재 재생 위치를 0-1 비율로 반환한다."
 description.en = "Seek to a playback position given as a fraction (0-1)."
 description.ja = "0-1 の割合で指定した再生位置にシークする。"
 description.ko = "0-1 비율로 지정한 재생 위치로 이동한다."
+
+["VideoPlayerBase::getFrameRate"]
+category = "video"
+keywords = ["fps", "frame rate", "unknown"]
+description.en = "Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player."
+description.ja = "ファイルのフレームレート（fps）を返す。不明または未ロードなら 0。各動画プレイヤーが実装する。"
+description.ko = "파일의 프레임 레이트(fps)를 반환한다. 알 수 없거나 로드되지 않았으면 0. 각 비디오 플레이어가 구현한다."
+details.en = "Frame APIs return 0 or do nothing when the rate is unknown on every platform, sharing one warning per player instance across reloads. Unloaded players and this getter itself do not warn. Use getPosition()/setPosition() and getDuration() for time-based control. HapPlayer derives its average rate from the file's video sample count and duration."
+details.ja = "全プラットフォームで、レートが不明ならフレーム API は 0 を返すか何もせず、再ロードをまたいでインスタンスごとに一度だけ警告する。未ロード時とこの getter 自体は警告しない。時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。HapPlayer はファイルの動画サンプル数と長さから平均レートを求める。"
+details.ko = "모든 플랫폼에서 레이트를 알 수 없으면 프레임 API는 0을 반환하거나 아무 작업도 하지 않으며, 다시 로드해도 인스턴스당 한 번만 경고한다. 로드되지 않은 플레이어와 이 getter 자체는 경고하지 않는다. 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용한다. HapPlayer는 파일의 비디오 샘플 수와 길이로 평균 레이트를 계산한다."
+related = ["VideoPlayer::getFrameRate", "VideoPlayerBase::getCurrentFrame", "VideoPlayerBase::setPosition"]
+
+["VideoPlayerBase::canUseFrameApis"]
+description.en = "Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate."
+description.ja = "protected ヘルパー。未ロードまたは非正値・非有限のフレームレートを拒否し、ロード済みで不明ならインスタンスごとに一度だけ警告する。"
+description.ko = "protected 헬퍼. 로드되지 않았거나 프레임 레이트가 양의 유한값이 아니면 거부하며, 로드된 플레이어의 레이트를 알 수 없으면 인스턴스당 한 번만 경고한다."
 
 ["VideoPlayerBase::getCurrentFrame"]
 description.en = "Return the index of the current frame."

@@ -419,16 +419,24 @@ public:
     // Frame control
     // =========================================================================
 
+    float getFrameRate() const override {
+        if (!initialized_ || duration_ <= 0.0f) return 0.0f;
+        const float rate = totalFrames_ / duration_;
+        return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
+    }
+
     int getCurrentFrame() const override {
+        if (!canUseFrameApis()) return 0;
         return currentFrame_;
     }
 
     int getTotalFrames() const override {
+        if (!canUseFrameApis()) return 0;
         return totalFrames_;
     }
 
     void setFrame(int frame) override {
-        if (!initialized_) return;
+        if (!canUseFrameApis()) return;
         frame = std::max(0, std::min(frame, totalFrames_ - 1));
         if (decodeFrame(frame)) {
             currentFrame_ = frame;
@@ -439,10 +447,12 @@ public:
     }
 
     void nextFrame() override {
+        if (!canUseFrameApis()) return;
         setFrame(currentFrame_ + 1);
     }
 
     void previousFrame() override {
+        if (!canUseFrameApis()) return;
         setFrame(currentFrame_ - 1);
     }
 

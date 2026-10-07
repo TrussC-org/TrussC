@@ -36,6 +36,7 @@ public:
     void moveErrorFrom(FakePlayer& other) { movePlaybackErrorFrom(other); }
     float getDuration() const override { return 2; }
     float getPosition() const override { return position; }
+    float getFrameRate() const override { return initialized_ ? 1.0f : 0.0f; }
     int getCurrentFrame() const override { return 1; }
     int getTotalFrames() const override { return 2; }
     void setFrame(int) override {}

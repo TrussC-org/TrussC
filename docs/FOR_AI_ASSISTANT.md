@@ -4387,6 +4387,7 @@ int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio 
 bool VideoPlayer::getAutoPoster() const  // Return whether the auto poster is enabled (default true)
 int VideoPlayer::getCurrentFrame() const  // Get current frame number
 float VideoPlayer::getDuration() const  // Get total duration in seconds
+float VideoPlayer::getFrameRate() const  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
 std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
 fs::path VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
@@ -4421,6 +4422,7 @@ void VideoPlayer::update()  // Update the video frame. Call once per frame in up
 
 ```cpp
 void VideoPlayerBase::applyCachedStateToPlatform()  // Subclass hook: after the backend has loaded, reapply the loop, volume and pan set before load(). Speed is applied by play().
+bool VideoPlayerBase::canUseFrameApis() const  // Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate.
 void VideoPlayerBase::clearPlaybackError()  // Subclass hook: clear pending and delivered errors on successful load and close.
 void VideoPlayerBase::close()  // Close the video and release its resources.
 bool VideoPlayerBase::dispatchPlaybackError(const char * logModule = "VideoPlayer")  // Subclass hook: call from update() on the main thread outside backend locks. Pause the backend, retain the frame, set error state and notify. Return immediately when true, since a listener may close or reload the player.
@@ -4433,6 +4435,7 @@ int VideoPlayerBase::getCurrentFrame() const  // Return the index of the current
 float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
 float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
 const std::string & VideoPlayerBase::getErrorMessage() const  // Last runtime error message, or an empty string when there is no error. Query on the main thread after update().
+float VideoPlayerBase::getFrameRate() const  // Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player.
 float VideoPlayerBase::getHeight() const  // Get video height in pixels
 std::string VideoPlayerBase::getHwAccelName() const  // Return the name of the active decode backend (e.g. "videotoolbox", "software", "none").
 float VideoPlayerBase::getPan() const  // Get current stereo pan

@@ -1,4 +1,4 @@
-// Exercise VideoPlayer's real public API with a decoder-free backend (#289).
+// Exercise the shared VideoPlayerBase frame-rate guard without a decoder (#289).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -13,9 +13,9 @@ void check(const char* name, bool ok) {
     if (!ok) ++failures;
 }
 
-class FakeVideoPlayer : public VideoPlayer {
+class FakeVideoPlayer : public VideoPlayerBase {
 public:
-    explicit FakeVideoPlayer(float rate) : rate_(rate) {}
+    float frameRate = 0.0f;
     ~FakeVideoPlayer() { close(); }
     LoadResult load(const fs::path&) override {
         initialized_ = true;
@@ -26,33 +26,55 @@ public:
     float getDuration() const override { return 2.0f; }
     float getPosition() const override { return seconds_ / getDuration(); }
     mutable int frameCalls = 0;
+    void update() override {}
+    unsigned char* getPixels() override { return nullptr; }
+    const unsigned char* getPixels() const override { return nullptr; }
+    // Return raw loaded rates so the base guard itself must reject NaN/Inf.
+    float getFrameRate() const override { return initialized_ ? frameRate : 0.0f; }
+    int getCurrentFrame() const override {
+        if (!canUseFrameApis()) return 0;
+        ++frameCalls;
+        return static_cast<int>(seconds_ * frameRate);
+    }
+    int getTotalFrames() const override {
+        if (!canUseFrameApis()) return 0;
+        ++frameCalls;
+        return static_cast<int>(getDuration() * frameRate);
+    }
+    void setFrame(int frame) override {
+        if (!canUseFrameApis()) return;
+        ++frameCalls;
+        seconds_ = frame / frameRate;
+    }
+    void nextFrame() override {
+        if (!canUseFrameApis()) return;
+        ++frameCalls;
+        seconds_ += 1.0f / frameRate;
+    }
+    void previousFrame() override {
+        if (!canUseFrameApis()) return;
+        ++frameCalls;
+        seconds_ -= 1.0f / frameRate;
+    }
+
+protected:
+    void playImpl() override {}
+    void stopImpl() override {}
+    void setPausedImpl(bool) override {}
+    void setVolumeImpl(float) override {}
+    void setSpeedImpl(float) override {}
+    void setPanImpl(float) override {}
+    void setLoopImpl(bool) override {}
+    void setPositionImpl(float pct) override { seconds_ = pct * getDuration(); }
 
 private:
-    float rate_;
     float seconds_ = 1.0f;
-    float getFrameRatePlatform() const override { return rate_; }
-    int getCurrentFramePlatform() const override {
-        ++frameCalls;
-        return static_cast<int>(seconds_ * rate_);
-    }
-    int getTotalFramesPlatform() const override {
-        ++frameCalls;
-        return static_cast<int>(getDuration() * rate_);
-    }
-    void setFramePlatform(int frame) override {
-        ++frameCalls;
-        seconds_ = frame / rate_;
-    }
-    void nextFramePlatform() override { ++frameCalls; seconds_ += 1.0f / rate_; }
-    void previousFramePlatform() override { ++frameCalls; seconds_ -= 1.0f / rate_; }
-    void setPositionImpl(float pct) override { seconds_ = pct * getDuration(); }
 };
 
 bool near(float a, float b) { return std::abs(a - b) < 0.00001f; }
 
 void exerciseUnknown(FakeVideoPlayer& player) {
     for (int i = 0; i < 3; ++i) {
-        check("unknown rate getter returns 0", player.getFrameRate() == 0.0f);
         check("unknown current and total frames return 0",
               player.getCurrentFrame() == 0 && player.getTotalFrames() == 0);
         player.setFrame(12);
@@ -60,7 +82,7 @@ void exerciseUnknown(FakeVideoPlayer& player) {
         player.previousFrame();
         player.firstFrame();
     }
-    check("unknown frame operations never reach backend", player.frameCalls == 0);
+    check("unknown frame operations never perform frame arithmetic", player.frameCalls == 0);
     check("unknown frame operations leave position unchanged", player.getPosition() == 0.5f);
 }
 } // namespace
@@ -73,15 +95,16 @@ TC_CORE_TEST_MAIN() {
     });
 
     for (float rate : {24.0f, 30.0f, 60.0f, 30000.0f / 1001.0f}) {
-        FakeVideoPlayer player(rate);
+        FakeVideoPlayer player;
+        player.frameRate = rate;
         check("unloaded rate is 0", player.getFrameRate() == 0.0f);
-        player.getCurrentFrame();
-        player.getTotalFrames();
+        check("unloaded frame queries return 0",
+              player.getCurrentFrame() == 0 && player.getTotalFrames() == 0);
         player.setFrame(10);
         player.nextFrame();
         player.previousFrame();
         player.firstFrame();
-        check("unloaded frame operations do not reach backend", player.frameCalls == 0);
+        check("unloaded frame operations do not perform frame arithmetic", player.frameCalls == 0);
         player.load({});
         check("known rate is preserved", player.getFrameRate() == rate);
         check("known total frames match two-second duration",
@@ -101,7 +124,7 @@ TC_CORE_TEST_MAIN() {
     }
     check("known and unloaded players do not warn", warnings == 0);
 
-    FakeVideoPlayer unknown(0.0f);
+    FakeVideoPlayer unknown;
     unknown.load({});
     check("querying unknown rate alone does not warn", unknown.getFrameRate() == 0 && warnings == 0);
     exerciseUnknown(unknown);
@@ -114,11 +137,17 @@ TC_CORE_TEST_MAIN() {
     unknown.load({});
     exerciseUnknown(unknown);
     check("reload does not spam warnings for the same player", warnings == 1);
+    unknown.frameRate = 24.0f;
+    check("a newly known rate enables frame APIs", unknown.getTotalFrames() == 48);
+    unknown.frameRate = 0.0f;
+    check("losing the rate again does not repeat the warning",
+          unknown.getTotalFrames() == 0 && warnings == 1);
 
     for (float rate : {-1.0f, std::numeric_limits<float>::infinity(),
                        std::numeric_limits<float>::quiet_NaN(), 0.0f}) {
         int before = warnings;
-        FakeVideoPlayer player(rate);
+        FakeVideoPlayer player;
+        player.frameRate = rate;
         player.load({});
         exerciseUnknown(player);
         check("each player warns once for an unavailable rate", warnings == before + 1);

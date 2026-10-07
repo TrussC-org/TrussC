@@ -3302,6 +3302,7 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
         (void)af::val<VideoPlayerBase>().getPan();
         (void)af::val<VideoPlayerBase>().setLoop(af::val<bool>());
         (void)af::val<VideoPlayerBase>().isLoop();
+        (void)af::val<VideoPlayerBase>().getFrameRate();
         (void)af::val<VideoPlayerBase>().getCurrentFrame();
         (void)af::val<VideoPlayerBase>().getTotalFrames();
         (void)af::val<VideoPlayerBase>().setFrame(af::val<int>());

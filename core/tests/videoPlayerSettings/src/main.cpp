@@ -44,6 +44,7 @@ public:
     void update() override {}
     float getDuration() const override { return 0.0f; }
     float getPosition() const override { return 0.0f; }
+    float getFrameRate() const override { return 0.0f; }
     int getCurrentFrame() const override { return 0; }
     int getTotalFrames() const override { return 0; }
     void setFrame(int) override {}

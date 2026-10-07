@@ -22,7 +22,6 @@
 // =============================================================================
 
 #include "tcVideoPlayerBase.h"
-#include "tc/utils/tcOnceGate.h"
 #include <cmath>
 #include "tc/graphics/tcPixels.h"
 
@@ -295,7 +294,7 @@ public:
 
     /// File frame rate in fps, or 0 when unknown (always 0 on Web).
     /// Time-based position/duration APIs are portable across backends.
-    float getFrameRate() const {
+    float getFrameRate() const override {
         if (!initialized_) return 0.0f;
         float rate = getFrameRatePlatform();
         return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
@@ -446,18 +445,6 @@ protected:
     }
 
 private:
-    mutable OnceGate unknownFrameRateWarning_;
-
-    bool canUseFrameApis() const {
-        if (!initialized_) return false;
-        if (getFrameRate() > 0.0f) return true;
-        if (unknownFrameRateWarning_.isFirstTime()) {
-            logWarning("VideoPlayer") << "Frame rate is unknown; frame APIs return 0 or do nothing. "
-                                      "Use getPosition()/setPosition() and getDuration().";
-        }
-        return false;
-    }
-
     // Pixel data (RGBA)
     unsigned char* pixels_ = nullptr;
 
@@ -610,12 +597,12 @@ private:
     void setSpeedPlatform(float speed);
     void setLoopPlatform(bool loop);
 
-    virtual float getFrameRatePlatform() const;
-    virtual int getCurrentFramePlatform() const;
-    virtual int getTotalFramesPlatform() const;
-    virtual void setFramePlatform(int frame);
-    virtual void nextFramePlatform();
-    virtual void previousFramePlatform();
+    float getFrameRatePlatform() const;
+    int getCurrentFramePlatform() const;
+    int getTotalFramesPlatform() const;
+    void setFramePlatform(int frame);
+    void nextFramePlatform();
+    void previousFramePlatform();
 
     // Audio access
     bool hasAudioPlatform() const;
