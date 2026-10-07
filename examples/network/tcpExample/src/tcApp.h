@@ -35,6 +35,8 @@ private:
 
     // State
     int messageCount = 0;
+    OnceGate echoFailed;
+    OnceGate clientSendFailed;
 
     void addLog(const std::string& msg);
 };
