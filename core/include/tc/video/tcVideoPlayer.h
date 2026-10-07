@@ -300,32 +300,6 @@ public:
         return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
     }
 
-    // Unknown rate: return 0 / do nothing, warning once per player instance.
-    int getCurrentFrame() const override {
-        if (!canUseFrameApis()) return 0;
-        return getCurrentFramePlatform();
-    }
-
-    int getTotalFrames() const override {
-        if (!canUseFrameApis()) return 0;
-        return getTotalFramesPlatform();
-    }
-
-    void setFrame(int frame) override {
-        if (!canUseFrameApis()) return;
-        setFramePlatform(frame);
-    }
-
-    void nextFrame() override {
-        if (!canUseFrameApis()) return;
-        nextFramePlatform();
-    }
-
-    void previousFrame() override {
-        if (!canUseFrameApis()) return;
-        previousFramePlatform();
-    }
-
     // =========================================================================
     // Gamma Correction
     // =========================================================================
@@ -395,6 +369,26 @@ protected:
     // -------------------------------------------------------------------------
     // Implementation methods
     // -------------------------------------------------------------------------
+
+    int getCurrentFrameImpl() const override {
+        return getCurrentFramePlatform();
+    }
+
+    int getTotalFramesImpl() const override {
+        return getTotalFramesPlatform();
+    }
+
+    void setFrameImpl(int frame) override {
+        setFramePlatform(frame);
+    }
+
+    void nextFrameImpl() override {
+        nextFramePlatform();
+    }
+
+    void previousFrameImpl() override {
+        previousFramePlatform();
+    }
 
     void playImpl() override {
         playPlatform();

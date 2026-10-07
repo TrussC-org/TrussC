@@ -4385,7 +4385,7 @@ uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
 int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
 bool VideoPlayer::getAutoPoster() const  // Return whether the auto poster is enabled (default true)
-int VideoPlayer::getCurrentFrame() const  // Get current frame number
+int VideoPlayer::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayer::getDuration() const  // Get total duration in seconds
 float VideoPlayer::getFrameRate() const  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
 float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
@@ -4395,17 +4395,17 @@ unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pi
 unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
 unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
 float VideoPlayer::getPosition() const  // Get current position (0.0 to 1.0)
-int VideoPlayer::getTotalFrames() const  // Get total number of frames
+int VideoPlayer::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
 bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
 bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
 LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file
-void VideoPlayer::nextFrame()  // Advance to the next frame
+void VideoPlayer::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
-void VideoPlayer::previousFrame()  // Go back to the previous frame
+void VideoPlayer::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::setAutoPoster(bool on)  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
-void VideoPlayer::setFrame(int frame)  // Seek to a specific frame number
+void VideoPlayer::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
 void VideoPlayer::setLoopImpl(bool loop)  // Backend implementation of setLoopImpl for this platform's video player.
 void VideoPlayer::setPanImpl(float pan)  // Backend implementation of setPanImpl for this platform's video player.
@@ -4431,7 +4431,8 @@ int VideoPlayerBase::getAudioChannels() const  // Return the number of audio cha
 uint32_t VideoPlayerBase::getAudioCodec() const  // Return the audio codec as a FourCC ('aac ', 'mp3 ', ...), or 0 if no audio.
 std::vector<uint8_t> VideoPlayerBase::getAudioData() const  // Return the raw (undecoded) audio data, or an empty vector if no audio.
 int VideoPlayerBase::getAudioSampleRate() const  // Return the audio sample rate in Hz, or 0 if no audio.
-int VideoPlayerBase::getCurrentFrame() const  // Return the index of the current frame.
+int VideoPlayerBase::getCurrentFrame() const  // Get current frame number; 0 when the frame rate is unknown.
+int VideoPlayerBase::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayerBase::getCurrentTime() const  // Get current playback time in seconds
 float VideoPlayerBase::getDuration() const  // Return the video duration in seconds.
 const std::string & VideoPlayerBase::getErrorMessage() const  // Last runtime error message, or an empty string when there is no error. Query on the main thread after update().
@@ -4444,7 +4445,8 @@ float VideoPlayerBase::getPosition() const  // Return the current playback posit
 float VideoPlayerBase::getResyncThreshold() const  // Get the current resync threshold in seconds
 float VideoPlayerBase::getSpeed() const  // Get current playback speed
 Texture & VideoPlayerBase::getTexture() [+1]  // Return the texture holding the current video frame.
-int VideoPlayerBase::getTotalFrames() const  // Return the total number of frames in the video.
+int VideoPlayerBase::getTotalFrames() const  // Get total frame count; 0 when the frame rate is unknown.
+int VideoPlayerBase::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
 float VideoPlayerBase::getVolume() const  // Get current volume
 float VideoPlayerBase::getWidth() const  // Get video width in pixels
 bool VideoPlayerBase::hasAudio() const  // Return true if the video has an audio track.
@@ -4461,13 +4463,16 @@ LoadResult VideoPlayerBase::load(const fs::path & path)  // Load a video from th
 void VideoPlayerBase::markDone()  // Mark playback as done, clearing playing unless looping.
 void VideoPlayerBase::markFrameNew()  // Mark that a new frame has arrived (sets frameNew and firstFrameReceived).
 void VideoPlayerBase::movePlaybackErrorFrom(VideoPlayerBase & other)  // Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object.
-void VideoPlayerBase::nextFrame()  // Advance to the next frame.
+void VideoPlayerBase::nextFrame()  // Advance one frame; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::play()  // Start or resume playback
 void VideoPlayerBase::playImpl()  // Platform hook: start playback. Pure virtual, implemented per backend.
-void VideoPlayerBase::previousFrame()  // Step back to the previous frame.
+void VideoPlayerBase::previousFrame()  // Go back one frame; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::reportPlaybackError(const std::string & message, int64_t code = 0)  // Subclass hook: enqueue a backend failure from any thread; coalesces pending reports until update dispatches them.
 void VideoPlayerBase::setCurrentTime(float seconds)  // Seek to a specific time in seconds
-void VideoPlayerBase::setFrame(int frame)  // Seek to the given frame index.
+void VideoPlayerBase::setFrame(int frame)  // Seek to a frame number; does nothing when the frame rate is unknown (0).
+void VideoPlayerBase::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayerBase::setLoop(bool loop)  // Enable/disable looping
 void VideoPlayerBase::setLoopImpl(bool loop)  // Platform hook: set looping. Pure virtual, implemented per backend.
 void VideoPlayerBase::setPan(float pan)  // Set stereo pan (-1.0 left, 0.0 center, 1.0 right)

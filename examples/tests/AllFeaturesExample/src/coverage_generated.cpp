@@ -3229,11 +3229,6 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().getDuration();
         (void)af::val<VideoPlayer>().getPosition();
         (void)af::val<VideoPlayer>().getFrameRate();
-        (void)af::val<VideoPlayer>().getCurrentFrame();
-        (void)af::val<VideoPlayer>().getTotalFrames();
-        (void)af::val<VideoPlayer>().setFrame(af::val<int>());
-        (void)af::val<VideoPlayer>().nextFrame();
-        (void)af::val<VideoPlayer>().previousFrame();
         (void)af::val<VideoPlayer>().setGammaCorrection(af::val<float>());
         (void)af::val<VideoPlayer>().getGammaCorrection();
         (void)af::val<VideoPlayer>().setUseHwAccel(af::val<bool>());

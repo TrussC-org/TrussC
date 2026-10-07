@@ -425,37 +425,6 @@ public:
         return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
     }
 
-    int getCurrentFrame() const override {
-        if (!canUseFrameApis()) return 0;
-        return currentFrame_;
-    }
-
-    int getTotalFrames() const override {
-        if (!canUseFrameApis()) return 0;
-        return totalFrames_;
-    }
-
-    void setFrame(int frame) override {
-        if (!canUseFrameApis()) return;
-        frame = std::max(0, std::min(frame, totalFrames_ - 1));
-        if (decodeFrame(frame)) {
-            currentFrame_ = frame;
-            playbackTime_ = (duration_ * frame) / totalFrames_;
-            updateTexture();
-            markFrameNew();
-        }
-    }
-
-    void nextFrame() override {
-        if (!canUseFrameApis()) return;
-        setFrame(currentFrame_ + 1);
-    }
-
-    void previousFrame() override {
-        if (!canUseFrameApis()) return;
-        setFrame(currentFrame_ - 1);
-    }
-
     // =========================================================================
     // HAP-specific
     // =========================================================================
@@ -561,6 +530,32 @@ protected:
     // -------------------------------------------------------------------------
     // Implementation methods
     // -------------------------------------------------------------------------
+
+    int getCurrentFrameImpl() const override {
+        return currentFrame_;
+    }
+
+    int getTotalFramesImpl() const override {
+        return totalFrames_;
+    }
+
+    void setFrameImpl(int frame) override {
+        frame = std::max(0, std::min(frame, totalFrames_ - 1));
+        if (decodeFrame(frame)) {
+            currentFrame_ = frame;
+            playbackTime_ = (duration_ * frame) / totalFrames_;
+            updateTexture();
+            markFrameNew();
+        }
+    }
+
+    void nextFrameImpl() override {
+        setFrameImpl(currentFrame_ + 1);
+    }
+
+    void previousFrameImpl() override {
+        setFrameImpl(currentFrame_ - 1);
+    }
 
     void playImpl() override {
         playbackTime_ = 0;

@@ -26,38 +26,38 @@ public:
     float getDuration() const override { return 2.0f; }
     float getPosition() const override { return seconds_ / getDuration(); }
     mutable int frameCalls = 0;
+    mutable int rateQueries = 0;
     void update() override {}
     unsigned char* getPixels() override { return nullptr; }
     const unsigned char* getPixels() const override { return nullptr; }
     // Return raw loaded rates so the base guard itself must reject NaN/Inf.
-    float getFrameRate() const override { return initialized_ ? frameRate : 0.0f; }
-    int getCurrentFrame() const override {
-        if (!canUseFrameApis()) return 0;
+    float getFrameRate() const override {
+        ++rateQueries;
+        return initialized_ ? frameRate : 0.0f;
+    }
+
+protected:
+    int getCurrentFrameImpl() const override {
         ++frameCalls;
         return static_cast<int>(seconds_ * frameRate);
     }
-    int getTotalFrames() const override {
-        if (!canUseFrameApis()) return 0;
+    int getTotalFramesImpl() const override {
         ++frameCalls;
         return static_cast<int>(getDuration() * frameRate);
     }
-    void setFrame(int frame) override {
-        if (!canUseFrameApis()) return;
+    void setFrameImpl(int frame) override {
         ++frameCalls;
         seconds_ = frame / frameRate;
     }
-    void nextFrame() override {
-        if (!canUseFrameApis()) return;
+    void nextFrameImpl() override {
         ++frameCalls;
         seconds_ += 1.0f / frameRate;
     }
-    void previousFrame() override {
-        if (!canUseFrameApis()) return;
+    void previousFrameImpl() override {
         ++frameCalls;
         seconds_ -= 1.0f / frameRate;
     }
 
-protected:
     void playImpl() override {}
     void stopImpl() override {}
     void setPausedImpl(bool) override {}
@@ -74,6 +74,7 @@ private:
 bool near(float a, float b) { return std::abs(a - b) < 0.00001f; }
 
 void exerciseUnknown(FakeVideoPlayer& player) {
+    const int queriesBefore = player.rateQueries;
     for (int i = 0; i < 3; ++i) {
         check("unknown current and total frames return 0",
               player.getCurrentFrame() == 0 && player.getTotalFrames() == 0);
@@ -82,7 +83,8 @@ void exerciseUnknown(FakeVideoPlayer& player) {
         player.previousFrame();
         player.firstFrame();
     }
-    check("unknown frame operations never perform frame arithmetic", player.frameCalls == 0);
+    check("unknown frame APIs each check the rate once", player.rateQueries == queriesBefore + 18);
+    check("unknown frame operations never enter Impl", player.frameCalls == 0);
     check("unknown frame operations leave position unchanged", player.getPosition() == 0.5f);
 }
 } // namespace
@@ -107,6 +109,7 @@ TC_CORE_TEST_MAIN() {
         check("unloaded frame operations do not perform frame arithmetic", player.frameCalls == 0);
         player.load({});
         check("known rate is preserved", player.getFrameRate() == rate);
+        const int queriesBefore = player.rateQueries;
         check("known total frames match two-second duration",
               player.getTotalFrames() == static_cast<int>(2.0f * rate));
         check("known current frame matches one second",
@@ -119,6 +122,8 @@ TC_CORE_TEST_MAIN() {
         check("previousFrame retreats by one frame", near(player.getCurrentTime(), 12.0f / rate));
         player.firstFrame();
         check("firstFrame seeks to zero", player.getPosition() == 0.0f);
+        check("known frame APIs dispatch to Impl exactly once each", player.frameCalls == 6);
+        check("known frame APIs each check the rate once", player.rateQueries == queriesBefore + 6);
         player.close();
         check("closed rate is 0", player.getFrameRate() == 0.0f);
     }

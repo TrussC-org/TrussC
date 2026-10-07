@@ -37,14 +37,16 @@ public:
     float getDuration() const override { return 2; }
     float getPosition() const override { return position; }
     float getFrameRate() const override { return initialized_ ? 1.0f : 0.0f; }
-    int getCurrentFrame() const override { return 1; }
-    int getTotalFrames() const override { return 2; }
-    void setFrame(int) override {}
-    void nextFrame() override {}
-    void previousFrame() override {}
+
     unsigned char* getPixels() override { return pixels.data(); }
     const unsigned char* getPixels() const override { return pixels.data(); }
 protected:
+    int getCurrentFrameImpl() const override { return 1; }
+    int getTotalFramesImpl() const override { return 2; }
+    void setFrameImpl(int) override {}
+    void nextFrameImpl() override {}
+    void previousFrameImpl() override {}
+
     void playImpl() override {}
     void stopImpl() override { ++stops; position = 0; pixels.fill(0); }
     void setPausedImpl(bool paused) override { if (paused) ++pauses; }
