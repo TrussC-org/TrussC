@@ -159,6 +159,12 @@ if (NOT MSVC)
   endif()
 endif (NOT MSVC)
 
+# OpenHarmony and IOS Disable JIT
+# Ref: https://developer.huawei.com/consumer/cn/doc/harmonyos-releases-V5/changelogs-for-all-apps-b031-V5
+if(OHOS OR IOS)
+  set(LUAJIT_DISABLE_JIT ON)
+endif()
+
 set(HOST_CFLAGS)     # Build the buildvm for host platform
 set(TARGET_ARCH)     # x86, x64, arm, arm64, ppc, mips, mips64, loongarch64
 
@@ -301,7 +307,9 @@ endif()
 
 string(FIND "${TARGET_TESTARCH}" "LJ_HASJIT 1" HAVE_FLAG)
 if (MSVC OR NOT HAVE_FLAG EQUAL -1)
-  set(DASM_FLAGS ${DASM_FLAGS} -D JIT)
+  if (NOT LUAJIT_DISABLE_JIT)
+    set(DASM_FLAGS ${DASM_FLAGS} -D JIT)
+  endif()
 endif()
 
 string(FIND "${TARGET_TESTARCH}" "LJ_HASFFI 1" HAVE_FLAG)
@@ -367,6 +375,7 @@ else ()
   if (TARGET_ARCH STREQUAL arm)
     if (CMAKE_SYSTEM_NAME STREQUAL iOS)
       set(DASM_FLAGS ${DASM_FLAGS} -D IOS)
+      set(LUAJIT_BUILD_EXE OFF)
     endif ()
   else ()
     string(FIND "${TARGET_TESTARCH}" "LJ_TARGET_MIPSR6" HAVE_FLAG)
@@ -409,10 +418,6 @@ endif()
 ## LJ_NO_SYSTEM: without system(3)
 if(ANDROID OR OHOS OR IOS)
   list(APPEND LJ_DEFINITIONS LJ_NO_SYSTEM=1)
-endif()
-
-if(IOS)
-  set(LUAJIT_DISABLE_JIT ON)
 endif()
 
 set(LJ_NUMMODE_SINGLE 0) # Single-number mode only.
@@ -526,9 +531,6 @@ message(STATUS "HOST_CFLAGS: ${HOST_CFLAGS}")
 
 # Build the minilua for host platform
 set(MINILUA_EXE minilua)
-if(HOST_WINE)
-  set(MINILUA_EXE minilua.exe)
-endif()
 
 list(JOIN HOST_CFLAGS " " MINILUA_CFLAGS)
 if(NOT CMAKE_CROSSCOMPILING)
@@ -540,7 +542,7 @@ else()
     ${CMAKE_CURRENT_BINARY_DIR}/minilua/${LJ_PREFIX}${MINILUA_EXE})
 
   add_custom_command(OUTPUT ${MINILUA_PATH}
-    COMMAND ${CMAKE_COMMAND} ${TOOLCHAIN} ${TARGET_SYS}
+    COMMAND ${CMAKE_COMMAND}
             -DLUAJIT_DIR=${LUAJIT_DIR}
             -DMINILUA_CFLAGS=${MINILUA_CFLAGS}
             ${CMAKE_CURRENT_LIST_DIR}/host/minilua
@@ -590,7 +592,7 @@ else()
 endif()
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/luajit.h
-  COMMAND ${HOST_WINE} ${MINILUA_PATH} ${LUAJIT_DIR}/src/host/genversion.lua
+  COMMAND ${MINILUA_PATH} ${LUAJIT_DIR}/src/host/genversion.lua
   ARGS ${LUAJIT_DIR}/src/luajit_rolling.h
        ${CMAKE_CURRENT_BINARY_DIR}/luajit_relver.txt
        ${CMAKE_CURRENT_BINARY_DIR}/luajit.h
@@ -600,7 +602,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/luajit.h
 
 # Generate buildvm_arch.h
 add_custom_command(OUTPUT ${BUILDVM_ARCH_H}
-  COMMAND ${HOST_WINE} ${MINILUA_PATH} ${DASM_PATH} ${DASM_FLAGS}
+  COMMAND ${MINILUA_PATH} ${DASM_PATH} ${DASM_FLAGS}
           -o ${BUILDVM_ARCH_H} ${VM_DASC_PATH}
   DEPENDS minilua ${DASM_PATH} ${CMAKE_CURRENT_BINARY_DIR}/luajit.h)
 add_custom_target(buildvm_arch_h ALL
