@@ -18,7 +18,7 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getGridFit"] = &trussc::Font::getGridFit;
         t["setMipmaps"] = &trussc::Font::setMipmaps;
         t["getMipmaps"] = &trussc::Font::getMipmaps;
-        t["load"] = &trussc::Font::load;
+        t["load"] = sol::overload([](trussc::Font& self, const fs::path & nameOrPath, int size) { return self.load(nameOrPath, size); }, [](trussc::Font& self, const fs::path & nameOrPath, int size, int faceIndex) { return self.load(nameOrPath, size, faceIndex); });
         t["isLoaded"] = &trussc::Font::isLoaded;
         t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
         t["getAlignH"] = &trussc::Font::getAlignH;

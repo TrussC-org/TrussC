@@ -65,11 +65,11 @@ for (const id in structure) {
         type: s.type,                                      // field/property C++ type (e.g. "float")
         access: s.access,                                  // 'protected' (public omitted); web emitter hides protected
         hidden: p.hide ? true : undefined,                 // `hide = true` in the toml: public C++ but not API — kept in the data (CI/luagen still see it), excluded from the docs
-        noLua: p.lua === false ? true : undefined,         // `lua = false` in the toml: not bound to Lua (luagen, luagen-types, emit-sketch-api skip it)
         members: s.members,                                // enum values (enums only)
         constructors: s.constructors,                      // public ctor signatures (types only)
         provider: s.provider,                              // 'std' for curated std:: symbols
         platforms: s.platforms, lua_bind: s.lua_bind,      // from TC_PLATFORMS / TC_LUA_BIND
+        lua_skip: s.lua_skip,                              // from TC_LUA_SKIP: not exposed to Lua (luagen, luagen-types, sketch emitters skip it)
 
         deprecated: s.deprecated,                          // from C++ [[deprecated]]
         category: p.category, keywords: p.keywords, of: p.of,

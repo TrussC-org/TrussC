@@ -1,0 +1,6 @@
+{test} --gpu-check
+# Use the bundled movie and generated error/bad-packet variants.
+skip "#707: no audio output device on the runner; back with #613" python3 display-video-check.py {test} --video-check normal
+python3 display-video-check.py {test} --video-check error
+skip "#707: no audio output device on the runner; back with #613" python3 display-video-check.py {test} --video-check bad-packet
+skip "#707: no audio output device on the runner; back with #613" python3 display-video-check.py {test} --video-check bad-packets

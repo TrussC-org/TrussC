@@ -112,6 +112,7 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["bufferSize"] = &trussc::AudioSettings::bufferSize;
         t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
         t["deviceName"] = &trussc::AudioSettings::deviceName;
+        t["backend"] = &trussc::AudioSettings::backend;
     }
     {
         sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate",
@@ -133,6 +134,11 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
     {
         sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
         t["data"] = &trussc::TcpReceiveEventArgs::data;
+    }
+    {
+        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
+        t["message"] = &trussc::VideoErrorEventArgs::message;
+        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
     }
 }
 #ifndef _MSC_VER

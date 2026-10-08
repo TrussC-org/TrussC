@@ -129,6 +129,10 @@ public:
     // connect(). Empty string means use the system default trust store.
     void setTlsCACertificate(const std::string& pem) { tlsCaPem_ = pem; }
 
+    // TCP connect deadline in seconds. Default 0 = OS timeout. Forwarded to
+    // TcpClient / TlsClient on the next connect(). No effect on Emscripten.
+    void setConnectTimeout(float seconds) { connectTimeout_ = seconds > 0.0f ? seconds : 0.0f; }
+
     // Time allowed for the opening handshake, in seconds, counted from the
     // moment the TCP connection is up. Default 15. 0 = no deadline. One
     // deadline covers both stages: the TLS handshake (wss://) and then the
@@ -138,11 +142,11 @@ public:
     //    on the receive thread): the connection is closed, then onError and
     //    onClose fire on the receive thread;
     //  - while waiting for the 101 (checked once per frame on the main
-    //    thread, update event, so it needs the app's main loop): onError
-    //    fires on the main thread, then the connection is closed and onClose
-    //    fires there too, unless an onError listener already disconnected,
-    //    reconnected or destroyed the client.
-    // The TCP connect before it is not covered: the OS times that out.
+    //    thread, update event, so it needs the app's main loop): the connection
+    //    is closed, then onError and onClose fire on the main thread, unless
+    //    an onError listener already disconnected, reconnected or destroyed
+    //    the client.
+    // The TCP connect before it uses setConnectTimeout() (default: OS).
     // Applies to the next connect(). No effect on Emscripten, where the
     // browser owns the handshake.
     void setHandshakeTimeout(float seconds) { handshakeTimeout_ = seconds > 0.0f ? seconds : 0.0f; }
@@ -154,8 +158,8 @@ private:
     void handleTcpDisconnect(TcpDisconnectEventArgs& args);
 
     // Main thread, every frame: fails the connection when the 101 has not
-    // arrived within handshakeTimeout_ of the TCP connect (onError, then
-    // disconnect() -> onClose, skipped when an onError listener already
+    // arrived within handshakeTimeout_ of the TCP connect (disconnect, then
+    // onError -> onClose, skipped when an onError listener already
     // disconnected, reconnected or destroyed the client)
     void checkHandshakeTimeout();
 
@@ -203,6 +207,7 @@ private:
     EventListener disconnectListener_;
     EventListener timeoutListener_;   // update event, checkHandshakeTimeout()
 
+    float connectTimeout_ = 0.0f;
     // setHandshakeTimeout()'s value (atomic: read on the receive thread too)
     std::atomic<float> handshakeTimeout_{defaultHandshakeTimeout_};
     // Set when the upgrade request goes out (the TCP / TLS connection is up)

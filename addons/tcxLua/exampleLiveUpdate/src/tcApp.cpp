@@ -1,10 +1,5 @@
 #include "tcApp.h"
 
-#include "sol/sol.hpp"
-
-// FIXME: This example would not work perfectly on Web (Emscripten) some part.
-//        Check notes after here.
-
 void tcApp::setup() {
     lua.open_libraries(sol::lib::base);
 
@@ -18,6 +13,7 @@ void tcApp::reset() {
     y = getHeight() / 2;
 
     script = "x + 1, y + 1";
+    compiledScript.clear();
 }
 
 void tcApp::updateFbo() {
@@ -35,17 +31,35 @@ void tcApp::update() {
     lua["x"] = x;
     lua["y"] = y;
 
-    // FIXME: in emscripten (web), this try catch would not work, just raise runtime_error and abort.
-    // FIXME: in desktop environment, works but warnings are shown if parse error occured.
+    // Rebuild `step` when the typed expression changes. While typing, the
+    // expression is often incomplete; script_pass_on_error returns that syntax
+    // error instead of throwing, and `step` is cleared so nothing runs until
+    // the expression is valid again.
+    if (script != compiledScript) {
+        compiledScript = script;
+        stepErrorLogged.emplace();
+        auto result = lua.safe_script("function step() x, y = " + script + " end", sol::script_pass_on_error);
+        if (!result.valid()) {
+            sol::error err = result;
+            logError("tcxLua") << err.what();
+            lua["step"] = sol::lua_nil;
+        }
+    }
 
-    try{
-        sol::optional<sol::error> result = lua.safe_script("x, y = " + script);
-        // if (result.has_value()) {
-        //     std::cerr << "Lua execution failed: "
-        //             << result.value().what() << std::endl;
-        // }
-    }catch(const std::exception& e){
-        
+    // Keep trying each frame, but log only once for this compiled expression.
+    // The shared call helper logs every failure, so gate the example's own
+    // protected call here instead.
+    sol::object target = lua["step"];
+    if (target.get_type() == sol::type::function) {
+        sol::protected_function step = target;
+        auto result = step();
+        if (!result.valid() && stepErrorLogged->isFirstTime()) {
+            sol::error err = result;
+            logError("tcxLua") << err.what();
+        }
+    } else if (target.get_type() != sol::type::lua_nil && target.get_type() != sol::type::none
+               && stepErrorLogged->isFirstTime()) {
+        logError("tcxLua") << "step: expected a Lua function";
     }
 
     auto&& _x = lua["x"];

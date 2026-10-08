@@ -166,9 +166,13 @@ endif()
 
 add_library(tc::TrussC ALIAS TrussC)
 
-# Bake the git-derived version into tc::getVersion() (tcVersion.h).
-# PUBLIC so user apps and addons see the same value.
-target_compile_definitions(TrussC PUBLIC TC_VERSION_STRING="${TC_VERSION}")
+# Only this small TU depends on the git-derived version. A changing PUBLIC
+# version string would change cache inputs for every core/app/addon TU.
+set_source_files_properties(include/tc/utils/tcVersion.cpp PROPERTIES
+    COMPILE_DEFINITIONS "TC_VERSION_STRING=\"${TC_VERSION}\"")
+# Callers (including hot-reload guests) use the library's out-of-line accessor.
+# Direct header use without CMake keeps the inline "unknown" fallback.
+target_compile_definitions(TrussC PUBLIC TC_VERSION_LINKED)
 
 # CI gate: promote uses of [[deprecated]] TrussC API to errors in the
 # framework's OWN sources (core lib TUs here; bundled examples/tests get the
@@ -677,6 +681,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/use_addon.cmake)
 # Built-in Shaders (compiled with sokol-shdc)
 # =============================================================================
 # shaders/*.glsl -> include/tc/gpu/shaders/*.glsl.h (see trussc_shaders.cmake)
+# The shared helper pins sokol-shdc and verifies its host-specific SHA-256.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/trussc_shaders.cmake)
 trussc_compile_shaders(TrussC "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")

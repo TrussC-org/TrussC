@@ -57,7 +57,8 @@ that no position past the array is read.
 4. Check that `src/tcxObjLoader.cpp` still compiles against it, and run the
    addon tests (`build_all.py --addon-tests-only`) and `example-basic`.
 5. Update this file (commit, date, version, patches) and the tinyobjloader
-   section of [LICENSES.md](LICENSES.md).
+   row of [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)
+   (`tools/check_dependencies.py` compares the two).
 
 To check which upstream commit the file matches, undo the TrussC patches
 and run in a clone of tinyobjloader: `git log --all -m --format='%H %ci'

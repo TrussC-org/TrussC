@@ -65,6 +65,7 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["drawNoLightingWithTexture"] = &trussc::Mesh::drawNoLightingWithTexture;
         t["drawWireframe"] = &trussc::Mesh::drawWireframe;
         t["markGpuDirty"] = &trussc::Mesh::markGpuDirty;
+        t["getDataRevision"] = &trussc::Mesh::getDataRevision;
         t["uploadToGpu"] = &trussc::Mesh::uploadToGpu;
         t["drawGpuPbr"] = &trussc::Mesh::drawGpuPbr;
         t["drawGpuPoints"] = &trussc::Mesh::drawGpuPoints;
@@ -121,6 +122,11 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
         t["note"] = &trussc::ChipSoundBundle::Entry::note;
         t["time"] = &trussc::ChipSoundBundle::Entry::time;
+    }
+    {
+        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
+        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
     }
     {
         sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
