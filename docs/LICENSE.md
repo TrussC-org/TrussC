@@ -78,7 +78,7 @@ These libraries are only included if you use the corresponding addon.
 | **Dear ImGui** | 1.92.9b (+ TrussC patch, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | not recorded | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
-| **libcurl** | 8.12.1 (Windows, when no system libcurl is found) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
+| **libcurl** | 8.22.0 (Windows; macOS/Linux use system libcurl) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
 | **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |
 | **Box2D** | 2.4.1 | `addons/tcxBox2d/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d |
 | **cgltf** | 1.14 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
@@ -341,7 +341,7 @@ libremidi's own code is under the BSD 2-Clause License (Copyright (c) 2017-2023,
 
 ### curl License (libcurl)
 
-libcurl is under the curl License, an MIT-style license (Copyright (c) Daniel Stenberg, and many contributors). Full text: [COPYING](https://github.com/curl/curl/blob/master/COPYING).
+libcurl is under the curl License, an MIT-style license (Copyright (c) 1996-2026 Daniel Stenberg, and many contributors). Full text: [COPYING](https://github.com/curl/curl/blob/curl-8_22_0/COPYING).
 
 ---
 
