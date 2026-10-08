@@ -591,14 +591,21 @@ int TcpClient::writeSendStep(const void* data, size_t size, bool& forWrite, int&
 
 SendResult TcpClient::enqueue(internal::TcpSendItem&& item) {
     auto ch = sendChannel();
-    if (!connected_ || !ch) return {SendError::NotRunning, 0};
+    if (!connected_ || !ch) {
+        notifyError("Not connected");
+        return {SendError::NotRunning, 0};
+    }
     std::unique_lock<std::mutex> lock(ch->mutex);
     auto room = [&] {
         size_t mark = sendAsyncBufferSize_;
         return !ch->open || mark == 0 || ch->pendingBytes < mark;
     };
     if (!room()) {
-        if (!item.waiter) return {SendError::QueueFull, 0};
+        if (!item.waiter) {
+            lock.unlock();
+            notifyError("Send queue full");
+            return {SendError::QueueFull, 0};
+        }
         if (!ch->threaded) {
             AliveToken alive = alive_;
             while (!room()) {
@@ -611,7 +618,11 @@ SendResult TcpClient::enqueue(internal::TcpSendItem&& item) {
             ch->room.wait(lock, room);
         }
     }
-    if (!ch->open) return {SendError::Disconnected, 0};
+    if (!ch->open) {
+        lock.unlock();
+        notifyError("Client disconnected");
+        return {SendError::Disconnected, 0};
+    }
     item.id = ++nextSendId_;
     const uint64_t id = item.id;
     ch->queue.push_back(std::move(item));
