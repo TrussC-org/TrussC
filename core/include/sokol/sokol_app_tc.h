@@ -3601,8 +3601,12 @@ static bool _sapp_tc_create_main_window(void) {
         // Quit, an AppleScript quit) carries no session reason: app-quit, so
         // the main window's windowShouldClose: does not fill in window-close.
         // IfEmpty keeps a reason an earlier exit request already recorded.
+        // A real logout sends the reason as an event attribute, not a
+        // parameter (seen on macOS); read the attribute first.
         NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
-        const AEEventID why = [[event paramDescriptorForKeyword:0x7768793f] enumCodeValue];
+        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+        const AEEventID why = [reason enumCodeValue];
         switch (why) {
             case 0x6c6f676f: // kAELogOut ('logo')
             case 0x726c676f: // kAEReallyLogOut ('rlgo')
