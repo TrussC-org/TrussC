@@ -16,6 +16,41 @@ void check(const char* name, bool ok) {
 using Block = std::array<uint8_t, 16>;
 using Pixel = std::array<uint8_t, 4>;
 
+void snappyRoundTripTests() {
+    using namespace tcx::hap;
+    // Repeated BC1 blocks ensure HAP uses Snappy instead of storing raw data.
+    const std::array<uint8_t, 8> block = {0x00, 0xf8, 0x00, 0x00, 0, 0, 0, 0};
+    std::vector<uint8_t> texture(64 * 64 / 2);
+    for (size_t i = 0; i < texture.size(); ++i) texture[i] = block[i % block.size()];
+
+    for (unsigned int chunks : {1u, 4u}) {
+        const void* input = texture.data();
+        unsigned long inputBytes = static_cast<unsigned long>(texture.size());
+        unsigned int format = HapTextureFormat_RGB_DXT1;
+        unsigned int compressor = HapCompressorSnappy;
+        std::vector<uint8_t> encoded(HapMaxEncodedLength(1, &inputBytes, &format, &chunks));
+        unsigned long encodedBytes = 0;
+        const unsigned int status = HapEncode(1, &input, &inputBytes, &format,
+            &compressor, &chunks, encoded.data(), static_cast<unsigned long>(encoded.size()),
+            &encodedBytes);
+        check("Snappy: HAP encoding succeeds", status == HapResult_No_Error);
+        if (status != HapResult_No_Error) continue;
+        check("Snappy: HAP frame is compressed", encodedBytes < inputBytes);
+
+        HapDecoder decoder;
+        HapDecodedFrame decoded;
+        check("Snappy: HAP allocating decode round trip",
+              decoder.decode(encoded.data(), encodedBytes, 64, 64, decoded) &&
+              decoded.format == HapFormat::DXT1 && decoded.data == texture);
+        std::vector<uint8_t> output(texture.size());
+        HapFormat outputFormat = HapFormat::Unknown;
+        check("Snappy: HAP preallocated decode round trip",
+              decoder.decodeToBuffer(encoded.data(), encodedBytes, 64, 64,
+                  output.data(), output.size(), outputFormat) &&
+              outputFormat == HapFormat::DXT1 && output == texture);
+    }
+}
+
 Block colorBlock(int blockIndex, bool bc3) {
     Block block{};
     const uint16_t endpoints[] = {0xf800, 0x07e0, 0x001f, 0xffff};
@@ -195,6 +230,7 @@ void drawTests() {
 } // namespace
 
 int runVideoTests() {
+    snappyRoundTripTests();
     blockTests();
     unalignedBlockTests();
     drawTests();
