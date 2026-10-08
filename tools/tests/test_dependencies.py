@@ -56,7 +56,7 @@ class DependencyTests(unittest.TestCase):
     def test_release_tag_and_archive_url_mismatches(self):
         cases = [
             ("mbedTLS", "addons/tcxTls/CMakeLists.txt", "v3.6.7", "v3.6.8"),
-            ("libcurl", "addons/tcxCurl/CMakeLists.txt", "8_12_1", "8_13_0"),
+            ("libcurl", "addons/tcxCurl/CMakeLists.txt", "8_22_0", "8_23_0"),
             ("libremidi", "addons/tcxMidi/CMakeLists.txt", "v5.4.3", "v5.4.4"),
         ]
         for name, path, old, new in cases:
@@ -281,7 +281,7 @@ fetchcontent_declare(real
             license_path.write_text(inventory)
             for path, old, new in [
                 ("addons/tcxTls/CMakeLists.txt", "v3.6.7", "v3.6.8"),
-                ("addons/tcxCurl/CMakeLists.txt", "8_12_1", "8_13_0"),
+                ("addons/tcxCurl/CMakeLists.txt", "8_22_0", "8_23_0"),
                 ("core/include/stb/README.md", "6e9f34d", "0000000"),
             ]:
                 target = root / path
