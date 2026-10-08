@@ -2955,6 +2955,7 @@ namespace internal {
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
                 // Build TouchEventArgs from sokol touchpoints. The mapper below
                 // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
+                static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
                 TouchEventArgs touchArgs;
                 internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
