@@ -79,7 +79,7 @@ void scenario() {
         {
             int errors = 0;
             auto err = client.onError.listen([&](TcpErrorEventArgs& e) {
-                check("closed-channel rejection message", e.message == "Client disconnected" && e.errorCode == 0);
+                check("closed-channel rejection message", e.message == "Connection closed" && e.errorCode == 0);
                 client.getSendAsyncPendingBytes();
                 ++errors;
             });

@@ -620,7 +620,7 @@ SendResult TcpClient::enqueue(internal::TcpSendItem&& item) {
     }
     if (!ch->open) {
         lock.unlock();
-        notifyError("Client disconnected");
+        notifyError("Connection closed");
         return {SendError::Disconnected, 0};
     }
     item.id = ++nextSendId_;
