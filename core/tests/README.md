@@ -77,6 +77,7 @@ alone, exactly as before.
    in **every** test's process of `allCoreTests`. No TrussC calls (Logger,
    clock, Window, MCP, sockets, threads) at static init or exit; put such an
    object in the entry as a function-local `static` (see `onceGate/`).
+4. Helpers shared through `core/tests/common/` headers go in namespace `tcCoreTest`.
 
 Use an **`own-binary`** marker file (one line saying why) instead when the
 test cannot share an executable: it replaces or interposes a library
