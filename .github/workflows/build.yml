@@ -634,6 +634,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
 
+      - name: core test symbol checker regression checks
+        if: always()
+        run: python3 tools/tests/test_core_test_symbols.py -v
+
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
