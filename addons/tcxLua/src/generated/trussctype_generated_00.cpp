@@ -99,18 +99,6 @@ void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua) {
         t["callEveryCatchUp"] = &trussc::Node::callEveryCatchUp;
         t["cancelTimer"] = &trussc::Node::cancelTimer;
         t["cancelAllTimers"] = &trussc::Node::cancelAllTimers;
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
-        t["callAfterAsync"] = &trussc::Node::callAfterAsync;
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
-        t["callEveryAsync"] = &trussc::Node::callEveryAsync;
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
-        t["cancelAsyncTimer"] = &trussc::Node::cancelAsyncTimer;
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
-        t["cancelAllAsyncTimers"] = &trussc::Node::cancelAllAsyncTimers;
-#endif
     }
     {
         sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener",
@@ -135,6 +123,13 @@ void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua) {
         t["width"] = &trussc::ResizeEventArgs::width;
         t["height"] = &trussc::ResizeEventArgs::height;
     }
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
+
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

@@ -29,6 +29,7 @@
 #include "sokol/util/sokol_memtrack.h"
 
 // Standard libraries
+#include <cstdlib>
 #include <cstdint>
 #include <cmath>
 #include <string>
@@ -44,6 +45,7 @@
 
 // Headless mode state (must be included early for graphics skip checks)
 #include "tc/app/tcHeadlessState.h"
+#include "tc/app/tcGpuFrame.h"
 
 // Platform-specific headers for memory usage
 #if defined(__APPLE__)
@@ -97,6 +99,7 @@
 
 // TrussC event system
 #include "tc/events/tcCoreEvents.h"
+#include "tc/events/tcTouchMouse.h"  // internal::TouchMouseMapper (touch-as-mouse)
 
 // TrussC utilities
 #include "tc/utils/tcFileIO.h"   // fs::path boundary helpers (before all path consumers)
@@ -169,6 +172,9 @@ enum class TextureWrap {
 // a Windows hot reload guest DLL would get its own copy of an inline variable
 // (docs/ARCHITECTURE.md, "One instance per process").
 namespace internal {
+    // Shared frame-end tail for drawn and non-drawing ticks (#332).
+    void endGpuFrame();
+
     // Bitmap font GPU state.
     struct BitmapFontAtlas {
         sg_image   texture = {};
@@ -260,6 +266,10 @@ namespace internal {
     };
     SglBudget& sglBudget();
 
+    // Separate report gates for screen and FBO contexts, shared across modules.
+    OnceGate& sglStackErrorReportGate(bool inFbo);
+    void reportSglStackErrors(sgl_error_t err, bool inFbo);
+
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
     // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan
@@ -298,12 +308,14 @@ namespace internal {
         double drawAccumulator = 0.0;
     };
     MainLoopState& mainLoop();
+    int& appExitCode();  // shared by the host and hot reload guests
 
     // Mouse position/button state + keyboard state moved to WindowContext
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
 
     // Touch-as-mouse mapping
-    // Default ON everywhere — the first touch synthesizes mouse press/drag, so
+    // Default ON everywhere — the first finger down synthesizes mouse press/
+    // drag/release (other fingers don't; tc/events/tcTouchMouse.h), so
     // mouse-based code (incl. the web build on iPad/phones) just works. Apps that
     // want raw touch separate from mouse call setTouchAsMouse(false) in setup().
     // Defined in tcGlobal.cpp: app code sets it, the host's event callback reads it.
@@ -341,6 +353,11 @@ namespace internal {
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
+    // Closes the secondary windows whose close() request is still pending
+    // (defined in tc/app/tcWindow.h). The app shutdown calls it after the
+    // main App's exit(): the run loop has ended, so no backend safe point
+    // follows.
+    void closeRequestedWindowsAtShutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -2038,7 +2055,8 @@ inline void requestExitApp() {
 
 // Immediately exit the application (cannot be cancelled)
 // Use this for forced exit, e.g., after user confirms exit in a dialog
-inline void exitApp() {
+inline void exitApp(int code = 0) {
+    internal::appExitCode() = code;
     sapp_quit();
 }
 
@@ -2121,26 +2139,27 @@ namespace internal {
 // captures on Linux when called inside draw().
 //
 // Returns true if the destination was prepared and the capture was queued;
-// false if the parent directory could not be created (e.g. no write
+// false if the destination is inside the app bundle (with an Error naming
+// getUserDataPath()) or the parent directory could not be created (e.g. no write
 // permission). The rare failure of the deferred write itself (permission/disk
 // after the directory check) is reported via logError("Screenshot").
 // Relative paths resolve against the data path. The format comes from the
-// extension (case-insensitive): png/jpg/bmp; macOS also writes tiff/gif,
-// Windows also tga, and iOS only png/jpg.
+// extension (case-insensitive): png/jpg/jpeg/bmp; macOS also writes tiff/tif/gif,
+// Windows also tga. Unsupported or missing extensions append .png and warn
+// with the actual destination and supported formats.
 //
-// Web: not implemented (no canvas readback). Always returns false (nothing is
-// queued or written) and warns once, pointing to the browser's own screenshot
-// feature.
-TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const std::filesystem::path& path) {
-#ifdef __EMSCRIPTEN__
-    // Web capture is not implemented: nothing reads the canvas back (see
-    // platform/web/tcPlatform_web.cpp). So fail up front instead of queuing a
-    // capture that would never write a file while this call reported success.
-    // The web captureWindowToFile() stub returns false and warns once.
-    return internal::captureWindowToFile(path);
-#else
-    // Resolve relative paths up front so the deferred worker gets an absolute one.
-    std::filesystem::path resolved = getDataPath(path);   // absolute passes through
+// Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
+// name gets a timestamped default. Returns true when queued; later failures
+// (including a tainted canvas) are logged. The browser may ask for permission
+// to allow multiple downloads.
+inline bool saveScreenshot(const std::filesystem::path& path) {
+    // Resolve native destinations or web download names before queuing.
+    #ifdef __EMSCRIPTEN__
+    std::filesystem::path resolved = internal::resolveScreenshotDownloadName(path);
+    #else
+    std::filesystem::path resolved = internal::resolveScreenshotPath(path);
+    // Inside the app bundle: refused, with an Error naming getUserDataPath()
+    if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
 
     // Auto-create the parent directory (mirrors VideoRecorder). This is the
     // failure users want to catch synchronously (missing/unwritable folder).
@@ -2154,6 +2173,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
             return false;
         }
     }
+#endif
 
     internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
     // Guarantee a present() (and thus the afterFrame drain) even when paused.
@@ -2164,7 +2184,6 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline bool saveScreenshot(const
         redraw();
     }
     return true;
-#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -2373,6 +2392,7 @@ namespace internal {
     // init-time failures sokol reports (e.g. no X display on Linux) and
     // setup-time log lines land in the file too.
     inline void openEnvLogFile() {
+        installCrashHandler();
         #ifndef __EMSCRIPTEN__
         if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
             if (envLog[0] != '\0' && !setLogFile(envLog)) {
@@ -2382,7 +2402,11 @@ namespace internal {
         #endif
     }
 
+    // Host launcher state; survives cleanup so runApp can report a failed start.
+    bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
+
     inline void _setup_cb() {
+        CrashPhaseScope crashPhase("setup");
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
         // key off this. (sokol's init_cb runs on the main thread.)
@@ -2391,10 +2415,11 @@ namespace internal {
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
         setup();
+        appSetupCalled() = true;
 
-        // The Apple data path root is chosen lazily on first getDataPath() use
-        // (resolveDataPathRootOnce in tcUtils.h) — probing here is too early to
-        // see a valid executable path on iOS.
+        // App's pre-setup hook resolves the data path root right before its
+        // setup() runs. getDataPath() also probes on an earlier call; probing
+        // here is too early to see a valid executable path on iOS.
 
         // Start console input thread (enabled by default)
         // To disable, call console::stop() in setup()
@@ -2516,6 +2541,7 @@ namespace internal {
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
         if (appUpdateFunc) {
+            CrashPhaseScope crashPhase("update");
             EntryStackGuard guard(AppEntry::Update);
             appUpdateFunc();
         }
@@ -2652,6 +2678,8 @@ namespace internal {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
         frameReentryGuard = true;
+        crashFrame(sapp_frame_count());
+        CrashPhaseScope crashPhase("frame");
 
         // Frame time, queued work, independent updates and the draw decision.
         bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
@@ -2674,7 +2702,10 @@ namespace internal {
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
 
-            if (appDrawFunc) appDrawFunc();
+            {
+                CrashPhaseScope drawPhase("draw");
+                if (appDrawFunc) appDrawFunc();
+            }
 
             // Reset shader stack if any shaders are still pushed
             internal::resetShaderStack();
@@ -2695,6 +2726,11 @@ namespace internal {
                 loop.redrawCount--;
             }
         } else {
+            // Offscreen passes/uploads also need a frame boundary, including
+            // work recorded by event handlers before this tick (#332).
+            if (tc_internal_gpu_frame_has_work()) {
+                internal::endGpuFrame();
+            }
             // Skip Present when not drawing (prevent double-buffer flickering)
             sapp_skip_present();
         }
@@ -2707,6 +2743,7 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        CrashPhaseScope crashPhase("cleanup");
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2728,6 +2765,11 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+
+        #if defined(__APPLE__) && TARGET_OS_OSX
+        // AppKit's terminate: would exit(0) right after this.
+        if (appExitCode() != 0) std::exit(appExitCode());
+        #endif
     }
 
     // The name an event entry point (#349) gives in its warning, from the
@@ -2750,12 +2792,20 @@ namespace internal {
             case SAPP_EVENTTYPE_RESIZED:           return "windowResized()";
             case SAPP_EVENTTYPE_FILES_DROPPED:     return "filesDropped()";
             case SAPP_EVENTTYPE_CLIPBOARD_PASTED:  return "the clipboardPasted event";
+            case SAPP_EVENTTYPE_TC_DEVICE_LOST:    return "the deviceLost event";
             case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
             default:                               return "a rawEvent listener";
         }
     }
 
     inline void _event_cb(const sapp_event* ev) {
+        CrashPhaseScope crashPhase("event dispatch");
+        if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
+            crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
+                       static_cast<int>(ev->mouse_y),
+                       ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP
+                           ? static_cast<int>(ev->key_code) : static_cast<int>(ev->mouse_button));
+        }
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they
         // found them.
@@ -2903,9 +2953,11 @@ namespace internal {
             case SAPP_EVENTTYPE_TOUCHES_MOVED:
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
-                // Build TouchEventArgs from sokol touchpoints
+                // Build TouchEventArgs from sokol touchpoints. The mapper below
+                // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
                 static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
                 TouchEventArgs touchArgs;
+                internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
                     touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
@@ -2914,60 +2966,74 @@ namespace internal {
                     touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
                     touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
                     touchArgs.touches[i].changed = ev->touches[i].changed;
+                    samples[i].id = ev->touches[i].identifier;
+                    samples[i].x = touchArgs.touches[i].x;
+                    samples[i].y = touchArgs.touches[i].y;
+                    samples[i].changed = ev->touches[i].changed;
                 }
 
                 // Fire touch events
+                internal::TouchPhase phase;
                 if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                    phase = internal::TouchPhase::Began;
                     events().touchPressed.notify(touchArgs);
                 } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                    phase = internal::TouchPhase::Moved;
                     events().touchMoved.notify(touchArgs);
                 } else {
                     touchArgs.cancelled = (ev->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED);
+                    phase = touchArgs.cancelled ? internal::TouchPhase::Cancelled
+                                                : internal::TouchPhase::Ended;
                     events().touchReleased.notify(touchArgs);
                 }
 
-                // Touch-as-mouse: map first touch to mouse events
-                if (touchAsMouse() && touchArgs.numTouches > 0) {
-                    float tx = touchArgs.touches[0].x;
-                    float ty = touchArgs.touches[0].y;
+                // Touch-as-mouse: only the primary touch (the first finger
+                // down) drives the mouse; see tc/events/tcTouchMouse.h.
+                auto& mapper = internal::touchMouseMapper();
+                if (!touchAsMouse()) {
+                    mapper.reset();
+                    break;
+                }
+                internal::TouchMouseAction action = mapper.update(phase, samples, touchArgs.numTouches);
+                float tx = action.x;
+                float ty = action.y;
 
-                    if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
-                        currentMouseButton = 0;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = 0;
-                        internal::currentWindowContext().mousePressed = true;
+                if (action.kind == internal::TouchMouseAction::Kind::Press) {
+                    currentMouseButton = 0;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = 0;
+                    internal::currentWindowContext().mousePressed = true;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mousePressed.notify(margs);
-                        if (appMousePressedFunc) appMousePressedFunc(margs);
-                    } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
-                        float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mousePressed.notify(margs);
+                    if (appMousePressedFunc) appMousePressedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
+                    float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
 
-                        internal::MouseEventRaw margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
-                        events().mouseDragged.notify(dragArgs);
-                        margs.consumed = dragArgs.consumed;
-                        if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
-                    } else {
-                        currentMouseButton = -1;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = -1;
-                        internal::currentWindowContext().mousePressed = false;
+                    internal::MouseEventRaw margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
+                    events().mouseDragged.notify(dragArgs);
+                    margs.consumed = dragArgs.consumed;
+                    if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
+                    currentMouseButton = -1;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = -1;
+                    internal::currentWindowContext().mousePressed = false;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mouseReleased.notify(margs);
-                        if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
-                    }
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mouseReleased.notify(margs);
+                    if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
                 }
                 break;
             }
@@ -3009,6 +3075,17 @@ namespace internal {
                 events().clipboardPasted.notify(args);
                 break;
             }
+            case SAPP_EVENTTYPE_TC_DEVICE_LOST: {
+                DeviceLostEventArgs args;
+                args.reason = ev->device_lost_reason;
+                events().deviceLost.notify(args);
+                if (!args.cancel) {
+                    logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x"
+                        << std::hex << ev->device_lost_reason << "; exiting";
+                    exitApp(1);
+                }
+                break;
+            }
             case SAPP_EVENTTYPE_QUIT_REQUESTED: {
                 // Notify exitRequested event - listeners can cancel by setting args.cancel = true
                 ExitRequestEventArgs args;
@@ -3032,6 +3109,8 @@ namespace internal {
 // Used by runApp() on desktop and by sokol_main() on Android.
 template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
+    internal::appExitCode() = 0;
+
     // Set pixel perfect mode
     internal::pixelPerfectMode() = settings.pixelPerfect;
 
@@ -3070,11 +3149,14 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         if (app) {
             events().exit.notify();
             app->exit();
-            app->cleanup();
+            // close() requests made so far (e.g. from exit()) land here,
+            // before the main App's cleanup().
+            internal::closeRequestedWindowsAtShutdown();
             // The audio device is still running (it stops in _cleanup_cb, so
             // exit() can use audio): detach the App's audio hooks and wait
-            // for a callback in flight before the App goes (#256).
+            // for a callback in flight before cleanup() frees audio state (#698).
             internal::detachAppAudio(*app);
+            app->cleanup();
             app.reset();
         }
     };
@@ -3230,8 +3312,14 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #ifdef _WIN32
     internal::ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
 #endif
+    internal::appSetupCalled() = false;
     sapp_run(&desc);
+#ifdef __EMSCRIPTEN__
+    // The browser owns the asynchronous loop; returning is not app shutdown.
     return 0;
+#else
+    return internal::appSetupCalled() ? internal::appExitCode() : 1;
+#endif
 }
 #endif
 

@@ -5,8 +5,8 @@
 // These expand to `[[clang::annotate("tc:...")]]` under Clang, which the
 // reference structure generator (docs/reference/structure.js) reads back from
 // the AST to enrich a symbol with information that can't be derived from its
-// signature: which platforms it exists on, and how a template should be
-// instantiated for the Lua binding. (Hiding an internal-but-public symbol is
+// signature: which platforms it exists on, how a template should be
+// instantiated for the Lua binding, and whether it is exposed to Lua at all. (Hiding an internal-but-public symbol is
 // done doc-side with `hide = true` in api-reference.toml — no source macro.)
 //
 // Under non-Clang compilers (MSVC, GCC) they expand to NOTHING — pure no-ops
@@ -17,6 +17,7 @@
 //
 //     TC_PLATFORMS("macos,windows,linux") void grabScreen();   // desktop only
 //     TC_LUA_BIND("float,Vec2,Vec3,Color") class Tween;        // bind these T
+//     TC_LUA_SKIP void runOnWorker(std::function<void()> fn);  // not in Lua
 //
 // Note: the annotation STRING is not emitted into Clang's JSON AST, so the
 // generator recovers it from the source via each AnnotateAttr's source range.
@@ -35,3 +36,8 @@
 
 // Lua: instantiate + bind this template at the given comma-separated types.
 #define TC_LUA_BIND(types) TC_ANNOTATE("tc:lua_bind:" types)
+
+// Lua: do not expose this declaration to Lua. The Lua binding generator and the
+// sketch reference skip it. Use it for API that is unsafe to call from Lua, such
+// as a callback that runs on a thread other than the main thread.
+#define TC_LUA_SKIP TC_ANNOTATE("tc:lua_skip")

@@ -12,6 +12,8 @@
 #include <chrono>
 #include <memory>
 #include <filesystem>
+#include <atomic>
+#include <mutex>
 #include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
 #include "../sound/tcSound.h"
 
@@ -39,16 +41,19 @@ namespace internal {
     //
     // Its compile-time default is "data", or "../../../data" on Apple. On Apple
     // the true root differs by bundle layout and is chosen at runtime (see
-    // resolveDataPathRootOnce): macOS keeps data in bin/data/ reached via
-    // ../../../ from Contents/MacOS/, while iOS uses a FLAT bundle with data/
+    // resolveDataPathRootOnce): macOS releases use Contents/Resources/data,
+    // development uses bin/data/ reached via ../../../ from Contents/MacOS/,
+    // while iOS uses a FLAT bundle with data/
     // right next to the executable. Existence, not a preprocessor macro, is the
     // source of truth (TARGET_OS_* proved unreliable in the iOS build, and the
     // runtime probe also runs too early in _setup_cb to see a valid executable
-    // path — so it happens lazily on first use).
+    // path — so it happens right before the App's setup(), or on the first
+    // getDataPath() call if that comes earlier, from any thread).
     struct DataPathState {
         fs::path root;
-        bool userSet = false;  // user called setDataPathRoot()
-        bool probed = false;   // lazy Apple probe done
+        bool userSet = false;            // user called setDataPathRoot()
+        std::atomic<bool> probed{false}; // root final (Apple probe done or skipped)
+        std::mutex probeMutex;           // guards the probe and setDataPathRoot()
     };
     DataPathState& dataPathState();
 }
@@ -56,69 +61,172 @@ namespace internal {
 // Set the data path root
 // If relative, resolved relative to executable directory
 // If absolute, used as-is (fs::path::is_absolute — handles "C:/..." on Windows too)
+// Call it before starting threads that load files (e.g. in setup()): loaders
+// read the root without a lock.
 inline void setDataPathRoot(const fs::path& path) {
     auto& state = internal::dataPathState();
+    std::lock_guard<std::mutex> lock(state.probeMutex);
     state.root = path;
     state.userSet = true;  // explicit choice wins over the probe
 }
 
 namespace internal {
-// One-shot: pick the Apple bundle layout by probing which data/ exists next to
-// the executable. Skipped if the user set the root explicitly. No-op elsewhere.
-inline void resolveDataPathRootOnce() {
-#ifdef __APPLE__
-    auto& state = dataPathState();
-    if (state.probed || state.userSet) return;
-    fs::path exe = getExecutableDir();
+// Pick the Apple bundle layout for exe: the flat data/ next to the
+// executable (iOS, distributed), then the release bundle's Resources/data,
+// then the development bin/data. One folder is chosen, never a fallback per
+// file. Skipped if the user set the root explicitly. Kept platform-independent
+// so tests can run it on temporary bundle layouts; resolveDataPathRootOnce()
+// calls it under probeMutex.
+inline void resolveAppleDataPathRootOnce(DataPathState& state, const fs::path& exe) {
+    if (state.probed.load(std::memory_order_acquire) || state.userSet) return;
     // Don't latch until the executable path is actually available — early on
     // iOS it can be empty/"/", which would resolve the checks against the CWD.
+    // The next call retries.
     if (exe.empty() || exe == fs::path("/")) return;
-    state.probed = true;
     std::error_code ec;
-    // Check the flat-bundle layout FIRST (unambiguous on iOS: data/ sits right
-    // next to the executable). macOS dev has no Contents/MacOS/data, so it
-    // correctly falls through to the ../../../data (bin/data) layout.
-    if (std::filesystem::exists(exe / "data", ec)) {
+    // Release data is covered by the bundle signature; normal macOS builds
+    // only have bin/data.
+    if (fs::is_directory(exe / "data", ec)) {
         state.root = "data";            // iOS flat bundle / distributed
-    } else if (std::filesystem::exists(exe / "../../../data", ec)) {
+    } else if (fs::is_directory(exe / "../Resources/data", ec)) {
+        state.root = "../Resources/data"; // macOS release bundle
+    } else if (fs::is_directory(exe / "../../../data", ec)) {
         state.root = "../../../data";   // macOS dev / bin layout
     }
     // else: keep the compile-time default
+    state.probed.store(true, std::memory_order_release);
+}
+
+// One-shot: pick the Apple bundle layout (above). Skipped if the user set the
+// root explicitly. Elsewhere it only sets the flag.
+// Safe to call from any thread: the probe runs once, under probeMutex; later
+// calls only read the atomic flag.
+inline void resolveDataPathRootOnce() {
+    auto& state = dataPathState();
+    if (state.probed.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lock(state.probeMutex);
+    if (state.probed.load(std::memory_order_relaxed)) return;
+#ifndef __APPLE__
+    state.probed.store(true, std::memory_order_release);  // nothing to probe
+#else
+    if (state.userSet) {
+        state.probed.store(true, std::memory_order_release);
+        return;
+    }
+    resolveAppleDataPathRootOnce(state, getExecutableDir());
 #endif
+}
+
+// The root after resolveDataPathRootOnce(). Until the probe has latched (the
+// executable path was not available yet) it is read under probeMutex, since
+// another thread may be probing.
+inline fs::path currentDataPathRoot() {
+    resolveDataPathRootOnce();
+    auto& state = dataPathState();
+    if (state.probed.load(std::memory_order_acquire)) return state.root;
+    std::lock_guard<std::mutex> lock(state.probeMutex);
+    return state.root;
 }
 } // namespace internal
 
 // Get the data path root
 inline fs::path getDataPathRoot() {
-    internal::resolveDataPathRootOnce();
-    return internal::dataPathState().root;
+    return internal::currentDataPathRoot();
 }
 
 // Get data path for a filename
 // - If filename is absolute, return as-is (like oF)
 // - Otherwise, resolved relative to executable directory + dataPathRoot
+// - Normalize only that base; preserve filename components (including symlink/..).
+// Safe to call from any thread (e.g. Pixels::load on a worker).
 inline fs::path getDataPath(const fs::path& filename) {
-    internal::resolveDataPathRootOnce();
     if (!filename.empty() && filename.is_absolute()) {
         return filename;
     }
 
-    const fs::path& root = internal::dataPathState().root;
+    const fs::path root = internal::currentDataPathRoot();
     if (root.is_absolute()) {
-        return root / filename;
+        return root.lexically_normal() / filename;
     } else {
         // Relative root: resolve relative to executable directory
-        return getExecutableDir() / root / filename;
+        return (getExecutableDir() / root).lexically_normal() / filename;
     }
 }
 
 // For macOS bundle distribution: Set data path to Resources folder
 // Will reference xxx.app/Contents/Resources/data/
 // No-op on non-macOS platforms
+// Like setDataPathRoot(), call it before starting threads that load files.
 TC_PLATFORMS("macos,ios") inline void setDataPathToResources() {
     #ifdef __APPLE__
     setDataPathRoot("../Resources/data/");
     #endif
+}
+
+// ---------------------------------------------------------------------------
+// User data and temp paths (where the app writes)
+// ---------------------------------------------------------------------------
+// getDataPath() is the bundled data the app reads. Files the app writes and
+// keeps go to getUserDataPath(), temporary files to getTempPath(). Both are
+// the OS per-user folders, in development and in a packaged app alike:
+//
+//            getUserDataPath()                      getTempPath()
+//   macOS    ~/Library/Application Support/<id>/    $TMPDIR/<id>/
+//   Windows  %LOCALAPPDATA%\<app>\                  %TEMP%\<app>\
+//   Linux    $XDG_DATA_HOME/<app>/                  $TMPDIR (or /tmp) /<app>/
+//            (default ~/.local/share/<app>/)
+//   iOS      the app's Library/Application Support/ the app's tmp/
+//   Android  the app's internal files folder        the app's cache folder
+//   Web      /userdata/ (in memory, not kept)       /tmp/ (in memory)
+//
+// <id> is the bundle id; <app> is the executable name. The folder is created
+// on first use. A write whose path resolves inside the app bundle (macOS /
+// iOS) is refused by every core writer, with an Error naming
+// getUserDataPath().
+
+namespace internal {
+    // Defined in tcGlobal.cpp: one state per process, also for a hot reload
+    // guest. Both return an absolute folder and create it on first use.
+    fs::path userDataPathRoot();
+    fs::path tempPathRoot();
+    void setUserDataPathRootState(const fs::path& path);
+
+    // Called by the core writers with the path they were given and the path
+    // it resolved to, before anything is created. Returns false, after one
+    // Error (module `module`) naming the file and getUserDataPath(), when
+    // `resolved` is inside the app bundle. On macOS / iOS, the first relative
+    // write into the data folder outside a bundle logs one Notice per process.
+    bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+                          const char* module);
+
+    // Tests: treat `bundle` as the running app bundle (empty: the platform's
+    // own again), and forget the cached default folders (the next call reads
+    // the environment again).
+    void setAppBundlePathForTests(const fs::path& bundle);
+    void resetUserDataPathForTests();
+}
+
+// Folder for files the app writes and keeps (settings, presets, logs,
+// recordings): the OS per-user app folder (see the table above), or the root
+// set with setUserDataPathRoot(). An absolute `path` is returned as is.
+inline fs::path getUserDataPath(const fs::path& path = "") {
+    if (!path.empty() && path.is_absolute()) return path;
+    return internal::userDataPathRoot() / path;
+}
+
+// Folder for temporary files: the OS may delete them at any time. An
+// absolute `path` is returned as is.
+inline fs::path getTempPath(const fs::path& path = "") {
+    if (!path.empty() && path.is_absolute()) return path;
+    return internal::tempPathRoot() / path;
+}
+
+// Fix the folder getUserDataPath() returns (installations, several instances,
+// tests). Mirrors setDataPathRoot(): a relative root is resolved against the
+// executable directory, an absolute one is used as is. A root inside the app
+// bundle still gets its writes refused.
+inline void setUserDataPathRoot(const fs::path& path) {
+    internal::setUserDataPathRootState(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,8 +508,10 @@ inline bool isStringInString(const std::string& haystack, const std::string& nee
 }
 
 /// Count occurrences of needle in haystack
+/// Matches are nonoverlapping; an empty needle matches nothing.
 /// Same as oF's ofStringTimesInString
 inline std::size_t stringTimesInString(const std::string& haystack, const std::string& needle) {
+    if (needle.empty()) return 0;
     const size_t step = needle.size();
     size_t count = 0;
     size_t pos = 0;
@@ -471,19 +581,24 @@ inline std::string joinString(const std::vector<std::string>& stringElements, co
 }
 
 /// Replace occurrences in string (in-place)
+/// Replaces left to right without overlapping or searching the replacement.
+/// An empty search string leaves input unchanged.
 /// Same as oF's ofStringReplace
 inline void stringReplace(std::string& input, const std::string& searchStr, const std::string& replaceStr) {
+    if (searchStr.empty()) return;
     auto pos = input.find(searchStr);
+    if (pos == std::string::npos) return;
+    std::string result;
+    result.reserve(input.size());
+    std::size_t start = 0;
     while (pos != std::string::npos) {
-        input.replace(pos, searchStr.size(), replaceStr);
-        pos += replaceStr.size();
-        std::string nextfind(input.begin() + pos, input.end());
-        auto nextpos = nextfind.find(searchStr);
-        if (nextpos == std::string::npos) {
-            break;
-        }
-        pos += nextpos;
+        result.append(input, start, pos - start);
+        result += replaceStr;
+        start = pos + searchStr.size();
+        pos = input.find(searchStr, start);
     }
+    result.append(input, start, std::string::npos);
+    input.swap(result);
 }
 
 /// Remove leading/trailing whitespace from string

@@ -41,7 +41,12 @@ model data is validated before it is read:
 - a node chain 20000 deep loads (the hierarchy is walked without recursion,
   each world transform computed once from its parent's). A node cycle is
   refused by cgltf_validate(), and a scene that lists a node twice by the
-  loader.
+  loader;
+- Japanese-named glTF files in a Japanese-named folder load an external
+  PNG, with either a data URI buffer or a Japanese-named external `.bin`.
+
+Texture cases use sokol's dummy graphics backend (no window or GPU). On
+Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.
 
 Every failed load logs a warning and leaves the model empty.
 

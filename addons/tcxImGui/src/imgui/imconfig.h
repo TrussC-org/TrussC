@@ -109,7 +109,7 @@ struct ImGuiTcItemValue
     const void*     Data;           // the caller's variable (written only by ImGuiTcHook_ItemEntry)
     int             Components;
     int             Flags;
-    unsigned int    EditCountAtEntry;   // an edit of a part (a component, ##X in ColorEdit) counts as an edit of the whole
+    unsigned int    EditCountAtEntry;   // Text uses the edit counter; fixed-size values use entry/exit snapshots
     bool            Injected;       // ImGuiTcHook_ItemEntry wrote a queued value this frame: the widget returns true
     ~ImGuiTcItemValue() { if (Ctx) ImGuiTcHook_ItemValue(this); }
 };

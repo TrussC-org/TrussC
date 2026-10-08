@@ -165,8 +165,11 @@ jobs:
       - name: Enable compiler launcher
         shell: bash
         run: |
-          echo "CMAKE_C_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=${{ matrix.launcher }}" >> "$GITHUB_ENV"
+          launcher="${{ matrix.launcher }}"
+          # Include Objective-C++: the macOS platform .mm files need caching too.
+          for lang in C CXX OBJC OBJCXX; do
+            echo "CMAKE_${lang}_COMPILER_LAUNCHER=$launcher" >> "$GITHUB_ENV"
+          done
           # Hash the compiler by content, not mtime: a fresh runner VM installs
           # the same compiler at a different mtime, which otherwise invalidates
           # every restored ccache entry (macOS hit this: 8% hits despite a warm
@@ -212,7 +215,15 @@ jobs:
       # binary under a static key so runs stop re-downloading it (this also
       # pins the tool — bump the key to pick up a newer upstream build).
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -246,6 +257,13 @@ jobs:
             echo "Searching for trusscli.exe..."
             find . -name trusscli.exe
           fi
+
+      # trusscli clean must refuse a folder that is not a TrussC project (#459).
+      # Runs against the trusscli just built from this commit.
+      - name: trusscli clean regression tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 tools/tests/test_trusscli_clean.py -v
 
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
@@ -348,7 +366,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -436,7 +462,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -492,7 +526,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -551,6 +593,11 @@ jobs:
   # NSLog in core/include/tc/** and core/platform/**, so core's diagnostics go
   # through the Logger (log file, onLog, platform log). Textual too; the
   # Logger's own sinks carry a `log-check: allow` marker.
+  # And the third-party list check (#407): every row of docs/LICENSE.md
+  # "Third-Party Libraries" matches the build (FetchContent GIT_TAG / URL,
+  # vendored version lines, provenance commits), every FetchContent_Declare
+  # has a row, every listed path exists. Reads files only, no network. The
+  # weekly upstream check is upstream-check.yml.
   # Cheap and independent of the build — always runs (not gated).
   header-state-check:
     timeout-minutes: 5
@@ -564,6 +611,32 @@ jobs:
       - name: core logging check (no printf / cerr / cout / NSLog)
         if: always()
         run: python3 tools/check_core_logging.py
+
+      - name: third-party list check (docs/LICENSE.md vs the build)
+        if: always()
+        run: |
+          python3 -m unittest discover -s tools/tests -p test_dependencies.py -v
+          python3 tools/check_dependencies.py
+
+      - name: core test runner regression checks
+        if: always()
+        run: python3 tools/test_core_test_runner.py
+
+      - name: release workflow offline tests
+        if: always()
+        run: python3 tools/tests/test_release_workflow.py -v
+
+      - name: daily web sequencing regression checks
+        if: always()
+        run: python3 tools/tests/test_daily_workflow.py -v
+
+      - name: build workflow cache regression checks
+        if: always()
+        run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: core test symbol checker regression checks
+        if: always()
+        run: python3 tools/tests/test_core_test_symbols.py -v
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,

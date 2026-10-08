@@ -39,7 +39,7 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 |-----------------|--------|
 | `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped). |
 | `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
-| `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. |
+| `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. Deprecating, removing or renaming a documented API, or dropping a platform's implementation along with its `TC_PLATFORMS` entry, needs the regenerated file in the **same PR**: the committed file still calls the old API, so CI fails. From a fresh checkout: build once (so the generated shader headers exist), then `node generate.js`, then `node emit-coverage.js`. |
 | `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (macros / keywords / constant values / example links) + `colors.json`. |
 
 The legacy `api-definition.yaml` and its `generate-docs.js` / `mine.js` are
@@ -154,6 +154,7 @@ generator reads back from the AST:
 |-------|--------|
 | `TC_PLATFORMS("macos,windows,…")` | record the platforms a symbol exists on (`platforms` field) |
 | `TC_LUA_BIND("float,Vec2,…")` | template instantiations to bind for Lua (`lua_bind` field) |
+| `TC_LUA_SKIP` | not exposed to Lua (`lua_skip` field): luagen, luagen-types and the sketch reference emitters skip it. Used for API that is unsafe to call from Lua, such as a callback on another thread (`Node::callAfterAsync`) |
 
 **Hiding a symbol** (public C++ but not user API — internal plumbing) is done
 **doc-side**, not with a source macro: add `hide = true` to its `api-reference.toml`

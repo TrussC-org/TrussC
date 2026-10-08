@@ -56,6 +56,7 @@ struct GuestView {
 // Where guest code finds the one-per-process singletons and GPU caches
 // (sharedInstances): each must be the host's instance, not one of its own.
 struct GuestInstances {
+    const void* version = nullptr;
     const void* audioEngine = nullptr;
     const void* screenRecorder = nullptr;
     const void* asyncScheduler = nullptr;
@@ -80,6 +81,9 @@ struct GuestInstances {
 struct UnloadProbe {
     int fired = 0;
     bool appWasRoot = false;
+    int exits = 0;
+    int cleanups = 0;
+    bool audioDetachedInCleanup = false;
 };
 
 class tcApp : public App {
@@ -116,6 +120,7 @@ public:
     void setup() override;
     void draw() override;
     void exit() override;
+    void cleanup() override;
 
     // Defined in tcApp.cpp (guest only), virtual so the host's calls run the
     // guest's code.

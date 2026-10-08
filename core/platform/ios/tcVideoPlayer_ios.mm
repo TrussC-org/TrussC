@@ -21,7 +21,10 @@ static std::string tcLogText(id obj) {
 // =============================================================================
 // Internal Objective-C class for AVFoundation handling
 // =============================================================================
-@interface TCVideoPlayerImpl : NSObject
+@interface TCVideoPlayerImpl : NSObject {
+@public
+    trussc::internal::VideoErrorQueue playbackErrors_;
+}
 
 @property (nonatomic, strong) AVPlayer* player;
 @property (nonatomic, strong) AVPlayerItem* playerItem;
@@ -271,6 +274,11 @@ static std::string tcLogText(id obj) {
                                                  name:AVPlayerItemDidPlayToEndTimeNotification
                                                object:self.playerItem];
 
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(playerFailedToFinish:)
+                                                 name:AVPlayerItemFailedToPlayToEndTimeNotification
+                                               object:self.playerItem];
+
     // Allocate pixel buffer (RGBA)
     _pixelBufferSize = _videoWidth * _videoHeight * 4;
     _pixelBuffer = new unsigned char[_pixelBufferSize];
@@ -312,6 +320,12 @@ static std::string tcLogText(id obj) {
     _isReady = NO;
     _isFinished = NO;
     _hasNewFrame = NO;
+}
+
+- (void)playerFailedToFinish:(NSNotification*)notification {
+    NSError* error = notification.userInfo[AVPlayerItemFailedToPlayToEndTimeErrorKey];
+    playbackErrors_.report(error ? tcLogText(error.localizedDescription) : "Video playback failed",
+                           error ? static_cast<int64_t>(error.code) : 0);
 }
 
 - (void)playerDidFinishPlaying:(NSNotification*)notification {
@@ -705,6 +719,16 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 void VideoPlayer::updatePlatform() {
     if (!platformHandle_) return;
     TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;
+    if (impl.playerItem.status == AVPlayerItemStatusFailed) {
+        NSError* error = impl.playerItem.error;
+        impl->playbackErrors_.report(error ? tcLogText(error.localizedDescription) : "Video playback failed",
+                                    error ? static_cast<int64_t>(error.code) : 0);
+    }
+    auto error = impl->playbackErrors_.take();
+    if (!error.message.empty()) {
+        reportPlaybackError(error.message, error.errorCode);
+        return;
+    }
     [impl update];
 
     // Copy pixels from Objective-C side
@@ -784,6 +808,12 @@ void VideoPlayer::setLoopPlatform(bool loop) {
     if (!platformHandle_) return;
     TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;
     impl.loop = loop;
+}
+
+float VideoPlayer::getFrameRatePlatform() const {
+    if (!platformHandle_) return 0.0f;
+    TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;
+    return impl.frameRate;
 }
 
 int VideoPlayer::getCurrentFramePlatform() const {

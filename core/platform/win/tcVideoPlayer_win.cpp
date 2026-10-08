@@ -2,7 +2,9 @@
 // tcVideoPlayer_win.cpp - Windows VideoPlayer implementation using Media Foundation
 // =============================================================================
 // Uses IMFMediaEngine for hardware-accelerated video decoding.
-// D3D11 textures are injected directly into sokol_gfx.
+// Each new frame is read back through a D3D11 staging texture and converted
+// from BGRA to RGBA on the CPU, then copied to VideoPlayer's pixel buffer.
+// VideoPlayer::update() uploads that buffer to a sokol_gfx texture.
 //
 // Reference: openFrameworks ofMediaFoundationPlayer (MIT License)
 // Based on code by Andrew Wright (https://github.com/axjxwright/AX-MediaPlayer/)
@@ -122,6 +124,7 @@ public:
     void setSpeed(float speed);
     void setLoop(bool loop);
 
+    float getFrameRate() const { return static_cast<float>(frameRate_); }
     int getCurrentFrame() const;
     int getTotalFrames() const;
     void setFrame(int frame);
@@ -142,11 +145,12 @@ public:
     std::vector<uint8_t> getAudioData() const;
 
 private:
+    internal::VideoErrorQueue playbackErrors_;
     bool createD3D11Device();
     bool createMediaEngine(const std::string& path);
     bool createRenderTexture();
     bool transferVideoFrame();
-    bool loadAudioInfo(const std::string& path);
+    bool loadMediaInfo(const std::string& path);
 
     // D3D11 resources
     ComPtr<ID3D11Device> d3dDevice_;
@@ -167,7 +171,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     float duration_ = 0.0f;
-    float frameRate_ = 30.0f;
+    float frameRate_ = 0.0f;
     bool isLoaded_ = false;
     bool isReady_ = false;
     bool hasNewFrame_ = false;
@@ -422,6 +426,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     );
 
     if (FAILED(hr)) {
+        HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
+        if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
         return false;
     }
 
@@ -455,11 +461,14 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
         return true;
     }
 
+    HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
+    if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
     return false;
 }
 
-bool TCVideoPlayerImpl::loadAudioInfo(const std::string& path) {
-    // Use IMFSourceReader to get audio track info
+bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
+    frameRate_ = 0.0f;
+    // Reuse one source reader for video frame rate and audio track info.
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring widePath(wideLen, 0);
     MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &widePath[0], wideLen);
@@ -468,6 +477,17 @@ bool TCVideoPlayerImpl::loadAudioInfo(const std::string& path) {
     HRESULT hr = MFCreateSourceReaderFromURL(widePath.c_str(), nullptr, &reader);
     if (FAILED(hr)) {
         return false;
+    }
+
+    // Read video metadata before probing audio: silent videos need this too.
+    ComPtr<IMFMediaType> videoType;
+    UINT32 numerator = 0, denominator = 0;
+    if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                                            0, &videoType)) &&
+        SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE,
+                                      &numerator, &denominator)) &&
+        numerator > 0 && denominator > 0) {
+        frameRate_ = static_cast<float>(numerator) / denominator;
     }
 
     // Get native audio media type
@@ -615,8 +635,8 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         return false;
     }
 
-    // Load audio track info
-    loadAudioInfo(path);
+    // Load video frame rate and audio track info
+    loadMediaInfo(path);
 
     isLoaded_ = true;
     return true;
@@ -653,6 +673,7 @@ void TCVideoPlayerImpl::close() {
     isFinished_ = false;
     width_ = 0;
     height_ = 0;
+    frameRate_ = 0.0f;
     hasAudio_ = false;
     audioCodec_ = 0;
     audioSampleRate_ = 0;
@@ -697,6 +718,16 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     hasNewFrame_ = false;
 
     if (!isLoaded_ || !mediaEngine_) return;
+
+    if (d3dDevice_) {
+        HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
+        if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
+    }
+    auto error = playbackErrors_.take();
+    if (!error.message.empty()) {
+        if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
+        return;
+    }
 
     EnterCriticalSection(&criticalSection_);
 
@@ -821,18 +852,16 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             isFinished_ = true;
             break;
 
-        case MF_MEDIA_ENGINE_EVENT_ERROR: {
-            MF_MEDIA_ENGINE_ERR err;
-            if (mediaEngine_) {
-                ComPtr<IMFMediaError> error;
-                mediaEngine_->GetError(&error);
-                if (error) {
-                    err = static_cast<MF_MEDIA_ENGINE_ERR>(error->GetErrorCode());
-                    logError("VideoPlayer") << "Media error: " << static_cast<int>(err);
-                }
-            }
+        case MF_MEDIA_ENGINE_EVENT_ERROR:
+            playbackErrors_.report("Media Foundation playback error (MF_MEDIA_ENGINE_ERR " +
+                                   std::to_string(param1) + ")",
+                                   param2 ? static_cast<int64_t>(static_cast<HRESULT>(param2))
+                                          : static_cast<int64_t>(param1));
             break;
-        }
+
+        case MF_MEDIA_ENGINE_EVENT_RESOURCELOST:
+            playbackErrors_.report("Media Foundation video resource lost");
+            break;
 
         default:
             break;
@@ -949,6 +978,11 @@ void VideoPlayer::setLoopPlatform(bool loop) {
     if (platformHandle_) {
         static_cast<TCVideoPlayerImpl*>(platformHandle_)->setLoop(loop);
     }
+}
+
+float VideoPlayer::getFrameRatePlatform() const {
+    if (!platformHandle_) return 0.0f;
+    return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getFrameRate();
 }
 
 int VideoPlayer::getCurrentFramePlatform() const {

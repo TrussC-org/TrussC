@@ -213,6 +213,15 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
     lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });
+    lua->set_function("getUserDataPath", sol::overload(
+        []() { return trussc::getUserDataPath(); },
+        [](const fs::path & path) { return trussc::getUserDataPath(path); }
+    ));
+    lua->set_function("getTempPath", sol::overload(
+        []() { return trussc::getTempPath(); },
+        [](const fs::path & path) { return trussc::getTempPath(path); }
+    ));
+    lua->set_function("setUserDataPathRoot", [](const fs::path & path) { return trussc::setUserDataPathRoot(path); });
     lua->set_function("toInt", [](const std::string & str) { return trussc::toInt(str); });
     lua->set_function("toInt64", [](const std::string & str) { return trussc::toInt64(str); });
     lua->set_function("toFloat", [](const std::string & str) { return trussc::toFloat(str); });
@@ -606,7 +615,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](int count) { return trussc::redraw(count); }
     ));
     lua->set_function("requestExitApp", []() { return trussc::requestExitApp(); });
-    lua->set_function("exitApp", []() { return trussc::exitApp(); });
+    lua->set_function("exitApp", sol::overload(
+        []() { return trussc::exitApp(); },
+        [](int code) { return trussc::exitApp(code); }
+    ));
     lua->set_function("grabScreen", [](trussc::Pixels & outPixels) { return trussc::grabScreen(outPixels); });
     lua->set_function("saveScreenshot", [](const std::filesystem::path & path) { return trussc::saveScreenshot(path); });
     lua->set_function("beginShape", []() { return trussc::beginShape(); });

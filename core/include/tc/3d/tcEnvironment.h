@@ -42,7 +42,11 @@
 
 namespace trussc {
 
+class Environment;
+
 namespace internal {
+
+void clearEnvironmentFromAllContexts(Environment* environment);
 
 // Shared baking resources (pipelines, quad buffer), lazily created on the
 // first bake (Environment::ensureBakeResources).
@@ -57,6 +61,7 @@ struct IblBakeResources {
     sg_pipeline lutPipe{};     // target: RG16F
     sg_buffer quadVbuf{};      // 6 verts, 2 triangles
     sg_sampler linearSampler{};
+    bool ready = false;        // all four shaders usable (internalShaderReady)
     bool initialized = false;
 };
 
@@ -73,6 +78,7 @@ public:
     Environment() = default;
 
     ~Environment() {
+        internal::clearEnvironmentFromAllContexts(this);
         release();
     }
 
@@ -232,6 +238,14 @@ private:
         r.irrShader = sg_make_shader(tc_ibl_irradiance_shader_desc(sg_query_backend()));
         r.preShader = sg_make_shader(tc_ibl_prefilter_shader_desc(sg_query_backend()));
         r.lutShader = sg_make_shader(tc_ibl_brdf_lut_shader_desc(sg_query_backend()));
+        r.ready = internal::internalShaderReady(r.eqShader,  "IBL equirect-to-cube")
+               && internal::internalShaderReady(r.irrShader, "IBL irradiance")
+               && internal::internalShaderReady(r.preShader, "IBL prefilter")
+               && internal::internalShaderReady(r.lutShader, "IBL BRDF LUT");
+        if (!r.ready) {
+            r.initialized = true;   // not retried; bakes are skipped
+            return;
+        }
 
         auto makePipe = [](sg_shader sh, sg_pixel_format colorFmt) {
             sg_pipeline_desc pd = {};
@@ -335,6 +349,10 @@ private:
 #endif
         ensureBakeResources();
         BakeResources& r = internal::iblBakeResources();
+        if (!r.ready) {   // warned once in ensureBakeResources()
+            loaded_ = false;
+            return false;
+        }
 
         // IBL bakes run outside any user-facing pass. If a swapchain pass is
         // somehow active, suspend it so we can start fresh offscreen passes.

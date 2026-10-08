@@ -129,7 +129,7 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 | `DragFloat3`, `SliderInt2`, `InputFloat4`, ... | same | An array, `[x, y, z]`, listed under the widget's own label |
 | `SliderAngle` | `slider_angle` | Radians — the variable's value — with `"unit": "rad"`, although the widget displays degrees |
 | `ColorEdit3/4`, `ColorPicker3/4` | `color` | The variable as it is: `[r, g, b]` or `[r, g, b, a]`, 0-1. `colorSpace` is `"rgb"`, or `"hsv"` with `ImGuiColorEditFlags_InputHSV` (then the values are the raw HSV the variable holds, not converted) |
-| `Combo` | `combo` | The selected index. `item` is the text shown |
+| `Combo` | `combo` | The selected index. `item` is the text shown; omitted in the frame of a pick, until the next frame reports the new preview |
 | `BeginCombo` (a custom combo) | `combo` | Only `item`, the text shown |
 | `InputText`, `InputTextMultiline` | `text` | The string. A password field reports `"password": true` and never its text |
 | `Checkbox`, `MenuItem(label, shortcut, bool* p_selected)`, `Selectable(label, bool* p_selected)` | `checkbox` | `true` / `false`, the variable after the click (a `Checkbox` or toggle `MenuItem` also has `checked`) |

@@ -57,6 +57,26 @@ namespace mcp {
 
 namespace detail {
 
+// Replies preserve valid UTF-8 and silently replace malformed bytes with U+FFFD.
+inline std::string dumpReply(const json& j) {
+    return j.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
+inline std::string makeResult(const json& id, const json& result) {
+    if (id.is_null()) return "";
+    json res = {
+        {"jsonrpc", "2.0"},
+        {"id", id},
+        {"result", result}
+    };
+    return dumpReply(res);
+}
+
+inline std::string toolError(const json& id, const std::string& message) {
+    return makeResult(id, {{"content", {{{"type", "text"}, {"text", message}}}},
+                           {"isError", true}});
+}
+
 // The promise carries a THUNK, not the reply string: the blocked HTTP worker
 // executes it (future.get()()) to obtain the reply. For ordinary tools the
 // thunk just returns a string built on the main thread; two-stage tools (see
@@ -66,19 +86,18 @@ namespace detail {
 using ReplyThunk = std::function<std::string()>;
 
 struct DeferredResponse {
+    json id = nullptr;  // request id retained for deferred error replies
     std::shared_ptr<std::promise<ReplyThunk>> response;  // unblocks the HTTP worker
     std::function<ReplyThunk()> makeEnvelope;            // main stage → worker thunk
     const void* target = nullptr;                        // window to run in (null = main)
     std::chrono::steady_clock::time_point deadline;      // targeted: give up after this
-    std::function<std::string()> timeoutReply;           // targeted: reply when given up
     // Registration owner of the code the producer runs (DeferralState::owner):
     // a hot reload guest generation, or null for host code. When that owner
     // is removed, removeRegistrationsOwnedBy() answers the entry with
-    // errorReply instead of running its producer, which may reach the App
+    // a tool error instead of running its producer, which may reach the App
     // about to be deleted (a guest tool capturing `this`, a status-image
     // getter). A host tool's deferral is not affected.
     const void* owner = nullptr;
-    std::function<std::string(const std::string&)> errorReply;  // tool error with this message
 };
 
 // A targeted deferral whose window renders no frame in this time (minimized,
@@ -87,6 +106,7 @@ struct DeferredResponse {
 inline constexpr std::chrono::seconds kTargetedDeferralTimeout{5};
 
 struct DeferralState {
+    json id = nullptr;  // copied into DeferredResponse when queued
     bool requested = false;                  // set by deferToolResultUntilAfterFrame()
     std::function<json()> produce;           // tool content producer (runs fully on main)
     bool twoStageRequested = false;          // set by deferToolResultTwoStage()
@@ -94,8 +114,6 @@ struct DeferralState {
     const void* target = nullptr;            // window the deferral runs in (null = main)
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
-    std::function<std::string()> timeoutReply;  // targeted deferral given up (see above)
-    std::function<std::string(const std::string&)> errorReply;  // deferral cancelled (unload)
     // Registration owner of the code the deferred producer runs: the called
     // tool's owner, set by handleToolsCall(); a host tool that runs code
     // someone else registered (tc_get_status_image a status-image getter)
@@ -170,13 +188,14 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
             try {
                 thunk = d.makeEnvelope();
             } catch (const std::exception& e) {
-                std::string err = std::string("{\"error\":\"deferred response failed: ") + e.what() + "\"}";
+                const std::string message = std::string("deferred response failed: ") + e.what();
+                std::string err = detail::toolError(d.id, message);
                 thunk = [err]() { return err; };
             }
             d.response->set_value(std::move(thunk));
         } else if (!targetWindow && d.target && now >= d.deadline) {
-            std::string reply = d.timeoutReply ? d.timeoutReply()
-                                               : std::string("{\"error\":\"window did not render\"}");
+            std::string reply = detail::toolError(d.id,
+                "the window rendered no frame within 5 s (minimized, hidden or closed?)");
             d.response->set_value([reply]() { return reply; });
         } else {
             keep.push_back(std::move(d));
@@ -237,6 +256,9 @@ public:
                 {"type", arg.type},
                 {"description", arg.description}
             };
+            // Nullable file path used by tc_analyze_image's optional save.
+            if (arg.type == "string|null")
+                schema["properties"][arg.name]["type"] = json::array({"string", "null"});
             if (arg.required) {
                 schema["required"].push_back(arg.name);
             }
@@ -361,7 +383,7 @@ private:
                 {"resources", {}}
             }}
         };
-        return makeResult(id, result);
+        return detail::makeResult(id, result);
     }
 
     std::string handleToolsList(const json& req, const json& id) {
@@ -373,7 +395,7 @@ private:
                 {"inputSchema", tool.getSchema()}
             });
         }
-        return makeResult(id, {{"tools", toolList}});
+        return detail::makeResult(id, {{"tools", toolList}});
     }
 
     std::string handleToolsCall(const json& req, const json& id) {
@@ -386,23 +408,24 @@ private:
         }
 
         // Wrap a tool's content json into a full JSON-RPC result string.
-        auto formatResult = [this, id](const json& content) -> std::string {
+        auto formatResult = [id](const json& content) -> std::string {
             json result;
             if (content.is_array() && content.size() > 0 && content[0].contains("type")) {
                 result = {{"content", content}};
             } else {
                 result = {{"content", {{
                     {"type", "text"},
-                    {"text", content.dump()}
+                    {"text", detail::dumpReply(content)}
                 }}}};
             }
-            return makeResult(id, result);
+            return detail::makeResult(id, result);
         };
 
         try {
             auto& ds = detail::deferralState();
             ds.requested = false;
             ds.twoStageRequested = false;
+            ds.id = id;
             ds.owner = tools_[name].owner;   // the handler may name another (setDeferralOwner)
 
             // Execute tool handler (may call deferToolResultUntilAfterFrame()
@@ -410,18 +433,6 @@ private:
             json content = tools_[name].handler(args);
 
             // Handler asked to produce its result after the next present().
-            if (ds.requested || ds.twoStageRequested) {
-                ds.errorReply = [formatResult](const std::string& message) -> std::string {
-                    return formatResult(json{{"status", "error"}, {"message", message}});
-                };
-            }
-            if (ds.target) {
-                ds.timeoutReply = [formatResult]() -> std::string {
-                    return formatResult(json{{"status", "error"},
-                        {"message", "the window rendered no frame within 5 s (minimized, hidden or closed?)"}});
-                };
-            }
-
             if (ds.requested) {
                 auto produce = std::move(ds.produce);
                 ds.requested = false;
@@ -442,13 +453,13 @@ private:
                 auto mainStage = std::move(ds.produceTwoStage);
                 ds.twoStageRequested = false;
                 ds.hasEnvelope = true;
-                ds.envelope = [formatResult, mainStage]() -> detail::ReplyThunk {
+                ds.envelope = [id, formatResult, mainStage]() -> detail::ReplyThunk {
                     std::function<json()> workerStage = mainStage();
-                    return [formatResult, workerStage]() -> std::string {
+                    return [id, formatResult, workerStage]() -> std::string {
                         try {
                             return formatResult(workerStage());
                         } catch (const std::exception& e) {
-                            return std::string("{\"error\":\"deferred worker stage failed: ") + e.what() + "\"}";
+                            return detail::toolError(id, std::string("deferred worker stage failed: ") + e.what());
                         }
                     };
                 };
@@ -458,7 +469,9 @@ private:
             return formatResult(content);
 
         } catch (const std::exception& e) {
-            return makeError(id, -32000, std::string("Tool execution error: ") + e.what());
+            return detail::toolError(id, std::string("Tool execution error: ") + e.what());
+        } catch (...) {
+            return detail::toolError(id, "Tool execution error: unknown exception");
         }
     }
 
@@ -472,7 +485,7 @@ private:
                 {"mimeType", res.mimeType.empty() ? nullptr : json(res.mimeType)}
             });
         }
-        return makeResult(id, {{"resources", resList}});
+        return detail::makeResult(id, {{"resources", resList}});
     }
 
     std::string handleResourcesRead(const json& req, const json& id) {
@@ -489,21 +502,11 @@ private:
                 {"mimeType", resources_[uri].mimeType}
             };
             resourceContent["text"] = content;
-            return makeResult(id, {{"contents", {resourceContent}}});
+            return detail::makeResult(id, {{"contents", {resourceContent}}});
 
         } catch (const std::exception& e) {
             return makeError(id, -32000, std::string("Resource read error: ") + e.what());
         }
-    }
-
-    std::string makeResult(const json& id, const json& result) {
-        if (id.is_null()) return "";
-        json res = {
-            {"jsonrpc", "2.0"},
-            {"id", id},
-            {"result", result}
-        };
-        return res.dump();
     }
 
     std::string makeError(const json& id, int code, const std::string& message) {
@@ -516,7 +519,7 @@ private:
                 {"message", message}
             }}
         };
-        return res.dump();
+        return detail::dumpReply(res);
     }
 };
 
@@ -617,7 +620,7 @@ inline bool bearerTokenMatches(std::string_view header, std::string_view token) 
 
 inline void rejectRequest(httplib::Response& res, int status, const std::string& why) {
     res.status = status;
-    res.set_content(json{{"error", why}}.dump(), "application/json");
+    res.set_content(dumpReply(json{{"error", why}}), "application/json");
 }
 
 // Browser-facing checks every request passes before anything else runs (#238,
@@ -730,7 +733,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
         try {
             result = thunk();
         } catch (const std::exception& e) {
-            result = std::string("{\"error\":\"reply construction failed: ") + e.what() + "\"}";
+            result = detail::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
         }
 
         res.set_content(result, "application/json");
@@ -744,7 +747,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
             {"transport", "http"},
             {"endpoint", "/mcp"}
         };
-        res.set_content(info.dump(), "application/json");
+        res.set_content(detail::dumpReply(info), "application/json");
     });
 
     detail::getHttpThread() = std::make_unique<std::thread>([port, host]() {
@@ -794,8 +797,7 @@ inline void stopHttpServer() {
         auto& list = detail::deferredResponses();
         for (auto& d : list) {
             const std::string message = "the MCP server shut down before the reply was produced";
-            std::string reply = d.errorReply ? d.errorReply(message)
-                                             : "{\"error\":\"" + message + "\"}";
+            std::string reply = detail::toolError(d.id, message);
             d.response->set_value([reply]() { return reply; });
         }
         list.clear();
@@ -823,8 +825,6 @@ inline void processHttpQueue() {
         auto& ds = detail::deferralState();
         ds.hasEnvelope = false;
         ds.target = nullptr;
-        ds.timeoutReply = nullptr;
-        ds.errorReply = nullptr;
         ds.owner = nullptr;
         std::string result = Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
@@ -832,13 +832,12 @@ inline void processHttpQueue() {
             // and answer it from drainDeferredResponses(). The HTTP worker stays
             // blocked on its future a few ms longer (correct, not a hang).
             detail::DeferredResponse d;
+            d.id = std::move(ds.id);
             d.response = req.response;
             d.makeEnvelope = std::move(ds.envelope);
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
-            d.timeoutReply = std::move(ds.timeoutReply);
             d.owner = ds.owner;
-            d.errorReply = std::move(ds.errorReply);
             detail::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
             ds.target = nullptr;
@@ -884,8 +883,7 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
         }
         const std::string message = "the app code behind this reply was unloaded by a hot reload "
                                     "before the reply was produced";
-        std::string reply = d.errorReply ? d.errorReply(message)
-                                         : "{\"error\":\"" + message + "\"}";
+        std::string reply = detail::toolError(d.id, message);
         d.response->set_value([reply]() { return reply; });
     }
     pending.swap(keep);

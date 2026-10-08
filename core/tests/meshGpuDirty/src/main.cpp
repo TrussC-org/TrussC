@@ -1,0 +1,327 @@
+// =============================================================================
+// core/tests/meshGpuDirty — behavioral regression test for the Mesh data
+// revision (#267).
+//
+// Headless, console, exit code = pass/fail (build_all.py runs it in CI).
+//
+// Guards the invariants:
+//   - Every mutator changes getDataRevision(): clear() / clearXxx(), add*,
+//     setNormal, translate / rotateX/Y/Z / scale / transform, append, setMode.
+//     This includes clear() followed by re-adding the same vertex count.
+//   - Non-const getters (getVertices / getColors / getNormals / getIndices /
+//     getTexCoords / getTangents) change it; const getters and other const
+//     reads do not.
+//   - markGpuDirty() changes it.
+// =============================================================================
+
+#include <TrussC.h>
+#include "../../common/tcCoreTest.h"
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <utility>
+
+using namespace std;
+using namespace tc;
+
+namespace {
+
+static int g_fail = 0;
+static void check(const char* name, bool ok) {
+    printf("%-66s %s\n", name, ok ? "PASS" : "FAIL");
+    fflush(stdout);
+    if (!ok) ++g_fail;
+}
+
+static Mesh makeMesh(int n) {
+    Mesh m;
+    for (int i = 0; i < n; i++) {
+        m.addVertex(Vec3(float(i), float(i % 7), 0.0f));
+        m.addNormal(0.0f, 0.0f, 1.0f);
+        m.addColor(1.0f, 1.0f, 1.0f);
+        m.addTexCoord(0.0f, 0.0f);
+        m.addTangent(1.0f, 0.0f, 0.0f);
+    }
+    for (int i = 0; i + 2 < n; i += 3) m.addTriangle(i, i + 1, i + 2);
+    return m;
+}
+
+// The revision changes across op(m).
+static void expectChange(const char* name, const function<void(Mesh&)>& op) {
+    Mesh m = makeMesh(99);
+    uint64_t before = m.getDataRevision();
+    op(m);
+    check(name, m.getDataRevision() != before);
+}
+
+// The revision stays the same across op(m).
+static void expectSame(const char* name, const function<void(Mesh&)>& op) {
+    Mesh m = makeMesh(99);
+    uint64_t before = m.getDataRevision();
+    op(m);
+    check(name, m.getDataRevision() == before);
+}
+
+// Optional render regression: no timing assumptions, one draw callback, with
+// synchronous FBO readback after each edit. Run under Xvfb on Linux.
+class GpuCheckApp : public App {
+public:
+    void setup() override { fbo_.allocate(96, 96); }
+
+    void draw() override {
+        setColor(1.0f);
+        setPointStyle(PointStyle::Square);
+        setPointSize(12.0f);
+        Mesh points;
+        points.setMode(PrimitiveMode::Points);
+        points.addVertex(20, 30, 0).addColor(1, 0, 0);
+        const auto initial = render(points);
+        const auto firstBuffer = points.getGpuPointBuffer();
+        check("gpu: Points buffer is valid",
+              sg_query_buffer_state(firstBuffer) == SG_RESOURCESTATE_VALID);
+        check("gpu: Points initially render", hasInk(initial));
+        check("gpu: unchanged Points retain pixels and buffer",
+              render(points) == initial && points.getGpuPointBuffer().id == firstBuffer.id);
+        points.clear();
+        points.addVertex(68, 30, 0).addColor(1, 0, 0);
+        const auto rebuilt = render(points);
+        check("gpu: same-size Points rebuild changes rendered pixels",
+              hasInk(rebuilt) && rebuilt != initial);
+        check("gpu: same-size Points rebuild replaces buffer",
+              points.getGpuPointBuffer().id != firstBuffer.id && points.getGpuPointCount() == 1);
+        points.getColors()[0] = Color(0, 1, 0);
+        const auto recolored = render(points);
+        check("gpu: getter color edit changes rendered Points",
+              hasInk(recolored) && recolored != rebuilt);
+        points.translate(-48, 0, 0);
+        const auto translated = render(points);
+        check("gpu: translation changes rendered Points",
+              hasInk(translated) && translated != recolored);
+        auto pointBuffer = points.getGpuPointBuffer();
+        points.markGpuDirty();
+        check("gpu: markGpuDirty re-uploads unchanged Points",
+              render(points) == translated && points.getGpuPointBuffer().id != pointBuffer.id);
+
+        Mesh triangles;
+        triangles.addVertex(18, 18, 0).addVertex(42, 18, 0).addVertex(18, 42, 0);
+        triangles.addNormals({Vec3(0, 0, 1), Vec3(0, 0, 1), Vec3(0, 0, 1)});
+        triangles.addTriangle(0, 1, 2);
+        Material material;
+        material.setBaseColor(1, 0, 0).setEmissive(1, 0, 0);
+        setMaterial(material);
+        const auto originalTriangle = render(triangles);
+        const auto triangleBuffer = triangles.getGpuVertexBuffer();
+        check("gpu: PBR vertex and index buffers are valid",
+              sg_query_buffer_state(triangleBuffer) == SG_RESOURCESTATE_VALID &&
+              sg_query_buffer_state(triangles.getGpuIndexBuffer()) == SG_RESOURCESTATE_VALID);
+        check("gpu: PBR triangle initially renders", hasInk(originalTriangle));
+        (void)as_const(triangles).getVertices();
+        check("gpu: const read and unchanged PBR retain buffer",
+              render(triangles) == originalTriangle &&
+              triangles.getGpuVertexBuffer().id == triangleBuffer.id);
+        triangles.rotateZ(0.3f);
+        const auto rotated = render(triangles);
+        check("gpu: rotation changes rendered PBR triangle",
+              hasInk(rotated) && rotated != originalTriangle);
+        check("gpu: rotation replaces PBR vertex buffer",
+              triangles.getGpuVertexBuffer().id != triangleBuffer.id);
+        triangles.getVertices()[0].x += 12;
+        const auto edited = render(triangles);
+        check("gpu: getter vertex edit changes rendered PBR triangle",
+              hasInk(edited) && edited != rotated);
+        auto normalBuffer = triangles.getGpuVertexBuffer();
+        triangles.setNormal(0, Vec3(0, 1, 0));
+        render(triangles);
+        check("gpu: setNormal re-uploads PBR buffers",
+              triangles.getGpuVertexBuffer().id != normalBuffer.id);
+        clearMaterial();
+
+        // Uploading one path must not mark the other path current.
+        triangles.uploadPointsToGpu();
+        triangles.translate(1, 0, 0);
+        triangles.uploadToGpu();
+        auto pbrBuffer = triangles.getGpuVertexBuffer();
+        triangles.uploadPointsToGpu();
+        pointBuffer = triangles.getGpuPointBuffer();
+        triangles.uploadToGpu();
+        triangles.uploadPointsToGpu();
+        check("gpu: PBR and Points independently reuse current revisions",
+              triangles.getGpuVertexBuffer().id == pbrBuffer.id &&
+              triangles.getGpuPointBuffer().id == pointBuffer.id);
+
+        Mesh destination = makeMesh(3);
+        const auto movedPbr = triangles.getGpuVertexBuffer();
+        const auto movedPoints = triangles.getGpuPointBuffer();
+        const auto beforeMove = destination.getDataRevision();
+        destination = std::move(triangles);
+        destination.uploadToGpu();
+        destination.uploadPointsToGpu();
+        check("gpu: move assignment preserves clean transferred buffers",
+              destination.getDataRevision() != beforeMove &&
+              destination.getGpuVertexBuffer().id == movedPbr.id &&
+              destination.getGpuPointBuffer().id == movedPoints.id);
+        destination.translate(1, 0, 0);
+        Mesh dirtyDestination;
+        dirtyDestination = std::move(destination);
+        dirtyDestination.uploadToGpu();
+        dirtyDestination.uploadPointsToGpu();
+        check("gpu: move assignment preserves stale transferred buffers",
+              dirtyDestination.getGpuVertexBuffer().id != movedPbr.id &&
+              dirtyDestination.getGpuPointBuffer().id != movedPoints.id);
+
+        exitApp();
+    }
+
+private:
+    vector<unsigned char> render(const Mesh& mesh) {
+        fbo_.begin(0, 0, 0, 0);
+        mesh.draw();
+        fbo_.end();
+        vector<unsigned char> pixels(96 * 96 * 4);
+        check("gpu: FBO readback succeeds", fbo_.readPixels(pixels.data()));
+        return pixels;
+    }
+
+    static bool hasInk(const vector<unsigned char>& pixels) {
+        for (size_t i = 3; i < pixels.size(); i += 4) {
+            if (pixels[i] != 0) return true;
+        }
+        return false;
+    }
+
+    Fbo fbo_;
+};
+
+} // namespace
+
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && strcmp(argv[1], "--gpu-check") == 0) {
+        WindowSettings settings;
+        settings.setSize(96, 96);
+        settings.setHighDpi(false);
+        runApp<GpuCheckApp>(settings);
+        printf("meshGpuDirty --gpu-check: %s (%d failures)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail);
+        return g_fail ? 1 : 0;
+    }
+    printf("=== meshGpuDirty (#267) ===\n");
+
+    // Same-size rebuild: clear() then re-add the same 100 vertices.
+    {
+        Mesh m;
+        m.setMode(PrimitiveMode::Points);
+        for (int i = 0; i < 100; i++) m.addVertex(float(i), 0.0f, 0.0f);
+        uint64_t r0 = m.getDataRevision();
+        m.clear();
+        for (int i = 0; i < 100; i++) m.addVertex(float(i) + 1.0f, 0.0f, 0.0f);
+        check("clear() + re-add same count changes revision", m.getDataRevision() != r0);
+        check("same-size rebuild keeps vertex count", m.getNumVertices() == 100);
+    }
+
+    expectChange("setMode",             [](Mesh& m) { m.setMode(PrimitiveMode::Points); });
+    expectChange("addVertex(x,y,z)",    [](Mesh& m) { m.addVertex(1, 2, 3); });
+    expectChange("addVertex(Vec2)",     [](Mesh& m) { m.addVertex(Vec2(1, 2)); });
+    expectChange("addVertex(Vec3)",     [](Mesh& m) { m.addVertex(Vec3(1, 2, 3)); });
+    expectChange("addVertices",         [](Mesh& m) { m.addVertices({Vec3(1, 2, 3)}); });
+    expectChange("addColor(Color)",     [](Mesh& m) { m.addColor(Color(1, 0, 0)); });
+    expectChange("addColor(r,g,b)",     [](Mesh& m) { m.addColor(1, 0, 0); });
+    expectChange("addColors",           [](Mesh& m) { m.addColors({Color(1, 0, 0)}); });
+    expectChange("addIndex",            [](Mesh& m) { m.addIndex(0); });
+    expectChange("addIndices",          [](Mesh& m) { m.addIndices({0, 1, 2}); });
+    expectChange("addTriangle",         [](Mesh& m) { m.addTriangle(0, 1, 2); });
+    expectChange("addNormal(x,y,z)",    [](Mesh& m) { m.addNormal(0, 1, 0); });
+    expectChange("addNormal(Vec3)",     [](Mesh& m) { m.addNormal(Vec3(0, 1, 0)); });
+    expectChange("addNormals",          [](Mesh& m) { m.addNormals({Vec3(0, 1, 0)}); });
+    expectChange("setNormal",           [](Mesh& m) { m.setNormal(0, Vec3(0, 1, 0)); });
+    expectChange("addTexCoord(u,v)",    [](Mesh& m) { m.addTexCoord(0.5f, 0.5f); });
+    expectChange("addTexCoord(Vec2)",   [](Mesh& m) { m.addTexCoord(Vec2(0.5f, 0.5f)); });
+    expectChange("addTangent(x,y,z,w)", [](Mesh& m) { m.addTangent(1, 0, 0, 1); });
+    expectChange("addTangent(Vec4)",    [](Mesh& m) { m.addTangent(Vec4(1, 0, 0, 1)); });
+    expectChange("addTangent(Vec3,w)",  [](Mesh& m) { m.addTangent(Vec3(1, 0, 0), 1.0f); });
+    expectChange("clear",               [](Mesh& m) { m.clear(); });
+    expectChange("clearVertices",       [](Mesh& m) { m.clearVertices(); });
+    expectChange("clearNormals",        [](Mesh& m) { m.clearNormals(); });
+    expectChange("clearColors",         [](Mesh& m) { m.clearColors(); });
+    expectChange("clearIndices",        [](Mesh& m) { m.clearIndices(); });
+    expectChange("clearTexCoords",      [](Mesh& m) { m.clearTexCoords(); });
+    expectChange("clearTangents",       [](Mesh& m) { m.clearTangents(); });
+    expectChange("translate(x,y,z)",    [](Mesh& m) { m.translate(1, 0, 0); });
+    expectChange("translate(Vec3)",     [](Mesh& m) { m.translate(Vec3(1, 0, 0)); });
+    expectChange("rotateX",             [](Mesh& m) { m.rotateX(0.02f); });
+    expectChange("rotateY",             [](Mesh& m) { m.rotateY(0.02f); });
+    expectChange("rotateZ",             [](Mesh& m) { m.rotateZ(0.02f); });
+    expectChange("scale(x,y,z)",        [](Mesh& m) { m.scale(2, 1, 1); });
+    expectChange("scale(s)",            [](Mesh& m) { m.scale(2.0f); });
+    expectChange("scale(Vec3)",         [](Mesh& m) { m.scale(Vec3(2, 2, 2)); });
+    expectChange("transform",           [](Mesh& m) { m.transform(Mat4::translate(1, 0, 0)); });
+    expectChange("append",              [](Mesh& m) { m.append(makeMesh(3)); });
+    expectChange("append empty mesh",   [](Mesh& m) { m.append(Mesh()); });
+    expectChange("markGpuDirty",        [](Mesh& m) { m.markGpuDirty(); });
+
+    // Assignment must invalidate observers even if the source has the same
+    // revision but different contents.
+    {
+        Mesh destination = makeMesh(3);
+        Mesh source = makeMesh(3);
+        destination.translate(1, 0, 0);
+        source.translate(2, 0, 0);
+        const uint64_t before = destination.getDataRevision();
+        check("move assignment starts with equal revisions",
+              before == source.getDataRevision());
+        destination = std::move(source);
+        check("move assignment changes destination revision",
+              destination.getDataRevision() != before);
+        check("move assignment transfers different vertex data",
+              as_const(destination).getVertices()[0].x == 2.0f);
+    }
+    expectChange("copy assignment", [](Mesh& m) {
+        const Mesh source = makeMesh(3);
+        m = source;
+    });
+
+    // Merely fetching mutable storage (without writing) also invalidates.
+    expectChange("mutable read getVertices",  [](Mesh& m) { (void)m.getVertices(); });
+    expectChange("mutable read getColors",    [](Mesh& m) { (void)m.getColors(); });
+    expectChange("mutable read getNormals",   [](Mesh& m) { (void)m.getNormals(); });
+    expectChange("mutable read getIndices",   [](Mesh& m) { (void)m.getIndices(); });
+    expectChange("mutable read getTexCoords", [](Mesh& m) { (void)m.getTexCoords(); });
+    expectChange("mutable read getTangents",  [](Mesh& m) { (void)m.getTangents(); });
+
+    // Non-const getters mark the mesh changed (writes through the reference).
+    expectChange("non-const getVertices",  [](Mesh& m) { m.getVertices()[0].x += 1.0f; });
+    expectChange("non-const getColors",    [](Mesh& m) { m.getColors()[0].r = 0.5f; });
+    expectChange("non-const getNormals",   [](Mesh& m) { m.getNormals()[0].z = -1.0f; });
+    expectChange("non-const getIndices",   [](Mesh& m) { m.getIndices()[0] = 2; });
+    expectChange("non-const getTexCoords", [](Mesh& m) { m.getTexCoords()[0].x = 1.0f; });
+    expectChange("non-const getTangents",  [](Mesh& m) { m.getTangents()[0].w = -1.0f; });
+
+    // Const reads leave the revision unchanged.
+    expectSame("const getVertices / getColors / getNormals", [](Mesh& m) {
+        const Mesh& c = m;
+        (void)c.getVertices(); (void)c.getColors(); (void)c.getNormals();
+    });
+    expectSame("as_const getIndices / getTexCoords / getTangents", [](Mesh& m) {
+        (void)as_const(m).getIndices(); (void)as_const(m).getTexCoords();
+        (void)as_const(m).getTangents();
+    });
+    expectSame("counts / has* / getNormal / getMode", [](Mesh& m) {
+        (void)m.getNumVertices(); (void)m.getNumIndices(); (void)m.hasColors();
+        (void)m.hasNormals(); (void)m.getNormal(0); (void)m.getMode();
+    });
+
+    // Each change gets a new revision (repeated same-size edits keep changing it).
+    {
+        Mesh m = makeMesh(10);
+        uint64_t a = m.getDataRevision();
+        m.rotateY(0.02f);
+        uint64_t b = m.getDataRevision();
+        m.rotateY(0.02f);
+        uint64_t c = m.getDataRevision();
+        check("repeated rotateY gives distinct revisions", a != b && b != c && a != c);
+    }
+
+    printf("=== %s (%d failure%s) ===\n", g_fail ? "FAILED" : "ALL PASSED",
+           g_fail, g_fail == 1 ? "" : "s");
+    return g_fail ? 1 : 0;
+}
