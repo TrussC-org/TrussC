@@ -176,15 +176,21 @@ public:
     // probes, and image-based lighting.
     //
     // `mipLevels` > 1 allocates a mip chain (rounded-down halving); useful
-    // for prefiltered environment maps.
+    // for prefiltered environment maps (RenderTarget only).
     //
-    // Allocation without initial data; use uploadCubemapFace() (Dynamic)
+    // Dynamic / Stream cubemaps have exactly one mip level.
+    // Allocation without initial data; use loadCubemapData() (Dynamic / Stream)
     // or render into each face via getCubemapFaceAttachmentView() (RenderTarget).
 
     void allocateCubemap(int sideSize, TextureFormat format,
                          TextureUsage usage = TextureUsage::RenderTarget,
                          int mipLevels = 1) {
         clear();
+
+        if ((usage == TextureUsage::Dynamic || usage == TextureUsage::Stream) && mipLevels > 1) {
+            logError() << "[Texture] allocateCubemap: Dynamic / Stream cubemaps require exactly one mip level";
+            return;
+        }
 
         width_ = sideSize;
         height_ = sideSize;
@@ -202,63 +208,41 @@ public:
         createCubemapResources();
     }
 
-    // Upload data for one face at one mip level. Requires Dynamic usage.
-    // `data` is a single-face buffer (sideSize(mip) * sideSize(mip) * bpp bytes).
-    void uploadCubemapFace(int face, int mipLevel, const void* data, size_t dataSize) {
+    // Load all six faces (+X, -X, +Y, -Y, +Z, -Z) in one update.
+    // Requires Dynamic / Stream usage and faceSize == sideSize * sideSize * bpp.
+    // As with loadData(), a second upload to the same image in the same device
+    // frame is skipped with a warning.
+    void loadCubemapData(const void* const faces[6], size_t faceSize) {
         if (!sg_isvalid()) return;
         if (!allocated_ || !isCubemap_) return;
-        if (face < 0 || face >= 6) return;
-        if (mipLevel < 0 || mipLevel >= numMipLevels_) return;
-        if (usage_ == TextureUsage::Immutable) return;
-
-        // sokol's sg_update_image for cubemap expects all 6 faces of one mip
-        // level concatenated. For single-face updates we stage a buffer and
-        // fill the remaining 5 faces with zeros. This is wasteful for rapid
-        // updates but fine for one-off IBL-style baking.
-        int mipW = mipDim(width_, mipLevel);
-        int mipH = mipDim(height_, mipLevel);
-        size_t bpp = computeBytesPerPixel();
-        size_t faceSize = (size_t)mipW * mipH * bpp;
-        if (dataSize != faceSize) {
-            logWarning() << "[Texture] uploadCubemapFace: data size mismatch, expected "
-                         << faceSize << " got " << dataSize;
-            return;
-        }
-        std::vector<uint8_t> buffer(faceSize * 6, 0);
-        std::memcpy(buffer.data() + face * faceSize, data, faceSize);
-
-        sg_image_data img_data = {};
-        for (int m = 0; m < numMipLevels_; ++m) {
-            // Only fill the target mip; other mips get null (ignored by update).
-            if (m == mipLevel) {
-                img_data.mip_levels[m].ptr = buffer.data();
-                img_data.mip_levels[m].size = buffer.size();
-            }
-        }
-        sg_update_image(image_, &img_data);
-    }
-
-    // Upload all 6 faces for one mip level at once. `data` points to 6 face
-    // buffers laid out consecutively (face 0..5, each sideSize(mip)^2 * bpp).
-    void uploadCubemapMip(int mipLevel, const void* data, size_t dataSize) {
-        if (!sg_isvalid()) return;
-        if (!allocated_ || !isCubemap_) return;
-        if (mipLevel < 0 || mipLevel >= numMipLevels_) return;
-        if (usage_ == TextureUsage::Immutable) return;
-
-        int mipW = mipDim(width_, mipLevel);
-        int mipH = mipDim(height_, mipLevel);
-        size_t bpp = computeBytesPerPixel();
-        size_t expected = (size_t)mipW * mipH * bpp * 6;
-        if (dataSize != expected) {
-            logWarning() << "[Texture] uploadCubemapMip: data size mismatch, expected "
-                         << expected << " got " << dataSize;
+        if (usage_ != TextureUsage::Dynamic && usage_ != TextureUsage::Stream) {
+            logWarning() << "[Texture] loadCubemapData: requires Dynamic / Stream usage";
             return;
         }
 
+        const size_t expected = (size_t)width_ * height_ * computeBytesPerPixel();
+        if (faceSize != expected) {
+            logWarning() << "[Texture] loadCubemapData: data size mismatch, expected "
+                         << expected << " got " << faceSize;
+            return;
+        }
+
+        const uint64_t currentFrame = sapp_frame_count();
+        if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
+            logWarning() << "[Texture] loadData() called twice in same frame, skipped";
+            return;
+        }
+        lastUpload_ = {image_.id, currentFrame};
+
+        // sokol expects every face of every mip in one call. Dynamic / Stream
+        // cubemaps have one mip; its six face buffers are concatenated here.
+        std::vector<uint8_t> buffer(faceSize * 6);
+        for (int face = 0; face < 6; ++face) {
+            std::memcpy(buffer.data() + face * faceSize, faces[face], faceSize);
+        }
         sg_image_data img_data = {};
-        img_data.mip_levels[mipLevel].ptr = data;
-        img_data.mip_levels[mipLevel].size = dataSize;
+        img_data.mip_levels[0].ptr = buffer.data();
+        img_data.mip_levels[0].size = buffer.size();
         sg_update_image(image_, &img_data);
     }
 
@@ -861,7 +845,7 @@ private:
         switch (usage_) {
             case TextureUsage::Immutable:
                 // Immutable cubemap not supported yet (would need initial data
-                // for all 6 faces and all mips). Use Dynamic + uploadCubemapFace
+                // for all 6 faces and all mips). Use Dynamic / Stream + loadCubemapData
                 // or RenderTarget + face attachment views instead.
                 logWarning() << "[Texture] allocateCubemap Immutable not supported; using Dynamic";
                 img_desc.usage.dynamic_update = true;

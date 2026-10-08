@@ -588,6 +588,17 @@ img.mirrorH();  img.mirrorV();      // shorthand
 - For per-frame heavy downscale, prefer rendering into a smaller `Fbo`
   over `resize()` — `resize` runs on CPU.
 
+### Cubemap uploads
+
+`Texture::loadCubemapData(const void* const faces[6], size_t faceSize)` loads
+all six faces in +X, -X, +Y, -Y, +Z, -Z order. Each buffer must contain
+`sideSize * sideSize * bytesPerPixel` bytes. Allocate with Dynamic or Stream
+usage and one mip level; requesting multiple levels logs an error and leaves
+the texture unallocated. Immutable and RenderTarget uploads, size mismatches,
+and a second upload to the same image in one device frame warn and return.
+RenderTarget mip chains still use `getCubemapFaceAttachmentView()` for rendering.
+This replaces `uploadCubemapFace()` and `uploadCubemapMip()` in v0.8.
+
 ### Fbo (Off-screen rendering)
 ```cpp
 Fbo fbo;
