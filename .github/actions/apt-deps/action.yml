@@ -1,0 +1,27 @@
+name: Install Linux dependencies
+description: Cache apt archives and install the TrussC Linux dependencies
+runs:
+  using: composite
+  steps:
+    - name: Cache month
+      id: month
+      shell: bash
+      run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache apt archives
+      uses: actions/cache@v5
+      with:
+        path: ~/.apt-archives
+        key: apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-${{ steps.month.outputs.value }}
+        restore-keys: |
+          apt-${{ runner.os }}-${{ hashFiles('tools/install_dependencies_linux.sh') }}-
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        mkdir -p ~/.apt-archives/partial
+        TRUSSC_APT_ARCHIVES=~/.apt-archives ./tools/install_dependencies_linux.sh -y
+        # apt runs as root (partial/ is 0700, plus a lock file); hand the
+        # directory back so the cache post step can read and save it.
+        sudo rm -f ~/.apt-archives/lock
+        sudo chown -R "$(id -u):$(id -g)" ~/.apt-archives

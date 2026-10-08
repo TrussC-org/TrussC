@@ -7,6 +7,7 @@
 # Usage:
 #   ./install_dependencies_linux.sh       # Interactive mode (asks before install)
 #   ./install_dependencies_linux.sh -y    # Auto-install without asking
+# Set TRUSSC_APT_ARCHIVES to reuse downloaded apt packages in that directory.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -144,8 +145,12 @@ fi
 
 case "$PKG_MANAGER" in
     apt)
-        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=3 update
-        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=3 install -y "${MISSING[@]}"
+        APT_CACHE_OPTIONS=()
+        if [ -n "${TRUSSC_APT_ARCHIVES:-}" ]; then
+            APT_CACHE_OPTIONS=(-o "Dir::Cache::Archives=$TRUSSC_APT_ARCHIVES")
+        fi
+        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=3 "${APT_CACHE_OPTIONS[@]}" update
+        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=3 "${APT_CACHE_OPTIONS[@]}" install -y "${MISSING[@]}"
         ;;
     pacman)
         sudo pacman -Sy --needed --noconfirm "${MISSING[@]}"
