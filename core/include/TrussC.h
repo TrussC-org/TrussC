@@ -99,6 +99,7 @@
 
 // TrussC event system
 #include "tc/events/tcCoreEvents.h"
+#include "tc/events/tcTouchMouse.h"  // internal::TouchMouseMapper (touch-as-mouse)
 
 // TrussC utilities
 #include "tc/utils/tcFileIO.h"   // fs::path boundary helpers (before all path consumers)
@@ -313,7 +314,8 @@ namespace internal {
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
 
     // Touch-as-mouse mapping
-    // Default ON everywhere — the first touch synthesizes mouse press/drag, so
+    // Default ON everywhere — the first finger down synthesizes mouse press/
+    // drag/release (other fingers don't; tc/events/tcTouchMouse.h), so
     // mouse-based code (incl. the web build on iPad/phones) just works. Apps that
     // want raw touch separate from mouse call setTouchAsMouse(false) in setup().
     // Defined in tcGlobal.cpp: app code sets it, the host's event callback reads it.
@@ -2951,8 +2953,10 @@ namespace internal {
             case SAPP_EVENTTYPE_TOUCHES_MOVED:
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
-                // Build TouchEventArgs from sokol touchpoints
+                // Build TouchEventArgs from sokol touchpoints. The mapper below
+                // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
                 TouchEventArgs touchArgs;
+                internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
                     touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
@@ -2961,60 +2965,74 @@ namespace internal {
                     touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
                     touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
                     touchArgs.touches[i].changed = ev->touches[i].changed;
+                    samples[i].id = ev->touches[i].identifier;
+                    samples[i].x = touchArgs.touches[i].x;
+                    samples[i].y = touchArgs.touches[i].y;
+                    samples[i].changed = ev->touches[i].changed;
                 }
 
                 // Fire touch events
+                internal::TouchPhase phase;
                 if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                    phase = internal::TouchPhase::Began;
                     events().touchPressed.notify(touchArgs);
                 } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                    phase = internal::TouchPhase::Moved;
                     events().touchMoved.notify(touchArgs);
                 } else {
                     touchArgs.cancelled = (ev->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED);
+                    phase = touchArgs.cancelled ? internal::TouchPhase::Cancelled
+                                                : internal::TouchPhase::Ended;
                     events().touchReleased.notify(touchArgs);
                 }
 
-                // Touch-as-mouse: map first touch to mouse events
-                if (touchAsMouse() && touchArgs.numTouches > 0) {
-                    float tx = touchArgs.touches[0].x;
-                    float ty = touchArgs.touches[0].y;
+                // Touch-as-mouse: only the primary touch (the first finger
+                // down) drives the mouse; see tc/events/tcTouchMouse.h.
+                auto& mapper = internal::touchMouseMapper();
+                if (!touchAsMouse()) {
+                    mapper.reset();
+                    break;
+                }
+                internal::TouchMouseAction action = mapper.update(phase, samples, touchArgs.numTouches);
+                float tx = action.x;
+                float ty = action.y;
 
-                    if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
-                        currentMouseButton = 0;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = 0;
-                        internal::currentWindowContext().mousePressed = true;
+                if (action.kind == internal::TouchMouseAction::Kind::Press) {
+                    currentMouseButton = 0;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = 0;
+                    internal::currentWindowContext().mousePressed = true;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mousePressed.notify(margs);
-                        if (appMousePressedFunc) appMousePressedFunc(margs);
-                    } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
-                        float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mousePressed.notify(margs);
+                    if (appMousePressedFunc) appMousePressedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
+                    float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
 
-                        internal::MouseEventRaw margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
-                        events().mouseDragged.notify(dragArgs);
-                        margs.consumed = dragArgs.consumed;
-                        if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
-                    } else {
-                        currentMouseButton = -1;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = -1;
-                        internal::currentWindowContext().mousePressed = false;
+                    internal::MouseEventRaw margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
+                    events().mouseDragged.notify(dragArgs);
+                    margs.consumed = dragArgs.consumed;
+                    if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
+                    currentMouseButton = -1;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = -1;
+                    internal::currentWindowContext().mousePressed = false;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mouseReleased.notify(margs);
-                        if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
-                    }
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mouseReleased.notify(margs);
+                    if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
                 }
                 break;
             }
