@@ -373,6 +373,15 @@ bool VideoGrabber::setupPlatform() {
     if (SUCCEEDED(currentType->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride))) {
         data->bufferStride = static_cast<std::int32_t>(stride);
     }
+    if (data->bufferStride == 0) {
+        LONG defaultStride = 0;
+        // RGB32's Data1 is D3DFMT_X8R8G8B8; preserve the fallback's sign.
+        if (FAILED(MFGetStrideForBitmapInfoHeader(MFVideoFormat_RGB32.Data1,
+                                                w, &defaultStride)) || defaultStride == 0) {
+            defaultStride = width_ * 4;
+        }
+        data->bufferStride = static_cast<std::int32_t>(defaultStride);
+    }
     currentType->Release();
 
     // バックバッファを確保
@@ -392,6 +401,8 @@ bool VideoGrabber::setupPlatform() {
 
     logNotice() << "VideoGrabber: Started capturing at " << width_ << "x" << height_
                   << " from " << deviceName_;
+    logNotice() << "VideoGrabber: RGB32 stride=" << data->bufferStride
+                << (data->bufferStride < 0 ? " (bottom-up)" : " (top-down)");
 
     return true;
 }

@@ -20,16 +20,22 @@ void conversion() {
         1, 2, 3, 4, 5, 6, 7, 8,
         9, 10, 11, 12, 13, 14, 15, 16
     };
-    const std::array<unsigned char, 16> expected = {
+    const std::array<unsigned char, 16> expectedTopDown = {
+        3, 2, 1, 255, 7, 6, 5, 255,
+        11, 10, 9, 255, 15, 14, 13, 255
+    };
+    const std::array<unsigned char, 16> expectedBottomUp = {
         11, 10, 9, 255, 15, 14, 13, 255,
         3, 2, 1, 255, 7, 6, 5, 255
     };
     std::array<unsigned char, 16> dst{};
     for (std::int32_t stride : {0, 8, -8}) {
         dst.fill(0);
-        check("packed RGB32 preserves channel swap, opaque alpha and flip",
+        check(stride < 0 ? "negative tight stride reverses rows, swaps channels and sets opaque alpha"
+                        : stride > 0 ? "positive tight stride keeps rows, swaps channels and sets opaque alpha"
+                                     : "zero stride keeps tightly packed rows in order",
               copyGrabberRGB32(dst.data(), packed.data(), packed.size(), 2, 2, stride)
-              && dst == expected);
+              && dst == (stride < 0 ? expectedBottomUp : expectedTopDown));
     }
 
     const std::array<unsigned char, 20> padded = {
@@ -38,9 +44,10 @@ void conversion() {
     };
     for (std::int32_t stride : {12, -12}) {
         dst.fill(0);
-        check("padding skipped with either stride sign; flip unchanged",
+        check(stride < 0 ? "negative padded stride reverses rows and skips padding"
+                         : "positive padded stride keeps rows and skips padding",
               copyGrabberRGB32(dst.data(), padded.data(), padded.size(), 2, 2, stride)
-              && dst == expected);
+              && dst == (stride < 0 ? expectedBottomUp : expectedTopDown));
     }
     std::array<unsigned char, 8> row{};
     const std::array<unsigned char, 8> expectedRow = {3, 2, 1, 255, 7, 6, 5, 255};
