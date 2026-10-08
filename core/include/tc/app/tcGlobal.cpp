@@ -737,10 +737,10 @@ HeadlessSleeper::~HeadlessSleeper() {
 #endif
 }
 
-void HeadlessSleeper::sleep(double seconds) {
+bool HeadlessSleeper::sleep(double seconds) {
     if (!(seconds > 0.0)) {
         std::this_thread::yield();
-        return;
+        return false;
     }
     if (seconds > 1.0) seconds = 1.0;
 #ifdef _WIN32
@@ -749,11 +749,12 @@ void HeadlessSleeper::sleep(double seconds) {
         due.QuadPart = -(LONGLONG)std::ceil(seconds * 1e7);   // relative, 100 ns units
         if (SetWaitableTimer((HANDLE)timer_, &due, 0, nullptr, nullptr, FALSE) &&
             WaitForSingleObject((HANDLE)timer_, INFINITE) == WAIT_OBJECT_0) {
-            return;
+            return true;
         }
     }
 #endif
     std::this_thread::sleep_for(std::chrono::nanoseconds((long long)std::ceil(seconds * 1e9)));
+    return true;
 }
 
 bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {

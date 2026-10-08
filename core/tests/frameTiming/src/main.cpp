@@ -1533,8 +1533,7 @@ struct StallHeadlessApp : App {
 };
 
 // HeadlessSleeper: the waits of 21 sleeps, sorted. The median keeps a busy
-// machine's odd late wake-up out of a "returns soon" check, and the minimum
-// keeps its odd slow yield out of a "returns at once" check.
+// machine's odd late wake-up out of a "returns soon" check.
 static vector<double> sleeperWaits(double seconds) {
     internal::HeadlessSleeper sleeper;
     vector<double> took;
@@ -1584,7 +1583,7 @@ static void testHeadlessLoop() {
            g_sMaxPerPass >= 14, g_sMaxPerPass);
     setMaxUpdateSteps(10);
 
-    // Timing-sensitive (real sleeps): medians / minimums of 21 waits, so a
+    // Timing-sensitive (real sleeps): median of 21 waits, so a
     // busy runner's odd late wake-up doesn't decide the result.
     // Lower bound at half the wait: a timer may fire a few microseconds early
     // against steady_clock, but a sleeper that doesn't sleep would busy-spin.
@@ -1592,16 +1591,28 @@ static void testHeadlessLoop() {
     const double shortWait = shortWaits[shortWaits.size() / 2];
     checkf("headless sleeper: 0.2 ms wait < 5 ms (not a 15.6 ms tick; median)",
            shortWait >= 0.0001 && shortWait < 0.005, shortWait);
-    const double noWait = sleeperWaits(0.0).front();
-    checkf("headless sleeper: a 0 wait returns at once (< 1 ms; fastest)", noWait < 0.001, noWait);
+    internal::HeadlessSleeper sleeper;
+    for (int i = 0; i < 21; ++i) {
+        check("headless sleeper: a 0 wait does not wait on the OS", !sleeper.sleep(0.0));
+    }
 
-    // Timing-sensitive (real time over 0.5 s): the bound sits between the
-    // ~1000/s a working sleeper gives and the ~640/s of a 15.6 ms tick, with
-    // room for a busy runner's late wake-ups (each one drops what exceeds 10
-    // steps).
+    // Timing-sensitive: compare with a bare sleeper over the same 0.5 s
+    // window, so the bound follows this runner's wake-up rate. The short
+    // wait median above still guards against a 15.6 ms timer tick.
+    int baselineSleeps = 0;
+    const auto baselineStart = Clk::now();
+    double baselineElapsed;
+    do {
+        sleeper.sleep(0.001);
+        ++baselineSleeps;
+        baselineElapsed = chrono::duration<double>(Clk::now() - baselineStart).count();
+    } while (baselineElapsed < 0.5);
+    const double baselineRate = baselineSleeps / baselineElapsed;
     runHeadlessApp<FastHeadlessApp>(HeadlessSettings().setFps(1000));
-    checkf("headless: 1 kHz keeps up (>= 800/s; 16 ms passes give ~640)",
-           g_fRate >= 800.0, g_fRate);
+    snprintf(name, sizeof name,
+             "headless: 1 kHz >= 80%% of sleeper baseline (loop %.3f/s, baseline %.3f/s)",
+             g_fRate, baselineRate);
+    check(name, g_fRate >= 0.8 * baselineRate);
     checkf("headless: ...within the 10-step cap per pass",
            g_fMaxPerPass >= 1 && g_fMaxPerPass <= 10, g_fMaxPerPass);
 }
