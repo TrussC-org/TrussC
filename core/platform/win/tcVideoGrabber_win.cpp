@@ -382,8 +382,8 @@ bool VideoGrabber::setupPlatform() {
     std::memset(data->backBuffer, 0, width_ * height_ * 4);
 
     // ターゲット設定（updateDelegatePixels で設定される）
-    data->mainMutex = &mutex_;
-    data->pixelsDirty = &pixelsDirty_;
+    data->mainMutex = &sharedState_->mtx;
+    data->pixelsDirty = &sharedState_->dirty;
     data->frameQueue = frameQueue_.get();
 
     // キャプチャスレッドを開始
@@ -417,18 +417,9 @@ void VideoGrabber::closePlatform() {
         data->mediaSource->Shutdown();
     }
 
-    // Wait for thread to finish with timeout
+    // Capture must finish before its buffers and shared state can be freed.
     if (data->captureThread.joinable()) {
-        HANDLE hThread = (HANDLE)data->captureThread.native_handle();
-        DWORD result = WaitForSingleObject(hThread, 500);  // 500ms timeout
-        if (result == WAIT_OBJECT_0) {
-            // Thread exited cleanly
-            data->captureThread.join();
-        } else {
-            // Thread didn't exit in time, detach to avoid hanging
-            logWarning() << "VideoGrabber: Capture thread did not exit in time, detaching";
-            data->captureThread.detach();
-        }
+        data->captureThread.join();
     }
 
     // Release resources
