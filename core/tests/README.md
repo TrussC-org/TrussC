@@ -261,6 +261,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   in allCoreTests; the default run is headless. With `--gpu-check`, FBO
   readback checks Points rebuilds/colors/translations and PBR rotations and
   vertex edits, plus independent buffer caching and move assignment.
+- `xml/` — XML serialization and query behavior across pugixml updates:
+  empty text uses an empty element tag, explicit paired-tag formatting works,
+  text and attributes round-trip, XPath selects numeric attributes, and invalid
+  or empty documents report failure. Headless, in `allCoreTests`.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
