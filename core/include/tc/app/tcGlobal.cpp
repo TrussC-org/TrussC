@@ -1444,6 +1444,11 @@ bool& touchAsMouse() {
     return enabled;
 }
 
+TouchMouseMapper& touchMouseMapper() {
+    static TouchMouseMapper mapper;
+    return mapper;
+}
+
 // Whether the setup callback ran in the current launch (#394).
 bool& appSetupCalled() {
     static bool called = false;

@@ -144,8 +144,8 @@ fi
 
 case "$PKG_MANAGER" in
     apt)
-        sudo apt-get update
-        sudo apt-get install -y "${MISSING[@]}"
+        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=3 update
+        sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=3 install -y "${MISSING[@]}"
         ;;
     pacman)
         sudo pacman -Sy --needed --noconfirm "${MISSING[@]}"

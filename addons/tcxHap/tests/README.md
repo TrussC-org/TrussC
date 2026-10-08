@@ -11,6 +11,11 @@ values; both a 64-byte guard region and an exact-sized allocation are checked.
 Run these tests under AddressSanitizer with the BC decoder implementation
 instrumented as well.
 
+BC1, BC3, BC7, and BC4 (Hap Q Alpha) also decode known blocks at every input
+byte offset from 0 through 7, covering bcdec 0.985's unaligned-input fix.
+Run with AddressSanitizer and UndefinedBehaviorSanitizer to check input
+bounds and alignment, including the decoder implementation.
+
 HAP-Q draw setup checks transformed quad corners, UVs, tint and alpha,
 column-major MVP uniforms, an Fbo-sized projection, and a perspective camera.
 These are headless setup checks; real HAP-Q playback in a Node, an Fbo, and a

@@ -56,7 +56,7 @@ class DependencyTests(unittest.TestCase):
     def test_release_tag_and_archive_url_mismatches(self):
         cases = [
             ("mbedTLS", "addons/tcxTls/CMakeLists.txt", "v3.6.7", "v3.6.8"),
-            ("libcurl", "addons/tcxCurl/CMakeLists.txt", "8_12_1", "8_13_0"),
+            ("libcurl", "addons/tcxCurl/CMakeLists.txt", "8_22_0", "8_23_0"),
             ("libremidi", "addons/tcxMidi/CMakeLists.txt", "v5.4.3", "v5.4.4"),
         ]
         for name, path, old, new in cases:
@@ -162,9 +162,9 @@ class DependencyTests(unittest.TestCase):
 
     def test_both_vendored_lua_copies_and_miniaudio_macros_are_checked(self):
         for path, old, new in [
-            ("addons/tcxLua/lua/include/lua.h", '#define LUA_VERSION_RELEASE\t"8"', '#define LUA_VERSION_RELEASE\t"9"'),
-            ("addons/tcxLua/lua/src/lua.h", '#define LUA_VERSION_RELEASE\t"8"', '#define LUA_VERSION_RELEASE\t"9"'),
-            ("core/include/miniaudio.h", "#define MA_VERSION_REVISION 23", "#define MA_VERSION_REVISION 24"),
+            ("addons/tcxLua/lua/include/lua.h", '#define LUA_VERSION_RELEASE\t"9"', '#define LUA_VERSION_RELEASE\t"0"'),
+            ("addons/tcxLua/lua/src/lua.h", '#define LUA_VERSION_RELEASE\t"9"', '#define LUA_VERSION_RELEASE\t"0"'),
+            ("core/include/miniaudio.h", "#define MA_VERSION_REVISION 25", "#define MA_VERSION_REVISION 26"),
         ]:
             with self.subTest(path=path):
                 source = deps.read(str(ROOT), path)
@@ -273,7 +273,7 @@ fetchcontent_declare(real
             self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
             self.assertIn("31 third-party entries", good.stdout)
             license_path = root / deps.LIST_FILE
-            inventory = license_path.read_text().replace("| 0.11.23 |", "| 0.11.21 |")
+            inventory = license_path.read_text().replace("| 0.11.25 |", "| 0.11.21 |")
             shader_row = next(r for r in self.rows if r["name"] == deps.SHADER_COMPILER)
             inventory = inventory.replace(shader_row["commit"], "0" * 40)
             inventory = inventory.replace(shader_row["hashes"]["linux"], "0" * 64)
@@ -281,7 +281,7 @@ fetchcontent_declare(real
             license_path.write_text(inventory)
             for path, old, new in [
                 ("addons/tcxTls/CMakeLists.txt", "v3.6.7", "v3.6.8"),
-                ("addons/tcxCurl/CMakeLists.txt", "8_12_1", "8_13_0"),
+                ("addons/tcxCurl/CMakeLists.txt", "8_22_0", "8_23_0"),
                 ("core/include/stb/README.md", "6e9f34d", "0000000"),
             ]:
                 target = root / path

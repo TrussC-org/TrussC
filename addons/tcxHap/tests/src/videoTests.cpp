@@ -103,7 +103,7 @@ void blockTests() {
         const int width = size[0], height = size[1];
         const int blocksX = (width + 3) / 4, blocksY = (height + 3) / 4;
         for (int format = 0; format < 3; ++format) {
-            // Keep compressed blocks aligned for bcdec's native-word reads.
+            // Aligned input; unalignedBlockTests covers every byte offset.
             std::vector<Block> blocks(blocksX * blocksY);
             std::vector<uint64_t> compressed((blocksX * blocksY * blockSizes[format]) / 8);
             auto* src = reinterpret_cast<uint8_t*>(compressed.data());
@@ -134,6 +134,46 @@ void blockTests() {
                                                blockSizes[format], decoders[format]);
             check("BC decode: exact-sized allocation matches guarded output",
                   std::memcmp(exact.data(), guarded.data(), bytes) == 0);
+        }
+    }
+}
+
+void unalignedBlockTests() {
+    const char* names[] = {"BC1", "BC3", "BC7", "BC4 (Hap Q Alpha)"};
+    const size_t blockSizes[] = {8, 16, 16, 8};
+    void (*decoders[])(const void*, void*, int) = {bcdec_bc1, bcdec_bc3, bcdec_bc7, bcdec_bc4};
+    for (int format = 0; format < 4; ++format) {
+        Block block = format == 2 ? bc7Block(1) : colorBlock(1, format == 1);
+        if (format == 3) {
+            // Alpha endpoints 224 and 32; alternate endpoint indices 0 and 1.
+            block = {};
+            block[0] = 224;
+            block[1] = 32;
+            for (int pixel = 0; pixel < 16; ++pixel) {
+                const int bit = 16 + pixel * 3;
+                block[bit / 8] |= (pixel % 2) << (bit % 8);
+            }
+        }
+        for (size_t offset = 0; offset < 8; ++offset) {
+            // Allocation starts aligned; the compressed block ends at its boundary.
+            std::vector<uint8_t> compressed(offset + blockSizes[format]);
+            std::memcpy(compressed.data() + offset, block.data(), blockSizes[format]);
+            // BC1/BC3 still require aligned output for their native-word stores.
+            std::array<uint32_t, 16> decoded{};
+            decoders[format](compressed.data() + offset, decoded.data(), format == 3 ? 4 : 16);
+            const auto* pixels = reinterpret_cast<const uint8_t*>(decoded.data());
+            bool pixelsOk = true;
+            for (int pixel = 0; pixel < 16; ++pixel) {
+                if (format == 3) {
+                    pixelsOk &= pixels[pixel] == (pixel % 2 ? 32 : 224);
+                } else {
+                    const auto expected = expectedPixel(1, pixel, format);
+                    pixelsOk &= std::memcmp(pixels + pixel * 4, expected.data(), 4) == 0;
+                }
+            }
+            char name[128];
+            std::snprintf(name, sizeof(name), "%s: compressed input byte offset %zu", names[format], offset);
+            check(name, pixelsOk);
         }
     }
 }
@@ -192,6 +232,7 @@ void drawTests() {
 int runVideoTests() {
     snappyRoundTripTests();
     blockTests();
+    unalignedBlockTests();
     drawTests();
     return failures;
 }

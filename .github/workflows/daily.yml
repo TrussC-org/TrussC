@@ -141,6 +141,7 @@ jobs:
           key: sokol-shdc-v1-${{ runner.os }}
 
       - name: Install Linux dependencies
+        timeout-minutes: 10
         if: runner.os == 'Linux'
         run: |
           chmod +x tools/install_dependencies_linux.sh
@@ -246,6 +247,7 @@ jobs:
           version: '6.0.2'
 
       - name: Install Linux dependencies (for trusscli)
+        timeout-minutes: 10
         run: |
           chmod +x tools/install_dependencies_linux.sh
           ./tools/install_dependencies_linux.sh -y

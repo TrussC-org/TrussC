@@ -77,6 +77,7 @@ alone, exactly as before.
    in **every** test's process of `allCoreTests`. No TrussC calls (Logger,
    clock, Window, MCP, sockets, threads) at static init or exit; put such an
    object in the entry as a function-local `static` (see `onceGate/`).
+4. Helpers shared through `core/tests/common/` headers go in namespace `tcCoreTest`.
 
 Use an **`own-binary`** marker file (one line saying why) instead when the
 test cannot share an executable: it replaces or interposes a library
@@ -261,6 +262,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   in allCoreTests; the default run is headless. With `--gpu-check`, FBO
   readback checks Points rebuilds/colors/translations and PBR rotations and
   vertex edits, plus independent buffer caching and move assignment.
+- `xml/` — XML serialization and query behavior across pugixml updates:
+  empty text uses an empty element tag, explicit paired-tag formatting works,
+  text and attributes round-trip, XPath selects numeric attributes, and invalid
+  or empty documents report failure. Headless, in `allCoreTests`.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
@@ -631,6 +636,13 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
   `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
   which is checked on every platform.
+- `touchAsMouse/` — touch-as-mouse mapping (#295), through
+  `internal::TouchMouseMapper`: the first finger down is the only touch that
+  drives the mouse (one press, drags, one release on ENDED or CANCELLED); it is
+  found by its full `uintptr_t` identifier, not its index in the touch array;
+  no drag after it lifts; an event with no touches clears it; a primary whose
+  end event was lost (not among the touches at the next BEGAN) is dropped so
+  the next finger down presses.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
