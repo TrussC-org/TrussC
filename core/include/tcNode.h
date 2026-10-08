@@ -832,15 +832,26 @@ private:
     void setupOnce() {
         if (setupCalled_) return;
         setupCalled_ = true;
+        onSetupStart();
         setup();
         onSetupDone();
     }
+
+    // Framework hook, not an app callback: runs once, right before the
+    // node's first setup(). App resolves the data path root here, so file
+    // loads started from setup() (including on worker threads) see it.
+    virtual void onSetupStart() {}
 
     // Framework hook, not an app callback (apps override setup()): runs once,
     // right after the node's first setup() has returned. App attaches its
     // audioOut() / audioIn() here (#426), so the audio thread never runs them
     // before or during setup().
     virtual void onSetupDone() {}
+
+    // Framework hook, not an app callback (apps override cleanup()): runs
+    // right before cleanupTree() runs this node's cleanup(). App detaches
+    // its audioOut() / audioIn() here and waits for callbacks in flight.
+    virtual void onCleanupStart() {}
 
     // Recursively update self and child nodes
     void updateTree() {
@@ -925,6 +936,7 @@ private:
         if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
+        onCleanupStart();
         cleanup();
     }
 
@@ -1441,19 +1453,22 @@ public:
     // fine). Cancel them before the members the callback touches are destroyed
     // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
     // waits for an in-flight callback to finish.
-    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callAfterAsync(double delay, std::function<void()> callback) {
+    //
+    // TC_LUA_SKIP: not exposed to Lua. Lua code only runs on the main thread;
+    // Lua scripts use callAfter / callEvery.
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP uint64_t callAfterAsync(double delay, std::function<void()> callback) {
         return internal::AsyncScheduler::get().after(asyncOwner(), delay, std::move(callback));
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") uint64_t callEveryAsync(double interval, std::function<void()> callback) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP uint64_t callEveryAsync(double interval, std::function<void()> callback) {
         return internal::AsyncScheduler::get().every(asyncOwner(), interval, std::move(callback));
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAsyncTimer(uint64_t id) {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP void cancelAsyncTimer(uint64_t id) {
         internal::AsyncScheduler::get().cancel(id);
     }
 
-    TC_PLATFORMS("macos,windows,linux,android,ios") void cancelAllAsyncTimers() {
+    TC_PLATFORMS("macos,windows,linux,android,ios") TC_LUA_SKIP void cancelAllAsyncTimers() {
         if (asyncOwner_) internal::AsyncScheduler::get().cancelOwner(asyncOwner_);
     }
 
@@ -1713,6 +1728,9 @@ namespace internal {
 inline void setupNodeOnce(Node& node) {
     if (node.setupCalled_) return;
     EntryStackGuard guard(AppEntry::Setup);
+    // A windowed App's setup() runs inside its first update or draw; report
+    // a crash there as "setup", not as the enclosing phase.
+    CrashPhaseScope crashPhase("setup");
     node.setupOnce();
 }
 }

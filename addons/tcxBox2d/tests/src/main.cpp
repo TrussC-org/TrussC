@@ -1696,6 +1696,202 @@ static void testModEventLifetimes() {
     }
 }
 
+// Outside-step Exits (#473): every wrapper finishes the Box2D operation
+// before a listener destroys a third body. Both contact-list orders are used.
+static void testExitListenerDestroysThirdBody() {
+    const vector<string> operations = {"destroy", "disable", "static", "dynamic", "kinematic"};
+    for (const auto& op : operations) {
+        for (bool reverse : {false, true}) {
+            box2d::World world;
+            world.setup(0, 0);
+            world.setAutoUpdate(false);
+            box2d::RectBody a, b, c;
+            a.setup(world, 400, 300, 200, 20);
+            auto makeB = [&] { b.setup(world, 340, kBallY, 20, 20); b.setSensor(true); };
+            auto makeC = [&] { c.setup(world, 460, kBallY, 20, 20); c.setSensor(true); };
+            if (reverse) { makeC(); makeB(); } else { makeB(); makeC(); }
+            if (op == "dynamic") b.setKinematic();
+            step(world, 1);
+            const bool touching = touchingContacts(world, a.getBody(), b.getBody()) > 0 &&
+                                  touchingContacts(world, a.getBody(), c.getBody()) > 0;
+            int ab = 0, ac = 0, bx = 0, cx = 0, ended = 0;
+            bool completed = true;
+            EventListener l1 = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
+                if (e.other == &b) {
+                    ++ab;
+                    // IsLocked() alone cannot detect DestroyBody/SetType's
+                    // contact loop: inspect their completed state too.
+                    completed = completed && !world.getWorld()->IsLocked();
+                    if (op == "destroy") completed = completed && !b.isCreated();
+                    else if (op == "disable") completed = completed && !b.isBodyEnabled();
+                    else completed = completed && contactsBetween(world, a.getBody(), b.getBody()) == 0;
+                    c.destroy();
+                } else if (e.other == &c) ++ac;
+            });
+            EventListener l2 = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++bx; });
+            EventListener l3 = c.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++cx; });
+            EventListener l4 = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) { ++ended; });
+            if (op == "destroy") b.destroy();
+            else if (op == "disable") b.setEnabled(false);
+            else if (op == "static") b.setStatic();
+            else if (op == "dynamic") b.setDynamic();
+            else b.setKinematic();
+            const string label = "outside-step " + op + (reverse ? " reverse" : "");
+            check(label + ": listener sees completed Box2D operation, destroys C", touching && completed && !c.isCreated());
+            check(label + ": each Exit once before wrapper returns", ab == 1 && ac == 1 && bx == 1 && cx == 1 && ended == 2);
+            world.getCollisionManager()->update();
+            check(label + ": update does not repeat Exits", ab == 1 && ac == 1 && bx == 1 && cx == 1 && ended == 2);
+        }
+    }
+
+    // Also put B and C in contact: C's destruction used to free a contact
+    // that B's DestroyBody/SetEnabled/SetType loop was still walking.
+    for (const auto& op : operations) {
+        for (bool reverse : {false, true}) {
+            box2d::World world;
+            world.setup(0, 0);
+            world.setAutoUpdate(false);
+            box2d::RectBody a, b, c;
+            a.setup(world, 400, 300, 200, 20);
+            auto makeB = [&] { b.setup(world, 397, kBallY, 20, 20); b.setSensor(true); };
+            auto makeC = [&] { c.setup(world, 403, kBallY, 20, 20); c.setSensor(true); };
+            if (reverse) { makeC(); makeB(); } else { makeB(); makeC(); }
+            if (op == "dynamic") b.setKinematic();
+            step(world, 1);
+            const bool touching = touchingContacts(world, a.getBody(), b.getBody()) > 0 &&
+                                  touchingContacts(world, a.getBody(), c.getBody()) > 0 &&
+                                  touchingContacts(world, b.getBody(), c.getBody()) > 0;
+            int ab = 0, ac = 0, ba = 0, bc = 0, ca = 0, cb = 0, ended = 0;
+            EventListener la = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
+                if (e.other == &b) { ++ab; c.destroy(); } else if (e.other == &c) ++ac;
+            });
+            EventListener lb = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
+                if (e.other == &a) ++ba; else ++bc; // C may already have been forgotten
+            });
+            EventListener lc = c.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent& e) {
+                if (e.other == &a) ++ca; else ++cb;
+            });
+            EventListener lw = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) { ++ended; });
+            if (op == "destroy") b.destroy();
+            else if (op == "disable") b.setEnabled(false);
+            else if (op == "static") b.setStatic();
+            else if (op == "dynamic") b.setDynamic();
+            else b.setKinematic();
+            const string label = "shared-contact " + op + (reverse ? " reverse" : "");
+            check(label + ": three pairs, each surviving side Exit once",
+                  touching && !c.isCreated() && ab == 1 && ac == 1 && ba == 1 && bc == 1 && ca == 1 && cb <= 1 && ended == 3);
+            // C's B Exit can already have fired before the listener drops C;
+            // otherwise forget() suppresses that pending notification.
+            const int before = ab + ac + ba + bc + ca + cb;
+            world.getCollisionManager()->update();
+            check(label + ": no repeated Exit", ab + ac + ba + bc + ca + cb == before && ended == 3);
+        }
+    }
+
+    const vector<string> modOperations = {"teardown", "static", "dynamic", "kinematic"};
+    // Distinct stable addresses for the Mod layer's per-World router.
+    static box2d::World worlds[8];
+    size_t index = 0;
+    for (const auto& op : modOperations) {
+        for (bool reverse : {false, true}) {
+            auto& world = worlds[index++];
+            world.setup(0, 0);
+            world.setAutoUpdate(false);
+            shared_ptr<Node> an, bn, cn;
+            auto* a = addModBody(world, an, 400, 300, box2d::Shape2D::box(200, 20));
+            box2d::RigidBody2D* b = nullptr;
+            box2d::RigidBody2D* c = nullptr;
+            auto makeB = [&] { b = addBall(world, bn, 340); };
+            auto makeC = [&] { c = addBall(world, cn, 460); };
+            if (reverse) { makeC(); makeB(); } else { makeB(); makeC(); }
+            if (op == "dynamic") b->setBodyType(box2d::BodyType::Kinematic);
+            step(world, 1);
+            ModCounts na, nb, nc;
+            bool completed = true;
+            auto la = countEvents(a, na, [&](int phase, box2d::Contact2D&) {
+                if (phase != 2 || !cn) return;
+                completed = completed && !world.getWorld()->IsLocked();
+                if (op == "teardown") completed = completed && world.getBodyCount() == 2;
+                else completed = completed && contactsBetween(world, a->getBody(), b->getBody()) == 0;
+                cn.reset();
+            });
+            auto lb = countEvents(b, nb);
+            auto lc = countEvents(c, nc);
+            int ended = 0;
+            EventListener lw = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) { ++ended; });
+            if (op == "teardown") bn.reset();
+            else b->setBodyType(op == "static" ? box2d::BodyType::Static
+                              : op == "dynamic" ? box2d::BodyType::Dynamic : box2d::BodyType::Kinematic);
+            const string label = "outside-step Mod " + op + (reverse ? " reverse" : "");
+            check(label + ": completed operation, listener drops C", completed && !cn);
+            check(label + ": each live side Exit once before return", na.ended == 2 && nb.ended == (op == "teardown" ? 0 : 1) && nc.ended == 0 && ended == 2);
+            world.getCollisionManager()->update();
+            check(label + ": update does not repeat Exits", na.ended == 2 && nb.ended == (op == "teardown" ? 0 : 1) && nc.ended == 0 && ended == 2);
+        }
+    }
+
+    for (const string op : {"disable", "type"}) {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+        box2d::RectBody a, b, c;
+        a.setup(world, 400, 300, 200, 20);
+        a.setStatic();
+        b.setup(world, 340, kBallY, 20, 20);
+        b.setSensor(true);
+        c.setup(world, 460, kBallY, 20, 20);
+        c.setSensor(true);
+        step(world, 1);
+        int ax = 0, bx = 0, cx = 0;
+        EventListener la = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++ax; c.destroy(); });
+        EventListener lb = b.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++bx; });
+        EventListener lc = c.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++cx; });
+        if (op == "disable") b.getBody()->SetEnabled(false);
+        else if (op == "type") b.getBody()->SetType(b2_staticBody);
+        check("raw " + op + ": no Exit inside Box2D call", ax == 0 && bx == 0 && cx == 0);
+        world.getCollisionManager()->update();
+        check("raw " + op + ": next update flushes exactly once", ax == 2 && bx == 1 && cx == 1);
+        world.getCollisionManager()->update();
+        check("raw " + op + ": no repeated Exit", ax == 2 && bx == 1 && cx == 1);
+    }
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+        box2d::RectBody a, c;
+        a.setup(world, 400, 300, 200, 20);
+        a.setStatic();
+        c.setup(world, 460, kBallY, 20, 20);
+        c.setSensor(true);
+        b2BodyDef def;
+        def.type = b2_dynamicBody;
+        def.position = box2d::World::toBox2d(340, kBallY);
+        b2Body* raw = world.getWorld()->CreateBody(&def);
+        b2PolygonShape shape;
+        shape.SetAsBox(box2d::World::toBox2d(10), box2d::World::toBox2d(10));
+        b2FixtureDef fixture;
+        fixture.shape = &shape;
+        fixture.isSensor = true;
+        fixture.density = 1;
+        raw->CreateFixture(&fixture);
+        step(world, 1);
+        int ended = 0, ax = 0, cx = 0;
+        EventListener lw = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) {
+            ++ended;
+            if (c.isCreated()) c.destroy();
+        });
+        EventListener la = a.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++ax; });
+        EventListener lc = c.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++cx; });
+        world.getWorld()->DestroyBody(raw);
+        check("raw DestroyBody: no Exit inside Box2D call", ended == 0 && ax == 0 && cx == 0);
+        world.getCollisionManager()->update();
+        check("raw DestroyBody: next update can destroy C, each Exit once", ended == 2 && ax == 1 && cx == 1 && !c.isCreated());
+        world.getCollisionManager()->update();
+        check("raw DestroyBody: no repeated Exit", ended == 2 && ax == 1 && cx == 1);
+    }
+
+}
+
 // The World's own DestroyBody calls: createBounds() replacing the walls
 // (the new walls get the freed b2Body's address) and clear(). The world-level
 // Ended deferred from the step must not name the freed walls or bodies.
@@ -2324,6 +2520,7 @@ int main() {
     testClassicEventLifetimes();
     testModEventLifetimes();
     testWorldEventLifetimes();
+    testExitListenerDestroysThirdBody();
     testCompoundOffset(world);
     testDensityAndType(world);
     testReducedConvexHull();

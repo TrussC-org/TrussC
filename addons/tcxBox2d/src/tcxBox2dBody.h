@@ -262,15 +262,27 @@ public:
     // Body Type
     // -------------------------------------------------------------------------
     void setStatic() {
-        if (body_) body_->SetType(b2_staticBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetType(b2_staticBody);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     void setDynamic() {
-        if (body_) body_->SetType(b2_dynamicBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetType(b2_dynamicBody);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     void setKinematic() {
-        if (body_) body_->SetType(b2_kinematicBody);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetType(b2_kinematicBody);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     bool isStaticBody() const {
@@ -313,7 +325,11 @@ public:
     }
 
     void setEnabled(bool enabled) {
-        if (body_) body_->SetEnabled(enabled);
+        if (body_) {
+            auto* cm = world_->getCollisionManager();
+            body_->SetEnabled(enabled);
+            if (cm) cm->flushPendingExits();
+        }
     }
 
     bool isBodyEnabled() const {
@@ -327,9 +343,15 @@ public:
         if (body_ && world_ && world_->getWorld()) {
             // A deferred Exit must not reach this body's collider once it is
             // freed (see CollisionManager)
-            if (auto* cm = world_->getCollisionManager()) cm->forget(body_);
-            world_->getWorld()->DestroyBody(body_);
-            body_ = nullptr;
+            auto* cm = world_->getCollisionManager();
+            b2Body* gone = body_;
+            if (cm) cm->forget(gone);
+            world_->getWorld()->DestroyBody(gone);
+            body_ = nullptr;   // listeners may call destroy() again
+            if (cm) {
+                cm->forgetBody(gone);
+                cm->flushPendingExits();
+            }
         }
     }
 

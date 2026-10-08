@@ -11,7 +11,7 @@
 //   (the test font's glyph is a filled square), and texels outside the
 //   glyph rectangles hold none.
 //
-// `fontAtlasR8 --gpu-check` (needs a display; not run in CI) opens a window
+// `fontAtlasR8 --gpu-check` (daily CI under Xvfb) opens a window
 // and, in one frame, draws 150 glyphs that were never drawn before into an
 // Fbo, one drawString() call each, so the page grows several times inside
 // the frame. It checks that the page texture is SG_PIXELFORMAT_R8 and that

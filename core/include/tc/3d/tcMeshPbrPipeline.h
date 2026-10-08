@@ -16,7 +16,7 @@
 //   6. tcMeshPbrPipeline.h        (this file; defines Mesh::drawGpuPbr())
 //
 // Draw submission:
-//   - Pipelines are cached per (color format, sample count), so both the
+//   - Pipelines are cached per (color format, sample count, primitive kind), so both the
 //     swapchain and Fbo passes are supported render targets.
 //   - ALL PBR draws are deferred: swapchain draws into the per-layer flush
 //     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
@@ -29,6 +29,7 @@
 
 #include <cstring>
 #include <map>
+#include <tuple>
 #include <vector>
 
 #include "tc/gpu/shaders/meshPbr.glsl.h"
@@ -104,13 +105,13 @@ public:
     void ensureInit() {
         if (initialized_) return;
         shader_ = sg_make_shader(tc_pbr_pbr_mesh_shader_desc(sg_query_backend()));
+        shaderReady_ = internal::internalShaderReady(shader_, "PBR");
         initialized_ = true;
     }
 
     // Get or create a pipeline for the given color pixel format and sample count.
-    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount) {
-        // キャッシュキー: colorFormat(下位16bit) + sampleCount(上位16bit)
-        int key = static_cast<int>(colorFormat) | (sampleCount << 16);
+    sg_pipeline getPipeline(sg_pixel_format colorFormat, int sampleCount, bool lines = false) {
+        const auto key = std::make_tuple(colorFormat, sampleCount, lines);
         auto it = pipelineCache_.find(key);
         if (it != pipelineCache_.end()) return it->second;
 
@@ -132,6 +133,7 @@ public:
 
         pd.sample_count = sampleCount;
         pd.index_type = SG_INDEXTYPE_UINT32;
+        pd.primitive_type = lines ? SG_PRIMITIVETYPE_LINES : SG_PRIMITIVETYPE_TRIANGLES;
         pd.label = "tc_mesh_pbr_pipeline";
 
         sg_pipeline pip = sg_make_pipeline(&pd);
@@ -143,6 +145,7 @@ public:
     // Assumes mesh has uploaded GPU buffers and currentMaterial is set.
     void drawMesh(const Mesh& mesh) {
         ensureInit();
+        if (!shaderReady_) return;   // warned once in ensureInit()
 
         // Lighting / material / environment / shadow state is all per-window.
         auto& wctx = internal::currentWindowContext();
@@ -158,14 +161,15 @@ public:
             colorFmt = wctx.currentFboColorFormat;
             sampleCount = wctx.currentFboSampleCount;
         } else {
-            colorFmt = _SG_PIXELFORMAT_DEFAULT;
-            sampleCount = sapp_sample_count();
+            const auto target = swapchainTargetFormat(wctx);
+            colorFmt = target.colorFormat;
+            sampleCount = target.sampleCount;
         }
 
         // Resolve the pipeline now; GPU submission happens at the end of this
         // function — deferred for the swapchain (so it composites with sokol_gl
         // in submission order), immediate inside an FBO pass.
-        sg_pipeline pip = getPipeline(colorFmt, sampleCount);
+        sg_pipeline pip = getPipeline(colorFmt, sampleCount, isLineMesh(mesh.getMode()));
 
         // --- Bindings -------------------------------------------------------
         sg_bindings bind = {};
@@ -574,6 +578,9 @@ private:
 public:
     void beginShadowPass(int lightIndex) {
         ensureShadowInit();
+        // No shadow shader (warned once): no pass; sh.inPass stays false, so
+        // shadowDraw()/endShadowPass() are no-ops.
+        if (!shadowReady_) return;
         auto& wctx = internal::currentWindowContext();
         auto& sh = wctx.shadow;
         const Light& light = *wctx.activeLights[lightIndex];
@@ -678,7 +685,7 @@ public:
 
     void shadowDrawMesh(const Mesh& mesh) {
         auto& sh = internal::currentWindowContext().shadow;
-        if (!sh.inPass) return;
+        if (!sh.inPass || isLineMesh(mesh.getMode())) return;
         mesh.uploadToGpu();
         if (mesh.getGpuVertexBuffer().id == 0) return;
 
@@ -740,6 +747,11 @@ private:
         if (shadowInitialized_) return;
 
         shadowShader_ = sg_make_shader(tc_shadow_shadow_depth_shader_desc(sg_query_backend()));
+        shadowReady_ = internal::internalShaderReady(shadowShader_, "shadow depth");
+        if (!shadowReady_) {
+            shadowInitialized_ = true;   // not retried
+            return;
+        }
 
         sg_pipeline_desc pd = {};
         pd.shader = shadowShader_;
@@ -841,12 +853,14 @@ private:
 
     // --- PBR pipeline state ---
     sg_shader shader_{};
-    std::map<int, sg_pipeline> pipelineCache_;  // keyed by sg_pixel_format
+    bool shaderReady_{false};
+    std::map<std::tuple<sg_pixel_format, int, bool>, sg_pipeline> pipelineCache_;
     bool initialized_{false};
 
     // --- Shadow pipeline state ---
     sg_shader shadowShader_{};
     sg_pipeline shadowPipeline_{};
+    bool shadowReady_{false};
     bool shadowInitialized_{false};
 
     sg_image shadowColorImage_{};   // SG_IMAGETYPE_ARRAY, maxShadowLights layers
@@ -932,7 +946,10 @@ inline void flushFboDeferredPbr(sgl_context ctx) {
 // forward declaration.
 inline void Mesh::drawGpuPbr() const {
     uploadToGpu();
-    if (vbuf_.id == 0) return;  // upload failed or mesh empty
+    if (vbuf_.id == 0) {
+        if (!vertices_.empty()) drawWithLighting();
+        return;
+    }
     internal::getPbrPipeline().drawMesh(*this);
 }
 

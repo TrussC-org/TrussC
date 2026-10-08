@@ -19,6 +19,8 @@
 //      a second depth / color block that is skipped, the stream manifest
 //      count, the header magic) are skipped or refused with the expected
 //      message, and the other frames still play.
+//      Depth / color blocks with trailing extension bytes still allow the
+//      following blocks to play, even when the known payload is skipped.
 //   3. Header frame size: 0x0 and sizes up to width x height x 4 = INT_MAX
 //      open; negative sizes and larger ones are refused.
 //   4. The parsers refuse a byte size above INT_MAX before allocating.
@@ -240,7 +242,7 @@ static Played play(const filesystem::path& path) {
                                     f.color.getChannels());
                 memcpy(pf.f.color.getData(), f.color.getData(), f.color.getTotalBytes());
             }
-            r.frames.push_back(move(pf));
+            r.frames.push_back(std::move(pf));
         }
         p->close();
     }
@@ -409,6 +411,25 @@ static void writeAll(const filesystem::path& p, const vector<uint8_t>& b) {
 
 constexpr uint8_t FILLER_TYPE = BLOCK_CUSTOM_BASE + 2;  // ProbePlayback ignores it
 
+// Add four unknown trailing bytes to a known block in frame 1. Its compressed
+// data stays the same; the TLV length, index location and later frame offsets
+// account for the inserted bytes, leaving the following blocks intact.
+static void addBlockExtension(uint8_t type, vector<uint8_t>& b,
+                              const vector<vector<BlockAt>>& L) {
+    const BlockAt& k = blockOf(L, 1, type);
+    const size_t tail = k.payload() + k.len;
+    uint64_t indexOffset = 0;
+    vector<uint64_t> offsets = frameOffsets(b, indexOffset);
+    b.insert(b.begin() + tail, 4, 0xFF);
+    put32(b, k.at + 1, k.len + 4);
+    indexOffset += 4;
+    memcpy(b.data() + offsetof(TcdcHeader, indexOffset), &indexOffset, 8);
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        if (offsets[i] > tail) offsets[i] += 4;
+        memcpy(b.data() + indexOffset + i * 16 + 8, &offsets[i], 8);
+    }
+}
+
 // Replaces the depth data of frame 1 with a valid LZ4 stream that decodes to 2
 // bytes less than the byte size, and keeps the sizes consistent with it. The
 // bytes it frees become a filler block, so the blocks after it stay in place.
@@ -541,6 +562,12 @@ static vector<Mutation> mutations() {
     const S R = S::Read, X = S::Skipped, A = S::Any;
     return {
         // --- depth block ---
+        {"depthTrailingExtension", hilo, lz4, R, R, R, nullptr,
+         [](auto& b, auto& L) { addBlockExtension(BLOCK_DEPTH, b, L); }},
+        {"depthSkippedWithTrailingExtension", hilo, lz4, X, R, R, "byte size doesn't match the sample count",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
+                                put32(b, k.payload() + D_RAW, get32(b, k.payload() + D_RAW) + 2);
+                                addBlockExtension(BLOCK_DEPTH, b, L); }},
         {"depthRawBytesLarger", hilo, lz4, X, R, R, "byte size doesn't match the sample count",
          [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_DEPTH);
                                 put32(b, k.payload() + D_RAW, get32(b, k.payload() + D_RAW) + 2); }},
@@ -602,6 +629,12 @@ static vector<Mutation> mutations() {
          [](auto& b, auto& L) { secondBlockWithoutData(BLOCK_DEPTH, b, L); }},
 
         // --- color block ---
+        {"colorTrailingExtension", hilo, lz4, R, R, R, nullptr,
+         [](auto& b, auto& L) { addBlockExtension(BLOCK_COLOR, b, L); }},
+        {"colorSkippedWithTrailingExtension", hilo, lz4, R, X, R, "width and height must be positive",
+         [](auto& b, auto& L) { const auto& k = blockOf(L, 1, BLOCK_COLOR);
+                                put32(b, k.payload() + C_W, static_cast<uint32_t>(-80));
+                                addBlockExtension(BLOCK_COLOR, b, L); }},
         // The length files written before the color length was fixed state
         // (13 + compressed size) plays like the one DepthRecorder writes now.
         {"colorLenBeforeFix", hilo, lz4, R, R, R, nullptr,

@@ -1,12 +1,11 @@
 // =============================================================================
-// tcxCurl tests - headless console test (no window), no libcurl needed.
+// tcxCurl tests - headless console test (no window), no network needed.
 //
 // Built and run by CI on every push/PR across macOS / Windows / Linux via
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 //
-// tcxCurl.h is included by relative path and tcxCurl is not listed in
-// addons.make, so TCX_HTTP_CURL stays undefined: only the curl-free code in
-// tcx::curl::detail is compiled. That is the code behind setVerbose():
+// tcxCurl is listed in addons.make to compile the libcurl glue and check
+// default SSL option bits. Also tests the code behind setVerbose():
 //   - redactCredentialLine(): credential headers (HTTP/1 lines and the
 //     [HTTP/2] / h2h3 / h2 info lines), curl's echo of an environment proxy
 //     (lines curl cut at 2047 chars, at 2043 + "...", and error lines at
@@ -88,6 +87,28 @@ static string replayPieces(const std::vector<Step>& steps, size_t piece) {
 }
 
 int main() {
+    // TLS defaults: certificate verification remains enabled; only unavailable
+    // revocation information becomes best-effort on Windows.
+#ifdef _WIN32
+    long nativeCa = 0, bestEffort = 0;
+#ifdef CURLSSLOPT_NATIVE_CA
+    nativeCa = CURLSSLOPT_NATIVE_CA;
+#endif
+#ifdef CURLSSLOPT_REVOKE_BEST_EFFORT
+    bestEffort = CURLSSLOPT_REVOKE_BEST_EFFORT;
+#endif
+    check("SSL defaults: native CA and best-effort revocation",
+          defaultSslOptions() == (nativeCa | bestEffort));
+    check("SSL custom PEM: best-effort revocation without native CA",
+          defaultSslOptions(true) == bestEffort);
+#ifdef CURLSSLOPT_NO_REVOKE
+    check("SSL defaults: revocation is not disabled",
+          (defaultSslOptions() & CURLSSLOPT_NO_REVOKE) == 0);
+#endif
+#else
+    check("SSL defaults: other platforms keep curl defaults",
+          defaultSslOptions() == 0L && defaultSslOptions(true) == 0L);
+#endif
     const string SECRET = "TOPSECRET42";
 
     // --- HTTP/1 request header lines ----------------------------------------

@@ -1,6 +1,6 @@
 # tcxWebSocket tests
 
-Headless console test (no window, no network). It checks how the web build
+Headless console test (no window; loopback connections only). It checks how the web build
 (Emscripten) turns a received message into `WebSocketEventArgs`
 (`detail::fillMessageArgs`, used by `WebSocketClient` on the web). Emscripten
 reports a text message as a NUL-terminated UTF-8 string and counts the
@@ -31,12 +31,28 @@ ephemeral port range (`TcpServer` cannot report a port the OS picked).
   1009, then `onError`, then `onClose`;
 - an `onError` listener that calls `disconnect()` -> one `onClose`.
 
+Frame header validation (#514) uses the same in-process server:
+
+- each RSV bit, every reserved opcode, fragmented Close/Ping/Pong, control
+  payloads over 125 bytes, and masked server frames -> exactly one Close
+  1002, one `onError` naming the violation, and one `onClose`, in that order;
+- both complete frames and headers without their advertised payload are
+  rejected; oversized control frames use 1002 even above the message limit;
+- valid 125-byte Ping/Pong/Close frames and unfragmented text/binary keep
+  their existing behavior, including a masked Pong echoing the Ping.
+
+These checks wait on conditions with deadlines, then join the transport
+threads before asserting exact event and frame counts.
+
 Handshake deadline and reconnecting from the events (#262). The test pumps
 the update event, as the app's frame loop would, for the 101 deadline:
 
 - `ws://` to a server that accepts and never answers the upgrade request,
-  with `setHandshakeTimeout(1)` -> `onError`, then `onClose`, after about
-  1 s; the client is `Disconnected`;
+  with `setHandshakeTimeout(1)` -> disconnect, then `onError`, then
+  `onClose`; the error callback already sees `Disconnected`;
+- a 101 timeout `onError` listener that reconnects or destroys the client
+  -> no stale `onClose`, and a replacement connection can open;
+- `setConnectTimeout(2)` forwards a separate TCP deadline for ws:// and wss://;
 - `wss://` to a server that accepts and never speaks TLS -> the same,
   through `TlsClient`'s handshake deadline;
 - `ws://` to a server that closes the connection before the `101` ->
@@ -62,3 +78,10 @@ trusscli run -p .          # from this directory
 # or from the repo root, run every addon test harness:
 ./examples/build_all.py --addon-tests-only --include-daily --verbose
 ```
+
+The tcxTls harness also checks a silent HTTP upgrade after successful TLS,
+20 successful wss:// connections reopened inline from `onClose`, and
+reconnection from `onError` after 20 self-signed certificate failures with
+certificate verification enabled. On Linux it also fills a loopback accept
+queue to check the inherited TCP deadline through TlsClient, with threads
+enabled and disabled.

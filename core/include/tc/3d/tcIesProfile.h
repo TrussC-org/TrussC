@@ -23,9 +23,10 @@
 #include <string>
 #include <vector>
 #include <fstream>
-#include <sstream>
 #include <cmath>
 #include <algorithm>
+
+#include "tcIesParse.h"
 
 namespace trussc {
 
@@ -105,101 +106,20 @@ private:
     // -------------------------------------------------------------------------
 
     bool parse(const std::string& data) {
-        std::istringstream iss(data);
-        std::string line;
-
-        // Skip header lines until TILT=
-        bool foundTilt = false;
-        while (std::getline(iss, line)) {
-            // Trim leading whitespace
-            size_t start = line.find_first_not_of(" \t\r\n");
-            if (start == std::string::npos) continue;
-            line = line.substr(start);
-
-            if (line.rfind("TILT=", 0) == 0) {
-                foundTilt = true;
-                // TILT=INCLUDE means extra tilt data follows; skip it
-                if (line.find("INCLUDE") != std::string::npos) {
-                    // Read lamp-to-luminaire tilt data: angles + factors
-                    // For simplicity, skip by consuming tokens until we've
-                    // read the described block. Format:
-                    //   <orientation> <numPairs>
-                    //   <angles...>
-                    //   <factors...>
-                    int orient = 0, numPairs = 0;
-                    iss >> orient >> numPairs;
-                    float dummy;
-                    for (int i = 0; i < numPairs * 2; i++) iss >> dummy;
-                }
-                break;
-            }
-        }
-        if (!foundTilt) {
-            logWarning() << "[IesProfile] TILT= line not found";
+        internal::IesParseResult parsed;
+        std::string error;
+        if (!internal::parseIes(data, parsed, error)) {
+            logWarning() << "[IesProfile] " << error;
             return false;
         }
 
-        // Read all remaining tokens as floats
-        std::vector<float> tokens;
-        {
-            float v;
-            while (iss >> v) tokens.push_back(v);
-        }
-
-        if (tokens.size() < 13) {
-            logWarning() << "[IesProfile] insufficient numeric data";
-            return false;
-        }
-
-        int idx = 0;
-        idx++;  // numLamps
-        idx++;  // lumensPerLamp
-        float candelaMultiplier = tokens[idx++];
-        int numVert = (int)tokens[idx++];
-        int numHoriz = (int)tokens[idx++];
-        idx++;  // photometricType (1=C, most common)
-        idx++;  // unitsType
-        idx++;  // width
-        idx++;  // length
-        idx++;  // height
-        idx++;  // ballastFactor
-        idx++;  // futureUse (file generation type)
-        idx++;  // inputWatts
-
-        // Vertical angles (degrees, ascending)
-        if (idx + numVert + numHoriz > (int)tokens.size()) {
-            logWarning() << "[IesProfile] not enough angle data";
-            return false;
-        }
-        vertAngles_.resize(numVert);
-        for (int i = 0; i < numVert; i++) vertAngles_[i] = tokens[idx++];
-
-        // Horizontal angles (degrees, ascending)
-        horizAngles_.resize(numHoriz);
-        for (int i = 0; i < numHoriz; i++) horizAngles_[i] = tokens[idx++];
-
-        // Candela values: one set of numVert values per horizontal angle
-        int needed = numHoriz * numVert;
-        if (idx + needed > (int)tokens.size()) {
-            logWarning() << "[IesProfile] not enough candela data";
-            return false;
-        }
-        candela_.resize(numHoriz);
-        maxCandela_ = 0.0f;
-        for (int h = 0; h < numHoriz; h++) {
-            candela_[h].resize(numVert);
-            for (int v = 0; v < numVert; v++) {
-                float cd = tokens[idx++] * candelaMultiplier;
-                candela_[h][v] = cd;
-                if (cd > maxCandela_) maxCandela_ = cd;
-            }
-        }
-
-        // Max vertical angle in radians
+        vertAngles_ = std::move(parsed.vertAngles);
+        horizAngles_ = std::move(parsed.horizAngles);
+        candela_ = std::move(parsed.candela);
+        maxCandela_ = parsed.maxCandela;
         maxVertAngle_ = vertAngles_.back() * PI_F / 180.0f;
-
-        numVertAngles_ = numVert;
-        numHorizAngles_ = numHoriz;
+        numVertAngles_ = static_cast<int>(vertAngles_.size());
+        numHorizAngles_ = static_cast<int>(horizAngles_.size());
         return true;
     }
 

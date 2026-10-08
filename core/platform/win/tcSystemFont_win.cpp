@@ -48,50 +48,55 @@ ComPtr<IDWriteFactory> getFactory() {
     return factory;
 }
 
-fs::path fontFilePath(IDWriteFont* font) {
-    if (!font) return "";
+// The file of a DirectWrite font and the index of its face in that file
+// (IDWriteFontFace::GetIndex(): the face's position in a .ttc / .otc).
+internal::SystemFontFace fontFileFace(IDWriteFont* font) {
+    internal::SystemFontFace out;
+    if (!font) return out;
 
     ComPtr<IDWriteFontFace> face;
-    if (FAILED(font->CreateFontFace(&face)) || !face) return "";
+    if (FAILED(font->CreateFontFace(&face)) || !face) return out;
 
     UINT32 fileCount = 0;
-    if (FAILED(face->GetFiles(&fileCount, nullptr)) || fileCount == 0) return "";
+    if (FAILED(face->GetFiles(&fileCount, nullptr)) || fileCount == 0) return out;
 
     std::vector<ComPtr<IDWriteFontFile>> files(fileCount);
-    if (FAILED(face->GetFiles(&fileCount, reinterpret_cast<IDWriteFontFile**>(files.data())))) return "";
+    if (FAILED(face->GetFiles(&fileCount, reinterpret_cast<IDWriteFontFile**>(files.data())))) return out;
 
     const void* refKey = nullptr;
     UINT32 refKeySize = 0;
-    if (FAILED(files[0]->GetReferenceKey(&refKey, &refKeySize))) return "";
+    if (FAILED(files[0]->GetReferenceKey(&refKey, &refKeySize))) return out;
 
     ComPtr<IDWriteFontFileLoader> loader;
-    if (FAILED(files[0]->GetLoader(&loader)) || !loader) return "";
+    if (FAILED(files[0]->GetLoader(&loader)) || !loader) return out;
 
     ComPtr<IDWriteLocalFontFileLoader> localLoader;
-    if (FAILED(loader.As(&localLoader)) || !localLoader) return "";
+    if (FAILED(loader.As(&localLoader)) || !localLoader) return out;
 
     UINT32 pathLen = 0;
-    if (FAILED(localLoader->GetFilePathLengthFromKey(refKey, refKeySize, &pathLen))) return "";
+    if (FAILED(localLoader->GetFilePathLengthFromKey(refKey, refKeySize, &pathLen))) return out;
 
     std::wstring wpath(pathLen + 1, L'\0');
-    if (FAILED(localLoader->GetFilePathFromKey(refKey, refKeySize, wpath.data(), pathLen + 1))) return "";
+    if (FAILED(localLoader->GetFilePathFromKey(refKey, refKeySize, wpath.data(), pathLen + 1))) return out;
 
     // Keep the path wide. A UTF-8 std::string handed back as fs::path would be
     // decoded in the active code page (a per-user font under a Japanese user
     // name would resolve to a mangled path).
     wpath.resize(pathLen);
-    return fs::path(wpath);
+    out.path = fs::path(wpath);
+    out.index = (int)face->GetIndex();
+    return out;
 }
 
 } // namespace
 
-fs::path systemFontPath(const std::string& name) {
-    if (name.empty()) return "";
+internal::SystemFontFace internal::systemFontFace(const std::string& name) {
+    if (name.empty()) return {};
     auto factory = getFactory();
-    if (!factory) return "";
+    if (!factory) return {};
 
     ComPtr<IDWriteFontCollection> coll;
-    if (FAILED(factory->GetSystemFontCollection(&coll, FALSE)) || !coll) return "";
+    if (FAILED(factory->GetSystemFontCollection(&coll, FALSE)) || !coll) return {};
 
     std::wstring wname = utf8ToWide(name);
 
@@ -106,8 +111,8 @@ fs::path systemFontPath(const std::string& name) {
                     DWRITE_FONT_WEIGHT_REGULAR,
                     DWRITE_FONT_STRETCH_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL, &font))) {
-                fs::path path = fontFilePath(font.Get());
-                if (!path.empty()) return path;
+                SystemFontFace face = fontFileFace(font.Get());
+                if (!face.path.empty()) return face;
             }
         }
     }
@@ -140,14 +145,18 @@ fs::path systemFontPath(const std::string& name) {
                 psName.resize(len);
 
                 if (_wcsicmp(psName.c_str(), wname.c_str()) == 0) {
-                    fs::path path = fontFilePath(font.Get());
-                    if (!path.empty()) return path;
+                    SystemFontFace face = fontFileFace(font.Get());
+                    if (!face.path.empty()) return face;
                 }
             }
         }
     }
 
-    return "";
+    return {};
+}
+
+fs::path systemFontPath(const std::string& name) {
+    return internal::systemFontFace(name).path;
 }
 
 std::vector<std::string> listSystemFonts() {

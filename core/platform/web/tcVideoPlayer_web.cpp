@@ -29,6 +29,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             }
 
             // Initialize state
+            window._trussc_player_error = null;
             window._trussc_player_ready = false;
             window._trussc_player_playing = false;
             window._trussc_player_frameNew = false;
@@ -36,7 +37,6 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             window._trussc_player_width = 0;
             window._trussc_player_height = 0;
             window._trussc_player_duration = 0;
-            window._trussc_player_frameRate = 30;
 
             // Create video element
             var video = document.createElement('video');
@@ -93,8 +93,13 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             };
 
             video.onerror = function(e) {
-                console.error('[VideoPlayer] Web: failed to load -', video.error ? video.error.message : 'unknown error');
-                window._trussc_player_ready = false;
+                if (window._trussc_player_video !== video) return;
+                window._trussc_player_error = {
+                    message: video.error && video.error.message || 'Video playback failed',
+                    code: video.error ? video.error.code : 0
+                };
+                video.pause();
+                window._trussc_player_playing = false;
             };
 
             // Start loading
@@ -171,6 +176,13 @@ void VideoPlayer::setPausedPlatform(bool paused) {
 }
 
 void VideoPlayer::updatePlatform() {
+    if (emscripten_run_script_int("!!window._trussc_player_error")) {
+        const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
+        int code = emscripten_run_script_int("window._trussc_player_error.code");
+        emscripten_run_script("window._trussc_player_error = null;");
+        reportPlaybackError(message, code);
+        return;
+    }
     // Update size if changed
     int newWidth = emscripten_run_script_int("(window._trussc_player_width || 0)");
     int newHeight = emscripten_run_script_int("(window._trussc_player_height || 0)");
@@ -299,61 +311,14 @@ void VideoPlayer::setLoopPlatform(bool loop) {
         "if (window._trussc_player_video) window._trussc_player_video.loop = false;");
 }
 
-int VideoPlayer::getCurrentFramePlatform() const {
-    return emscripten_run_script_int(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (!video || !window._trussc_player_ready) return 0;
-            var fps = window._trussc_player_frameRate || 30;
-            return Math.floor(video.currentTime * fps);
-        })();
-    )JS");
-}
-
-int VideoPlayer::getTotalFramesPlatform() const {
-    return emscripten_run_script_int(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (!video || !window._trussc_player_ready) return 0;
-            var fps = window._trussc_player_frameRate || 30;
-            return Math.floor(video.duration * fps);
-        })();
-    )JS");
-}
-
-void VideoPlayer::setFramePlatform(int frame) {
-    char script[512];
-    snprintf(script, sizeof(script),
-        "if (window._trussc_player_video && window._trussc_player_ready) {"
-        "var fps = window._trussc_player_frameRate || 30;"
-        "window._trussc_player_video.currentTime = %d / fps;"
-        "}", frame);
-    emscripten_run_script(script);
-}
-
-void VideoPlayer::nextFramePlatform() {
-    emscripten_run_script(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (video && window._trussc_player_ready) {
-                var fps = window._trussc_player_frameRate || 30;
-                video.currentTime = Math.min(video.duration, video.currentTime + 1/fps);
-            }
-        })();
-    )JS");
-}
-
-void VideoPlayer::previousFramePlatform() {
-    emscripten_run_script(R"JS(
-        (function() {
-            var video = window._trussc_player_video;
-            if (video && window._trussc_player_ready) {
-                var fps = window._trussc_player_frameRate || 30;
-                video.currentTime = Math.max(0, video.currentTime - 1/fps);
-            }
-        })();
-    )JS");
-}
+// HTMLVideoElement does not provide a reliable file frame rate.
+// The shared API guard warns once; time-based seeking remains available.
+float VideoPlayer::getFrameRatePlatform() const { return 0.0f; }
+int VideoPlayer::getCurrentFramePlatform() const { return 0; }
+int VideoPlayer::getTotalFramesPlatform() const { return 0; }
+void VideoPlayer::setFramePlatform(int) {}
+void VideoPlayer::nextFramePlatform() {}
+void VideoPlayer::previousFramePlatform() {}
 
 // ---------------------------------------------------------------------------
 // Audio-related stubs (not yet implemented for Web)

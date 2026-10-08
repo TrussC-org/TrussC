@@ -33,12 +33,12 @@ if(NOT TRUSSCLI_VERSION_STR)
     set(TRUSSCLI_VERSION_STR "unknown")
 endif()
 string(TIMESTAMP TRUSSCLI_BUILD_DATE_STR "%Y-%m-%d")
-add_compile_definitions(
-    TRUSSCLI_VERSION="${TRUSSCLI_VERSION_STR}"
-    TRUSSCLI_BUILD_DATE="${TRUSSCLI_BUILD_DATE_STR}"
-)
-
 trussc_app(
     NAME trusscli
     DISPLAY_NAME "TrussC Project Generator"
 )
+
+# These are only read in main.cpp. Directory-wide definitions also reach
+# TrussC and addons, changing their compile commands on each commit/day.
+set_source_files_properties(src/main.cpp PROPERTIES COMPILE_DEFINITIONS
+    "TRUSSCLI_VERSION=\"${TRUSSCLI_VERSION_STR}\";TRUSSCLI_BUILD_DATE=\"${TRUSSCLI_BUILD_DATE_STR}\"")

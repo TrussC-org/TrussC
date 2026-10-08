@@ -490,7 +490,7 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         iosPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("ios");
         iosPreset["generator"] = "Xcode";
         iosPreset["cacheVariables"]["CMAKE_SYSTEM_NAME"] = "iOS";
-        iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "16.3";
+        iosPreset["cacheVariables"]["CMAKE_OSX_DEPLOYMENT_TARGET"] = "16.4";
         if (!trusscDir.empty()) {
             iosPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
         }
@@ -967,9 +967,9 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
     file << ")\n\n";
     file << "REM Configure and build using CMake presets\n";
     file << "cmake --preset web\n";
-    file << "if errorlevel 1 exit /b 1\n\n";
+    file << "if %ERRORLEVEL% neq 0 exit /b 1\n\n";
     file << "cmake --build --preset web --parallel\n";
-    file << "if errorlevel 1 exit /b 1\n\n";
+    file << "if %ERRORLEVEL% neq 0 exit /b 1\n\n";
     file << "echo.\n";
     file << "echo Build complete! Output files are in bin\\\n";
     file << "echo To test locally:\n";

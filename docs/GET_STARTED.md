@@ -24,11 +24,11 @@ Built on C++20 + sokol, it's simple to write and runs cross-platform.
 | OS | Compiler |
 |----|----------|
 | macOS 14+ (Sonoma) | Xcode Command Line Tools (`xcode-select --install`) |
-| iOS 16.3+ | Xcode on macOS (iOS SDK) |
+| iOS 16.4+ | Xcode on macOS (iOS SDK) |
 | Windows | Visual Studio 2022 |
 | Linux | GCC 10+ or Clang 10+ |
 
-The iOS minimum is 16.3 so floating-point `std::format` is available.
+The iOS minimum is 16.4 for Metal BC texture support detection; floating-point `std::format` is also available.
 Run `trusscli update` to apply this deployment target to an existing iOS project.
 
 **CMake** is also required. Please install it — without it the build may fail
@@ -294,3 +294,12 @@ Running an app unattended for days or weeks (exhibitions, signage) needs a few m
 
 - **Windows:** [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md) covers Smart App Control, keeping the display on, Windows Update restarts, crash dumps without dialogs, auto-start and restart.
 - **Linux (Raspberry Pi and other SBCs):** [GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) covers auto-start at boot and keeping the monitor awake.
+
+For a network peer that may power off, set `client.setConnectTimeout(5)` before
+using `connectAsync()`. The default keeps the OS TCP timeout (about 127 seconds
+on Linux), so a reconnect loop can wait about a minute before trying again.
+In installations, connect by IP address so nothing waits for DNS.
+Repeated `connectAsync()` calls to the same pending host and port do nothing;
+`isConnecting()` shows that attempt. Use `sendAsync()` in the frame loop so a
+peer that stops reading does not stall rendering. The default send timeout is
+60 seconds without progress; a timeout reports an error and disconnects.

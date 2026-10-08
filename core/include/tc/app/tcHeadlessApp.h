@@ -142,6 +142,9 @@ struct HeadlessSettings {
 // ---------------------------------------------------------------------------
 template<typename AppClass>
 int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
+    internal::installCrashHandler();
+    internal::CrashPhaseScope crashPhase("headless");
+
     // Set target FPS
     headless::targetFps = settings.targetFps;
 
@@ -221,6 +224,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         for (int i = 0; i < adv.steps; ++i) {
             ctx.updateDeltaTime = targetDelta;
             internal::EntryStackGuard guard(internal::AppEntry::Update);
+            internal::crashFrame(headless::frameCount);
+            internal::CrashPhaseScope updatePhase("update");
             app->update();
             headless::frameCount++;
         }
@@ -241,12 +246,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     {
         internal::EntryStackGuard guard(internal::AppEntry::Exit);
         app->exit();
+        // The device keeps running; finish any callback before cleanup().
+        internal::detachAppAudio(*app);
         app->cleanup();
     }
 
-    // The audio device keeps running: detach the App's audio hooks and wait
-    // for a callback in flight before the App goes out of scope (#256).
-    internal::detachAppAudio(*app);
     ctx.rootNode.reset();   // no longer the running App
 
     // Headless apps leave the audio device running (no shutdownAudio() on

@@ -180,7 +180,7 @@ trusscli run --session labwc
 
 ## 4. Auto-start at Boot
 
-For installations and kiosk setups, you can auto-start your app on boot using a systemd service:
+For installations and kiosk setups, you can auto-start your app on boot using a systemd service. (For a Windows installation PC, see [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md).)
 
 ```bash
 sudo tee /etc/systemd/system/trussc-app.service << 'EOF'
@@ -205,6 +205,16 @@ sudo systemctl start trussc-app
 ```
 
 Replace `/path/to/your/project` with your project directory and `your_username` with your user.
+
+For unattended installations, pair the app with a watchdog (for example,
+anchorbolt, Task Scheduler on Windows, or a service supervisor) configured to
+restart it after a non-zero exit. Return `tc::runApp<App>(settings)` from
+`main()` so the supervisor receives the exit code. On Windows, a D3D11 device
+loss (such as a GPU timeout or driver reset) logs `GetDeviceRemovedReason`,
+fires `events().deviceLost` once, and exits with code 1 by default. A listener
+can set `args.cancel = true` to keep non-graphics work running and handle the
+failure itself; it must manage subsequent drawing because GPU resources are
+not recreated. Other graphics backends do not gain device-loss detection.
 
 ---
 
@@ -298,3 +308,4 @@ For the Linux console framebuffer (non-X), add `consoleblank=0` to `/boot/firmwa
 - [GET_STARTED.md](GET_STARTED.md) — General getting started guide
 - [BUILD_SYSTEM.md](BUILD_SYSTEM.md) — Build system details and hot reload
 - [AI_AUTOMATION.md](AI_AUTOMATION.md) — MCP mode for headless AI interaction
+- [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md) — Checklist for Windows PCs that run an app unattended

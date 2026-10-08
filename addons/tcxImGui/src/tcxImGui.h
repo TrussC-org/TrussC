@@ -171,11 +171,9 @@ public:
         // through the manager registry — they stay installed (no-op for
         // windows without an initialized manager).
         pointerCaptured_ = false;
-        // GPU teardown only while sokol_gfx is alive. If shutdown runs from the
-        // static destructor during exit() (e.g. an abnormal teardown path where
-        // the exit event never fired), sokol_gfx is already gone and its objects
-        // with it — skipping is the correct cleanup, touching them would crash.
-        // (The widget registry is a static too: only touched on the live path.)
+        // shutdown() runs only on live teardown paths, not static destruction.
+        // Keep this guard for an explicit imguiShutdown() after sokol_gfx is gone:
+        // its GPU objects are no longer valid to destroy.
         if (sg_isvalid()) {
             forgetContext(imguiCtx_);   // drop its widget registry before the context goes
             simgui_tc_destroy_context(simguiCtx_);
@@ -224,7 +222,9 @@ public:
     }
 
 public:
-    ~ImGuiManager() { shutdown(); }   // public: owned by unique_ptr in the registry
+    // Teardown runs only on live paths; at static destruction other statics
+    // may already be gone. Public: owned by unique_ptr in the registry.
+    ~ImGuiManager() = default;
 private:
     ImGuiManager() = default;
 

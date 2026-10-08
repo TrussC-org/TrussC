@@ -29,6 +29,7 @@
 #include <unordered_map>
 #include <cstring>
 #include "../utils/tcAnnotations.h"
+#include "../utils/tcOnceGate.h"
 
 namespace trussc {
 
@@ -117,6 +118,7 @@ public:
         pipeline = {};
         vertexBuffer = {};
         indexBuffer = {};
+        stream_.reset();
         loaded = false;
     }
 
@@ -230,6 +232,14 @@ protected:
     // Internal uniform plumbing — protected so Shader subclasses can reuse it.
     // Store uniform data for later application
     void storeUniform(int slot, const void* data, size_t size) {
+        if (slot < 0 || slot >= SG_MAX_UNIFORMBLOCK_BINDSLOTS) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) {
+                logWarning("Shader") << "Uniform slot " << slot << " is outside [0, "
+                    << SG_MAX_UNIFORMBLOCK_BINDSLOTS << "); ignored";
+            }
+            return;
+        }
         pendingUniforms[slot].assign((const uint8_t*)data, (const uint8_t*)data + size);
     }
 
@@ -246,12 +256,19 @@ public:
     // Texture binding
     // -------------------------------------------------------------------------
 
+    // Both overloads accept view slots [0, SG_MAX_VIEW_BINDSLOTS). A sampler
+    // is bound at the same slot only below SG_MAX_SAMPLER_BINDSLOTS (12).
+    // Higher texture slots (12-31) ignore a supplied sampler with a warning;
+    // the shader must sample them with a sampler at binding 0-11, set by
+    // another setTexture() call or an overridden setupBindings().
+
     // Convenience overload taking a raw sg_image. sokol's binding model needs
     // an sg_view, so one is created here and cached per slot (recreated only
     // when the image changes; the old view goes through the deferred-destroy
     // queue since a recorded draw may still reference it). Prefer the sg_view
     // overload when a view is already available (e.g. Texture::getView()).
     void setTexture(int slot, sg_image image, sg_sampler sampler) {
+        if (!validateTextureSlot(slot, sampler)) return;
         auto& cached = imageViews_[slot];
         if (cached.image.id != image.id) {
             internal::deferGpuDestroy(cached.view);
@@ -264,6 +281,7 @@ public:
     }
 
     void setTexture(int slot, sg_view view, sg_sampler sampler) {
+        if (!validateTextureSlot(slot, sampler)) return;
         pendingViews[slot] = { view, sampler };
     }
 
@@ -285,7 +303,21 @@ public:
         // destroyed before present()) and later setUniform()/setTexture()
         // calls cannot retroactively change this draw. Same pattern as
         // PbrDrawCommand; executed by internal::executeDeferredShaderDraw().
+        // Grow before capturing any handles in this sokol frame. Later FBO
+        // flushes can request growth, but must not replace this frame's buffers.
+        if (stream_) {
+            const auto growth = stream_->beginFrame(vertexBuffer, indexBuffer);
+            if (growth == internal::ShaderStreamGrowth::Grown) {
+                logWarning("Shader") << "Stream buffers grew to "
+                    << sg_query_buffer_size(vertexBuffer) / sizeof(ShaderVertex)
+                    << " vertices and " << sg_query_buffer_size(indexBuffer) / sizeof(uint32_t)
+                    << " indices";
+            } else if (growth == internal::ShaderStreamGrowth::Failed) {
+                logError("Shader") << "Failed to grow stream buffers";
+            }
+        }
         internal::DeferredShaderDraw draw;
+        draw.stream = stream_;
         draw.pipeline = pipelineForCurrentTarget();  // target-resolved (swapchain vs FBO)
         draw.vertices.assign(data, data + count);
         draw.type = type;
@@ -300,10 +332,7 @@ public:
         // Snapshot bindings: stream buffers + texture view/sampler pairs.
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;
-        for (const auto& [slot, tex] : pendingViews) {
-            bind.views[slot] = tex.view;
-            bind.samplers[slot] = tex.sampler;
-        }
+        fillTextureBindings(bind);
         setupBindings(bind);  // subclass hook (runs at submission, object is alive)
         bind.index_buffer = indexBuffer;
         draw.bindings = bind;
@@ -326,6 +355,17 @@ public:
     }
 
 protected:
+    // Slots have been checked by setTexture(); views and samplers have
+    // different sokol limits, so high view slots must not write a sampler.
+    void fillTextureBindings(sg_bindings& bind) const {
+        for (const auto& [slot, tex] : pendingViews) {
+            bind.views[slot] = tex.view;
+            if (slot < SG_MAX_SAMPLER_BINDSLOTS) {
+                bind.samplers[slot] = tex.sampler;
+            }
+        }
+    }
+
     // Sokol resources
     sg_shader shader = {};
     sg_pipeline pipeline = {};   // targets the swapchain (created at load())
@@ -381,61 +421,76 @@ protected:
         desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
 
         // Index buffer for quad support
-        desc.index_type = SG_INDEXTYPE_UINT16;
+        desc.index_type = SG_INDEXTYPE_UINT32;
 
         desc.label = "tc_shader_pipeline";
         return desc;
     }
 
     virtual void createVertexBuffer() {
-        // Vertex buffer for append mode (stream usage)
-        sg_buffer_desc vbufDesc = {};
-        vbufDesc.size = 65536 * sizeof(ShaderVertex);
-        vbufDesc.usage.stream_update = true;  // Enable append mode
-        vbufDesc.label = "tc_shader_vertices";
-        vertexBuffer = sg_make_buffer(&vbufDesc);
-
-        // Index buffer for append mode
-        sg_buffer_desc ibufDesc = {};
-        ibufDesc.size = 65536 * sizeof(uint16_t);
-        ibufDesc.usage.index_buffer = true;
-        ibufDesc.usage.stream_update = true;  // Enable append mode
-        ibufDesc.label = "tc_shader_indices";
-        indexBuffer = sg_make_buffer(&ibufDesc);
+        vertexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(ShaderVertex), false);
+        indexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(uint32_t), true);
+        stream_ = std::make_shared<internal::ShaderStreamState>();
     }
 
     virtual void onBegin() {}
     virtual void onEnd() {}
     virtual void setupBindings(sg_bindings& bind) {}
 
-    // Pipeline matching the current render target. The swapchain uses the
-    // load()-time `pipeline`; an FBO pass needs a pipeline whose color format,
-    // sample count and depth match the FBO, so one is built lazily (from the same
-    // createPipelineDesc()) and cached per distinct (format, sampleCount) target.
+    // Pipeline matching the current render target. The main swapchain uses the
+    // load()-time `pipeline`; secondary windows and FBOs need matching color
+    // format, sample count and depth. Build those pipelines lazily from the same
+    // createPipelineDesc() and cache per distinct (format, sampleCount) target.
     sg_pipeline pipelineForCurrentTarget() {
         auto& wctx = internal::currentWindowContext();
-        if (!wctx.inFboPass) return pipeline;
-        uint64_t key = ((uint64_t)wctx.currentFboColorFormat << 8)
-                     | (uint64_t)(wctx.currentFboSampleCount & 0xff);
+        if (!wctx.inFboPass && wctx.isMain) return pipeline;
+        const auto target = wctx.inFboPass
+            ? internal::SwapchainTargetFormat{wctx.currentFboColorFormat, wctx.currentFboSampleCount}
+            : internal::swapchainTargetFormat(wctx);
+        uint64_t key = ((uint64_t)target.colorFormat << 8)
+                     | (uint64_t)(target.sampleCount & 0xff);
         auto it = targetPipelines_.find(key);
         if (it != targetPipelines_.end()) return it->second;
         sg_pipeline_desc desc = createPipelineDesc();
         desc.shader = shader;
-        desc.colors[0].pixel_format = wctx.currentFboColorFormat;
-        desc.sample_count           = wctx.currentFboSampleCount;
-        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // Fbo always allocates depth-stencil
+        desc.colors[0].pixel_format = target.colorFormat;
+        desc.sample_count           = target.sampleCount;
+        desc.depth.pixel_format     = SG_PIXELFORMAT_DEPTH_STENCIL;  // FBOs and windows use depth-stencil
         sg_pipeline pip = sg_make_pipeline(&desc);
         targetPipelines_[key] = pip;
         return pip;
     }
 
 private:
+    static bool validateTextureSlot(int slot, sg_sampler sampler) {
+        if (slot < 0 || slot >= SG_MAX_VIEW_BINDSLOTS) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) {
+                logWarning("Shader") << "Texture slot " << slot << " is outside [0, "
+                    << SG_MAX_VIEW_BINDSLOTS << "); ignored";
+            }
+            return false;
+        }
+        if (slot >= SG_MAX_SAMPLER_BINDSLOTS && sampler.id != SG_INVALID_ID) {
+            static OnceGate warned;
+            if (warned.isFirstTime()) {
+                logWarning("Shader") << "Sampler for texture slot " << slot
+                    << " is ignored; use a sampler at binding [0, "
+                    << SG_MAX_SAMPLER_BINDSLOTS << ")";
+            }
+        }
+        return true;
+    }
+
+    std::shared_ptr<internal::ShaderStreamState> stream_;
+
     void moveFrom(Shader&& other) {
         shader = other.shader;
         pipeline = other.pipeline;
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
+        stream_ = std::move(other.stream_);
         pendingViews = std::move(other.pendingViews);
         pendingUniforms = std::move(other.pendingUniforms);
         imageViews_ = std::move(other.imageViews_);
@@ -579,10 +634,7 @@ public:
         bind.index_buffer = indexBuffer;
         // Apply inputs set via setTexture(slot, view, sampler), so a plain
         // FullscreenShader can sample a source without a setupBindings() override.
-        for (auto& [slot, v] : pendingViews) {
-            bind.views[slot] = v.view;
-            bind.samplers[slot] = v.sampler;
-        }
+        fillTextureBindings(bind);
         setupBindings(bind);
         sg_apply_bindings(&bind);
 

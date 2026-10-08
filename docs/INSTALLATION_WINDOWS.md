@@ -32,6 +32,7 @@ powercfg /hibernate off
 - Turn notifications off, or enable Do not disturb: Settings → System → Notifications.
 - In the app, call `setKeepScreenOn(true)` in `setup()` as a second layer. It asks Windows to keep the display and the system awake while the app runs. Call it from the main thread.
 - The High performance plan also keeps Windows from moving a hidden or minimized app to the efficiency cores.
+- **No High performance plan?** Many current laptops and mini PCs (Modern Standby) have only the Balanced plan, and the first line fails with an error such as "The power scheme, subgroup or setting specified does not exist". Check with `powercfg /l`. Stay on Balanced and set Settings → System → Power (or Power & battery) → Power mode → **Best performance**. The other three lines still apply.
 
 ## 3. Windows Update
 
@@ -57,17 +58,23 @@ reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\MyAp
 reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\MyApp.exe" /v DumpCount /t REG_DWORD /d 10 /f
 ```
 
-**Keep the symbols.** A dump is only readable with the matching `.pdb`. Apps build as RelWithDebInfo by default, so the `.pdb` sits next to the `.exe` in `bin/`. Archive the `.exe` and `.pdb` together for every build you deploy. Open the `.dmp` in Visual Studio (or WinDbg) with that `.pdb` to see the call stack.
+**Keep the symbols.** A dump is only readable with the matching `.pdb`. `trusscli build` and VS Code builds are RelWithDebInfo by default, so the `.pdb` sits next to the `.exe` in `bin/`. The Visual Studio solution (`--ide vs`) opens in Debug: pick RelWithDebInfo (or Release) in the configuration drop-down before you build an exe to deploy. A Debug exe needs Visual Studio's debug runtime and won't start on a PC without Visual Studio. Archive the `.exe` and `.pdb` together for every build you deploy. Open the `.dmp` in Visual Studio (or WinDbg) with that `.pdb` to see the call stack.
 
 **Reading the Event Log.** Event Viewer → Windows Logs → Application → "Application Error" (event 1000) names the faulting module and offset. An entry with `ucrtbase.dll` and `0xc0000409` usually means an uncaught C++ exception or `abort()`, not a buffer overrun.
 
 ## 5. Auto-start and restart
 
 1. **Automatic sign-in:** use Sysinternals Autologon, or `netplwiz`, so the PC reaches the desktop after a restart without anyone typing a password.
-2. **Start the app at sign-in:** create a Task Scheduler task with the trigger "At log on". In the action, set **"Start in"** to the folder that contains the exe (see section 6).
+2. **Start the app at sign-in:** create a Task Scheduler task with the trigger "At log on". In the action, set **"Start in"** to the folder that contains the exe (see section 6). Then change two defaults, or Windows stops the task:
+   - **Settings** tab: uncheck **"Stop the task if it runs longer than"**. It is on by default with 3 days, so Windows ends the app (or the supervisor that restarts it) about 72 hours after sign-in.
+   - **Conditions** tab: uncheck **"Stop if the computer switches to battery power"**, then **"Start the task only if the computer is on AC power"**. This matters on laptops.
+   - Without the GUI: in the task's XML, `<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>` means no limit. In PowerShell, pass `New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries` as `-Settings` to `Register-ScheduledTask`.
+   - The task's process runs at priority 7 (below normal) by default. If that matters, set `<Priority>` in the XML, or `-Priority` on `New-ScheduledTaskSettingsSet`.
 3. **Restart it when it stops:**
    - **anchorbolt** ([tettou771/anchorbolt](https://github.com/tettou771/anchorbolt)): `anchorbolt start` supervises a TrussC app: it restarts the app when it exits or stops responding, collects the logs, and can report to a fleet dashboard. Start anchorbolt from the scheduled task instead of the app.
    - **Without anchorbolt:** a small loop script that restarts the exe when it exits works, as long as the crash dialog is suppressed (section 4).
+
+On D3D11 device loss, `events().deviceLost` fires once and the app exits with code 1 unless a listener cancels; project templates use `return TC_RUN_APP(...)` to propagate the exit code to a watchdog (ordinary exits return 0).
 
 ## 6. Working directory and file paths
 
@@ -76,6 +83,7 @@ A Task Scheduler task with an empty "Start in" runs with the working directory a
 - Set "Start in" to the exe folder in the task or shortcut.
 - Load assets with paths under `bin/data`, the way the examples do. `getDataPath("file")` gives the absolute path.
 - Log file names resolve against `bin/data` too: `getLogger().setLogFile("logs/app.log")` writes `bin/data/logs/app.log` and creates `logs` if it is missing. A relative `TRUSSC_LOG_FILE` resolves the same way. Check the return value: on failure `setLogFile()` returns false and logs why.
+- If window or GPU startup fails before `setup()` runs, `runApp()` returns 1; otherwise it returns 0. `TC_RUN_APP` passes this status to `main()`. With `TRUSSC_LOG_FILE` set, D3D11 and main-window startup failures are recorded with their HRESULT or Win32 error code so a supervisor can identify a failed start.
 
 ## 7. GPU on dual-GPU machines
 
@@ -88,6 +96,7 @@ Run through this once on the actual machine:
 - [ ] Leave the app running with no input for longer than the old display timeout: the display stays on.
 - [ ] End the app in Task Manager: it comes back (section 5).
 - [ ] Restart Windows: it signs in and the app starts.
+- [ ] The task's "Stop the task if it runs longer than" setting is off (Settings tab, section 5).
 - [ ] Force a crash in a test build: a `.dmp` appears in the dump folder, and no dialog stays on screen.
 - [ ] The log file is written where you expect it.
 - [ ] Smart App Control is off, or the exe is signed.

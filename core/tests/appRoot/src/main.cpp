@@ -81,6 +81,8 @@ public:
     }
     void setup() override {
         g_setupRan = true;
+        check("runApp: data path root was resolved before setup()",
+              internal::dataPathState().probed.load(std::memory_order_acquire));
         const int before = g_unownedSizeWarnings;
         setSize(640, 480);
         g_warningsFromSetup = g_unownedSizeWarnings - before;
