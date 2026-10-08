@@ -232,9 +232,7 @@ jobs:
       - name: Install Linux dependencies
         timeout-minutes: 10
         if: runner.os == 'Linux'
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        uses: ./.github/actions/apt-deps
 
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
@@ -382,9 +380,7 @@ jobs:
 
       - name: Install Linux dependencies (for trusscli)
         timeout-minutes: 10
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -487,9 +483,7 @@ jobs:
 
       - name: Install Linux dependencies (for trusscli)
         timeout-minutes: 10
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -636,6 +630,10 @@ jobs:
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: apt dependency cache regression checks
+        if: always()
+        run: python3 tools/tests/test_apt_dependencies.py -v
 
       - name: core test symbol checker regression checks
         if: always()
