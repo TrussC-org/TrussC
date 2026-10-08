@@ -1,5 +1,10 @@
 # tcxHap tests
 
+Snappy integration checks encode repeated BC1 blocks as single-chunk and
+four-chunk HAP frames, verify compression actually reduced their size, and
+compare both `HapDecoder` decode paths with the original texture bytes.
+These checks run headlessly as part of the default test mode.
+
 Video regressions (#283) check BC1, BC3 (Hap Alpha and HAP-Q), and BC7
 decoding at 6x5, 6x8, 8x5, 8x8, and 1x1. Hand-built blocks have known pixel
 values; both a 64-byte guard region and an exact-sized allocation are checked.
