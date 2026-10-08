@@ -55,7 +55,7 @@ This is the one list of third-party code in TrussC and the version the build use
 | **dr_wav** | 0.14.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
 | **dr_mp3** | 0.7.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
 | **dr_flac** | 0.13.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
-| **nlohmann/json** | 3.11.3 | `core/include/nlohmann/json.hpp` | https://github.com/nlohmann/json | MIT | Niels Lohmann |
+| **nlohmann/json** | 3.12.0 | `core/include/nlohmann/json.hpp` | https://github.com/nlohmann/json | MIT | Niels Lohmann |
 | **pugixml** | 1.15 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
 | **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
