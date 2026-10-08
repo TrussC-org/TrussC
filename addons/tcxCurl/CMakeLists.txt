@@ -84,8 +84,8 @@ else()
 
     FetchContent_Declare(
         curl
-        URL https://github.com/curl/curl/releases/download/curl-8_12_1/curl-8.12.1.tar.xz
-        URL_HASH SHA256=0341f1ed97a26c811abaebd37d62b833956792b7607ea3f15d001613c76de202
+        URL https://github.com/curl/curl/releases/download/curl-8_22_0/curl-8.22.0.tar.xz
+        URL_HASH SHA256=f7ef3ae8a22e521f289803fe93543eb64c329b58aa73a9e224dfd915a2a5f4f7
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
     FetchContent_MakeAvailable(curl)
