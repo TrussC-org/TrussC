@@ -4,7 +4,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The engine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the real mixer callback, so no sound card is needed.
 //
 // Guards the invariants:
@@ -67,6 +67,13 @@
 //   to the default); a later init() succeeds (#279).
 // - An init() on the null backend the test requested logs no "no usable
 //   audio backend" warning (that warning is for a fallback to it).
+// - A missing file fails with FileNotFound and logs one Error naming the
+//   path, for each loader that returns LoadResult and runs here: .wav, .ogg,
+//   a stream, .m4a and VideoPlayer::load() (Linux, macOS, Windows) and
+//   Pixels::load() / loadHDR() (#359).
+// - On Windows, a WAV name holding an unpaired UTF-16 surrogate loads
+//   eagerly and as a stream; its load logs and maxPolyphony warning use
+//   U+FFFD for display instead of throwing (#380).
 // =============================================================================
 
 #include <TrussC.h>
@@ -75,6 +82,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -888,9 +896,69 @@ struct PumpApp : App {
     }
 };
 
+#ifdef _WIN32
+namespace {
+
+template <class F>
+void checkNoThrow(const string& name, F&& body) {
+    bool ok = false;
+    string detail;
+    try {
+        ok = body();
+    } catch (const std::exception& e) {
+        detail = e.what();
+    } catch (...) {
+        detail = "unknown exception";
+    }
+    check(name, ok, detail);
+}
+
+// The null backend is already running. Wait for the warning as a condition:
+// earlier checks may have just used this diagnostic's rate limit.
+void checkSurrogateSoundPath(const fs::path& directory) {
+    const string R = "\xEF\xBF\xBD"; // U+FFFD
+    const string stem = "tc_audio_diag_surrogate";
+    const fs::path path = directory /
+        (std::wstring(L"tc_audio_diag_surrogate") + wchar_t(0xD800) + L".wav");
+    const string display = pathToUtf8(directory / stem) + R + ".wav";
+    checkNoThrow("surrogate WAV: file written through the wide path", [&] {
+        return writeWav(path, 2.0f, 48000);
+    });
+    checkNoThrow("surrogate WAV: eager load succeeds and logs U+FFFD", [&] {
+        SoundBuffer buffer;
+        const size_t before = countLogs(LogLevel::Verbose, "loaded WAV " + display);
+        return buffer.load(path).ok() && buffer.numSamples > 0 && buffer.getPath() == path &&
+               countLogs(LogLevel::Verbose, "loaded WAV " + display) == before + 1;
+    });
+    Sound stream;
+    checkNoThrow("surrogate WAV: stream load succeeds and logs U+FFFD", [&] {
+        const size_t before = countLogs(LogLevel::Verbose, "ready " + display);
+        return stream.loadStream(path, 1).ok() &&
+               countLogs(LogLevel::Verbose, "ready " + display) == before + 1;
+    });
+    checkNoThrow("surrogate WAV: maxPolyphony drop warns with U+FFFD", [&] {
+        stream.setLoop(true);
+        Sound copy = stream;
+        const string warning = "maxPolyphony=1 reached for " + display;
+        const size_t before = countLogs(LogLevel::Warning, warning);
+        if (!stream.play() || copy.play()) return false;
+        // The diagnostic interval is 2 s; allow scheduling slack while
+        // checking the warning itself, never the elapsed time.
+        return waitFor([&] {
+            if (countLogs(LogLevel::Warning, warning) == before + 1) return true;
+            copy.play();
+            return countLogs(LogLevel::Warning, warning) == before + 1;
+        }, 5000);
+    });
+    stream.stop();
+    std::error_code ec;
+    fs::remove(path, ec);
+}
+
+} // namespace
+#endif
+
 int main() {
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
@@ -898,9 +966,23 @@ int main() {
         g_logs.push_back({e.level, e.message, this_thread::get_id()});
     });
 
-    // --- engine start ---------------------------------------------------------
+    // --- enumeration before engine start (#360) -------------------------------
     auto& engine = AudioEngine::getInstance();
+    check("engine is uninitialized before enumeration", !engine.isInitialized());
+    {
+        const auto probe = internal::audioDeviceReport(true);
+        check("device report enumerates before engine start", probe.enumerated);
+        check("probe report names an available backend", !probe.backend.empty(), probe.backend);
+        check("device report leaves the engine uninitialized", !engine.isInitialized());
+        const auto devices = AudioEngine::listDevices();
+        check("listDevices matches the default backend probe before engine start",
+              devices.size() == probe.playbackDevices.size());
+        check("listDevices leaves the engine uninitialized", !engine.isInitialized());
+    }
+
+    // --- engine start ---------------------------------------------------------
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;
@@ -914,6 +996,8 @@ int main() {
     changedSub.disconnect();
     check("engine starts on the null backend", started && engine.isInitialized());
     if (!started) return 1;
+    check("explicit Null logs one Notice", countLogs(LogLevel::Notice,
+          "audio backend: Null (requested); output is silent") == 1);
     auto report = internal::audioDeviceReport(false);
     // getBufferSize() is the requested size; the event reports the period
     // the device runs with, in engine-rate frames.
@@ -989,9 +1073,12 @@ int main() {
     loud.loadFromBuffer(loudBuf);
     loud.setVolume(4.0f);   // 0.5 * 4 = peaks at 2.0: must clip
     check("loud voice plays", loud.play());
+    // Peak and RMS are published per meter window. The first window that sees
+    // the voice can still be mostly silence: its peak is already high but its
+    // RMS is not, so wait for a window that holds the voice throughout.
     const bool metered = waitFor([&] {
         AudioStats s = engine.getStats();
-        return s.clippedSamples > 0 && s.peak > 1.5f;
+        return s.clippedSamples > 0 && s.peak > 1.5f && s.rms > 0.5f;
     }, 2000);
     st = engine.getStats();
     check("clipped samples are counted", st.clippedSamples > 0);
@@ -1124,6 +1211,50 @@ int main() {
         }
         std::error_code rmEc;
         fs::remove(notOgg, rmEc);
+    }
+
+    // A missing file: every loader that returns LoadResult fails with
+    // FileNotFound and logs one Error line naming the path (#359).
+    {
+        const fs::path missingDir = fs::temp_directory_path() / ("tc_audio_diag_" + tag + "_missing");
+        std::error_code rmEc;
+        fs::remove_all(missingDir, rmEc);
+        auto checkMissing = [&](const string& name, const fs::path& path, auto load) {
+            const string pathStr = internal::pathToUtf8(path);
+            const size_t errorsBefore = countLogs(LogLevel::Error, pathStr);
+            const LoadResult r = load(path);
+            check("missing: " + name + " fails with FileNotFound",
+                  !r && r.error == LoadError::FileNotFound, loadErrorName(r.error));
+            check("missing: " + name + " logs one Error",
+                  countLogs(LogLevel::Error, pathStr) == errorsBefore + 1, lastLog(LogLevel::Error));
+        };
+        checkMissing("SoundBuffer::loadWav()", missingDir / "a.wav",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadWav(p); });
+        checkMissing("SoundBuffer::loadOgg()", missingDir / "b.ogg",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadOgg(p); });
+        checkMissing("Sound::load() of a .wav", missingDir / "c.wav",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        checkMissing("Sound::load() of an .ogg", missingDir / "d.ogg",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        checkMissing("Sound::loadStream()", missingDir / "e.wav",
+                     [](const fs::path& p) { Sound s; return s.loadStream(p); });
+        // loadAac() is per platform (Linux, macOS / iOS, Windows), and each
+        // implementation logs the missing file itself.
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__) || defined(_WIN32)
+        checkMissing("SoundBuffer::loadAac()", missingDir / "f.m4a",
+                     [](const fs::path& p) { SoundBuffer b; return b.loadAac(p); });
+        checkMissing("Sound::load() of an .m4a", missingDir / "g.m4a",
+                     [](const fs::path& p) { Sound s; return s.load(p); });
+        // VideoPlayer::load() classifies a missing file before it reaches the
+        // platform backend, so no window or decoder is needed. The path is
+        // absolute, so getDataPath() passes it through unchanged.
+        checkMissing("VideoPlayer::load()", missingDir / "j.mp4",
+                     [](const fs::path& p) { VideoPlayer v; return v.load(p); });
+#endif
+        checkMissing("Pixels::load()", missingDir / "h.png",
+                     [](const fs::path& p) { Pixels px; return px.load(p); });
+        checkMissing("Pixels::loadHDR()", missingDir / "i.hdr",
+                     [](const fs::path& p) { Pixels px; return px.loadHDR(p); });
     }
 
     Sound gone;
@@ -1299,6 +1430,9 @@ int main() {
         check("default buffer size: audioDeviceChanged reports the period the device chose",
               reinit.bufferSize > 0 && reinit.bufferSize == defExpected,
               to_string(reinit.bufferSize) + " vs " + to_string(defExpected));
+#ifdef _WIN32
+        checkSurrogateSoundPath(wavSub);
+#endif
         engine.shutdown();
     }
 

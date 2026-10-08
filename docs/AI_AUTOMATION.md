@@ -43,13 +43,21 @@ runs on and logs a warning. sokol's own errors, warnings and panics go through t
 logger too, and lines logged from worker threads land whole. A window or GPU
 setup failure reaches the file where sokol reports it as text: on Linux (no X
 display; GLX setup, framebuffer config, GL context or window creation; EGL
-setup in GLES3 builds) and on iOS (Metal swapchain textures). On the web,
+setup in GLES3 builds), Windows (D3D11 device, main window and swapchain),
+macOS (Metal device and main window), and iOS (Metal swapchain textures). On the web,
 WebGPU instance, adapter and device request failures reach the logger (the
 browser console and `onLog`), not a file. On Android sokol's app messages
 (lifecycle, the app thread's startup) reach the logger too, but an EGL setup
-failure is not logged; on Windows and macOS a window or GPU setup failure is
-not logged yet. This is how a supervisor process (e.g. `anchorbolt start`)
+failure is not logged. This is how a supervisor process (e.g. `anchorbolt start`)
 captures logs from an unmodified app.
+
+On desktop, `runApp()` returns **1** when window or GPU startup fails before
+`setup()` runs, and **0** otherwise; `TC_RUN_APP` passes that status to `main()`.
+A supervisor can use the exit code together with `TRUSSC_LOG_FILE` to distinguish
+a failed start from a normal shutdown. Fatal panics still abort the process.
+On Linux, no available X display causes an abort (a nonzero process status).
+Android and Web have OS/browser-owned loops; this return value does not report
+their eventual shutdown.
 
 The audio engine reports through the logger too, so the file also receives
 the plays it had to drop (`Sound::play()` returned false: every playback slot busy, a
@@ -85,12 +93,24 @@ your own tools:
 | `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main). A secondary window must be visible, as for `tc_get_screenshot` |
 | `tc_list_windows` | (none) | List open windows: `{windows: [{index, main, title, width, height, occluded}]}`. Index 0 = main (no `title`, no `occluded`), then the secondary windows. `occluded` is `true` while the OS reports that window hidden (`Window::isOccluded()`). Use the index as the `window` arg above |
 | `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `playingSounds` `[{slot, path (as given, the same string as `getPath()` and the logs, UTF-8), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the playback's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, polyphonyLimit, streamLimit, decoderError, notRunning}` (plays refused since startup; `polyphonyLimit` = every playback slot busy); `thread` `{cpuUsage, cpuUsagePeak}` (fraction of audio-thread time: mix time / audio time over ~0.5 s of audio, 1.0 = a callback took as long as the audio it produced; `cpuUsagePeak` = the worst single callback, > 1 = a dropout); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getPlayingSounds()` |
-| `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `memoryBytes` is sokol-tracked allocations only |
+| `tc_get_audio_spectrum` | `n`?, `window`?, `channels`?, `fmin`?, `fmax`?, `peaks`? | Full output FFT: `n` is a power of two from 64 up to the two-second ring length (default 1024); `window` is `hann` (default) or `blackmanharris`; `channels` is `mix` (default, all-channel average) or `each`; `peaks` defaults to 3. Returns `{sampleRate, n, binHz, framesWritten, channels: [{peak, rms, peaks: [{hz, dbfs}], spectrum}]}`. Peak/RMS are linear; spectrum is amplitude dBFS rounded to one decimal, with `null` for zero amplitude (−∞). All n/2+1 bins are returned unless inclusive `fmin`/`fmax` bounds select a range. Bin frequencies start at `ceil(fmin / binHz) * binHz`. Peaks use coherent-gain normalization and frequency interpolation. |
+| `tc_save_audio_capture` | `path`, `seconds`? | Save the last `seconds` (default 1.0), ending at the call, as float32 WAV. Returns `{path, sampleRate, channels, frames, framesWritten}`. Relative paths resolve through `getDataPath()`; missing directories are created; paths without a `.wav` extension get `.wav` appended with a log warning. Duration is capped by the two-second ring and available history. Use `AudioRecorder` for longer recordings. |
+| `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, mainQueuePending, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `mainQueuePending` is how many `runOnMainThread` / `Deliver::Main` calls this frame's drain started with (each frame runs only those, so frames keep starting; a number that keeps growing means workers queue faster than the app runs them); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
 | `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
 | `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as euler degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
 | `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
+
+Both audio tools read the same per-channel, post-clamp output history and never
+start the engine. `framesWritten` identifies the end of the snapshot and counts
+frames since the latest engine initialization; reinitialization clears history.
+Before any initialization, the tools return an error. After shutdown, retained
+history remains readable. Spectrum analysis zero-pads missing startup frames;
+capture writes only actual frames and fails if none are available. If concurrent
+callbacks prevent a coherent snapshot, the tools return an error to retry. Capture does
+not wait for new audio. The existing `getAudioAnalysisBuffer()` reads this same
+ring while keeping its 4096-sample limit and L/R mono average.
 
 #### Hidden secondary windows
 
@@ -301,6 +321,27 @@ curl -X POST http://127.0.0.1:8080/mcp \
 }
 ```
 
+Tool failures produced by the framework use a JSON-RPC `result` with
+`isError: true`. This includes exceptions thrown inline or in either deferred
+stage, cancellation during server shutdown or hot-reload unload, and a timeout
+waiting for a targeted window to render. The request's `id` is preserved and the
+message is plain text in `content`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "content": [{ "type": "text", "text": "Tool execution error: example failure" }],
+    "isError": true
+  }
+}
+```
+
+Protocol errors (such as an unknown method or tool, or invalid parameters) remain
+JSON-RPC `error` replies. A tool's own `{"status":"error",...}` return value stays
+serialized as tool content; the framework does not reinterpret it.
+
 Image tools (`tc_get_screenshot`, `tc_get_status_image`) return an
 MCP-standard **image content block** — clients like Claude Code render it
 inline instead of receiving a Base64 wall — followed by a text block with
@@ -397,7 +438,7 @@ Configure your MCP client with the HTTP URL:
 
 | Category | Tools | Enabled by |
 |----------|-------|------------|
-| Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_audio_state`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
+| Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_audio_state`, `tc_get_audio_spectrum`, `tc_save_audio_capture`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
 | Recording (window capture to video) | `tc_start_recording`, `tc_stop_recording` | Automatic when MCP is enabled |
 | Control (input injection / scene mutation / quit) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members`, `tc_quit` | `mcp::registerControlTools()` |
 | ImGui (widget reading / interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_get_touched`, `tcx_imgui_reset_touched` (read-only: the reset clears the record, not app state), `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerControlTools()` |

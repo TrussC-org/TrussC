@@ -67,19 +67,23 @@ inline std::chrono::steady_clock::duration getElapsedDuration() {
     return d.count() < 0 ? std::chrono::steady_clock::duration::zero() : d;
 }
 
-// String replacement (for getTimestampString)
+// String replacement (for getTimestampString). Empty patterns match nothing;
+// replacements are left-to-right, nonoverlapping, and are not searched again.
 inline void stringReplace(std::string& input, const std::string& searchStr, const std::string& replaceStr) {
+    if (searchStr.empty()) return;
     auto pos = input.find(searchStr);
+    if (pos == std::string::npos) return;
+    std::string result;
+    result.reserve(input.size());
+    std::size_t start = 0;
     while (pos != std::string::npos) {
-        input.replace(pos, searchStr.size(), replaceStr);
-        pos += replaceStr.size();
-        std::string nextfind(input.begin() + pos, input.end());
-        auto nextpos = nextfind.find(searchStr);
-        if (nextpos == std::string::npos) {
-            break;
-        }
-        pos += nextpos;
+        result.append(input, start, pos - start);
+        result += replaceStr;
+        start = pos + searchStr.size();
+        pos = input.find(searchStr, start);
     }
+    result.append(input, start, std::string::npos);
+    input.swap(result);
 }
 // Platform-specific localtime (Windows: localtime_s, others: localtime)
 inline std::tm safeLocaltime(const std::time_t* t) {

@@ -9,7 +9,8 @@
 //
 // Streaming constraints (vs eager load):
 //   - setSpeed() is ignored (decoder outputs engine-rate frames).
-//   - setPosition() incurs a seek + ring-buffer refill (~10 ms blackout).
+//   - setPosition() incurs a seek + ring-buffer refill; see its API comment
+//     for measured latency to the first post-seek output callback.
 //   - Supported formats: WAV / MP3 / FLAC. (.ogg / .aac use load() instead.)
 //
 // Audio source:

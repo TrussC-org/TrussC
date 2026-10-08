@@ -301,6 +301,48 @@ int main() {
 ### Data Folder
 Place assets (images, fonts, sounds) in `bin/data/`.
 This path is automatically resolved at runtime via `tc::getDataPath()`.
+On Apple platforms, the first use chooses one existing folder relative to the
+executable: `data` (iOS), then `../Resources/data` (macOS release bundle), then
+`../../../data` (macOS development). An explicit `setDataPathRoot()` overrides
+this probe. The selected folder stays fixed for the process; a missing file
+never falls back to an asset outside the bundle. `setDataPathToResources()`
+continues to explicitly select `Contents/Resources/data`.
+
+The reusable [release workflow](../.github/workflows/release.yml) copies
+`bin/data` into `Contents/Resources/data` before signing a macOS app, and beside
+the executable on Windows and Linux. Normal macOS builds do not copy data into
+the bundle, so development continues to use `bin/data`.
+
+### Release Packages
+
+App repositories can call `.github/workflows/release.yml`. `trussc-ref` takes
+priority over the app's `.trussc-version`; without either, the workflow selects
+the latest GitHub release from `trussc-repository`. The actual ref, tag and commit
+for each platform are recorded in the release notes. This default follows new
+TrussC releases; pin a tag or commit when a rebuild must use a fixed version.
+
+Packages build with `RelWithDebInfo`, reject hot reload, and use `macos-15`,
+`windows-2025` and `ubuntu-24.04` runner images. macOS packages are arm64 only,
+with a deployment target and `LSMinimumSystemVersion` of 14.0. Signing uses
+hardened runtime, timestamps, and camera/microphone entitlements by default;
+`entitlements` replaces the defaults with an app-specific plist relative to
+`project-path`. Nested code is signed before the app, followed by the DMG.
+Data inside the signed bundle is part of the signature; changing it invalidates
+the signature.
+
+The Windows zip uses the dynamic MSVC runtime (`/MD`). Target machines need the
+Microsoft Visual C++ 2015–2022 Redistributable (x64) installed separately; the
+zip does not install or bundle it.
+
+Matching PDB, dSYM and Linux debug files are uploaded as separate symbol
+artifacts and release assets, outside the user packages. Keep them for crash
+analysis. On Linux the packaged executable contains a GNU debug link; extract
+the matching `.debug` file beside it (or into a `.debug` subdirectory) for GDB.
+
+`publish: false` builds and verifies packages without creating a GitHub Release.
+`project-path` defaults to `.`; the weekly package check uses `cursorExample`
+with its data folder and ad-hoc signing (`sign-identity: '-'`). Ad-hoc signing
+skips certificate import, notarization and stapling, and uses no timestamp.
 
 ### App Icon
 Place icon files in the `icon/` folder:
@@ -425,6 +467,10 @@ target_link_directories(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARY_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${LENSFUN_LIBRARIES})
 ```
 
+### Bundle Identifier (macOS / iOS)
+
+On macOS and iOS the app's bundle identifier defaults to `com.trussc.<project name>`. Set your own one in `local.cmake` before you distribute the app, e.g. `set(TC_BUNDLE_ID "com.example.myApp")`. `trussc_app()` reads `TC_BUNDLE_ID` after including `local.cmake` and uses it for `CFBundleIdentifier` in the generated Info.plist and for the Xcode `PRODUCT_BUNDLE_IDENTIFIER` setting, so it survives `trusscli update`. macOS keys privacy permissions and user defaults by this identifier, so two apps with the same project name and the default identifier share them. Other platforms ignore `TC_BUNDLE_ID`.
+
 ### `local.cmake` vs Addons
 
 | | `local.cmake` | Addon (`addons.make`) |
@@ -467,7 +513,7 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
-2. The old Guest's App is destroyed (`events().hotReloadUnload` fires first). Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
+2. The old Guest's App is ended and destroyed (`events().hotReloadUnload` fires first): its `exit()` runs, its `audioOut()` / `audioIn()` are detached (waiting for a call in flight), then its `cleanup()` runs. Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
 3. New Guest is loaded (`dlopen` / `LoadLibrary`)
 4. A new App instance is created → `setup()` runs again
 

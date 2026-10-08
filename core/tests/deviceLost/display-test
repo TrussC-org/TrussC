@@ -1,0 +1,4 @@
+{test} --window-default
+{test} --window-cancel
+{test} --window-code
+{test} --window-zero

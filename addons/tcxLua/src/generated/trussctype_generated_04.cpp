@@ -18,7 +18,7 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getGridFit"] = &trussc::Font::getGridFit;
         t["setMipmaps"] = &trussc::Font::setMipmaps;
         t["getMipmaps"] = &trussc::Font::getMipmaps;
-        t["load"] = &trussc::Font::load;
+        t["load"] = sol::overload([](trussc::Font& self, const fs::path & nameOrPath, int size) { return self.load(nameOrPath, size); }, [](trussc::Font& self, const fs::path & nameOrPath, int size, int faceIndex) { return self.load(nameOrPath, size, faceIndex); });
         t["isLoaded"] = &trussc::Font::isLoaded;
         t["setAlign"] = sol::overload([](trussc::Font& self, trussc::Direction h, trussc::Direction v) { return self.setAlign(h, v); }, [](trussc::Font& self, trussc::Direction h) { return self.setAlign(h); });
         t["getAlignH"] = &trussc::Font::getAlignH;
@@ -83,56 +83,65 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["save"] = &trussc::HasTexture::save;
     }
     {
-        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
-        t["entries"] = &trussc::ChipSoundBundle::entries;
-        t["volume"] = &trussc::ChipSoundBundle::volume;
-        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
-        t["clear"] = &trussc::ChipSoundBundle::clear;
-        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
-        t["build"] = &trussc::ChipSoundBundle::build;
+        sol::usertype<trussc::MouseMoveEventArgs> t = lua->new_usertype<trussc::MouseMoveEventArgs>("MouseMoveEventArgs");
+        t["x"] = &trussc::MouseMoveEventArgs::x;
+        t["y"] = &trussc::MouseMoveEventArgs::y;
+        t["deltaX"] = &trussc::MouseMoveEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseMoveEventArgs::deltaY;
+        t["shift"] = &trussc::MouseMoveEventArgs::shift;
+        t["ctrl"] = &trussc::MouseMoveEventArgs::ctrl;
+        t["alt"] = &trussc::MouseMoveEventArgs::alt;
+        t["super"] = &trussc::MouseMoveEventArgs::super;
+        t["pos"] = &trussc::MouseMoveEventArgs::pos;
+        t["globalPos"] = &trussc::MouseMoveEventArgs::globalPos;
+        t["delta"] = &trussc::MouseMoveEventArgs::delta;
+        t["globalDelta"] = &trussc::MouseMoveEventArgs::globalDelta;
+        t["consumed"] = &trussc::MouseMoveEventArgs::consumed;
+        t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::ScrollBar> t = lua->new_usertype<trussc::ScrollBar>("ScrollBar");
-        t["getBarColor"] = &trussc::ScrollBar::getBarColor;
-        t["setBarColor"] = &trussc::ScrollBar::setBarColor;
-        t["getBarWidth"] = &trussc::ScrollBar::getBarWidth;
-        t["setBarWidth"] = &trussc::ScrollBar::setBarWidth;
-        t["getMargin"] = &trussc::ScrollBar::getMargin;
-        t["setMargin"] = &trussc::ScrollBar::setMargin;
-        t["getOffset"] = &trussc::ScrollBar::getOffset;
-        t["updateFromContainer"] = &trussc::ScrollBar::updateFromContainer;
-    }
-    lua->new_usertype<trussc::LogLevel>("LogLevel",
-        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
-        "Verbose", sol::var(trussc::LogLevel::Verbose),
-        "Notice", sol::var(trussc::LogLevel::Notice),
-        "Warning", sol::var(trussc::LogLevel::Warning),
-        "Error", sol::var(trussc::LogLevel::Error),
-        "Fatal", sol::var(trussc::LogLevel::Fatal),
-        "Silent", sol::var(trussc::LogLevel::Silent));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["node"] = &trussc::Node::HitResult::node;
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["hit"] = &trussc::Node::HitResult::hit;
+        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
+        t["isWeb"] = &trussc::Platform::isWeb;
+        t["isMacOS"] = &trussc::Platform::isMacOS;
+        t["isIOS"] = &trussc::Platform::isIOS;
+        t["isWindows"] = &trussc::Platform::isWindows;
+        t["isAndroid"] = &trussc::Platform::isAndroid;
+        t["isLinux"] = &trussc::Platform::isLinux;
+        t["isApple"] = &trussc::Platform::isApple;
+        t["isMobile"] = &trussc::Platform::isMobile;
+        t["isDesktop"] = &trussc::Platform::isDesktop;
+        t["name"] = &trussc::Platform::name;
     }
     {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
+        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
+        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
+        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["isDerived"] = &trussc::Reflector::isDerived;
+        t["pushDerived"] = &trussc::Reflector::pushDerived;
+        t["popDerived"] = &trussc::Reflector::popDerived;
+        t["endGroup"] = &trussc::Reflector::endGroup;
     }
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    lua->new_usertype<trussc::ThermalState>("ThermalState",
+        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
+        "Nominal", sol::var(trussc::ThermalState::Nominal),
+        "Fair", sol::var(trussc::ThermalState::Fair),
+        "Serious", sol::var(trussc::ThermalState::Serious),
+        "Critical", sol::var(trussc::ThermalState::Critical));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    {
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["format"] = &trussc::AudioRecordSettings::format;
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

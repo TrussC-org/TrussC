@@ -7,12 +7,95 @@
 #include "tc/utils/tcLog.h"
 #include "tc/events/tcCoreEvents.h"
 #include <cstring>
+#include <algorithm>
+#include <climits>
 
 namespace trussc {
+namespace {
+thread_local const TcpClient* connectingClient = nullptr;
+
+bool setNonBlocking(
+#ifdef _WIN32
+    SOCKET fd
+#else
+    int fd
+#endif
+) {
+#ifdef _WIN32
+    u_long mode = 1;
+    return ioctlsocket(fd, FIONBIO, &mode) == 0;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    return flags >= 0 && fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+}
+
+// Connect readiness includes socket errors; SO_ERROR supplies the result.
+int waitSocket(
+#ifdef _WIN32
+    SOCKET fd,
+#else
+    int fd,
+#endif
+    bool write, int ms) {
+#ifdef _WIN32
+    fd_set ready, errors;
+    FD_ZERO(&ready); FD_SET(fd, &ready);
+    FD_ZERO(&errors); FD_SET(fd, &errors);
+    timeval tv{ms / 1000, (ms % 1000) * 1000};
+    return select(0, write ? nullptr : &ready, write ? &ready : nullptr, &errors, &tv);
+#else
+    pollfd pfd{fd, static_cast<short>(write ? POLLOUT : POLLIN), 0};
+    int result = poll(&pfd, 1, ms);
+    return result < 0 && errno == EINTR ? 0 : result;
+#endif
+}
+void finishWaiter(const internal::TcpSendItem& item, SendError error, size_t written) {
+    if (!item.waiter) return;
+    {
+        std::lock_guard<std::mutex> lock(item.waiter->mutex);
+        item.waiter->error = error;
+        item.waiter->bytesSent = written;
+        item.waiter->done = true;
+    }
+    item.waiter->cv.notify_all();
+}
+
+// After a send listener destroyed the client, only the independently owned
+// channel remains. Wake any borrowed senders without touching the client.
+void cancelQueuedSends(internal::TcpSendChannel& ch) {
+    for (;;) {
+        internal::TcpSendItem item;
+        {
+            std::lock_guard<std::mutex> lock(ch.mutex);
+            if (ch.queue.empty()) break;
+            item = std::move(ch.queue.front());
+            ch.queue.pop_front();
+            ch.pendingBytes -= item.size;
+        }
+        finishWaiter(item, SendError::Disconnected, 0);
+    }
+    ch.room.notify_all();
+}
+} // namespace
+
 
 // =============================================================================
 // Constructor / Destructor
 // =============================================================================
+struct TcpClient::ClientSendChannel : internal::TcpSendChannel {
+    internal::TcpSendItem active;
+    // Cancellation releases payloads/waiters immediately; the writer retains
+    // only IDs so completion events still run on its thread.
+    std::deque<uint64_t> cancelledSendIds;
+    bool hasActive = false;
+    bool threaded = false;
+    bool draining = false;
+    size_t written = 0;
+    float timeout = 0;
+    std::chrono::steady_clock::time_point progress;
+};
+
 TcpClient::TcpClient() {
     internal::ensureWinsock();
 #ifdef __EMSCRIPTEN__
@@ -21,6 +104,9 @@ TcpClient::TcpClient() {
 }
 
 TcpClient::~TcpClient() {
+    // A receive thread whose listener is destroying this client checks this
+    // once the notification returns, and stops without reading the client
+    *alive_ = false;
     // Disconnect without onDisconnect: a listener that reconnects would
     // reconnect a client that is going away.
     disconnectImpl(false);
@@ -72,8 +158,9 @@ TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
 // Connection management
 // =============================================================================
 bool TcpClient::connect(const std::string& host, int port) {
+    if (!prepareConnect()) return false;
     if (connected_ || running_ || connectPending_) {
-        disconnect();
+        disconnectImpl(true, false);
     }
 
     // Release what is left before starting over.
@@ -110,81 +197,11 @@ bool TcpClient::connect(const std::string& host, int port) {
     // to the update event).
     const unsigned generation = ++receiveGeneration_;
 
-    // Create socket
-    socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#ifdef _WIN32
-    if (socket_ == INVALID_SOCKET) {
-#else
-    if (socket_ < 0) {
-#endif
-        notifyError("Failed to create socket", SOCKET_ERROR_CODE);
-        return false;
-    }
-
-    // A send() racing the peer's close must fail, not raise SIGPIPE
-    internal::setNoSigpipe(socket_);
-
-    // Set non-blocking if not using threads to avoid blocking connect
-    if (!useThread_) {
-        setBlocking(false);
-    }
-
-    // Resolve hostname
-    struct addrinfo hints, *result;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    std::string portStr = std::to_string(port);
-    int ret = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
-    if (ret != 0) {
-        // Clean up before notifying: an onError listener that reconnects
-        // must not have its new socket closed after it returns
-        CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-        socket_ = INVALID_SOCKET;
-#else
-        socket_ = -1;
-#endif
-        notifyError("Failed to resolve host: " + host, ret);
-        return false;
-    }
-
-    // Connect
-    ret = ::connect(socket_, result->ai_addr, (int)result->ai_addrlen);
-    freeaddrinfo(result);
-
-    remoteHost_ = host;
-    remotePort_ = port;
-
-    if (ret == SOCKET_ERROR) {
-        int err = SOCKET_ERROR_CODE;
-#ifdef _WIN32
-        if (err == WSAEWOULDBLOCK) {
-#else
-        if (err == EINPROGRESS) {
-#endif
-            // Async connection started
-            connectPending_ = true;
-            running_ = true;
-        } else {
-            // Clean up before notifying (see above)
-            CLOSE_SOCKET(socket_);
-#ifdef _WIN32
-            socket_ = INVALID_SOCKET;
-#else
-            socket_ = -1;
-#endif
-            notifyError("Failed to connect to " + host + ":" + std::to_string(port), err);
-            return false;
-        }
-    } else {
-        // Connected immediately
+    if (!connectSocket(host, port)) return false;
+    if (!connectPending_) {
+        startSendChannel();
         connected_ = true;
-        running_ = true;
-        
         logNotice() << "TCP connected to " << host << ":" << port;
-
         TcpConnectEventArgs args;
         args.success = true;
         args.message = "Connected";
@@ -193,9 +210,10 @@ bool TcpClient::connect(const std::string& host, int port) {
 
     if (running_) {
         if (useThread_) {
-            // Start receive thread (ensure blocking mode for thread unless explicitly set otherwise)
-            setBlocking(true);
-            receiveThread_ = std::thread(&TcpClient::receiveThreadFunc, this, generation);
+            // Both reader and writer use non-blocking sockets.
+            keptThreads_.start(receiveThread_, [this, generation, alive = alive_] {
+                receiveThreadFunc(generation, alive);
+            });
         } else {
             // Register update listener
             updateListener_ = events().update.listen(this, &TcpClient::processNetwork);
@@ -205,30 +223,188 @@ bool TcpClient::connect(const std::string& host, int port) {
     return true;
 }
 
-void TcpClient::connectAsync(const std::string& host, int port) {
-    if (useThread_) {
-        // Wait for existing connection thread if any
-        if (connectThread_.joinable()) {
-            connectThread_.join();
+bool TcpClient::prepareConnect() {
+    if (connectingClient == this) return !connectCancelled_ && *alive_;
+    stopConnectThread();
+    connectCancelled_ = false;
+    return *alive_;
+}
+
+void TcpClient::stopConnectThread() {
+    connectCancelled_ = true;
+    std::deque<internal::TcpSendItem> cancelled;
+    // A connect listener (WebSocket's HTTP request, for example) may be
+    // waiting in send(). Cut that wait too before joining the connect worker.
+    if (auto ch = sendChannel()) {
+        {
+            std::lock_guard<std::mutex> lock(ch->mutex);
+            ch->open = false;
+            // Queued borrowed bytes are not in use. An active item is woken
+            // by its writer only after its non-blocking I/O step has ended.
+            cancelled.swap(ch->queue);
+            for (const auto& item : cancelled) {
+                ch->pendingBytes -= item.size;
+                ch->cancelledSendIds.push_back(item.id);
+            }
         }
-        connectThread_ = std::thread(&TcpClient::connectThreadFunc, this, host, port);
+        for (const auto& item : cancelled) finishWaiter(item, SendError::Disconnected, 0);
+        ch->queued.notify_all();
+        ch->room.notify_all();
+    }
+    keptThreads_.release(connectThread_);
+    keptThreads_.joinOthers();
+    asyncConnecting_ = false;
+}
+
+bool TcpClient::connectSocket(const std::string& host, int port) {
+    if (connectCancelled_) return false;
+    {
+        std::lock_guard<std::mutex> lock(targetMutex_);
+        remoteHost_ = host;
+        remotePort_ = port;
+    }
+    addrinfo hints{}, *result = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    int ret = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &result);
+    if (connectCancelled_) {
+        if (result) freeaddrinfo(result);
+        return false;
+    }
+    if (ret != 0) {
+        notifyError("Failed to resolve host: " + host, ret);
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        socket_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    }
+    if (socket_ == INVALID_SOCKET) {
+        freeaddrinfo(result);
+        notifyError("Failed to create socket", SOCKET_ERROR_CODE);
+        return false;
+    }
+    internal::setNoSigpipe(socket_);
+    connectStart_ = std::chrono::steady_clock::now();
+    bool nonBlocking;
+    int error;
+    {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        nonBlocking = setNonBlocking(socket_);
+        ret = nonBlocking ? ::connect(socket_, result->ai_addr, static_cast<int>(result->ai_addrlen)) : SOCKET_ERROR;
+        error = ret == SOCKET_ERROR ? SOCKET_ERROR_CODE : 0;
+    }
+    freeaddrinfo(result);
+    if (!nonBlocking) {
+        closeClientSocket();
+        notifyError("Failed to make socket non-blocking", error);
+        return false;
+    }
+#ifdef _WIN32
+    const bool pending = error == WSAEWOULDBLOCK || error == WSAEINPROGRESS;
+#else
+    const bool pending = error == EINPROGRESS;
+#endif
+    if (ret == SOCKET_ERROR && !pending) {
+        closeClientSocket();
+        notifyError("Failed to connect to " + host + ":" + std::to_string(port), error);
+        return false;
+    }
+    running_ = true;
+    connectPending_ = pending;
+    if (useThread_ && pending) {
+        int code = 0;
+        int state;
+        do { state = checkPendingConnect(100, code); } while (state == 0);
+        if (state < 0) {
+            running_ = false;
+            connectPending_ = false;
+            closeClientSocket();
+            if (state != -2) notifyError("Connection failed or timed out", code);
+            return false;
+        }
+    }
+    if (connectCancelled_) {
+        running_ = false;
+        connectPending_ = false;
+        closeClientSocket();
+        return false;
+    }
+    return true;
+}
+
+int TcpClient::checkPendingConnect(int waitMs, int& error) {
+    if (connectCancelled_) return -2;
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (socket_ == INVALID_SOCKET) return -2;
+    int ready = waitSocket(socket_, true, waitMs);
+    if (connectCancelled_) return -2;
+    if (ready != 0) {
+#ifdef _WIN32
+        int len = sizeof(error);
+        int result = getsockopt(socket_, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &len);
+#else
+        socklen_t len = sizeof(error);
+        int result = getsockopt(socket_, SOL_SOCKET, SO_ERROR, &error, &len);
+#endif
+        if (result != 0) error = SOCKET_ERROR_CODE;
+        if (ready < 0 || error != 0) return -1;
+        connectPending_ = false;
+        return 1;
+    }
+    const float timeout = connectTimeout_;
+    if (timeout > 0 && std::chrono::steady_clock::now() - connectStart_ >=
+            std::chrono::duration<float>(timeout)) {
+#ifdef _WIN32
+        error = WSAETIMEDOUT;
+#else
+        error = ETIMEDOUT;
+#endif
+        return -1;
+    }
+    return 0;
+}
+
+void TcpClient::connectAsync(const std::string& host, int port) {
+    if (isConnecting()) {
+        std::lock_guard<std::mutex> lock(targetMutex_);
+        const bool same = asyncConnecting_
+            ? asyncHost_ == host && asyncPort_ == port
+            : remoteHost_ == host && remotePort_ == port;
+        if (same) return;
+    }
+    // Cancel the old attempt before resetting the connection. Its connect
+    // uses non-blocking syscalls and notices cancellation between poll slices.
+    disconnect();
+    connectCancelled_ = false;
+    {
+        std::lock_guard<std::mutex> lock(targetMutex_);
+        asyncHost_ = host;
+        asyncPort_ = port;
+    }
+    const unsigned attempt = ++connectAttempt_;
+    asyncConnecting_ = true; // Published before the worker can start.
+    if (useThread_) {
+        keptThreads_.start(connectThread_, [this, host, port, attempt] {
+            connectThreadFunc(host, port, attempt);
+        });
     } else {
-        // Non-blocking connect handled in connect() + processNetwork()
-        connect(host, port);
+        connectThreadFunc(host, port, attempt);
     }
 }
 
-void TcpClient::connectThreadFunc(const std::string& host, int port) {
-    bool success = connect(host, port);
-    // An onError listener may have started a newer attempt from inside the
-    // connect() above. That attempt reports its own result: this one is not
-    // reported once the client is connected or connecting again.
-    if (!success && !connected_ && !running_ && !connectPending_) {
+void TcpClient::connectThreadFunc(const std::string& host, int port, unsigned attempt) {
+    const TcpClient* previous = connectingClient;
+    connectingClient = this;
+    bool success = !connectCancelled_ && *alive_ && connect(host, port);
+    if (connectAttempt_ == attempt) asyncConnecting_ = false;
+    if (connectAttempt_ == attempt && !success && !connectCancelled_ && !connected_ && !running_ && !connectPending_) {
         TcpConnectEventArgs args;
         args.success = false;
         args.message = "Connection failed";
         onConnect.notify(args);
     }
+    connectingClient = previous;
 }
 
 void TcpClient::disconnect() {
@@ -236,16 +412,14 @@ void TcpClient::disconnect() {
 }
 
 // disconnect() with notify, the destructor without
-void TcpClient::disconnectImpl(bool notify) {
+void TcpClient::disconnectImpl(bool notify, bool stopConnect) {
+    if (stopConnect) stopConnectThread();
     running_ = false;
     connectPending_ = false;
     updateListener_.disconnect();
 
     resetConnection();
 
-    // On the connect thread itself (a listener there), keep it for a later
-    // join from another thread. Then join what earlier calls kept.
-    keptThreads_.release(connectThread_);
     keptThreads_.joinOthers();
 
     // The receive thread reports only a close it ran into itself (running_
@@ -263,19 +437,7 @@ void TcpClient::disconnectImpl(bool notify) {
 // called on it). connectThread_ is left alone: connect() runs on it for
 // connectAsync(), and calls this.
 void TcpClient::resetConnection() {
-#ifdef _WIN32
-    if (socket_ != INVALID_SOCKET) {
-        shutdown(socket_, SD_BOTH);
-        CLOSE_SOCKET(socket_);
-        socket_ = INVALID_SOCKET;
-    }
-#else
-    if (socket_ >= 0) {
-        shutdown(socket_, SHUT_RDWR);
-        CLOSE_SOCKET(socket_);
-        socket_ = -1;
-    }
-#endif
+    closeClientSocket();
 
     // Called from within the receive thread (a listener that disconnects or
     // reconnects), the thread cannot join itself: the client keeps it, and
@@ -294,34 +456,37 @@ bool TcpClient::isConnected() const {
 // Data transmission
 // =============================================================================
 bool TcpClient::send(const void* data, size_t size) {
-    if (!connected_) {
-        notifyError("Not connected");
-        return false;
+    AliveToken alive = alive_;
+    auto ch = sendChannel();
+    if (!connected_ || !ch) { notifyError("Not connected"); return false; }
+    {
+        std::lock_guard<std::mutex> lock(ch->mutex);
+        if (ch->writerId == std::this_thread::get_id() || (!ch->threaded && ch->draining)) return false;
     }
-
-    std::lock_guard<std::mutex> lock(sendMutex_);
-
-    const char* ptr = static_cast<const char*>(data);
-    size_t remaining = size;
-
-    while (remaining > 0) {
-        int sent = static_cast<int>(::send(socket_, ptr, remaining, TC_SEND_FLAGS));
-        if (sent == SOCKET_ERROR) {
-            int err = SOCKET_ERROR_CODE;
-            if (err == WOULD_BLOCK_ERROR) {
-                // In non-blocking mode, we should ideally buffer this, 
-                // but for now we just return false or wait.
-                // Simple implementation: wait a bit or fail.
-                continue; 
+    internal::TcpSendItem item;
+    item.borrowed = data;
+    item.size = size;
+    auto waiter = std::make_shared<internal::TcpSendWaiter>();
+    item.waiter = waiter;
+    if (!enqueue(std::move(item))) return false;
+    if (!ch->threaded) {
+        while (*alive) {
+            {
+                std::lock_guard<std::mutex> held(waiter->mutex);
+                if (waiter->done) break;
             }
-            notifyError("Send failed", err);
-            return false;
+            drainSendChannel(ch, true, alive);
         }
-        ptr += sent;
-        remaining -= sent;
     }
-
-    return true;
+    if (!*alive && !ch->threaded) { cancelQueuedSends(*ch); return false; }
+    if (!ch->threaded && !ch->open) {
+        while (drainSendChannel(ch, false, alive)) {
+            if (!*alive) { cancelQueuedSends(*ch); return false; }
+        }
+    }
+    std::unique_lock<std::mutex> lock(waiter->mutex);
+    waiter->cv.wait(lock, [&] { return waiter->done; });
+    return waiter->error == SendError::None;
 }
 
 bool TcpClient::send(const std::vector<char>& data) {
@@ -332,85 +497,371 @@ bool TcpClient::send(const std::string& message) {
     return send(message.data(), message.size());
 }
 
+bool TcpClient::isConnecting() const {
+    return asyncConnecting_ || connectPending_;
+}
+
+std::shared_ptr<TcpClient::ClientSendChannel> TcpClient::sendChannel() const {
+    std::lock_guard<std::mutex> lock(channelMutex_);
+    return sendChannel_;
+}
+
+void TcpClient::startSendChannel() {
+    auto ch = std::make_shared<ClientSendChannel>();
+    ch->socket = socket_;
+    ch->threaded = useThread_;
+    {
+        std::lock_guard<std::mutex> lock(channelMutex_);
+        sendChannel_ = ch;
+        if (ch->threaded) writerThread_ = std::thread(&TcpClient::writerThreadFunc, this, ch, alive_);
+    }
+}
+
+void TcpClient::stopSendChannel() {
+    std::shared_ptr<ClientSendChannel> ch;
+    std::thread writer;
+    {
+        std::lock_guard<std::mutex> lock(channelMutex_);
+        ch = std::move(sendChannel_);
+        writer = std::move(writerThread_);
+    }
+    if (ch) {
+        {
+            std::lock_guard<std::mutex> lock(ch->mutex);
+            ch->open = false;
+        }
+        ch->queued.notify_all();
+        ch->room.notify_all();
+    }
+    keptWriters_.release(writer);
+    keptWriters_.joinOthers();
+    if (ch && !ch->threaded && !ch->draining) {
+        AliveToken alive = alive_;
+        while (drainSendChannel(ch, false, alive)) {}
+    }
+}
+
+void TcpClient::waitClientSocket(bool forWrite, int ms) {
+#ifdef _WIN32
+    SOCKET fd;
+#else
+    int fd;
+#endif
+    {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        fd = socket_;
+    }
+    // Waiting only observes readiness. Actual recv/send/close operations are
+    // serialized separately; holding that lock during a read wait would block
+    // the writer even when the send buffer has room.
+    if (fd != INVALID_SOCKET) waitSocket(fd, forWrite, ms);
+}
+
+void TcpClient::closeClientSocket() {
+    stopSendChannel();
+    // Socket I/O and close use this lock and non-blocking sockets. Taking and resetting
+    // the handle under it makes simultaneous TLS/main teardown close only once
+    // and prevents a receive/write step using a recycled descriptor.
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (socket_ != INVALID_SOCKET) {
+#ifdef _WIN32
+        shutdown(socket_, SD_BOTH);
+#else
+        shutdown(socket_, SHUT_RDWR);
+#endif
+        CLOSE_SOCKET(socket_);
+        socket_ = INVALID_SOCKET;
+    }
+}
+
+int TcpClient::writeSendStep(const void* data, size_t size, bool& forWrite, int& error) {
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    forWrite = true;
+    if (socket_ == INVALID_SOCKET) return -2;
+    int sent = static_cast<int>(::send(socket_, static_cast<const char*>(data),
+                                     static_cast<int>(std::min(size, size_t(INT_MAX))), TC_SEND_FLAGS));
+    if (sent >= 0) return sent;
+    error = SOCKET_ERROR_CODE;
+#ifdef _WIN32
+    return error == WSAEWOULDBLOCK || error == WSAEINTR ? -1 : -2;
+#else
+    return error == EWOULDBLOCK || error == EAGAIN || error == EINTR ? -1 : -2;
+#endif
+}
+
+SendResult TcpClient::enqueue(internal::TcpSendItem&& item) {
+    auto ch = sendChannel();
+    if (!connected_ || !ch) {
+        notifyError("Not connected");
+        return {SendError::NotRunning, 0};
+    }
+    std::unique_lock<std::mutex> lock(ch->mutex);
+    auto room = [&] {
+        size_t mark = sendAsyncBufferSize_;
+        return !ch->open || mark == 0 || ch->pendingBytes < mark;
+    };
+    if (!room()) {
+        if (!item.waiter) {
+            lock.unlock();
+            notifyError("Send queue full");
+            return {SendError::QueueFull, 0};
+        }
+        if (!ch->threaded) {
+            AliveToken alive = alive_;
+            while (!room()) {
+                lock.unlock();
+                drainSendChannel(ch, true, alive);
+                if (!*alive) return {SendError::Disconnected, 0};
+                lock.lock();
+            }
+        } else {
+            ch->room.wait(lock, room);
+        }
+    }
+    if (!ch->open) {
+        lock.unlock();
+        notifyError("Connection closed");
+        return {SendError::Disconnected, 0};
+    }
+    item.id = ++nextSendId_;
+    const uint64_t id = item.id;
+    ch->queue.push_back(std::move(item));
+    ch->pendingBytes += ch->queue.back().size;
+    lock.unlock();
+    ch->queued.notify_one();
+    return {SendError::None, id};
+}
+
+SendResult TcpClient::sendAsync(const void* data, size_t size) {
+    internal::TcpSendItem item;
+    auto bytes = std::make_shared<std::vector<char>>(size);
+    if (size) std::memcpy(bytes->data(), data, size);
+    item.owned = std::move(bytes);
+    item.size = size;
+    return enqueue(std::move(item));
+}
+
+SendResult TcpClient::sendAsync(std::vector<char>&& data) {
+    internal::TcpSendItem item;
+    item.size = data.size();
+    item.owned = std::make_shared<const std::vector<char>>(std::move(data));
+    return enqueue(std::move(item));
+}
+
+SendResult TcpClient::sendAsync(const std::string& message) {
+    return sendAsync(message.data(), message.size());
+}
+
+bool TcpClient::drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, bool wait,
+                                  const AliveToken& alive) {
+    if (ch->draining) return false;
+    ch->draining = true;
+    struct DrainGuard {
+        ClientSendChannel& channel;
+        ~DrainGuard() { channel.draining = false; }
+    } guard{*ch};
+    std::deque<uint64_t> cancelledSendIds;
+    auto reportCancelled = [&] {
+        for (uint64_t id : cancelledSendIds) {
+            if (!*alive) break;
+            TcpSendCompleteEventArgs args;
+            args.sendId = id;
+            args.error = SendError::Disconnected;
+            onSendComplete.notify(args);
+        }
+    };
+    if (!ch->hasActive) {
+        {
+            std::lock_guard<std::mutex> lock(ch->mutex);
+            if (ch->queue.empty()) {
+                cancelledSendIds.swap(ch->cancelledSendIds);
+            } else {
+                ch->active = std::move(ch->queue.front());
+                ch->queue.pop_front();
+                ch->hasActive = true;
+                ch->written = 0;
+                ch->timeout = *alive ? sendTimeout_.load() : 0.0f;
+                ch->progress = std::chrono::steady_clock::now();
+            }
+        }
+        if (!ch->hasActive) {
+            reportCancelled();
+            return !cancelledSendIds.empty();
+        }
+    }
+    auto& item = ch->active;
+    SendError outcome = SendError::None;
+    int error = 0;
+    while (ch->written < item.size) {
+        if (!ch->open || !*alive) { outcome = SendError::Disconnected; break; }
+        bool forWrite = true;
+        int sent = writeSendStep(static_cast<const char*>(item.data()) + ch->written,
+                                 item.size - ch->written, forWrite, error);
+        if (sent > 0) {
+            ch->written += static_cast<size_t>(sent);
+            ch->progress = std::chrono::steady_clock::now();
+            continue;
+        }
+        if (sent != -1) { outcome = SendError::Disconnected; break; }
+        if (ch->timeout > 0 && std::chrono::steady_clock::now() - ch->progress >=
+                std::chrono::duration<float>(ch->timeout)) {
+            outcome = SendError::Timeout;
+            break;
+        }
+        // update() never parks; a synchronous caller or the writer waits in
+        // cancellable slices. TLS WANT_READ waits for readability instead.
+        if (!wait) return false;
+        if (ch->open) waitClientSocket(forWrite, 100);
+    }
+    if (!ch->open && outcome == SendError::None) outcome = SendError::Disconnected;
+    const bool failed = outcome != SendError::None && ch->open;
+    const bool timedOut = outcome == SendError::Timeout;
+    if (timedOut) outcome = SendError::Disconnected; // The stream is closed.
+    auto finished = std::move(ch->active);
+    const size_t written = ch->written;
+    ch->hasActive = false;
+    std::deque<internal::TcpSendItem> cancelled;
+    {
+        std::lock_guard<std::mutex> lock(ch->mutex);
+        ch->pendingBytes -= finished.size;
+        cancelledSendIds.swap(ch->cancelledSendIds);
+        if (failed) {
+            ch->open = false;
+            cancelled.swap(ch->queue);
+            for (const auto& item : cancelled) ch->pendingBytes -= item.size;
+        }
+    }
+    if (failed && *alive) {
+        running_ = false;
+        connected_ = false;
+        connectPending_ = false;
+    }
+    ch->room.notify_all();
+    // Release every borrowed sender BEFORE teardown/listeners can join its
+    // thread. No payload bytes are read after these notifications.
+    finishWaiter(finished, outcome, written);
+    for (const auto& item : cancelled) finishWaiter(item, SendError::Disconnected, 0);
+    if (failed && *alive) {
+        closeClientSocket();
+        notifyError(timedOut ? "Send timed out; client disconnected" : "Send failed", error);
+        if (*alive && !connected_ && !running_) {
+            TcpDisconnectEventArgs args;
+            args.reason = "Send failed";
+            args.wasClean = false;
+            onDisconnect.notify(args);
+        }
+    }
+    auto report = [&](const internal::TcpSendItem& item, SendError result, size_t bytes) {
+        if (!*alive) return;
+        TcpSendCompleteEventArgs args;
+        args.sendId = item.id;
+        args.error = result;
+        args.bytesSent = bytes;
+        onSendComplete.notify(args);
+    };
+    report(finished, outcome, written);
+    for (const auto& item : cancelled) report(item, SendError::Disconnected, 0);
+    reportCancelled();
+    return true;
+}
+
+void TcpClient::writerThreadFunc(std::shared_ptr<ClientSendChannel> ch, AliveToken alive) {
+    {
+        std::lock_guard<std::mutex> lock(ch->mutex);
+        ch->writerId = std::this_thread::get_id();
+    }
+    for (;;) {
+        {
+            std::unique_lock<std::mutex> lock(ch->mutex);
+            ch->queued.wait(lock, [&] { return !ch->open || !ch->queue.empty(); });
+            if (ch->queue.empty() && ch->cancelledSendIds.empty()) break;
+        }
+        drainSendChannel(ch, true, alive);
+        if (!*alive) { cancelQueuedSends(*ch); return; }
+    }
+}
+
+void TcpClient::setSendTimeout(float seconds) {
+    sendTimeout_ = seconds > 0 ? seconds : 0;
+}
+void TcpClient::setConnectTimeout(float seconds) {
+    connectTimeout_ = seconds > 0 ? seconds : 0;
+}
+void TcpClient::setSendAsyncBufferSize(size_t bytes) {
+    sendAsyncBufferSize_ = bytes;
+    if (auto ch = sendChannel()) ch->room.notify_all();
+}
+size_t TcpClient::getSendAsyncBufferSize() const { return sendAsyncBufferSize_; }
+size_t TcpClient::getSendAsyncPendingBytes() const {
+    auto ch = sendChannel();
+    if (!ch) return 0;
+    std::lock_guard<std::mutex> lock(ch->mutex);
+    return ch->pendingBytes;
+}
+
 // =============================================================================
 // Update / Receive logic
 // =============================================================================
-void TcpClient::processNetwork() {
-    if (!running_) return;
+bool TcpClient::processSendQueue(const AliveToken& alive) {
+    auto ch = sendChannel();
+    if (ch && !running_ && !connected_) {
+        // A remote close also retires the idle writer. Leave its handle owned
+        // for the next teardown to join; a receive thread must not wait for a
+        // writer listener that could be waiting for this receive thread.
+        {
+            std::lock_guard<std::mutex> lock(ch->mutex);
+            ch->open = false;
+        }
+        ch->queued.notify_all();
+        ch->room.notify_all();
+    }
+    if (ch && !ch->threaded) while (drainSendChannel(ch, false, alive)) {
+        if (!*alive) { cancelQueuedSends(*ch); return false; }
+    }
+    return *alive;
+}
 
-    // Handle pending connection
+void TcpClient::processNetwork() {
+    // Without threads (driven by the update event) the result is not needed:
+    // a stop means the connection ended and the update listener is gone.
+    // The token is copied first: a listener may destroy the client.
+    AliveToken alive = alive_;
+    processNetworkStep(alive);
+}
+
+// processNetwork()'s work. Returns false when the caller must stop without
+// reading the client again (see the header).
+bool TcpClient::processNetworkStep(const AliveToken& alive) {
+    if (!processSendQueue(alive)) return false;
+    if (!running_) return true;
+
     if (connectPending_) {
-#ifdef _WIN32
-        struct fd_set writefds, exceptfds;
-        FD_ZERO(&writefds);
-        FD_ZERO(&exceptfds);
-        FD_SET(socket_, &writefds);
-        FD_SET(socket_, &exceptfds);
-        struct timeval tv = {0, 0};
-        int res = select(0, NULL, &writefds, &exceptfds, &tv);
-        if (res > 0) {
-            if (FD_ISSET(socket_, &exceptfds)) {
-                int err = 0;
-                int len = sizeof(err);
-                getsockopt(socket_, SOL_SOCKET, SO_ERROR, (char*)&err, &len);
-                // Tear down before notifying: a listener that reconnects must
-                // not have its new connection torn down after it returns
-                disconnect();
-                notifyError("Connection failed", err);
-                // Not reported if an onError listener started a newer attempt
-                if (!connected_ && !running_ && !connectPending_) {
-                    TcpConnectEventArgs args;
-                    args.success = false;
-                    args.message = "Connection failed";
-                    onConnect.notify(args);
-                }
-                return;
-            }
-            if (FD_ISSET(socket_, &writefds)) {
-                connectPending_ = false;
-                connected_ = true;
-                logNotice() << "TCP connected (async) to " << remoteHost_ << ":" << remotePort_;
+        int error = 0;
+        int state = checkPendingConnect(0, error);
+        if (state < 0) {
+            disconnect();
+            if (state == -2) return false;
+            notifyError("Connection failed or timed out", error);
+            if (!*alive) return false;
+            if (!connected_ && !running_ && !isConnecting()) {
                 TcpConnectEventArgs args;
-                args.success = true;
-                args.message = "Connected";
+                args.message = "Connection failed";
                 onConnect.notify(args);
             }
+            return false;
         }
-#else
-        struct pollfd pfd;
-        pfd.fd = socket_;
-        pfd.events = POLLOUT;
-        int res = poll(&pfd, 1, 0);
-        if (res > 0) {
-            int err = 0;
-            socklen_t len = sizeof(err);
-            getsockopt(socket_, SOL_SOCKET, SO_ERROR, &err, &len);
-            if (err == 0) {
-                connectPending_ = false;
-                connected_ = true;
-                logNotice() << "TCP connected (async) to " << remoteHost_ << ":" << remotePort_;
-                TcpConnectEventArgs args;
-                args.success = true;
-                args.message = "Connected";
-                onConnect.notify(args);
-            } else {
-                // Tear down before notifying (see the Windows branch)
-                disconnect();
-                notifyError("Connection failed", err);
-                // Not reported if an onError listener started a newer attempt
-                if (!connected_ && !running_ && !connectPending_) {
-                    TcpConnectEventArgs args;
-                    args.success = false;
-                    args.message = "Connection failed";
-                    onConnect.notify(args);
-                }
-                return;
-            }
-        }
-#endif
+        if (state == 0) return true;
+        startSendChannel();
+        connected_ = true;
+        logNotice() << "TCP connected (async) to " << getRemoteHost() << ":" << getRemotePort();
+        TcpConnectEventArgs args;
+        args.success = true;
+        args.message = "Connected";
+        onConnect.notify(args);
+        if (!*alive) return false;
     }
 
-    if (!connected_) return;
+    if (!connected_) return true;
 
     // Receive data. The buffer is this client's own: every client's receive
     // thread runs this at the same time.
@@ -425,13 +876,22 @@ void TcpClient::processNetwork() {
     // next to that thread, sharing recvBuf_ with it.
     const unsigned generation = receiveGeneration_;
     while (connected_ && receiveGeneration_ == generation) {
-        int received = static_cast<int>(recv(socket_, recvBuf_.data(), recvBuf_.size(), 0));
+        int received, receiveError = 0;
+        {
+            std::lock_guard<std::mutex> lock(socketMutex_);
+            if (!running_ || socket_ == INVALID_SOCKET) break;
+            received = static_cast<int>(recv(socket_, recvBuf_.data(), recvBuf_.size(), 0));
+            if (received < 0) receiveError = SOCKET_ERROR_CODE;
+        }
 
         if (received > 0) {
             TcpReceiveEventArgs args;
             args.data.assign(recvBuf_.begin(), recvBuf_.begin() + received);
             onReceive.notify(args);
-            
+            // An onReceive listener may have destroyed the client (an owner
+            // that replaces it from a close it handles inline, say)
+            if (!*alive) return false;
+
             // If using threads, we might block again. 
             // If not, we should return to let the app run.
             if (!useThread_) break; 
@@ -444,40 +904,52 @@ void TcpClient::processNetwork() {
             // start over while disconnect() is still joining this thread.
             if (running_.exchange(false)) {
                 connected_ = false;
+                if (!processSendQueue(alive)) return false;
                 TcpDisconnectEventArgs args;
                 args.reason = "Connection closed by remote";
                 args.wasClean = true;
+                // This thread stops here, decided before notifying: a
+                // listener may destroy, disconnect or reconnect the client,
+                // so nothing of it is read after the notification (#262).
                 onDisconnect.notify(args);
+                return false;
             }
             break;
         } else {
             // Error
-            int err = SOCKET_ERROR_CODE;
+            int err = receiveError;
             if (err == WOULD_BLOCK_ERROR) break;
             
             // As above: an error caused by a local disconnect() is its to report
             if (running_.exchange(false)) {
                 connected_ = false;
+                if (!processSendQueue(alive)) return false;
                 TcpDisconnectEventArgs args;
                 args.reason = "Connection error";
                 args.wasClean = false;
+                // As above: stop without reading the client again
                 onDisconnect.notify(args);
+                return false;
             }
             break;
         }
     }
+    return true;
 }
 
-void TcpClient::receiveThreadFunc(unsigned generation) {
+void TcpClient::receiveThreadFunc(unsigned generation, AliveToken alive) {
     // running_ alone cannot end this loop when a listener on this thread
     // reconnects: connect() lets go of this thread (the client keeps it for
     // a later join), starts the new connection's own, and running_ is true
     // again for that one. The generation says which thread is current
     // (processNetwork()'s receive loop checks it as well).
+    // processNetworkStep() returns false once it reported the end of the
+    // connection, or a listener destroyed the client: the thread then ends
+    // without reading the client again.
     while (running_ && receiveGeneration_ == generation) {
-        processNetwork();
+        if (!processNetworkStep(alive)) return;
         if (running_ && receiveGeneration_ == generation) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            waitClientSocket(false, 100);
         }
     }
 }
@@ -508,31 +980,29 @@ bool TcpClient::isUsingThread() const {
 }
 
 void TcpClient::setBlocking(bool blocking) {
-#ifdef _WIN32
-    if (socket_ != INVALID_SOCKET) {
-        u_long mode = blocking ? 0 : 1;
-        ioctlsocket(socket_, FIONBIO, &mode);
-    }
-#else
-    if (socket_ >= 0) {
-        int flags = fcntl(socket_, F_GETFL, 0);
-        if (blocking) {
-            fcntl(socket_, F_SETFL, flags & ~O_NONBLOCK);
-        } else {
-            fcntl(socket_, F_SETFL, flags | O_NONBLOCK);
+    // Every owned socket, including one not yet marked pending/connected,
+    // must stay non-blocking so a concurrent setting cannot park connect().
+    {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        if (socket_ == INVALID_SOCKET) return;
+        if (!blocking) {
+            setNonBlocking(socket_);
+            return;
         }
     }
-#endif
+    logWarning() << "TcpClient: active sockets remain non-blocking";
 }
 
 // =============================================================================
 // Information retrieval
 // =============================================================================
 std::string TcpClient::getRemoteHost() const {
+    std::lock_guard<std::mutex> lock(targetMutex_);
     return remoteHost_;
 }
 
 int TcpClient::getRemotePort() const {
+    std::lock_guard<std::mutex> lock(targetMutex_);
     return remotePort_;
 }
 

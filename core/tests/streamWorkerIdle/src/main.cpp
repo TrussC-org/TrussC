@@ -5,7 +5,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The engine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the real mixer callback. The test reads the process CPU time
 // (getrusage / GetProcessTimes) over about 1 s while the main thread sleeps,
 // and listens on AudioEngine::audioOut for the level of the mix: the test
@@ -19,6 +19,10 @@
 // - With one stream playing, the process uses well under one core too, and
 //   every audioOut block holds the full level (refills are on time: no gap),
 //   also at speed 10, where the ring holds ~34 ms.
+// - With no stream playing, the worker polls every 50 ms, not 5 ms (#550):
+//   its passes per second of wall time (internal::streamWorkerPassesForTests()
+//   over the measured window) stay well under the ~200/s of a 5 ms poll, and a stream resumed after such an idle
+//   pause plays without a gap (the mixer wakes the worker back to 5 ms).
 // - A seek request on a playing stream is heard within a bound well under
 //   the ring's length (the worker wakes for it; the mean is printed for
 //   reference, a missed wakeup adds up to the 5 ms poll on average).
@@ -74,6 +78,11 @@ constexpr int kRate = 48000;   // engine rate = file rate: no resampling
 
 // Bound on the process CPU use while the main thread sleeps, in cores.
 constexpr double kMaxCores = 0.25;
+
+// Bound on the worker's passes per second of wall time while no stream plays:
+// its idle poll is 50 ms (~20/s); the 5 ms poll it used before #550 made ~200/s.
+// A rate, not a count: a slow runner can stretch the ~1 s window (#527).
+constexpr double kMaxIdlePassesPerSec = 60.0;
 
 static void sleepMs(int ms) { this_thread::sleep_for(chrono::milliseconds(ms)); }
 
@@ -165,12 +174,11 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = kRate;
     settings.channels = 2;
     settings.bufferSize = 256;
@@ -222,11 +230,22 @@ TC_CORE_TEST_MAIN() {
             ended = !s.isPlaying();
         }
         check("the short stream plays to its end", ended);
-        sleepMs(100);
+        sleepMs(500);   // past the worker's switch to its idle poll
+        const auto w0 = chrono::steady_clock::now();
+        const uint64_t p0 = internal::streamWorkerPassesForTests();
         const double idle = measureCores(1000);
-        printf("  idle after the stream ended: %s\n", fmt(idle, "cores").c_str());
+        const uint64_t idlePasses = internal::streamWorkerPassesForTests() - p0;
+        const double idleSec = chrono::duration<double>(chrono::steady_clock::now() - w0).count();
+        // Passes per second of the window as it actually lasted (#527).
+        const double idleRate = idleSec > 0.0 ? (double)idlePasses / idleSec : 0.0;
+        char rateDetail[96];
+        snprintf(rateDetail, sizeof(rateDetail), "%llu passes in %.3f s = %.1f /s",
+                 (unsigned long long)idlePasses, idleSec, idleRate);
+        printf("  idle after the stream ended: %s, %s\n", fmt(idle, "cores").c_str(), rateDetail);
         check("idle after a stream ended: the process uses well under one core",
               idle < kMaxCores, fmt(idle, "cores"));
+        check("idle after a stream ended: the worker polls slowly",
+              idleRate < kMaxIdlePassesPerSec, rateDetail);
     }
 
     // --- one stream playing --------------------------------------------------------
@@ -239,9 +258,12 @@ TC_CORE_TEST_MAIN() {
         g_minLevel.store(1.0f);
         g_watchedBlocks.store(0);
         g_watch.store(true);
+        const uint64_t p0 = internal::streamWorkerPassesForTests();
         const double playing = measureCores(1000);
         g_watch.store(false);
-        printf("  one stream playing: %s\n", fmt(playing, "cores").c_str());
+        printf("  one stream playing: %s, %llu worker passes in ~1 s\n",
+               fmt(playing, "cores").c_str(),
+               (unsigned long long)(internal::streamWorkerPassesForTests() - p0));
         check("one stream playing: the process uses well under one core",
               playing < kMaxCores, fmt(playing, "cores"));
         const int blocks = g_watchedBlocks.load();
@@ -264,10 +286,35 @@ TC_CORE_TEST_MAIN() {
         const int fastBlocks = g_watchedBlocks.load();
         const float fastMin = g_minLevel.load();
         // Reported, not checked: at speed 10 the ring holds about 34 ms, and a
-        // busy runner can stall the worker that long (Windows also rounds the
-        // 5 ms wait to its 15.6 ms timer tick).
+        // busy runner can stall the worker that long (Windows without the
+        // high-resolution timer, before 10 1803, also rounds the 5 ms wait
+        // to its 15.6 ms timer tick).
         printf("  speed 10: %d blocks, lowest level %.4f (full level 0.5 = no gap)\n",
                fastBlocks, fastMin);
+
+        // Paused long enough for the worker to go to its 50 ms idle poll,
+        // then resumed: the mixer's first drain wakes it back to the 5 ms
+        // poll, and the resumed stream plays without a gap.
+        s.setSpeed(1.0f);
+        sleepMs(100);
+        s.pause();
+        sleepMs(500);
+        s.resume();
+        sleepMs(30);   // a callback in flight at resume() may still mix the paused voice
+        g_minLevel.store(1.0f);
+        g_watchedBlocks.store(0);
+        g_watch.store(true);
+        const uint64_t r0 = internal::streamWorkerPassesForTests();
+        sleepMs(1000);
+        g_watch.store(false);
+        const uint64_t resumedPasses = internal::streamWorkerPassesForTests() - r0;
+        const int resumedBlocks = g_watchedBlocks.load();
+        const float resumedMin = g_minLevel.load();
+        printf("  resumed after an idle pause: %llu worker passes in ~1 s\n",
+               (unsigned long long)resumedPasses);
+        check("resumed after an idle pause: every block holds the full level",
+              resumedBlocks > 100 && approx(resumedMin, 0.5f, 0.02f),
+              to_string(resumedBlocks) + " blocks, lowest level " + to_string(resumedMin));
         s.stop();
     }
 

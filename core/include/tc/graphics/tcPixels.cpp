@@ -19,6 +19,31 @@ bool Pixels::save(const fs::path& path) const {
         logError("Pixels") << "No file name in path: " << savePath;
         return false;
     }
+    if (!internal::checkWriteTarget(path, savePath, "Pixels")) return false;
+
+    // Encode to memory first: an encode error leaves an existing file
+    // untouched. The encoder follows the extension, whatever its case
+    // (.PNG, .Jpg); the file is written under the path as given.
+    auto ext = toLower(getFileExtension(savePath));
+    std::vector<unsigned char> encoded;
+    auto append = [](void* ctx, void* d, int size) {
+        auto* out = static_cast<std::vector<unsigned char>*>(ctx);
+        auto* bytes = static_cast<unsigned char*>(d);
+        out->insert(out->end(), bytes, bytes + size);
+    };
+    int result = 0;
+    if (ext == "jpg" || ext == "jpeg") {
+        result = stbi_write_jpg_to_func(append, &encoded, width_, height_, channels_, data_, 90);
+    } else if (ext == "bmp") {
+        result = stbi_write_bmp_to_func(append, &encoded, width_, height_, channels_, data_);
+    } else {
+        // Default is PNG
+        result = stbi_write_png_to_func(append, &encoded, width_, height_, channels_, data_, width_ * channels_);
+    }
+    if (result == 0 || encoded.empty()) {
+        logError("Pixels") << "Cannot encode image: " << savePath;
+        return false;
+    }
 
     // Create a missing parent folder, like saveScreenshot()
     std::error_code ec;
@@ -32,25 +57,20 @@ bool Pixels::save(const fs::path& path) const {
         }
     }
 
-    // The encoder follows the extension, whatever its case (.PNG, .Jpg);
-    // the file is written under the path as given.
-    auto ext = toLower(getFileExtension(savePath));
-    // UTF-8 for stb (STBIW_WINDOWS_UTF8 makes stb wide-open it on Windows)
-    auto pathStr = internal::pathToUtf8(savePath);
-    int result = 0;
-
-    if (ext == "png") {
-        result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
-    } else if (ext == "jpg" || ext == "jpeg") {
-        result = stbi_write_jpg(pathStr.c_str(), width_, height_, channels_, data_, 90);
-    } else if (ext == "bmp") {
-        result = stbi_write_bmp(pathStr.c_str(), width_, height_, channels_, data_);
-    } else {
-        // Default is PNG
-        result = stbi_write_png(pathStr.c_str(), width_, height_, channels_, data_, width_ * channels_);
+    // fs::path keeps Windows paths wide; the write and the close are checked
+    std::ofstream file(savePath, std::ios::binary);
+    if (!file.is_open()) {
+        logError("Pixels") << "Cannot create file: " << savePath;
+        return false;
     }
-
-    return result != 0;
+    file.write(reinterpret_cast<const char*>(encoded.data()),
+               static_cast<std::streamsize>(encoded.size()));
+    file.close();
+    if (file.fail()) {
+        logError("Pixels") << "Write error: " << savePath;
+        return false;
+    }
+    return true;
 }
 
 // Platform-specific image loader fallback (non-Apple stub)

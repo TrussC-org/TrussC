@@ -151,7 +151,10 @@ public:
             // Use this node's effective camera context, same as the base does.
             auto [ctx, ray] = resolvePickRay(pick, inheritedCtx, globalRay);
             (void)ctx;
-            Mat4 localInverse = getLocalMatrix().inverted();
+            // Degenerate local matrix (an axis scaled to 0): no area, so
+            // nothing in this subtree can be hit.
+            Mat4 localInverse;
+            if (!getLocalMatrix().tryInvert(localInverse)) return HitResult{};
             Mat4 globalInverse = localInverse * parentInverseMatrix;
             Ray localRay = ray.transformed(globalInverse);
 

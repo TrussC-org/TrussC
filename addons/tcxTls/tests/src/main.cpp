@@ -41,6 +41,8 @@
 //   - A plain onError listener that reconnects after a failed handshake ends
 //     up connected. The failed connection used to be torn down after the
 //     listener returned, taking the new connection with it.
+//   - A TLS setup failure reports onError then onConnect(false) once, closes
+//     the socket and permits a new connection, with or without threads (#384).
 //   - An onError listener that reconnects after a refused connect() keeps
 //     its connection: connect() closes the failed socket before notifying.
 //   - A connection attempt that a newer attempt replaced (an onError
@@ -55,6 +57,16 @@
 //     reconnect used to leave the generation unchanged.
 //   - Destroying a client while its onError listener runs for a failed
 //     handshake waits for that listener: the receive thread stays owned.
+//   - Handshake deadline (#262): a peer that accepts TCP and never speaks
+//     TLS, with setHandshakeTimeout(1) -> onError, then onConnect(false),
+//     both "TLS handshake timeout", after disconnecting; with
+//     threads and without (update event pumped). With 0 (no deadline)
+//     nothing fires for 1.5 s and disconnect() still returns at once.
+//   - A client destroyed by a listener on its own receive thread (#262): an
+//     owner replaces the unique_ptr holding the client from an inline
+//     onDisconnect listener (the peer sent close_notify), and from an inline
+//     onError listener after a failed handshake (the client verifies the
+//     peer's self-signed certificate), 20 times each.
 //   - A receive thread that a listener's disconnect() let go of (it cannot
 //     join itself) is joined later: the next connect() and disconnect() on
 //     another thread, and the destructor, return only once that listener
@@ -70,6 +82,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include <tcWebSocketClient.h>
 #include "tcTlsClient.h"
 
 #include <mbedtls/ctr_drbg.h>
@@ -79,6 +92,7 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
+#include "../../src/tcTlsCaInternal.h"
 #include <psa/crypto.h>
 
 #include <atomic>
@@ -205,7 +219,7 @@ static bool waitFor(int ms, P pred) {
 // -----------------------------------------------------------------------------
 
 // A listening TCP socket on 127.0.0.1 with a port the OS picks
-static rawsocket_t listenLoopback(int& port) {
+static rawsocket_t listenLoopback(int& port, int backlog = 8) {
     rawsocket_t s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == kNoSocket) return kNoSocket;
     sockaddr_in addr{};
@@ -215,7 +229,7 @@ static rawsocket_t listenLoopback(int& port) {
     socklen_t len = sizeof(addr);
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) != 0 ||
         ::getsockname(s, (sockaddr*)&addr, &len) != 0 ||
-        ::listen(s, 8) != 0) {
+        ::listen(s, backlog) != 0) {
         TC_CLOSE(s);
         return kNoSocket;
     }
@@ -371,6 +385,67 @@ struct TlsServer {
     }
 };
 
+// The same loader used by Windows, with an injected DER list: no OS store or
+// network needed. Run on every platform so Linux also exercises the union.
+static void testDefaultCaUnion() {
+    using namespace tcx::tls::tls_internal;
+    TlsServer dummy;
+    check("default CA union: self-signed OS certificate", dummy.setup());
+    if (g_fail) return;
+    const vector<unsigned char> der(dummy.cert.raw.p,
+                                   dummy.cert.raw.p + dummy.cert.raw.len);
+    mbedtls_x509_crt bundle;
+    mbedtls_x509_crt_init(&bundle);
+    check("default CA union: initialized chain counts as empty", countCerts(&bundle) == 0);
+    const char* pem = bundledCaPem();
+    check("default CA union: bundle parses completely",
+          mbedtls_x509_crt_parse(&bundle, reinterpret_cast<const unsigned char*>(pem),
+                                 strlen(pem) + 1) == 0);
+    const size_t bundledCount = countCerts(&bundle);
+    check("default CA union: bundle is nonempty", bundledCount > 0);
+    if (g_fail) {
+        mbedtls_x509_crt_free(&bundle);
+        return;
+    }
+
+    mbedtls_x509_crt anchors;
+    mbedtls_x509_crt_init(&anchors);
+    const auto counts = loadWindowsDefaultCAs(&anchors, {der});
+    check("default CA union: one OS anchor loaded", counts.windowsRoot == 1);
+    check("default CA union: all bundled anchors appended", counts.bundled == bundledCount);
+    check("default CA union: OS + bundled count", countCerts(&anchors) == 1 + bundledCount);
+    bool hasDummy = false, hasIsrg = false;
+    for (auto* cert = &anchors; cert != nullptr; cert = cert->next) {
+        if (cert->raw.len == der.size() && memcmp(cert->raw.p, der.data(), der.size()) == 0) {
+            hasDummy = true;
+        }
+        char subject[512]{};
+        mbedtls_x509_dn_gets(subject, sizeof(subject), &cert->subject);
+        if (string(subject).find("CN=ISRG Root X1") != string::npos) hasIsrg = true;
+    }
+    check("default CA union: OS-only anchor retained", hasDummy);
+    check("default CA union: bundle-only ISRG Root X1 retained", hasIsrg);
+    mbedtls_x509_crt_free(&anchors);
+
+    for (const vector<vector<unsigned char>>& os :
+         {vector<vector<unsigned char>>{}, vector<vector<unsigned char>>{{0x00}}}) {
+        mbedtls_x509_crt_init(&anchors);
+        const auto fallback = loadWindowsDefaultCAs(&anchors, os);
+        check("default CA union: absent/invalid OS anchors load zero", fallback.windowsRoot == 0);
+        check("default CA union: absent/invalid OS store still gets bundle",
+              fallback.bundled == bundledCount && countCerts(&anchors) == bundledCount);
+        mbedtls_x509_crt_free(&anchors);
+    }
+    mbedtls_x509_crt_init(&anchors);
+    const vector<unsigned char> duplicate(bundle.raw.p, bundle.raw.p + bundle.raw.len);
+    const auto duplicates = loadWindowsDefaultCAs(&anchors, {duplicate});
+    check("default CA union: duplicate OS/bundled root is harmless",
+          duplicates.windowsRoot == 1 && duplicates.bundled == bundledCount &&
+          countCerts(&anchors) == 1 + bundledCount);
+    mbedtls_x509_crt_free(&anchors);
+    mbedtls_x509_crt_free(&bundle);
+}
+
 static int peerSend(void* ctx, const unsigned char* buf, size_t len) {
     rawsocket_t fd = *static_cast<rawsocket_t*>(ctx);
     int n = static_cast<int>(::send(fd, reinterpret_cast<const char*>(buf),
@@ -491,6 +566,82 @@ static void scenario() {
     rawsocket_t listener = listenLoopback(port);
     check("loopback listener is up", listener != kNoSocket);
     if (g_fail) bail();
+
+    // --- setup failure before the handshake (#384) ---------------------------
+    for (bool threads : {true, false}) {
+        g_phase = "the TLS setup failure";
+        const string name = threads ? "setup failure" : "setup failure, no threads";
+        TlsClient setup;
+        setup.setVerifyNone();
+        setup.setUseThread(threads);
+        setup.setHostname(std::string(300, 'a'));
+        mutex evMutex;
+        vector<string> evs;
+        bool stoppedBeforeError = false;
+        bool hostnameError = false;
+        EventListener errSub = setup.onError.listen([&](TcpErrorEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            stoppedBeforeError = !setup.isConnected() && !setup.isConnecting();
+            hostnameError = e.message.find("TLS hostname set failed: ") == 0 &&
+                            e.errorCode == MBEDTLS_ERR_SSL_BAD_INPUT_DATA;
+            evs.push_back("error");
+        });
+        EventListener conSub = setup.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back(e.success ? "connected" : "failed");
+        });
+        check((name + ": connect() with an invalid hostname").c_str(),
+              setup.connect("127.0.0.1", port));
+        rawsocket_t failedPeer = acceptWithin(listener, 2000);
+        check((name + ": the peer accepted TCP").c_str(), failedPeer != kNoSocket);
+        if (g_fail) bail();
+        check((name + ": failure reported").c_str(), waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 2;
+        }));
+        if (g_fail) bail();
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": stopped before hostname error").c_str(),
+                  stoppedBeforeError && hostnameError);
+            check((name + ": onError then onConnect(false) once").c_str(),
+                  evs == vector<string>{"error", "failed"});
+        }
+        check((name + ": disconnected without disconnect()").c_str(),
+              !setup.isConnected() && !setup.isConnecting());
+        setRecvTimeout(failedPeer, 2000);
+        char byte;
+        check((name + ": peer observes the closed socket").c_str(),
+              ::recv(failedPeer, &byte, 1, 0) == 0);
+        TC_CLOSE(failedPeer);
+        if (g_fail) bail();
+
+        // connect() joins the previous receive thread itself. No explicit
+        // disconnect() hides a setup failure that left work pending.
+        setup.setHostname("localhost");
+        check((name + ": reconnect() with a valid hostname").c_str(),
+              setup.connect("127.0.0.1", port));
+        if (g_fail) bail();
+        TlsPeer recovered;
+        bool handshook = false;
+        thread acceptThread([&] { handshook = recovered.accept(listener, server.conf, 5000); });
+        const bool connected = waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 3;
+        });
+        acceptThread.join();
+        check((name + ": valid hostname completes TLS").c_str(),
+              connected && handshook && setup.isConnected());
+        setup.disconnect(); // join before checking the complete event sequence
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": no duplicate failure after reconnect").c_str(),
+                  evs == vector<string>{"error", "failed", "connected"});
+        }
+        if (g_fail) bail();
+    }
 
     // Everything the client receives, from its receive thread
     mutex rxMutex;
@@ -696,12 +847,12 @@ static void scenario() {
     int threadsAfterOnConnect = -1;
     waitFor(1000, [&] {
         threadsAfterOnConnect = countEntries("/proc/self/task");
-        return threadsAfterOnConnect <= threadsBeforeOnConnect + 1;
+        return threadsAfterOnConnect <= threadsBeforeOnConnect + 2;
     });
-    printf("  (threads: %d before connect(), %d after; one receive thread expected)\n",
+    printf("  (threads: %d before connect(), %d after; one receive and one writer thread expected)\n",
            threadsBeforeOnConnect, threadsAfterOnConnect);
     check("onConnect reconnect: the old receive thread stopped",
-          threadsAfterOnConnect <= threadsBeforeOnConnect + 1);
+          threadsAfterOnConnect <= threadsBeforeOnConnect + 2);
 #else
     printf("%-60s %s\n", "onConnect reconnect: the old receive thread stopped",
            "SKIP (counted on Linux)");
@@ -1123,6 +1274,348 @@ static void scenario() {
     if (g_fail) bail();
     // victimErr outlives its Event: disconnecting it is a no-op
 
+    // #261: cancellation must precede resetting/freeing the TLS state.
+    for (int i = 0; i < 20; ++i) {
+        auto pending = make_unique<TlsClient>();
+        pending->setVerifyNone();
+        pending->setHandshakeTimeout(0);
+        pending->connectAsync("127.0.0.1", plainPort);
+        rawsocket_t accepted = acceptWithin(plainListener, 5000);
+        check("async TLS: silent peer accepted", accepted != kNoSocket);
+        check("async TLS: handshake is connecting", pending->isConnecting());
+        if (i % 2 == 0) {
+            pending.reset();
+        } else {
+            pending->disconnect();
+            check("async TLS disconnect leaves no attempt", !pending->isConnected() && !pending->isConnecting());
+            pending.reset();
+        }
+        if (accepted != kNoSocket) TC_CLOSE(accepted);
+    }
+    for (int i = 0; i < 100; ++i) {
+        auto pending = make_unique<TlsClient>();
+        pending->setVerifyNone();
+        pending->connectAsync("127.0.0.1", plainPort);
+        pending.reset();
+    }
+    // Drain any TCP attempts that completed just before their cancellation.
+    for (;;) {
+#ifdef _WIN32
+        fd_set ready;
+        FD_ZERO(&ready); FD_SET(plainListener, &ready);
+        timeval tv{};
+        if (select(0, &ready, nullptr, nullptr, &tv) <= 0) break;
+#else
+        pollfd ready{plainListener, POLLIN, 0};
+        if (poll(&ready, 1, 0) <= 0) break;
+#endif
+        rawsocket_t accepted = ::accept(plainListener, nullptr, nullptr);
+        if (accepted == kNoSocket) break;
+        TC_CLOSE(accepted);
+    }
+    check("async TLS immediate destruction completes", true);
+
+#ifdef __linux__
+    // As in core's tcpClientConnect fixture, a full accept queue leaves TCP
+    // pending. Exercise TlsClient's inherited deadline before TLS can start.
+    {
+        int fullPort = 0;
+        rawsocket_t full = listenLoopback(fullPort, 0);
+        check("TLS TCP timeout: listener created", full != kNoSocket);
+        if (g_fail) bail();
+        rawsocket_t filler = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        address.sin_port = htons(static_cast<uint16_t>(fullPort));
+        check("TLS TCP timeout: fill accept queue",
+              ::connect(filler, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+        if (g_fail) bail();
+        for (bool threads : {true, false}) {
+            TlsClient pending;
+            pending.setUseThread(threads);
+            pending.setConnectTimeout(0.5f);
+            pending.setHandshakeTimeout(0);
+            atomic<int> errors{0}, failures{0};
+            auto error = pending.onError.listen([&](TcpErrorEventArgs&) { ++errors; });
+            auto connected = pending.onConnect.listen([&](TcpConnectEventArgs& e) {
+                if (!e.success) ++failures;
+            });
+            pending.connectAsync("127.0.0.1", fullPort);
+            check("TLS TCP timeout: failure delivered", waitFor(5000, [&] {
+                if (!threads) pending.processNetwork();
+                return failures == 1;
+            }));
+            pending.disconnect();
+            check("TLS TCP timeout: one error and no connection",
+                  errors == 1 && failures == 1 && !pending.isConnected() && !pending.isConnecting());
+            if (g_fail) bail();
+        }
+        TC_CLOSE(filler);
+        TC_CLOSE(full);
+    }
+#endif
+
+    // #261: one send path, including TLS WANT_READ/WANT_WRITE and idle timeout.
+    for (bool threads : {true, false}) {
+        TlsClient sender;
+        sender.setVerifyNone();
+        sender.setUseThread(threads);
+        sender.setSendTimeout(0.5f);
+        atomic<int> sendErrors{0}, sendCompletions{0};
+        atomic<bool> sendTimedOut{false};
+        atomic<SendError> result{SendError::None};
+        auto err = sender.onError.listen([&](TcpErrorEventArgs& e) {
+            sendTimedOut = e.message.find("timed out") != string::npos;
+            ++sendErrors;
+        });
+        auto completion = sender.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+            result = e.error;
+            ++sendCompletions;
+        });
+        check("TLS send timeout: connect", sender.connect("127.0.0.1", port));
+        TlsPeer nonReader;
+        atomic<bool> serverDone{false}, serverOk{false};
+        thread handshaker([&] {
+            serverOk = nonReader.accept(listener, server.conf, 5000);
+            serverDone = true;
+        });
+        check("TLS send timeout: handshake completes", waitFor(10000, [&] {
+            if (!threads) sender.processNetwork();
+            return serverDone.load() && sender.isConnected();
+        }));
+        handshaker.join();
+        check("TLS send timeout: peer handshakes", serverOk);
+        if (g_fail) bail();
+        check("TLS send timeout: send fails", !sender.send(vector<char>(64 * 1024 * 1024, 'x')));
+        check("TLS send timeout: completion arrives", waitFor(5000, [&] { return sendCompletions == 1; }));
+        check("TLS send timeout: one error, timeout and disconnect", sendErrors == 1 && sendTimedOut && result == SendError::Disconnected && !sender.isConnected());
+        sender.disconnect();
+        if (g_fail) bail();
+    }
+
+    {
+        // A WebSocket-style owner replaces its TLS client from a send error.
+        auto doomed = make_unique<TlsClient>();
+        doomed->setVerifyNone();
+        doomed->setSendTimeout(0.5f);
+        atomic<bool> armed{false}, destroyed{false};
+        auto error = doomed->onError.listen([&](TcpErrorEventArgs&) {
+            if (armed) { doomed.reset(); destroyed = true; }
+        });
+        TlsPeer nonReader;
+        check("TLS send listener destruction: connect", doomed->connect("127.0.0.1", port));
+        check("TLS send listener destruction: handshake", nonReader.accept(listener, server.conf, 5000));
+        check("TLS send listener destruction: connected", waitFor(5000, [&] { return doomed->isConnected(); }));
+        if (g_fail) bail();
+        TlsClient* sender = doomed.get();
+        armed = true;
+        check("TLS send listener destruction wakes the sender", !sender->send(vector<char>(64 * 1024 * 1024, 'x')));
+        check("TLS send listener destroyed the client", waitFor(5000, [&] { return destroyed.load(); }));
+    }
+
+    // --- handshake deadline (#262) -------------------------------------------
+    // The plain peer accepts TCP and then says nothing
+    for (bool threads : {true, false}) {
+        g_phase = "the handshake deadline";
+        const string name = threads ? "handshake timeout" : "handshake timeout, no threads";
+        TlsClient silent;
+        silent.setVerifyNone();
+        silent.setUseThread(threads);
+        silent.setHandshakeTimeout(1);
+        silent.setConnectTimeout(2);
+        mutex evMutex;
+        vector<string> evs;
+        EventListener errSub = silent.onError.listen([&](TcpErrorEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back("error: " + e.message);
+        });
+        EventListener conSub = silent.onConnect.listen([&](TcpConnectEventArgs& e) {
+            lock_guard<mutex> lock(evMutex);
+            evs.push_back(e.success ? string("connected") : "failed: " + e.message);
+        });
+        check((name + ": connect() to a silent peer").c_str(),
+              silent.connect("127.0.0.1", plainPort));
+        rawsocket_t silentPeer = acceptWithin(plainListener, 2000);
+        check((name + ": the peer accepted").c_str(), silentPeer != kNoSocket);
+        const bool reported = waitFor(5000, [&] {
+            if (!threads) events().update.notify();
+            lock_guard<mutex> lock(evMutex);
+            return evs.size() >= 2;
+        });
+        check((name + ": failure reported").c_str(), reported);
+        silent.disconnect(); // join before checking the complete event sequence
+        {
+            lock_guard<mutex> lock(evMutex);
+            check((name + ": onError, then onConnect(false), \"TLS handshake timeout\"").c_str(),
+                  evs == vector<string>{"error: TLS handshake timeout",
+                                        "failed: TLS handshake timeout"});
+        }
+        check((name + ": not connected").c_str(), !silent.isConnected());
+        if (silentPeer != kNoSocket) TC_CLOSE(silentPeer);
+        if (g_fail) bail();
+    }
+    {
+        // 0 = no deadline: nothing fires, and disconnect() ends the wait
+        TlsClient patient;
+        patient.setVerifyNone();
+        patient.setHandshakeTimeout(0);
+        atomic<int> fired{0};
+        EventListener errSub = patient.onError.listen([&](TcpErrorEventArgs&) { ++fired; });
+        EventListener conSub = patient.onConnect.listen([&](TcpConnectEventArgs&) { ++fired; });
+        check("no handshake deadline: connect() to a silent peer",
+              patient.connect("127.0.0.1", plainPort));
+        rawsocket_t silentPeer = acceptWithin(plainListener, 2000);
+        check("no handshake deadline: the peer accepted", silentPeer != kNoSocket);
+        this_thread::sleep_for(chrono::milliseconds(1500));
+        check("no handshake deadline: nothing fires in 1.5 s", fired == 0);
+        check("no handshake deadline: disconnect() returns within 2 s",
+              completesWithin(2000, [&] { patient.disconnect(); }));
+        if (silentPeer != kNoSocket) TC_CLOSE(silentPeer);
+        if (g_fail) bail();
+    }
+
+    // Complete TLS, then leave the HTTP upgrade unanswered. The shared
+    // handshake deadline must also cover this second stage of wss://.
+    {
+        tcx::websocket::WebSocketClient ws;
+        ws.setTlsVerifyNone();
+        ws.setConnectTimeout(2);
+        ws.setHandshakeTimeout(1);
+        string notifications;
+        mutex notificationMutex;
+        atomic<bool> disconnected{false};
+        EventListener err = ws.onError.listen([&](TcpErrorEventArgs&) {
+            disconnected = ws.getState() == tcx::websocket::WebSocketClient::State::Disconnected;
+            lock_guard<mutex> lock(notificationMutex);
+            notifications += "error ";
+        });
+        EventListener close = ws.onClose.listen([&] {
+            lock_guard<mutex> lock(notificationMutex);
+            notifications += "close";
+        });
+        ws.connect("wss://127.0.0.1:" + to_string(port) + "/");
+        TlsPeer silentUpgrade;
+        check("WebSocket: TLS completes before a silent HTTP upgrade",
+              silentUpgrade.accept(listener, server.conf, 3000));
+        check("WebSocket: wss 101 deadline disconnects before error then close",
+              waitFor(5000, [&] {
+                  events().update.notify();
+                  lock_guard<mutex> lock(notificationMutex);
+                  return notifications == "error close";
+              }) && disconnected);
+        ws.disconnect();
+    }
+
+    // Reconnect from onClose after a successful wss:// upgrade. Sending the
+    // upgrade answer after TLS succeeds also exercises the non-blocking
+    // receive loop after the handshake finishes.
+    {
+        tcx::websocket::WebSocketClient ws;
+        ws.setTlsVerifyNone();
+        const string url = "wss://127.0.0.1:" + to_string(port) + "/";
+        atomic<int> opens{0}, closes{0};
+        atomic<bool> done{false};
+        EventListener open = ws.onOpen.listen([&] { ++opens; });
+        EventListener close = ws.onClose.listen([&] {
+            if (++closes < 20) ws.connect(url);
+            else done = true;
+        });
+        bool ok = ws.connect(url);
+        for (int i = 0; ok && i < 20; ++i) {
+            TlsPeer closing;
+            ok = closing.accept(listener, server.conf, 3000) &&
+                 closing.write("HTTP/1.1 101 Switching Protocols\r\n\r\n") &&
+                 waitFor(3000, [&] { return opens > i; });
+            if (closing.fd != kNoSocket) closing.closeNotify();
+        }
+        check("WebSocket: wss onClose reconnects inline (20 rounds)",
+              ok && waitFor(3000, [&] { return done.load(); }) && opens == 20);
+        ws.disconnect();
+    }
+
+    // WebSocket reconnects inline after rejection of the self-signed peer.
+    // This replaces the TlsClient from its onConnect(false) callback.
+    {
+        tcx::websocket::WebSocketClient ws;
+        ws.setConnectTimeout(2);
+        const string url = "wss://127.0.0.1:" + to_string(port) + "/";
+        atomic<int> failures{0};
+        atomic<bool> listenerDone{false};
+        EventListener err = ws.onError.listen([&](TcpErrorEventArgs&) {
+            if (++failures < 20) ws.connect(url);
+            else listenerDone = true;
+        });
+        bool accepted = ws.connect(url);
+        for (int i = 0; accepted && i < 20; ++i) {
+            TlsPeer rejected;
+            rejected.accept(listener, server.conf, 3000);
+            accepted = rejected.fd != kNoSocket &&
+                waitFor(3000, [&] { return failures > i; });
+        }
+        check("WebSocket: reconnect on self-signed certificate failure (20 rounds)",
+              accepted && waitFor(3000, [&] { return listenerDone.load(); }) && failures == 20);
+        ws.disconnect();
+    }
+
+    // --- destroyed by a listener on its own receive thread (#262) ------------
+    // An owner holds the client in a unique_ptr and replaces it from the
+    // client's own event. The old client is destroyed on its receive thread,
+    // which then must not read it again (best caught with AddressSanitizer).
+    struct Owner {
+        unique_ptr<TlsClient> c;
+        EventListener sub;
+        atomic<int> replaced{0};
+        bool onError;   // false: onDisconnect
+        explicit Owner(bool err) : onError(err) { make(); }
+        void make() {
+            c = make_unique<TlsClient>();   // destroys the previous client
+            if (onError) {
+                // Verification on (the default): the peer's self-signed
+                // certificate fails it
+                sub = c->onError.listen([this](TcpErrorEventArgs&) { replace(); });
+            } else {
+                c->setVerifyNone();
+                sub = c->onDisconnect.listen([this](TcpDisconnectEventArgs& e) {
+                    if (e.reason != "Disconnected by client") replace();
+                });
+            }
+        }
+        void replace() {
+            make();
+            ++replaced;
+        }
+    };
+    for (bool fromError : {false, true}) {
+        g_phase = fromError ? "the self-destroy rounds (onError)"
+                            : "the self-destroy rounds (onDisconnect)";
+        const string name = fromError ? "destroyed from its onError"
+                                      : "destroyed from its onDisconnect";
+        const int rounds = 20;
+        Owner owner(fromError);
+        bool ok = true;
+        for (int i = 0; ok && i < rounds; ++i) {
+            const int before = owner.replaced.load();
+            TlsPeer p;
+            ok = owner.c->connect("127.0.0.1", port);
+            if (!ok) break;
+            const bool handshook = p.accept(listener, server.conf, 5000);
+            if (fromError) {
+                // The client rejects the certificate; its onError replaces it
+                p.reset();
+            } else {
+                ok = handshook && waitFor(3000, [&] { return owner.replaced.load() > before ||
+                                                         owner.c->isConnected(); });
+                if (!ok) break;
+                p.closeNotify();
+            }
+            ok = waitFor(5000, [&] { return owner.replaced.load() > before; });
+        }
+        check((name + ": replaced 20 times, nothing crashed").c_str(),
+              ok && owner.replaced.load() == rounds);
+        if (g_fail) bail();
+    }
+
     // --- a thread a listener let go of is joined later (#543) ----------------
     // An onError listener on the receive thread (a failed handshake) calls
     // disconnect() and then runs on for a while. The receive thread cannot
@@ -1188,7 +1681,7 @@ static void scenario() {
     TC_CLOSE(listener);
 }
 
-int main() {
+int main(int argc, char** argv) {
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);
@@ -1201,6 +1694,15 @@ int main() {
         check("psa_crypto_init()", false);
         bail();
     }
+    testDefaultCaUnion();
+    if (g_fail || (argc == 2 && string(argv[1]) == "--default-ca-union")) {
+        return g_fail ? 1 : 0;
+    }
+#ifdef __linux__
+    // Include persistent sanitizer/runtime helpers in the thread baseline.
+    std::thread([] {}).join();
+    const int threadsAtStart = countEntries("/proc/self/task");
+#endif
     g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);
@@ -1216,10 +1718,10 @@ int main() {
     int threadsAtExit = -1;
     waitFor(1000, [&] {
         threadsAtExit = countEntries("/proc/self/task");
-        return threadsAtExit == 1;
+        return threadsAtExit <= threadsAtStart;
     });
-    printf("  (threads when main() returns: %d)\n", threadsAtExit);
-    check("no thread is left when main() returns", threadsAtExit == 1);
+    printf("  (threads: %d when main() started, %d when it returns)\n", threadsAtStart, threadsAtExit);
+    check("no thread is left when main() returns", threadsAtStart > 0 && threadsAtExit > 0 && threadsAtExit <= threadsAtStart);
 #else
     printf("%-60s %s\n", "no thread is left when main() returns", "SKIP (counted on Linux)");
 #endif

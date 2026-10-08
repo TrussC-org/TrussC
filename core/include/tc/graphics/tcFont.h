@@ -9,10 +9,11 @@
 // - FontAtlasManager: Atlas management (multi-atlas, dynamic expansion)
 // - Font: User-facing class
 //
-// TODO: Memory optimization
-// - Currently uses RGBA8 (4bytes/pixel)
-// - Could reduce to 1/4 with R8 (1byte/pixel) + custom shader
-// - Requires direct sokol_gfx usage with shader swizzle
+// Atlas pages are R8: one byte of glyph coverage per texel, on the CPU and on
+// the GPU. They are drawn with internal::activeCoverage2D(), whose shader
+// (core/shaders/sglCoverage.glsl) uses R as alpha. A page starts at 256x256 and
+// doubles up to the GPU's max 2D image size, capped at 8192x8192 (4096x4096
+// when the limit cannot be queried); after that a new page is added.
 // =============================================================================
 
 #include <string>
@@ -24,6 +25,7 @@
 #include <filesystem>
 #include <functional>
 #include <cstring>
+#include <cmath>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/fetch.h>
@@ -39,6 +41,7 @@
 #include "stb/stb_truetype.h"
 
 #include "../utils/tcLog.h"
+#include "../utils/tcOnceGate.h"
 #include "tc/utils/tcLoadResult.h"
 #include "../utils/tcSystemFont.h"
 #include "../types/tcDirection.h"
@@ -61,7 +64,7 @@
     #define TC_FONT_SANS_JA  "https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-jp@latest/japanese-400-normal.ttf"
     #define TC_FONT_SERIF_JA "https://cdn.jsdelivr.net/fontsource/fonts/noto-serif-jp@latest/japanese-400-normal.ttf"
 #elif defined(_WIN32)
-    // Windows — resolved via DirectWrite (not yet implemented; falls back to path)
+    // Windows — resolved via DirectWrite
     #define TC_FONT_SANS     "Segoe UI"
     #define TC_FONT_SERIF    "Times New Roman"
     #define TC_FONT_MONO     "Consolas"
@@ -82,7 +85,7 @@
     #define TC_FONT_SANS_JA  "Noto Sans CJK JP"
     #define TC_FONT_SERIF_JA "Noto Serif CJK JP"
 #else
-    // Linux — resolved via fontconfig (not yet implemented; falls back to path)
+    // Linux — resolved via fontconfig
     #define TC_FONT_SANS     "DejaVu Sans"
     #define TC_FONT_SERIF    "DejaVu Serif"
     #define TC_FONT_MONO     "DejaVu Sans Mono"
@@ -106,11 +109,12 @@ void setStbttLimitsForTests(int maxVertices, int maxPoints, size_t mallocMax);
 void resetStbttLimitsForTests();
 
 // ---------------------------------------------------------------------------
-// Font cache key (font path + size)
+// Font cache key (font path + face index + size)
 // ---------------------------------------------------------------------------
 struct FontCacheKey {
     std::string fontPath;
     int fontSize;
+    int faceIndex = 0;      // face inside a collection (.ttc / .otc); 0 for a single font
     bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
 
@@ -120,6 +124,7 @@ struct FontCacheKey {
 
     bool operator==(const FontCacheKey& other) const {
         return fontPath == other.fontPath && fontSize == other.fontSize
+            && faceIndex == other.faceIndex
             && mipmaps == other.mipmaps && oversample == other.oversample;
     }
 };
@@ -130,7 +135,8 @@ struct FontCacheKeyHash {
         size_t h2 = std::hash<int>()(key.fontSize);
         size_t h3 = std::hash<bool>()(key.mipmaps);
         size_t h4 = std::hash<int>()(key.oversample);
-        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3);
+        size_t h5 = std::hash<int>()(key.faceIndex);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4);
     }
 };
 
@@ -172,6 +178,8 @@ public:
     sg_image getTexture() const { return texture_; }
     sg_view getView() const { return view_; }
     bool isTextureValid() const { return textureValid_; }
+    // CPU copy of the page: width * height bytes, glyph coverage per texel.
+    const std::vector<uint8_t>& getPixels() const { return pixels_; }
 
 private:
     friend class FontAtlasManager;
@@ -189,7 +197,7 @@ private:
     bool textureDirty_ = false;
 
     // CPU-side pixel data (for expansion/update)
-    std::vector<uint8_t> pixels_;  // RGBA
+    std::vector<uint8_t> pixels_;  // R8: glyph coverage, one byte per texel
 };
 
 // ---------------------------------------------------------------------------
@@ -208,7 +216,9 @@ public:
     // -------------------------------------------------------------------------
     // Initialization
     // -------------------------------------------------------------------------
-    bool setup(const std::string& fontPath, int fontSize) {
+    // `faceIndex` picks the face inside a font collection (.ttc / .otc); a
+    // single font has only face 0.
+    bool setup(const std::string& fontPath, int fontSize, int faceIndex = 0) {
         cleanup();
 
         // Load font file (fontPath is UTF-8 — convert so non-ASCII paths
@@ -244,10 +254,11 @@ public:
             return false;
         }
 
-        return initFromFontData(fontSize);
+        fontName_ = fontPath;
+        return initFromFontData(fontSize, faceIndex);
     }
 
-    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize) {
+    bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, int faceIndex = 0) {
         cleanup();
 
         if (!data && size > 0) {
@@ -257,7 +268,8 @@ public:
         // Empty data is rejected by the sfnt check in initFromFontData.
         fontData_.assign(data, data + size);
 
-        return initFromFontData(fontSize);
+        fontName_ = "font data in memory";
+        return initFromFontData(fontSize, faceIndex);
     }
 
     // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
@@ -283,11 +295,58 @@ public:
 
     // Must be set before any glyph is rasterized (glyphs are lazy, so setting
     // it right after setup() is early enough). Clamped to at least 1.
-    void setOversample(int n) { oversample_ = (n < 1) ? 1 : n; }
+    void setOversample(int n) {
+        oversample_ = (n < 1) ? 1 : n;
+        if (loaded_) warnIfGlyphsExceedPage();
+    }
     int getOversample() const { return oversample_; }
 
+    // Test hook (core/tests/fontAtlasLimit), not part of the Font API:
+    // largest atlas page side in texels (the GPU limit, capped at 8192).
+    int getMaxAtlasSizeForTests() const { return maxAtlasSize_; }
+
 private:
-    bool initFromFontData(int fontSize, int fontIndex = 0) {
+    // A glyph fits the largest page when its padded box fits the region the
+    // packer fills first on a page grown to maxAtlasSize_: the right half,
+    // starting GLYPH_PADDING in from the top and from the middle.
+    bool fitsLargestPage(int paddedWidth, int paddedHeight) const {
+        return paddedWidth <= maxAtlasSize_ / 2 - GLYPH_PADDING &&
+               paddedHeight <= maxAtlasSize_ - GLYPH_PADDING;
+    }
+
+    // Load-time check: the font's overall bounding box at this size and
+    // oversampling against the largest page. When some glyphs can be larger
+    // than a page, those glyphs are rasterized at a lower resolution (see
+    // addGlyphToAtlas); one warning per loaded font says so.
+    void warnIfGlyphsExceedPage() {
+        int bx0 = 0, by0 = 0, bx1 = 0, by1 = 0;
+        stbtt_GetFontBoundingBox(&fontInfo_, &bx0, &by0, &bx1, &by1);
+        const double s = (double)scale_ * oversample_;
+        const double w = std::ceil(bx1 * s) - std::floor(bx0 * s) + (oversample_ - 1);
+        const double h = std::ceil(by1 * s) - std::floor(by0 * s) + (oversample_ - 1);
+        const int pw = (int)std::min(w + GLYPH_PADDING, 1e9);
+        const int ph = (int)std::min(h + GLYPH_PADDING, 1e9);
+        if (fitsLargestPage(pw, ph)) return;
+        if (!pageLimitWarned_.isFirstTime()) return;
+        logWarning("Font") << fontName_ << " at size " << fontSize_
+                           << " (oversampling " << oversample_
+                           << "): some glyphs are larger than an atlas page ("
+                           << maxAtlasSize_ << "x" << maxAtlasSize_
+                           << " texels); those glyphs are drawn at a lower resolution";
+    }
+
+    bool initFromFontData(int fontSize, int fontIndex) {
+        // The face index is checked against the number of faces in the data:
+        // the font count of a collection, 1 for a single font.
+        const uint64_t faces = faceCount(fontData_.data(), fontData_.size());
+        if (faces > 0 && (fontIndex < 0 || (uint64_t)fontIndex >= faces)) {
+            logError() << "FontAtlasManager: face index " << fontIndex
+                       << " is out of range (the font has " << faces
+                       << (faces == 1 ? " face)" : " faces)");
+            fontData_.clear();
+            return false;
+        }
+
         // The sfnt structure is checked against the data size before the data
         // is given to stb_truetype.
         std::string reason;
@@ -357,6 +416,7 @@ private:
         createNewAtlas();
 
         loaded_ = true;
+        warnIfGlyphsExceedPage();
         return true;
     }
 
@@ -387,14 +447,30 @@ private:
     //
     // Checks the collection header, the table directory, the fixed fields of
     // head / hhea / maxp / cmap, loca and hmtx against the data size before
-    // the data is given to stb_truetype. It does not look inside cmap
-    // subtables, glyph outlines or CFF data. It belongs to the stb backend:
-    // drop it together with stb if the backend is replaced. Offsets and
-    // lengths are added in 64 bits.
+    // the data is given to stb_truetype. For cmap subtables it checks only
+    // the format, not their contents, glyph outlines or CFF data. It belongs
+    // to the stb backend: drop it together with stb if the backend is replaced.
+    // Offsets and lengths are added in 64 bits.
     // -------------------------------------------------------------------------
     static constexpr uint64_t kMaxFontDataSize = 0x40000000u;
     static constexpr const char* kTooLargeReason =
         "the bundled font engine (stb_truetype) cannot handle fonts larger than 1 GiB";
+
+    // Number of faces in font data: the font count of a collection whose
+    // header and offset table fit in the data, 1 for any other data of at
+    // least 12 bytes, 0 when the header cannot be read (checkSfntSkeleton
+    // gives the reason then).
+    static uint64_t faceCount(const uint8_t* data, size_t size) {
+        if (!data || size < 12) return 0;
+        auto u32 = [data](uint64_t o) -> uint64_t {
+            return ((uint64_t)data[o] << 24) | ((uint64_t)data[o + 1] << 16) |
+                   ((uint64_t)data[o + 2] << 8) | data[o + 3];
+        };
+        if (u32(0) != 0x74746366u) return 1;  // 'ttcf'
+        const uint64_t numFonts = u32(8);
+        if (numFonts == 0 || 12 + 4 * numFonts > (uint64_t)size) return 0;
+        return numFonts;
+    }
 
     static bool checkSfntSkeleton(const uint8_t* data, size_t size, int fontIndex,
                                   std::string& reason) {
@@ -520,6 +596,7 @@ private:
             reason = "cmap encoding records are truncated";
             return false;
         }
+        bool usableCmap = false;
         for (uint64_t i = 0; i < numSubtables; i++) {
             const uint64_t rec = cmap.offset + 4 + 8 * i;
             const uint64_t platform = u16(rec);
@@ -529,7 +606,16 @@ private:
                     reason = "cmap subtable offset is outside the cmap table";
                     return false;
                 }
+                // Match the vendored stbtt_InitFont selection. Read the format
+                // only after checking this Unicode record's subtable offset.
+                const uint64_t format = u16(cmap.offset + u32(rec + 4));
+                if (format == 0 || format == 4 || format == 6 || format == 12 || format == 13)
+                    usableCmap = true;
             }
+        }
+        if (!usableCmap) {
+            reason = "no usable Unicode character map (stb_truetype supports cmap formats 0, 4, 6, 12 and 13)";
+            return false;
         }
 
         // hmtx: numberOfHMetrics long entries, then one short entry per
@@ -613,14 +699,11 @@ public:
             return &it->second;
         }
 
-        // Add glyph
+        // Add glyph. A glyph that cannot be placed is kept with valid_ = false,
+        // so it is not tried again until clearAtlas().
         GlyphInfo info;
-        if (addGlyphToAtlas(codepoint, info)) {
-            glyphs_[codepoint] = info;
-            return &glyphs_[codepoint];
-        }
-
-        return nullptr;
+        if (!addGlyphToAtlas(codepoint, info)) info.valid_ = false;
+        return &(glyphs_[codepoint] = info);
     }
 
     bool hasGlyph(uint32_t codepoint) const {
@@ -812,6 +895,8 @@ private:
     bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
     bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
     int oversample_ = 1;         // NxN supersampling of the rasterized glyph
+    std::string fontName_;       // path, for log messages
+    OnceGate pageLimitWarned_;   // load-time page-limit warning, once per font
 
     // Glyph cache
     std::unordered_map<uint32_t, GlyphInfo> glyphs_;
@@ -837,7 +922,7 @@ private:
         atlas.currentX_ = GLYPH_PADDING;
         atlas.currentY_ = GLYPH_PADDING;
         atlas.rowHeight_ = 0;
-        atlas.pixels_.resize(atlas.width_ * atlas.height_ * 4, 0);
+        atlas.pixels_.resize((size_t)atlas.width_ * atlas.height_, 0);
         atlas.textureDirty_ = true;
 
         atlases_.push_back(std::move(atlas));
@@ -859,13 +944,13 @@ private:
                        << " to " << newWidth << "x" << newHeight;
 
         // Create new buffer
-        std::vector<uint8_t> newPixels(newWidth * newHeight * 4, 0);
+        std::vector<uint8_t> newPixels((size_t)newWidth * newHeight, 0);
 
         // Copy old data
         for (int y = 0; y < atlas.height_; y++) {
-            memcpy(newPixels.data() + y * newWidth * 4,
-                   atlas.pixels_.data() + y * atlas.width_ * 4,
-                   atlas.width_ * 4);
+            memcpy(newPixels.data() + (size_t)y * newWidth,
+                   atlas.pixels_.data() + (size_t)y * atlas.width_,
+                   atlas.width_);
         }
 
         // Update UV coordinates (only for glyphs in this atlas)
@@ -918,8 +1003,13 @@ private:
         // there is simply more information in the atlas, whatever the transform.
         // Layout below is in OVERSAMPLED texels; the metrics handed back to the
         // draw path are converted to final pixels at the end.
-        const int   os      = oversample_;
-        const float osScale = scale_ * (float)os;
+        //
+        // `rs` is the raster scale (texels per final pixel) and `os` the
+        // prefilter width. Both start at oversample_; for a glyph larger than
+        // the largest page they are lowered below (rs below 1 if needed).
+        int   os      = oversample_;
+        float rs      = (float)os;
+        float osScale = scale_ * rs;
 
         int x0, y0, x1, y1;
         stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
@@ -946,6 +1036,43 @@ private:
 
         int paddedWidth = glyphWidth + GLYPH_PADDING;
         int paddedHeight = glyphHeight + GLYPH_PADDING;
+
+        // Checked before any page is created or grown: a glyph whose box does
+        // not fit the largest page is rasterized at a lower resolution that
+        // fits, and drawn scaled up to its size in final pixels. Integer scales
+        // keep the box prefilter; below 1 the glyph is rasterized directly.
+        for (int attempt = 0; attempt < 32 && !fitsLargestPage(paddedWidth, paddedHeight); ++attempt) {
+            const float fitW = (float)(maxAtlasSize_ / 2 - 2 * GLYPH_PADDING) / (float)glyphWidth;
+            const float fitH = (float)(maxAtlasSize_ - 2 * GLYPH_PADDING) / (float)glyphHeight;
+            const float next = rs * std::min(fitW, fitH) * 0.99f;
+            if (next >= 1.0f) {
+                os = (int)next;
+                rs = (float)os;
+            } else {
+                os = 1;
+                rs = next;
+            }
+            if (!(rs > 0.0f)) break;
+            osScale = scale_ * rs;
+            stbtt_GetGlyphBitmapBox(&fontInfo_, glyphIndex, osScale, osScale, &x0, &y0, &x1, &y1);
+            glyphWidth  = std::max(x1 - x0, 1) + (os - 1);
+            glyphHeight = std::max(y1 - y0, 1) + (os - 1);
+            paddedWidth = glyphWidth + GLYPH_PADDING;
+            paddedHeight = glyphHeight + GLYPH_PADDING;
+        }
+        if (!fitsLargestPage(paddedWidth, paddedHeight)) {
+            logWarning("Font") << "glyph U+" << std::hex << codepoint << std::dec
+                               << " does not fit an atlas page of " << maxAtlasSize_
+                               << "x" << maxAtlasSize_ << " texels; it is not drawn";
+            outInfo.advance_ = advanceWidth * scale_;
+            outInfo.valid_ = false;
+            return false;
+        }
+        if (rs < (float)oversample_) {
+            logVerbose("Font") << "glyph U+" << std::hex << codepoint << std::dec
+                               << " rasterized at " << rs << " texels per pixel"
+                               << " (oversampling " << oversample_ << ")";
+        }
 
         // Find atlas that can fit glyph
         size_t targetAtlas = atlases_.size();
@@ -1032,21 +1159,15 @@ private:
                                   glyphBitmap.data(),
                                   glyphWidth, glyphHeight,
                                   glyphWidth,  // stride
-                                  scale_, scale_,
+                                  osScale, osScale,
                                   glyphIndex);
         }
 
-        // Copy to atlas (RGBA)
+        // Copy to atlas (R8 coverage)
         for (int y = 0; y < glyphHeight; y++) {
-            for (int x = 0; x < glyphWidth; x++) {
-                int srcIdx = y * glyphWidth + x;
-                int dstIdx = ((destY + y) * atlas.width_ + (destX + x)) * 4;
-                uint8_t alpha = glyphBitmap[srcIdx];
-                atlas.pixels_[dstIdx + 0] = 255;    // R
-                atlas.pixels_[dstIdx + 1] = 255;    // G
-                atlas.pixels_[dstIdx + 2] = 255;    // B
-                atlas.pixels_[dstIdx + 3] = alpha;  // A
-            }
+            memcpy(atlas.pixels_.data() + (size_t)(destY + y) * atlas.width_ + destX,
+                   glyphBitmap.data() + (size_t)y * glyphWidth,
+                   glyphWidth);
         }
 
         // Set glyph info
@@ -1058,7 +1179,7 @@ private:
         // UVs above address oversampled TEXELS; everything the draw path uses is
         // in FINAL pixels, so divide out the oversampling here. This is the only
         // place the two spaces meet -- emitPlacedGlyphsToAtlas needs no changes.
-        const float inv = 1.0f / (float)os;
+        const float inv = 1.0f / rs;
         outInfo.xoff_ = (float)x0 * inv + subX;
         outInfo.yoff_ = (float)y0 * inv + subY;
         outInfo.width_ = (float)glyphWidth * inv;
@@ -1139,7 +1260,7 @@ private:
         sg_image_desc img_desc = {};
         img_desc.width = atlas.width_;
         img_desc.height = atlas.height_;
-        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.pixel_format = SG_PIXELFORMAT_R8;   // coverage, drawn by activeCoverage2D()
         // immutable (default) - can set initial data
         img_desc.data.mip_levels[0].ptr = atlas.pixels_.data();
         img_desc.data.mip_levels[0].size = atlas.pixels_.size();
@@ -1147,10 +1268,10 @@ private:
         // Optional mip chain: without it, glyphs minified on screen (far/small
         // text, non-HiDPI displays) alias and shimmer under motion — MSAA can't
         // fix in-texture minification. sokol never auto-generates mipmaps, so we
-        // build the chain on the CPU here. Glyph texels are white (RGB=255) with
-        // coverage in A, so every mip keeps RGB=255 and box-averages only alpha;
-        // that avoids the dark colour fringe straight-alpha RGBA averaging would
-        // produce and keeps minified glyphs clean. (GLYPH_PADDING=2 means very
+        // build the chain on the CPU here. Texels hold coverage only (the colour
+        // comes from the vertex colour in the coverage shader), so each mip
+        // box-averages coverage; there is no colour channel to darken at glyph
+        // edges, and minified glyphs stay clean. (GLYPH_PADDING=2 means very
         // coarse mips bleed slightly between neighbours, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
@@ -1175,15 +1296,14 @@ private:
             img_desc.num_mipmaps = numMips;
             for (int level = 1; level < numMips; ++level) {
                 int cw = std::max(1, pw / 2), ch = std::max(1, ph / 2);
-                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch * 4);
+                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch);
                 for (int y = 0; y < ch; ++y) {
                     for (int x = 0; x < cw; ++x) {
                         int x0 = x * 2, y0 = y * 2;
                         int x1 = std::min(x0 + 1, pw - 1), y1 = std::min(y0 + 1, ph - 1);
-                        int a = (prev[(y0 * pw + x0) * 4 + 3] + prev[(y0 * pw + x1) * 4 + 3]
-                               + prev[(y1 * pw + x0) * 4 + 3] + prev[(y1 * pw + x1) * 4 + 3] + 2) / 4;
-                        uint8_t* d = &dst[(static_cast<size_t>(y) * cw + x) * 4];
-                        d[0] = 255; d[1] = 255; d[2] = 255; d[3] = static_cast<uint8_t>(a);
+                        int a = (prev[y0 * pw + x0] + prev[y0 * pw + x1]
+                               + prev[y1 * pw + x0] + prev[y1 * pw + x1] + 2) / 4;
+                        dst[static_cast<size_t>(y) * cw + x] = static_cast<uint8_t>(a);
                     }
                 }
                 lowerMips.push_back(std::move(dst));
@@ -1232,11 +1352,12 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setup(key.fontPath, key.fontSize)) {
+        // Oversampling first, so the load-time page check uses it.
+        manager->setOversample(key.oversample);
+        manager->setMipmaps(key.mipmaps);
+        if (!manager->setup(key.fontPath, key.fontSize, key.faceIndex)) {
             return nullptr;
         }
-        manager->setMipmaps(key.mipmaps);
-        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -1251,11 +1372,12 @@ public:
         }
 
         auto manager = std::make_shared<FontAtlasManager>();
-        if (!manager->setupFromMemory(data, size, key.fontSize)) {
+        // Oversampling first, so the load-time page check uses it.
+        manager->setOversample(key.oversample);
+        manager->setMipmaps(key.mipmaps);
+        if (!manager->setupFromMemory(data, size, key.fontSize, key.faceIndex)) {
             return nullptr;
         }
-        manager->setMipmaps(key.mipmaps);
-        manager->setOversample(key.oversample);
 
         cache_[key] = manager;
         return manager;
@@ -1333,8 +1455,16 @@ public:
     //   - A URL (Emscripten only, async load)
     //   - A filesystem path
     //   - A system font name (PostScript or family name) — resolved via
-    //     tc::systemFontPath when the path doesn't exist on disk. Lets users
-    //     write `font.load("HiraginoSans-W3", 24)` cross-platform.
+    //     the OS font lookup (as tc::systemFontPath) when the path doesn't
+    //     exist on disk. Lets users write `font.load("HiraginoSans-W3", 24)`
+    //     cross-platform. The name opens the face the OS resolves it to,
+    //     including a later face of a font collection (.ttc).
+    // `faceIndex` picks the face inside a font collection (.ttc / .otc) given
+    // as a file or URL; a single font has only face 0. It must be below the
+    // number of faces in the file, or the load fails with an error. A system
+    // font name uses the face the OS resolves it to instead. The order of the
+    // faces is part of the file, so a file and a face index load the same
+    // face on every OS; system font names depend on the fonts each OS has.
     // -------------------------------------------------------------------------
     // Oversampling (supersampled glyph rasterization)
     // -------------------------------------------------------------------------
@@ -1421,7 +1551,7 @@ private:
     }
 
 public:
-    LoadResult load(const fs::path& nameOrPath, int size) {
+    LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
         dpiScale_ = sapp_dpi_scale();
@@ -1434,21 +1564,35 @@ public:
         // Resolve input to a concrete path (file / URL). A font NAME
         // ("HiraginoSans-W3") is a valid relative fs::path, so both spellings
         // arrive here; the UTF-8 string form is what cache keys and the
-        // system-font lookup use.
+        // system-font lookup use. A relative file path resolves via
+        // getDataPath, like Image::load; when a file in the data folder and a
+        // system font share a name, the data file wins.
         std::string nameStr = internal::pathToUtf8(nameOrPath);
         std::string actualPath = nameStr;
+        int actualFace = faceIndex;
         if (!isUrl(nameStr)) {
-            std::ifstream test(nameOrPath, std::ios::binary);
+            const fs::path filePath = getDataPath(nameOrPath);   // absolute paths pass through
+            actualPath = internal::pathToUtf8(filePath);
+            std::ifstream test(filePath, std::ios::binary);
             if (!test.good()) {
-                // Not a usable file path — try as a system font name.
-                fs::path resolved = systemFontPath(nameStr);
-                if (!resolved.empty()) {
-                    actualPath = internal::pathToUtf8(resolved);
+                // Not a usable file path — try as a system font name. The OS
+                // gives the file and the face inside it.
+                internal::SystemFontFace resolved = internal::systemFontFace(nameStr);
+                if (!resolved.path.empty()) {
+                    actualPath = internal::pathToUtf8(resolved.path);
+                    actualFace = resolved.index;
+                    if (faceIndex != 0) {
+                        logWarning("Font") << "faceIndex " << faceIndex
+                                           << " applies to font files; \"" << nameStr
+                                           << "\" is a system font name and uses face "
+                                           << actualFace;
+                    }
                     logNotice("Font") << "Resolved \"" << nameStr
-                                      << "\" → " << actualPath;
+                                      << "\" → " << actualPath << " (face " << actualFace
+                                      << ")";
                 }
-                // If resolution failed, fall through with the original input so
-                // the eventual load error mentions what the user actually asked for.
+                // If resolution failed, keep the data-folder path: the load
+                // error then names the input and where it was looked for.
             }
         }
 
@@ -1463,13 +1607,14 @@ public:
 
         cacheKey_.fontPath = actualPath;
         cacheKey_.fontSize = physicalSize;
+        cacheKey_.faceIndex = actualFace;
         cacheKey_.oversample = oversample_;
         cacheKey_.mipmaps = mipmaps_;
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
             // Async load - returns immediately, font available after fetch completes
-            loadFromUrlAsync(actualPath, physicalSize);
+            loadFromUrlAsync(actualPath, physicalSize, actualFace);
             return LoadResult::success();  // Will be loaded asynchronously
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
@@ -1496,8 +1641,9 @@ public:
                 if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
                 return LoadResult::fail(LoadError::FileNotFound, msg);
             }
-            return LoadResult::fail(LoadError::DecodeFailed,
-                                    "failed to init font: " + actualPath);
+            std::string msg = "failed to init font: " + actualPath;
+            if (actualFace != 0) msg += " (face " + std::to_string(actualFace) + ")";
+            return LoadResult::fail(LoadError::DecodeFailed, msg);
         }
         return LoadResult::success();
     }
@@ -1548,9 +1694,10 @@ private:
         emscripten_fetch_close(fetch);
     }
 
-    void loadFromUrlAsync(const std::string& url, int size) {
+    void loadFromUrlAsync(const std::string& url, int size, int faceIndex) {
         // Check cache first (don't try to load from file)
         internal::FontCacheKey key{url, size};
+        key.faceIndex = faceIndex;
         auto cached = internal::SharedFontCache::getInstance().get(key);
         if (cached) {
             atlasManager_ = cached;
@@ -1905,9 +2052,10 @@ protected:
             const internal::AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
             if (!atlas.isTextureValid()) continue;
 
-            // Accumulating Fill2D for the active target (swapchain or FBO). Unifies
-            // the old font pipeline (dst_factor_alpha=ZERO destroyed dst alpha).
-            internal::loadPipeline(internal::activeFill2D());
+            // Coverage pipeline for the active target (swapchain or FBO): the
+            // Alpha blend of activeFill2D() (dst alpha accumulates) with a shader
+            // that reads the R8 atlas's R channel as alpha.
+            internal::loadPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
             sgl_texture(atlas.getView(), pickSampler());
 
@@ -2777,8 +2925,8 @@ private:
     static inline int defaultOversample_ = 1;
     int logicalSize_ = 0;      // User-requested font size (logical pixels)
 
-    // Shared GPU resources. The TTF draw path loads the active per-target 2D
-    // fill pipeline (internal::activeFill2D()) at draw time, so the font class
+    // Shared GPU resources. The TTF draw path loads the active per-target
+    // coverage pipeline (internal::activeCoverage2D()) at draw time, so the font class
     // only needs its own samplers: internal::fontSamplers(), one pair per
     // process, lazily created by initResources().
 

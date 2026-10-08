@@ -2,7 +2,8 @@
 
 Headless **behavioral regression tests** for the TrussC core. Each test's
 entry (`TC_CORE_TEST_MAIN`, see below) returns non-zero on failure. CI builds and runs every `core/tests/*/`
-here (`build_all.py --core-tests-only`); a non-zero exit fails the job. This is
+here (`build_all.py --core-tests-only`), except tests marked `daily-only`;
+a non-zero exit fails the job. This is
 the same convention bundled addons use (`addons/*/tests/`).
 
 This is the *behavioral* tier — it complements, and does not replace, the
@@ -82,8 +83,8 @@ test cannot share an executable: it replaces or interposes a library
 function for the whole binary (`operator new`, `fclose`, `write`, `ioctl`,
 `pthread_create`), needs a special project shape (hot reload host/guest),
 or needs an addon. Such a test is built and run alone, as before. Today:
-`audioDiagnostics`, `hotReloadLifecycle`, `serialBaudRate`, `serialHangup`,
-`tcpServerClients`.
+`audioDiagnostics`, `dataPathLoads`, `hotReloadLifecycle`, `serialBaudRate`,
+`serialHangup`, `tcpServerClients`.
 
 ### Running tests locally
 
@@ -100,6 +101,20 @@ Arguments after the name go to the test, e.g. `allCoreTests fontSfntCheck
 --dump font.ttf`. An unknown name prints the usage and exits 2. Build it in
 Release: `entryStacks` and `scopedStack` skip in a debug build.
 
+The batch runner prints each test process's wall time and a summary sorted
+from slowest to fastest, across combined, own-binary and standalone unit
+tests. Build time is excluded; timing is informational, never a pass/fail
+threshold.
+
+A `daily-only` marker file in `core/tests/<name>/` skips that test's run on
+PRs. `build_all.py --core-tests-only --include-daily` includes it in the
+daily workflow. This applies to both test shapes and web runs. Combined
+daily-only tests remain compiled into `allCoreTests`; its full `--list` is
+checked against every combined test directory before runs are selected, so
+an unregistered test still fails the sweep. Do not comment out or delete
+tests to reduce run time. Which tests move to daily-only requires an owner
+Decision after reviewing measured times.
+
 ### Also on web (`web-test` marker)
 
 A trusscli project test that also has a `web-test` file in its dir is built for
@@ -114,6 +129,40 @@ through `allCoreTests`). It still runs natively under `--core-tests-only`, so
 give the native side something real to check (or an explicit skip).
 Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
+### Display modes (`display-test` marker, daily Linux only)
+
+After the normal core build, daily CI runs every `core/tests/*/display-test`
+under Xvfb with Mesa software GL. PR CI does not run these modes. Each marker
+line is one process invocation, with shell-style quoting and `#` comments,
+but no shell expansion. The token `{test}` expands to the test executable
+(plus its name for `allCoreTests`); the working directory is the test's own
+directory. For example:
+
+```text
+{test} --gpu-check
+```
+
+Use multiple lines for multiple modes. A line may prefix `{test}` with a
+launcher or test-local fixture helper (see `startupExit` and
+`videoPlayerError`). Keep arguments and any Mesa-specific skip reason next
+to the test, never in the workflow. To hold a mode back, prefix its line
+with `skip "<reason>"` (for example `skip "#707: no audio device on the
+runner" {test} --gpu-check`): it is not run, but it is listed as `SKIP` with
+the reason and counted in the summary, and it never fails the sweep. Interactive modes must have an automated
+equivalent that exits (`hotReloadLifecycle --reload-check`, for example).
+Missing binaries, nonzero exits and hangs fail the sweep; later modes still
+run. The 600-second per-process timeout only stops hangs. Printed wall times
+are informational.
+
+After building the core tests, run the same step locally on Linux with:
+
+```sh
+LIBGL_ALWAYS_SOFTWARE=1 \
+  __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
+  xvfb-run -a -s '-screen 0 1280x1024x24' \
+  python3 tools/run_core_display_tests.py
+```
+
 ## Keep it curated (avoid rot)
 
 - Default workflow: **when you fix a bug, add the regression test that would have
@@ -123,9 +172,35 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
 
 ## Tests
 
+- `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
+  rejected view/image slots leave pending bindings and the image cache unchanged;
+  every valid view slot binds, but only supported sampler slots are written.
+  Checks the entire bindings object and surrounding guards, including the end
+  canary, with zero and nonzero sentinels. Uniform slots retain their bytes or
+  are rejected before copying; repeated invalid calls warn only once.
+- `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
+  replay (#271): pre-append overflow detection, growth on the next sokol frame,
+  32-bit relative indices, multiple passes, and captured-resource lifetime.
+  Standalone CMake unit test with a plain `int main()`; run in Debug and Release.
+- `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
+  `allCoreTests shaderStreamDraws --gpu-check` (OpenGL Core display required)
+  also reads FBO pixels for a 70002-vertex draw and 12000 rectangles over two
+  passes, checks the growth warning, and exercises Shader moves/clear with
+  a pending swapchain draw. On Linux, run it with Xvfb.
+- `stringPatterns/` — empty substring patterns count as zero or leave the
+  input unchanged (#405); replacements are left-to-right and nonoverlapping,
+  including the internal timestamp helper. Covers deletion, growth, and many
+  CRLF replacements without timing thresholds.
 - `threadSafety/` — main-thread affinity: `runOnMainThread` defers + delivers on
   the main thread, `Event` `Deliver::Main` marshals worker-fired notifies onto the
-  main thread, and `Node::destroy()` is safe from any thread.
+  main thread, and `Node::destroy()` is safe from any thread. Each frame's drain
+  runs only what was queued when it started, in order and nothing dropped, so
+  frames keep starting while a worker keeps the queue non-empty (#397); the
+  count is the one `tc_get_health` reports (`ThreadChannel::receiveAll`).
+- `threadChannelClosed/` — `ThreadChannel::isClosed()` synchronizes with
+  concurrent `close()` calls (#565); closed state is permanent. Also run this
+  focused test under ThreadSanitizer to detect races that values alone cannot
+  reveal.
 - `threadLifecycle/` — destroying a `tc::Thread` never calls `std::terminate`
   (#257): not after its worker returned on its own, not after only
   `stopThread()`, not right after `startThread()` (the worker skips
@@ -177,6 +252,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   the first Spot light with a projection texture and the single IES slot to
   the first light with a profile (among the first 8), and flags a further
   projector or IES light that gets no slot (the PBR draw warns once from it).
+- `meshGpuDirty/` — the `Mesh` data revision that decides GPU re-uploads
+  (#267): every mutator (`clear()` / `clearXxx()`, `add*`, `setNormal`,
+  `translate` / `rotateX/Y/Z` / `scale` / `transform`, `append`, `setMode`),
+  every non-const getter and `markGpuDirty()` change `getDataRevision()`,
+  also for a `clear()` followed by re-adding the same vertex count; const
+  getters and other const reads leave it unchanged. Uses `TC_CORE_TEST_MAIN`
+  in allCoreTests; the default run is headless. With `--gpu-check`, FBO
+  readback checks Points rebuilds/colors/translations and PBR rotations and
+  vertex edits, plus independent buffer caching and move assignment.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
@@ -188,6 +272,44 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `setLogFile`, `getLogFilePath()` is the resolved absolute path, and a failed
   call (folder or open failure) keeps the current log file open, with the
   error line and later lines in it.
+- `userDataPath/` — where the app writes (#433): `getUserDataPath()` and
+  `getTempPath()` are the OS per-user folders, created on first use (Linux:
+  `$XDG_DATA_HOME` / `$HOME` and `$TMPDIR` overrides; Windows:
+  `%LOCALAPPDATA%` / `%TMP%`; macOS: the parent folders);
+  `setUserDataPathRoot()` fixes the folder (absolute or relative to the
+  executable); with a simulated app bundle every core writer refuses a path
+  inside it (relative, absolute, or a user data root inside it) with one Error
+  naming the file and `getUserDataPath()`, and creates nothing; on macOS the
+  first relative write into the data folder outside a bundle logs one Notice.
+- `dataPathLoads/` — the loaders share the same path rule (#273):
+  `Pixels::load` / `loadHDR`, `Sound::load` / `loadStream` and tcxLut's
+  `Lut3D::load` resolve a relative path against `getDataPath()` with no
+  working-directory fallback (the test moves the CWD elsewhere; a file only
+  there is not found), `Pixels::save("a.png")` then `Pixels::load("a.png")`
+  round-trips, and a UTF-8 WAV name loads. `getDataPath()` called from two
+  threads at once, before anything else, agrees with the main thread. `Lut3D`
+  is checked up to its `.cube` parse; `Font::load` needs a GPU and is not run.
+  The data-root base is normalized without changing filename components
+  (including `symlink/..`), and absolute inputs pass through unchanged (#365 P2).
+- `fboWindowContext/` — Fbo::end() in a secondary window returns sokol_gl to
+  that window's own context (#653). Draws 2D, an Fbo pass, then 2D in both
+  windows and reads each back: both shapes are present and nothing leaks into
+  the main window. The default run is a skip; `allCoreTests fboWindowContext
+  --gpu-check` needs a display (Linux/Xvfb, macOS Debug).
+- `fileSave/` — the save helpers report write errors (#274): `saveJson`
+  serializes before it opens the file, so a string that is not valid UTF-8
+  returns false, logs an error and leaves the saved `{"a":1}` loadable, and it
+  writes `dump()`'s bytes as they are (no CR). On Linux, `saveTextFile`,
+  `appendToFile`, `saveJson` and `Pixels::save` to `/dev/full` return false
+  and log an error; the normal saves (PNG / JPEG / BMP included) still return
+  true with the expected bytes.
+- `audioHealth/` — audio health diagnostics (#302) on miniaudio's null
+  backend: counts silent output frames after a stream starts, excludes startup,
+  pauses, pending seeks, refill waits after applied seeks and normal ends; reports stalled callbacks with zero
+  meters and voice levels; counts stream decoder reopen failures on live re-init
+  separately from dropped plays. Checks MCP fields, main-thread underrun/stall
+  warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
+  Uses callback gates and condition-based waits.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -197,9 +319,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   playing sound's level / CPU usage) work and shutdown clears them, a reused `SoundBuffer`'s
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
-  miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
+  miniaudio's null backend (`AudioSettings::backend = AudioBackend::Null`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
+  A missing `.wav` / `.ogg` / stream / image, and on Linux, macOS and
+  Windows a missing `.m4a` / video (`VideoPlayer::load()`), fails with
+  `FileNotFound` and logs one Error naming the path (#359).
   `SoundBuffer::mixFrom()` counts its offset in frames and refuses (logs)
   channel mismatches and ends past what a buffer holds. Decoders size buffers
   from what decodes: a FLAC or Ogg Vorbis stream (`src/vorbisTone.cpp`) whose
@@ -220,6 +345,12 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   move keeps the moved voice playing), a paused voice is released too, and a
   streamed voice closes its file on `stop()` and when its last handle goes
   away (checked through `/proc/self/fd` on Linux).
+- `streamSeekRepeat/` — daily-only repetition of the exhausted non-looping
+  stream's pending seek to frame 0 (#582), 50 times on the null audio backend.
+  It checks that target audio returns after the worker stall is released.
+  Failures here and in `streamSeek/` report the voice's playing state and
+  position, seek request/served/published/applied sequences, end-of-stream
+  and decoder-end flags, and worker pass count.
 - `streamSeek/` — a streamed `Sound` seeks for real and a stream it cannot
   read ends (#280), on the real `AudioEngine` over miniaudio's null backend,
   measured on `audioOut` with files of DC levels: `setPosition()` moves the
@@ -259,7 +390,11 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `GetProcessTimes`, the main thread asleep) stays under a quarter of one
   core (the worker used to spin a whole core); while it plays, every
   `audioOut` block holds the file's full DC level (no gap), also at speed 10;
-  and a seek on a playing stream is heard within 100 ms (the mean is printed).
+  and every seek on a playing stream reaches the output callback (mean and
+  maximum latency are printed, with no latency threshold assertion).
+  With no stream playing the worker polls every 50 ms, not 5 ms (#550): its
+  passes over ~1 s (`internal::streamWorkerPassesForTests()`) stay under 60,
+  and a stream resumed after such an idle pause plays without a gap.
 - `eventRemovalDuringNotify/` — a `notify()` pass whose listener list changes
   (#256, #107), for `Event<T>` and `Event<void>`: a listener that an earlier
   one disconnects or destroys is not called in that pass, `clear()` stops the
@@ -282,7 +417,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   after a second meanwhile) and goes on once it returns; an App runs once:
   `Window::setApp()` refuses an App whose window closed (one error, the
   window keeps its App, no hook comes back, no second `setup()`) and any App
-  on a window that is not open;
+  on a window that is not open, and `setApp(nullptr)` removes the window
+  App's hook;
   `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
   flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
   while another thread calls `stop()` still ends up in the WAV and in
@@ -310,7 +446,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   secondary window's App (setup on the window's first tick), whose `setup()`
   allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
   has returned and no hook is subscribed while it runs; afterwards there is
-  exactly one hook each, also after more ticks or a move to another window;
+  exactly one hook each, also after more ticks, and `setApp(nullptr)` removes
+  them;
   an App that is constructed but never run gets no callbacks; the App's
   `audioOut()` still runs before the default-priority listeners its `setup()`
   subscribed (the order the constructor subscription gave); the attach is
@@ -340,6 +477,17 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
   V vertices) GPU-buffer blow-up that grew the buffer until allocation failed
   (Metal `id:52`), the root cause of disappearing deferred 2D/PBR content.
+- `sglPoolLimits/` — *(standalone, dummy backend)* sokol_gl pool handling
+  in the fork (#317): `sgl_context_make_pipeline()` returns id 0 when the sg
+  pipeline pool cannot hold all of its sg pipelines, and the ones it made are
+  destroyed again (their slots are usable afterwards); `sgl_draw()` skips a
+  command recorded while a destroyed sgl pipeline was loaded and draws the
+  rest; the sgl context pool grows when full, and the current context keeps
+  its vertices, drawing and commit rewind across the grow. Backend pipeline
+  failures with nonzero FAILED handles also roll back; failure of any growth
+  allocation leaves the old pool usable and frees temporary allocations.
+  TrussC's `RenderTarget::release()` on window close and the one-time
+  warnings require separate windowed checks.
 - `hotReloadLifecycle/` — *(hot reload host/guest build)* the real
   `GuestLibrary` loads, runs and unloads the guest several times (see the
   header of `src/main.cpp` for every check). `events().hotReloadUnload` fires
@@ -357,14 +505,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   platforms without hot reload (web / Android / iOS) even with the macro in
   source (#329). The end-to-end build of a macro app as a normal app is
   `examples/tests/HotReloadFallback`, built by the daily sweeps.
-- `screenshotContract/` — *(also on web)* the screenshot APIs report what they
-  actually do (#230). Web: `grabScreen()` / `saveScreenshot()` return false,
-  nothing is queued or created, and each API warns once. Native:
-  `saveScreenshot()` still creates the destination folder, queues the capture
-  and returns true. The per-PR CI runs only the native half, which passes with
-  or without the #230 fix: it catches the web early return leaking into native
-  builds. The web half is what guards #230; the daily run (`daily.yml`,
-  `sweep-web`) runs it under node.
+- `screenshotExtension/` — unknown or missing screenshot extensions append
+  `.png`, warn with the actual path and supported formats, and report that
+  path in the queue and MCP reply (#455). Supported formats preserve the
+  requested spelling. `--screen` (needs a display, e.g. Xvfb) also checks the
+  deferred PNG/JPEG/BMP files, direct file capture and absence of duplicate
+  suffixes. The default run needs no GPU.
+- `screenshotContract/` — *(also on web)* screenshot contracts (#230, #298).
+  Web: `grabScreen()` returns false and warns once; `saveScreenshot()` queues
+  a canvas download without creating folders. A mock DOM under node checks
+  filenames, PNG/JPEG selection, deferred callbacks, resource cleanup and
+  errors (including a tainted canvas). Native: the destination folder is
+  created and capture is queued. The web half runs in the daily sweep.
 - `mcpHttpGuard/` — a web page in the user's browser cannot drive the
   loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
   403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
@@ -378,6 +530,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   gets a loopback packet. The per-class counts used to call `WSACleanup()` on
   every 0 -> 1 -> 0 cycle and tear Winsock down for the whole process. Only
   Windows can fail it; elsewhere the same steps run and pass.
+- `tcpClientSend/` — non-reading loopback peers: idle timeout, one error and
+  disconnect with and without threads; owned async payloads, queue back-pressure,
+  disabled-timeout cancellation and sync/async FIFO ordering.
+- `tcpClientConnect/` — immediate async destruction; on Linux, a full accept
+  queue verifies same-target no-op, target replacement, configurable timeout and
+  cancellation by disconnect/destruction. Harness deadlines catch hangs without
+  elapsed-time assertions.
 - `tcpClientSigpipe/` — *(POSIX)* `TcpClient::send()` to a peer that reset
   the connection returns false instead of raising SIGPIPE, which killed the
   process without a trace (#254). One part keeps `connected_` set (no receive
@@ -404,6 +563,14 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   replaced attempt reports no `onConnect(false)` (#393), through
   `connectAsync()` and without threads; a refused `connectAsync()` with no
   reconnect reports `onConnect(false)` exactly once.
+- `tcpClientSelfDestroy/` — a `TcpClient` destroyed by a listener on its own
+  receive thread (#262): an owner replaces the `unique_ptr<TcpClient>` that
+  holds the client from an inline `onDisconnect` listener (peer closed, peer
+  reset) and from an inline `onReceive` listener, 50 times each, and connects
+  the new client every round; the destroyed clients' receive threads end
+  (counted on Linux). The receive thread must not read the client after
+  such a notification, which a plain build rarely shows: build it with
+  AddressSanitizer (`-DCMAKE_CXX_FLAGS=-fsanitize=address`) to check that.
 - `mcpHttpGuard/` — the MCP HTTP server refuses browser-driven requests
   (#238): a non-loopback `Host`, a foreign `Origin` (403) and a non-JSON
   `Content-Type` (415), and checks the bearer token on `/mcp` (401). It also
@@ -497,6 +664,15 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   0), with a warning naming it (`update() ended with 1 pushMatrix() ...`),
   rate-limited per entry point; values set outside a push carry on. Checks
   run in a release build only (headless `pushMatrix()` reaches sokol_gl).
+- `nodeTransform/` — Node global transform and picking (#264): `addChild()` /
+  `insertChild()` / `removeChild()` / `removeAllChildren()` /
+  `sweepDeadChildren()` refresh the moved node's global matrix, so
+  `getGlobalPos()`, `globalToLocal()` and the press `e.pos` use the new parent
+  right away (also with `keepGlobalPosition`); picking uses
+  `Mat4::tryInvert()`, so a node with an axis scaled to 0 and its subtree
+  (including a clipping RectNode's children) are not hit, while a tiny valid
+  scale still inverts; `tryInvert()` fails on singular matrices and leaves
+  `out` unchanged, `inverted()` still returns identity.
 - `nodeRemoval/` — node lifetime in mouse dispatch (#255): the window context
   holds the hovered / grabbed / selected node weakly and dispatch holds a
   strong reference while handlers run, so a node freed by `removeChild()` /
@@ -514,6 +690,33 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
+- `windowAppSwap/` — a secondary window's `setApp()` and `close()` are
+  requests that land at the window's next frame boundary (#315). Called from
+  the window's own App (`update()`, `keyPressed()`) or from its child
+  (`update()`, `onKeyPress()`), the window is unchanged until the tick or
+  event ends (`getApp()`, `App::getWindow()`, `isOpen()`), the App and its
+  children stay alive for the rest of it, and then the swap lands; a request
+  from outside a tick lands when the next tick starts. Two `setApp()` in one
+  frame: the last wins and the other App is never attached. `close()` with a
+  `setApp()` in the same frame: `close()` wins (the pending App is dropped
+  with a warning; a `setApp()` after `close()` is an error at the call). The
+  checks run again when a request is applied (the same App requested on two
+  windows lands on the first only), and the teardown detaches the App before
+  its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
+  closed window. The tick / event bracket is the glue's
+  `internal::WindowDispatchScope`; build with `-fsanitize=address` for the
+  memory side. The same test also has real-window pipeline lifetime checks:
+  `allCoreTests windowAppSwap --pipeline-cycles self 100` closes from the
+  secondary App's third update; replace `self` with `main` to close from the
+  main App, or `early` to request close before the first secondary tick.
+  Each cycle checks `sg_query_stats().total.pipelines.alive` against the
+  warmed main-window baseline, retains the closed Window for three main
+  updates to catch late recreation, and checks debug pipeline ownership.
+  These modes require a desktop backend; on Linux/X11 run, for example,
+  `LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a core/tests/allCoreTests/bin/allCoreTests
+  windowAppSwap --pipeline-cycles self 100` from the repository root. They
+  are compiled into the normal core runner, but must be invoked explicitly
+  with a display; the default invocation retains the headless checks.
 - `tcpServerClients/` — `TcpServer` client bookkeeping: the threads of a
   client that leaves (closes or resets) are joined while the server runs,
   not held until `stop()` (on Linux the address space stays flat over 200
@@ -650,6 +853,48 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `fontFaceIndex/` — the face index picks the face inside a font collection
+  (#294). With a two-face `.ttc` built at runtime, face 0 and face 1 give
+  their own glyph metrics through `FontAtlasManager::setupFromMemory()`,
+  `setup()` from a file and `SharedFontCache` (the face index is part of
+  `FontCacheKey`, so each face gets its own atlas); the default is face 0; a
+  face index below 0 or at or past the number of faces fails with an error
+  log. `internal::findFaceByPostScriptName()` (the macOS / iOS face lookup)
+  finds a face by its PostScript name in Windows and Mac name records and
+  reads within the data. The file matcher seeks to the collection header,
+  face directories and name tables; the generated fixture checks both faces
+  and rejects corrupt offsets/lengths, including 32-bit overflow. On Linux,
+  `"Noto Sans CJK SC"` / `"Noto Sans CJK JP"` resolve to the faces fontconfig
+  reports, whose PostScript names are
+  `NotoSansCJKsc-Regular` / `NotoSansCJKjp-Regular`, and their outlines of
+  U+9AA8 differ (SKIP when Noto Sans CJK is not installed). The system-name
+  check on Windows (`MS PGothic`) and macOS is manual. `fontFaceIndex
+  --gpu-check` also exercises the public `Font::load()` with a display:
+  default and explicit face 0 agree, face 1 has different metrics and
+  rendered glyphs, invalid indices fail with an error, and changing raster
+  options preserves the face. On Linux, Noto CJK SC renders differently from
+  JP and identically to the same face loaded by file and index; the Mono face
+  has equal widths for `iiii` and `WWWW` (SKIP if the fonts are absent).
+- `fontAtlasLimit/` — glyphs larger than an atlas page (#404). A glyph whose
+  box does not fit the largest page is rasterized at a lower resolution that
+  fits (a lower integer oversampling, or a raster scale below 1) and keeps
+  its size and offset in final pixels; a glyph that fits keeps its
+  oversampling. A font whose bounding box at the loaded size and oversampling
+  exceeds the page logs exactly one warning, naming the size, oversampling
+  and page limit, and no further warning over many lookups; the atlas page
+  count and memory stay the same over many simulated frames, and
+  `clearAtlas()` rasterizes the glyph again. Headless (page limit 4096); the
+  font is built at runtime.
+- `fontAtlasR8/` — TrueType glyph atlas pages are R8, one byte of coverage
+  per texel (#293): `getMemoryUsage()` is the sum of width × height over the
+  pages, and after 300 glyphs grow a page through several doubling steps
+  every glyph still has full coverage at its UV centre and nothing lies
+  outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
+  not run in CI) draws 150 new glyphs into an Fbo in one frame, one
+  `drawString()` each, and checks that the page texture is
+  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` colour,
+  and a minified draw builds and samples the R8 mip chain. The font is
+  built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as
@@ -698,6 +943,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
+- `windowSetApp/` — an App ends when it leaves its window (#318), on the real
+  `AudioEngine` over miniaudio's null backend: `Window::setApp(other)` and
+  `setApp(nullptr)` run the outgoing App's `exit()` and then `cleanup()`, once
+  each, and detach its `audioOut()` / `audioIn()` (not called again); the
+  incoming App's `setup()` runs on the window's next tick; attaching the
+  swapped-out App again is refused with one error and the window keeps its
+  App; an App whose `cleanup()` already ran is not ended twice. Also from the
+  App's own `update()`, from its `setup()` (the swapped-out App's audio
+  hooks are detached at the boundary), and for an App added with `addChild()`
+  and destroyed (its hooks go with `cleanupTree()`). Requests leave the App
+  live inside its callback and run teardown at the frame boundary (#315).
+  Audio-stop checks wait for actual callbacks. Not covered: a native window.
 - `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's
   `globalPos` (`TC_DERIVED`, derived from `pos`): `reflectToJson()` writes
   `pos` and no `globalPos` (`reflectToJson(obj, true)` writes both), and a

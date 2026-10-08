@@ -29,6 +29,8 @@
 // generated desc into every translation unit. The shader handle is exposed via
 // internal::sglPremultShader().
 #include "tc/gpu/shaders/sglPremult.glsl.h"
+// Same, from core/shaders/sglCoverage.glsl: internal::sglCoverageShader().
+#include "tc/gpu/shaders/sglCoverage.glsl.h"
 
 #ifdef __APPLE__
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
@@ -45,7 +47,15 @@ void setup() {
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
-    sgdesc.pipeline_pool_size = 256;  // default 64 is too small when FBOs are used
+    // Shader and pipeline pools are fixed at sg_setup(): sg resources point
+    // into the pool arrays, so these pools cannot grow (#317). 10000 like the
+    // pools below would cost ~34 MB (shader slot ~3.4 KB) and ~12 MB
+    // (pipeline slot ~1.2 KB). 1024 shaders (~3.5 MB) leaves room for many
+    // loaded Shader objects next to TrussC's own dozen or so. 1024 pipelines
+    // (~1.2 MB) is ~200 sgl pipelines (5 sg pipelines each) plus the PBR /
+    // point / Shader pipelines per target format.
+    sgdesc.shader_pool_size = 1024;   // sokol default 32
+    sgdesc.pipeline_pool_size = 1024; // sokol default 64
     sgdesc.buffer_pool_size = 10000;  // default 128 too small with many meshes (only CPU slot table, not GPU memory)
     sgdesc.image_pool_size = 10000;
     sgdesc.view_pool_size = 10000;
@@ -74,6 +84,9 @@ void setup() {
     // Initialize sokol_gl (with memory tracking allocator)
     sgl_desc_t sgldesc = {};
     sgldesc.logger.func = internal::sokolLog;
+    // sgl pipeline slots are small (32 B); the sg pipeline pool above is the
+    // real limit, since each sgl pipeline uses 5 sg pipelines. The sgl
+    // context pool is left at the sokol_gl_tc.h default: it grows when full.
     sgldesc.pipeline_pool_size = 256;
     sgldesc.max_vertices = internal::sglBudget().maxVertices;
     sgldesc.max_commands = internal::sglBudget().maxCommands;
@@ -117,6 +130,7 @@ void setup() {
     internal::active2D(BlendMode::Subtract);
     internal::active2D(BlendMode::Disabled);
     internal::activePremult();
+    internal::activeCoverage2D();
     internal::activeClear();
     internal::active3D();
 }
@@ -125,10 +139,12 @@ void setup() {
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
-    // The 2D blend / 3D / premultiplied / clear sgl pipelines now live in the
-    // swapchain and per-FBO RenderTarget caches; sgl_shutdown() below frees them
-    // all (it destroys every pipeline in every sgl context), so there is nothing
-    // to release individually here.
+    // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
+    // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
+    // global pool (sgl_destroy_context() frees only the context's own default
+    // pipeline); sgl_shutdown() below frees every context and every pipeline,
+    // so there is nothing to release individually here. A secondary window
+    // frees its own on close() (RenderTarget::release()).
 
     // Release font resources
     auto& fontAtlas = internal::bitmapFontAtlas();
@@ -168,6 +184,18 @@ sg_shader sglPremultShader() {
     return shd;
 }
 
+// Coverage sgl shader (core/shaders/sglCoverage.glsl), bound by the
+// activeCoverage2D() pipeline that draws the TrueType glyph atlas: the atlas is
+// R8 (coverage in R), and this shader uses R as alpha. Same ABI and lifetime as
+// sglPremultShader() above. Returns {0} if sokol isn't ready yet.
+sg_shader sglCoverageShader() {
+    static sg_shader shd = {};
+    if (shd.id == SG_INVALID_ID && sg_isvalid()) {
+        shd = sg_make_shader(tc_sglcov_coverage_shader_desc(sg_query_backend()));
+    }
+    return shd;
+}
+
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
     auto& budget = sglBudget();
     logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
@@ -175,8 +203,9 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
         << " -> " << newMaxCommands;
 
     // 1. Shutdown and re-init sokol_gl with larger buffers. sgl_shutdown()
-    //    destroys every pipeline in every sgl context (including the swapchain &
-    //    FBO RenderTarget caches), so there is nothing to destroy by hand first.
+    //    destroys every sgl context and every sgl pipeline (including the
+    //    swapchain & FBO RenderTarget caches), so there is nothing to destroy by
+    //    hand first.
     //    Font texture/sampler/view are sg resources — they survive sgl_shutdown.
     sgl_shutdown();
 
@@ -209,6 +238,7 @@ void resizeSgl(int newMaxVertices, int newMaxCommands) {
     active2D(BlendMode::Subtract);
     active2D(BlendMode::Disabled);
     activePremult();
+    activeCoverage2D();
     activeClear();
     active3D();
     internal::currentWindowContext().currentTarget = prevTarget;
@@ -372,6 +402,56 @@ void ensureSwapchainPass() {
     }
 }
 
+namespace internal {
+OnceGate& sglStackErrorReportGate(bool inFbo) {
+    if (inFbo) {
+        static OnceGate gate{5.0};
+        return gate;
+    }
+    static OnceGate gate{5.0};
+    return gate;
+}
+
+void reportSglStackErrors(sgl_error_t err, bool inFbo) {
+    // Matrix stack errors (#232): TrussC keeps its push/pop balanced per node
+    // and per frame. FBO contexts are reset at begin() (#327). Reported once, then
+    // at most every 5 s per place — the flags are cleared again at sg_commit().
+    if (err.stack_overflow || err.stack_underflow) {
+        if (sglStackErrorReportGate(inFbo).isFirstTime()) {
+            logWarning("sokol_gl") << "matrix stack "
+                << (err.stack_overflow ? "overflow (more than 64 nested pushMatrix / node levels in one frame)"
+                                       : "underflow (sgl_pop_matrix without a push)")
+                << (inFbo ? " in an Fbo pass" : " on screen")
+                << "; transforms past that point are wrong this frame";
+        }
+    }
+}
+} // namespace internal
+
+void internal::endGpuFrame() {
+    sgl_error_t err = sgl_error();
+    internal::reportSglStackErrors(err, false);
+    if (err.vertices_full || err.commands_full) {
+        auto& budget = internal::sglBudget();
+        int newVerts = budget.maxVertices * 4;
+        if (newVerts > budget.pendingResize) {
+            budget.pendingResize = newVerts;
+            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
+                << budget.maxVertices << " vertices, "
+                << budget.maxCommands << " commands). "
+                << "Will resize to " << newVerts << " next frame.";
+        }
+    }
+
+    sg_commit();
+
+    // Now that every deferred draw (swapchain layers above, FBO passes at
+    // their Fbo::end()) has been submitted, it is safe to destroy the GPU
+    // resources released during this frame (temporary Mesh draws, texture
+    // re-uploads, atlas growth, sampler changes, ...).
+    internal::drainPendingGpuDestroys();
+}
+
 void present() {
     if (headless::isActive()) return;
 
@@ -385,48 +465,12 @@ void present() {
 
     events().onRender.notify();
 
-    sgl_error_t err = sgl_error();
-    // Matrix stack errors (#232): TrussC keeps its push/pop balanced per node
-    // and per frame, so what reaches sokol_gl is nesting deeper than its fixed
-    // stack (64), or a raw sgl_push/pop_matrix mismatch. Reported once, then
-    // at most every 5 s — the flags are cleared again at sg_commit().
-    if (err.stack_overflow || err.stack_underflow) {
-        static std::chrono::steady_clock::time_point lastReport{};
-        static bool reported = false;
-        auto now = std::chrono::steady_clock::now();
-        if (!reported || now - lastReport >= std::chrono::seconds(5)) {
-            reported = true;
-            lastReport = now;
-            logWarning("sokol_gl") << "matrix stack "
-                << (err.stack_overflow ? "overflow (more than 64 nested pushMatrix / node levels in one frame)"
-                                       : "underflow (sgl_pop_matrix without a push)")
-                << "; transforms past that point are wrong this frame";
-        }
-    }
-    if (err.vertices_full || err.commands_full) {
-        auto& budget = internal::sglBudget();
-        int newVerts = budget.maxVertices * 4;
-        if (newVerts > budget.pendingResize) {
-            budget.pendingResize = newVerts;
-            logNotice("sokol_gl") << "Vertex buffer overflow detected ("
-                << budget.maxVertices << " vertices, "
-                << budget.maxCommands << " commands). "
-                << "Will resize to " << newVerts << " next frame.";
-        }
-    }
-
     sg_end_pass();
     internal::currentWindowContext().inSwapchainPass = false;
     // Frame is over: the next swapchain pass start belongs to the next frame
     // and must CLEAR again with swapchainClearValue (see issue #191).
     internal::currentWindowContext().swapchainPassStartedThisFrame = false;
-    sg_commit();
-
-    // Now that every deferred draw (swapchain layers above, FBO passes at
-    // their Fbo::end()) has been submitted, it is safe to destroy the GPU
-    // resources released during this frame (temporary Mesh draws, texture
-    // re-uploads, atlas growth, sampler changes, ...).
-    internal::drainPendingGpuDestroys();
+    internal::endGpuFrame();
 
     // Frame end (#232): whatever this frame left pushed is dropped here (with
     // a warning), so a missing pop can't leak into the next frame; sokol_gl's
@@ -462,10 +506,24 @@ void resumeSwapchainPass() {
 // ---------------------------------------------------------------------------
 
 namespace internal {
+namespace {
+// Main-thread-only lighting cleanup can outlive these function-local statics
+// (e.g. a sketch's global Material). Constant initialization and trivial
+// destruction keep the flag readable throughout static destruction.
+constinit bool windowStateDestroyed = false;
+
+struct WindowStateLifetimeMark {
+    ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
+};
+} // namespace
+
 // The main window's state container. Non-inline so a hot-reload guest binds
 // to the host's instance (same pattern as events()/getDefaultContext()).
 WindowContext& mainWindowContext() {
     static WindowContext ctx;
+    // Destroyed before ctx, like LoggerLifetimeMark below.
+    static WindowStateLifetimeMark lifetimeMark;
+    (void)lifetimeMark;
     return ctx;
 }
 
@@ -473,6 +531,9 @@ WindowContext& mainWindowContext() {
 // reason as mainWindowContext(). Main thread only.
 static std::vector<Window*>& windowRegistryStorage() {
     static std::vector<Window*> list;
+    // Either storage may be initialized first; stop cleanup before either dies.
+    static WindowStateLifetimeMark lifetimeMark;
+    (void)lifetimeMark;
     return list;
 }
 void registerWindow(Window* w) {
@@ -500,9 +561,34 @@ std::vector<Window*> openWindows() {
 // (declared in tcLight.h); defined here because it needs the Window registry.
 // Non-inline keeps it host/guest-shared under hot reload, same as the registry.
 void removeLightFromAllContexts(Light* light) {
+    if (windowStateDestroyed) return;
     auto scrub = [&](WindowContext& ctx) {
         auto& v = ctx.activeLights;
         v.erase(std::remove(v.begin(), v.end(), light), v.end());
+    };
+    scrub(mainWindowContext());
+    for (Window* w : openWindows()) {
+        if (w) scrub(w->context());
+    }
+}
+
+// Detach destroyed lighting state before the next mesh draw. Like Light's
+// cleanup, these definitions are shared by the hot-reload host and guest.
+void clearMaterialFromAllContexts(Material* material) {
+    if (windowStateDestroyed) return;
+    auto scrub = [&](WindowContext& ctx) {
+        if (ctx.currentMaterial == material) ctx.currentMaterial = nullptr;
+    };
+    scrub(mainWindowContext());
+    for (Window* w : openWindows()) {
+        if (w) scrub(w->context());
+    }
+}
+
+void clearEnvironmentFromAllContexts(Environment* environment) {
+    if (windowStateDestroyed) return;
+    auto scrub = [&](WindowContext& ctx) {
+        if (ctx.currentEnvironment == environment) ctx.currentEnvironment = nullptr;
     };
     scrub(mainWindowContext());
     for (Window* w : openWindows()) {
@@ -834,6 +920,25 @@ Logger& getLogger() {
     return logger;
 }
 
+// Shared by the deferred queue, native file writers and MCP path reporting.
+std::filesystem::path internal::resolveScreenshotPath(const std::filesystem::path& path) {
+    auto resolved = path.is_absolute() ? path : getDataPath(path);
+    const auto ext = toLower(getFileExtension(resolved));
+    const bool common = ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "bmp";
+    const bool mac = Platform::isMacOS() &&
+                     (ext == "tiff" || ext == "tif" || ext == "gif");
+    const bool win = Platform::isWindows() && ext == "tga";
+    if (!common && !mac && !win) {
+        resolved += ".png";
+        const char* formats = Platform::isMacOS() ? "png, jpg/jpeg, bmp, tiff/tif, gif" :
+                              Platform::isWindows() ? "png, jpg/jpeg, bmp, tga" :
+                                                      "png, jpg/jpeg, bmp";
+        logWarning("Screenshot") << "Unsupported or missing extension; saving PNG to "
+                                 << internal::pathToUtf8(resolved) << ". Supported formats: " << formats;
+    }
+    return resolved;
+}
+
 // Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
 // (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
 bool Logger::setLogFile(const fs::path& path) {
@@ -841,7 +946,7 @@ bool Logger::setLogFile(const fs::path& path) {
     // An absolute path skips getDataPath(), so it never reads the data path
     // state (unlocked, and written by the first call on Apple).
     const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
-    const std::string pathUtf8 = internal::pathToUtf8(resolved);
+    const std::string pathUtf8 = internal::pathToDisplayUtf8(resolved);
 
     // "" or "logs/": fail before creating any folder (the current log stays
     // open, as with the failures below).
@@ -849,6 +954,8 @@ bool Logger::setLogFile(const fs::path& path) {
         log(LogLevel::Error, "Failed to open log file: " + pathUtf8 + " (no file name in path)");
         return false;
     }
+    // Inside the app bundle: refused (logged, the current log stays open)
+    if (!internal::checkWriteTarget(path, resolved, "Logger")) return false;
 
     // Create a missing parent folder, like saveScreenshot().
     std::error_code ec;
@@ -878,6 +985,10 @@ bool Logger::setLogFile(const fs::path& path) {
         closeFileLocked();
         fileStream_ = std::move(stream);
         filePath_ = pathUtf8;
+        if (this == &getLogger()) {
+            internal::setCrashLogFile(resolved);
+            crashLogOwner_ = true;
+        }
     }
     return true;
 }
@@ -1059,10 +1170,6 @@ std::atomic<bool>& isRunning() {
     static std::atomic<bool> running{false};
     return running;
 }
-std::unique_ptr<std::thread>& getThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
-}
 } // namespace detail
 } // namespace console
 
@@ -1073,7 +1180,82 @@ ThreadChannel<std::function<void()>>& mainThreadQueue() {
     static ThreadChannel<std::function<void()>> q;
     return q;
 }
+std::atomic<size_t>& mainThreadQueuePendingCount() {
+    static std::atomic<size_t> n{0};
+    return n;
+}
 #endif
+
+AsyncScheduler::AsyncScheduler() {
+#ifdef _WIN32
+    // Same convention as HeadlessSleeper: Windows before 10 1803 rejects
+    // the high-resolution flag, leaving the condition-variable fallback.
+    timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                                    TIMER_MODIFY_STATE | SYNCHRONIZE);
+    if (timer_) {
+        taskEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!taskEvent_) closeWaitHandles();
+    }
+#endif
+    try {
+        worker_ = std::thread([this] { run(); });
+    } catch (...) {
+        closeWaitHandles();
+        throw;
+    }
+}
+
+AsyncScheduler::~AsyncScheduler() {
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        stop_ = true;
+        wakeWorker();
+    }
+    if (worker_.joinable()) worker_.join();
+    closeWaitHandles();
+}
+
+void AsyncScheduler::closeWaitHandles() {
+#ifdef _WIN32
+    if (timer_) CloseHandle((HANDLE)timer_);
+    if (taskEvent_) CloseHandle((HANDLE)taskEvent_);
+    timer_ = taskEvent_ = nullptr;
+#endif
+}
+
+void AsyncScheduler::wakeWorker() {
+#ifdef _WIN32
+    if (taskEvent_) SetEvent((HANDLE)taskEvent_);
+#endif
+    cv_.notify_all();
+}
+
+void AsyncScheduler::waitUntil(std::unique_lock<std::mutex>& lk, Clock::time_point when) {
+#ifdef _WIN32
+    if (timer_) {
+        const auto remaining = when - Clock::now();
+        if (remaining <= Clock::duration::zero()) return;
+        // Relative, rounded up to 100 ns; a zero due time would mean an
+        // absolute deadline in the past. The timer is armed under mtx_, so
+        // changes after unlocking leave the auto-reset event signaled.
+        using TimerTick = std::chrono::duration<int64_t, std::ratio<1, 10000000>>;
+        LARGE_INTEGER due;
+        due.QuadPart = -std::chrono::ceil<TimerTick>(remaining).count();
+        if (SetWaitableTimer((HANDLE)timer_, &due, 0, nullptr, nullptr, FALSE)) {
+            HANDLE handles[] = {(HANDLE)taskEvent_, (HANDLE)timer_};
+            lk.unlock();
+            const DWORD result = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+            lk.lock();
+            if (result == WAIT_OBJECT_0 || result == WAIT_OBJECT_0 + 1) return;
+        }
+        // Disable a failed native wait and re-evaluate the task list before
+        // falling back: notifications could have arrived while unlocked.
+        closeWaitHandles();
+        return;
+    }
+#endif
+    cv_.wait_until(lk, when);
+}
 
 AsyncScheduler& AsyncScheduler::get() {
     static AsyncScheduler instance;
@@ -1217,6 +1399,11 @@ FontSamplers& fontSamplers() {
 // ---------------------------------------------------------------------------
 namespace internal {
 
+int& appExitCode() {
+    static int code = 0;
+    return code;
+}
+
 MainLoopState& mainLoop() {
     static MainLoopState state;
     return state;
@@ -1262,6 +1449,12 @@ TouchMouseMapper& touchMouseMapper() {
     return mapper;
 }
 
+// Whether the setup callback ran in the current launch (#394).
+bool& appSetupCalled() {
+    static bool called = false;
+    return called;
+}
+
 DataPathState& dataPathState() {
     static DataPathState* state = [] {
         auto* s = new DataPathState();
@@ -1273,6 +1466,171 @@ DataPathState& dataPathState() {
         return s;
     }();
     return *state;
+}
+
+// ---------------------------------------------------------------------------
+// User data / temp folders (declared in tcUtils.h)
+// ---------------------------------------------------------------------------
+namespace {
+struct UserPathState {
+    std::mutex mutex;
+    fs::path userRoot;            // setUserDataPathRoot(), as given
+    bool userRootSet = false;
+    fs::path defaultUserRoot;     // platform default, read once
+    fs::path defaultTempRoot;
+    fs::path createdUserRoot;     // last folder created (skip the next stat)
+    fs::path createdTempRoot;
+    fs::path bundleForTests;
+    bool bundleForTestsSet = false;
+};
+
+UserPathState& userPathState() {
+    static auto* state = new UserPathState();   // leaked: usable during exit
+    return *state;
+}
+
+fs::path appBundlePath();
+bool isInsideFolder(const fs::path& p, const fs::path& folder);
+
+// Create `root` unless it is the folder created last time. Logged outside
+// the state mutex (an onLog listener may ask for a path again).
+fs::path ensureFolder(const fs::path& root, fs::path UserPathState::*created) {
+    // Resolving a user root inside the bundle must not modify the bundle
+    // itself. Return the path; the writer reports the refusal once.
+    const fs::path bundle = appBundlePath();
+    if (!bundle.empty() && isInsideFolder(root, bundle)) return root;
+    auto& s = userPathState();
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.*created == root) return root;
+    }
+    std::error_code ec;
+    fs::create_directories(root, ec);
+    if (ec) {
+        logError() << "Cannot create folder: " << pathToDisplayUtf8(root)
+                   << " (" << ec.message() << ")";
+        return root;
+    }
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.*created = root;
+    return root;
+}
+
+fs::path appBundlePath() {
+    auto& s = userPathState();
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.bundleForTestsSet) return s.bundleForTests;
+    }
+    return platformAppBundlePath();
+}
+
+// Absolute, normalized, with symlinks of the existing part resolved.
+fs::path comparablePath(const fs::path& p) {
+    std::error_code ec;
+    fs::path abs = fs::absolute(p, ec);
+    if (ec) abs = p;
+    fs::path canon = fs::weakly_canonical(abs, ec);
+    return (ec ? abs : canon).lexically_normal();
+}
+
+// True if `p` is `folder` or inside it (component-wise, so "/a/bc" is not
+// inside "/a/b").
+bool isInsideFolder(const fs::path& p, const fs::path& folder) {
+    const fs::path a = comparablePath(p);
+    const fs::path b = comparablePath(folder);
+    auto ia = a.begin();
+    for (auto ib = b.begin(); ib != b.end(); ++ib) {
+        if (ib->empty()) continue;   // trailing separator
+        if (ia == a.end() || *ia != *ib) return false;
+        ++ia;
+    }
+    return true;
+}
+} // namespace
+
+fs::path userDataPathRoot() {
+    auto& s = userPathState();
+    fs::path root;
+    bool userSet = false;
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        userSet = s.userRootSet;
+        if (userSet) {
+            root = s.userRoot;
+        } else {
+            if (s.defaultUserRoot.empty()) s.defaultUserRoot = platformUserDataRoot();
+            root = s.defaultUserRoot;
+        }
+    }
+    // A relative root (setUserDataPathRoot) is resolved against the
+    // executable directory, like setDataPathRoot().
+    if (root.is_relative()) root = getExecutableDir() / root;
+    return ensureFolder(root.lexically_normal(), &UserPathState::createdUserRoot);
+}
+
+fs::path tempPathRoot() {
+    auto& s = userPathState();
+    fs::path root;
+    {
+        std::lock_guard<std::mutex> lock(s.mutex);
+        if (s.defaultTempRoot.empty()) s.defaultTempRoot = platformTempRoot();
+        root = s.defaultTempRoot;
+    }
+    if (root.is_relative()) root = getExecutableDir() / root;
+    return ensureFolder(root.lexically_normal(), &UserPathState::createdTempRoot);
+}
+
+void setUserDataPathRootState(const fs::path& path) {
+    auto& s = userPathState();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.userRoot = path;
+    s.userRootSet = true;
+}
+
+void setAppBundlePathForTests(const fs::path& bundle) {
+    auto& s = userPathState();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.bundleForTests = bundle;
+    s.bundleForTestsSet = !bundle.empty();
+}
+
+void resetUserDataPathForTests() {
+    auto& s = userPathState();
+    std::lock_guard<std::mutex> lock(s.mutex);
+    s.userRoot.clear();
+    s.userRootSet = false;
+    s.defaultUserRoot.clear();
+    s.defaultTempRoot.clear();
+    s.createdUserRoot.clear();
+    s.createdTempRoot.clear();
+}
+
+bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+                      const char* module) {
+    const fs::path bundle = appBundlePath();
+    if (!bundle.empty() && isInsideFolder(resolved, bundle)) {
+        const fs::path name = requested.filename().empty() ? resolved.filename()
+                                                           : requested.filename();
+        logError(module) << "Cannot write " << pathToDisplayUtf8(resolved)
+                         << ": it is inside the app bundle. Write to getUserDataPath(\""
+                         << pathToDisplayUtf8(name) << "\") instead";
+        return false;
+    }
+#ifdef __APPLE__
+    // Development on macOS / iOS: the data folder is outside a bundle, so
+    // this write works now but would be refused in a packaged app.
+    if (!requested.empty() && requested.is_relative()) {
+        static OnceGate noticed;
+        if (isInsideFolder(resolved, getDataPath(fs::path()))
+            && noticed.isFirstTime()) {
+            logNotice(module) << "Writing " << pathToDisplayUtf8(requested)
+                              << " into the data folder. In a packaged .app this write"
+                                 " would be refused; use getUserDataPath()";
+        }
+    }
+#endif
+    return true;
 }
 
 std::function<bool()>& overlayHoveredQuery() {
@@ -1329,8 +1687,8 @@ WindowContext& currentWindowContext() {
     return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
 }
 
-// Window::setApp() (app code) adds to it and the platform close() (host code)
-// removes from it. Leaked like the ones above: ~Window() calls close(), and a
+// Window::applyPendingApp() adds to it and the platform teardown (host code)
+// removes from it. Leaked like the ones above: ~Window() calls the teardown, and a
 // Window an app keeps in a global is destroyed at exit.
 std::unordered_set<const App*>& attachedApps() {
     static auto* apps = new std::unordered_set<const App*>();

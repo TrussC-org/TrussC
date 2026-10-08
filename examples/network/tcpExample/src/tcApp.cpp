@@ -41,12 +41,16 @@ void tcApp::setup() {
         oss << "[Server] Received from client " << e.clientId << ": " << msg;
         addLog(oss.str());
 
-        // Echo back
+        // See tcpAsyncExample for the waiting (send) vs queued (sendAsync) difference.
         string reply = "Echo: " + msg;
-        server.send(e.clientId, reply);
+        const SendResult result = server.sendAsync(e.clientId, reply);
+        if (!result && echoFailed.isFirstTime()) {
+            addLog(string("[Server] Echo not queued: ") + sendErrorName(result.error));
+        }
     }, Deliver::Main);
 
     serverErrorListener = server.onError.listen([this](TcpServerErrorEventArgs& e) {
+        // A rejected sendAsync() is reported here too (#214), as send() does.
         ostringstream oss;
         oss << "[Server] Error: " << e.message;
         addLog(oss.str());
@@ -140,12 +144,9 @@ void tcApp::keyPressed(int key) {
     } else if (key == 'C') {
         // Client connect
         if (!client.isConnected()) {
+            // Non-blocking on the main thread; onConnect reports the result.
             addLog("[Client] Connecting to 127.0.0.1:9001...");
-            if (client.connect("127.0.0.1", 9001)) {
-                addLog("[Client] Connected!");
-            } else {
-                addLog("[Client] Connection failed");
-            }
+            client.connectAsync("127.0.0.1", 9001);
         } else {
             addLog("[Client] Already connected");
         }
@@ -156,16 +157,23 @@ void tcApp::keyPressed(int key) {
         if (server.isRunning() && server.getClientCount() > 0) {
             ostringstream oss;
             oss << "Server broadcast #" << messageCount;
-            server.broadcast(oss.str());
-            addLog("[Server] Broadcast: " + oss.str());
+            // broadcastAsync() returns how many clients accepted it (no onError).
+            const int clientCount = server.getClientCount();
+            const int accepted = server.broadcastAsync(oss.str());
+            addLog("[Server] Broadcast queued for " + to_string(accepted) + "/" +
+                   to_string(clientCount) + " clients: " + oss.str());
         }
 
         // Send from client
         if (client.isConnected()) {
             ostringstream oss;
             oss << "Hello from client #" << messageCount;
-            client.send(oss.str());
-            addLog("[Client] Sent: " + oss.str());
+            const SendResult result = client.sendAsync(oss.str());
+            if (result) {
+                addLog("[Client] Queued: " + oss.str());
+            } else if (clientSendFailed.isFirstTime()) {
+                addLog(string("[Client] Send not queued: ") + sendErrorName(result.error));
+            }
         }
     } else if (key == 'D') {
         // Disconnect
