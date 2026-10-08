@@ -10186,9 +10186,9 @@ description.ko = "텍스처를 할당"
 ["Texture::allocateCubemap"]
 category = "graphics_texture"
 keywords = ["skybox", "environment", "ibl"]
-description.en = "Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains."
-description.ja = "初期データなしでキューブマップテクスチャを確保。Dynamic / Stream は1ミップレベルのみ。複数指定はエラーを記録し、未確保の状態にする。RenderTarget はミップチェーンに対応。"
-description.ko = "초기 데이터 없이 큐브맵 텍스처를 할당. Dynamic / Stream은 밉 레벨 하나만 지원하며, 여러 레벨을 요청하면 오류를 기록하고 할당하지 않습니다. RenderTarget은 밉 체인을 지원합니다."
+description.en = "Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains. Immutable is refused with an error (it would need initial data)."
+description.ja = "初期データなしでキューブマップテクスチャを確保。Dynamic / Stream は1ミップレベルのみ。複数指定はエラーを記録し、未確保の状態にする。RenderTarget はミップチェーンに対応。Immutable は初期データが要るため、エラーを記録して確保しない。"
+description.ko = "초기 데이터 없이 큐브맵 텍스처를 할당. Dynamic / Stream은 밉 레벨 하나만 지원하며, 여러 레벨을 요청하면 오류를 기록하고 할당하지 않습니다. RenderTarget은 밉 체인을 지원합니다. Immutable은 초기 데이터가 필요하므로 오류를 기록하고 할당하지 않습니다."
 related = ["Texture::loadCubemapData", "Texture::isCubemap"]
 
 ["Texture::bind"]

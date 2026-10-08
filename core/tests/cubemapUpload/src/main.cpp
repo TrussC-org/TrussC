@@ -87,15 +87,17 @@ public:
         int usageWarnings = 0;
         int sizeWarnings = 0;
         int mipErrors = 0;
+        int immutableErrors = 0;
         int unexpectedErrors = 0;
         EventListener logs = getLogger().onLog.listen([&](LogEventArgs& e) {
             if (e.level == LogLevel::Warning) {
-                if (e.message == "[Texture] loadData() called twice in same frame, skipped") ++duplicateWarnings;
+                if (e.message == "[Texture] loadCubemapData() called twice in same frame, skipped") ++duplicateWarnings;
                 if (e.message == "[Texture] loadCubemapData: requires Dynamic / Stream usage") ++usageWarnings;
                 if (e.message.find("[Texture] loadCubemapData: data size mismatch") == 0) ++sizeWarnings;
             }
             if (e.level == LogLevel::Error || e.level == LogLevel::Fatal) {
                 if (e.message == "[Texture] allocateCubemap: Dynamic / Stream cubemaps require exactly one mip level") ++mipErrors;
+                else if (e.message.find("[Texture] allocateCubemap: Immutable cubemap needs initial data") == 0) ++immutableErrors;
                 else ++unexpectedErrors;
             }
         });
@@ -141,11 +143,13 @@ public:
 
         Texture immutable;
         immutable.allocateCubemap(sideSize, TextureFormat::RGBA8, TextureUsage::Immutable);
+        check("Immutable cubemap allocation is refused with an error",
+              immutableErrors == 1 && !immutable.isAllocated());
         loadFaces(immutable, a_);
         Texture target;
         target.allocateCubemap(sideSize, TextureFormat::RGBA8, TextureUsage::RenderTarget, 3);
         loadFaces(target, a_);
-        check("Immutable and RenderTarget uploads warn", usageWarnings == 2);
+        check("RenderTarget upload warns", usageWarnings == 1);
         check("RenderTarget retains its mip chain", target.getNumMipLevels() == 3 &&
               sg_query_image_state(target.getImage()) == SG_RESOURCESTATE_VALID);
         for (int face = 0; face < 6; ++face) {

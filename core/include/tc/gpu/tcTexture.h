@@ -8,6 +8,7 @@
 // to access sokol and internal namespace variables
 
 #include "../utils/tcAnnotations.h"
+#include <memory>
 
 namespace trussc {
 
@@ -187,6 +188,12 @@ public:
                          int mipLevels = 1) {
         clear();
 
+        if (usage == TextureUsage::Immutable) {
+            logError() << "[Texture] allocateCubemap: Immutable cubemap needs initial data, which "
+                          "allocateCubemap cannot take; use Dynamic / Stream with loadCubemapData, "
+                          "or RenderTarget";
+            return;
+        }
         if ((usage == TextureUsage::Dynamic || usage == TextureUsage::Stream) && mipLevels > 1) {
             logError() << "[Texture] allocateCubemap: Dynamic / Stream cubemaps require exactly one mip level";
             return;
@@ -229,20 +236,26 @@ public:
 
         const uint64_t currentFrame = sapp_frame_count();
         if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
-            logWarning() << "[Texture] loadData() called twice in same frame, skipped";
+            logWarning() << "[Texture] loadCubemapData() called twice in same frame, skipped";
             return;
         }
         lastUpload_ = {image_.id, currentFrame};
 
         // sokol expects every face of every mip in one call. Dynamic / Stream
         // cubemaps have one mip; its six face buffers are concatenated here.
-        std::vector<uint8_t> buffer(faceSize * 6);
+        // The staging buffer is reused (a Stream cubemap may upload every
+        // frame) and not zero-filled: all of it is overwritten below.
+        const size_t total = faceSize * 6;
+        if (cubemapStagingSize_ != total) {
+            cubemapStaging_.reset(new uint8_t[total]);
+            cubemapStagingSize_ = total;
+        }
         for (int face = 0; face < 6; ++face) {
-            std::memcpy(buffer.data() + face * faceSize, faces[face], faceSize);
+            std::memcpy(cubemapStaging_.get() + face * faceSize, faces[face], faceSize);
         }
         sg_image_data img_data = {};
-        img_data.mip_levels[0].ptr = buffer.data();
-        img_data.mip_levels[0].size = buffer.size();
+        img_data.mip_levels[0].ptr = cubemapStaging_.get();
+        img_data.mip_levels[0].size = total;
         sg_update_image(image_, &img_data);
     }
 
@@ -346,6 +359,8 @@ public:
 
     // Release resources
     void clear() {
+        cubemapStaging_.reset();
+        cubemapStagingSize_ = 0;
         if (allocated_) {
             // Deferred destroy: draws recorded this frame (sokol_gl quads,
             // deferred PBR bindings) may still reference these handles.
@@ -638,6 +653,10 @@ private:
         uint32_t image = SG_INVALID_ID;
         uint64_t frame = UINT64_MAX;
     } lastUpload_;
+    // Staging for loadCubemapData(): six faces back to back, allocated on the
+    // first upload of a Dynamic / Stream cubemap, released by clear().
+    std::unique_ptr<uint8_t[]> cubemapStaging_;
+    size_t cubemapStagingSize_ = 0;
     sg_pixel_format pixelFormat_ = SG_PIXELFORMAT_NONE;
 
     TextureFilter minFilter_ = TextureFilter::Linear;
@@ -844,12 +863,9 @@ private:
 
         switch (usage_) {
             case TextureUsage::Immutable:
-                // Immutable cubemap not supported yet (would need initial data
-                // for all 6 faces and all mips). Use Dynamic / Stream + loadCubemapData
-                // or RenderTarget + face attachment views instead.
-                logWarning() << "[Texture] allocateCubemap Immutable not supported; using Dynamic";
-                img_desc.usage.dynamic_update = true;
-                break;
+                // Refused in allocateCubemap(): an Immutable cubemap would need
+                // initial data for all 6 faces and all mips.
+                return;
             case TextureUsage::Dynamic:
                 img_desc.usage.dynamic_update = true;
                 break;
@@ -967,6 +983,9 @@ private:
         mipSamplingViews_ = std::move(other.mipSamplingViews_);
         usage_ = other.usage_;
         lastUpload_ = other.lastUpload_;
+        cubemapStaging_ = std::move(other.cubemapStaging_);
+        cubemapStagingSize_ = other.cubemapStagingSize_;
+        other.cubemapStagingSize_ = 0;
         pixelFormat_ = other.pixelFormat_;
         minFilter_ = other.minFilter_;
         magFilter_ = other.magFilter_;
