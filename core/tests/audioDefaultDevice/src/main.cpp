@@ -3,6 +3,11 @@
 #include "tc/sound/tcAudioDeviceInternal.h"
 #include "../../common/tcCoreTest.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -70,6 +75,7 @@ void checkInit(const string& label, const string& deviceName) {
         changed = args;
     });
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.deviceName = deviceName;
     const bool started = engine.init(settings);
     check(label + ": init succeeds", started && engine.isInitialized());
@@ -83,12 +89,105 @@ void checkInit(const string& label, const string& deviceName) {
           state["output"].value("default", false));
 }
 
+void checkBackendFailure() {
+    auto& engine = AudioEngine::getInstance();
+    const auto before = internal::audioDeviceReport(true);
+    check("default settings select Default", AudioSettings{}.backend == AudioBackend::Default);
+    check("enumeration does not start the engine", !engine.isInitialized());
+    check("initial stats have no failure", engine.getStats().initFailure == AudioInitFailure::None);
+
+    AudioSettings settings;
+    settings.backend = AudioBackend::Null;
+    settings.bufferSize = 256;
+    settings.deviceName = "tc-audio-missing-device";
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
+    check("injected device-open failure stops init", !engine.init(settings) && !engine.isInitialized());
+    const auto failed = engine.getStats();
+    check("failure stats preserve reason/result/backend",
+          failed.initFailure == AudioInitFailure::DeviceOpen &&
+          failed.initFailureResult == MA_FAILED_TO_OPEN_BACKEND_DEVICE &&
+          string(failed.initFailureBackend) == "Null");
+    const auto report = internal::audioDeviceReport(false);
+    check("failed init retains context and requested name",
+          report.backend == "Null" && report.outputDevice.empty() &&
+          report.initFailureDevice == settings.deviceName);
+    const auto state = audioState();
+    check("MCP reports stopped engine with exact failure",
+          state.is_object() && !state.value("running", true) &&
+          state.value("initFailure", Json()) == Json({{"reason", "deviceOpen"},
+              {"result", MA_FAILED_TO_OPEN_BACKEND_DEVICE}, {"backend", "Null"},
+              {"device", settings.deviceName}}));
+    engine.shutdown();
+    check("shutdown retains the last failure", engine.getStats().initFailure == AudioInitFailure::DeviceOpen);
+
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
+    mutex callbackMutex;
+    condition_variable callbackCv;
+    bool called = false;
+    EventListener listener = engine.audioOut.listen([&](AudioOutBuffer&) {
+        lock_guard<mutex> lock(callbackMutex);
+        called = true;
+        callbackCv.notify_one();
+    });
+    settings.deviceName.clear();
+    check("retry starts the Null backend", engine.init(settings));
+    {
+        unique_lock<mutex> lock(callbackMutex);
+        check("Null drives audioOut", callbackCv.wait_for(lock, chrono::seconds(5), [&] { return called; }));
+    }
+    const auto recovered = engine.getStats();
+    check("successful init clears every failure field",
+          recovered.initFailure == AudioInitFailure::None && recovered.initFailureResult == 0 &&
+          string(recovered.initFailureBackend).empty() &&
+          internal::audioDeviceReport(false).initFailureDevice.empty());
+    const auto running = audioState();
+    check("MCP reports Null running without initFailure", running.is_object() &&
+          running.value("running", false) && !running.contains("initFailure") &&
+          running.at("output").value("backend", "") == "Null");
+    const auto devices = AudioEngine::listDevices();
+    check("enumeration follows the engine context", devices.size() == 1 &&
+          devices[0].name == "NULL Playback Device");
+
+    // Keep a diagnostics reader active across failed live re-init and recovery.
+    atomic<bool> reading{true};
+    atomic<bool> consistent{true};
+    thread reader([&] {
+        while (reading.load()) {
+            const auto stats = engine.getStats();
+            if (stats.initFailure == AudioInitFailure::DeviceOpen &&
+                (stats.initFailureResult != MA_FAILED_TO_OPEN_BACKEND_DEVICE ||
+                 string(stats.initFailureBackend) != "Null")) consistent.store(false);
+        }
+    });
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
+    check("failed live re-init stops the old device", !engine.init(settings) && !engine.isInitialized());
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
+    check("live re-init failure can recover", engine.init(settings));
+    reading.store(false);
+    reader.join();
+    check("concurrent stats reads keep failure fields consistent", consistent.load());
+
+    // Zero-argument init must discard Null selection, even after a failed init.
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
+    check("zero-argument init uses Default and surfaces its failure", !engine.init());
+    const auto defaultReport = internal::audioDeviceReport(false);
+    check("Default uses the same backend as the initial real-backend probe",
+          defaultReport.backend == before.backend);
+    check("device-open failure does not switch backend",
+          engine.getStats().initFailure == AudioInitFailure::DeviceOpen &&
+          string(engine.getStats().initFailureBackend) == before.backend);
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
+    check("explicit Null can replace the Default context", engine.init(settings));
+    listener.disconnect();
+    engine.shutdown();
+}
+
 } // namespace
 
 TC_CORE_TEST_MAIN() {
     checkSelection();
-    internal::setNullAudioBackendForTests(true);
     mcp::registerInspectionTools();
+    checkBackendFailure();
     checkInit("implicit default", "");
     checkInit("unknown name falls back to default", "tc-audio-default-device-missing");
     const auto devices = AudioEngine::listDevices();

@@ -352,6 +352,11 @@ namespace internal {
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
+    // Closes the secondary windows whose close() request is still pending
+    // (defined in tc/app/tcWindow.h). The app shutdown calls it after the
+    // main App's exit(): the run loop has ended, so no backend safe point
+    // follows.
+    void closeRequestedWindowsAtShutdown();
 }
 
 // ---------------------------------------------------------------------------
@@ -2388,6 +2393,7 @@ namespace internal {
     // init-time failures sokol reports (e.g. no X display on Linux) and
     // setup-time log lines land in the file too.
     inline void openEnvLogFile() {
+        installCrashHandler();
         #ifndef __EMSCRIPTEN__
         if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
             if (envLog[0] != '\0' && !setLogFile(envLog)) {
@@ -2401,6 +2407,7 @@ namespace internal {
     bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
 
     inline void _setup_cb() {
+        CrashPhaseScope crashPhase("setup");
         installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
@@ -2536,6 +2543,7 @@ namespace internal {
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
         if (appUpdateFunc) {
+            CrashPhaseScope crashPhase("update");
             EntryStackGuard guard(AppEntry::Update);
             appUpdateFunc();
         }
@@ -2678,6 +2686,8 @@ namespace internal {
             return;
         }
         frameReentryGuard = true;
+        crashFrame(sapp_frame_count());
+        CrashPhaseScope crashPhase("frame");
 
         // Frame time, queued work, independent updates and the draw decision.
         bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
@@ -2700,7 +2710,10 @@ namespace internal {
             // If Update is synced to Draw, call Update here
             runSyncedUpdate();
 
-            if (appDrawFunc) appDrawFunc();
+            {
+                CrashPhaseScope drawPhase("draw");
+                if (appDrawFunc) appDrawFunc();
+            }
 
             // Reset shader stack if any shaders are still pushed
             internal::resetShaderStack();
@@ -2739,6 +2752,7 @@ namespace internal {
 
     inline void _cleanup_cb() {
         if (!beginExitCleanup()) return;
+        CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
         currentWindowCtx() = &mainWindowContext();
@@ -2799,6 +2813,13 @@ namespace internal {
     }
 
     inline void _event_cb(const sapp_event* ev) {
+        CrashPhaseScope crashPhase("event dispatch");
+        if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
+            crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
+                       static_cast<int>(ev->mouse_y),
+                       ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP
+                           ? static_cast<int>(ev->key_code) : static_cast<int>(ev->mouse_button));
+        }
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they
         // found them.
@@ -3130,11 +3151,14 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         if (app) {
             events().exit.notify();
             app->exit();
-            app->cleanup();
+            // close() requests made so far (e.g. from exit()) land here,
+            // before the main App's cleanup().
+            internal::closeRequestedWindowsAtShutdown();
             // The audio device is still running (it stops in _cleanup_cb, so
             // exit() can use audio): detach the App's audio hooks and wait
-            // for a callback in flight before the App goes (#256).
+            // for a callback in flight before cleanup() frees audio state (#698).
             internal::detachAppAudio(*app);
+            app->cleanup();
             app.reset();
         }
     };

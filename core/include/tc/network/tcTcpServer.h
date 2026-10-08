@@ -240,12 +240,18 @@ public:
     // Data send
     // -------------------------------------------------------------------------
 
-    // Send data to specified client
+    // Send data to the specified client and wait until the payload is written
+    // or an error occurs, including setSendTimeout() seconds without progress
+    // (60 s by default). On the main thread (update/draw, input handlers,
+    // Deliver::Main listeners), use sendAsync() to avoid waiting.
     bool send(int clientId, const void* data, size_t size);
     bool send(int clientId, const std::vector<char>& data);
     bool send(int clientId, const std::string& message);
 
-    // Broadcast to all clients
+    // Broadcast to all clients and wait for each payload to be written or an
+    // error to occur, including setSendTimeout() seconds without progress
+    // (60 s by default). On the main thread (update/draw, input handlers,
+    // Deliver::Main listeners), use broadcastAsync() to avoid waiting.
     void broadcast(const void* data, size_t size);
     void broadcast(const std::vector<char>& data);
     void broadcast(const std::string& message);

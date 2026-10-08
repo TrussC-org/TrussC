@@ -14,11 +14,13 @@
 
 #include <TrussC.h>
 #include "tcAnalyzeImage.h"
+#include "tcAudioTools.h"
 
 namespace trussc {
 namespace mcp {
 
 void registerInspectionTools() {
+    detail::registerAudioTools();
 
     // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
     // secondary windows in the order tc_list_windows reports). Returns the
@@ -385,7 +387,7 @@ void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
-    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
+    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; initFailure (last failed init reason, miniaudio result, backend and requested device; omitted after success); stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
         .arg<bool>("devices", "Enumerate playback / capture devices (default true)", false)
         .bind([](const json& args) -> json {
             bool enumerate = true;
@@ -398,7 +400,7 @@ void registerInspectionTools() {
 
             json playingSounds = json::array();
             for (const auto& v : engine.getPlayingSounds()) {
-                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToUtf8(v.path)},
+                playingSounds.push_back({{"slot", v.slot}, {"path", trussc::internal::pathToDisplayUtf8(v.path)},
                                   {"streaming", v.streaming},
                                   {"position", v.position}, {"duration", v.duration},
                                   {"volume", v.volume}, {"pan", v.pan}, {"speed", v.speed},
@@ -434,6 +436,13 @@ void registerInspectionTools() {
                                 {"decoderError", st.droppedDecoderError},
                                 {"notRunning", st.droppedNotRunning}}},
                    {"thread", {{"cpuUsage", st.cpuUsage}, {"cpuUsagePeak", st.cpuUsagePeak}}}};
+            if (st.initFailure != trussc::AudioInitFailure::None) {
+                const char* reason = "noBackend";
+                if (st.initFailure == trussc::AudioInitFailure::DeviceOpen) reason = "deviceOpen";
+                if (st.initFailure == trussc::AudioInitFailure::DeviceStart) reason = "deviceStart";
+                r["initFailure"] = {{"reason", reason}, {"result", st.initFailureResult},
+                                    {"backend", st.initFailureBackend}, {"device", dev.initFailureDevice}};
+            }
             if (dev.enumerated) {
                 auto list = [](const std::vector<trussc::AudioDeviceInfo>& in) {
                     json a = json::array();

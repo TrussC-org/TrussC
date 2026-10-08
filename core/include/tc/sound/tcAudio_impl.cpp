@@ -42,25 +42,10 @@
 namespace trussc {
 
 namespace {
-// Open a ma_decoder from a path. Wide entry point on Windows so non-ASCII
-// paths survive (same helper as tcSound_impl.cpp).
-ma_result maDecoderInitPathA(const fs::path& path,
-                             const ma_decoder_config* cfg, ma_decoder* dec) {
-#ifdef _WIN32
-    return ma_decoder_init_file_w(path.c_str(), cfg, dec);
-#else
-    return ma_decoder_init_file(path.c_str(), cfg, dec);
-#endif
-}
-
-// Set by internal::setNullAudioBackendForTests(): the engine, device
-// enumeration and MicInput open miniaudio's null backend only.
-std::atomic<bool> g_nullBackendForTests{false};
-
-// Whether the engine's persistent context was opened with the null backend
-// on request (the test hook above), so landing on it is not a fallback.
-// Main thread only: written and read in AudioEngine::init().
+// Main thread only: backend request used to open the persistent context.
 bool g_engineNullBackendRequested = false;
+
+std::atomic<int> g_audioDeviceFault{0};
 
 // Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
 std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
@@ -76,19 +61,60 @@ std::atomic<bool> g_mixerLagReleased{false};
 // Read by internal::lastStreamSeekPointsForTests(): the seek points of the
 // stream decoder opened last.
 std::atomic<uint32_t> g_lastStreamSeekPoints{0};
+std::atomic<uint64_t> g_streamMp3Scans{0};
+std::atomic<uint64_t> g_streamMp3TableBuilds{0};
 
 // Read by internal::streamWorkerPassesForTests(): the StreamWorker's passes.
 std::atomic<uint64_t> g_streamWorkerPasses{0};
 
+// Open a ma_decoder from a path. Wide entry point on Windows so non-ASCII
+// paths survive (same helper as tcSound_impl.cpp).
+ma_result maDecoderInitPathA(const fs::path& path,
+                             const ma_decoder_config* cfg, ma_decoder* dec) {
+#ifdef _WIN32
+    const ma_result r = ma_decoder_init_file_w(path.c_str(), cfg, dec);
+#else
+    const ma_result r = ma_decoder_init_file(path.c_str(), cfg, dec);
+#endif
+    // Count automatic table generation too, so the regression test catches
+    // a nonzero seekPointCount accidentally returning to the play path.
+    if (r == MA_SUCCESS && cfg->seekPointCount != 0 &&
+            dec->pBackendVTable == &g_ma_decoding_backend_vtable_mp3) {
+        g_streamMp3TableBuilds.fetch_add(1, std::memory_order_relaxed);
+    }
+    return r;
+}
+
+// All streaming length queries use this seam, including non-MP3 decoders.
+ma_uint64 streamDecoderLength(ma_decoder& decoder, bool nativeRate = false) {
+    const bool mp3 = decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3;
+    if (mp3) g_streamMp3Scans.fetch_add(1, std::memory_order_relaxed);
+    ma_uint64 frames = 0;
+    if (nativeRate) {
+        ma_data_source_get_length_in_pcm_frames(decoder.pBackend, &frames);
+    } else {
+        ma_decoder_get_length_in_pcm_frames(&decoder, &frames);
+    }
+    return frames;
+}
+
 const ma_backend kNullBackend = ma_backend_null;
 
 // ma_context_init with miniaudio's default backend order for the platform,
-// or only the null backend under the test hook.
-ma_result initContext(ma_context* ctx) {
-    if (g_nullBackendForTests.load(std::memory_order_relaxed)) {
-        return ma_context_init(&kNullBackend, 1, NULL, ctx);
+// or only the explicitly requested null backend.
+ma_result initContext(ma_context* ctx, bool probe = false,
+                      AudioBackend backend = AudioBackend::Default) {
+    ma_context_config cfg = ma_context_config_init();
+    if (probe) {
+        // Enumeration only observes the iOS session, including on uninit.
+        cfg.coreaudio.sessionCategory = ma_ios_session_category_none;
+        cfg.coreaudio.noAudioSessionActivate = MA_TRUE;
+        cfg.coreaudio.noAudioSessionDeactivate = MA_TRUE;
     }
-    return ma_context_init(NULL, 0, NULL, ctx);
+    if (backend == AudioBackend::Null) {
+        return ma_context_init(&kNullBackend, 1, &cfg, ctx);
+    }
+    return ma_context_init(NULL, 0, &cfg, ctx);
 }
 } // namespace
 
@@ -105,8 +131,8 @@ bool openedDeviceIsDefault(const ma_device_id* selectedID,
     return false;
 }
 
-void setNullAudioBackendForTests(bool on) {
-    g_nullBackendForTests.store(on, std::memory_order_relaxed);
+void setAudioDeviceFaultForTests(AudioDeviceFaultForTests fault) {
+    g_audioDeviceFault.store((int)fault, std::memory_order_relaxed);
 }
 
 void setAudioRecorderCaptureHookForTests(void (*hook)(int frames)) {
@@ -125,6 +151,14 @@ void setStreamFaultForTests(StreamFaultForTests fault) {
 
 uint32_t lastStreamSeekPointsForTests() {
     return g_lastStreamSeekPoints.load(std::memory_order_relaxed);
+}
+
+uint64_t streamMp3ScansForTests() {
+    return g_streamMp3Scans.load(std::memory_order_relaxed);
+}
+
+uint64_t streamMp3TableBuildsForTests() {
+    return g_streamMp3TableBuilds.load(std::memory_order_relaxed);
 }
 
 uint64_t streamWorkerPassesForTests() {
@@ -170,6 +204,17 @@ struct AudioDiagnostics {
     std::atomic<int64_t> lastCallbackFinished{0};
     std::atomic<int64_t> stallTimeout{250000000};
     std::atomic<bool> running{false};
+    // One atomic snapshot: reason (8 bits), backend id + 1 (8 bits; 0 = none),
+    // and signed ma_result (upper 32 bits). No allocation or lock in getStats().
+    std::atomic<uint64_t> initFailure{0};
+
+    void recordInitFailure(AudioInitFailure reason, ma_result result,
+                           int backend, const std::string& device) {
+        initFailureDevice = device;
+        initFailure.store((uint64_t)(uint32_t)result << 32
+                          | (uint64_t)(backend + 1) << 8 | (uint64_t)reason,
+                          std::memory_order_relaxed);
+    }
 
     // --- audio thread only (reset while no device runs): meter / load windows ---
     float    winPeak = 0.0f;
@@ -187,6 +232,7 @@ struct AudioDiagnostics {
     bool wasStalled = false;
     uint64_t unreportedStalls = 0;
     bool     deviceIsDefault = false;   // set by init()
+    std::string initFailureDevice;      // main thread only
 
     AudioDiagnostics() {
         // "Long ago", so the first report of each reason goes out at once
@@ -245,7 +291,31 @@ std::string sourceLabel(const SoundSource* source) {
 AudioEngine::AudioEngine()
     : diag_(std::make_unique<AudioDiagnostics>()) {
     playingSounds_.resize(DEFAULT_MAX_PLAYING_SOUNDS);
-    analysisBuffer_.resize(ANALYSIS_BUFFER_SIZE, 0.0f);
+}
+
+internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngine& engine, size_t frames) {
+    std::lock_guard<std::mutex> lock(engine.analysisMutex_);
+    return engine.analysisRing_ ? engine.analysisRing_->snapshot(frames) : AudioOutputSnapshot{};
+}
+
+size_t AudioEngine::getAnalysisBuffer(float* outBuffer, size_t numSamples) {
+    if (!initialized_ || !outBuffer || numSamples == 0) return 0;
+    numSamples = std::min(numSamples, size_t(ANALYSIS_BUFFER_SIZE));
+    // Callable from any thread: the lock covers analysisCopy_ as well as the
+    // ring. Only readers and init() take it, never the audio callback.
+    std::lock_guard<std::mutex> lock(analysisMutex_);
+    const auto data = analysisRing_ ? analysisRing_->snapshot(numSamples) : internal::AudioOutputSnapshot{};
+    if (data.channels) {
+        const size_t count = data.samples.size() / data.channels;
+        const size_t padding = ANALYSIS_BUFFER_SIZE - count;
+        std::fill_n(analysisCopy_, padding, 0.0f);
+        for (size_t f = 0; f < count; ++f) {
+            const float* frame = &data.samples[f * data.channels];
+            analysisCopy_[padding + f] = data.channels > 1 ? (frame[0] + frame[1]) * 0.5f : frame[0];
+        }
+    }
+    std::copy_n(analysisCopy_ + ANALYSIS_BUFFER_SIZE - numSamples, numSamples, outBuffer);
+    return numSamples;
 }
 
 AudioEngine::~AudioEngine() {
@@ -392,6 +462,11 @@ AudioStats AudioEngine::getStats() const {
     const AudioDiagnostics& d = *diag_;
     auto get = [](const std::atomic<uint64_t>& a) { return a.load(std::memory_order_relaxed); };
     AudioStats s;
+    const uint64_t failure = d.initFailure.load(std::memory_order_relaxed);
+    s.initFailure = (AudioInitFailure)(failure & 0xff);
+    s.initFailureResult = (int32_t)(failure >> 32);
+    const int backend = (int)((failure >> 8) & 0xff) - 1;
+    s.initFailureBackend = backend >= 0 ? ma_get_backend_name((ma_backend)backend) : "";
     s.droppedPolyphonyLimit = get(d.dropped[(int)DropReason::PolyphonyLimit]);
     s.droppedStreamLimit    = get(d.dropped[(int)DropReason::StreamLimit]);
     s.droppedDecoderError   = get(d.dropped[(int)DropReason::DecoderError]);
@@ -456,6 +531,7 @@ void flushAudioDiagnostics() {
 AudioDeviceReport audioDeviceReport(bool enumerate) {
     AudioDeviceReport r;
     AudioEngine& engine = AudioEngine::getInstance();
+    r.initFailureDevice = engine.diag_->initFailureDevice;
     ma_context* ctx = static_cast<ma_context*>(engine.context_);
     if (ctx) r.backend = ma_get_backend_name(ctx->backend);
 
@@ -473,7 +549,7 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
         // through a throwaway context, so asking never starts the engine.
         ma_context temp;
         bool tempInit = false;
-        if (!ctx && initContext(&temp) == MA_SUCCESS) {
+        if (!ctx && initContext(&temp, true) == MA_SUCCESS) {
             ctx = &temp;
             tempInit = true;
             r.backend = ma_get_backend_name(temp.backend);
@@ -545,6 +621,14 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
 
 namespace internal {
 
+// Immutable after load, shared by the source and every bound decoder. The
+// worker can retain a decoder even after its PlayingSound releases the source.
+struct Mp3StreamData {
+    ma_uint64 nativeFrames = 0;
+    ma_uint32 nativeRate = 0;
+    std::vector<ma_dr_mp3_seek_point> seekPoints;
+};
+
 struct StreamInstance {
     static constexpr size_t RING_FRAMES = 16384;          // power of 2
     static constexpr size_t RING_MASK   = RING_FRAMES - 1;
@@ -553,6 +637,7 @@ struct StreamInstance {
                                                           // the mixer consumes
     ma_decoder decoder;
     bool decoderInitialized = false;
+    std::shared_ptr<const Mp3StreamData> mp3Data;
 
     // Interleaved stereo float, size = RING_FRAMES * CHANNELS.
     std::vector<float> ring;
@@ -615,35 +700,33 @@ struct StreamInstance {
     // engine rate `rate`, and read its length. play() and the re-init
     // migration, on the caller's thread.
     //
-    // An MP3 gets a seek table (#280): without one dr_mp3 seeks by decoding
-    // from the start (or from the current frame, forward), which on a
-    // one-hour file took up to 2.5 s on a desktop CPU and blocks the single
-    // StreamWorker, so every other stream underruns meanwhile. With one
-    // point per second of audio a seek decodes at most ~1 s (~1 ms). The
-    // count is capped at 1024 (24 bytes each, 24 KB per voice): past ~17
-    // minutes the points spread out, a one-hour file seeks in ~3 ms and a
-    // three-hour one in ~10 ms. Building the table scans the file's frame
-    // headers once more, on this thread (~75 ms for a one-hour 192 kbps
-    // file in the page cache; reading its length already takes one such
-    // scan). WAV and FLAC seek on their own; only the MP3 backend reads
-    // seekPointCount.
+    // MP3 length and seek points are prepared once by loadStream(). Binding
+    // them here does not scan the file, including during a rate migration.
     ma_result openDecoder(const SoundStream& src, ma_uint32 rate) {
         ma_decoder_config cfg = ma_decoder_config_init(ma_format_f32, CHANNELS, rate);
         cfg.encodingFormat = (ma_encoding_format)src.encodingFormatHint_;
-        if (cfg.encodingFormat == ma_encoding_format_mp3) {
-            cfg.seekPointCount = mp3SeekPointCount(src.duration_);
-        }
+        cfg.seekPointCount = 0;
         const ma_result r = maDecoderInitPathA(src.path_, &cfg, &decoder);
         if (r != MA_SUCCESS) return r;
         decoderInitialized = true;
         uint32_t seekPoints = 0;
         if (decoder.pBackendVTable == &g_ma_decoding_backend_vtable_mp3 && decoder.pBackend) {
-            seekPoints = static_cast<const ma_mp3*>(decoder.pBackend)->seekPointCount;
+            mp3Data = src.mp3Data_;
+            if (!mp3Data) return MA_INVALID_DATA;
+            auto* mp3 = static_cast<ma_mp3*>(decoder.pBackend);
+            seekPoints = (ma_uint32)mp3Data->seekPoints.size();
+            // dr_mp3's binding API is non-const, but only reads the table.
+            // Leave ma_mp3::pSeekPoints null: ma_mp3_uninit frees that field.
+            if (!ma_dr_mp3_bind_seek_table(&mp3->dr, seekPoints,
+                    const_cast<ma_dr_mp3_seek_point*>(mp3Data->seekPoints.data()))) {
+                return MA_ERROR;
+            }
+            totalFramesInFile = ma_calculate_frame_count_after_resampling(
+                rate, mp3Data->nativeRate, mp3Data->nativeFrames);
+        } else {
+            totalFramesInFile = streamDecoderLength(decoder);
         }
         g_lastStreamSeekPoints.store(seekPoints, std::memory_order_relaxed);
-        ma_uint64 total = 0;
-        ma_decoder_get_length_in_pcm_frames(&decoder, &total);
-        totalFramesInFile = (uint64_t)total;
         pathUtf8 = internal::pathToDisplayUtf8(src.path_);
         return MA_SUCCESS;
     }
@@ -682,7 +765,7 @@ struct StreamInstance {
     }
 
     // One seek point per second of audio, at least 1, at most 1024 (see
-    // openDecoder()).
+    // loadStream()).
     static ma_uint32 mp3SeekPointCount(float durationSec) {
         constexpr ma_uint32 kMax = 1024;
         if (!(durationSec > 1.0f)) return 1;
@@ -1225,6 +1308,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                                                     StreamInstance::CHANNELS,
                                                     AudioEngine::getInstance().getSampleRate());
     cfg.encodingFormat = fmt;
+    cfg.seekPointCount = 0;
     ma_result r = maDecoderInitPathA(path, &cfg, &probe);
     if (r != MA_SUCCESS) {
         logError("SoundStream") << "failed to open " << path
@@ -1235,7 +1319,44 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
     }
 
     ma_uint64 totalFrames = 0;
-    ma_decoder_get_length_in_pcm_frames(&probe, &totalFrames);
+    std::shared_ptr<internal::Mp3StreamData> mp3Data;
+    if (fmt == ma_encoding_format_mp3) {
+        // An MP3 gets a seek table (#280): without one dr_mp3 seeks by
+        // decoding from the start (or forward from the current frame), which
+        // on a one-hour file took up to 2.5 s and blocked the single
+        // StreamWorker, so every other stream underran. With one point per
+        // second of audio a seek decodes at most ~1 s (~1 ms); the count is
+        // capped at 1024 (past ~17 minutes the points spread out: a one-hour
+        // file seeks in ~3 ms). Building it scans the frame headers once
+        // (~75 ms for a one-hour 192 kbps file), so it is done here, once per
+        // load, and shared by every voice and engine-rate re-init (#463).
+        auto* mp3 = static_cast<ma_mp3*>(probe.pBackend);
+        try {
+            mp3Data = std::make_shared<internal::Mp3StreamData>();
+            mp3Data->nativeRate = mp3->dr.sampleRate;
+            mp3Data->nativeFrames = streamDecoderLength(probe, true);
+            totalFrames = ma_calculate_frame_count_after_resampling(
+                probe.outputSampleRate, mp3Data->nativeRate, mp3Data->nativeFrames);
+            const float duration = (float)((double)totalFrames / probe.outputSampleRate);
+            ma_uint32 count = StreamInstance::mp3SeekPointCount(duration);
+            mp3Data->seekPoints.resize(count);
+            g_streamMp3TableBuilds.fetch_add(1, std::memory_order_relaxed);
+            if (!ma_dr_mp3_calculate_seek_points(&mp3->dr, &count, mp3Data->seekPoints.data())) {
+                r = MA_ERROR;
+            }
+            mp3Data->seekPoints.resize(count);
+        } catch (const std::bad_alloc&) {
+            r = MA_OUT_OF_MEMORY;
+        }
+        if (r != MA_SUCCESS) {
+            ma_decoder_uninit(&probe);
+            logError("SoundStream") << "failed to prepare MP3 seek table: " << path;
+            return LoadResult::fail(LoadError::DecodeFailed, "failed to prepare MP3 seek table: " +
+                                    internal::pathToDisplayUtf8(path));
+        }
+    } else {
+        totalFrames = streamDecoderLength(probe);
+    }
     ma_uint64 probed = totalFrames;
     if (totalFrames == 0) {
         // A length of 0 can also mean "unknown" (a FLAC whose STREAMINFO
@@ -1259,6 +1380,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                 : 0.0f;
     ma_decoder_uninit(&probe);
 
+    mp3Data_ = std::move(mp3Data);
     path_ = path;
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = (int)fmt;
@@ -1589,6 +1711,9 @@ StreamSeekStateForTests streamSeekStateForTests(const Sound& sound) {
     if (!sound.playing_ || !sound.playing_->stream) return state;
     const StreamInstance& s = *sound.playing_->stream;
     state.hasStream = true;
+    state.totalFrames = s.totalFramesInFile;
+    state.mp3SeekTable = s.mp3Data
+        ? static_cast<const ma_mp3*>(s.decoder.pBackend)->dr.pSeekPoints : nullptr;
     state.request = s.seekRequestSeq.load(std::memory_order_acquire);
     state.served = s.seekServedSeq.load(std::memory_order_relaxed);
     state.published = s.seekPublishedSeq.load(std::memory_order_relaxed);
@@ -1731,6 +1856,9 @@ bool AudioEngine::init(const AudioSettings& settings) {
             ma_device_uninit(device);
             delete device;
             device_ = nullptr;
+            // Not running until the new device starts; a failed reopen
+            // must not read as a stall next to initFailure.
+            diag_->running.store(false, std::memory_order_release);
         }
         initialized_ = false;
     }
@@ -1744,6 +1872,11 @@ bool AudioEngine::init(const AudioSettings& settings) {
     sampleRate_ = settings.sampleRate > 0 ? settings.sampleRate : DEFAULT_SAMPLE_RATE;
     channels_   = settings.channels   > 0 ? settings.channels   : DEFAULT_CHANNELS;
     bufferSize_ = settings.bufferSize  > 0 ? settings.bufferSize : DEFAULT_BUFFER_SIZE;
+    {
+        std::lock_guard<std::mutex> lock(analysisMutex_);
+        analysisRing_ = std::make_unique<internal::AudioOutputRing>(sampleRate_, channels_);
+        std::fill_n(analysisCopy_, ANALYSIS_BUFFER_SIZE, 0.0f);
+    }
 
     int polyphony = settings.maxPolyphony > 0
                   ? settings.maxPolyphony
@@ -1767,10 +1900,18 @@ bool AudioEngine::init(const AudioSettings& settings) {
     // every device init/uninit cycle keeps CoreAudio's internal state
     // consistent on macOS — without it, the second ma_device_uninit in a
     // tight cycle hangs waiting for the audio thread to join.
+    const bool nullRequested = settings.backend == AudioBackend::Null;
+    if (context_ && nullRequested != g_engineNullBackendRequested) {
+        auto* ctx = static_cast<ma_context*>(context_);
+        ma_context_uninit(ctx);
+        delete ctx;
+        context_ = nullptr;
+    }
     if (!context_) {
         ma_context* ctx = new ma_context();
-        ma_result ctxResult = initContext(ctx);
+        ma_result ctxResult = initContext(ctx, false, settings.backend);
         if (ctxResult != MA_SUCCESS) {
+            diag_->recordInitFailure(AudioInitFailure::NoBackend, ctxResult, -1, settings.deviceName);
             logError("AudioEngine") << "no audio backend available (ma_context_init result="
                                     << (int)ctxResult
                                     << (settings.deviceName.empty() ? std::string()
@@ -1780,7 +1921,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
             return false;
         }
         context_ = ctx;
-        g_engineNullBackendRequested = g_nullBackendForTests.load(std::memory_order_relaxed);
+        g_engineNullBackendRequested = nullRequested;
     }
     ma_context* ctxArg = static_cast<ma_context*>(context_);
 
@@ -1829,8 +1970,11 @@ bool AudioEngine::init(const AudioSettings& settings) {
         config.periodSizeInFrames = bufferSize_;
     }
 
-    ma_result result = ma_device_init(ctxArg, &config, device);
+    ma_result result = g_audioDeviceFault.load(std::memory_order_relaxed)
+            == (int)internal::AudioDeviceFaultForTests::OpenFails
+        ? MA_FAILED_TO_OPEN_BACKEND_DEVICE : ma_device_init(ctxArg, &config, device);
     if (result != MA_SUCCESS) {
+        diag_->recordInitFailure(AudioInitFailure::DeviceOpen, result, ctxArg->backend, settings.deviceName);
         logError("AudioEngine") << "failed to initialize " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         delete device;
@@ -1848,6 +1992,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     result = ma_device_start(device);
     if (result != MA_SUCCESS) {
         diag_->running.store(false, std::memory_order_release);
+        diag_->recordInitFailure(AudioInitFailure::DeviceStart, result, ctxArg->backend, settings.deviceName);
         logError("AudioEngine") << "failed to start " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         ma_device_uninit(device);
@@ -1857,14 +2002,19 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     device_ = device;
     initialized_ = true;
+    diag_->initFailureDevice.clear();
+    diag_->initFailure.store(0, std::memory_order_relaxed);
 
+    if (g_engineNullBackendRequested) {
+        logNotice("AudioEngine") << "audio backend: Null (requested); output is silent";
+    }
     logNotice("AudioEngine") << "initialized (" << sampleRate_ << " Hz, " << channels_ << " ch, "
                              << playingSounds_.size() << " playback slots, "
                              << ma_get_backend_name(ctxArg->backend) << ": "
                              << device->playback.name << ")";
 
     // miniaudio's default backend order ends with the null backend, so with
-    // no usable real backend init() still succeeds on a silent device.
+    // no real backend context init() still succeeds on a silent device.
     if (ctxArg->backend == ma_backend_null && !g_engineNullBackendRequested) {
         logWarning("AudioEngine") << "no usable audio backend; output is silent (miniaudio Null device)";
     }
@@ -1909,25 +2059,25 @@ bool AudioEngine::init(const AudioSettings& settings) {
 std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
     std::vector<AudioDeviceInfo> result;
 
-    ma_context context;
-    if (initContext(&context) != MA_SUCCESS) {
-        return result;
+    ma_context temporary;
+    auto* context = static_cast<ma_context*>(getInstance().context_);
+    const bool probe = context == nullptr;
+    if (probe) {
+        if (initContext(&temporary, true) != MA_SUCCESS) return result;
+        context = &temporary;
     }
 
     ma_device_info* playbackInfos = nullptr;
     ma_uint32 playbackCount = 0;
-    if (ma_context_get_devices(&context, &playbackInfos, &playbackCount,
-                                NULL, NULL) == MA_SUCCESS) {
+    if (ma_context_get_devices(context, &playbackInfos, &playbackCount,
+                               NULL, NULL) == MA_SUCCESS) {
         result.reserve(playbackCount);
         for (ma_uint32 i = 0; i < playbackCount; ++i) {
-            AudioDeviceInfo info;
-            info.name      = playbackInfos[i].name;
-            info.isDefault = (playbackInfos[i].isDefault != 0);
-            result.push_back(std::move(info));
+            result.push_back({playbackInfos[i].name, playbackInfos[i].isDefault != 0});
         }
     }
 
-    ma_context_uninit(&context);
+    if (probe) ma_context_uninit(&temporary);
     return result;
 }
 
@@ -2248,9 +2398,11 @@ bool MicInput::start(int sampleRate) {
     config.dataCallback = micDataCallback;
     config.pUserData = this;
 
-    // Same backend choice as the engine (internal::setNullAudioBackendForTests()).
-    ma_result result = g_nullBackendForTests.load(std::memory_order_relaxed)
-        ? ma_device_init_ex(&kNullBackend, 1, nullptr, &config, device)
+    // Follow the engine's selected backend, with a private capture context so
+    // engine re-init/shutdown cannot invalidate a running microphone's context.
+    const auto* engineContext = static_cast<const ma_context*>(AudioEngine::getInstance().context_);
+    ma_result result = engineContext
+        ? ma_device_init_ex(&engineContext->backend, 1, nullptr, &config, device)
         : ma_device_init(nullptr, &config, device);
     if (result != MA_SUCCESS) {
         logError("MicInput") << "failed to initialize the capture device (result="

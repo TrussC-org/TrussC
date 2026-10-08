@@ -6,6 +6,7 @@
 // Common interface and state management for VideoPlayer and HapPlayer.
 
 #include <string>
+#include <cmath>
 #include <atomic>
 #include <mutex>
 #include <filesystem>
@@ -13,6 +14,7 @@
 #include "tc/events/tcEvent.h"
 #include "tc/utils/tcLoadResult.h"
 #include "tc/utils/tcLog.h"
+#include "tc/utils/tcOnceGate.h"
 
 namespace trussc {
 
@@ -199,11 +201,33 @@ public:
     // Frame control
     // =========================================================================
 
-    virtual int getCurrentFrame() const = 0;
-    virtual int getTotalFrames() const = 0;
-    virtual void setFrame(int frame) = 0;
-    virtual void nextFrame() = 0;
-    virtual void previousFrame() = 0;
+    virtual float getFrameRate() const = 0;
+
+    // Non-virtual entry points enforce the shared guard before backend dispatch.
+    int getCurrentFrame() const {
+        if (!canUseFrameApis()) return 0;
+        return getCurrentFrameImpl();
+    }
+
+    int getTotalFrames() const {
+        if (!canUseFrameApis()) return 0;
+        return getTotalFramesImpl();
+    }
+
+    void setFrame(int frame) {
+        if (!canUseFrameApis()) return;
+        setFrameImpl(frame);
+    }
+
+    void nextFrame() {
+        if (!canUseFrameApis()) return;
+        nextFrameImpl();
+    }
+
+    void previousFrame() {
+        if (!canUseFrameApis()) return;
+        previousFrameImpl();
+    }
 
     void firstFrame() {
         setFrame(0);
@@ -277,6 +301,25 @@ public:
     const Texture& getTexture() const override { return texture_; }
 
 protected:
+    bool canUseFrameApis() const {
+        if (!initialized_) return false;
+        const float rate = getFrameRate();
+        if (std::isfinite(rate) && rate > 0.0f) return true;
+        if (unknownFrameRateWarning_.isFirstTime()) {
+            logWarning("VideoPlayer") << "Frame rate is unknown; frame APIs return 0 or do nothing. "
+                                      "Use getPosition()/setPosition() and getDuration().";
+        }
+        return false;
+    }
+
+    // Reapply persistent settings once the derived player has loaded its backend.
+    // Speed is applied by play(): setting the rate can start native playback.
+    void applyCachedStateToPlatform() {
+        setLoopImpl(loop_);
+        setVolumeImpl(volume_);
+        setPanImpl(pan_);
+    }
+
     // Safe on decoder threads. No listeners or playback state are touched here.
     void reportPlaybackError(const std::string& message, int64_t code = 0) {
         playbackErrors_.report(message, code);
@@ -343,6 +386,12 @@ protected:
     // -------------------------------------------------------------------------
     // Implementation methods (to be overridden by derived classes)
     // -------------------------------------------------------------------------
+    virtual int getCurrentFrameImpl() const = 0;
+    virtual int getTotalFramesImpl() const = 0;
+    virtual void setFrameImpl(int frame) = 0;
+    virtual void nextFrameImpl() = 0;
+    virtual void previousFrameImpl() = 0;
+
     virtual void playImpl() = 0;
     virtual void stopImpl() = 0;
     virtual void setPausedImpl(bool paused) = 0;
@@ -365,6 +414,8 @@ protected:
             playing_ = false;
         }
     }
+private:
+    mutable OnceGate unknownFrameRateWarning_;
 };
 
 } // namespace trussc

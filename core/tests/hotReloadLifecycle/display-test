@@ -1,0 +1,2 @@
+# --app is the interactive host; --reload-check exercises it and exits.
+{test} --reload-check

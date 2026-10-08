@@ -271,9 +271,11 @@ public:
         win_.native_ = &nativeStandIn_;
         app_ = make_shared<App>();
         win_.setApp(app_);
+        internal::applyPendingAppForTests(win_);   // the frame boundary
     }
     ~WindowDriver() override {
         win_.setApp(nullptr);
+        internal::applyPendingAppForTests(win_);   // the frame boundary
         win_.native_ = nullptr;
         app_.reset();
         internal::currentWindowCtx() = prev_;

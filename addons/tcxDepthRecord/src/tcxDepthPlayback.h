@@ -190,9 +190,10 @@ protected:
                     else fresh.color = false;
                     reportSkippedBlock(type, why);
                 }
-                // These end where their own size fields say (see the parsers).
+                // Skip unknown trailing fields, while preserving the legacy
+                // color length that is four bytes short of its known payload.
                 if (used == 0) break;
-                next = payload + used;
+                next = payload + std::max<std::uint64_t>(len, used);
             } else {
                 // unknown / custom: read the payload and offer it to a subclass.
                 std::vector<std::uint8_t> buf(len);

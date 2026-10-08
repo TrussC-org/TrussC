@@ -223,10 +223,9 @@ TC_CORE_TEST_MAIN() {
     fs::create_directories(sandbox);
 
     // Device-less audio engine for AudioRecorder::start
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();
     auto& engine = AudioEngine::getInstance();
-    const bool audioUp = engine.init(AudioSettings{});
+    const bool audioUp = engine.init(AudioSettings{.backend = AudioBackend::Null});
     check("audio engine starts on the null backend", audioUp);
 
     // --- per-platform folders ---

@@ -848,6 +848,11 @@ private:
     // before or during setup().
     virtual void onSetupDone() {}
 
+    // Framework hook, not an app callback (apps override cleanup()): runs
+    // right before cleanupTree() runs this node's cleanup(). App detaches
+    // its audioOut() / audioIn() here and waits for callbacks in flight.
+    virtual void onCleanupStart() {}
+
     // Recursively update self and child nodes
     void updateTree() {
         if (!isActive_) return;
@@ -931,6 +936,7 @@ private:
         if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
+        onCleanupStart();
         cleanup();
     }
 
@@ -1722,6 +1728,9 @@ namespace internal {
 inline void setupNodeOnce(Node& node) {
     if (node.setupCalled_) return;
     EntryStackGuard guard(AppEntry::Setup);
+    // A windowed App's setup() runs inside its first update or draw; report
+    // a crash there as "setup", not as the enclosing phase.
+    CrashPhaseScope crashPhase("setup");
     node.setupOnce();
 }
 }

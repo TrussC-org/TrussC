@@ -210,12 +210,18 @@ public:
     // Data send/receive (virtual - can be overridden in TlsClient)
     // -------------------------------------------------------------------------
 
-    // Send data
+    // Send data and wait until the payload is written or an error occurs,
+    // including setSendTimeout() seconds without progress (60 s by default).
+    // On the main thread (update/draw, input handlers, Deliver::Main listeners),
+    // use sendAsync() to avoid waiting.
     virtual bool send(const void* data, size_t size);
     virtual bool send(const std::vector<char>& data);
     virtual bool send(const std::string& message);
 
     // Queue owned bytes; completion reports through onSendComplete.
+    // An immediate rejection (not connected, queue full, connection closed)
+    // also fires onError right away on the calling thread: sending again from
+    // that listener recurses.
     SendResult sendAsync(const void* data, size_t size);
     SendResult sendAsync(std::vector<char>&& data);
     SendResult sendAsync(const std::string& message);
