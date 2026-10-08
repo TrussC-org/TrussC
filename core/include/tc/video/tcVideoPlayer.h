@@ -22,6 +22,7 @@
 // =============================================================================
 
 #include "tcVideoPlayerBase.h"
+#include <cmath>
 #include "tc/graphics/tcPixels.h"
 
 namespace trussc {
@@ -111,6 +112,7 @@ public:
 
         clearPlaybackError();
         initialized_ = true;
+        applyCachedStateToPlatform();
         firstFrameReceived_ = false;
         posterActive_ = false;
 
@@ -290,29 +292,12 @@ public:
     // Frame control
     // =========================================================================
 
-    int getCurrentFrame() const override {
-        if (!initialized_) return 0;
-        return getCurrentFramePlatform();
-    }
-
-    int getTotalFrames() const override {
-        if (!initialized_) return 0;
-        return getTotalFramesPlatform();
-    }
-
-    void setFrame(int frame) override {
-        if (!initialized_) return;
-        setFramePlatform(frame);
-    }
-
-    void nextFrame() override {
-        if (!initialized_) return;
-        nextFramePlatform();
-    }
-
-    void previousFrame() override {
-        if (!initialized_) return;
-        previousFramePlatform();
+    /// File frame rate in fps, or 0 when unknown (always 0 on Web).
+    /// Time-based position/duration APIs are portable across backends.
+    float getFrameRate() const override {
+        if (!initialized_) return 0.0f;
+        float rate = getFrameRatePlatform();
+        return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
     }
 
     // =========================================================================
@@ -384,6 +369,26 @@ protected:
     // -------------------------------------------------------------------------
     // Implementation methods
     // -------------------------------------------------------------------------
+
+    int getCurrentFrameImpl() const override {
+        return getCurrentFramePlatform();
+    }
+
+    int getTotalFramesImpl() const override {
+        return getTotalFramesPlatform();
+    }
+
+    void setFrameImpl(int frame) override {
+        setFramePlatform(frame);
+    }
+
+    void nextFrameImpl() override {
+        nextFramePlatform();
+    }
+
+    void previousFrameImpl() override {
+        previousFramePlatform();
+    }
 
     void playImpl() override {
         playPlatform();
@@ -586,6 +591,7 @@ private:
     void setSpeedPlatform(float speed);
     void setLoopPlatform(bool loop);
 
+    float getFrameRatePlatform() const;
     int getCurrentFramePlatform() const;
     int getTotalFramesPlatform() const;
     void setFramePlatform(int frame);

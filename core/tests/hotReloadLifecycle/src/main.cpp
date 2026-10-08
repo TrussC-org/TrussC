@@ -113,7 +113,7 @@
 // hotReloadUnload are the same as the first generation's, so the Hierarchy
 // is drawn once; a press over the panel is taken by ImGui, and a press away
 // from it, after a reload that happened while the cursor was over the panel,
-// is not. It needs a display (e.g. Xvfb) and cmake, so CI does not run it.
+// is not. It needs a display (e.g. Xvfb) and cmake; daily Linux CI runs it.
 // =============================================================================
 
 #include "tcApp.h"
@@ -563,9 +563,11 @@ static int runCycles(const std::string& guestPath, int port) {
             const bool attached = guest->attachApp(first, sub);
             const bool guestSawAttach = attached && guest->seesAttached(sub.get());
             first.setApp(nullptr);
+            internal::applyPendingAppForTests(first);   // the frame boundary
             const bool guestSawRelease = !guest->seesAttached(sub.get());
             const bool attachedNew = guest->attachApp(second, reopened);
             second.setApp(nullptr);
+            internal::applyPendingAppForTests(second);   // the frame boundary
             first.native_ = nullptr;
             second.native_ = nullptr;
             if (!attached || !guestSawAttach) {
@@ -610,6 +612,13 @@ static int runCycles(const std::string& guestPath, int port) {
         posts.push_back(startPost(port, toolCallBody("host_deferred", json::object())));
         bool unloadedWhileDeferred = false;
         auto replies = awaitPosts(posts, posts.size(), [&] {
+            if (i == kCycles) {
+                // Normal host shutdown ends the App before unloading it.
+                // unload() must not repeat exit() / cleanup().
+                app->exit();
+                internal::detachAppAudio(*app);
+                app->cleanup();
+            }
             lib.unload();
             unloadedWhileDeferred = true;
         });
@@ -638,6 +647,10 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(43, "hotReloadUnload did not fire once before the guest's App and node references were released "
                             "(fired " + std::to_string(unloadProbe.fired) + " time(s))");
         }
+        if (unloadProbe.exits != 1 || unloadProbe.cleanups != 1 ||
+            !unloadProbe.audioDetachedInCleanup) {
+            return fail(45, "guest unload did not run exit, detach audio, cleanup once in order");
+        }
         if (hostListenerCounts() != countsBeforeLoad) {
             const std::vector<size_t> after = hostListenerCounts();
             return fail(44, "the unloaded generation left listeners on the host's events: keyPressed " +
@@ -651,9 +664,13 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(41, "the unloaded guest App's audio hooks are still subscribed");
         }
         for (size_t k = 0; k < 2; k++) {
-            json cancelled = toolContent(replies[k]);
-            if (!cancelled.is_object() || cancelled.value("status", "") != "error" ||
-                cancelled.value("message", "").find("unloaded") == std::string::npos) {
+            json cancelled = json::parse(replies[k], nullptr, false);
+            const json expected = {{"jsonrpc", "2.0"},
+                {"id", json::parse(posts[k].ex->body).at("id")},
+                {"result", {{"content", {{{"type", "text"},
+                    {"text", "the app code behind this reply was unloaded by a hot reload before the reply was produced"}}}},
+                    {"isError", true}}}};
+            if (cancelled != expected) {
                 return fail(35, std::string("a deferred reply running guest code, pending when the guest was unloaded, "
                                             "was not answered with the unload error: ") +
                                 (cancelled.is_discarded() ? std::string("no reply") : cancelled.dump()));

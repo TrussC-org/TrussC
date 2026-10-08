@@ -29,6 +29,18 @@ struct PausedWriterClient : ProbeClient {
 };
 
 void scenario() {
+    for (bool threads : {true, false}) {
+        TcpClient client;
+        client.setUseThread(threads);
+        int errors = 0;
+        auto err = client.onError.listen([&](TcpErrorEventArgs& e) {
+            check("not-connected rejection message", e.message == "Not connected" && e.errorCode == 0);
+            ++errors;
+        });
+        const auto result = client.sendAsync(string("x"));
+        check("not-connected rejection result", !result && result.error == SendError::NotRunning && result.id == 0);
+        check("not-connected rejection fires once", errors == 1);
+    }
     // Keep an owned send active so the borrowed send stays in the queue.
     // Stopping the connect worker must remove queued bytes before waking the
     // sender, even while the writer cannot drain the closed channel.
@@ -64,6 +76,17 @@ void scenario() {
         sender.join();
         check("cancelled queue bytes removed before writer resumes", client.getSendAsyncPendingBytes() == activeBytes);
         check("removed send completions wait for the writer", completions == 0);
+        {
+            int errors = 0;
+            auto err = client.onError.listen([&](TcpErrorEventArgs& e) {
+                check("closed-channel rejection message", e.message == "Connection closed" && e.errorCode == 0);
+                client.getSendAsyncPendingBytes();
+                ++errors;
+            });
+            const auto result = client.sendAsync("x", 1);
+            check("closed-channel rejection result", !result && result.error == SendError::Disconnected && result.id == 0);
+            check("closed-channel rejection fires once", errors == 1);
+        }
         client.releaseWriter();
         client.disconnect();
         check("active send completes and pending bytes reach zero", completions == 3 && client.getSendAsyncPendingBytes() == 0);
@@ -113,7 +136,15 @@ void scenario() {
         client.setUseThread(threads);
         client.setSendTimeout(0);
         client.setSendAsyncBufferSize(1024);
-        atomic<int> completions{0};
+        atomic<int> errors{0}, completions{0};
+        atomic<bool> queueFullMessage{false}, notConnectedMessage{false};
+        auto err = client.onError.listen([&](TcpErrorEventArgs& e) {
+            queueFullMessage = e.message == "Send queue full" && e.errorCode == 0;
+            notConnectedMessage = e.message == "Not connected" && e.errorCode == 0;
+            // Error callbacks must run without the send-channel mutex held.
+            client.getSendAsyncPendingBytes();
+            ++errors;
+        });
         atomic<SendError> outcome{SendError::None};
         auto complete = client.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
             outcome = e.error;
@@ -129,11 +160,15 @@ void scenario() {
             if (!threads) client.processNetwork();
             return client.wouldBlock.load();
         }));
-        check("back-pressure refuses another payload", client.sendAsync(string("tail")).error == SendError::QueueFull);
+        check("accepted send does not report an error", errors == 0);
+        const auto rejected = client.sendAsync(vector<char>{'t'});
+        check("back-pressure refuses another payload", !rejected && rejected.error == SendError::QueueFull && rejected.id == 0);
+        check("queue-full rejection fires once with matching message", errors == 1 && queueFullMessage);
         check("pending bytes exceed the mark", client.getSendAsyncPendingBytes() > client.getSendAsyncBufferSize());
         client.disconnect();
         check("disconnect drains completions with timeout disabled", completions == 1 && outcome == SendError::Disconnected);
         check("empty disconnected queue", client.getSendAsyncPendingBytes() == 0 && client.sendAsync(string("x")).error == SendError::NotRunning);
+        check("post-disconnect rejection fires once with matching message", errors == 2 && notConnectedMessage);
         if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
     }
     // WebSocket owners may replace their client from a send-error listener.

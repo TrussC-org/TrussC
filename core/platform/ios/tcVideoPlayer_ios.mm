@@ -810,6 +810,12 @@ void VideoPlayer::setLoopPlatform(bool loop) {
     impl.loop = loop;
 }
 
+float VideoPlayer::getFrameRatePlatform() const {
+    if (!platformHandle_) return 0.0f;
+    TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;
+    return impl.frameRate;
+}
+
 int VideoPlayer::getCurrentFramePlatform() const {
     if (!platformHandle_) return 0;
     TCVideoPlayerImpl* impl = (__bridge TCVideoPlayerImpl*)platformHandle_;

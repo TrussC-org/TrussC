@@ -985,6 +985,10 @@ bool Logger::setLogFile(const fs::path& path) {
         closeFileLocked();
         fileStream_ = std::move(stream);
         filePath_ = pathUtf8;
+        if (this == &getLogger()) {
+            internal::setCrashLogFile(resolved);
+            crashLogOwner_ = true;
+        }
     }
     return true;
 }
@@ -1165,10 +1169,6 @@ ThreadChannel<ConsoleEventArgs>& getChannel() {
 std::atomic<bool>& isRunning() {
     static std::atomic<bool> running{false};
     return running;
-}
-std::unique_ptr<std::thread>& getThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
 }
 } // namespace detail
 } // namespace console
@@ -1682,8 +1682,8 @@ WindowContext& currentWindowContext() {
     return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
 }
 
-// Window::setApp() (app code) adds to it and the platform close() (host code)
-// removes from it. Leaked like the ones above: ~Window() calls close(), and a
+// Window::applyPendingApp() adds to it and the platform teardown (host code)
+// removes from it. Leaked like the ones above: ~Window() calls the teardown, and a
 // Window an app keeps in a global is destroyed at exit.
 std::unordered_set<const App*>& attachedApps() {
     static auto* apps = new std::unordered_set<const App*>();
