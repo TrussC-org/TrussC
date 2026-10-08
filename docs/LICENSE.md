@@ -82,7 +82,7 @@ These libraries are only included if you use the corresponding addon.
 | **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |
 | **Box2D** | 2.4.1 | `addons/tcxBox2d/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d |
 | **cgltf** | 1.15 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
-| **tinyobjloader** | commit `966edce` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
+| **tinyobjloader** | commit `45636bd` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
 | **Snappy** | 1.2.1 | `addons/tcxHap/CMakeLists.txt` | https://github.com/google/snappy | BSD 3-Clause | Google Inc. | tcxHap |
 | **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
 | **bcdec** | 0.98 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
