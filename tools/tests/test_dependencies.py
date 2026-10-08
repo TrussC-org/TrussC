@@ -162,8 +162,8 @@ class DependencyTests(unittest.TestCase):
 
     def test_both_vendored_lua_copies_and_miniaudio_macros_are_checked(self):
         for path, old, new in [
-            ("addons/tcxLua/lua/include/lua.h", '#define LUA_VERSION_RELEASE\t"8"', '#define LUA_VERSION_RELEASE\t"9"'),
-            ("addons/tcxLua/lua/src/lua.h", '#define LUA_VERSION_RELEASE\t"8"', '#define LUA_VERSION_RELEASE\t"9"'),
+            ("addons/tcxLua/lua/include/lua.h", '#define LUA_VERSION_RELEASE\t"9"', '#define LUA_VERSION_RELEASE\t"0"'),
+            ("addons/tcxLua/lua/src/lua.h", '#define LUA_VERSION_RELEASE\t"9"', '#define LUA_VERSION_RELEASE\t"0"'),
             ("core/include/miniaudio.h", "#define MA_VERSION_REVISION 23", "#define MA_VERSION_REVISION 24"),
         ]:
             with self.subTest(path=path):
