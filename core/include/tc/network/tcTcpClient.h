@@ -219,6 +219,9 @@ public:
     virtual bool send(const std::string& message);
 
     // Queue owned bytes; completion reports through onSendComplete.
+    // An immediate rejection (not connected, queue full, connection closed)
+    // also fires onError right away on the calling thread: sending again from
+    // that listener recurses.
     SendResult sendAsync(const void* data, size_t size);
     SendResult sendAsync(std::vector<char>&& data);
     SendResult sendAsync(const std::string& message);

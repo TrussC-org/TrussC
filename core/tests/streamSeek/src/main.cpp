@@ -698,7 +698,7 @@ TC_CORE_TEST_MAIN() {
                           ", isPlaying " + (playing ? "true" : "false");
         }
         check("pending: it is still playing early in the file (position < 0.2)", early,
-              early ? earlyDetail : earlyDetail + ", " + streamSeekFailureState(n, g_level.load()));
+              early ? earlyDetail : earlyDetail + ", " + tcCoreTest::streamSeekFailureState(n, g_level.load()));
         if (early) {
             internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
             n.setPosition(0.0f);
@@ -709,7 +709,7 @@ TC_CORE_TEST_MAIN() {
             }, 2000);
             const bool playing = pending && n.isPlaying();
             check("pending: a non-looping stream does not end at the old data's end",
-                  playing, playing ? "" : streamSeekFailureState(n, g_level.load()));
+                  playing, playing ? "" : tcCoreTest::streamSeekFailureState(n, g_level.load()));
             {
                 lock_guard<mutex> lock(g_blockMutex);
                 g_blockLevels.clear();
@@ -737,7 +737,7 @@ TC_CORE_TEST_MAIN() {
                 }
             }
             check("pending: then it plays from the target (level 0.5)",
-                  heard, heard ? "" : streamSeekFailureState(n, g_level.load()));
+                  heard, heard ? "" : tcCoreTest::streamSeekFailureState(n, g_level.load()));
         }
         n.stop();
     }

@@ -51,12 +51,12 @@ This is the one list of third-party code in TrussC and the version the build use
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_truetype** | 1.26, commit `6e9f34d` (+ 3 TrussC patches) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_vorbis** | 1.22, commit `dd0c5ec` (fork, branch `stb_vorbis-sezero`) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
-| **miniaudio** | 0.11.23 | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
-| **dr_wav** | 0.14.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
-| **dr_mp3** | 0.7.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
-| **dr_flac** | 0.13.1 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **miniaudio** | 0.11.25 | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
+| **dr_wav** | 0.14.5 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **dr_mp3** | 0.7.3 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
+| **dr_flac** | 0.13.3 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
 | **nlohmann/json** | 3.12.0 | `core/include/nlohmann/json.hpp` | https://github.com/nlohmann/json | MIT | Niels Lohmann |
-| **pugixml** | 1.15 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
+| **pugixml** | 1.16 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
 | **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
 | **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
@@ -78,18 +78,18 @@ These libraries are only included if you use the corresponding addon.
 | **Dear ImGui** | 1.92.9b (+ TrussC patch, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | not recorded | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
-| **libcurl** | 8.12.1 (Windows, when no system libcurl is found) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
+| **libcurl** | 8.22.0 (Windows; macOS/Linux use system libcurl) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
 | **libremidi** | 5.4.3 | `addons/tcxMidi/CMakeLists.txt` | https://github.com/celtera/libremidi | BSD 2-Clause (parts from RtMidi: MIT) | Jean-Michaël Celerier | tcxMidi |
 | **Box2D** | 2.4.1 | `addons/tcxBox2d/CMakeLists.txt` | https://github.com/erincatto/box2d | MIT | Erin Catto | tcxBox2d |
-| **cgltf** | 1.14 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
-| **tinyobjloader** | commit `966edce` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
+| **cgltf** | 1.15 | `addons/tcxGltf/CMakeLists.txt` | https://github.com/jkuhlmann/cgltf | MIT | Johannes Kuhlmann | tcxGltf |
+| **tinyobjloader** | commit `45636bd` (branch `release`, + 2 TrussC patches, see [PROVENANCE.md](../addons/tcxObj/PROVENANCE.md)) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
 | **Snappy** | 1.2.1 | `addons/tcxHap/CMakeLists.txt` | https://github.com/google/snappy | BSD 3-Clause | Google Inc. | tcxHap |
 | **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
 | **bcdec** | 0.98 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
-| **Lua** | 5.4.8 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
+| **Lua** | 5.4.9 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
 | **LuaJIT** | 2.1 (rolling), commit not recorded | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
-| **luajit-cmake** | commit `67637d0` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
+| **luajit-cmake** | commit `94444a6` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
 
 > **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.0以降 (MIT) を使用しています。
 
@@ -341,7 +341,7 @@ libremidi's own code is under the BSD 2-Clause License (Copyright (c) 2017-2023,
 
 ### curl License (libcurl)
 
-libcurl is under the curl License, an MIT-style license (Copyright (c) Daniel Stenberg, and many contributors). Full text: [COPYING](https://github.com/curl/curl/blob/master/COPYING).
+libcurl is under the curl License, an MIT-style license (Copyright (c) 1996-2026 Daniel Stenberg, and many contributors). Full text: [COPYING](https://github.com/curl/curl/blob/curl-8_22_0/COPYING).
 
 ---
 

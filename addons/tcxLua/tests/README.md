@@ -3,6 +3,9 @@
 Headless console test (no window). Lua files are written to a temp directory at
 runtime.
 
+XML bindings: empty-text serialization, escaped text and attribute round trips
+through `Xml` and `parseXml` using the vendored pugixml.
+
 Error-contained entry points (`tcxLua::call` / `tcxLua::runFile`):
 
 - a syntax error, a missing file and a top-level `error()` in `runFile`, and a

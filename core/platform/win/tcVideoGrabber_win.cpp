@@ -19,6 +19,7 @@
 #include <dshow.h>
 
 #include "TrussC.h"
+#include "tcVideoGrabberPixels.h"
 
 #include <atomic>
 #include <chrono>
@@ -50,6 +51,7 @@ struct VideoGrabberPlatformData {
     std::atomic<bool> bufferReady{false};
     int bufferWidth = 0;
     int bufferHeight = 0;
+    std::int32_t bufferStride = 0;
 
     // サイズ変更通知用
     std::atomic<bool> needsResize{false};
@@ -135,25 +137,8 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
             if (SUCCEEDED(hr) && rawData) {
                 int w = data->bufferWidth;
                 int h = data->bufferHeight;
-                size_t expectedSize = (size_t)w * h * 4;
-
-                // Validate buffer size before copy (RGB32/BGRA -> RGBA conversion)
-                if (data->backBuffer && w > 0 && h > 0 && currentLength >= expectedSize) {
-                    unsigned char* src = rawData;
-                    unsigned char* dst = data->backBuffer;
-
-                    // RGB32 is BGRA format, flip vertically and swap R/B
-                    for (int y = 0; y < h; y++) {
-                        int srcY = h - 1 - y;  // flip vertically
-                        unsigned char* srcRow = src + srcY * w * 4;
-                        unsigned char* dstRow = dst + y * w * 4;
-                        for (int x = 0; x < w; x++) {
-                            dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B (BGRA->RGBA)
-                            dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G
-                            dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
-                            dstRow[x * 4 + 3] = 255;  // A (force opaque)
-                        }
-                    }
+                if (internal::copyGrabberRGB32(data->backBuffer, rawData,
+                        currentLength, w, h, data->bufferStride)) {
 
                     // Copy to main thread buffer
                     if (data->targetPixels && data->mainMutex && !data->needsResize.load()) {
@@ -356,17 +341,39 @@ bool VideoGrabber::setupPlatform() {
     // Get actual format after setting
     IMFMediaType* currentType = nullptr;
     hr = data->sourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &currentType);
-    if (SUCCEEDED(hr) && currentType) {
-        UINT32 w = 0, h = 0;
-        MFGetAttributeSize(currentType, MF_MT_FRAME_SIZE, &w, &h);
-        width_ = (int)w;
-        height_ = (int)h;
-        
-        currentType->Release();
-    } else {
-        width_ = requestedWidth_;
-        height_ = requestedHeight_;
+    if (FAILED(hr) || !currentType) {
+        logError() << "VideoGrabber: Cannot read current media type for requested "
+                   << requestedWidth_ << "x" << requestedHeight_;
+        if (currentType) currentType->Release();
+        closePlatform();
+        return false;
     }
+
+    GUID subtype = GUID_NULL;
+    hr = currentType->GetGUID(MF_MT_SUBTYPE, &subtype);
+    if (FAILED(hr) || subtype != MFVideoFormat_RGB32) {
+        WCHAR subtypeName[40] = {};
+        char subtypeText[40] = {};
+        StringFromGUID2(subtype, subtypeName, 40);
+        WideCharToMultiByte(CP_UTF8, 0, subtypeName, -1,
+                            subtypeText, 40, nullptr, nullptr);
+        logError() << "VideoGrabber: Requested " << requestedWidth_ << "x"
+                   << requestedHeight_ << " requires RGB32; current subtype="
+                   << (FAILED(hr) ? "unavailable" : subtypeText);
+        currentType->Release();
+        closePlatform();
+        return false;
+    }
+
+    UINT32 w = 0, h = 0;
+    MFGetAttributeSize(currentType, MF_MT_FRAME_SIZE, &w, &h);
+    width_ = (int)w;
+    height_ = (int)h;
+    UINT32 stride = 0;
+    if (SUCCEEDED(currentType->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride))) {
+        data->bufferStride = static_cast<std::int32_t>(stride);
+    }
+    currentType->Release();
 
     // バックバッファを確保
     data->bufferWidth = width_;
@@ -375,8 +382,8 @@ bool VideoGrabber::setupPlatform() {
     std::memset(data->backBuffer, 0, width_ * height_ * 4);
 
     // ターゲット設定（updateDelegatePixels で設定される）
-    data->mainMutex = &mutex_;
-    data->pixelsDirty = &pixelsDirty_;
+    data->mainMutex = &sharedState_->mtx;
+    data->pixelsDirty = &sharedState_->dirty;
     data->frameQueue = frameQueue_.get();
 
     // キャプチャスレッドを開始
@@ -410,18 +417,9 @@ void VideoGrabber::closePlatform() {
         data->mediaSource->Shutdown();
     }
 
-    // Wait for thread to finish with timeout
+    // Capture must finish before its buffers and shared state can be freed.
     if (data->captureThread.joinable()) {
-        HANDLE hThread = (HANDLE)data->captureThread.native_handle();
-        DWORD result = WaitForSingleObject(hThread, 500);  // 500ms timeout
-        if (result == WAIT_OBJECT_0) {
-            // Thread exited cleanly
-            data->captureThread.join();
-        } else {
-            // Thread didn't exit in time, detach to avoid hanging
-            logWarning() << "VideoGrabber: Capture thread did not exit in time, detaching";
-            data->captureThread.detach();
-        }
+        data->captureThread.join();
     }
 
     // Release resources

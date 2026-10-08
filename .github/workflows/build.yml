@@ -230,6 +230,7 @@ jobs:
 
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
+        timeout-minutes: 10
         if: runner.os == 'Linux'
         run: |
           chmod +x tools/install_dependencies_linux.sh
@@ -380,6 +381,7 @@ jobs:
           key: sokol-shdc-v1-${{ runner.os }}
 
       - name: Install Linux dependencies (for trusscli)
+        timeout-minutes: 10
         run: |
           chmod +x tools/install_dependencies_linux.sh
           ./tools/install_dependencies_linux.sh -y
@@ -484,6 +486,7 @@ jobs:
           version: '6.0.2'
 
       - name: Install Linux dependencies (for trusscli)
+        timeout-minutes: 10
         run: |
           chmod +x tools/install_dependencies_linux.sh
           ./tools/install_dependencies_linux.sh -y
@@ -633,6 +636,10 @@ jobs:
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: core test symbol checker regression checks
+        if: always()
+        run: python3 tools/tests/test_core_test_symbols.py -v
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
