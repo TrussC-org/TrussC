@@ -21,6 +21,18 @@
 #
 # =============================================================================
 
+# CI can share dependency sources across otherwise independent app builds.
+# Explicit CMake settings (including -D overrides) always take precedence.
+if(DEFINED ENV{TRUSSC_FETCHCONTENT_DIR} AND NOT DEFINED FETCHCONTENT_BASE_DIR)
+    set(FETCHCONTENT_BASE_DIR "$ENV{TRUSSC_FETCHCONTENT_DIR}" CACHE PATH
+        "Shared FetchContent directory")
+endif()
+if(DEFINED ENV{TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED}
+        AND NOT DEFINED FETCHCONTENT_UPDATES_DISCONNECTED)
+    set(FETCHCONTENT_UPDATES_DISCONNECTED "$ENV{TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED}" CACHE BOOL
+        "Skip FetchContent remote updates")
+endif()
+
 # trussc_compile_shaders() (also used by core and addons)
 include("${CMAKE_CURRENT_LIST_DIR}/trussc_shaders.cmake")
 

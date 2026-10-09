@@ -4,8 +4,11 @@ Only boolean expressions and event-name comparisons are supported; unfamiliar
 conditions fail closed so they require review instead of silently passing.
 """
 import ast
+import os
 from pathlib import Path
 import re
+import subprocess
+import tempfile
 import unittest
 
 import yaml
@@ -92,6 +95,49 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                 self.assertEqual(can_save_on_merge_group(step), expected)
         with self.assertRaises(ValueError):
             on_merge_group('unknown.context')
+
+    def test_fetchcontent_cache_twins_and_environment(self):
+        for filename, jobs in [('build.yml', ('build', 'build-android', 'build-web', 'build-ios')),
+                               ('daily.yml', ('sweep', 'sweep-web'))]:
+            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(),
+                                 Loader=yaml.BaseLoader)
+            for job_name in jobs:
+                with self.subTest(workflow=filename, job=job_name):
+                    steps = workflow['jobs'][job_name]['steps']
+                    save = next(s for s in steps if s.get('id') == 'fetchcontent')
+                    restore = next(s for s in steps if s.get('id') == 'fetchcontent-restore')
+                    setup = next(s for s in steps if s.get('name') == 'Configure shared FetchContent')
+                    self.assertEqual(save['uses'], 'actions/cache@v5')
+                    self.assertEqual(save['if'], "github.event_name != 'merge_group'")
+                    self.assertEqual(restore['uses'], 'actions/cache/restore@v5')
+                    self.assertEqual(restore['if'], "github.event_name == 'merge_group'")
+                    self.assertFalse(can_save_on_merge_group(save))
+                    expected = {'path': '${{ github.workspace }}/.fetchcontent',
+                                'key': "fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}"}
+                    self.assertEqual(save['with'], expected)
+                    self.assertEqual(restore['with'], expected)
+                    self.assertEqual(steps.index(restore), steps.index(save) + 1)
+                    self.assertEqual(steps.index(setup), steps.index(restore) + 1)
+                    self.assertLess(steps.index(setup), next(i for i, s in enumerate(steps)
+                                                          if s.get('name', '').startswith('Build ')))
+                    self.assertEqual(setup['shell'], 'bash')
+                    self.assertEqual(setup['env']['FETCHCONTENT_CACHE_HIT'],
+                                     "${{ steps.fetchcontent.outputs.cache-hit == 'true' || "
+                                     "steps.fetchcontent-restore.outputs.cache-hit == 'true' }}")
+                    # Execute the actual shell on hit/miss, including a path
+                    # with spaces, without invoking a cache service.
+                    with tempfile.TemporaryDirectory(dir=ROOT) as scratch:
+                        env_file = Path(scratch) / 'github-env'
+                        workspace = str(Path(scratch) / 'workspace with spaces')
+                        for hit in ('true', 'false', ''):
+                            env_file.write_text('')
+                            subprocess.run(['bash', '-eu', '-c', setup['run']], check=True,
+                                           env=dict(os.environ, GITHUB_ENV=str(env_file),
+                                                    GITHUB_WORKSPACE=workspace, FETCHCONTENT_CACHE_HIT=hit))
+                            expected_lines = [f'TRUSSC_FETCHCONTENT_DIR={workspace}/.fetchcontent']
+                            if hit == 'true':
+                                expected_lines.append('TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON')
+                            self.assertEqual(env_file.read_text().splitlines(), expected_lines)
 
     def test_regression_runs_in_pr_ci(self):
         matches = [step for step in self.workflow['jobs']['header-state-check']['steps']

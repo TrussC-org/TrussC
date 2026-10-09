@@ -94,6 +94,33 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.fetchcontent
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.fetchcontent
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
+
       # Same cache keys as build.yml, so the sweep starts warm from PR builds
       # (the build-directory cache only when the runner image matches).
       - name: Setup compiler cache
@@ -208,6 +235,33 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.fetchcontent
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ github.workspace }}/.fetchcontent
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
