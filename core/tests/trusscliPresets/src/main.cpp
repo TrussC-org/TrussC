@@ -1111,6 +1111,41 @@ static void testConfigurePlan() {
     }
 }
 
+// #417: doctor must not mistake another object's dependencies for main's.
+static void testWindowsHeaderDependencies() {
+    check("deps: main has headers", hasMainHeaderDependencies(
+        "CMakeFiles/app.dir/src/main.cpp.obj: #deps 133, deps mtime 42 (VALID)\r\n"
+        "    C:/project/src/tcApp.h\r\n\r\n"));
+    check("deps: backslash paths", hasMainHeaderDependencies(
+        "CMakeFiles\\app.dir\\src\\main.cpp.obj: #deps 1, deps mtime 42 (VALID)\n"));
+    check("deps: zero main deps despite another good object", !hasMainHeaderDependencies(
+        "CMakeFiles/app.dir/src/tcApp.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"
+        "CMakeFiles/app.dir/src/main.cpp.obj: #deps 0, deps mtime 42 (VALID)\n"));
+    check("deps: missing main", !hasMainHeaderDependencies(
+        "CMakeFiles/app.dir/src/tcApp.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"));
+    check("deps: empty log", !hasMainHeaderDependencies(""));
+    check("deps: malformed count", !hasMainHeaderDependencies("main.cpp.obj: #deps unknown\n"));
+    check("deps: similarly named object", !hasMainHeaderDependencies(
+        "not-main.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"));
+    check("deps: any zero main record fails", !hasMainHeaderDependencies(
+        "a/main.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"
+        "b/main.cpp.obj: #deps 0, deps mtime 42 (VALID)\n"));
+
+    check("Windows argv: empty", quoteWindowsArgument("") == "\"\"");
+    check("Windows argv: spaces", quoteWindowsArgument("C:\\Program Files\\cmake.exe") ==
+          "\"C:\\Program Files\\cmake.exe\"");
+    check("Windows argv: trailing slash", quoteWindowsArgument("C:\\folder\\") ==
+          "\"C:\\folder\\\\\"");
+    check("Windows argv: embedded quote", quoteWindowsArgument("a\"b") == "\"a\\\"b\"");
+
+    fs::path cache = makeProject("deps-cache") / "CMakeCache.txt";
+    writeFile(cache, "// Comment\nCMAKE_BUILD_TYPE:STRING=RelWithDebInfo\n"
+                    "CMAKE_MAKE_PROGRAM:FILEPATH=C:/Program Files/Ninja/ninja.exe\n");
+    check("cache: Ninja path with spaces", readCMakeCacheValue(cache.string(), "CMAKE_MAKE_PROGRAM") ==
+          "C:/Program Files/Ninja/ninja.exe");
+    check("cache: missing entry", readCMakeCacheValue(cache.string(), "MISSING").empty());
+}
+
 // -----------------------------------------------------------------------------
 // 7b. The build folder on disk: which folder `build` looks at, and what
 //     `clean` removes
@@ -1531,6 +1566,7 @@ TC_CORE_TEST_MAIN() {
     testTargetFlags();
     testBuildDirMapping();
     testConfigurePlan();
+    testWindowsHeaderDependencies();
     testBuildFolders();
     testToolchainCheck();
 #ifdef _WIN32

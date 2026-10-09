@@ -167,11 +167,34 @@ static bool parseAddonValue(const string& value,
 static int runProcess(const vector<string>& argv) {
     if (argv.empty()) return -1;
 #ifdef _WIN32
-    // Build a null-terminated argv for _spawnvp
-    vector<const char*> cargv;
-    for (const auto& a : argv) cargv.push_back(a.c_str());
-    cargv.push_back(nullptr);
-    return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+    if (GetConsoleCP() != 0) {
+        // CLI builds inherit the same console used by configure.
+        vector<const char*> cargv;
+        for (const auto& a : argv) cargv.push_back(a.c_str());
+        cargv.push_back(nullptr);
+        return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+    }
+    // Without a console, keep children hidden just as configure does.
+    string commandLine;
+    for (const auto& a : argv) {
+        if (!commandLine.empty()) commandLine += ' ';
+        commandLine += quoteWindowsArgument(a);
+    }
+    STARTUPINFOA si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    si.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    PROCESS_INFORMATION pi = {};
+    if (!CreateProcessA(nullptr, commandLine.data(), nullptr, nullptr, TRUE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return -1;
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    const BOOL gotExitCode = GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return gotExitCode ? static_cast<int>(exitCode) : -1;
 #else
     // POSIX: posix_spawnp + waitpid
     vector<char*> cargv;
@@ -235,6 +258,36 @@ struct CheckResult {
     string hint;
     bool essential = false;
 };
+
+#ifdef _WIN32
+static CheckResult checkWindowsHeaderDependencies(const string& projectPath) {
+    CheckResult r{"Header dependencies", CheckStatus::Skipped,
+                  "not checked (no Ninja build yet)", "", false};
+    const fs::path dir = fs::absolute(fs::path(projectPath) /
+        ProjectGenerator::buildDirForPreset("windows"));
+    if (!fs::exists(dir / "build.ninja") || !fs::exists(dir / ".ninja_log")) return r;
+
+    string ninja = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_MAKE_PROGRAM");
+    if (ninja.empty()) ninja = "ninja";
+    // Outer quotes preserve a quoted executable path when _popen invokes cmd.
+    auto [code, output] = captureCommand("\"\"" + ninja + "\" -C \"" +
+        dir.string() + "\" -t deps 2>NUL\"");
+    if (code != 0) {
+        r.status = CheckStatus::Warning;
+        r.detail = "unknown (could not read Ninja dependencies)";
+        r.hint = "Check CMAKE_MAKE_PROGRAM in the project's CMakeCache.txt.";
+    } else if (hasMainHeaderDependencies(output)) {
+        r.status = CheckStatus::OK;
+        r.detail = "recorded for main.cpp.obj (last build)";
+    } else {
+        r.status = CheckStatus::Error;
+        r.detail = "none for main.cpp.obj (last build)";
+        r.hint = "Run 'trusscli update' and 'trusscli build --debug' in the same console, "
+                 "then run doctor again.";
+    }
+    return r;
+}
+#endif
 
 static CheckResult checkCMake() {
     CheckResult r{"CMake", CheckStatus::OK, "", "", true};
@@ -2883,7 +2936,8 @@ static void printDoctorHelp() {
          << "to see all checks including optional tools and cross-compile targets.\n"
          << "On Windows, inside a project, it also checks that the Visual Studio\n"
          << "paths pinned in CMakePresets.json (MSVC, Windows SDK, ninja) still\n"
-         << "exist.\n"
+         << "exist, and whether the last Ninja build recorded header dependencies\n"
+         << "for main.cpp.obj.\n"
          << "\n"
          << "Options:\n"
          << "      --verbose              Show all checks (including OK / optional / skipped)\n"
@@ -2956,6 +3010,7 @@ static int cmdDoctor(const vector<string>& args) {
     // The project's pinned VS toolchain (only a Windows preset pins one)
     if (!projectPath.empty()) {
         results.push_back(checkWindowsPresetToolchain(projectPath));
+        results.push_back(checkWindowsHeaderDependencies(projectPath));
     }
 #endif
 
@@ -4029,6 +4084,7 @@ int main(int argc, char* argv[]) {
         }
         #endif
         warnIfVersionDrift(autoDetectTcRoot());
+        ProjectGenerator::runChildrenHidden = true;
         WindowSettings settings;
         settings.title = "TrussC Project Generator";
         settings.width = 500;
