@@ -38,6 +38,14 @@ FIXTURE_LIST = """# License
 
 ## Third-Party Libraries
 
+### Core
+
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization |
+|---------|---------|----------------------|----------|---------|---------------------|
+| **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+| **LuaJIT** | 2.1 (rolling), commit not recorded | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall |
+| **branchlib** | branch `x` (not pinned) | `branchlib.h` | https://github.com/owner/branchlib | MIT | Someone |
+
 ### Build Tools
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |
@@ -61,19 +69,30 @@ class UpstreamTests(unittest.TestCase):
     def test_inventory_shape(self):
         # Shape only: the weekly workflow runs these tests before the report,
         # so a pinned value that went stale would stop the report itself.
-        rows = check.parse_list((ROOT / check.LIST_FILE).read_text())
+        rows = check.parse_list((ROOT / check.LIST_FILE).read_text(encoding="utf-8"))
         self.assertTrue(rows)
         for r in rows:
             with self.subTest(library=r["name"]):
                 self.assertTrue(r["slug"])
                 self.assertTrue(r["paths"])
                 self.assertTrue(r["version"] or r["commit"] or r["branch"] or r["not_recorded"])
-                self.assertTrue(all((ROOT / p).exists() for p in r["paths"]))
+                for p in r["paths"]:
+                    self.assertTrue((ROOT / p).exists(), p)
 
     def test_parse_list_values(self):
         by_name = {r["name"]: r for r in check.parse_list(FIXTURE_LIST)}
-        self.assertEqual(set(by_name), {"sokol-shdc (sokol-tools-bin)", "mbedTLS", "libcurl",
+        self.assertEqual(set(by_name), {"earcut.hpp", "LuaJIT", "branchlib",
+                                        "sokol-shdc (sokol-tools-bin)", "mbedTLS", "libcurl",
                                         "tinyobjloader", "HAP"})
+        self.assertTrue(by_name["earcut.hpp"]["not_recorded"])
+        self.assertIsNone(by_name["earcut.hpp"]["version"])
+        self.assertIsNone(by_name["earcut.hpp"]["commit"])
+        self.assertEqual(by_name["LuaJIT"]["version"], "2.1")
+        self.assertTrue(by_name["LuaJIT"]["not_recorded"])
+        self.assertEqual(by_name["branchlib"]["branch"], "x")
+        self.assertFalse(by_name["branchlib"]["not_recorded"])
+        self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["hashes"],
+                         {"linux": "ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df"})
         self.assertEqual(by_name["mbedTLS"]["version"], "3.6.7")
         self.assertEqual(by_name["mbedTLS"]["slug"], "mbed-tls/mbedtls")
         self.assertEqual(by_name["libcurl"]["version"], "8.12.1")
