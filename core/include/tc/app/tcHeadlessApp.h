@@ -26,34 +26,40 @@ void pumpAudioDiagnostics();
 void flushAudioDiagnostics();
 
 #ifdef _WIN32
-// The code page HeadlessConsoleUtf8 will restore, for the console control
-// handler's forced exit (headless::consoleHandler); 0 when there is none.
+// The code pages HeadlessConsoleUtf8 will restore, for the console control
+// handler's forced exit (headless::consoleHandler); 0 for each unset page.
 // Headless only, where hot reload never runs, so a per-module copy is fine
 // (tools/header_state_allowlist.txt).
-inline std::atomic<UINT> headlessRestoreConsoleCP{0};
+inline ConsoleCodePages headlessRestoreConsoleCP;
 
-// runHeadlessApp()'s console output code page: UTF-8 for the guard's
-// lifetime, as the windowed app gets from sapp_desc.win32.console_utf8 (log
-// text is UTF-8). runHeadlessApp() declares it before the app, so the code
+// runHeadlessApp()'s console input and output code pages: UTF-8 for the guard's
+// lifetime, as the windowed app gets from sapp_desc.win32.console_utf8.
+// runHeadlessApp() declares it before the app, so each successfully set code
 // page comes back after the app's destructor, and when an exception that
 // the caller catches leaves the function. An uncaught exception ends the
-// process without unwinding, and does not restore it. Without a console
-// the set fails and nothing is restored.
+// process without unwinding, and does not restore them. Without a console
+// both sets fail and nothing is restored.
 struct HeadlessConsoleUtf8 {
     HeadlessConsoleUtf8()
-        : original(GetConsoleOutputCP()), set(SetConsoleOutputCP(CP_UTF8) != 0) {
-        if (set) headlessRestoreConsoleCP = original;
+        : originalOutput(GetConsoleOutputCP()), originalInput(GetConsoleCP()),
+          outputSet(SetConsoleOutputCP(CP_UTF8) != 0),
+          inputSet(SetConsoleCP(CP_UTF8) != 0) {
+        headlessRestoreConsoleCP.output = outputSet ? originalOutput : 0;
+        headlessRestoreConsoleCP.input = inputSet ? originalInput : 0;
     }
     ~HeadlessConsoleUtf8() {
-        if (!set) return;
-        headlessRestoreConsoleCP = 0;
-        SetConsoleOutputCP(original);
+        if (outputSet) SetConsoleOutputCP(originalOutput);
+        if (inputSet) SetConsoleCP(originalInput);
+        headlessRestoreConsoleCP.output = 0;
+        headlessRestoreConsoleCP.input = 0;
     }
     HeadlessConsoleUtf8(const HeadlessConsoleUtf8&) = delete;
     HeadlessConsoleUtf8& operator=(const HeadlessConsoleUtf8&) = delete;
 
-    UINT original;
-    bool set;
+    UINT originalOutput;
+    UINT originalInput;
+    bool outputSet;
+    bool inputSet;
 };
 #endif
 }
@@ -76,17 +82,19 @@ namespace headless {
 
 #ifdef _WIN32
     // Windows console control handler. The first Ctrl+C or Ctrl+Break stops
-    // the loop, so the app is destroyed and the console code page restored
+    // the loop, so the app is destroyed and both console code pages restored
     // (internal::HeadlessConsoleUtf8). A second one, while the loop is
     // already stopping, means the app is stuck where the loop flag is not
-    // read (setup(), a long update()): restore the code page and fall
+    // read (setup(), a long update()): restore both code pages and fall
     // through to the default handler (ExitProcess), so the keyboard can
     // still end a hung app.
     inline BOOL WINAPI consoleHandler(DWORD signal) {
         if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
             if (running.exchange(false)) return TRUE;
-            const UINT cp = internal::headlessRestoreConsoleCP.load();
-            if (cp != 0) SetConsoleOutputCP(cp);
+            const UINT output = internal::headlessRestoreConsoleCP.output.load();
+            const UINT input = internal::headlessRestoreConsoleCP.input.load();
+            if (output != 0) SetConsoleOutputCP(output);
+            if (input != 0) SetConsoleCP(input);
             return FALSE;
         }
         if (signal == CTRL_CLOSE_EVENT) {
@@ -152,7 +160,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     headless::installSignalHandlers();
 
 #ifdef _WIN32
-    // Console output code page UTF-8 until the app is destroyed (see
+    // Console input and output code pages UTF-8 until the app is destroyed (see
     // internal::HeadlessConsoleUtf8)
     internal::HeadlessConsoleUtf8 consoleUtf8;
 #endif

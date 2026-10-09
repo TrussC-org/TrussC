@@ -3261,7 +3261,8 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none.
     // sokol restores both code pages when sapp_run() returns. The host's
     // ConsoleCPCtrlGuard covers Ctrl+C, Ctrl+Break, console close and
-    // std::exit(); the Windows crash handler restores after its report.
+    // std::exit(), and restores during exception unwinding; the Windows
+    // crash handler restores after its report.
     // abort(), TerminateProcess and external kills cannot restore them.
     // Ignored on other platforms.
     desc.win32.console_utf8 = true;
@@ -3271,9 +3272,10 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
 #ifdef _WIN32
 namespace internal {
-// sokol restores both code pages when sapp_run() returns. Console control
-// events use ExitProcess instead, and std::exit() skips stack destructors.
-// Restore before default control handling, or from the registered exit hook.
+// sokol restores both code pages when sapp_run() returns normally. The guard
+// also restores on destruction, including when an exception escapes sapp_run().
+// Console control events use ExitProcess instead, and std::exit() skips stack
+// destructors. Restore before default control handling, or from the exit hook.
 // Host-only state (tools/header_state_allowlist.txt): the guard around
 // sapp_run() in runApp() / the hot reload host and its handlers live in the
 // host; a guest's copy is never used. Zero means there is no console.
@@ -3311,11 +3313,13 @@ struct ConsoleCPCtrlGuard {
                     SetConsoleCtrlHandler(restoreConsoleCPOnCtrl, TRUE) != 0;
     }
     ~ConsoleCPCtrlGuard() {
+        // Repeat sokol's normal restore, or perform it during exception unwinding.
+        restoreConsoleCP();
         if (installed) SetConsoleCtrlHandler(restoreConsoleCPOnCtrl, FALSE);
-        // sokol has restored the console. Do not overwrite later changes at exit.
-        setCrashConsoleCodePages(0, 0);
+        // Disarm only after restoring; do not overwrite later changes at exit.
         consoleCPBeforeRun.output = 0;
         consoleCPBeforeRun.input = 0;
+        setCrashConsoleCodePages(0, 0);
     }
     ConsoleCPCtrlGuard(const ConsoleCPCtrlGuard&) = delete;
     ConsoleCPCtrlGuard& operator=(const ConsoleCPCtrlGuard&) = delete;
