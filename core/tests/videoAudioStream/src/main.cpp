@@ -236,9 +236,9 @@ bool aacFixture(const tc::fs::path& path) {
 TC_CORE_TEST_MAIN() {
 #if defined(__linux__) && !defined(__ANDROID__)
     using namespace tc;
-    internal::setNullAudioBackendForTests(true);
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = kRate;
     settings.bufferSize = 256;
     check("null audio backend", engine.init(settings));
