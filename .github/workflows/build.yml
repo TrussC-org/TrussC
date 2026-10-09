@@ -155,7 +155,11 @@ jobs:
         if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
@@ -163,7 +167,11 @@ jobs:
         if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
@@ -342,7 +350,11 @@ jobs:
         if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
@@ -350,7 +362,11 @@ jobs:
         if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
@@ -480,7 +496,11 @@ jobs:
         if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
@@ -488,7 +508,11 @@ jobs:
         if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
@@ -608,7 +632,11 @@ jobs:
         if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
@@ -616,7 +644,11 @@ jobs:
         if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
-          path: ${{ github.workspace }}/.fetchcontent
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
