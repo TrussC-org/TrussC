@@ -5,9 +5,9 @@
 
 namespace trussc::internal {
 
-// RGB32 in a contiguous MF buffer is BGRA. A zero stride means the media
-// type did not supply MF_MT_DEFAULT_STRIDE; RGB32 rows are then tightly packed.
-// Keep the existing unconditional vertical flip, regardless of stride sign.
+// RGB32 in a contiguous MF buffer is BGRA. src points to the buffer start;
+// negative stride means bottom-up rows, positive stride means top-down rows.
+// Zero is treated as tightly packed top-down; setup resolves the actual stride.
 inline bool copyGrabberRGB32(unsigned char* dst, const unsigned char* src,
                              std::size_t length, int width, int height,
                              std::int32_t stride) {
@@ -22,7 +22,8 @@ inline bool copyGrabberRGB32(unsigned char* dst, const unsigned char* src,
             (length - rowBytes) / pitch) return false;
 
     for (int y = 0; y < height; ++y) {
-        const auto* srcRow = src + static_cast<std::size_t>(height - 1 - y) * pitch;
+        const int sourceY = stride < 0 ? height - 1 - y : y;
+        const auto* srcRow = src + static_cast<std::size_t>(sourceY) * pitch;
         auto* dstRow = dst + static_cast<std::size_t>(y) * rowBytes;
         for (std::size_t x = 0; x < rowBytes; x += 4) {
             dstRow[x + 0] = srcRow[x + 2];
