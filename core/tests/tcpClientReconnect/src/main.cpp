@@ -302,6 +302,10 @@ static int countEntries(const char* path) {
 #endif
 
 // Give LSan one narrow allocation site for the deliberately retained clients.
+// noinline keeps the frame name that lsan.supp matches.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
 static TcpClient& makeProcessLifetimeReconnectClient() {
     return *new TcpClient();
 }
