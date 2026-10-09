@@ -49,11 +49,18 @@ struct Pty {
     ~Pty() { if (master >= 0) ::close(master); }
     bool send(const vector<uint8_t>& data) {
         size_t offset = 0;
-        return until([&] {
+        auto deadline = chrono::steady_clock::now() + chrono::seconds(10);
+        do {
             const ssize_t n = ::write(master, data.data() + offset, data.size() - offset);
-            if (n > 0) offset += static_cast<size_t>(n);
-            return offset == data.size();
-        });
+            if (n > 0) {
+                offset += static_cast<size_t>(n);
+                // Bound stalls, not throughput on a busy runner.
+                deadline = chrono::steady_clock::now() + chrono::seconds(10);
+            }
+            if (offset == data.size()) return true;
+            this_thread::sleep_for(chrono::milliseconds(1));
+        } while (chrono::steady_clock::now() < deadline);
+        return false;
     }
 };
 #endif
