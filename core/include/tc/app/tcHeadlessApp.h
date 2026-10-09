@@ -15,6 +15,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace trussc {
@@ -26,10 +28,8 @@ void pumpAudioDiagnostics();
 void flushAudioDiagnostics();
 
 #ifdef _WIN32
-// The code page HeadlessConsoleUtf8 will restore, for the console control
-// handler's forced exit (headless::consoleHandler); 0 when there is none.
-// Headless only, where hot reload never runs, so a per-module copy is fine
-// (tools/header_state_allowlist.txt).
+// Code page to restore before the console handler's forced-exit fallback.
+// Headless only: hot reload never runs this path.
 inline std::atomic<UINT> headlessRestoreConsoleCP{0};
 
 // runHeadlessApp()'s console output code page: UTF-8 for the guard's
@@ -65,8 +65,11 @@ namespace headless {
     // Headless-only state: hot reload is windowed and never runs this loop, so
     // a per-module copy is fine (tools/header_state_allowlist.txt).
 
-    // Running flag (set to false by signal handler)
-    inline std::atomic<bool> running{true};
+    // First signal only publishes; a second pending signal forces exit.
+    // The main thread acknowledges delivery and records the reason.
+    static_assert(std::atomic<sig_atomic_t>::is_always_lock_free);
+    inline std::atomic<sig_atomic_t> pendingSignal{0};
+    inline sig_atomic_t deliveredSignal = 0;
 
     // Target FPS for headless mode (default: 60)
     inline float targetFps = 60.0f;
@@ -75,22 +78,18 @@ namespace headless {
     inline uint64_t frameCount = 0;
 
 #ifdef _WIN32
-    // Windows console control handler. The first Ctrl+C or Ctrl+Break stops
-    // the loop, so the app is destroyed and the console code page restored
-    // (internal::HeadlessConsoleUtf8). A second one, while the loop is
-    // already stopping, means the app is stuck where the loop flag is not
-    // read (setup(), a long update()): restore the code page and fall
-    // through to the default handler (ExitProcess), so the keyboard can
-    // still end a hung app.
+    // A second Ctrl+C/Ctrl+Break must still end a hung app, including while
+    // listeners or cleanup run: restore the code page and let the default
+    // console handler call ExitProcess.
     inline BOOL WINAPI consoleHandler(DWORD signal) {
         if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT) {
-            if (running.exchange(false)) return TRUE;
+            if (!pendingSignal.exchange(SIGINT, std::memory_order_relaxed)) return TRUE;
             const UINT cp = internal::headlessRestoreConsoleCP.load();
             if (cp != 0) SetConsoleOutputCP(cp);
             return FALSE;
         }
         if (signal == CTRL_CLOSE_EVENT) {
-            running = false;
+            pendingSignal.store(SIGTERM, std::memory_order_relaxed);
             return TRUE;
         }
         return FALSE;
@@ -98,8 +97,7 @@ namespace headless {
 #else
     // POSIX signal handler
     inline void signalHandler(int sig) {
-        (void)sig;
-        running = false;
+        if (pendingSignal.exchange(sig, std::memory_order_relaxed)) _exit(128 + sig);
     }
 #endif
 
@@ -113,6 +111,19 @@ namespace headless {
 #endif
     }
 
+    // Main thread only, including between catch-up steps.
+    inline void pollExitSignal() {
+        // Keep the pending value so a later signal escalates even after
+        // delivery. Signals are uncancellable; only a new run resets it.
+        const sig_atomic_t sig = pendingSignal.load(std::memory_order_relaxed);
+        if (sig == deliveredSignal) return;
+        deliveredSignal = sig;
+        if (sig) {
+            internal::setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
+            running = false;
+        }
+    }
+
     // Elapsed time: the same clock as trussc::getElapsedTime() (one steady
     // clock with its origin at program start, #229).
     inline double getElapsedTime() {
@@ -124,6 +135,54 @@ namespace headless {
         return frameCount;
     }
 }
+
+namespace internal {
+// One pass, with elapsed time supplied by the runner (or a deterministic
+// test). A cancellable request is dispatched only after all owed steps.
+inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
+                                  double& accumulator, double elapsed,
+                                  double targetDelta) {
+    FixedStepAdvance adv = advanceFixedStep(
+        accumulator, elapsed, targetDelta, getMaxUpdateSteps());
+    if (adv.droppedTime > 0.0) {
+        warnUpdateStepsDropped(FixedStepLoop::Headless,
+                               adv.droppedTime, targetDelta, adv.steps);
+    }
+    int ran = 0;
+    for (; ran < adv.steps; ++ran) {
+        headless::pollExitSignal();
+        if (!headless::running || app.isExitRequested()) break;
+        ctx.updateDeltaTime = targetDelta;
+        EntryStackGuard guard(AppEntry::Update);
+        crashFrame(headless::frameCount);
+        CrashPhaseScope updatePhase("update");
+        app.update();
+        headless::frameCount++;
+    }
+    // As in the windowed loop, steps cut short do not count toward the rate.
+    recordUpdateRateSample(ctx, elapsed,
+        (elapsed - adv.droppedTime) / targetDelta - (adv.steps - ran));
+
+    headless::pollExitSignal();
+    if (headless::running && !app.isExitRequested()
+            && headless::quitRequested.exchange(false)) {
+        EntryStackGuard guard(AppEntry::Event);
+        setExitBlockReason("");
+        ExitRequestEventArgs args;
+        events().exitRequested.notify(args);
+        headless::pollExitSignal();
+        if (args.cancel) {
+            // A listener may also issue an uncancellable exit.
+            if (headless::running) {
+                setExitBlockReason(args.reason);
+                clearExitReason();
+            }
+        } else {
+            headless::running = false;
+        }
+    }
+}
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Headless settings
@@ -148,6 +207,16 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // Set target FPS
     headless::targetFps = settings.targetFps;
 
+    // Reset before installing handlers: keep any signal received during
+    // installation, and start consecutive runs with no stale exit state.
+    headless::running = true;
+    headless::quitRequested = false;
+    headless::pendingSignal = 0;
+    headless::deliveredSignal = 0;
+    internal::appExitCode() = 0;
+    internal::clearExitReason();
+    internal::setExitBlockReason("");
+
     // Install signal handlers
     headless::installSignalHandlers();
 
@@ -163,7 +232,6 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 
     // Reset state
     headless::active = true;
-    headless::running = true;
     headless::frameCount = 0;
 
     // Headless apps run in the main window's (GPU-less) context: that is
@@ -198,6 +266,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::HeadlessSleeper sleeper;
 
     while (headless::running && !app->isExitRequested()) {
+        headless::pollExitSignal();
+        if (!headless::running) break;
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration<double>(now - lastTime).count();
         lastTime = now;
@@ -214,26 +284,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             internal::pumpAudioDiagnostics();
         }
 
-        // Fixed timestep update
-        internal::FixedStepAdvance adv = internal::advanceFixedStep(
-            accumulator, elapsed, targetDelta, getMaxUpdateSteps());
-        if (adv.droppedTime > 0.0) {
-            internal::warnUpdateStepsDropped(internal::FixedStepLoop::Headless,
-                                             adv.droppedTime, targetDelta, adv.steps);
-        }
-        for (int i = 0; i < adv.steps; ++i) {
-            ctx.updateDeltaTime = targetDelta;
-            internal::EntryStackGuard guard(internal::AppEntry::Update);
-            internal::crashFrame(headless::frameCount);
-            internal::CrashPhaseScope updatePhase("update");
-            app->update();
-            headless::frameCount++;
-        }
-        // Measured rate: the time the steps consumed, in (fractional) steps,
-        // over the wall time. A pass is often shorter than a step (~1 ms on
-        // Linux/macOS), so whole-step counts would read 0 in most windows.
-        internal::recordUpdateRateSample(ctx, elapsed,
-                                         (elapsed - adv.droppedTime) / targetDelta);
+        internal::runHeadlessUpdatePass(*app, ctx, accumulator, elapsed, targetDelta);
+        if (!headless::running || app->isExitRequested()) break;
 
         // Sleep until the next step is due (at most 1 ms), counted from the
         // pass start: the steps above already took part of that time.
@@ -258,7 +310,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::flushAudioDiagnostics();
 
     headless::active = false;
-    return 0;
+    return internal::appExitCode();
 }
 
 } // namespace trussc

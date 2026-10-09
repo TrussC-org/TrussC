@@ -14,6 +14,10 @@ namespace headless {
 // is windowed, so it is false in every module's copy there.
 inline std::atomic<bool> active{false};
 
+// Headless-only loop flags; hot reload is windowed and never reads them.
+inline std::atomic<bool> running{true};
+inline std::atomic<bool> quitRequested{false};
+
 // Check if currently running in headless mode
 inline bool isActive() { return active.load(); }
 
