@@ -49,12 +49,13 @@ TC_CORE_TEST_MAIN() {
     check("windowed guard disarms restoration", pagesAre(CP_UTF8, CP_UTF8));
     setPages(output, input);
 
-    const bool wasRunning = headless::running.exchange(true);
+    headless::pendingSignal = 0;
     {
         internal::HeadlessConsoleUtf8 guard;
         check("headless guard sets both UTF-8", pagesAre(CP_UTF8, CP_UTF8));
-        check("first headless Ctrl+C stops the loop",
-              headless::consoleHandler(CTRL_C_EVENT) == TRUE && !headless::running);
+        check("first headless Ctrl+C requests exit",
+              headless::consoleHandler(CTRL_C_EVENT) == TRUE
+              && headless::pendingSignal == SIGINT);
         check("first headless Ctrl+C leaves restoration to teardown",
               pagesAre(CP_UTF8, CP_UTF8));
         check("second headless Ctrl+C falls through",
@@ -68,7 +69,8 @@ TC_CORE_TEST_MAIN() {
           headless::consoleHandler(CTRL_C_EVENT) == FALSE);
     check("headless guard disarms restoration", pagesAre(CP_UTF8, CP_UTF8));
     setPages(output, input);
-    headless::running = wasRunning;
+    headless::pendingSignal = 0;
+    headless::deliveredSignal = 0;
     return failures ? 1 : 0;
 #endif
 }

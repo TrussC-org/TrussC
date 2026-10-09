@@ -670,6 +670,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   no drag after it lifts; an event with no touches clears it; a primary whose
   end event was lost (not among the touches at the next BEGAN) is dropped so
   the next finger down presses.
+- `headlessExit/` — headless exit protocol (#378, #383): pending-signal
+  retention and second-signal escalation (POSIX child processes), forced and cancellable
+  exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
+  consecutive runs, and deterministic 100-step catch-up passes that stop only
+  for uncancellable exits. No display or timing-dependent assertions.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame

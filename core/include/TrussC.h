@@ -2052,7 +2052,8 @@ inline void redraw(int count = 1) {
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
     internal::setExitReason("request-exit-app");
-    sapp_request_quit();
+    if (headless::isActive()) headless::quitRequested = true;
+    else sapp_request_quit();
 }
 
 // Immediately exit the application (cannot be cancelled)
@@ -2060,7 +2061,8 @@ inline void requestExitApp() {
 inline void exitApp(int code = 0) {
     internal::appExitCode() = code;
     internal::setExitReason("exit-app");
-    sapp_quit();
+    if (headless::isActive()) headless::running = false;
+    else sapp_quit();
 }
 
 // ---------------------------------------------------------------------------
