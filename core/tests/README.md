@@ -315,6 +315,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   separately from dropped plays. Checks MCP fields, main-thread underrun/stall
   warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
   Uses callback gates and condition-based waits.
+- `micInput/` — Sound playback advances across repeated MicInput start/stop
+  cycles on the Null backend (#696). Capture works without initializing
+  playback and its callbacks continue through engine sample-rate re-init,
+  shutdown/restart, and backend replacement. iOS session behavior and passive
+  system-volume reads still require the iPhone checks.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an

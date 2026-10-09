@@ -105,11 +105,13 @@ const ma_backend kNullBackend = ma_backend_null;
 ma_result initContext(ma_context* ctx, bool probe = false,
                       AudioBackend backend = AudioBackend::Default) {
     ma_context_config cfg = ma_context_config_init();
+    // The iOS session is shared with video playback too. Core may activate
+    // it, but releasing an audio context must never deactivate it.
+    cfg.coreaudio.noAudioSessionDeactivate = MA_TRUE;
     if (probe) {
         // Enumeration only observes the iOS session, including on uninit.
         cfg.coreaudio.sessionCategory = ma_ios_session_category_none;
         cfg.coreaudio.noAudioSessionActivate = MA_TRUE;
-        cfg.coreaudio.noAudioSessionDeactivate = MA_TRUE;
     }
     if (backend == AudioBackend::Null) {
         return ma_context_init(&kNullBackend, 1, &cfg, ctx);
@@ -2400,10 +2402,12 @@ bool MicInput::start(int sampleRate) {
 
     // Follow the engine's selected backend, with a private capture context so
     // engine re-init/shutdown cannot invalidate a running microphone's context.
+    // Releasing capture must not deactivate the iOS session used by playback.
+    ma_context_config contextConfig = ma_context_config_init();
+    contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;
     const auto* engineContext = static_cast<const ma_context*>(AudioEngine::getInstance().context_);
-    ma_result result = engineContext
-        ? ma_device_init_ex(&engineContext->backend, 1, nullptr, &config, device)
-        : ma_device_init(nullptr, &config, device);
+    ma_result result = ma_device_init_ex(engineContext ? &engineContext->backend : nullptr,
+                                       engineContext ? 1 : 0, &contextConfig, &config, device);
     if (result != MA_SUCCESS) {
         logError("MicInput") << "failed to initialize the capture device (result="
                              << (int)result << ")";
