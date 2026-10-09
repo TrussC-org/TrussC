@@ -68,6 +68,8 @@ std::atomic<HANDLE> logFile{INVALID_HANDLE_VALUE};
 HANDLE stderrHandle = INVALID_HANDLE_VALUE;
 LPTOP_LEVEL_EXCEPTION_FILTER previousFilter = nullptr;
 std::atomic<DWORD> cppReportThread{0};
+// One lock-free snapshot, also readable when a worker crashes.
+std::atomic<uint64_t> crashConsoleCodePages{0};
 using AbortHandler = void (*)(int);
 AbortHandler previousAbort = SIG_DFL;
 #else
@@ -308,6 +310,11 @@ LONG WINAPI onException(EXCEPTION_POINTERS* exception) {
         }
         context(); windowsStack(exception->ContextRecord); flush();
     }
+    const uint64_t codePages = crashConsoleCodePages.load();
+    const UINT outputCP = static_cast<UINT>(codePages >> 32);
+    const UINT inputCP = static_cast<UINT>(codePages);
+    if (outputCP != 0) SetConsoleOutputCP(outputCP);
+    if (inputCP != 0) SetConsoleCP(inputCP);
     if (previousFilter) return previousFilter(exception);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -355,6 +362,12 @@ void onTerminate() noexcept {
 } // namespace
 
 CrashContext& crashContext() { return contextState; }
+
+#ifdef _WIN32
+void setCrashConsoleCodePages(unsigned output, unsigned input) noexcept {
+    crashConsoleCodePages.store((static_cast<uint64_t>(output) << 32) | input);
+}
+#endif
 
 void refreshCrashModules() noexcept try {
     std::lock_guard<std::mutex> guard(moduleMutex);

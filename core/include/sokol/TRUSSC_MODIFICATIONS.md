@@ -62,6 +62,21 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### Windows console UTF-8 input and output (#754)
+
+`console_utf8` saves `orig_output_codepage` and `orig_input_codepage`, then
+sets both console code pages to UTF-8 (output first). The two success flags
+are independent: `_sapp_tc_win32_restore_console()` restores only the code
+pages that were successfully set, each to its own original value. Preserve
+this behavior and the descriptor comments when importing upstream changes.
+
+Outside sokol, `TrussC.h`'s host-only `ConsoleCPCtrlGuard` saves both values
+for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. It also passes
+the pair to the Windows crash handler, which restores after reporting and
+before chaining to a previous exception filter. Normal shutdown disarms
+these fallbacks. `abort()`, `TerminateProcess` and external kills cannot
+restore the console. Console input still uses `std::getline(std::cin)`.
+
 ### D3D11 device loss (#258)
 
 All three Present paths (main, secondary, and occlusion test) and ResizeBuffers
