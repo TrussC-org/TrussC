@@ -160,7 +160,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
         id: fetchcontent-restore
@@ -172,7 +172,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
         shell: bash
@@ -355,7 +355,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
         id: fetchcontent-restore
@@ -367,7 +367,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
         shell: bash
@@ -501,7 +501,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
         id: fetchcontent-restore
@@ -513,7 +513,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
         shell: bash
@@ -637,7 +637,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Cache FetchContent (restore only, merge queue)
         id: fetchcontent-restore
@@ -649,7 +649,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.fetchcontent/*-src
             ${{ github.workspace }}/.fetchcontent/*-subbuild
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
       - name: Configure shared FetchContent
         shell: bash

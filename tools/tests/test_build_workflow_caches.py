@@ -114,7 +114,7 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                     self.assertFalse(can_save_on_merge_group(save))
                     expected = {'path': '${{ github.workspace }}/.fetchcontent/*-src\n'
                                         '${{ github.workspace }}/.fetchcontent/*-subbuild\n',
-                                'key': "fetchcontent-${{ runner.os }}-${{ hashFiles('addons/*/CMakeLists.txt') }}"}
+                                'key': "fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}"}
                     self.assertEqual(save['with'], expected)
                     self.assertEqual(restore['with'], expected)
                     self.assertEqual(steps.index(restore), steps.index(save) + 1)
