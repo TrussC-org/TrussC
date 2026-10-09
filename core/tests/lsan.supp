@@ -1,0 +1,4 @@
+# fontFaceIndex: fontconfig retains its one-time system-font cache.
+leak:libfontconfig.so
+# tcpClientReconnect: clients outlive the scenario to check thread cleanup without destructors.
+leak:makeProcessLifetimeReconnectClient

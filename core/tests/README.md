@@ -116,6 +116,28 @@ an unregistered test still fails the sweep. Do not comment out or delete
 tests to reduce run time. Which tests move to daily-only requires an owner
 Decision after reviewing measured times.
 
+### AddressSanitizer sweep (Linux)
+
+From the repository root, with fresh build directories (CMake caches these
+flags on its first configure):
+
+```sh
+CC=gcc CXX=g++ \
+CFLAGS='-fsanitize=address -fno-omit-frame-pointer -g' \
+CXXFLAGS='-fsanitize=address -fno-omit-frame-pointer -g' \
+LDFLAGS='-fsanitize=address' \
+LSAN_OPTIONS="suppressions=$PWD/core/tests/lsan.supp" \
+  python3 examples/build_all.py --core-tests-only --include-daily
+```
+
+Keep symbolization enabled and a symbolizer available so the named LSan
+suppression can match. `lsan.supp` covers fontconfig's retained cache and
+the deliberately retained reconnect clients; other leaks remain errors.
+`crashHandler` logs each skipped signal case under ASan, while its exception
+and terminate cases still run. Run a normal sweep as well to cover those
+signal cases. Use fresh build directories or explicitly reset the cached
+compiler and linker flags when switching back to a normal build.
+
 ### Also on web (`web-test` marker)
 
 A trusscli project test that also has a `web-test` file in its dir is built for

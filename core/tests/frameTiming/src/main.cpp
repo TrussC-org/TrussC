@@ -1249,13 +1249,13 @@ static void testModeSwitchMeasuredDelta() {
 // runs updateTree() twice in it; its timers must not count that update twice
 // (fire a frame early).
 struct MovingNode : Node {
-    shared_ptr<Node> target;
+    weak_ptr<Node> target;
     bool moveNow = false;
     int fired = 0;
     void update() override {
         if (moveNow) {
             moveNow = false;
-            target->addChild(shared_from_this());
+            if (auto parent = target.lock()) parent->addChild(shared_from_this());
         }
     }
 };

@@ -301,12 +301,21 @@ static int countEntries(const char* path) {
 }
 #endif
 
+// Give LSan one narrow allocation site for the deliberately retained clients.
+// noinline keeps the frame name that lsan.supp matches.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+static TcpClient& makeProcessLifetimeReconnectClient() {
+    return *new TcpClient();
+}
+
 static void scenario() {
     // Constructed first: it also starts Winsock. Kept for the life of the
     // process: the old receive threads that the listener reconnects below
     // let go of must be joined by the client's later connect() and
     // disconnect() calls, not only by a destructor (main() counts threads).
-    TcpClient& client = *new TcpClient();
+    TcpClient& client = makeProcessLifetimeReconnectClient();
 
     int port = 0;
     rawsocket_t listener = listenLoopback(port);
@@ -722,7 +731,7 @@ static void scenario() {
         // Kept for the life of the process: the old receive thread that the
         // listener's disconnect() lets go of must be joined by the client's
         // later connect() and disconnect() calls (main() counts threads).
-        TcpClient& bc = *new TcpClient();
+        TcpClient& bc = makeProcessLifetimeReconnectClient();
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
 #endif
@@ -814,7 +823,7 @@ static void scenario() {
     // went on polling it after this block had ended and, nothing waiting
     // for its thread, after main() had returned.
     {
-        TcpClient& bn = *new TcpClient();   // kept, as above
+        TcpClient& bn = makeProcessLifetimeReconnectClient();   // kept, as above
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
 #endif
