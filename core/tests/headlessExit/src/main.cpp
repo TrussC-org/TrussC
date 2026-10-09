@@ -278,11 +278,16 @@ void testSignalEscalation() {
         headless::pollExitSignal();
         check(headless::consoleHandler(control) == FALSE,
               "second console interrupt after poll falls through to default handler");
-        if (consoleUtf8.set)
-            check(GetConsoleOutputCP() == consoleUtf8.original,
-                  "second console interrupt restores original code page");
+        if (consoleUtf8.outputSet)
+            check(GetConsoleOutputCP() == consoleUtf8.originalOutput,
+                  "second console interrupt restores original output code page");
+        if (consoleUtf8.inputSet)
+            check(GetConsoleCP() == consoleUtf8.originalInput,
+                  "second console interrupt restores original input code page");
     }
-    check(internal::headlessRestoreConsoleCP == 0, "console guard clears restore code page");
+    check(internal::headlessRestoreConsoleCP.output == 0
+          && internal::headlessRestoreConsoleCP.input == 0,
+          "console guard clears restore code pages");
     headless::active = false;
 #endif
 }

@@ -21,6 +21,10 @@ void installCrashHandler();
 void refreshCrashModules() noexcept;
 void setCrashLogFile(const std::filesystem::path& path);
 void closeCrashLogFile();
+#ifdef _WIN32
+// Saved by the host's console guard; zero disarms restoration after sapp_run().
+void setCrashConsoleCodePages(unsigned output, unsigned input) noexcept;
+#endif
 
 // Main-loop bookkeeping only: no allocation, clocks, disk I/O or locks.
 // Atomics let a crashing worker read the main thread's latest context.

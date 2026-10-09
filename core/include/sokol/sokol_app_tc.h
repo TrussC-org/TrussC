@@ -1329,8 +1329,8 @@
     via the following Windows-specific sapp_desc flags:
 
         sapp_desc.win32.console_utf8 (default: false)
-            When set to true, the output console codepage will be switched
-            to UTF-8 (and restored to the original codepage on exit)
+            When set to true, the input and output console codepages will be
+            switched to UTF-8 (and each restored to its original codepage on exit)
 
         sapp_desc.win32.console_attach (default: false)
             When set to true, stdout and stderr will be attached to the
@@ -2135,7 +2135,7 @@ typedef struct sapp_gl_desc {
 } sapp_gl_desc;
 
 typedef struct sapp_win32_desc {
-    bool console_utf8;            // if true, set the output console codepage to UTF-8
+    bool console_utf8;            // if true, set the input and output console codepages to UTF-8
     bool console_create;          // if true, attach stdout/stderr to a new console window
     bool console_attach;          // if true, attach stdout/stderr to parent process
 } sapp_win32_desc;
@@ -6292,8 +6292,10 @@ static struct {
         HCURSOR custom_cursors[_SAPP_MOUSECURSOR_NUM];
         bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
         /* console */
-        bool console_utf8_set;
-        UINT orig_codepage;
+        bool console_output_utf8_set;
+        bool console_input_utf8_set;
+        UINT orig_output_codepage;
+        UINT orig_input_codepage;
         /* clipboard */
         bool clipboard_enabled;
         int clipboard_size;
@@ -6725,16 +6727,24 @@ static void _sapp_tc_win32_init_console(void) {
         }
     }
     if (d->win32.console_utf8) {
-        _sapp_tc.app.orig_codepage = GetConsoleOutputCP();
+        /* [TrussC #754] Keep the console UTF-8 in both directions. */
+        _sapp_tc.app.orig_output_codepage = GetConsoleOutputCP();
+        _sapp_tc.app.orig_input_codepage = GetConsoleCP();
         if (SetConsoleOutputCP(CP_UTF8)) {
-            _sapp_tc.app.console_utf8_set = true;
+            _sapp_tc.app.console_output_utf8_set = true;
+        }
+        if (SetConsoleCP(CP_UTF8)) {
+            _sapp_tc.app.console_input_utf8_set = true;
         }
     }
 }
 
 static void _sapp_tc_win32_restore_console(void) {
-    if (_sapp_tc.app.console_utf8_set) {
-        SetConsoleOutputCP(_sapp_tc.app.orig_codepage);
+    if (_sapp_tc.app.console_output_utf8_set) {
+        SetConsoleOutputCP(_sapp_tc.app.orig_output_codepage);
+    }
+    if (_sapp_tc.app.console_input_utf8_set) {
+        SetConsoleCP(_sapp_tc.app.orig_input_codepage);
     }
 }
 

@@ -72,7 +72,8 @@ core/include/TrussC.h trussc::internal::appWindowResizedFunc   # host-only: as a
 core/include/TrussC.h trussc::internal::appFilesDroppedFunc    # host-only: as appSetupFunc
 core/include/TrussC.h trussc::buildAppDescriptor::app          # host-only: runApp's App; a hot reload build launches through runHotReloadApp instead
 core/include/TrussC.h trussc::internal::g_androidDesc          # no-hot-reload: Android only
-core/include/TrussC.h trussc::internal::consoleOutputCPBeforeRun  # host-only: set and read by ConsoleOutputCPCtrlGuard around sapp_run() in runApp / the hot reload host's main, and by its console handler
+core/include/TrussC.h trussc::internal::consoleCPBeforeRun  # host-only: saved by ConsoleCPCtrlGuard around sapp_run() in runApp / the hot reload host, read by its control and exit handlers
+core/include/TrussC.h trussc::internal::ConsoleCPCtrlGuard::ConsoleCPCtrlGuard::exitHook  # host-only: only the host constructs the guard; register one exit hook across repeated runs
 
 # --- tcColor.h
 core/include/tcColor.h trussc::colors::*   # immutable: the named color constants (const Color)

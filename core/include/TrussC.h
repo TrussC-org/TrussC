@@ -3258,15 +3258,15 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
 
-    // Windows: switch the console output code page to UTF-8 while the app
-    // runs, so UTF-8 log text is not shown in the OEM code page. Takes effect
-    // whenever the process has a console (Debug builds, TRUSSC_SHOW_CONSOLE);
-    // a GUI-subsystem Release build has none, and the call does nothing.
-    // sokol restores the previous code page when sapp_run() returns, and
-    // internal::ConsoleOutputCPCtrlGuard when Ctrl+C, Ctrl+Break or closing
-    // the console ends the process. std::exit(), abort(), an uncaught
-    // exception and a crash leave the console in UTF-8. Ignored on other
-    // platforms.
+    // Windows: keep console input and output UTF-8 while the app runs.
+    // Takes effect whenever the process has a console (Debug builds,
+    // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none.
+    // sokol restores both code pages when sapp_run() returns. The host's
+    // ConsoleCPCtrlGuard covers Ctrl+C, Ctrl+Break, console close and
+    // std::exit(), and restores during exception unwinding; the Windows
+    // crash handler restores after its report.
+    // abort(), TerminateProcess and external kills cannot restore them.
+    // Ignored on other platforms.
     desc.win32.console_utf8 = true;
 
     return desc;
@@ -3274,37 +3274,57 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
 #ifdef _WIN32
 namespace internal {
-// sokol switches the console output code page to UTF-8 (console_utf8 above)
-// and puts it back when sapp_run() returns. Ctrl+C, Ctrl+Break and closing
-// the console end the process in the default console handler (ExitProcess)
-// instead, which would leave the launching cmd in UTF-8. This handler puts
-// the code page back first and returns FALSE, so the default handling goes
-// on and the process still ends.
-// Host-only state (tools/header_state_allowlist.txt): only the guard around
-// sapp_run() in runApp() / the hot reload host and its handler touch it, and
-// both are compiled into the host, so a guest's copy is never used.
-inline UINT consoleOutputCPBeforeRun = 0;   // 0: the process has no console
+// sokol restores both code pages when sapp_run() returns normally. The guard
+// also restores on destruction, including when an exception escapes sapp_run().
+// Console control events use ExitProcess instead, and std::exit() skips stack
+// destructors. Restore before default control handling, or from the exit hook.
+// Host-only state (tools/header_state_allowlist.txt): the guard around
+// sapp_run() in runApp() / the hot reload host and its handlers live in the
+// host; a guest's copy is never used. Zero means there is no console.
+struct ConsoleCodePages {
+    std::atomic<UINT> output{0};
+    std::atomic<UINT> input{0};
+};
+inline ConsoleCodePages consoleCPBeforeRun;
 
-inline BOOL WINAPI restoreConsoleOutputCPOnCtrl(DWORD type) {
+inline void restoreConsoleCP() {
+    const UINT output = consoleCPBeforeRun.output.load();
+    const UINT input = consoleCPBeforeRun.input.load();
+    if (output != 0) SetConsoleOutputCP(output);
+    if (input != 0) SetConsoleCP(input);
+}
+
+inline BOOL WINAPI restoreConsoleCPOnCtrl(DWORD type) {
     if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
-        SetConsoleOutputCP(consoleOutputCPBeforeRun);
+        restoreConsoleCP();
     }
     return FALSE;
 }
 
-// Installs restoreConsoleOutputCPOnCtrl for its lifetime (around sapp_run()),
-// with the code page the console has before sokol changes it.
-struct ConsoleOutputCPCtrlGuard {
-    ConsoleOutputCPCtrlGuard() {
-        consoleOutputCPBeforeRun = GetConsoleOutputCP();
-        installed = consoleOutputCPBeforeRun != 0 &&
-                    SetConsoleCtrlHandler(restoreConsoleOutputCPOnCtrl, TRUE) != 0;
+// Capture before sokol switches code pages; keep one exit hook per host.
+struct ConsoleCPCtrlGuard {
+    ConsoleCPCtrlGuard() {
+        const UINT output = GetConsoleOutputCP();
+        const UINT input = GetConsoleCP();
+        consoleCPBeforeRun.output = output;
+        consoleCPBeforeRun.input = input;
+        setCrashConsoleCodePages(output, input);
+        static const int exitHook = std::atexit(restoreConsoleCP);
+        (void)exitHook;
+        installed = (output != 0 || input != 0) &&
+                    SetConsoleCtrlHandler(restoreConsoleCPOnCtrl, TRUE) != 0;
     }
-    ~ConsoleOutputCPCtrlGuard() {
-        if (installed) SetConsoleCtrlHandler(restoreConsoleOutputCPOnCtrl, FALSE);
+    ~ConsoleCPCtrlGuard() {
+        // Repeat sokol's normal restore, or perform it during exception unwinding.
+        restoreConsoleCP();
+        if (installed) SetConsoleCtrlHandler(restoreConsoleCPOnCtrl, FALSE);
+        // Disarm only after restoring; do not overwrite later changes at exit.
+        consoleCPBeforeRun.output = 0;
+        consoleCPBeforeRun.input = 0;
+        setCrashConsoleCodePages(0, 0);
     }
-    ConsoleOutputCPCtrlGuard(const ConsoleOutputCPCtrlGuard&) = delete;
-    ConsoleOutputCPCtrlGuard& operator=(const ConsoleOutputCPCtrlGuard&) = delete;
+    ConsoleCPCtrlGuard(const ConsoleCPCtrlGuard&) = delete;
+    ConsoleCPCtrlGuard& operator=(const ConsoleCPCtrlGuard&) = delete;
 
     bool installed = false;
 };
@@ -3333,7 +3353,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     internal::openEnvLogFile();   // before sapp_run(): init-time failures too
     sapp_desc desc = buildAppDescriptor<AppClass>(settings);
 #ifdef _WIN32
-    internal::ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
+    internal::ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
 #endif
     internal::appSetupCalled() = false;
     sapp_run(&desc);
