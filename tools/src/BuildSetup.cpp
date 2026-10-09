@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 using namespace std;
 using Json = nlohmann::json;
@@ -67,19 +68,54 @@ ConfigurePlan planConfigure(const ConfigureInputs& in) {
     return plan;
 }
 
-// CMAKE_BUILD_TYPE in a CMakeCache.txt ("" when the file or entry is missing).
-static string readCachedBuildType(const fs::path& cachePath) {
+// Cache entry value ("" when the file or entry is missing).
+string readCMakeCacheValue(const string& cachePath, const string& key) {
     ifstream cache(cachePath);
     if (!cache) return "";
     string line;
     while (getline(cache, line)) {
         // Format: CMAKE_BUILD_TYPE:STRING=RelWithDebInfo
-        if (line.rfind("CMAKE_BUILD_TYPE:", 0) == 0) {
+        if (line.rfind(key + ":", 0) == 0) {
             auto eq = line.find('=');
             if (eq != string::npos) return line.substr(eq + 1);
         }
     }
     return "";
+}
+
+string quoteWindowsArgument(const string& argument) {
+    string quoted = "\"";
+    size_t slashes = 0;
+    for (char c : argument) {
+        if (c == '\\') {
+            ++slashes;
+            continue;
+        }
+        // Windows argv parsing doubles backslashes before a quote.
+        quoted.append(c == '"' ? slashes * 2 + 1 : slashes, '\\');
+        quoted += c;
+        slashes = 0;
+    }
+    quoted.append(slashes * 2, '\\');
+    return quoted + '"';
+}
+
+bool hasMainHeaderDependencies(const string& ninjaDeps) {
+    istringstream lines(ninjaDeps);
+    string line;
+    bool found = false;
+    while (getline(lines, line)) {
+        const auto marker = line.find(": #deps ");
+        if (marker == string::npos) continue;
+        string object = line.substr(0, marker);
+        replace(object.begin(), object.end(), '\\', '/');
+        if (object.substr(object.find_last_of('/') + 1) != "main.cpp.obj") continue;
+        istringstream countText(line.substr(marker + 8));
+        long long count = 0;
+        if (!(countText >> count) || count <= 0) return false;
+        found = true;
+    }
+    return found;
 }
 
 // Whether a finished configure left a build system in dir. The generate
@@ -109,7 +145,7 @@ ConfigureInputs inspectBuildFolder(const string& projectDir,
     error_code ec;
     in.hasCache = fs::is_regular_file(dir / "CMakeCache.txt", ec);
     in.generated = hasBuildSystem(dir);
-    in.cachedBuildType = readCachedBuildType(dir / "CMakeCache.txt");
+    in.cachedBuildType = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_BUILD_TYPE");
     return in;
 }
 

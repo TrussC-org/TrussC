@@ -43,7 +43,9 @@ static string getCmakePath() {
 static pair<int, string> executeCommand(const string& cmd) {
     string output;
 #ifdef _WIN32
-    // CreateProcessでコンソールウィンドウを非表示にして実行
+    // Keep configure and build on the same console/code page (#417).
+    // A GUI invocation without a console still runs children hidden.
+    const bool hasConsole = GetConsoleCP() != 0;
     string fullCmd = "cmd.exe /c " + cmd + " 2>&1";
 
     SECURITY_ATTRIBUTES sa = {};
@@ -59,17 +61,20 @@ static pair<int, string> executeCommand(const string& cmd) {
 
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = hWritePipe;
     si.hStdError = hWritePipe;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.wShowWindow = SW_HIDE;
+    if (!hasConsole) {
+        si.dwFlags |= STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+    }
 
     PROCESS_INFORMATION pi = {};
     BOOL ok = CreateProcessA(
         nullptr, const_cast<char*>(fullCmd.c_str()),
         nullptr, nullptr, TRUE,
-        CREATE_NO_WINDOW,
+        hasConsole ? 0 : CREATE_NO_WINDOW,
         nullptr, nullptr, &si, &pi);
 
     // 書き込み側を閉じる（子プロセスが使うので親では不要）
@@ -392,6 +397,22 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     windowsPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("windows");
     windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
+    // project() initializes MSVC's build type to Debug, before trussc_app's
+    // fallback can run. Pin our intended default, preserving a project override.
+    windowsPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "RelWithDebInfo";
+    ifstream savedFile(destPath + "/CMakePresets.json");
+    Json saved = Json::parse(savedFile, nullptr, false);
+    if (saved.is_object() && saved.contains("configurePresets") &&
+        saved["configurePresets"].is_array()) {
+        for (const auto& p : saved["configurePresets"]) {
+            if (p.is_object() && p.contains("name") && p["name"] == "windows" &&
+                p.contains("cacheVariables") && p["cacheVariables"].is_object() &&
+                p["cacheVariables"].contains("CMAKE_BUILD_TYPE")) {
+                windowsPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] =
+                    p["cacheVariables"]["CMAKE_BUILD_TYPE"];
+            }
+        }
+    }
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
         windowsPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;

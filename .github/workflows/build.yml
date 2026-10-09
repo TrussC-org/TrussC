@@ -299,6 +299,14 @@ jobs:
         shell: bash
         run: python3 tools/tests/test_trusscli_clean.py -v
 
+      # Configure and build must agree on localized /showIncludes bytes (#417).
+      - name: Windows UTF-8 console header dependencies
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          python tools/tests/test_windows_header_dependencies.py -v
+
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
       # other example is built daily (daily.yml).
