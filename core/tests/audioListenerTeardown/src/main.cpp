@@ -5,7 +5,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The real AudioEngine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the mixer callback on its own thread, so no sound card is needed.
 //
 // Guards the invariants:
@@ -20,8 +20,8 @@
 //     warning and returns false (the exit must not hang).
 //   - App teardown, through runHeadlessApp (the windowed exit, hot reload and
 //     closing a secondary window call the same internal::detachAppAudio()),
-//     started while the App's audioOut() is in flight: cleanup() still has the
-//     hook attached, the hook is gone afterwards, the App's destructor never
+//     started while the App's audioOut() is in flight: cleanup() has the
+//     hook detached (#698), the hook stays gone, the App's destructor never
 //     starts while audioOut() runs, and audioOut() never runs once the
 //     destructor has started. Before #256 the audio thread kept calling the
 //     derived audioOut() until ~App() disconnected it, after the derived
@@ -31,7 +31,7 @@
 //     logged, and the teardown goes on once audioOut() returns. Meanwhile the
 //     public waitForAudioCallbacks() still gives up after about a second.
 //   - An App runs once: Window::setApp() refuses an App whose window closed
-//     (exit(), cleanup(), audio detached) with one error, keeps the window's
+//     (exit(), audio detached, cleanup()) with one error, keeps the window's
 //     App, subscribes no hook and runs no second setup(); and it refuses any
 //     App on a window that is not open (one error each, the window stays
 //     empty), which leaves that App free to go to an open window.
@@ -93,7 +93,7 @@ static constexpr double kAtOnce = 0.1;
 // --- The App shape ------------------------------------------------------------
 // audioOut() reads a member of the derived App. After a few ordinary calls one
 // call runs long, and update() asks to exit while it runs, so the teardown
-// (exit(), cleanup(), detach, destruction) meets an audioOut() in flight every
+// (exit(), detach, cleanup(), destruction) meets an audioOut() in flight every
 // time. The derived destructor marks the App as going first, then lingers so
 // that an audio thread still calling audioOut() is caught doing it.
 //
@@ -131,7 +131,7 @@ struct SynthApp : App {
         if (g_longCallRunning) requestExit();   // tear down during the long call
         if (frames >= 2000) { g_timedOut = true; requestExit(); }
     }
-    // The hooks are detached AFTER cleanup(): it can still use audio.
+    // The App hooks are detached before cleanup(); the engine keeps running.
     void cleanup() override {
         ++g_cleanupCalls;
         g_hooksAtCleanup = AudioEngine::getInstance().audioOut.listenerCount();
@@ -223,8 +223,6 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     mutex logMutex;
@@ -254,6 +252,7 @@ TC_CORE_TEST_MAIN() {
     }
 
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;
@@ -346,8 +345,8 @@ TC_CORE_TEST_MAIN() {
         check(tag + "the exit ran while a long audioOut() was in flight",
               g_audioOutCalls.load() >= 5 && !g_timedOut,
               to_string(g_audioOutCalls.load()) + " calls");
-        check(tag + "cleanup() ran with the App's audioOut() still attached",
-              g_cleanupCalls == run + 1 && g_hooksAtCleanup == 1,
+        check(tag + "cleanup() ran with the App's audioOut() already detached",
+              g_cleanupCalls == run + 1 && g_hooksAtCleanup == 0,
               to_string(g_hooksAtCleanup) + " listeners");
         check(tag + "the App's hook is gone after the exit", engine.audioOut.listenerCount() == 0);
         check(tag + "audioOut() never ran after the destructor started",
@@ -398,7 +397,7 @@ TC_CORE_TEST_MAIN() {
 
     // --- setApp() refuses a cleaned-up App and a closed window ---------------------------
     // An App runs once. Window::close() needs a native window; here the test
-    // runs its steps itself (exit(), cleanup(), internal::detachAppAudio(),
+    // runs its steps itself (exit(), internal::detachAppAudio(), cleanup(),
     // release, clear the native state) and then calls the real
     // Window::setApp().
     {
@@ -423,8 +422,8 @@ TC_CORE_TEST_MAIN() {
 
         // What the platform Window::close() does, its App part included.
         sub->exit();
-        sub->cleanup();
         internal::detachAppAudio(*sub);
+        sub->cleanup();
         first.setApp(nullptr);
         internal::applyPendingAppForTests(first);   // the frame boundary
         first.native_ = nullptr;
@@ -462,20 +461,21 @@ TC_CORE_TEST_MAIN() {
         internal::applyPendingAppForTests(first);   // the frame boundary
         check("... also one that was open before", first.getApp() == nullptr &&
               countErrors("this window is closed") == closedErrors + 2);
+        // setApp(nullptr) ends keeper as a close does (#318): its hook goes.
         second.setApp(nullptr);
         internal::applyPendingAppForTests(second);   // the frame boundary
+        check("setApp(nullptr) ends the window's App: its hook is gone",
+              internal::appRanCleanup(*keeper) && engine.audioOut.listenerCount() == hooks,
+              to_string(engine.audioOut.listenerCount()) + " hooks");
         second.setApp(stray);   // the refusals left it free to attach
         internal::applyPendingAppForTests(second);   // the frame boundary
         check("the refused App can still go to an open window",
-              second.getApp() == stray && engine.audioOut.listenerCount() == hooks + 1);
+              second.getApp() == stray && engine.audioOut.listenerCount() == hooks);
         second.setApp(nullptr);
         internal::applyPendingAppForTests(second);   // the frame boundary
 
-        // keeper still has its hook (it was set up on second's tick): detach
-        // and wait before it goes, so the audio thread (still running) cannot
-        // be inside it meanwhile. stray and mainApp never ran setup(), so
-        // they have none; detaching them is harmless.
-        internal::detachAppAudio(*keeper);
+        // stray and mainApp never ran setup(), so they have no hook;
+        // detaching them is harmless.
         internal::detachAppAudio(*stray);
         internal::detachAppAudio(*mainApp);
     }

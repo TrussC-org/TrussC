@@ -42,6 +42,8 @@ public:
     explicit SyntheticDepthCamera(int width = 640, int height = 480)
         : width_(width), height_(height) {}
 
+    ~SyntheticDepthCamera() override { close(); }
+
     SyntheticDepthCamera& setResolution(int w, int h) {  // call before setup()
         width_ = w;
         height_ = h;

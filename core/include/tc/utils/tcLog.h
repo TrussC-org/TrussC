@@ -99,9 +99,17 @@ struct LogEventArgs {
             << '.' << std::setfill('0') << std::setw(3) << ms.count();
         timestamp = oss.str();
     }
+
+private:
+    friend class Logger;
+    bool protocolLine_ = false;
 };
 
 namespace internal {
+// Runtime protocol records bypass only the file threshold, retaining their
+// level and normal event delivery. Kept out of Logger's public API.
+void writeProtocolLine(LogLevel level, const std::string& message);
+
 // True while the current thread logs from a panic path (the sokol bridge,
 // internal::sokolLog): the Logger's sinks then only try the lock, and write
 // the line to the console (stderr) and the system log alone when another
@@ -131,7 +139,8 @@ void writeSystemLog(const LogEventArgs& e);
 // wins.
 //   - console: stdout (Verbose / Notice) and stderr (Warning and up) on
 //     desktop and web; os_log on iOS; logcat on Android.
-//   - file: the file opened with setLogFile() (or TRUSSC_LOG_FILE).
+//   - file: the file opened with setLogFile() (or TRUSSC_LOG_FILE). Runtime
+//     exit protocol records always reach an open file, even at Silent.
 //   - system: os_log on macOS, OutputDebugStringW on Windows. Elsewhere
 //     there is none (on iOS and Android the OS log is the console output),
 //     and the system level has no effect.
@@ -241,6 +250,14 @@ public:
     }
 
 private:
+    friend void internal::writeProtocolLine(LogLevel, const std::string&);
+
+    void logProtocolLine(LogLevel level, const std::string& message) {
+        LogEventArgs args(level, message);
+        args.protocolLine_ = true;
+        onLog.notify(args);
+    }
+
     // The sink listener. Takes mutex_ (only tries it on a panic path, see
     // internal::isLogNonBlocking) and writes to the system log, the console
     // and the file.
@@ -309,7 +326,7 @@ private:
     }
 
     void writeFile(const LogEventArgs& e) {
-        if (!fileStream_.is_open() || !passes(e.level, fileLevel_.load())) return;
+        if (!fileStream_.is_open() || (!e.protocolLine_ && !passes(e.level, fileLevel_.load()))) return;
         fileStream_ << "[" << e.timestamp << "] "
                     << "[" << logLevelToString(e.level) << "] "
                     << e.message << std::endl;

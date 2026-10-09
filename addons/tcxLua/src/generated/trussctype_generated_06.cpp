@@ -24,6 +24,7 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["draw"] = sol::overload([](trussc::VideoPlayer& self, float x, float y) { return self.draw(x, y); }, [](trussc::VideoPlayer& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
         t["getDuration"] = &trussc::VideoPlayer::getDuration;
         t["getPosition"] = &trussc::VideoPlayer::getPosition;
+        t["getFrameRate"] = &trussc::VideoPlayer::getFrameRate;
         t["getCurrentFrame"] = &trussc::VideoPlayer::getCurrentFrame;
         t["getTotalFrames"] = &trussc::VideoPlayer::getTotalFrames;
         t["setFrame"] = &trussc::VideoPlayer::setFrame;
@@ -67,6 +68,7 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["isInitialized"] = &trussc::Serial::isInitialized;
         t["getDevicePath"] = &trussc::Serial::getDevicePath;
         t["available"] = &trussc::Serial::available;
+        t["getDroppedByteCount"] = &trussc::Serial::getDroppedByteCount;
         t["readByte"] = &trussc::Serial::readByte;
         t["writeBytes"] = [](trussc::Serial& self, const std::string & buffer) { return self.writeBytes(buffer); };
         t["writeByte"] = &trussc::Serial::writeByte;
@@ -150,6 +152,11 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["raw"] = &trussc::ConsoleEventArgs::raw;
         t["args"] = &trussc::ConsoleEventArgs::args;
     }
+    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
+        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
+        "Default", sol::var(trussc::AudioBackend::Default),
+        "Null", sol::var(trussc::AudioBackend::Null));
+
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

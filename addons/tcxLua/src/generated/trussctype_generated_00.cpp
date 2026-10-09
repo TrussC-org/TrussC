@@ -123,6 +123,13 @@ void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua) {
         t["width"] = &trussc::ResizeEventArgs::width;
         t["height"] = &trussc::ResizeEventArgs::height;
     }
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
+
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

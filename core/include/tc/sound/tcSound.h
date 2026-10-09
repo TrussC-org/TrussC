@@ -246,7 +246,7 @@ public:
 
     // Load AAC data from memory (platform-specific implementation)
     // Fails on unsupported platforms
-    TC_PLATFORMS("macos,windows,linux,ios,web") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
+    TC_PLATFORMS("macos,windows,linux,ios") LoadResult loadAacFromMemory(const void* data, size_t dataSize);
 
     // -------------------------------------------------------------------------
     // ADTS header utilities (for raw AAC from MOV containers)
@@ -617,10 +617,10 @@ private:
 //   - setSpeed() supports forward playback from 0 to 10 using interpolation.
 //   - setPosition() posts a seek: the StreamWorker seeks the decoder and
 //     re-fills the ring buffer, and the audio moves once the mixer
-//     reaches the new data (~10 ms blackout, similar tradeoff to other
-//     engines; longer on slow storage or for an MP3 several hours long,
-//     whose seek table is capped). getPosition() reports the requested
-//     target meanwhile. A file whose length is unknown (duration 0, e.g.
+//     reaches the new data (see Sound::setPosition() for measured latency;
+//     longer on slow storage or for an MP3 several hours long, whose seek
+//     table is capped). getPosition() reports the requested target
+//     meanwhile. A file whose length is unknown (duration 0, e.g.
 //     a FLAC encoded to a pipe) cannot seek, and an engine re-init at
 //     another sample rate restarts it from the beginning.
 //   - Each polyphony slot costs one open file handle + one decoder +
@@ -783,6 +783,8 @@ struct PlayingSound {
 // Empty `deviceName` selects the system default playback device.
 // Use AudioEngine::listDevices() to enumerate available device names.
 // ---------------------------------------------------------------------------
+enum class AudioBackend { Default, Null };
+
 struct AudioSettings {
     int sampleRate   = 0;       // engine output sample rate (Hz);
                                 // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
@@ -790,6 +792,7 @@ struct AudioSettings {
     int bufferSize   = 0;       // requested device buffer size in frames; 0 = let miniaudio choose
     int maxPolyphony = 32;      // max simultaneously-playing Sound voices
     std::string deviceName;     // playback device name; empty = system default
+    AudioBackend backend = AudioBackend::Default; // Null = silent, device-less mixer clock
 };
 
 // ---------------------------------------------------------------------------
@@ -879,6 +882,8 @@ struct PlayingSoundInfo {
 // AudioEngine::getStats(). Counters are cumulative since the process
 // started (they survive re-init); meters describe the recent output.
 // ---------------------------------------------------------------------------
+enum class AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart };
+
 struct AudioStats {
     // Plays AudioEngine::play() refused (Sound::play() returned false),
     // in total and by reason.
@@ -901,6 +906,11 @@ struct AudioStats {
     uint64_t underrunFrames = 0;       // silent output frames per stream voice after playback began
     bool stalled = false;             // running, but no callback finished for max(250 ms, 4 periods)
     uint64_t voicesStoppedByReinit = 0; // stream voices whose decoder could not reopen at the new rate
+
+    // Last failed init(), cleared only by a successful init().
+    AudioInitFailure initFailure = AudioInitFailure::None;
+    int initFailureResult = 0;          // miniaudio ma_result
+    const char* initFailureBackend = ""; // static backend name; empty if no context opened
 };
 
 // Engine diagnostics state (counters, meters, report timers). Defined in
@@ -918,6 +928,7 @@ namespace internal {
 
     // Device details for tc_get_audio_state that need miniaudio types.
     struct AudioDeviceReport {
+        std::string initFailureDevice; // requested device name of the last failed init
         std::string backend;          // miniaudio backend ("Core Audio", "WASAPI", "PulseAudio", "Null", ...)
         std::string outputDevice;     // name of the open playback device; empty when not running
         bool outputIsDefault = false; // it is the OS default playback device
@@ -932,13 +943,9 @@ namespace internal {
     // backends. Main thread; does not initialize the engine.
     AudioDeviceReport audioDeviceReport(bool enumerate);
 
-    // Test hook, not a user setting: AudioEngine, listDevices(),
-    // audioDeviceReport() and (native) MicInput open miniaudio's null
-    // backend only, a device-less clock that still drives the real mixer
-    // callback, so a headless test runs without a sound card. Call it before
-    // anything opens an audio context: the engine keeps the context it
-    // opened first. State lives in tcAudio_impl.cpp.
-    void setNullAudioBackendForTests(bool on);
+    // Test hook: fail the engine's device open without changing its backend.
+    enum class AudioDeviceFaultForTests { None, OpenFails };
+    void setAudioDeviceFaultForTests(AudioDeviceFaultForTests fault);
 
     // Test hook, not a user setting: AudioRecorder's audio-thread capture
     // calls `hook` with the frame count of every buffer it takes, after
@@ -1006,8 +1013,9 @@ namespace internal {
     // under the engine lock). A stream voice only gets a request: the
     // StreamWorker seeks its decoder and refills the ring from the new
     // position, and the mixer, the only writer of the ring's read side and
-    // of positionF, moves to it when it reaches that data (~10 ms). Until
-    // then the request is pending; a later request replaces it (the last
+    // of positionF, moves to it when it reaches that data (see
+    // Sound::setPosition() for measured latency). Until then the request
+    // is pending; a later request replaces it (the last
     // one wins). A stream whose length is unknown ignores it (one warning
     // per voice). Call it from one thread per voice, like the Sound API.
     // tcAudio_impl.cpp.
@@ -1069,12 +1077,14 @@ public:
     // so they are kept even when the open fails. init() with no arguments
     // reuses the settings of the last init(settings) call, failed or not
     // (the DEFAULT_* values if there was none), but always opens the system
-    // default device: deviceName is not kept. On a running
-    // engine it re-initializes live: the device is reopened with the new
+    // default device on AudioBackend::Default: deviceName and backend are
+    // not kept. On a running engine it re-initializes live: the device is reopened with the new
     // settings and playing voices move over, keeping their position.
     //
-    // With no usable audio backend, miniaudio falls back to its Null
-    // backend: init() succeeds on a silent device and logs a warning.
+    // miniaudio reaches Null only when no real backend context can be
+    // created. A context that opens but has no device makes init() return
+    // false, without switching to Null. Set AudioSettings::backend to
+    // AudioBackend::Null to run silently on purpose.
     // Returns false when no output device can be opened (none present, or
     // the requested one refused); the failure is logged
     // through logError("AudioEngine"), naming the requested device, and the
@@ -1096,6 +1106,8 @@ public:
     // Enumerate available playback devices. Names from this list are
     // suitable for AudioSettings::deviceName. Returns an empty vector if
     // device enumeration is unsupported on the current platform.
+    // iOS enumeration leaves the audio session untouched, so before session
+    // activation (SoloAmbient), the current route may have no inputs.
     static std::vector<AudioDeviceInfo> listDevices();
 
     // Runtime engine configuration accessors. These reflect the values
@@ -1148,7 +1160,7 @@ public:
     // Do it in the most-derived class (or in cleanup()), not in a base-class
     // destructor, which runs after the derived members are already gone. The
     // App's own audioOut() / audioIn() hooks are handled by the framework:
-    // they are detached after cleanup(), and before the App is destroyed
+    // they are detached before cleanup(), and before cleanup() begins
     // (exit, hot reload, closing a secondary window) the framework waits the
     // same way, but without the one-second limit below
     // (internal::waitForAudioCallbacksNoTimeout()).
@@ -1226,6 +1238,7 @@ private:
     friend void internal::flushAudioDiagnostics();
     friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+    friend class MicInput;
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
     friend void internal::releaseVoice(PlayingSound&);
@@ -1599,8 +1612,9 @@ public:
     //
     // Limitations vs eager load():
     //   - setSpeed() supports forward playback from 0 to 10.
-    //   - setPosition() incurs a seek + ring-buffer refill (usually
-    //     ~10 ms); getPosition() reports the requested position meanwhile.
+    //   - setPosition() incurs a seek + ring-buffer refill (see its comment
+    //     for measured latency); getPosition() reports the requested
+    //     position meanwhile.
     //     A file whose length is unknown (getDuration() is 0) cannot seek,
     //     and an engine re-init at another sample rate restarts it from the
     //     beginning.
@@ -1886,8 +1900,9 @@ public:
     }
 
     // Playback position in seconds. On a stream, after setPosition() and
-    // until the audio has moved there (usually ~10 ms), this is the requested
-    // position; otherwise it is the position being played.
+    // until the audio has moved there, this is the requested position;
+    // otherwise it is the position being played. See setPosition() for
+    // measured stream seek latency.
     float getPosition() const {
         if (!playing_ || !buffer_) return 0;
         const int rate = positionRate();
@@ -1895,8 +1910,12 @@ public:
     }
 
     // Seek to `seconds`. Eager sounds move at once. A stream moves after
-    // its decoder has seeked and the ring has refilled (~10 ms of silence;
-    // longer on slow storage or for an MP3 several hours long);
+    // its decoder has seeked and the ring has refilled. Measured seek to
+    // first post-seek output callback on WASAPI/CoreAudio: about 1.5 audio
+    // callbacks on average, about 2 at p95 (13-16 ms mean with 10 ms callbacks).
+    // PulseAudio on main averaged 25.4 ms. These are callback-level timings,
+    // not speaker/DAC latency or silence duration; slow storage or an MP3
+    // several hours long can take longer. See issue #550 for measurements.
     // getPosition() reports the new position right away, and if
     // setPosition() is called again before that, the last call wins. A
     // paused stream moves when it resumes. A stream whose length is

@@ -77,6 +77,7 @@ public:
     void setSpeed(float speed);
     void setLoop(bool loop);
 
+    float getFrameRate() const { return static_cast<float>(frameRate_); }
     int getCurrentFrame() const;
     int getTotalFrames() const;
     void setFrame(int frame);
@@ -166,7 +167,7 @@ private:
     int width_ = 0;
     int height_ = 0;
     double duration_ = 0.0;
-    double frameRate_ = 30.0;
+    double frameRate_ = 0.0;
     AVRational timeBase_ = {1, 1};
 
     // Playback state
@@ -341,6 +342,8 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     height_ = codecCtx_->height;
     timeBase_ = videoStream->time_base;
 
+    // Unknown metadata must not retain a previous rate or guess 30 fps.
+    frameRate_ = 0.0;
     // Calculate frame rate
     if (videoStream->avg_frame_rate.num > 0 && videoStream->avg_frame_rate.den > 0) {
         frameRate_ = av_q2d(videoStream->avg_frame_rate);
@@ -1482,6 +1485,11 @@ void VideoPlayer::setLoopPlatform(bool loop) {
     if (platformHandle_) {
         static_cast<TCVideoPlayerImpl*>(platformHandle_)->setLoop(loop);
     }
+}
+
+float VideoPlayer::getFrameRatePlatform() const {
+    if (!platformHandle_) return 0.0f;
+    return static_cast<TCVideoPlayerImpl*>(platformHandle_)->getFrameRate();
 }
 
 int VideoPlayer::getCurrentFramePlatform() const {

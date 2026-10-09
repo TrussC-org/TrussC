@@ -67,8 +67,9 @@ public:
     HeadlessSleeper(const HeadlessSleeper&) = delete;
     HeadlessSleeper& operator=(const HeadlessSleeper&) = delete;
 
-    // Sleep `seconds` (clamped to 1 s).
-    void sleep(double seconds);
+    // Sleep `seconds` (clamped to 1 s). Returns true after an OS wait,
+    // false when yielding without waiting (seconds <= 0).
+    bool sleep(double seconds);
 
 private:
     void* timer_ = nullptr;   // Windows: the waitable timer's HANDLE

@@ -5,7 +5,7 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The engine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the real mixer callback, so no sound card is needed. The test
 // listens on AudioEngine::audioOut and reads the level of the mix: every
 // test file holds DC levels, so the level tells which part of the file is
@@ -407,8 +407,6 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
@@ -424,6 +422,7 @@ TC_CORE_TEST_MAIN() {
 
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = kRate;
     settings.channels = 2;
     settings.bufferSize = 256;
@@ -699,7 +698,7 @@ TC_CORE_TEST_MAIN() {
                           ", isPlaying " + (playing ? "true" : "false");
         }
         check("pending: it is still playing early in the file (position < 0.2)", early,
-              early ? earlyDetail : earlyDetail + ", " + streamSeekFailureState(n, g_level.load()));
+              early ? earlyDetail : earlyDetail + ", " + tcCoreTest::streamSeekFailureState(n, g_level.load()));
         if (early) {
             internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
             n.setPosition(0.0f);
@@ -710,7 +709,7 @@ TC_CORE_TEST_MAIN() {
             }, 2000);
             const bool playing = pending && n.isPlaying();
             check("pending: a non-looping stream does not end at the old data's end",
-                  playing, playing ? "" : streamSeekFailureState(n, g_level.load()));
+                  playing, playing ? "" : tcCoreTest::streamSeekFailureState(n, g_level.load()));
             {
                 lock_guard<mutex> lock(g_blockMutex);
                 g_blockLevels.clear();
@@ -738,7 +737,7 @@ TC_CORE_TEST_MAIN() {
                 }
             }
             check("pending: then it plays from the target (level 0.5)",
-                  heard, heard ? "" : streamSeekFailureState(n, g_level.load()));
+                  heard, heard ? "" : tcCoreTest::streamSeekFailureState(n, g_level.load()));
         }
         n.stop();
     }

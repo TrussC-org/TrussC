@@ -77,8 +77,8 @@ public:
     // (standard Node lifecycle), i.e. on the window's first tick; its
     // audioOut() / audioIn() are subscribed right after that setup() returns,
     // not at setApp(). An App runs
-    // once: setup() when first attached, exit() / cleanup() when its window
-    // closes (or, with #318, when it is swapped out); closing the window also
+    // once: setup() when first attached, exit() / cleanup() when it leaves
+    // its window (close(), setApp(other), or setApp(nullptr)); leaving also
     // detaches its audioOut() / audioIn() for good. To show it again, create
     // a new App. setApp() refuses an App whose cleanup() already ran, and any
     // App on a window that is not open or is closing (both log an error and
@@ -105,6 +105,9 @@ public:
     // return the App and the window. Safe to call from the window's own
     // App (update() / draw() / keyPressed() ...). Destroying the Window
     // (the last shared_ptr) still closes it immediately.
+    // At teardown: the native window is destroyed and isOpen() turns false,
+    // then events().exit fires, then the App's exit() / cleanup() run.
+    // App::getWindow() returns nullptr during those teardown callbacks.
     void close();
     bool isOpen() const { return native_ != nullptr; }
 
@@ -249,8 +252,9 @@ private:
     // running.
     void applyPendingApp();
     // Ends the window's App: drops a pending setApp() (logged when it held an
-    // App), detaches the App from the window, then runs its exit() /
-    // cleanup() and detaches its audio hooks. Part of the platform teardown.
+    // App), detaches the App from the window, then runs its exit(), detaches
+    // its audio hooks (waiting for a call in flight) and runs its cleanup().
+    // Part of the platform teardown.
     void endApp();
     // The platform teardown: destroys the native window right away, fires
     // events().exit, then endApp(). Runs when the backend closes the window
@@ -440,9 +444,17 @@ inline void Window::applyPendingApp() {
     if (next) attached.insert(next.get());
     app_ = std::move(next);
     ctx_.rootNode = app_;
-    // The outgoing App leaves the window here, at the boundary, outside its
-    // own callbacks: ending it (#318: exit(), cleanup(), audio hooks) belongs
-    // at this point.
+    // Same shape as endApp() (close): the window drops the App first, then
+    // its exit() / cleanup() run, so getApp() there is already the next App.
+    // An App runs once (#318): end it at the boundary, outside its own
+    // callbacks, with this window's context still active. Keep it alive until
+    // its audio hooks are detached and any callback in flight has returned.
+    if (outgoing && !internal::appRanCleanup(*outgoing)) {
+        internal::EntryStackGuard guard(internal::AppEntry::Exit);
+        outgoing->exit();
+        internal::detachAppAudio(*outgoing);
+        outgoing->cleanup();
+    }
     outgoing.reset();
     internal::currentWindowCtx() = prev;
 }
@@ -462,10 +474,10 @@ inline void Window::endApp() {
     if (!app) return;
     internal::attachedApps().erase(app.get());
     app->exit();
-    app->cleanup();
     // Audio keeps running for the other windows: detach this App's audio
-    // hooks and wait for a callback in flight before the App goes (#256).
+    // hooks and wait for a callback in flight before cleanup() releases its audio state (#698).
     internal::detachAppAudio(*app);
+    app->cleanup();
 }
 
 namespace internal {

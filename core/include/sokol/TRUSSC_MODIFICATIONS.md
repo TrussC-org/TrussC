@@ -456,3 +456,22 @@ These were previously in sokol_app.h but have been moved to TrussC platform code
 ## Author
 
 All modifications by tettou771
+
+## OS-initiated exit requests (#266)
+
+- Windows `WM_QUERYENDSESSION` shares the main-window quit request, including
+  `ENDSESSION_CLOSEAPP`. Vetoes supply a UTF-8 shutdown-block reason. Accepted
+  queries wait for `WM_ENDSESSION`; cancellation resets the request and block.
+  `WM_ENDSESSION(TRUE)`, including `ENDSESSION_CLOSEAPP`, performs synchronous
+  cleanup even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)`.
+  Interrupted user code, DLL detach and guest static destructors do not resume.
+- macOS `applicationShouldTerminate:` uses the same cancellable request as
+  window close. Known quit Apple event reasons identify logoff/restart/shutdown;
+  a quit without one (Cmd+Q, Dock, AppleScript) records `app-quit` if no origin
+  is recorded yet.
+- Backends identify native exit origins through internal `tcExit` state. Window
+  close preserves an already recorded origin on Windows, macOS, X11 and EGL.
+  `_cleanup_cb` guards cleanup once and freezes its reason; `sapp_run` retains
+  its backend cleanup check. Frame/tree/event paths need no teardown guards.
+- Shared runtime signal handling, Logger markers and MCP drain semantics are
+  documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).

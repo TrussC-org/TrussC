@@ -1486,7 +1486,7 @@ extern "C" {
 
 /* misc constants */
 enum {
-    SAPP_MAX_TOUCHPOINTS = 8,
+    SAPP_MAX_TOUCHPOINTS = 32,
     SAPP_MAX_MOUSEBUTTONS = 3,
     SAPP_MAX_KEYCODES = 512,
     SAPP_MAX_ICONIMAGES = 8,
@@ -1967,6 +1967,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(IMAGE_DATA_SIZE_MISMATCH, "image data size mismatch (must be width*height*4 bytes)") \
     _SAPP_LOGITEM_XMACRO(DROPPED_FILE_PATH_TOO_LONG, "dropped file path too long (sapp_desc.max_dropped_filed_path_length)") \
     _SAPP_LOGITEM_XMACRO(CLIPBOARD_STRING_TOO_BIG, "clipboard string didn't fit into clipboard buffer") \
+    _SAPP_LOGITEM_XMACRO(TOUCHPOINTS_DROPPED, "touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped") \
 
 #define _SAPP_LOGITEM_XMACRO(item,msg) SAPP_LOGITEM_##item,
 typedef enum sapp_log_item {
@@ -2482,6 +2483,8 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 /*=== IMPLEMENTATION =========================================================*/
 #if defined(SOKOL_APP_TC_IMPL_INCLUDED) && !defined(SOKOL_APP_TC_IMPL_DONE)
 #define SOKOL_APP_TC_IMPL_DONE (1)
+
+#include "../tc/app/tcExit.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -3206,11 +3209,8 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 static void _sapp_tc_start_fallback_timer(void);
 static void _sapp_tc_stop_fallback_timer(void);
 
-@implementation _sapp_tc_win_delegate
-- (BOOL)windowShouldClose:(id)sender {
-    (void)sender;
-    _sapp_tc_window_t* w = self.w;
-    if (!w || !w->is_main) return YES;
+static BOOL _sapp_tc_request_exit(void) {
+    _sapp_tc_window_t* w = _sapp_tc.app.main;
     /* main window: sokol_app.h's cancellable quit dance. sapp_quit() pre-sets
        quit_ordered (unvetoable); otherwise QUIT_REQUESTED is delivered and a
        handler may call sapp_cancel_quit() to keep the window open. */
@@ -3224,6 +3224,15 @@ static void _sapp_tc_stop_fallback_timer(void);
         }
     }
     return _sapp_tc.app.quit_ordered ? YES : NO;
+}
+
+@implementation _sapp_tc_win_delegate
+- (BOOL)windowShouldClose:(id)sender {
+    (void)sender;
+    _sapp_tc_window_t* w = self.w;
+    if (!w || !w->is_main) return YES;
+    trussc::internal::setExitReasonIfEmpty("window-close");
+    return _sapp_tc_request_exit();
 }
 - (void)windowWillClose:(NSNotification*)n {
     (void)n;
@@ -3602,6 +3611,34 @@ static bool _sapp_tc_create_main_window(void) {
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     (void)sender;
     return YES;
+}
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
+    (void)sender;
+    if (!_sapp_tc.app.quit_ordered) {
+        // Cocoa forwards the quit Apple event's reason for OS session exits.
+        // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
+        // Quit, an AppleScript quit) carries no session reason: app-quit, so
+        // the main window's windowShouldClose: does not fill in window-close.
+        // IfEmpty keeps a reason an earlier exit request already recorded.
+        // A real logout sends the reason as an event attribute, not a
+        // parameter (seen on macOS); read the attribute first.
+        NSAppleEventDescriptor* event = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+        NSAppleEventDescriptor* reason = [event attributeDescriptorForKeyword:0x7768793f];
+        if (!reason) reason = [event paramDescriptorForKeyword:0x7768793f];
+        const AEEventID why = [reason enumCodeValue];
+        switch (why) {
+            case 0x6c6f676f: // kAELogOut ('logo')
+            case 0x726c676f: // kAEReallyLogOut ('rlgo')
+                trussc::internal::setExitReason("os-logoff"); break;
+            case 0x72657374: // kAERestart ('rest')
+                trussc::internal::setExitReason("os-restart"); break;
+            case 0x73687574: // kAEShutDown ('shut')
+                trussc::internal::setExitReason("os-shutdown"); break;
+            default:
+                trussc::internal::setExitReasonIfEmpty("app-quit"); break;
+        }
+    }
+    return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
 }
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
@@ -5080,13 +5117,34 @@ _SOKOL_PRIVATE void _sapp_tc_ios_touch_event(sapp_event_type type, NSSet<UITouch
         NSEnumerator* enumerator = event.allTouches.objectEnumerator;
         UITouch* ios_touch;
         while ((ios_touch = [enumerator nextObject])) {
-            if ((_sapp_tc.event.num_touches + 1) < SAPP_MAX_TOUCHPOINTS) {
+            const bool changed = [touches containsObject:ios_touch];
+            int dst_index = -1;
+            if (_sapp_tc.event.num_touches < SAPP_MAX_TOUCHPOINTS) {
+                dst_index = _sapp_tc.event.num_touches++;
+            } else {
+                // Implementation-only state: warn once for this backend's lifetime.
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "iOS: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+                }
+                // Preserve platform order until full, then replace an unchanged tail point.
+                if (changed) {
+                    for (int i = SAPP_MAX_TOUCHPOINTS - 1; i >= 0; i--) {
+                        if (!_sapp_tc.event.touches[i].changed) {
+                            dst_index = i;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (dst_index >= 0) {
                 CGPoint ios_pos = [ios_touch locationInView:_sapp_tc.ios.view];
-                sapp_touchpoint* cur_point = &_sapp_tc.event.touches[_sapp_tc.event.num_touches++];
+                sapp_touchpoint* cur_point = &_sapp_tc.event.touches[dst_index];
                 cur_point->identifier = (uintptr_t) ios_touch;
                 cur_point->pos_x = ios_pos.x * _sapp_tc.dpi_scale;
                 cur_point->pos_y = ios_pos.y * _sapp_tc.dpi_scale;
-                cur_point->changed = [touches containsObject:ios_touch];
+                cur_point->changed = changed;
             }
         }
         if (_sapp_tc.event.num_touches > 0) {
@@ -7227,6 +7285,25 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w, bool from_modal) {
     }
 }
 
+static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
+    if (!_sapp_tc.app.quit_ordered) {
+        _sapp_tc.app.quit_requested = true;
+        _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+    }
+    return _sapp_tc.app.quit_ordered || _sapp_tc.app.quit_requested;
+}
+
+static void _sapp_tc_win32_cleanup(void) {
+    // Both sapp_run and an early/reentrant WM_ENDSESSION must obey this guard.
+    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
+        _sapp_tc.app.cleanup_called = true;
+        if (_sapp_tc.app.main) ShutdownBlockReasonDestroy(_sapp_tc.app.main->hwnd);
+        if (_sapp_tc.app.desc.cleanup_cb) _sapp_tc.app.desc.cleanup_cb();
+        else if (_sapp_tc.app.desc.cleanup_userdata_cb)
+            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
+    }
+}
+
 /*-- window procedure --------------------------------------------------------*/
 static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     if (msg == WM_NCCREATE) {
@@ -7241,17 +7318,52 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     switch (msg) {
+        case WM_QUERYENDSESSION:
+            if (!w->is_main) return TRUE;
+            trussc::internal::setExitReason("os-session-end");
+            if (_sapp_tc_win32_request_exit(w)) {
+                // Do not end the run loop until WM_ENDSESSION(TRUE): another
+                // app may still veto the session. No QUIT_REQUESTED twice.
+                _sapp_tc.app.quit_requested = false;
+                ShutdownBlockReasonDestroy(hwnd);
+                return TRUE;
+            } else {
+                std::string reason = trussc::internal::exitBlockReason();
+                if (reason.empty()) reason = "The app is still busy.";
+                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, NULL, 0);
+                if (count > 0) {
+                    std::wstring wide((size_t)count, L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, &wide[0], count);
+                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
+                }
+                return FALSE;
+            }
+        case WM_ENDSESSION:
+            if (!w->is_main) return 0;
+            ShutdownBlockReasonDestroy(hwnd);
+            if (wParam) {
+                // Forced shutdown can arrive after a veto. Cleanup must finish
+                // inside this message; Windows may kill us as soon as it returns.
+                trussc::internal::setExitReason("os-session-end");
+                _sapp_tc.app.quit_ordered = true;
+                _sapp_tc_win32_cleanup();
+                // This is what Windows does after we return; cleanup and logs
+                // are complete. Do not run DLL detach or guest static destructors.
+                TerminateProcess(GetCurrentProcess(),
+                    trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+            } else {
+                _sapp_tc.app.quit_requested = false;
+                _sapp_tc.app.quit_ordered = false;
+                trussc::internal::clearExitReason();
+                trussc::internal::setExitBlockReason("");
+            }
+            return 0;
         case WM_CLOSE:
             if (w->is_main) {
-                /* the cancellable quit dance (sokol_app.h parity): sapp_quit()
-                   pre-sets quit_ordered (unvetoable); otherwise QUIT_REQUESTED
-                   is delivered and a handler may sapp_cancel_quit() */
-                if (!_sapp_tc.app.quit_ordered) {
-                    _sapp_tc.app.quit_requested = true;
-                    _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
-                    if (_sapp_tc.app.quit_requested) {
-                        _sapp_tc.app.quit_ordered = true;
-                    }
+                trussc::internal::setExitReasonIfEmpty("window-close");
+                if (_sapp_tc_win32_request_exit(w)) {
+                    _sapp_tc.app.quit_ordered = true;
+                    ShutdownBlockReasonDestroy(hwnd);
                 }
                 if (_sapp_tc.app.quit_ordered) {
                     PostQuitMessage(0);
@@ -7893,14 +8005,7 @@ void sapp_run(const sapp_desc* desc) {
 
     /* user cleanup runs BEFORE any GPU/window teardown (the app shuts down
        sokol_gfx here, which still needs the device) */
-    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
-        _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.desc.cleanup_cb) {
-            _sapp_tc.app.desc.cleanup_cb();
-        } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-            _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-        }
-    }
+    _sapp_tc_win32_cleanup();
     /* destroy any windows the app left open (secondary first, then main) */
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         _sapp_tc_window_t* w = _sapp_tc.windows[i];
@@ -10277,6 +10382,7 @@ static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
                 /* the cancellable quit dance runs at the loop tail (upstream
                    parity): QUIT_REQUESTED is delivered there and a handler
                    may sapp_cancel_quit() */
+                trussc::internal::setExitReasonIfEmpty("window-close");
                 _sapp_tc.app.quit_requested = true;
             } else if (w->desc.close_cb) {
                 /* user closed a secondary window: notify; the app accepts by
@@ -14752,6 +14858,7 @@ _SOKOL_PRIVATE void _sapp_tc_x11_on_clientmessage(XEvent* event) {
     if (event->xclient.message_type == _sapp_tc.x11.WM_PROTOCOLS) {
         const Atom protocol = (Atom)event->xclient.data.l[0];
         if (protocol == _sapp_tc.x11.WM_DELETE_WINDOW) {
+            trussc::internal::setExitReasonIfEmpty("window-close");
             _sapp_tc.quit_requested = true;
         }
     } else if (event->xclient.message_type == _sapp_tc.x11.xdnd.XdndEnter) {
@@ -16800,17 +16907,29 @@ _SOKOL_PRIVATE bool _sapp_tc_android_touch_event(const AInputEvent* e) {
     _sapp_tc_init_event(type);
     _sapp_tc.event.num_touches = (int)AMotionEvent_getPointerCount(e);
     if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+        // Implementation-only state: warn once for this backend's lifetime.
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "Android: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+        }
         _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
     }
     for (int32_t i = 0; i < _sapp_tc.event.num_touches; i++) {
+        // Only substitute the last slot when the changed pointer would be dropped.
+        int32_t src_index = i;
+        if (i == SAPP_MAX_TOUCHPOINTS - 1 && idx >= SAPP_MAX_TOUCHPOINTS &&
+            (action == AMOTION_EVENT_ACTION_POINTER_DOWN || action == AMOTION_EVENT_ACTION_POINTER_UP)) {
+            src_index = idx;
+        }
         sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
-        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)i);
-        dst->pos_x = (AMotionEvent_getX(e, (size_t)i) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
-        dst->pos_y = (AMotionEvent_getY(e, (size_t)i) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
-        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)i);
+        dst->identifier = (uintptr_t)AMotionEvent_getPointerId(e, (size_t)src_index);
+        dst->pos_x = (AMotionEvent_getX(e, (size_t)src_index) / _sapp_tc.window_width) * _sapp_tc.framebuffer_width;
+        dst->pos_y = (AMotionEvent_getY(e, (size_t)src_index) / _sapp_tc.window_height) * _sapp_tc.framebuffer_height;
+        dst->android_tooltype = (sapp_android_tooltype) AMotionEvent_getToolType(e, (size_t)src_index);
         if (action == AMOTION_EVENT_ACTION_POINTER_DOWN ||
             action == AMOTION_EVENT_ACTION_POINTER_UP) {
-            dst->changed = (i == idx);
+            dst->changed = (src_index == idx);
         } else {
             dst->changed = true;
         }
@@ -18790,6 +18909,7 @@ _SOKOL_PRIVATE void _sapp_tc_wgpu_device_lost_cb(const WGPUDevice* dev, WGPUDevi
     // NOTE: on wgpuInstanceRelease(), the device lost callback is always called with
     // WGPUDeviceLostReason_CallbackCancelled (even though no device should exist at that point)
     if (reason != WGPUDeviceLostReason_CallbackCancelled) {
+        trussc::internal::setExitReason("device-lost");
         SOKOL_ASSERT(msg.data && (msg.length > 0));
         char buf[1024];
         _sapp_tc_strcpy_range(msg.data, msg.length, buf, sizeof(buf));
@@ -19951,11 +20071,32 @@ _SOKOL_PRIVATE EM_BOOL _sapp_tc_emsc_touch_cb(int emsc_type, const EmscriptenTou
             _sapp_tc.event.modifiers = _sapp_tc_emsc_touch_event_mods(emsc_event);
             _sapp_tc.event.num_touches = emsc_event->numTouches;
             if (_sapp_tc.event.num_touches > SAPP_MAX_TOUCHPOINTS) {
+                // Implementation-only state: warn once for this backend's lifetime.
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    _SAPP_WARN_MSG(TOUCHPOINTS_DROPPED, "Web: touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped");
+                }
                 _sapp_tc.event.num_touches = SAPP_MAX_TOUCHPOINTS;
             }
-            for (int i = 0; i < _sapp_tc.event.num_touches; i++) {
+            for (int i = 0; i < emsc_event->numTouches; i++) {
                 const EmscriptenTouchPoint* src = &emsc_event->touches[i];
-                sapp_touchpoint* dst = &_sapp_tc.event.touches[i];
+                int dst_index = i;
+                if (i >= SAPP_MAX_TOUCHPOINTS) {
+                    dst_index = -1;
+                    if (src->isChanged) {
+                        for (int j = SAPP_MAX_TOUCHPOINTS - 1; j >= 0; j--) {
+                            if (!_sapp_tc.event.touches[j].changed) {
+                                dst_index = j;
+                                break;
+                            }
+                        }
+                    }
+                    if (dst_index < 0) {
+                        continue;
+                    }
+                }
+                sapp_touchpoint* dst = &_sapp_tc.event.touches[dst_index];
                 dst->identifier = (uintptr_t)src->identifier;
                 dst->pos_x = src->targetX * _sapp_tc.dpi_scale;
                 dst->pos_y = src->targetY * _sapp_tc.dpi_scale;

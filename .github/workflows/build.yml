@@ -215,17 +215,24 @@ jobs:
       # binary under a static key so runs stop re-downloading it (this also
       # pins the tool — bump the key to pick up a newer upstream build).
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
+        timeout-minutes: 10
         if: runner.os == 'Linux'
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        uses: ./.github/actions/apt-deps
 
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
@@ -358,15 +365,22 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
       - name: Install Linux dependencies (for trusscli)
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -446,7 +460,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -460,9 +482,8 @@ jobs:
           version: '6.0.2'
 
       - name: Install Linux dependencies (for trusscli)
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -502,7 +523,15 @@ jobs:
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
+        with:
+          path: core/tools/sokol-shdc
+          key: sokol-shdc-v1-${{ runner.os }}
+
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
@@ -597,6 +626,18 @@ jobs:
       - name: daily web sequencing regression checks
         if: always()
         run: python3 tools/tests/test_daily_workflow.py -v
+
+      - name: build workflow cache regression checks
+        if: always()
+        run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: apt dependency cache regression checks
+        if: always()
+        run: python3 tools/tests/test_apt_dependencies.py -v
+
+      - name: core test symbol checker regression checks
+        if: always()
+        run: python3 tools/tests/test_core_test_symbols.py -v
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,

@@ -192,7 +192,7 @@ cmake --build --preset android
 Notes:
 - trusscli detects the NDK from `ANDROID_NDK_HOME` or `$ANDROID_HOME/ndk/`.
 - APK signing uses `~/.android/debug.keystore`. If missing, APK packaging is skipped and only the .so is built.
-- Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. To also receive them as mouse events, call `setTouchAsMouse(true)` in `setup()`.
+- Touch input: On Android, touch events are delivered via `touchPressed()`/`touchMoved()`/`touchReleased()`. Touch-as-mouse is ON by default: the first finger down also drives the mouse (one `mousePressed`, then `mouseDragged`, then one `mouseReleased` when it lifts); other fingers only produce touch events. Call `setTouchAsMouse(false)` in `setup()` to receive touch events only.
 - Data files: Use `adb push` to transfer assets to the app's internal storage.
 - **If `cmake --preset android` fails after trusscli update**, try running the command manually from the terminal.
 
@@ -513,7 +513,7 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
-2. The old Guest's App is destroyed (`events().hotReloadUnload` fires first). Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
+2. The old Guest's App is ended and destroyed (`events().hotReloadUnload` fires first): its `exit()` runs, its `audioOut()` / `audioIn()` are detached (waiting for a call in flight), then its `cleanup()` runs. Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d
 3. New Guest is loaded (`dlopen` / `LoadLibrary`)
 4. A new App instance is created → `setup()` runs again
 

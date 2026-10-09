@@ -77,6 +77,7 @@ alone, exactly as before.
    in **every** test's process of `allCoreTests`. No TrussC calls (Logger,
    clock, Window, MCP, sockets, threads) at static init or exit; put such an
    object in the entry as a function-local `static` (see `onceGate/`).
+4. Helpers shared through `core/tests/common/` headers go in namespace `tcCoreTest`.
 
 Use an **`own-binary`** marker file (one line saying why) instead when the
 test cannot share an executable: it replaces or interposes a library
@@ -128,6 +129,40 @@ environment includes node), so it must not touch the canvas / GPU: plain
 through `allCoreTests`). It still runs natively under `--core-tests-only`, so
 give the native side something real to check (or an explicit skip).
 Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
+
+### Display modes (`display-test` marker, daily Linux only)
+
+After the normal core build, daily CI runs every `core/tests/*/display-test`
+under Xvfb with Mesa software GL. PR CI does not run these modes. Each marker
+line is one process invocation, with shell-style quoting and `#` comments,
+but no shell expansion. The token `{test}` expands to the test executable
+(plus its name for `allCoreTests`); the working directory is the test's own
+directory. For example:
+
+```text
+{test} --gpu-check
+```
+
+Use multiple lines for multiple modes. A line may prefix `{test}` with a
+launcher or test-local fixture helper (see `startupExit` and
+`videoPlayerError`). Keep arguments and any Mesa-specific skip reason next
+to the test, never in the workflow. To hold a mode back, prefix its line
+with `skip "<reason>"` (for example `skip "#707: no audio device on the
+runner" {test} --gpu-check`): it is not run, but it is listed as `SKIP` with
+the reason and counted in the summary, and it never fails the sweep. Interactive modes must have an automated
+equivalent that exits (`hotReloadLifecycle --reload-check`, for example).
+Missing binaries, nonzero exits and hangs fail the sweep; later modes still
+run. The 600-second per-process timeout only stops hangs. Printed wall times
+are informational.
+
+After building the core tests, run the same step locally on Linux with:
+
+```sh
+LIBGL_ALWAYS_SOFTWARE=1 \
+  __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
+  xvfb-run -a -s '-screen 0 1280x1024x24' \
+  python3 tools/run_core_display_tests.py
+```
 
 ## Keep it curated (avoid rot)
 
@@ -227,6 +262,10 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   in allCoreTests; the default run is headless. With `--gpu-check`, FBO
   readback checks Points rebuilds/colors/translations and PBR rotations and
   vertex edits, plus independent buffer caching and move assignment.
+- `xml/` — XML serialization and query behavior across pugixml updates:
+  empty text uses an empty element tag, explicit paired-tag formatting works,
+  text and attributes round-trip, XPath selects numeric attributes, and invalid
+  or empty documents report failure. Headless, in `allCoreTests`.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
@@ -285,7 +324,7 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   playing sound's level / CPU usage) work and shutdown clears them, a reused `SoundBuffer`'s
   `getPath()` follows its last fill (memory / PCM / generated fills clear it),
   and `tc_get_audio_state` reports it all, the microphone included. Runs on
-  miniaudio's null backend (`internal::setNullAudioBackendForTests()`), so no
+  miniaudio's null backend (`AudioSettings::backend = AudioBackend::Null`), so no
   sound card is needed. A `.ogg` file that is not Ogg Vorbis fails with
   `DecodeFailed` and is closed once (counted on Linux by `src/fcloseProbe.cpp`).
   A missing `.wav` / `.ogg` / stream / image, and on Linux, macOS and
@@ -356,7 +395,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `GetProcessTimes`, the main thread asleep) stays under a quarter of one
   core (the worker used to spin a whole core); while it plays, every
   `audioOut` block holds the file's full DC level (no gap), also at speed 10;
-  and a seek on a playing stream is heard within 100 ms (the mean is printed).
+  and every seek on a playing stream reaches the output callback (mean and
+  maximum latency are printed, with no latency threshold assertion).
   With no stream playing the worker polls every 50 ms, not 5 ms (#550): its
   passes over ~1 s (`internal::streamWorkerPassesForTests()`) stay under 60,
   and a stream resumed after such an idle pause plays without a gap.
@@ -382,7 +422,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   after a second meanwhile) and goes on once it returns; an App runs once:
   `Window::setApp()` refuses an App whose window closed (one error, the
   window keeps its App, no hook comes back, no second `setup()`) and any App
-  on a window that is not open;
+  on a window that is not open, and `setApp(nullptr)` removes the window
+  App's hook;
   `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
   flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
   while another thread calls `stop()` still ends up in the WAV and in
@@ -410,7 +451,8 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   secondary window's App (setup on the window's first tick), whose `setup()`
   allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
   has returned and no hook is subscribed while it runs; afterwards there is
-  exactly one hook each, also after more ticks or a move to another window;
+  exactly one hook each, also after more ticks, and `setApp(nullptr)` removes
+  them;
   an App that is constructed but never run gets no callbacks; the App's
   `audioOut()` still runs before the default-priority listeners its `setup()`
   subscribed (the order the constructor subscription gave); the attach is
@@ -594,6 +636,13 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
   `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
   which is checked on every platform.
+- `touchAsMouse/` — touch-as-mouse mapping (#295), through
+  `internal::TouchMouseMapper`: the first finger down is the only touch that
+  drives the mouse (one press, drags, one release on ENDED or CANCELLED); it is
+  found by its full `uintptr_t` identifier, not its index in the touch array;
+  no drag after it lifts; an event with no touches clears it; a primary whose
+  end event was lost (not among the touches at the next BEGAN) is dropped so
+  the next finger down presses.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
@@ -809,6 +858,28 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   The fonts are built at runtime; fonts installed at
   the usual system paths are also loaded and cut short when present.
   `fontSfntCheck --dump <files>` prints glyph metrics to compare two builds.
+- `fontFaceIndex/` — the face index picks the face inside a font collection
+  (#294). With a two-face `.ttc` built at runtime, face 0 and face 1 give
+  their own glyph metrics through `FontAtlasManager::setupFromMemory()`,
+  `setup()` from a file and `SharedFontCache` (the face index is part of
+  `FontCacheKey`, so each face gets its own atlas); the default is face 0; a
+  face index below 0 or at or past the number of faces fails with an error
+  log. `internal::findFaceByPostScriptName()` (the macOS / iOS face lookup)
+  finds a face by its PostScript name in Windows and Mac name records and
+  reads within the data. The file matcher seeks to the collection header,
+  face directories and name tables; the generated fixture checks both faces
+  and rejects corrupt offsets/lengths, including 32-bit overflow. On Linux,
+  `"Noto Sans CJK SC"` / `"Noto Sans CJK JP"` resolve to the faces fontconfig
+  reports, whose PostScript names are
+  `NotoSansCJKsc-Regular` / `NotoSansCJKjp-Regular`, and their outlines of
+  U+9AA8 differ (SKIP when Noto Sans CJK is not installed). The system-name
+  check on Windows (`MS PGothic`) and macOS is manual. `fontFaceIndex
+  --gpu-check` also exercises the public `Font::load()` with a display:
+  default and explicit face 0 agree, face 1 has different metrics and
+  rendered glyphs, invalid indices fail with an error, and changing raster
+  options preserves the face. On Linux, Noto CJK SC renders differently from
+  JP and identically to the same face loaded by file and index; the Mono face
+  has equal widths for `iiii` and `WWWW` (SKIP if the fonts are absent).
 - `fontAtlasLimit/` — glyphs larger than an atlas page (#404). A glyph whose
   box does not fit the largest page is rasterized at a lower resolution that
   fits (a lower integer oversampling, or a raster scale below 1) and keeps
@@ -877,6 +948,18 @@ Locally: source `emsdk_env.sh` first (for `emcmake` and `EMSDK_NODE`).
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
+- `windowSetApp/` — an App ends when it leaves its window (#318), on the real
+  `AudioEngine` over miniaudio's null backend: `Window::setApp(other)` and
+  `setApp(nullptr)` run the outgoing App's `exit()` and then `cleanup()`, once
+  each, and detach its `audioOut()` / `audioIn()` (not called again); the
+  incoming App's `setup()` runs on the window's next tick; attaching the
+  swapped-out App again is refused with one error and the window keeps its
+  App; an App whose `cleanup()` already ran is not ended twice. Also from the
+  App's own `update()`, from its `setup()` (the swapped-out App's audio
+  hooks are detached at the boundary), and for an App added with `addChild()`
+  and destroyed (its hooks go with `cleanupTree()`). Requests leave the App
+  live inside its callback and run teardown at the frame boundary (#315).
+  Audio-stop checks wait for actual callbacks. Not covered: a native window.
 - `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's
   `globalPos` (`TC_DERIVED`, derived from `pos`): `reflectToJson()` writes
   `pos` and no `globalPos` (`reflectToJson(obj, true)` writes both), and a

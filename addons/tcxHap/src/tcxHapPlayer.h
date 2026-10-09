@@ -20,15 +20,38 @@
 #include "tcxHapDecoder.h"
 #include "ycocg.glsl.h"
 #include "impl/bcdec.h"
+#include "impl/tcxHapRgba.h"
 
 namespace tcx::hap {
 
 // Uniform structs for YCoCg shader
 struct YCoCgVsParams {
-    float screenSize[2];
-    float _pad[2];
+    float mvp[16];
 };
 
+
+namespace detail {
+
+struct YCoCgDrawData {
+    YCoCgVsParams uniforms;
+    tc::ShaderVertex vertices[4];
+};
+
+inline YCoCgDrawData makeYCoCgDrawData(float x, float y, float w, float h,
+                                      const tc::Mat4& projection, const tc::Mat4& view,
+                                      const tc::Mat4& model, const tc::Color& color) {
+    YCoCgDrawData data = {};
+    // Mat4 is row-major; shader uniforms use column-major matrices.
+    const tc::Mat4 mvp = (projection * view * model).transposed();
+    std::memcpy(data.uniforms.mvp, mvp.m, sizeof(data.uniforms.mvp));
+    data.vertices[0] = {x, y, 0, 0, 0, color.r, color.g, color.b, color.a};
+    data.vertices[1] = {x + w, y, 0, 1, 0, color.r, color.g, color.b, color.a};
+    data.vertices[2] = {x + w, y + h, 0, 1, 1, color.r, color.g, color.b, color.a};
+    data.vertices[3] = {x, y + h, 0, 0, 1, color.r, color.g, color.b, color.a};
+    return data;
+}
+
+} // namespace detail
 
 // ---------------------------------------------------------------------------
 // loadPcmTrack - read a PCM audio track and decode it into a SoundBuffer
@@ -220,6 +243,7 @@ public:
 
     // Relative paths resolve via getDataPath, like VideoPlayer::load.
     tc::LoadResult load(const tc::fs::path& filePath) override {
+        ycocgShaderFailed_ = false;
         const auto previousError = errorMessage_;
         if (initialized_) {
             close();
@@ -419,31 +443,10 @@ public:
     // Frame control
     // =========================================================================
 
-    int getCurrentFrame() const override {
-        return currentFrame_;
-    }
-
-    int getTotalFrames() const override {
-        return totalFrames_;
-    }
-
-    void setFrame(int frame) override {
-        if (!initialized_) return;
-        frame = std::max(0, std::min(frame, totalFrames_ - 1));
-        if (decodeFrame(frame)) {
-            currentFrame_ = frame;
-            playbackTime_ = (duration_ * frame) / totalFrames_;
-            updateTexture();
-            markFrameNew();
-        }
-    }
-
-    void nextFrame() override {
-        setFrame(currentFrame_ + 1);
-    }
-
-    void previousFrame() override {
-        setFrame(currentFrame_ - 1);
+    float getFrameRate() const override {
+        if (!initialized_ || duration_ <= 0.0f) return 0.0f;
+        const float rate = totalFrames_ / duration_;
+        return std::isfinite(rate) && rate > 0.0f ? rate : 0.0f;
     }
 
     // =========================================================================
@@ -552,6 +555,32 @@ protected:
     // Implementation methods
     // -------------------------------------------------------------------------
 
+    int getCurrentFrameImpl() const override {
+        return currentFrame_;
+    }
+
+    int getTotalFramesImpl() const override {
+        return totalFrames_;
+    }
+
+    void setFrameImpl(int frame) override {
+        frame = std::max(0, std::min(frame, totalFrames_ - 1));
+        if (decodeFrame(frame)) {
+            currentFrame_ = frame;
+            playbackTime_ = (duration_ * frame) / totalFrames_;
+            updateTexture();
+            markFrameNew();
+        }
+    }
+
+    void nextFrameImpl() override {
+        setFrameImpl(currentFrame_ + 1);
+    }
+
+    void previousFrameImpl() override {
+        setFrameImpl(currentFrame_ - 1);
+    }
+
     void playImpl() override {
         playbackTime_ = 0;
         currentFrame_ = -1;  // Force first frame decode
@@ -659,6 +688,8 @@ private:
 
     // YCoCg shader for HAP-Q
     mutable tc::Shader ycocgShader_;
+    // A failed lazy load is retried only after the next load().
+    mutable bool ycocgShaderFailed_ = false;
 
     // RGBA pixel buffer for encoding (decoded from BC/DXT on demand)
     std::vector<uint8_t> pixels_;
@@ -704,6 +735,9 @@ private:
         hasAudio_ = other.hasAudio_;
         audioHeldForReverse_ = other.audioHeldForReverse_;
         decodeTimeMs_ = other.decodeTimeMs_;
+        ycocgShader_ = std::move(other.ycocgShader_);
+        ycocgShaderFailed_ = other.ycocgShaderFailed_;
+        other.ycocgShaderFailed_ = false;
 
         // Invalidate source
         other.initialized_ = false;
@@ -922,49 +956,19 @@ private:
 
         switch (hapFormat_) {
             case HapFormat::DXT1:
-                // BC1: 8 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc1(src, blockDst, dstPitch);
-                        src += BCDEC_BC1_BLOCK_SIZE;
-                    }
-                }
+                detail::decodeRgbaBlocks(src, dst, width_, height_, BCDEC_BC1_BLOCK_SIZE, bcdec_bc1);
                 break;
 
             case HapFormat::DXT5:
-                // BC3: 16 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc3(src, blockDst, dstPitch);
-                        src += BCDEC_BC3_BLOCK_SIZE;
-                    }
-                }
-                break;
-
             case HapFormat::YCoCgDXT5:
-                // BC3 + YCoCg color transform: 16 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc3(src, blockDst, dstPitch);
-                        src += BCDEC_BC3_BLOCK_SIZE;
-                    }
+                detail::decodeRgbaBlocks(src, dst, width_, height_, BCDEC_BC3_BLOCK_SIZE, bcdec_bc3);
+                if (hapFormat_ == HapFormat::YCoCgDXT5) {
+                    convertYCoCgToRgb();
                 }
-                // Convert YCoCg to RGB
-                convertYCoCgToRgb();
                 break;
 
             case HapFormat::BC7:
-                // BC7: 16 bytes per block
-                for (int by = 0; by < blocksY; by++) {
-                    for (int bx = 0; bx < blocksX; bx++) {
-                        uint8_t* blockDst = dst + (by * 4 * dstPitch) + (bx * 4 * 4);
-                        bcdec_bc7(src, blockDst, dstPitch);
-                        src += BCDEC_BC7_BLOCK_SIZE;
-                    }
-                }
+                detail::decodeRgbaBlocks(src, dst, width_, height_, BCDEC_BC7_BLOCK_SIZE, bcdec_bc7);
                 break;
 
             case HapFormat::RGTC1:
@@ -1082,10 +1086,11 @@ private:
     // -------------------------------------------------------------------------
 
     void initYCoCgShader() const {
-        if (!ycocgShader_.isLoaded()) {
+        if (!ycocgShader_.isLoaded() && !ycocgShaderFailed_) {
             tc::logNotice("HapPlayer") << "Loading YCoCg shader...";
             if (!ycocgShader_.load(ycocg_shader_desc)) {
-                tc::logError("HapPlayer") << "Failed to load YCoCg shader!";
+                ycocgShaderFailed_ = true;
+                tc::logError("HapPlayer") << "Failed to load YCoCg shader; HAP-Q is drawn without colour conversion until the next load()";
             } else {
                 tc::logNotice("HapPlayer") << "YCoCg shader loaded successfully";
             }
@@ -1097,41 +1102,20 @@ private:
         initYCoCgShader();
         if (!ycocgShader_.isLoaded()) {
             // Fallback to standard draw (will show wrong colors)
-            static bool warned = false;
-            if (!warned) {
-                tc::logWarning("HapPlayer") << "YCoCg shader not loaded, using fallback";
-                warned = true;
-            }
             texture_.draw(x, y, w, h);
             return;
         }
 
-        // Setup uniforms
-        YCoCgVsParams vsParams = {};
-        vsParams.screenSize[0] = static_cast<float>(tc::getWindowWidth());
-        vsParams.screenSize[1] = static_cast<float>(tc::getWindowHeight());
+        const auto& context = tc::internal::currentWindowContext();
+        const auto data = detail::makeYCoCgDrawData(x, y, w, h,
+            context.currentProjectionMatrix, context.currentViewMatrix, tc::getMatrix(), tc::getColor());
 
-        // Draw with shader
         tc::pushShader(ycocgShader_);
-
-        // Bind texture and sampler
         ycocgShader_.setTexture(0, texture_.getView(), texture_.getSampler());
-
-        // Set vertex shader uniforms
-        ycocgShader_.setUniform(0, &vsParams, sizeof(vsParams));
-
-        // Create textured quad vertices directly for shader
-        tc::ShaderVertex verts[4];
-        // Top-left
-        verts[0] = {x, y, 0, 0.0f, 0.0f, 1, 1, 1, 1};
-        // Top-right
-        verts[1] = {x + w, y, 0, 1.0f, 0.0f, 1, 1, 1, 1};
-        // Bottom-right
-        verts[2] = {x + w, y + h, 0, 1.0f, 1.0f, 1, 1, 1, 1};
-        // Bottom-left
-        verts[3] = {x, y + h, 0, 0.0f, 1.0f, 1, 1, 1, 1};
-
-        ycocgShader_.submitVertices(verts, 4, tc::PrimitiveType::Quads);
+        ycocgShader_.setUniform(0, &data.uniforms, sizeof(data.uniforms));
+        // submitVertices snapshots a pipeline matching the current render target.
+        // Keep positions in model space: the shader applies the full MVP once.
+        ycocgShader_.submitVertices(data.vertices, 4, tc::PrimitiveType::Quads);
 
         tc::popShader();
     }

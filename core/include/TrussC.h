@@ -99,6 +99,7 @@
 
 // TrussC event system
 #include "tc/events/tcCoreEvents.h"
+#include "tc/events/tcTouchMouse.h"  // internal::TouchMouseMapper (touch-as-mouse)
 
 // TrussC utilities
 #include "tc/utils/tcFileIO.h"   // fs::path boundary helpers (before all path consumers)
@@ -128,6 +129,8 @@
 
 // TrussC MCP (Model Context Protocol) Server
 #include "tc/utils/tcMCP.h"
+#include "tc/app/tcExit.h"
+#include <csignal>
 
 // =============================================================================
 // trussc namespace
@@ -307,13 +310,13 @@ namespace internal {
         double drawAccumulator = 0.0;
     };
     MainLoopState& mainLoop();
-    int& appExitCode();  // shared by the host and hot reload guests
 
     // Mouse position/button state + keyboard state moved to WindowContext
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
 
     // Touch-as-mouse mapping
-    // Default ON everywhere — the first touch synthesizes mouse press/drag, so
+    // Default ON everywhere — the first finger down synthesizes mouse press/
+    // drag/release (other fingers don't; tc/events/tcTouchMouse.h), so
     // mouse-based code (incl. the web build on iPad/phones) just works. Apps that
     // want raw touch separate from mouse call setTouchAsMouse(false) in setup().
     // Defined in tcGlobal.cpp: app code sets it, the host's event callback reads it.
@@ -2048,6 +2051,7 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
+    internal::setExitReason("request-exit-app");
     sapp_request_quit();
 }
 
@@ -2055,6 +2059,7 @@ inline void requestExitApp() {
 // Use this for forced exit, e.g., after user confirms exit in a dialog
 inline void exitApp(int code = 0) {
     internal::appExitCode() = code;
+    internal::setExitReason("exit-app");
     sapp_quit();
 }
 
@@ -2405,6 +2410,7 @@ namespace internal {
 
     inline void _setup_cb() {
         CrashPhaseScope crashPhase("setup");
+        installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
         // key off this. (sokol's init_cb runs on the main thread.)
@@ -2675,6 +2681,12 @@ namespace internal {
     inline void _frame_cb() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
+        if (int sig = pendingWindowExitSignal()) {
+            setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
+            sapp_request_quit();
+            sapp_skip_present();
+            return;
+        }
         frameReentryGuard = true;
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
@@ -2741,7 +2753,11 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        if (!beginExitCleanup()) return;
         CrashPhaseScope crashPhase("cleanup");
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
+        // Session end may arrive inside a secondary window's modal loop.
+        currentWindowCtx() = &mainWindowContext();
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2763,6 +2779,8 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
+        restoreWindowExitSignals();
 
         #if defined(__APPLE__) && TARGET_OS_OSX
         // AppKit's terminate: would exit(0) right after this.
@@ -2951,8 +2969,11 @@ namespace internal {
             case SAPP_EVENTTYPE_TOUCHES_MOVED:
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
-                // Build TouchEventArgs from sokol touchpoints
+                // Build TouchEventArgs from sokol touchpoints. The mapper below
+                // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
+                static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
                 TouchEventArgs touchArgs;
+                internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
                     touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
@@ -2961,60 +2982,74 @@ namespace internal {
                     touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
                     touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
                     touchArgs.touches[i].changed = ev->touches[i].changed;
+                    samples[i].id = ev->touches[i].identifier;
+                    samples[i].x = touchArgs.touches[i].x;
+                    samples[i].y = touchArgs.touches[i].y;
+                    samples[i].changed = ev->touches[i].changed;
                 }
 
                 // Fire touch events
+                internal::TouchPhase phase;
                 if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                    phase = internal::TouchPhase::Began;
                     events().touchPressed.notify(touchArgs);
                 } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                    phase = internal::TouchPhase::Moved;
                     events().touchMoved.notify(touchArgs);
                 } else {
                     touchArgs.cancelled = (ev->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED);
+                    phase = touchArgs.cancelled ? internal::TouchPhase::Cancelled
+                                                : internal::TouchPhase::Ended;
                     events().touchReleased.notify(touchArgs);
                 }
 
-                // Touch-as-mouse: map first touch to mouse events
-                if (touchAsMouse() && touchArgs.numTouches > 0) {
-                    float tx = touchArgs.touches[0].x;
-                    float ty = touchArgs.touches[0].y;
+                // Touch-as-mouse: only the primary touch (the first finger
+                // down) drives the mouse; see tc/events/tcTouchMouse.h.
+                auto& mapper = internal::touchMouseMapper();
+                if (!touchAsMouse()) {
+                    mapper.reset();
+                    break;
+                }
+                internal::TouchMouseAction action = mapper.update(phase, samples, touchArgs.numTouches);
+                float tx = action.x;
+                float ty = action.y;
 
-                    if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
-                        currentMouseButton = 0;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = 0;
-                        internal::currentWindowContext().mousePressed = true;
+                if (action.kind == internal::TouchMouseAction::Kind::Press) {
+                    currentMouseButton = 0;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = 0;
+                    internal::currentWindowContext().mousePressed = true;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mousePressed.notify(margs);
-                        if (appMousePressedFunc) appMousePressedFunc(margs);
-                    } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
-                        float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mousePressed.notify(margs);
+                    if (appMousePressedFunc) appMousePressedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
+                    float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
 
-                        internal::MouseEventRaw margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
-                        events().mouseDragged.notify(dragArgs);
-                        margs.consumed = dragArgs.consumed;
-                        if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
-                    } else {
-                        currentMouseButton = -1;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = -1;
-                        internal::currentWindowContext().mousePressed = false;
+                    internal::MouseEventRaw margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
+                    events().mouseDragged.notify(dragArgs);
+                    margs.consumed = dragArgs.consumed;
+                    if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
+                    currentMouseButton = -1;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = -1;
+                    internal::currentWindowContext().mousePressed = false;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mouseReleased.notify(margs);
-                        if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
-                    }
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mouseReleased.notify(margs);
+                    if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
                 }
                 break;
             }
@@ -3064,15 +3099,20 @@ namespace internal {
                     logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x"
                         << std::hex << ev->device_lost_reason << "; exiting";
                     exitApp(1);
+                    setExitReason("device-lost");
                 }
                 break;
             }
             case SAPP_EVENTTYPE_QUIT_REQUESTED: {
                 // Notify exitRequested event - listeners can cancel by setting args.cancel = true
+                setExitBlockReason("");
                 ExitRequestEventArgs args;
                 events().exitRequested.notify(args);
                 if (args.cancel) {
+                    setExitBlockReason(args.reason);
+                    clearExitReason();
                     sapp_cancel_quit();
+                    cancelWindowExitSignal();
                 }
                 break;
             }
@@ -3133,11 +3173,11 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
             // close() requests made so far (e.g. from exit()) land here,
             // before the main App's cleanup().
             internal::closeRequestedWindowsAtShutdown();
-            app->cleanup();
             // The audio device is still running (it stops in _cleanup_cb, so
             // exit() can use audio): detach the App's audio hooks and wait
-            // for a callback in flight before the App goes (#256).
+            // for a callback in flight before cleanup() frees audio state (#698).
             internal::detachAppAudio(*app);
+            app->cleanup();
             app.reset();
         }
     };

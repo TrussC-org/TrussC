@@ -82,6 +82,8 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["underrunFrames"] = &trussc::AudioStats::underrunFrames;
         t["stalled"] = &trussc::AudioStats::stalled;
         t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
+        t["initFailure"] = &trussc::AudioStats::initFailure;
+        t["initFailureResult"] = &trussc::AudioStats::initFailureResult;
     }
     {
         sol::usertype<trussc::SoundStream> t = lua->new_usertype<trussc::SoundStream>("SoundStream",

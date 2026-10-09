@@ -335,6 +335,8 @@ def build_test_project(test_dir, pg_bin, platform_info, args):
 
     build_dir_name = platform_info["build_dir"]
     cmd_config = cmake_config_cmd(build_dir_name, platform_info)
+    if platform_info["os"] == "linux" and os.path.basename(test_dir) == ALL_CORE_TESTS_NAME:
+        cmd_config.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
         return None, "configure"
 
@@ -384,9 +386,14 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
     Colors.print(f"Building: {runner_name}", Colors.YELLOW)
     t0 = time.monotonic()
     binary, stage = build_test_project(runner_dir, pg_bin, platform_info, args)
+    if binary and platform_info["os"] == "linux":
+        cmd = [sys.executable, os.path.join(ROOT_DIR, "tools", "check_core_test_symbols.py"),
+               os.path.join(runner_dir, platform_info["build_dir"])]
+        if not run_command(cmd, cwd=ROOT_DIR, verbose=args.verbose):
+            stage = "duplicate-symbols"
     build_secs = time.monotonic() - t0
     names = []
-    if binary:
+    if binary and not stage:
         Colors.print(f"  Built in {build_secs:.1f}s", Colors.GREEN)
         try:
             r = subprocess.run([binary, "--list"], cwd=runner_dir, stdout=subprocess.PIPE,

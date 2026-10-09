@@ -140,12 +140,38 @@ void concurrentAccounting() {
         for (int j = 0; j < 1000; ++j) Access::fail(socket, Kind::Send);
     });
     for (auto& thread : threads) thread.join();
-    check("concurrent failures log once and notify every time", logs.take().size() == 1 && callbacks == 4000);
+    const auto failureLines = logs.take();
+    check("concurrent failures log once and notify every time",
+          failureLines.size() == 1 && callbacks == 4000);
     threads.clear();
     for (int i = 0; i < 4; ++i) threads.emplace_back([&] { Access::recover(socket, Kind::Send); });
     for (auto& thread : threads) thread.join();
-    check("concurrent recovery accounts for every suppressed failure once", logs.take() ==
-          std::vector<std::string>{"UdpSocket: send recovered after 3999 more failures"});
+    const auto recoveryLines = logs.take();
+    // Failures that land while the first one is being reported are counted
+    // in its "(+N more since the last report)", the rest in the recovery
+    // line; together they must cover the 3999 suppressed failures exactly.
+    unsigned long long inFirst = 0, inRecovery = 0;
+    bool shapesOk = failureLines.size() == 1 && recoveryLines.size() == 1;
+    if (shapesOk) {
+        const std::string& first = failureLines[0];
+        const std::string base = "UdpSocket: injected failure (code: 42)";
+        if (first == base) {
+            inFirst = 0;
+        } else if (std::sscanf(first.c_str(), "UdpSocket: injected failure (code: 42) (+%llu more since the last report)",
+                               &inFirst) != 1) {
+            shapesOk = false;
+        }
+        if (std::sscanf(recoveryLines[0].c_str(), "UdpSocket: send recovered after %llu more failures",
+                        &inRecovery) != 1) {
+            shapesOk = false;
+        }
+    }
+    const bool accounted = shapesOk && inFirst + inRecovery == 3999;
+    check("concurrent recovery accounts for every suppressed failure once", accounted);
+    if (!accounted) {
+        for (const auto& line : failureLines) std::printf("    failure line: %s\n", line.c_str());
+        for (const auto& line : recoveryLines) std::printf("    recovery line: %s\n", line.c_str());
+    }
 
     // Both callback types can re-enter error bookkeeping without deadlocking.
     Access::fail(socket, Kind::Send);

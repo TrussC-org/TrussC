@@ -737,10 +737,10 @@ HeadlessSleeper::~HeadlessSleeper() {
 #endif
 }
 
-void HeadlessSleeper::sleep(double seconds) {
+bool HeadlessSleeper::sleep(double seconds) {
     if (!(seconds > 0.0)) {
         std::this_thread::yield();
-        return;
+        return false;
     }
     if (seconds > 1.0) seconds = 1.0;
 #ifdef _WIN32
@@ -749,11 +749,12 @@ void HeadlessSleeper::sleep(double seconds) {
         due.QuadPart = -(LONGLONG)std::ceil(seconds * 1e7);   // relative, 100 ns units
         if (SetWaitableTimer((HANDLE)timer_, &due, 0, nullptr, nullptr, FALSE) &&
             WaitForSingleObject((HANDLE)timer_, INFINITE) == WAIT_OBJECT_0) {
-            return;
+            return true;
         }
     }
 #endif
     std::this_thread::sleep_for(std::chrono::nanoseconds((long long)std::ceil(seconds * 1e9)));
+    return true;
 }
 
 bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
@@ -918,6 +919,10 @@ Logger& getLogger() {
     static LoggerLifetimeMark lifetimeMark;
     (void)lifetimeMark;
     return logger;
+}
+
+void internal::writeProtocolLine(LogLevel level, const std::string& message) {
+    getLogger().logProtocolLine(level, message);
 }
 
 // Shared by the deferred queue, native file writers and MCP path reporting.
@@ -1169,10 +1174,6 @@ ThreadChannel<ConsoleEventArgs>& getChannel() {
 std::atomic<bool>& isRunning() {
     static std::atomic<bool> running{false};
     return running;
-}
-std::unique_ptr<std::thread>& getThread() {
-    static std::unique_ptr<std::thread> t;
-    return t;
 }
 } // namespace detail
 } // namespace console
@@ -1446,6 +1447,11 @@ float& farClipOverride() {
 bool& touchAsMouse() {
     static bool enabled = true;
     return enabled;
+}
+
+TouchMouseMapper& touchMouseMapper() {
+    static TouchMouseMapper mapper;
+    return mapper;
 }
 
 // Whether the setup callback ran in the current launch (#394).

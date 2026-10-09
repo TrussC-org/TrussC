@@ -10,17 +10,17 @@ description.ko = "기반 애플리케이션 클래스: 서브클래싱하여 set
 ["App::audioIn"]
 category = "audioengine"
 keywords = ["microphone", "mic", "capture"]
-description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached after cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here."
-description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく setup() が戻った直後から呼ばれ、cleanup() の後で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
-description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 setup() 이 반환된 직후부터 호출되고, cleanup() 후에 분리되어 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
+description.en = "Real-time capture callback event (microphone input). RT-safe same as audioOut. Like audioOut, first called right after setup() returns and detached before cleanup() for good; the same rule applies: don't wait on the main thread or on its locks in here."
+description.ja = "リアルタイム入力コールバック event (マイク入力)。RT-safe 要件は audioOut と同様。audioOut と同じく setup() が戻った直後から呼ばれ、cleanup() の前で切り離され、元には戻らない。ここでもメインスレッドやそのロックを待たないこと"
+description.ko = "실시간 캡처 콜백 이벤트 (마이크 입력). RT-safe 요건은 audioOut과 동일. audioOut 과 같이 setup() 이 반환된 직후부터 호출되고, cleanup() 전에 분리되어 다시 등록되지 않는다. 여기서도 메인 스레드나 그 락을 기다리지 말 것"
 related = ["Event<T>", "AudioInBuffer", "getMicInput", "getMicAnalysisBuffer"]
 
 ["App::audioOut"]
 category = "events"
 keywords = ["sound", "output", "buffer", "dsp", "synth"]
-description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework detaches it after cleanup() and waits for a call in flight before it destroys the App (exit, hot reload, closing the App's window), for as long as the call takes: don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
-description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。setup() が戻った直後から呼ばれるので、setup() で用意したものはここで使える。一度も動かさない App には呼ばれない。フレームワークが cleanup() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから App を破棄する (終了時、ホットリロード時、App のウィンドウを閉じたとき)。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
-description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. setup() 이 반환된 직후부터 호출되므로 setup() 에서 준비한 것은 여기서 쓸 수 있다. 한 번도 실행되지 않은 App 에는 호출되지 않는다. 프레임워크가 cleanup() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 App 을 파괴한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
+description.en = "Fill the audio output buffer (override to synthesize audio). Runs on the audio thread. First called right after setup() returns, so what setup() prepares is ready in here; an App that is never run gets no calls. The framework calls exit(), detaches it and waits as long as necessary for a call in flight before calling cleanup() (exit, hot reload, closing the App's window). cleanup() may free its audio state. Don't wait on the main thread or on a lock the main thread may hold in here, or the teardown hangs (with an error logged after one second). An App runs once: when its window closes it is detached for good; to show the App again, create a new one"
+description.ja = "オーディオ出力バッファを満たす(音を合成するにはオーバーライド)。オーディオスレッドで実行される。setup() が戻った直後から呼ばれるので、setup() で用意したものはここで使える。一度も動かさない App には呼ばれない。フレームワークが exit() の後で切り離し、実行中の呼び出しが戻るまで時間の制限なしに待ってから cleanup() を呼ぶ (終了時、ホットリロード時、App のウィンドウを閉じたとき)。cleanup() ではオーディオの状態を解放できる。ここでメインスレッドや、メインスレッドが持ちうるロックを待たないこと。後片付けが固まる (1 秒後にエラーログが出る)。App は 1 回だけ動くので、ウィンドウを閉じたら二度と登録されない。もう一度表示するには新しい App を作る"
+description.ko = "오디오 출력 버퍼를 채움(오디오를 합성하려면 오버라이드). 오디오 스레드에서 실행된다. setup() 이 반환된 직후부터 호출되므로 setup() 에서 준비한 것은 여기서 쓸 수 있다. 한 번도 실행되지 않은 App 에는 호출되지 않는다. 프레임워크가 exit() 후에 분리하고, 실행 중인 호출이 반환될 때까지 시간 제한 없이 기다린 뒤 cleanup() 을 호출한다 (종료 시, 핫 리로드 시, App 의 윈도우를 닫을 때). cleanup() 에서는 오디오 상태를 해제할 수 있다. 여기서 메인 스레드나 메인 스레드가 쥘 수 있는 락을 기다리지 말 것. 정리가 멈춘다 (1 초 후 에러 로그가 남는다). App 은 한 번만 동작하므로 윈도우를 닫으면 다시 등록되지 않는다. 다시 표시하려면 새 App 을 만든다"
 related = ["AudioOutBuffer"]
 
 ["App::exit"]
@@ -40,9 +40,9 @@ description.ko = "윈도우에 파일이 드롭됨"
 
 ["App::getWindow"]
 keywords = ["multi window", "second window", "own window", "attach"]
-description.en = "The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks"
-description.ja = "Window::setApp() でこのAppが載っているWindow。載っていなければ nullptr (runApp() で起動したメインAppと、ウィンドウが閉じられたAppを含む)。App自身から引くので、どのウィンドウのコールバックから subApp->getWindow() を呼んでも正しいウィンドウが返る"
-description.ko = "Window::setApp()으로 이 App이 연결된 Window. 연결되어 있지 않으면 nullptr (runApp()으로 시작한 메인 App과 윈도우가 닫힌 App 포함). App 자체에서 조회하므로 어느 윈도우의 콜백에서 subApp->getWindow()를 호출해도 올바른 윈도우가 반환됨"
+description.en = "The Window this App is attached to via Window::setApp(), or nullptr when it is not attached — including the main App started by runApp() and an App whose window was closed. `close()` only requests closure; the window remains available until teardown begins. Already nullptr during teardown: inside this App's own exit() / cleanup() and in the window's events().exit listeners, because the native window is destroyed first. Read what you need (title, size, fullscreen) before calling close(), or keep it up to date in update(). Resolved from the App itself, so subApp->getWindow() returns the right window from any window's callbacks"
+description.ja = "Window::setApp() でこのAppが載っているWindow。載っていなければ nullptr (runApp() で起動したメインAppと、ウィンドウが閉じられたAppを含む)。close() は終了要求のみで、破棄が始まるまではウィンドウを取得できる。破棄中はすでに nullptr になる: このApp自身の exit() / cleanup() の中と、そのウィンドウの events().exit リスナーの中。ネイティブウィンドウが先に破棄されるため。必要な情報 (タイトル、サイズ、フルスクリーン) は close() を呼ぶ前に読むか、update() で更新しておく。App自身から引くので、どのウィンドウのコールバックから subApp->getWindow() を呼んでも正しいウィンドウが返る"
+description.ko = "Window::setApp()으로 이 App이 연결된 Window. 연결되어 있지 않으면 nullptr (runApp()으로 시작한 메인 App과 윈도우가 닫힌 App 포함). close()는 닫기를 요청할 뿐이며 실제 정리가 시작되기 전까지 윈도우를 얻을 수 있음. 정리 중에는 이미 nullptr: 이 App 자신의 exit() / cleanup() 안과 그 윈도우의 events().exit 리스너 안. 네이티브 윈도우가 먼저 파괴되기 때문. 필요한 정보 (제목, 크기, 전체 화면)는 close()를 호출하기 전에 읽거나 update()에서 갱신해 둘 것. App 자체에서 조회하므로 어느 윈도우의 콜백에서 subApp->getWindow()를 호출해도 올바른 윈도우가 반환됨"
 related = ["Window::setApp", "Window::getApp", "createWindow"]
 
 ["App::isExitRequested"]
@@ -119,10 +119,13 @@ related = ["App::isExitRequested"]
 ["App::setSize"]
 category = "events"
 keywords = ["resize", "window", "dimensions"]
-description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup()"
-description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。まだshared_ptrに所有されていないApp(コンストラクタ内など)も自分のサイズだけが変わり、一度だけ警告が出る。setup()で呼ぶ"
-description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. 아직 shared_ptr이 소유하지 않은 App(생성자 안 등)도 자신의 크기만 바뀌고 경고가 한 번 나옴. setup()에서 호출"
+description.en = "Resize the app's own window — the one it is attached to, or the main window for the main App — from any window's callbacks. Same units as setWindowSize(). An App attached to no window only changes its own size. So does an App no shared_ptr owns yet (e.g. inside its constructor), which also warns once: call it in setup(). Resizing the main window is not implemented on Linux yet"
+description.ja = "アプリ自身のウィンドウ (Appが載っているウィンドウ、メインAppならメインウィンドウ) をリサイズ。どのウィンドウのコールバックから呼んでも同じ。単位は setWindowSize() と同じ。どのウィンドウにも載っていないAppは自分のサイズだけが変わる。まだshared_ptrに所有されていないApp(コンストラクタ内など)も自分のサイズだけが変わり、一度だけ警告が出る。setup()で呼ぶ。メインウィンドウのリサイズは Linux ではまだ未実装"
+description.ko = "앱 자신의 윈도우 (App이 연결된 윈도우, 메인 App이면 메인 윈도우)를 리사이즈. 어느 윈도우의 콜백에서 호출해도 동일. 단위는 setWindowSize()와 같음. 어떤 윈도우에도 연결되지 않은 App은 자신의 크기만 바뀜. 아직 shared_ptr이 소유하지 않은 App(생성자 안 등)도 자신의 크기만 바뀌고 경고가 한 번 나옴. setup()에서 호출. 메인 윈도우 리사이즈는 Linux에서 아직 미구현"
 related = ["getWindowSize", "setWindowSize", "App::getWindow"]
+platform_note.en = "Resizing the main window is a no-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas. A window created with createWindow() resizes on Linux too."
+platform_note.ja = "メインウィンドウのリサイズは Linux（未実装）/ iOS / Android（全画面固定）では no-op。Web は canvas をリサイズ。createWindow() で作ったウィンドウは Linux でもリサイズされる。"
+platform_note.ko = "메인 윈도우 리사이즈는 Linux(미구현) / iOS / Android(전체 화면 고정)에서 no-op. Web은 canvas를 리사이즈. createWindow()로 만든 윈도우는 Linux에서도 리사이즈됨."
 
 ["App::touchMoved"]
 category = "events"
@@ -288,9 +291,9 @@ related = ["AudioStats", "AudioEngine::getPlayingSounds", "Sound::play"]
 ["AudioEngine::init"]
 category = "audioengine"
 keywords = ["initialize", "start", "open", "device", "setup"]
-description.en = "Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device."
-description.ja = "エンジンを初期化する、または AudioSettings の上書きで再初期化する。init(settings) はサンプルレート、チャンネル、バッファサイズ、ポリフォニーを失敗しても保持し、引数なしの init() は直前のそれらを再利用する (init(settings) を一度も呼んでいなければデフォルト) が、デバイスは常にシステム既定を開く。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。使えるオーディオバックエンドがないと miniaudio は無音の Null デバイスにフォールバックし、init() は成功して警告をログに出す。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること。Sound::load*() はエンジンが未初期化なら init() を呼ぶので、init(settings) が失敗した後はその設定でシステム既定のデバイスが開かれる。要求したデバイスを使いたいならサウンドを読み込む前に init(settings) を呼び直すこと"
-description.ko = "엔진을 초기화하거나 AudioSettings 오버라이드로 재초기화. init(settings) 는 샘플레이트, 채널, 버퍼 크기, 폴리포니를 실패해도 유지하고, 인수 없는 init() 은 마지막 값을 재사용하지만 (init(settings) 를 호출한 적이 없으면 기본값) 디바이스는 항상 시스템 기본 디바이스를 연다. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. 사용할 수 있는 오디오 백엔드가 없으면 miniaudio 는 무음의 Null 디바이스로 폴백하고, init() 은 성공하며 경고를 로그에 남긴다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것. Sound::load*() 는 엔진이 초기화되지 않았으면 init() 을 호출하므로, init(settings) 가 실패한 뒤에는 그 설정으로 시스템 기본 디바이스가 열린다. 요청한 디바이스를 쓰려면 사운드를 로드하기 전에 init(settings) 를 다시 호출할 것"
+description.en = "Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device on AudioBackend::Default. Re-init on a running engine migrates active voices to the new settings. miniaudio reaches Null only when no real backend context can be created; if a context opens but its device cannot, init() returns false without switching backend. Set AudioSettings::backend = AudioBackend::Null for intentional silent operation (one Notice per init). getStats() retains the last init failure until a successful init. Returns true on success, false when no output device can be opened; the failure is logged through logError(\"AudioEngine\") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device."
+description.ja = "エンジンを初期化する、または AudioSettings の上書きで再初期化する。init(settings) はサンプルレート、チャンネル、バッファサイズ、ポリフォニーを失敗しても保持し、引数なしの init() は直前のそれらを再利用する (init(settings) を一度も呼んでいなければデフォルト) が、バックエンドは常に AudioBackend::Default、デバイスはシステム既定を開く。動作中のエンジンで再初期化するとアクティブなボイスを新設定へ移行する。miniaudio が Null に到達するのは実バックエンドのコンテキストを作れない場合だけ。コンテキストが開いてもデバイスを開けなければ、バックエンドを切り替えず false を返す。意図的に無音で動かすには AudioSettings::backend = AudioBackend::Null を指定する (init ごとに Notice を 1 回)。getStats() は次の初期化成功まで最後の失敗を保持する。成功時 true、出力デバイスを開けないときは false を返す。失敗は要求したデバイス名とともに logError(\"AudioEngine\") でログに出る。再初期化が失敗するとエンジンは止まったままになる (新しいデバイスを試す前に動作中のデバイスを閉じるため)。後からもう一度呼んでよいが、失敗するたびにデバイスを開き直してログを出すので、毎フレームではなくタイマー (1 秒に 1 回程度) やユーザー操作で再試行すること。Sound::load*() はエンジンが未初期化なら init() を呼ぶので、init(settings) が失敗した後はその設定でシステム既定のデバイスが開かれる。要求したデバイスを使いたいならサウンドを読み込む前に init(settings) を呼び直すこと"
+description.ko = "엔진을 초기화하거나 AudioSettings 오버라이드로 재초기화. init(settings) 는 샘플레이트, 채널, 버퍼 크기, 폴리포니를 실패해도 유지하고, 인수 없는 init() 은 마지막 값을 재사용하지만 (init(settings) 를 호출한 적이 없으면 기본값) 백엔드는 항상 AudioBackend::Default이며 시스템 기본 디바이스를 연다. 동작 중인 엔진에서 재초기화하면 활성 보이스를 새 설정으로 이전한다. miniaudio 는 실제 백엔드 컨텍스트를 만들 수 없을 때만 Null 에 도달한다. 컨텍스트가 열려도 디바이스를 열 수 없으면 백엔드를 바꾸지 않고 false 를 반환한다. 의도적인 무음 실행에는 AudioSettings::backend = AudioBackend::Null 을 지정한다 (init 마다 Notice 한 번). getStats() 는 다음 초기화 성공까지 마지막 실패를 유지한다. 성공 시 true, 출력 디바이스를 열 수 없으면 false 반환. 실패는 요청한 디바이스 이름과 함께 logError(\"AudioEngine\") 로 로그에 남는다. 재초기화가 실패하면 엔진은 멈춘 상태로 남는다 (새 디바이스를 시도하기 전에 동작 중인 디바이스를 닫기 때문). 나중에 다시 호출해도 되지만, 실패할 때마다 디바이스를 다시 열고 로그를 남기므로 매 프레임이 아니라 타이머(1초에 한 번 정도)나 사용자 조작으로 재시도할 것. Sound::load*() 는 엔진이 초기화되지 않았으면 init() 을 호출하므로, init(settings) 가 실패한 뒤에는 그 설정으로 시스템 기본 디바이스가 열린다. 요청한 디바이스를 쓰려면 사운드를 로드하기 전에 init(settings) 를 다시 호출할 것"
 related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
 
 ["AudioEngine::isInitialized"]
@@ -305,6 +308,9 @@ keywords = ["enumerate", "outputs", "playback", "available"]
 description.en = "Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform."
 description.ja = "利用可能な再生デバイスを列挙 (name + isDefault)。プラットフォームが非対応の場合は空"
 description.ko = "사용 가능한 재생 디바이스를 열거 (name + isDefault). 플랫폼이 미지원이면 비어 있음"
+details.en = "iOS enumeration leaves the audio session untouched, so before session activation (SoloAmbient), the current route may have no inputs."
+details.ja = "iOS の列挙はオーディオセッションを変更しないため、有効化前（SoloAmbient）の現在のルートには入力がない場合があります。"
+details.ko = "iOS 열거는 오디오 세션을 변경하지 않으므로 세션 활성화 전(SoloAmbient)에는 현재 경로에 입력이 없을 수 있습니다."
 related = ["AudioDeviceInfo"]
 
 ["AudioEngine::play"]
@@ -2138,10 +2144,32 @@ description.ja = "exitRequested イベントの引数"
 description.ko = "exitRequested 이벤트의 인자"
 related = ["requestExitApp", "events"]
 
+["ExitRequestEventArgs::reason"]
+description.en = "Optional explanation shown by Windows when cancel blocks shutdown or logoff; empty uses a generic busy message"
+description.ja = "cancel で Windows のシャットダウンやログオフを止める理由。空なら汎用の処理中メッセージを表示"
+description.ko = "cancel로 Windows 종료나 로그오프를 막을 때 표시할 이유. 비어 있으면 일반적인 작업 중 메시지 표시"
+
 ["ExitRequestEventArgs::cancel"]
-description.en = "Set true in a listener to cancel the requested exit"
-description.ja = "リスナーで true にすると要求された終了をキャンセル"
-description.ko = "리스너에서 true로 설정하면 요청된 종료를 취소"
+description.en = """
+Set true in a listener to cancel the requested exit. Windowed Windows session
+end (including Restart Manager), macOS termination and Linux/macOS SIGTERM or
+SIGINT use this event too. After a veto the user starts shutdown again. A second
+signal forces termination. Forced OS shutdown cannot be blocked; Windows gives
+exit()/cleanup() only a few seconds after WM_ENDSESSION(TRUE).
+"""
+description.ja = """
+リスナーで true にすると終了要求をキャンセル。ウィンドウ付きアプリの Windows
+セッション終了（Restart Manager を含む）、macOS 終了、Linux/macOS の SIGTERM・SIGINT
+もこのイベントを通る。キャンセル後はユーザーが終了操作をやり直す。2 回目のシグナルは
+強制終了する。OS の強制終了は阻止できず、Windows の WM_ENDSESSION(TRUE) 後に
+exit()/cleanup() を実行できる時間は数秒に限られる。
+"""
+description.ko = """
+리스너에서 true로 설정하면 종료 요청을 취소한다. 창 앱의 Windows 세션 종료
+(Restart Manager 포함), macOS 종료, Linux/macOS SIGTERM 및 SIGINT도 이 이벤트를 거친다.
+취소 후 사용자가 종료를 다시 시작한다. 두 번째 시그널은 강제 종료한다. OS의 강제 종료는
+막을 수 없으며 Windows WM_ENDSESSION(TRUE) 이후 exit()/cleanup() 실행 시간은 몇 초뿐이다.
+"""
 
 ["Fbo"]
 category = "graphics_fbo"
@@ -2640,10 +2668,34 @@ description.ko = "줄 바꿈이 활성화되었는지 확인"
 
 ["Font::load"]
 category = "font"
-keywords = ["open", "read", "file"]
-description.en = "Load a font file or a system font name. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins."
-description.ja = "フォントファイルまたはシステムフォント名を読み込む。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う"
-description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용"
+keywords = ["open", "read", "file", "ttc", "font collection", "face index", "system font name"]
+description.en = "Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins."
+description.ja = "フォントファイルまたはシステムフォント名を読み込む。faceIndex で .ttc 内の書体を選ぶ。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う"
+description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. faceIndex로 .ttc 안의 서체를 선택. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용"
+details.en = """
+`load(nameOrPath, size, faceIndex = 0)`. `nameOrPath` is a font file, a URL (web), or a system font name such as `"Noto Sans CJK SC"`.
+
+- `faceIndex` picks the face inside a font collection (`.ttc` / `.otc`) given as a file or URL. A single font has only face 0. An index below 0, or at or past the number of faces in the file, fails the load with an error log.
+- A system font name opens the face the OS resolves it to, including a later face of a `.ttc` (fontconfig `FC_INDEX` on Linux, DirectWrite on Windows, the CoreText font's PostScript name on macOS / iOS). `faceIndex` does not apply to a name.
+- The order of faces is part of the file, so a file and a face index load the same face on every OS. System font names depend on the fonts each OS has. For identical text on every OS, bundle the font in `data/` and load it by file and face index.
+- Each (file, face index, size) gets its own glyph atlas.
+"""
+details.ja = """
+`load(nameOrPath, size, faceIndex = 0)`。`nameOrPath` はフォントファイル、URL（Web）、または `"Noto Sans CJK SC"` のようなシステムフォント名。
+
+- `faceIndex` はファイルや URL で渡したフォントコレクション（`.ttc` / `.otc`）内の書体を選ぶ。単一フォントは書体 0 だけ。0 未満、またはファイル内の書体数以上のインデックスはエラーログを出して読み込みに失敗する。
+- システムフォント名は OS が解決した書体を開く。`.ttc` の 2 番目以降の書体も含む（Linux は fontconfig の `FC_INDEX`、Windows は DirectWrite、macOS / iOS は CoreText フォントの PostScript 名）。名前には `faceIndex` は使われない。
+- 書体の順番はファイルの一部なので、ファイルと書体インデックスの組はどの OS でも同じ書体を読み込む。システムフォント名は各 OS にあるフォントに依存する。どの OS でも同じ文字にするには、フォントを `data/` に同梱してファイルと書体インデックスで読み込む。
+- （ファイル、書体インデックス、サイズ）ごとにグリフアトラスが別に作られる。
+"""
+details.ko = """
+`load(nameOrPath, size, faceIndex = 0)`. `nameOrPath`는 폰트 파일, URL(웹), 또는 `"Noto Sans CJK SC"` 같은 시스템 폰트 이름.
+
+- `faceIndex`는 파일이나 URL로 지정한 폰트 컬렉션(`.ttc` / `.otc`) 안의 서체를 선택한다. 단일 폰트는 서체 0만 있다. 0 미만이거나 파일의 서체 수 이상인 인덱스는 에러 로그를 남기고 로드에 실패한다.
+- 시스템 폰트 이름은 OS가 해석한 서체를 연다. `.ttc`의 두 번째 이후 서체도 포함한다(Linux는 fontconfig `FC_INDEX`, Windows는 DirectWrite, macOS / iOS는 CoreText 폰트의 PostScript 이름). 이름에는 `faceIndex`가 쓰이지 않는다.
+- 서체 순서는 파일의 일부이므로 파일과 서체 인덱스의 조합은 모든 OS에서 같은 서체를 로드한다. 시스템 폰트 이름은 각 OS에 있는 폰트에 따라 달라진다. 모든 OS에서 같은 글자를 쓰려면 폰트를 `data/`에 넣고 파일과 서체 인덱스로 로드한다.
+- (파일, 서체 인덱스, 크기)마다 글리프 아틀라스가 따로 만들어진다.
+"""
 
 ["Font::resetLineHeight"]
 keywords = ["line height", "default", "leading"]
@@ -8067,10 +8119,14 @@ related = ["SerialDeviceInfo", "SerialDisconnectEventArgs", "TcpClient"]
 platform_note.en = "Real backends only on Windows (Win32 COM), macOS/Linux (POSIX termios), and Android (USB Host CDC-ACM via JNI+usbfs, CDC-ACM class devices only, first connect needs an async USB permission dialog). No serial on iOS (sandbox has no /dev/tty access — the macOS __APPLE__ enumeration branch compiles but never lists/opens a device) or wasm (Emscripten has no serial device; setup() falls into the POSIX open()/termios path against the virtual FS and fails)."
 platform_note.ja = "実バックエンドは Windows (Win32 COM)、macOS/Linux (POSIX termios)、Android (USB Host CDC-ACM、JNI+usbfs、CDC-ACMクラス機器のみ、初回接続は非同期のUSB許可ダイアログが必要) のみ。iOS はサンドボックスで /dev/tty にアクセスできず実質不可 (__APPLE__ の列挙分岐はコンパイルされるが機器を列挙/オープンできない)、wasm はシリアルデバイスが存在せず setup() が POSIX open()/termios 経路に落ちて失敗。"
 
+details.en = "Each open port has a receive worker and a 1 MiB buffer on desktop and Android. When the buffer fills, the oldest bytes are discarded and getDroppedByteCount() counts them. Overflow warnings use a 5 s OnceGate and include the running total. On desktop, overflow and driver warnings are delivered by the next read/write I/O call; device loss is also deferred to app I/O. Windows uses overlapped reads and writes."
+details.ja = "デスクトップと Android では、開いたポートごとに受信ワーカーと 1 MiB のバッファを持つ。容量を超えると古いバイトから破棄し、getDroppedByteCount() で数える。オーバーフロー警告は 5 秒間隔の OnceGate で制限し、累計を含める。デスクトップでは、オーバーフローとドライバの警告は次の読み書き時に出し、切断の通知もアプリの I/O 呼び出しまで遅延する。Windows の読み書きはオーバーラップ I/O を使う。"
+details.ko = "데스크톱과 Android에서는 열린 포트마다 수신 워커와 1 MiB 버퍼를 둔다. 용량을 넘으면 가장 오래된 바이트부터 버리고 getDroppedByteCount()로 센다. 오버플로 경고는 5초 간격 OnceGate로 제한하며 누적 수를 포함한다. 데스크톱에서는 오버플로 및 드라이버 경고를 다음 읽기/쓰기 I/O 호출에서 전달하고, 장치 소실도 앱 I/O까지 지연한다. Windows 읽기와 쓰기는 오버랩 I/O를 사용한다."
+
 ["Serial::available"]
-description.en = "Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
-description.ja = "読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
-description.ko = "읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+description.en = "Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
+description.ja = "TrussC がバッファに保持している読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "TrussC 버퍼에서 읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
 related = ["Serial::isConnected", "Serial::readBytes", "Serial::onDisconnect"]
 
 ["Serial::close"]
@@ -8106,6 +8162,15 @@ description.ja = "listDevices() の非推奨エイリアス"
 description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
+["Serial::getDroppedByteCount"]
+description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count"
+description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持"
+description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지"
+details.en = "Counts only overflow discards, on desktop and Android. Reading and intentional flushing do not increase it. Moving a Serial carries its counter. Windows overrun/RX overflow flags are logged, but the driver does not supply an exact lost-byte count; those losses cannot be included. Framing/parity errors are log-only."
+details.ja = "デスクトップと Android で、容量超過による破棄だけを数える。読み取りや意図した flush では増えない。Serial のムーブでは累計も移る。Windows の overrun/RX overflow は警告するが、ドライバが正確な消失バイト数を提供しないので累計には含められない。framing/parity はログのみ。"
+details.ko = "데스크톱과 Android에서 용량 초과로 버린 바이트만 센다. 읽기나 의도적인 flush로는 증가하지 않는다. Serial 이동 시 누적 수도 이동한다. Windows overrun/RX overflow 플래그는 경고하지만 드라이버가 정확한 손실 바이트 수를 제공하지 않아 누적 수에 포함할 수 없다. framing/parity 오류는 로그만 남긴다."
+related = ["Serial::available", "Serial::flushInput", "Serial::setup"]
+
 ["Serial::getDevicePath"]
 description.en = "Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call"
 description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す。setup()、close()、I/O 呼び出しを待たない"
@@ -8137,8 +8202,9 @@ stays true until one of those calls reports the loss (the USB worker thread
 that finds it only records it).
 
 One `Serial` may be used from several threads. Its I/O calls (`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) never
-wait for each other. Opening and closing (`setup()`, `close()`, closing a lost
+`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) share
+its port lock; receive calls also share a buffer mutex. Opening and closing
+(`setup()`, `close()`, closing a lost
 port, the destructor, the moves) wait until the I/O calls in progress have
 returned, so no call ever uses a closed port, and new I/O calls wait behind
 them. `isConnected()` and [`getDevicePath()`](#Serial::getDevicePath) wait
@@ -8146,11 +8212,9 @@ for neither: they answer with the state at that moment. Which thread reads or
 writes what, and in which order, is still up to the app. So a long
 `writeBytes()` (Windows, Android; see [`writeBytes()`](#Serial::writeBytes))
 or `drain()` delays a `setup()` / `close()` on another thread, not the other
-I/O calls. On Android `close()`, the destructor and a move assignment also
-wait for the USB worker thread to stop (up to about 250 ms once connected).
-On Windows the system itself runs the calls on one port handle one at a time
-(it is not opened for overlapped I/O), so there `available()`, the reads and
-the flush calls still wait for a `writeBytes()` in progress.
+I/O calls. Closing also stops the receive worker (desktop polling interval:
+50 ms; Android USB read timeout: 250 ms). Desktop moves transfer the worker
+with the connection. Windows uses overlapped reads and writes.
 
 A [Logger](#Logger) listener that runs inline may call this `Serial`. One
 exception, on Android: the USB worker thread logs too (permission timeout,
@@ -8196,19 +8260,18 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
 
 1つの `Serial` を複数のスレッドから使ってよい。I/O の呼び出し（`available()`、
-`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）どうしは互いを
-待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
+`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）はポートのロックを
+共有する。受信側の呼び出しはバッファの mutex も共有する。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
 ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを触るので、閉じた
 ポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで待つ。
 `isConnected()` と [`getDevicePath()`](#Serial::getDevicePath) はどちらも待たず、
 その時点の状態を返す。どのスレッドが何をどの順に読み書きするかは、アプリ側で
 決める必要がある。つまり時間のかかる `writeBytes()`（Windows、Android。
 [`writeBytes()`](#Serial::writeBytes) 参照）や `drain()` が遅らせるのは、別スレッドの
-`setup()` / `close()` で、ほかの I/O 呼び出しではない。Android の `close()`、
-デストラクタ、ムーブ代入は、USB ワーカースレッドが止まるのも待つ（接続後なら最大で
-約 250 ms）。Windows では、システム自体が1つのポートハンドルへの呼び出しを1つずつ
-実行する（オーバーラップ I/O で開いていないため）。そのため Windows では
-`available()`、読み込み、flush 系は実行中の `writeBytes()` を待つ。
+`setup()` / `close()` で、ほかの I/O 呼び出しではない。閉じる際は受信ワーカーも
+停止する（デスクトップの poll 間隔は 50 ms、Android の USB 読み取りタイムアウトは
+250 ms）。デスクトップのムーブではワーカーを接続と一緒に移す。
+Windows の読み書きはオーバーラップ I/O を使う。
 
 インラインで動く [Logger](#Logger) のリスナーから、この `Serial` を呼んでよい。
 例外は Android で、USB ワーカースレッドもログを出す（許可のタイムアウト、接続、
@@ -8252,18 +8315,17 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
 
 하나의 `Serial`을 여러 스레드에서 사용해도 된다. I/O 호출(`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)끼리는 서로를
-기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
+`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)은 포트 락을
+공유하며 수신 호출은 버퍼 mutex도 공유한다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
 이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로, 닫힌 포트를
 쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. `isConnected()`와
 [`getDevicePath()`](#Serial::getDevicePath)는 어느 쪽도 기다리지 않고 그 시점의
 상태를 반환한다. 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다.
 즉 오래 걸리는 `writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes)
 참조)나 `drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O
-호출이 아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
-기다린다(연결 후라면 최대 약 250 ms). Windows에서는 시스템 자체가 하나의 포트
-핸들에 대한 호출을 하나씩 실행한다(오버랩 I/O로 열지 않았기 때문). 그래서
-Windows에서는 `available()`, 읽기, flush 계열이 진행 중인 `writeBytes()`를 기다린다.
+호출이 아니다. 닫을 때 수신 워커도 멈춘다(데스크톱 poll 간격: 50 ms,
+Android USB 읽기 타임아웃: 250 ms). 데스크톱 이동은 워커와 연결을 함께 옮긴다.
+Windows 읽기와 쓰기는 오버랩 I/O를 사용한다.
 
 인라인으로 실행되는 [Logger](#Logger) 리스너에서 이 `Serial`을 호출해도 된다. 예외는
 Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연결, 연결 소실, 수신
@@ -8581,9 +8643,8 @@ How long it may take depends on the platform:
   report how much of a timed-out chunk went out, so some bytes past the
   returned count may have reached the device too.
 
-A write that must never stall the app goes on a thread of its own: the other
-I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
-Windows, where the reads still do).
+A write that must never stall the app goes on a thread of its own: receive
+calls do not wait for it.
 '''
 details.ja = '''
 どれだけ時間がかかりうるかはプラットフォームによる。
@@ -8607,8 +8668,7 @@ details.ja = '''
   先のバイトも機器に届いていることがある。
 
 アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
-それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
-参照）。
+それを待たない。
 '''
 details.ko = '''
 얼마나 걸릴 수 있는지는 플랫폼에 따라 다르다.
@@ -8631,8 +8691,7 @@ details.ko = '''
   알려 주지 않으므로, 반환한 수보다 뒤의 바이트도 장치에 도달했을 수 있다.
 
 앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
-기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
-참조).
+기다리지 않는다.
 '''
 
 ["SerialDeviceInfo"]
@@ -8811,9 +8870,9 @@ description.ko = "현재 패닝을 얻음"
 ["Sound::getPosition"]
 category = "sound"
 keywords = ["progress", "playhead", "normalized", "seek"]
-description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there (usually ~10 ms), this is the requested position."
-description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまで (通常 ~10ms) の間、要求した位置を返す"
-description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 (보통 ~10ms) 요청한 위치를 반환"
+description.en = "Get playback position in seconds. On a stream, right after setPosition() and until the audio has moved there, this is the requested position. See Sound::setPosition() for measured stream seek latency."
+description.ja = "再生位置を取得（秒）。ストリームでは setPosition() の直後から音が実際にそこへ移るまでの間、要求した位置を返す。ストリームのシーク遅延の実測値は Sound::setPosition() を参照"
+description.ko = "재생 위치를 초 단위로 얻음. 스트림에서는 setPosition() 직후부터 소리가 실제로 그 위치로 옮겨질 때까지 요청한 위치를 반환. 스트림 시크 지연의 측정값은 Sound::setPosition() 참조"
 
 ["Sound::getSpeed"]
 category = "sound"
@@ -8967,9 +9026,9 @@ related = ["EasyCam::setPanSensitivity"]
 ["Sound::setPosition"]
 category = "sound"
 keywords = ["seek", "jump", "scrub", "playhead", "normalized"]
-description.en = "Seek to a specific time in seconds. On streams the decoder seeks and the ring refills, so the audio moves after ~10 ms of silence (longer on slow storage or for an MP3 several hours long); getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning."
-description.ja = "指定秒数にシーク。ストリームではデコーダがシークして ring を補充するので、~10ms の無音の後に音が移る (遅いストレージや数時間の長さの MP3 ではもっとかかる)。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る。長さが不明なストリーム (getDuration() が 0) はシークできず、呼び出しは警告を出して無視される"
-description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전하므로 ~10ms 무음 후에 소리가 옮겨짐 (느린 저장소나 몇 시간 길이의 MP3에서는 더 걸림). getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생. 길이를 알 수 없는 스트림 (getDuration()이 0)은 시크할 수 없으며, 호출은 경고와 함께 무시됨"
+description.en = "Seek to a specific time in seconds. On streams the audio moves after the decoder seeks and the ring refills. Measured seek to first post-seek output callback on WASAPI/CoreAudio: about 1.5 audio callbacks on average, about 2 at p95 (13–16 ms mean with 10 ms callbacks). PulseAudio on main averaged 25.4 ms. These are callback-level timings, not speaker/DAC latency or silence duration; slow storage or an MP3 several hours long can take longer. See issue #550 for measurements. getPosition() reports the new position at once, the last of several calls wins, and a paused stream resumes from there. A stream whose length is unknown (getDuration() is 0) cannot seek: the call is ignored with a warning."
+description.ja = "指定秒数にシーク。ストリームではデコーダのシークと ring の補充後に音が移る。シーク要求からシーク先の音を含む最初の出力コールバックまでの実測値は、WASAPI/CoreAudio で平均約 1.5 コールバック、p95 で約 2 コールバック (10 ms 間隔では平均 13–16 ms)。PulseAudio の main では平均 25.4 ms。これはコールバック単位の測定で、スピーカー/DAC までの遅延や無音時間ではない。遅いストレージや数時間の長さの MP3 ではもっとかかる。測定の詳細は issue #550 を参照。getPosition() は直後から新しい位置を返し、続けて呼んだ場合は最後の呼び出しが有効。一時停止中のストリームは再開時にそこから鳴る。長さが不明なストリーム (getDuration() が 0) はシークできず、呼び出しは警告を出して無視される"
+description.ko = "지정 시간(초)으로 시크. 스트림은 디코더가 시크하고 링을 재충전한 뒤 소리가 옮겨짐. 시크 요청부터 새 위치의 오디오가 담긴 첫 출력 콜백까지의 측정값은 WASAPI/CoreAudio에서 평균 약 1.5 콜백, p95 약 2 콜백 (10 ms 간격에서 평균 13–16 ms). PulseAudio의 main에서는 평균 25.4 ms. 이는 콜백 단위 측정이며 스피커/DAC까지의 지연이나 무음 시간이 아님. 느린 저장소나 몇 시간 길이의 MP3에서는 더 걸릴 수 있음. 측정 상세는 issue #550 참조. getPosition()은 즉시 새 위치를 반환하고, 연속으로 호출하면 마지막 호출이 유효. 일시정지 중인 스트림은 재개할 때 그 위치부터 재생. 길이를 알 수 없는 스트림 (getDuration()이 0)은 시크할 수 없으며, 호출은 경고와 함께 무시됨"
 
 ["Sound::setSpeed"]
 category = "sound"
@@ -9185,9 +9244,9 @@ description.ko = "소스의 샘플레이트(Hz)"
 
 ["SoundStream"]
 keywords = ["streaming audio", "bgm", "music stream", "disk audio", "on demand"]
-description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a refill of usually ~10 ms (a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer."
-description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()は通常約10 msのrefillでseekし(長さが不明なファイルはseekできない)、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
-description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 보통 약 10 ms의 refill로 seek하며(길이를 알 수 없는 파일은 seek할 수 없음), polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
+description.en = "Streaming sound source: the file stays open and is decoded on demand into a small per-voice ring buffer instead of full PCM in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Best for long files (BGM, podcasts). Trade-offs vs SoundBuffer: setSpeed() is treated as 1.0, setPosition() seeks with a ring-buffer refill (see Sound::setPosition() for measured latency; a file whose length is unknown cannot seek), and each polyphony slot costs one open file handle + decoder + ring buffer."
+description.ja = "ストリーミングなサウンドソース: ファイルを開いたままにし、全PCMをRAMに置く代わりにvoiceごとの小さなring bufferへオンデマンドにデコードする。SoundSourceから派生(channels / sampleRate / kind() / getDuration()を継承)。長尺ファイル(BGM、ポッドキャスト)に最適。SoundBufferとのトレードオフ: setSpeed()は1.0として扱われ、setPosition()はring bufferを補充してseekし(遅延の実測値はSound::setPosition()を参照。長さが不明なファイルはseekできない)、polyphonyスロットごとにopenファイルハンドル+デコーダ+ring bufferのコストがかかる"
+description.ko = "스트리밍 사운드 소스: 파일을 열어둔 채로, 전체 PCM을 RAM에 두는 대신 voice별 작은 ring buffer로 on-demand 디코딩. SoundSource에서 파생(channels / sampleRate / kind() / getDuration() 상속). 긴 파일(BGM, 팟캐스트)에 최적. SoundBuffer 대비 트레이드오프: setSpeed()는 1.0으로 처리되고, setPosition()은 ring buffer를 재충전하여 seek하며(지연 측정값은 Sound::setPosition() 참조. 길이를 알 수 없는 파일은 seek할 수 없음), polyphony 슬롯마다 open 파일 핸들 + 디코더 + ring buffer 비용이 듦"
 related = ["SoundBuffer", "SoundSource"]
 
 ["SoundStream::getDuration"]
@@ -10551,9 +10610,9 @@ description.ja = "touches 内の有効なエントリ数"
 description.ko = "touches 내의 유효한 항목 수"
 
 ["TouchEventArgs::touches"]
-description.en = "Array of active touch points (up to MAX_TOUCHES = 8)"
-description.ja = "アクティブなタッチ点の配列(最大 MAX_TOUCHES = 8)"
-description.ko = "활성 터치 포인트의 배열(최대 MAX_TOUCHES = 8)"
+description.en = "Array of active touch points (up to MAX_TOUCHES = 32)"
+description.ja = "アクティブなタッチ点の配列(最大 MAX_TOUCHES = 32)"
+description.ko = "활성 터치 포인트의 배열(최대 MAX_TOUCHES = 32)"
 
 ["TouchEventArgs::x"]
 description.en = "Convenience: X position of the first touch point"
@@ -12145,19 +12204,23 @@ description.en = "Audio sample rate in Hz (0 if no audio)"
 description.ja = "音声のサンプルレート（Hz、音声がなければ 0）"
 description.ko = "오디오 샘플 레이트 (Hz, 오디오가 없으면 0)"
 
-["VideoPlayer::getCurrentFrame"]
-category = "video"
-keywords = ["frame number", "playhead", "index"]
-description.en = "Get current frame number"
-description.ja = "現在のフレーム番号を取得"
-description.ko = "현재 프레임 번호를 가져옴"
-
 ["VideoPlayer::getDuration"]
 category = "video"
 keywords = ["length", "total time", "seconds", "runtime"]
 description.en = "Get total duration in seconds"
 description.ja = "総再生時間を秒単位で取得"
 description.ko = "전체 재생 시간을 초 단위로 가져옴"
+
+["VideoPlayer::getFrameRate"]
+category = "video"
+keywords = ["fps", "frame rate", "unknown"]
+description.en = "Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0."
+description.ja = "ファイルのフレームレート（fps）を取得。不明または未ロードなら 0。Web では 0。"
+description.ko = "파일의 프레임 레이트(fps)를 가져옴. 알 수 없거나 로드되지 않았으면 0. Web에서는 0."
+details.en = "Windows reads MF_MT_FRAME_RATE instead of assuming 30 fps. Linux uses average/nominal metadata; macOS/iOS use the nominal rate. Frame counts and seeks derived from a rate are approximate for variable-frame-rate files. Unknown rates are never replaced with 30: frame queries return 0 and frame operations do nothing, with one warning per player instance. This getter itself does not warn. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "Windows は 30 fps と仮定せず MF_MT_FRAME_RATE を読む。Linux は平均／公称レート、macOS/iOS は公称レートを使う。可変フレームレートのファイルではレートから求めるフレーム数やシークは近似。不明時に 30 で代用せず、フレーム取得は 0、操作は何もせず、インスタンスごとに一度だけ警告する。この getter 自体は警告しない。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "Windows는 30 fps로 가정하지 않고 MF_MT_FRAME_RATE를 읽음. Linux는 평균/명목 메타데이터, macOS/iOS는 명목 레이트를 사용. 가변 프레임 레이트 파일에서 레이트로 계산한 프레임 수와 탐색은 근사값임. 알 수 없는 레이트를 30으로 대체하지 않으며 프레임 조회는 0, 프레임 조작은 무동작이고 인스턴스당 한 번 경고함. 이 getter 자체는 경고하지 않음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
+related = ["VideoPlayerBase::getFrameRate", "VideoPlayerBase::getCurrentFrame", "VideoPlayerBase::getTotalFrames", "VideoPlayerBase::setFrame", "VideoPlayer::getPosition"]
 
 ["VideoPlayer::getGammaCorrection"]
 category = "video"
@@ -12213,13 +12276,6 @@ description.en = "Get current position (0.0 to 1.0)"
 description.ja = "現在の再生位置を取得（0.0〜1.0）"
 description.ko = "현재 재생 위치를 가져옴 (0.0~1.0)"
 
-["VideoPlayer::getTotalFrames"]
-category = "video"
-keywords = ["frame count", "length"]
-description.en = "Get total number of frames"
-description.ja = "総フレーム数を取得"
-description.ko = "전체 프레임 수를 가져옴"
-
 ["VideoPlayer::getUseHwAccel"]
 category = "video"
 keywords = ["hardware", "gpu decode", "acceleration", "preference"]
@@ -12268,27 +12324,6 @@ details.ja = '''
 [`isFrameNew`](#VideoPlayer::isFrameNew) が一度 true になったらライブ側へ切り替える。
 '''
 
-["VideoPlayer::nextFrame"]
-category = "video"
-keywords = ["advance", "step", "forward"]
-description.en = "Advance to the next frame"
-description.ja = "次のフレームに進む"
-description.ko = "다음 프레임으로 이동"
-
-["VideoPlayer::previousFrame"]
-category = "video"
-keywords = ["back", "step", "rewind"]
-description.en = "Go back to the previous frame"
-description.ja = "前のフレームに戻る"
-description.ko = "이전 프레임으로 이동"
-
-["VideoPlayer::setFrame"]
-category = "video"
-keywords = ["seek", "jump", "frame number", "scrub"]
-description.en = "Seek to a specific frame number"
-description.ja = "指定フレームにシーク"
-description.ko = "지정된 프레임으로 이동"
-
 ["VideoPlayer::setGammaCorrection"]
 category = "video"
 keywords = ["brightness", "tone", "color correction"]
@@ -12318,6 +12353,9 @@ keywords = ["start", "beginning", "rewind", "home"]
 description.en = "Go to the first frame"
 description.ja = "最初のフレームに移動"
 description.ko = "첫 프레임으로 이동"
+details.en = "For VideoPlayer, does nothing when the frame rate is unknown (0), sharing the one-per-instance frame API warning."
+details.ja = "VideoPlayer ではフレームレートが不明（0）なら何もしない。フレーム API のインスタンスごとに一度の警告を共有する。"
+details.ko = "VideoPlayer는 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않으며 프레임 API의 인스턴스당 한 번 경고를 공유함."
 
 ["VideoPlayerBase::getCurrentTime"]
 category = "video"
@@ -12795,9 +12833,9 @@ related = ["createWindow", "WindowSettings"]
 
 ["Window::setApp"]
 keywords = ["attach", "lifecycle", "content", "swap", "scene", "request", "frame boundary"]
-description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when its window closes (or, with #318, when it is swapped out), and closing the window also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied"
-description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App。App は 1 回だけ動く: 最初に付けたときに setup()、ウィンドウを閉じたとき (#318 以降は差し替えで外したときも) に exit() / cleanup()。ウィンドウを閉じると audioOut() / audioIn() も切り離され、元には戻らない。もう一度表示するには新しい App を作る。setApp() は cleanup() 済みの App と、開いていないウィンドウ・閉じる途中のウィンドウへの設定を拒否する (どちらもエラーログを出し、ウィンドウはそのまま)。setApp() はリクエスト: すぐに戻り、ウィンドウは次のフレーム境界 (そのウィンドウの tick やイベントの前後) で反映する。App 自身の update() / draw() / keyPressed() など、どこから呼んでも同じ。それまで getApp() は今の App を返す。境界までの最後の setApp() が有効で、それより前に close() が要求されていれば close() が優先される。チェックは反映時にもう一度行う"
-description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나. App 은 한 번만 동작한다: 처음 연결할 때 setup(), 윈도우를 닫을 때 (#318 이후에는 교체로 분리될 때도) exit() / cleanup(). 윈도우를 닫으면 audioOut() / audioIn() 도 분리되고 다시 연결되지 않는다. 다시 표시하려면 새 App 을 만든다. setApp() 은 cleanup() 이 이미 실행된 App 과, 열려 있지 않거나 닫히는 중인 윈도우에 대한 설정을 거부한다 (둘 다 에러 로그를 남기고 윈도우는 그대로). setApp() 은 요청이다: 바로 반환되고, 윈도우는 다음 프레임 경계 (그 윈도우의 tick 이나 이벤트의 앞뒤) 에서 반영한다. App 자신의 update() / draw() / keyPressed() 등 어디서 호출해도 같다. 그때까지 getApp() 은 현재 App 을 반환한다. 경계까지의 마지막 setApp() 이 유효하고, 그 전에 close() 가 요청되었으면 close() 가 우선한다. 검사는 반영할 때 다시 수행한다"
+description.en = "Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when it leaves its window (close(), setApp(other), or setApp(nullptr)), and leaving also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied"
+description.ja = "このウィンドウにAppを設定 (ウィンドウにコンテンツを与える唯一の方法)。Appのライフサイクル一式 (setup/update/draw/キー/マウス/windowResized + RectNodeサイズ同期) がこのウィンドウで動く。1ウィンドウ1App。App は 1 回だけ動く: 最初に付けたときに setup()、ウィンドウから外れたとき (close()、setApp() で別の App に差し替えたとき、setApp(nullptr) のとき) に exit() / cleanup()。ウィンドウから外れると audioOut() / audioIn() も切り離され、元には戻らない。もう一度表示するには新しい App を作る。setApp() は cleanup() 済みの App と、開いていないウィンドウ・閉じる途中のウィンドウへの設定を拒否する (どちらもエラーログを出し、ウィンドウはそのまま)。setApp() はリクエスト: すぐに戻り、ウィンドウは次のフレーム境界 (そのウィンドウの tick やイベントの前後) で反映する。App 自身の update() / draw() / keyPressed() など、どこから呼んでも同じ。それまで getApp() は今の App を返す。境界までの最後の setApp() が有効で、それより前に close() が要求されていれば close() が優先される。チェックは反映時にもう一度行う"
+description.ko = "이 윈도우에 App을 연결 (윈도우에 콘텐츠를 주는 유일한 방법). App의 전체 라이프사이클이 이 윈도우에서 실행됨. 윈도우당 App 하나. App 은 한 번만 동작한다: 처음 연결할 때 setup(), 윈도우에서 분리될 때 (close(), setApp() 으로 다른 App 으로 교체할 때, setApp(nullptr) 일 때) exit() / cleanup(). 윈도우에서 분리되면 audioOut() / audioIn() 도 분리되고 다시 연결되지 않는다. 다시 표시하려면 새 App 을 만든다. setApp() 은 cleanup() 이 이미 실행된 App 과, 열려 있지 않거나 닫히는 중인 윈도우에 대한 설정을 거부한다 (둘 다 에러 로그를 남기고 윈도우는 그대로). setApp() 은 요청이다: 바로 반환되고, 윈도우는 다음 프레임 경계 (그 윈도우의 tick 이나 이벤트의 앞뒤) 에서 반영한다. App 자신의 update() / draw() / keyPressed() 등 어디서 호출해도 같다. 그때까지 getApp() 은 현재 App 을 반환한다. 경계까지의 마지막 setApp() 이 유효하고, 그 전에 close() 가 요청되었으면 close() 가 우선한다. 검사는 반영할 때 다시 수행한다"
 
 ["Window::getApp"]
 description.en = "Get the App attached to this window"
@@ -17143,10 +17181,13 @@ platform_note.ja = "Linux（未実装）/ iOS / Android / Web では警告のみ
 ["setWindowSize"]
 category = "window_system"
 keywords = ["resize", "dimensions", "width height", "resolution"]
-description.en = "Set window size"
-description.ja = "ウィンドウのサイズを設定"
-description.ko = "윈도우 크기를 설정"
+description.en = "Set window size. Resizing the main window is not implemented on Linux yet"
+description.ja = "ウィンドウのサイズを設定。メインウィンドウのリサイズは Linux ではまだ未実装"
+description.ko = "윈도우 크기를 설정. 메인 윈도우 리사이즈는 Linux에서 아직 미구현"
 related = ["getWindowSize", "setWindowSizeLogical", "setWindowPosition"]
+platform_note.en = "Resizing the main window is a no-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas. A window created with createWindow() resizes on Linux too."
+platform_note.ja = "メインウィンドウのリサイズは Linux（未実装）/ iOS / Android（全画面固定）では no-op。Web は canvas をリサイズ。createWindow() で作ったウィンドウは Linux でもリサイズされる。"
+platform_note.ko = "메인 윈도우 리사이즈는 Linux(미구현) / iOS / Android(전체 화면 고정)에서 no-op. Web은 canvas를 리사이즈. createWindow()로 만든 윈도우는 Linux에서도 리사이즈됨."
 
 ["setWindowSizeLogical"]
 category = "window_system"
@@ -17157,6 +17198,7 @@ description.ko = "윈도우를 지정한 논리 크기(논리 픽셀)로 리사�
 related = ["setWindowSize", "getDpiScale"]
 platform_note.en = "No-op on Linux (not yet implemented), iOS and Android (fixed fullscreen). Web resizes the canvas."
 platform_note.ja = "Linux（未実装）/ iOS / Android（全画面固定）では no-op。Web は canvas をリサイズ。"
+platform_note.ko = "Linux(미구현) / iOS / Android(전체 화면 고정)에서는 no-op. Web은 canvas를 리사이즈."
 
 ["setWindowTitle"]
 category = "window_system"
@@ -17344,8 +17386,8 @@ related = ["isStringInString", "splitString"]
 ["systemFontPath"]
 category = "font"
 keywords = ["resolve", "lookup", "find", "os font"]
-description.en = "Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS uses CoreText; Linux/Windows currently stub."
-description.ja = "システムフォント名（PostScript 名や family 名）をファイルパスに解決。見つからなければ空文字を返す。macOS は CoreText、Linux/Win は現状スタブ"
+description.en = "Resolve a system font name (PostScript / family) to a file path. Returns empty string if not found. macOS / iOS use CoreText, Linux fontconfig, Windows DirectWrite."
+description.ja = "システムフォント名（PostScript 名や family 名）をファイルパスに解決。見つからなければ空文字を返す。macOS / iOS は CoreText、Linux は fontconfig、Windows は DirectWrite"
 description.ko = "시스템 폰트 이름을 파일 경로로 변환"
 related = ["listSystemFonts"]
 platform_note.en = '''
@@ -18063,30 +18105,71 @@ description.en = "Seek to a playback position given as a fraction (0-1)."
 description.ja = "0-1 の割合で指定した再生位置にシークする。"
 description.ko = "0-1 비율로 지정한 재생 위치로 이동한다."
 
+["VideoPlayerBase::getFrameRate"]
+category = "video"
+keywords = ["fps", "frame rate", "unknown"]
+description.en = "Return the file frame rate in fps, or 0 when unknown or unloaded. Implemented by each video player."
+description.ja = "ファイルのフレームレート（fps）を返す。不明または未ロードなら 0。各動画プレイヤーが実装する。"
+description.ko = "파일의 프레임 레이트(fps)를 반환한다. 알 수 없거나 로드되지 않았으면 0. 각 비디오 플레이어가 구현한다."
+details.en = "Frame APIs return 0 or do nothing when the rate is unknown on every platform, sharing one warning per player instance across reloads. Unloaded players and this getter itself do not warn. Use getPosition()/setPosition() and getDuration() for time-based control. HapPlayer derives its average rate from the file's video sample count and duration."
+details.ja = "全プラットフォームで、レートが不明ならフレーム API は 0 を返すか何もせず、再ロードをまたいでインスタンスごとに一度だけ警告する。未ロード時とこの getter 自体は警告しない。時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。HapPlayer はファイルの動画サンプル数と長さから平均レートを求める。"
+details.ko = "모든 플랫폼에서 레이트를 알 수 없으면 프레임 API는 0을 반환하거나 아무 작업도 하지 않으며, 다시 로드해도 인스턴스당 한 번만 경고한다. 로드되지 않은 플레이어와 이 getter 자체는 경고하지 않는다. 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용한다. HapPlayer는 파일의 비디오 샘플 수와 길이로 평균 레이트를 계산한다."
+related = ["VideoPlayer::getFrameRate", "VideoPlayerBase::getCurrentFrame", "VideoPlayerBase::setPosition"]
+
+["VideoPlayerBase::canUseFrameApis"]
+description.en = "Protected helper: reject unloaded players or nonpositive/nonfinite frame rates; warn once per loaded player instance for an unknown rate."
+description.ja = "protected ヘルパー。未ロードまたは非正値・非有限のフレームレートを拒否し、ロード済みで不明ならインスタンスごとに一度だけ警告する。"
+description.ko = "protected 헬퍼. 로드되지 않았거나 프레임 레이트가 양의 유한값이 아니면 거부하며, 로드된 플레이어의 레이트를 알 수 없으면 인스턴스당 한 번만 경고한다."
+
 ["VideoPlayerBase::getCurrentFrame"]
-description.en = "Return the index of the current frame."
-description.ja = "現在のフレーム番号を返す。"
-description.ko = "현재 프레임 인덱스를 반환한다."
+category = "video"
+keywords = ["frame number", "playhead", "index"]
+description.en = "Get current frame number; 0 when the frame rate is unknown."
+description.ja = "現在のフレーム番号を取得。フレームレートが不明なら 0。"
+description.ko = "현재 프레임 번호를 가져옴. 프레임 레이트를 알 수 없으면 0."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::getTotalFrames"]
-description.en = "Return the total number of frames in the video."
-description.ja = "動画の総フレーム数を返す。"
-description.ko = "비디오의 전체 프레임 수를 반환한다."
+category = "video"
+keywords = ["frame count", "length"]
+description.en = "Get total frame count; 0 when the frame rate is unknown."
+description.ja = "総フレーム数を取得。フレームレートが不明なら 0。"
+description.ko = "전체 프레임 수를 가져옴. 프레임 레이트를 알 수 없으면 0."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::setFrame"]
-description.en = "Seek to the given frame index."
-description.ja = "指定したフレーム番号にシークする。"
-description.ko = "지정한 프레임 인덱스로 이동한다."
+category = "video"
+keywords = ["seek", "jump", "frame number", "scrub"]
+description.en = "Seek to a frame number; does nothing when the frame rate is unknown (0)."
+description.ja = "指定フレームにシーク。フレームレートが不明（0）なら何もしない。"
+description.ko = "지정된 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::nextFrame"]
-description.en = "Advance to the next frame."
-description.ja = "次のフレームへ進む。"
-description.ko = "다음 프레임으로 이동한다."
+category = "video"
+keywords = ["advance", "step", "forward"]
+description.en = "Advance one frame; does nothing when the frame rate is unknown (0)."
+description.ja = "次のフレームに進む。フレームレートが不明（0）なら何もしない。"
+description.ko = "다음 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::previousFrame"]
-description.en = "Step back to the previous frame."
-description.ja = "前のフレームへ戻る。"
-description.ko = "이전 프레임으로 돌아간다."
+category = "video"
+keywords = ["back", "step", "rewind"]
+description.en = "Go back one frame; does nothing when the frame rate is unknown (0)."
+description.ja = "前のフレームに戻る。フレームレートが不明（0）なら何もしない。"
+description.ko = "이전 프레임으로 이동. 프레임 레이트를 알 수 없으면(0) 아무 동작도 하지 않음."
+details.en = "When unknown, all frame APIs share one warning per player instance. Web always has an unknown rate. Use getPosition()/setPosition() and getDuration() for portable time-based control."
+details.ja = "不明時の警告は全フレーム API で共有し、プレイヤーのインスタンスごとに一度だけ出力。Web では常に不明。移植可能な時間ベースの制御には getPosition()/setPosition() と getDuration() を使う。"
+details.ko = "알 수 없는 경우 모든 프레임 API가 플레이어 인스턴스당 한 번만 경고함. Web에서는 항상 알 수 없음. 이식 가능한 시간 기반 제어에는 getPosition()/setPosition()과 getDuration()을 사용."
 
 ["VideoPlayerBase::getPixels"]
 description.en = "Return raw RGBA pixel data of the current frame, or nullptr if none decoded yet."
@@ -18925,6 +19008,31 @@ description.en = "Create the fullscreen-quad vertex/index buffers (overrides Sha
 description.ja = "フルスクリーンクワッド用の頂点・インデックスバッファを作成する（Shader をオーバーライド）。"
 description.ko = "전체 화면 쿼드용 정점·인덱스 버퍼를 생성한다(Shader 재정의)."
 
+["VideoPlayerBase::getCurrentFrameImpl"]
+description.en = "Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：現在のフレーム番号を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 현재 프레임 인덱스를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::getTotalFramesImpl"]
+description.en = "Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：総フレーム数を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 전체 프레임 수를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::setFrameImpl"]
+description.en = "Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：指定したフレーム番号にシークする。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 지정한 프레임 인덱스로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::nextFrameImpl"]
+description.en = "Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：次のフレームへ進む。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 다음 프레임으로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayerBase::previousFrameImpl"]
+description.en = "Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：前のフレームへ戻る。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 이전 프레임으로 돌아간다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
 ["VideoPlayerBase::playImpl"]
 description.en = "Platform hook: start playback. Pure virtual, implemented per backend."
 description.ja = "プラットフォームフック：再生を開始する。純粋仮想、バックエンドごとに実装。"
@@ -18979,6 +19087,31 @@ description.ko = "새 프레임 도착을 표시한다(frameNew, firstFrameRecei
 description.en = "Mark playback as done, clearing playing unless looping."
 description.ja = "再生終了をマークする。ループ中でなければ playing を下げる。"
 description.ko = "재생 종료를 표시한다. 루프 중이 아니면 playing을 해제한다."
+
+["VideoPlayer::getCurrentFrameImpl"]
+description.en = "Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：現在のフレーム番号を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 현재 프레임 인덱스를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::getTotalFramesImpl"]
+description.en = "Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：総フレーム数を返す。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 전체 프레임 수를 반환한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::setFrameImpl"]
+description.en = "Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：指定したフレーム番号にシークする。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 지정한 프레임 인덱스로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::nextFrameImpl"]
+description.en = "Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：次のフレームへ進む。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 다음 프레임으로 이동한다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
+
+["VideoPlayer::previousFrameImpl"]
+description.en = "Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate."
+description.ja = "protected 実装フック：前のフレームへ戻る。VideoPlayerBase の公開フレーム API がフレームレートを確認した後に呼ばれる。"
+description.ko = "protected 구현 훅: 이전 프레임으로 돌아간다. VideoPlayerBase의 공개 프레임 API가 프레임 레이트를 확인한 뒤 호출한다."
 
 ["VideoPlayer::playImpl"]
 description.en = "Backend implementation of playImpl for this platform's video player."
@@ -19536,3 +19669,39 @@ description.ko = "파생 클래스용: load 성공 및 close 시 대기 중인 �
 description.en = "Subclass hook: transfer pending and delivered error state when moving a player. Event listeners stay with their original object."
 description.ja = "派生クラス用：ムーブ時に通知待ちと通知済みのエラー状態を移す。イベントリスナーは元のオブジェクトに残る。"
 description.ko = "파생 클래스용: 이동 시 대기 중인 오류와 전달된 오류 상태를 옮긴다. 이벤트 리스너는 원래 객체에 남는다."
+
+["AudioBackend"]
+category = "sound"
+description.en = "Audio backend selection: Default uses the platform backend order; Null explicitly runs the real mixer silently without a device."
+description.ja = "オーディオバックエンドの選択。Default はプラットフォームの順序、Null はデバイスなしで実際のミキサーを無音で動かす。"
+description.ko = "오디오 백엔드 선택. Default 는 플랫폼 순서, Null 은 디바이스 없이 실제 믹서를 무음으로 실행한다."
+
+["AudioSettings::backend"]
+category = "sound"
+description.en = "Backend to open (Default by default). Set Null and call init(settings) before loading sounds for headless use. Enumeration and native MicInput follow the engine backend; before init, enumeration uses real backends. Zero-argument init() uses Default."
+description.ja = "開くバックエンド (既定 Default)。ヘッドレス実行では Null を指定してサウンド読込前に init(settings) を呼ぶ。列挙とネイティブ MicInput はエンジンのバックエンドに従う。init 前の列挙は実バックエンドを使う。引数なしの init() は Default を使う。"
+description.ko = "열 백엔드 (기본 Default). 헤드리스 실행에는 Null 을 지정하고 사운드 로드 전에 init(settings) 를 호출한다. 열거와 네이티브 MicInput 은 엔진 백엔드를 따른다. init 전 열거는 실제 백엔드를 사용한다. 인수 없는 init() 은 Default 를 사용한다."
+
+["AudioInitFailure"]
+category = "sound"
+description.en = "Initialization failure stage: None, NoBackend (context creation), DeviceOpen, or DeviceStart."
+description.ja = "初期化失敗の段階: None、NoBackend (コンテキスト作成)、DeviceOpen、DeviceStart。"
+description.ko = "초기화 실패 단계: None, NoBackend (컨텍스트 생성), DeviceOpen, DeviceStart."
+
+["AudioStats::initFailure"]
+category = "sound"
+description.en = "Last init failure, retained through shutdown and cleared by successful init. tc_get_audio_state includes initFailure with reason, result, backend and requested device only while a failure is recorded."
+description.ja = "最後の初期化失敗。shutdown 後も保持し、init 成功でクリアする。tc_get_audio_state は失敗記録があるときだけ reason、result、backend、要求デバイス名を含む initFailure を返す。"
+description.ko = "마지막 초기화 실패. shutdown 후에도 유지하며 init 성공 시 지운다. tc_get_audio_state 는 실패 기록이 있을 때만 reason, result, backend, 요청 디바이스 이름을 담은 initFailure 를 반환한다."
+
+["AudioStats::initFailureResult"]
+category = "sound"
+description.en = "miniaudio result code of the last failed init (for example -401 for a device open failure); 0 when no failure is recorded."
+description.ja = "最後の初期化失敗の miniaudio 結果コード (例: デバイスを開けない場合 -401)。失敗記録がなければ 0。"
+description.ko = "마지막 초기화 실패의 miniaudio 결과 코드 (예: 디바이스 열기 실패 -401). 실패 기록이 없으면 0."
+
+["AudioStats::initFailureBackend"]
+category = "sound"
+description.en = "Static backend name resolved from the atomic failure snapshot. Empty when no backend context opened or no failure is recorded."
+description.ja = "atomic な失敗スナップショットから解決する静的なバックエンド名。コンテキストが開かなかった場合や失敗記録がない場合は空。"
+description.ko = "atomic 실패 스냅샷에서 해석한 정적 백엔드 이름. 컨텍스트를 열지 못했거나 실패 기록이 없으면 비어 있다."

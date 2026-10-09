@@ -1,5 +1,26 @@
 # tcxHap tests
 
+Snappy integration checks encode repeated BC1 blocks as single-chunk and
+four-chunk HAP frames, verify compression actually reduced their size, and
+compare both `HapDecoder` decode paths with the original texture bytes.
+These checks run headlessly as part of the default test mode.
+
+Video regressions (#283) check BC1, BC3 (Hap Alpha and HAP-Q), and BC7
+decoding at 6x5, 6x8, 8x5, 8x8, and 1x1. Hand-built blocks have known pixel
+values; both a 64-byte guard region and an exact-sized allocation are checked.
+Run these tests under AddressSanitizer with the BC decoder implementation
+instrumented as well.
+
+BC1, BC3, BC7, and BC4 (Hap Q Alpha) also decode known blocks at every input
+byte offset from 0 through 7, covering bcdec 0.985's unaligned-input fix.
+Run with AddressSanitizer and UndefinedBehaviorSanitizer to check input
+bounds and alignment, including the decoder implementation.
+
+HAP-Q draw setup checks transformed quad corners, UVs, tint and alpha,
+column-major MVP uniforms, an Fbo-sized projection, and a perspective camera.
+These are headless setup checks; real HAP-Q playback in a Node, an Fbo, and a
+3D camera still needs a manual check on each platform.
+
 Headless console test (no window, no GPU, no audio device). Checks that PCM
 audio in HAP movies decodes in the right byte order (#419): each movie is
 parsed with `MovParser` and decoded with `loadPcmTrack()`, the path
@@ -128,3 +149,13 @@ sufficient on Linux). It checks fatal truncated-sample reads and
 `HapResult_Buffer_Too_Small`: one event and one error log, stopped state and
 retained texture. A separate single `HapResult_Bad_Frame` fixture checks a
 warning, continued playback and decoding of the following frame.
+
+The optional `tests --shader-failure` mode also runs under Xvfb. It builds a
+4x4 HAP-Q movie locally and reserves the remaining shader slots to force a
+real shader load failure. Over 64 draws it checks one load attempt, one
+HapPlayer error explaining the fallback, no separate fallback warning, and
+raw texture pixels read back from an Fbo. It also checks independent players,
+one new attempt after `load()`, no retry merely because shader slots become
+available, successful recovery on the next `load()`, and preservation of
+shader state when moving a player. The existing lower-level Shader/Sokol
+failure diagnostics are left intact.
