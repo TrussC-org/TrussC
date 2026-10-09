@@ -28,6 +28,7 @@ struct Probe {
     int updates = 0, requests = 0, exits = 0, cleanups = 0;
     int updatesAtRequest = -1;
     bool inUpdate = false;
+    bool reRequested = false;  // CancelOnce: the second request is issued once
     bool setupReturned = false;
     bool checkEntry = true;
     std::string reason;
@@ -111,9 +112,12 @@ struct ExitProbeApp : App {
                 case Mode::SetupRequest:
                 case Mode::SetupSignal: break;
             }
-        } else if (probe->mode == Mode::CancelOnce && probe->requests == 1) {
+        } else if (probe->mode == Mode::CancelOnce && probe->requests == 1 && !probe->reRequested) {
+            // Only once: a loaded runner can run several catch-up steps in one
+            // pass, and the request below stays pending until the pass ends.
             check(internal::exitReason().empty() && !headless::quitRequested,
                   "veto clears request and reason");
+            probe->reRequested = true;
             requestExitApp();
         }
         probe->inUpdate = false;
