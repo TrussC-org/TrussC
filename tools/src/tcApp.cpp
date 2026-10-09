@@ -4,6 +4,7 @@
 
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "ProjectState.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -838,6 +839,23 @@ void tcApp::importProject(const string& path) {
             }
         }
         addonsFile.close();
+    }
+
+    // Use the CLI's read-back, starting with the current GUI defaults so a
+    // project without saved settings keeps the previous import behaviour.
+    const PresetState state = readPresetState(path);
+    auto settings = buildProjectSettings();
+    applyGenerationOptions(settings, state, GenerationFlags());
+    ideType = settings.ideType;
+    generateWebBuild = settings.generateWebBuild;
+    generateAndroidBuild = settings.generateAndroidBuild;
+    generateIosBuild = settings.generateIosBuild;
+    webBackend = settings.webBackend;
+    for (const auto& warning : state.warnings) {
+        logWarning("tcApp") << warning;
+    }
+    if (!state.ideWarning.empty()) {
+        logWarning("tcApp") << state.ideWarning;
     }
 
     // Set import state

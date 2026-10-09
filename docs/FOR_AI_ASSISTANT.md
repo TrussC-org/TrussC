@@ -1527,6 +1527,10 @@ This also works on the **default screen** (no camera scope): `z = 0` is pixel-id
 
 ### How do I quit the app? (exitApp vs requestExitApp)
 
+Both calls work in windowed and headless apps. In headless mode, `exitApp()`
+stops after the current update step; `requestExitApp()` dispatches the event
+on the main thread after the current pass, including all catch-up steps.
+
 Two options:
 - **`requestExitApp()`**: *requests* exit. Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set `args.cancel = true` to **cancel** it (for a "save before quit?" prompt). Equivalent to oF's `ofExit`.
 - **`exitApp()`**: exits immediately (not cancellable).
@@ -1736,7 +1740,7 @@ int main(int argc, char** argv) {
     return 1;                                                            // exit code
 }
 ```
-If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable).
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
 
 ### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
 

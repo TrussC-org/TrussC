@@ -35,6 +35,9 @@
 //     by a flag an error (ProjectGenerator::update with a toolchain that
 //     fails on purpose; needs cmake in PATH).
 //
+// Guards (#460): GUI import reads the IDE, targets and backend through the
+// shared read-back, retaining the GUI defaults when saved values are absent.
+//
 // Guards (#357): `trusscli build` and `trusscli clean`.
 //   - ProjectGenerator::buildDirForPreset() is the one preset -> build folder
 //     mapping (ios -> xcode-ios), and the written presets' binaryDir follow it.
@@ -511,6 +514,63 @@ static void testPrecedence() {
         applyGenerationOptions(none, PresetState(), webFlag);
         check("no presets: a flagged target is not kept", !none.webKept);
     }
+}
+
+// -----------------------------------------------------------------------------
+// GUI import through the shared read-back (#460)
+// -----------------------------------------------------------------------------
+static void testGuiImportReadback() {
+    const fs::path project = makeProject("gui-import");
+    {
+        ofstream file(project / "CMakePresets.json");
+        file << R"({
+            "version": 6,
+            "vendor": {"trussc": {"ide": "cursor"}},
+            "configurePresets": [
+                {"name": "web", "cacheVariables": {"TC_WEB_BACKEND": "GLES3"}},
+                {"name": "android"},
+                {"name": "ios"}
+            ]
+        })";
+    }
+
+    // importProject starts with the GUI's current settings, then copies
+    // these fields back to the IDE combo, target checkboxes and backend combo.
+    ProjectSettings gui;
+    applyGenerationOptions(gui, readPresetState(project.string()), GenerationFlags());
+    check("GUI import: remembered IDE preselected", gui.ideType == IdeType::Cursor);
+    check("GUI import: web and android checked, WebGL selected",
+          gui.generateWebBuild && gui.generateAndroidBuild && gui.webBackend == 1);
+#ifdef __APPLE__
+    check("GUI import: ios checked on macOS", gui.generateIosBuild);
+#else
+    check("GUI import: ios unavailable off macOS", !gui.generateIosBuild);
+#endif
+    const auto cli = prepareRegeneration(project.string(), g_root.string(), {}, {}, {});
+    check("GUI import: same selections as CLI regeneration",
+          gui.ideType == cli.settings.ideType &&
+          gui.generateWebBuild == cli.settings.generateWebBuild &&
+          gui.generateAndroidBuild == cli.settings.generateAndroidBuild &&
+          gui.generateIosBuild == cli.settings.generateIosBuild &&
+          gui.webBackend == cli.settings.webBackend);
+
+    const fs::path fresh = makeProject("gui-import-no-presets");
+    applyGenerationOptions(gui, readPresetState(fresh.string()), GenerationFlags());
+    check("GUI import: no presets retains current GUI defaults",
+          gui.ideType == IdeType::Cursor && gui.generateWebBuild &&
+          gui.generateAndroidBuild && gui.webBackend == 1);
+
+    // A native-only project clears selections from the previous import;
+    // older projects without vendor.trussc.ide retain the current IDE.
+    {
+        ofstream file(project / "CMakePresets.json");
+        file << R"({"configurePresets": [{"name": "linux"}]})";
+    }
+    applyGenerationOptions(gui, readPresetState(project.string()), GenerationFlags());
+    check("GUI import: native-only project clears cross-compile checkboxes",
+          !gui.generateWebBuild && !gui.generateAndroidBuild && !gui.generateIosBuild);
+    check("GUI import: missing remembered IDE retains current IDE",
+          gui.ideType == IdeType::Cursor);
 }
 
 // -----------------------------------------------------------------------------
@@ -1499,6 +1559,7 @@ TC_CORE_TEST_MAIN() {
     testParseEdgeCases();
     testWebBackend();
     testPrecedence();
+    testGuiImportReadback();
     testPrepareRegeneration();
     testToolchainFiles();
     testKeptTargetConfigureFailure();

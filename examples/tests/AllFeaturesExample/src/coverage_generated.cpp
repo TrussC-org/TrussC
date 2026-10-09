@@ -3267,6 +3267,8 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<const fs::path>(), af::val<Image>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
+        (void)af::val<VideoPlayer>().setAudioStreaming(af::val<bool>());
+        (void)af::val<VideoPlayer>().isAudioStreaming();
     }
 };
 

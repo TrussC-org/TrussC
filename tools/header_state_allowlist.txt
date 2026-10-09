@@ -87,10 +87,13 @@ core/include/tcMath.h trussc::internal::getRandomEngine::engine  # harmless: thr
 core/include/tc/3d/tcEnvironment.h trussc::Environment::isIosWeb::cached                 # harmless: cached platform probe
 
 # --- tc/app
-core/include/tc/app/tcHeadlessApp.h trussc::headless::running     # no-hot-reload: runHeadlessApp only (hot reload is windowed)
+core/include/tc/app/tcHeadlessState.h trussc::headless::running     # no-hot-reload: runHeadlessApp only (hot reload is windowed)
 core/include/tc/app/tcHeadlessApp.h trussc::headless::targetFps   # no-hot-reload: as running
 core/include/tc/app/tcHeadlessApp.h trussc::headless::frameCount  # no-hot-reload: as running
-core/include/tc/app/tcHeadlessApp.h trussc::internal::headlessRestoreConsoleCP  # no-hot-reload: runHeadlessApp's console guard and handler only
+core/include/tc/app/tcHeadlessState.h trussc::headless::quitRequested # no-hot-reload: headless exit requests only
+core/include/tc/app/tcHeadlessApp.h trussc::headless::pendingSignal # no-hot-reload: headless handlers and loop only
+core/include/tc/app/tcHeadlessApp.h trussc::headless::deliveredSignal # no-hot-reload: headless main-thread signal acknowledgement
+core/include/tc/app/tcHeadlessApp.h trussc::internal::headlessRestoreConsoleCP # no-hot-reload: headless Windows console restoration only
 core/include/tc/app/tcHeadlessState.h trussc::headless::active    # no-hot-reload: false in every copy of a hot reload (windowed) process
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::loadCounter   # host-only: the hot reload host itself
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::create::generation  # host-only: the hot reload host itself
@@ -119,3 +122,4 @@ core/include/tc/utils/tcTypeName.h trussc::typeName::cache            # harmless
 core/include/tc/utils/tcTypeName.h trussc::typeName::mutex            # harmless: guards its module's cache
 core/include/tc/utils/tcTypeName.h trussc::shortTypeName::cache       # harmless: demangle cache
 core/include/tc/utils/tcTypeName.h trussc::shortTypeName::mutex       # harmless: guards its module's cache
+core/include/tc/sound/internal/tcFFmpegAudio.h trussc::internal::ffBackendVTable   # host-only: included only by tcAudio_impl.cpp (Linux), compiled into the TrussC library

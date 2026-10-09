@@ -337,6 +337,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   separately from dropped plays. Checks MCP fields, main-thread underrun/stall
   warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
   Uses callback gates and condition-based waits.
+- `micInput/` — Sound playback advances across repeated MicInput start/stop
+  cycles on the Null backend (#696). Capture works without initializing
+  playback and its callbacks continue through engine sample-rate re-init,
+  shutdown/restart, and backend replacement. iOS session behavior and passive
+  system-volume reads still require the iPhone checks.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -665,6 +670,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   no drag after it lifts; an event with no touches clears it; a primary whose
   end event was lost (not among the touches at the next BEGAN) is dropped so
   the next finger down presses.
+- `headlessExit/` — headless exit protocol (#378, #383): pending-signal
+  retention and second-signal escalation (POSIX child processes), forced and cancellable
+  exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
+  consecutive runs, and deterministic 100-step catch-up passes that stop only
+  for uncancellable exits. No display or timing-dependent assertions.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame
