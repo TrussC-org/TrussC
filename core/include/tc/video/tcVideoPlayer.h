@@ -1,5 +1,6 @@
 #pragma once
 #include "tc/utils/tcAnnotations.h"
+#include "tc/utils/tcOnceGate.h"
 
 // =============================================================================
 // tcVideoPlayer.h - Video playback
@@ -53,6 +54,21 @@ public:
     // =========================================================================
     // Load / Close
     // =========================================================================
+
+    /// Linux: stream audio by default. Set false before load() to preload
+    /// the whole track for sample-accurate loops and seeks. Changing this
+    /// setting applies to the next load(). Native OS players ignore it.
+    void setAudioStreaming(bool streaming) {
+        audioStreaming_ = streaming;
+#if defined(__APPLE__) || defined(_WIN32) || defined(__EMSCRIPTEN__)
+        static OnceGate noticed;
+        if (!streaming && noticed.isFirstTime()) {
+            logNotice("VideoPlayer") << "setAudioStreaming(false) has no effect on this platform; "
+                                       "the native player handles audio";
+        }
+#endif
+    }
+    bool isAudioStreaming() const { return audioStreaming_; }
 
     LoadResult load(const fs::path& path) override {
         const auto previousError = errorMessage_;
@@ -462,6 +478,7 @@ private:
 
     // HW decode preference (default on; Linux backend honors this)
     bool useHwAccel_ = true;
+    bool audioStreaming_ = true;
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
@@ -502,6 +519,7 @@ private:
         lastShownTime_   = other.lastShownTime_;
         pendingSeekSec_  = other.pendingSeekSec_;
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
+        audioStreaming_ = other.audioStreaming_;
         platformHandle_  = other.platformHandle_;
         sourcePath_      = std::move(other.sourcePath_);
 
@@ -735,6 +753,19 @@ public:
     static void reportError(VideoPlayer& player, const VideoErrorEventArgs& error) {
         player.reportPlaybackError(error.message, error.errorCode);
     }
+#if defined(__linux__) && !defined(__ANDROID__)
+    // Exercise the real Linux decoder/clock in headless regression tests,
+    // without creating textures or uploading frames to a GPU.
+    static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
+        player.setUseHwAccel(false);
+        if (!player.loadPlatform(path)) return false;
+        player.initialized_ = true;
+        return true;
+    }
+    static void playHeadlessForTests(VideoPlayer& player) { player.playPlatform(); }
+    static void updateHeadlessForTests(VideoPlayer& player) { player.updatePlatform(); }
+    static void stopAudioForTests(VideoPlayer& player);
+#endif
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;
         player.height_ = h;
