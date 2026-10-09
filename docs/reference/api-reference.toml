@@ -8119,10 +8119,14 @@ related = ["SerialDeviceInfo", "SerialDisconnectEventArgs", "TcpClient"]
 platform_note.en = "Real backends only on Windows (Win32 COM), macOS/Linux (POSIX termios), and Android (USB Host CDC-ACM via JNI+usbfs, CDC-ACM class devices only, first connect needs an async USB permission dialog). No serial on iOS (sandbox has no /dev/tty access — the macOS __APPLE__ enumeration branch compiles but never lists/opens a device) or wasm (Emscripten has no serial device; setup() falls into the POSIX open()/termios path against the virtual FS and fails)."
 platform_note.ja = "実バックエンドは Windows (Win32 COM)、macOS/Linux (POSIX termios)、Android (USB Host CDC-ACM、JNI+usbfs、CDC-ACMクラス機器のみ、初回接続は非同期のUSB許可ダイアログが必要) のみ。iOS はサンドボックスで /dev/tty にアクセスできず実質不可 (__APPLE__ の列挙分岐はコンパイルされるが機器を列挙/オープンできない)、wasm はシリアルデバイスが存在せず setup() が POSIX open()/termios 経路に落ちて失敗。"
 
+details.en = "Each open port has a receive worker and a 1 MiB buffer on desktop and Android. When the buffer fills, the oldest bytes are discarded and getDroppedByteCount() counts them. Overflow warnings use a 5 s OnceGate and include the running total. On desktop, overflow and driver warnings are delivered by the next read/write I/O call; device loss is also deferred to app I/O. Windows uses overlapped reads and writes."
+details.ja = "デスクトップと Android では、開いたポートごとに受信ワーカーと 1 MiB のバッファを持つ。容量を超えると古いバイトから破棄し、getDroppedByteCount() で数える。オーバーフロー警告は 5 秒間隔の OnceGate で制限し、累計を含める。デスクトップでは、オーバーフローとドライバの警告は次の読み書き時に出し、切断の通知もアプリの I/O 呼び出しまで遅延する。Windows の読み書きはオーバーラップ I/O を使う。"
+details.ko = "데스크톱과 Android에서는 열린 포트마다 수신 워커와 1 MiB 버퍼를 둔다. 용량을 넘으면 가장 오래된 바이트부터 버리고 getDroppedByteCount()로 센다. 오버플로 경고는 5초 간격 OnceGate로 제한하며 누적 수를 포함한다. 데스크톱에서는 오버플로 및 드라이버 경고를 다음 읽기/쓰기 I/O 호출에서 전달하고, 장치 소실도 앱 I/O까지 지연한다. Windows 읽기와 쓰기는 오버랩 I/O를 사용한다."
+
 ["Serial::available"]
-description.en = "Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
-description.ja = "読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
-description.ko = "읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+description.en = "Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
+description.ja = "TrussC がバッファに保持している読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "TrussC 버퍼에서 읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
 related = ["Serial::isConnected", "Serial::readBytes", "Serial::onDisconnect"]
 
 ["Serial::close"]
@@ -8158,6 +8162,15 @@ description.ja = "listDevices() の非推奨エイリアス"
 description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
+["Serial::getDroppedByteCount"]
+description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count"
+description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持"
+description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지"
+details.en = "Counts only overflow discards, on desktop and Android. Reading and intentional flushing do not increase it. Moving a Serial carries its counter. Windows overrun/RX overflow flags are logged, but the driver does not supply an exact lost-byte count; those losses cannot be included. Framing/parity errors are log-only."
+details.ja = "デスクトップと Android で、容量超過による破棄だけを数える。読み取りや意図した flush では増えない。Serial のムーブでは累計も移る。Windows の overrun/RX overflow は警告するが、ドライバが正確な消失バイト数を提供しないので累計には含められない。framing/parity はログのみ。"
+details.ko = "데스크톱과 Android에서 용량 초과로 버린 바이트만 센다. 읽기나 의도적인 flush로는 증가하지 않는다. Serial 이동 시 누적 수도 이동한다. Windows overrun/RX overflow 플래그는 경고하지만 드라이버가 정확한 손실 바이트 수를 제공하지 않아 누적 수에 포함할 수 없다. framing/parity 오류는 로그만 남긴다."
+related = ["Serial::available", "Serial::flushInput", "Serial::setup"]
+
 ["Serial::getDevicePath"]
 description.en = "Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call"
 description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す。setup()、close()、I/O 呼び出しを待たない"
@@ -8189,8 +8202,9 @@ stays true until one of those calls reports the loss (the USB worker thread
 that finds it only records it).
 
 One `Serial` may be used from several threads. Its I/O calls (`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) never
-wait for each other. Opening and closing (`setup()`, `close()`, closing a lost
+`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) share
+its port lock; receive calls also share a buffer mutex. Opening and closing
+(`setup()`, `close()`, closing a lost
 port, the destructor, the moves) wait until the I/O calls in progress have
 returned, so no call ever uses a closed port, and new I/O calls wait behind
 them. `isConnected()` and [`getDevicePath()`](#Serial::getDevicePath) wait
@@ -8198,11 +8212,9 @@ for neither: they answer with the state at that moment. Which thread reads or
 writes what, and in which order, is still up to the app. So a long
 `writeBytes()` (Windows, Android; see [`writeBytes()`](#Serial::writeBytes))
 or `drain()` delays a `setup()` / `close()` on another thread, not the other
-I/O calls. On Android `close()`, the destructor and a move assignment also
-wait for the USB worker thread to stop (up to about 250 ms once connected).
-On Windows the system itself runs the calls on one port handle one at a time
-(it is not opened for overlapped I/O), so there `available()`, the reads and
-the flush calls still wait for a `writeBytes()` in progress.
+I/O calls. Closing also stops the receive worker (desktop polling interval:
+50 ms; Android USB read timeout: 250 ms). Desktop moves transfer the worker
+with the connection. Windows uses overlapped reads and writes.
 
 A [Logger](#Logger) listener that runs inline may call this `Serial`. One
 exception, on Android: the USB worker thread logs too (permission timeout,
@@ -8248,19 +8260,18 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
 
 1つの `Serial` を複数のスレッドから使ってよい。I/O の呼び出し（`available()`、
-`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）どうしは互いを
-待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
+`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）はポートのロックを
+共有する。受信側の呼び出しはバッファの mutex も共有する。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
 ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを触るので、閉じた
 ポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで待つ。
 `isConnected()` と [`getDevicePath()`](#Serial::getDevicePath) はどちらも待たず、
 その時点の状態を返す。どのスレッドが何をどの順に読み書きするかは、アプリ側で
 決める必要がある。つまり時間のかかる `writeBytes()`（Windows、Android。
 [`writeBytes()`](#Serial::writeBytes) 参照）や `drain()` が遅らせるのは、別スレッドの
-`setup()` / `close()` で、ほかの I/O 呼び出しではない。Android の `close()`、
-デストラクタ、ムーブ代入は、USB ワーカースレッドが止まるのも待つ（接続後なら最大で
-約 250 ms）。Windows では、システム自体が1つのポートハンドルへの呼び出しを1つずつ
-実行する（オーバーラップ I/O で開いていないため）。そのため Windows では
-`available()`、読み込み、flush 系は実行中の `writeBytes()` を待つ。
+`setup()` / `close()` で、ほかの I/O 呼び出しではない。閉じる際は受信ワーカーも
+停止する（デスクトップの poll 間隔は 50 ms、Android の USB 読み取りタイムアウトは
+250 ms）。デスクトップのムーブではワーカーを接続と一緒に移す。
+Windows の読み書きはオーバーラップ I/O を使う。
 
 インラインで動く [Logger](#Logger) のリスナーから、この `Serial` を呼んでよい。
 例外は Android で、USB ワーカースレッドもログを出す（許可のタイムアウト、接続、
@@ -8304,18 +8315,17 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
 
 하나의 `Serial`을 여러 스레드에서 사용해도 된다. I/O 호출(`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)끼리는 서로를
-기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
+`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)은 포트 락을
+공유하며 수신 호출은 버퍼 mutex도 공유한다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
 이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로, 닫힌 포트를
 쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. `isConnected()`와
 [`getDevicePath()`](#Serial::getDevicePath)는 어느 쪽도 기다리지 않고 그 시점의
 상태를 반환한다. 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다.
 즉 오래 걸리는 `writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes)
 참조)나 `drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O
-호출이 아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
-기다린다(연결 후라면 최대 약 250 ms). Windows에서는 시스템 자체가 하나의 포트
-핸들에 대한 호출을 하나씩 실행한다(오버랩 I/O로 열지 않았기 때문). 그래서
-Windows에서는 `available()`, 읽기, flush 계열이 진행 중인 `writeBytes()`를 기다린다.
+호출이 아니다. 닫을 때 수신 워커도 멈춘다(데스크톱 poll 간격: 50 ms,
+Android USB 읽기 타임아웃: 250 ms). 데스크톱 이동은 워커와 연결을 함께 옮긴다.
+Windows 읽기와 쓰기는 오버랩 I/O를 사용한다.
 
 인라인으로 실행되는 [Logger](#Logger) 리스너에서 이 `Serial`을 호출해도 된다. 예외는
 Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연결, 연결 소실, 수신
@@ -8633,9 +8643,8 @@ How long it may take depends on the platform:
   report how much of a timed-out chunk went out, so some bytes past the
   returned count may have reached the device too.
 
-A write that must never stall the app goes on a thread of its own: the other
-I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
-Windows, where the reads still do).
+A write that must never stall the app goes on a thread of its own: receive
+calls do not wait for it.
 '''
 details.ja = '''
 どれだけ時間がかかりうるかはプラットフォームによる。
@@ -8659,8 +8668,7 @@ details.ja = '''
   先のバイトも機器に届いていることがある。
 
 アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
-それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
-参照）。
+それを待たない。
 '''
 details.ko = '''
 얼마나 걸릴 수 있는지는 플랫폼에 따라 다르다.
@@ -8683,8 +8691,7 @@ details.ko = '''
   알려 주지 않으므로, 반환한 수보다 뒤의 바이트도 장치에 도달했을 수 있다.
 
 앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
-기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
-참조).
+기다리지 않는다.
 '''
 
 ["SerialDeviceInfo"]

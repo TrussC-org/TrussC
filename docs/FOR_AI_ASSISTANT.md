@@ -3830,7 +3830,7 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
+int Serial::available() const  // Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
 void Serial::close()  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
 void Serial::drain()  // Wait until output transmission completes
 void Serial::flush()  // Clear both input and output buffers
@@ -3838,6 +3838,7 @@ void Serial::flushInput()  // Clear the input buffer
 void Serial::flushOutput()  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
 std::string Serial::getDevicePath() const  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
+size_t Serial::getDroppedByteCount() const  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count
 bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
 bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices

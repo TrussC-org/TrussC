@@ -18,7 +18,7 @@
 //
 // Threads: a Serial has its own reader-writer lock. The I/O calls
 // (available(), readBytes(), readByte(), writeBytes(), the flush calls,
-// drain()) share it, so they never wait for each other. Opening and closing
+// drain()) share it. Receive calls also share a buffer mutex. Opening and closing
 // (setup(), close(), closing a lost port, the destructor, the moves) take it
 // alone: they wait until the I/O calls in progress have returned, so no call
 // ever uses a closed or reused port, and new I/O calls wait behind them.
@@ -28,12 +28,16 @@
 // order, is still up to the app.
 // So a long I/O call (writeBytes() on Windows and Android, drain(); see
 // writeBytes()) delays setup() / close() on another thread, not the other
-// I/O calls. On Android, close(), the destructor and a move assignment also
-// wait for the USB worker thread to stop (up to about 250 ms once
-// connected). On Windows the system itself runs the calls on one port
-// handle one at a time (it is opened without FILE_FLAG_OVERLAPPED), so
-// available() / readBytes() / readByte() / the flush calls still wait there
-// for a writeBytes() in progress.
+// I/O calls. Closing also stops the receive worker (desktop poll interval:
+// 50 ms; Android USB read timeout: 250 ms). Desktop moves transfer the worker
+// with its connection. Windows uses overlapped reads and writes.
+//
+// Each open port has a worker draining RX into a 1 MiB TrussC buffer. Past
+// the cap the oldest bytes are dropped; getDroppedByteCount() counts them.
+// available() reports this buffer; readBytes()/readByte() consume it. Desktop workers
+// defer loss and overflow/driver warnings to app I/O, so callbacks never
+// run from those workers. Overflow warnings include the running total and
+// use a OnceGate with a 5 s interval; Android uses the same receive policy.
 //
 // Logger listeners: Serial logs only with its lock released (what to log is
 // decided under the lock, the line goes out after it), so a Logger listener
@@ -75,6 +79,8 @@
 #include <sstream>
 #include <mutex>
 #include <thread>
+#include <memory>
+#include "tcSerialRx.h"
 #if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
     #include <condition_variable>
 #endif
@@ -330,6 +336,7 @@ namespace androidserial {
     private:
         internal::SerialHeldLog* previous_;
     };
+    size_t getDroppedByteCount(const Impl* impl);
     int available(const Impl* impl);
     int readBytes(Impl* impl, void* buffer, int length);
     // error: the errno of a failed bulk transfer, 0 otherwise. The backend
@@ -437,7 +444,7 @@ public:
     // destructor or a move assignment over an open Serial, nor setup() when
     // it closes a port that a listener or another thread opened while
     // setup() was closing the previous one (it logs a warning instead).
-    // Only those four I/O calls find a loss: a device that went away before
+    // Only those four I/O calls report a loss: a device that went away before
     // close() / setup() without one of them noticing ends with wasClean =
     // true and "closed by close()". On Android, where the worker thread may
     // have found it already, reason then goes on with "(the device had
@@ -445,9 +452,9 @@ public:
     //
     // THREADING: it fires inline on the thread that made that call, normally
     // the main thread, after the call has released the Serial's lock. On
-    // Android the USB worker thread finds the loss; it only records it, and
-    // the event fires from the next of those calls (or close() / setup()) on
-    // the app's thread. A listener that must run on the main thread whichever
+    // desktop and Android, receive workers record loss; the event fires
+    // from the next I/O call on the app's thread (Android also collects it
+    // through close() / setup()). A listener that must run on the main thread whichever
     // thread uses the Serial opts in:
     //
     //   listener = serial.onDisconnect.listen(fn, Deliver::Main);
@@ -518,6 +525,9 @@ public:
             devicePath_ = std::move(other.devicePath_);
             other.devicePath_.clear();
         }
+#if !defined(__ANDROID__)
+        rx_ = std::move(other.rx_);
+#endif
         initialized_ = wasOpen;
         baudRate_ = other.baudRate_;
         ++other.generation_;
@@ -572,6 +582,9 @@ public:
                 androidserial::HoldLogs hold(held);
                 androidserial::destroy(old);  // closes the old connection too
             }
+#endif
+#if !defined(__ANDROID__)
+            rx_ = std::move(other.rx_);
 #endif
             initialized_ = otherWasOpen;
             baudRate_ = other.baudRate_;
@@ -819,7 +832,7 @@ public:
                               0,                     // Exclusive access
                               nullptr,               // No security attributes
                               OPEN_EXISTING,
-                              0,                     // Non-overlapped mode
+                              FILE_FLAG_OVERLAPPED,  // Reader and writer may run together
                               nullptr);
 
         if (handle_ == INVALID_HANDLE_VALUE) {
@@ -883,6 +896,7 @@ public:
             devicePath_ = portName;
         }
         baudRate_ = baudRate;
+        startReader();
         initialized_ = true;
         writeTimeoutWarned_ = false;
         held(LogLevel::Notice) << "Serial: connected to " << portName << " at " << baudRate << " baud";
@@ -1004,6 +1018,7 @@ public:
             devicePath_ = portName;
         }
         baudRate_ = appliedBaudRate;
+        startReader();
         initialized_ = true;
         if (appliedBaudRate != baudRate) {
             held(LogLevel::Warning) << "Serial: requested " << baudRate << " baud on " << portName
@@ -1079,43 +1094,37 @@ public:
         return devicePath_;
     }
 
-    // Get number of bytes available for reading.
+    // Get number of bytes buffered by TrussC for reading.
     // Returns 0 when not connected; a device loss found here closes the port
     // (isConnected() turns false) and fires onDisconnect.
     int available() const {
+        internal::SerialHeldLog held;
         LossFound loss;
         int n = [&]() -> int {
             Shared lock(lock_);
-#if defined(__ANDROID__)
-            if (markLostOnWorker(loss)) return 0;
-#endif
+            if (markLostOnWorker(loss, held)) return 0;
             if (!isOpenLocked()) return 0;
-
-#if defined(_WIN32)
-            COMSTAT comStat;
-            DWORD errors;
-            if (ClearCommError(handle_, &errors, &comStat)) {
-                return (int)comStat.cbInQue;
-            }
-            markLost(loss, "ClearCommError", GetLastError());
-            return 0;
-#elif defined(__ANDROID__)
+#if defined(__ANDROID__)
             return androidserial::available(aimpl_);
 #else
-            int bytesAvailable = 0;
-            if (ioctl(fd_, FIONREAD, &bytesAvailable) == -1) {
-                int err = errno;
-                if (isDeviceLostError(err)) markLost(loss, "ioctl(FIONREAD)", err);
-                return 0;
-            }
-            if (bytesAvailable > 0) return bytesAvailable;
-            // Nothing buffered: tell a quiet port from a hung-up one
-            if (isHungUp()) markLost(loss, "hangup", 0);
-            return 0;
+            std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
+            return static_cast<int>(rx_->buffer.bytes.size());
 #endif
         }();
         closeLost(loss);
         return n;
+    }
+
+    // Received bytes discarded by the 1 MiB buffer, since the last setup().
+    // Flush/close preserve the count; Windows driver flags cannot supply an
+    // exact byte count and are warned about separately.
+    size_t getDroppedByteCount() const {
+        Shared lock(lock_);
+#if defined(__ANDROID__)
+        return aimpl_ ? androidserial::getDroppedByteCount(aimpl_) : 0;
+#else
+        return rx_ ? rx_->buffer.dropped.load() : 0;
+#endif
     }
 
     // ---------------------------------------------------------------------------
@@ -1127,42 +1136,18 @@ public:
     // closes the port (isConnected() turns false), fires onDisconnect and
     // returns -1. Never blocks: it returns what has arrived so far.
     int readBytes(void* buffer, int length) {
+        internal::SerialHeldLog held;
         LossFound loss;
         int n = [&]() -> int {
             Shared lock(lock_);
-#if defined(__ANDROID__)
-            if (markLostOnWorker(loss)) return -1;
-#endif
+            if (markLostOnWorker(loss, held)) return -1;
             if (!isOpenLocked()) return -1;
             if (length <= 0) return 0;
-
-#if defined(_WIN32)
-            DWORD bytesRead = 0;
-            if (!ReadFile(handle_, buffer, length, &bytesRead, nullptr)) {
-                markLost(loss, "ReadFile", GetLastError());
-                return -1;
-            }
-            return (int)bytesRead;
-#elif defined(__ANDROID__)
+#if defined(__ANDROID__)
             return androidserial::readBytes(aimpl_, buffer, length);
 #else
-            ssize_t result = read(fd_, buffer, length);
-            if (result > 0) return static_cast<int>(result);
-            if (result == -1) {
-                int err = errno;
-                // EAGAIN/EWOULDBLOCK means "no data available", like 0 below
-                if (err != EAGAIN && err != EWOULDBLOCK) {
-                    if (isDeviceLostError(err)) markLost(loss, "read", err);
-                    return -1;
-                }
-            }
-            // No data. With VMIN = VTIME = 0, read() returns 0 both for a quiet
-            // port and for a hung-up tty, so only poll() can tell them apart.
-            if (isHungUp()) {
-                markLost(loss, "hangup", 0);
-                return -1;
-            }
-            return 0;
+            std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
+            return rx_->buffer.read(buffer, length);
 #endif
         }();
         closeLost(loss);
@@ -1184,50 +1169,9 @@ public:
     // found here closes the port (isConnected() turns false), fires
     // onDisconnect and returns -2.
     int readByte() {
-        LossFound loss;
-        int n = [&]() -> int {
-            Shared lock(lock_);
-#if defined(__ANDROID__)
-            if (markLostOnWorker(loss)) return -2;
-#endif
-            if (!isOpenLocked()) return -2;
-
-            unsigned char byte;
-#if defined(_WIN32)
-            DWORD bytesRead = 0;
-            if (!ReadFile(handle_, &byte, 1, &bytesRead, nullptr)) {
-                markLost(loss, "ReadFile", GetLastError());
-                return -2;  // Error
-            }
-            if (bytesRead == 1) {
-                return byte;
-            }
-            return -1;  // No data
-#elif defined(__ANDROID__)
-            int result = androidserial::readBytes(aimpl_, &byte, 1);
-            if (result == 1) return byte;
-            if (result == 0) return -1;  // No data
-            return -2;  // Error
-#else
-            ssize_t result = read(fd_, &byte, 1);
-            if (result == 1) return byte;
-            if (result == -1) {
-                int err = errno;
-                if (err != EAGAIN && err != EWOULDBLOCK) {
-                    if (isDeviceLostError(err)) markLost(loss, "read", err);
-                    return -2;  // Error
-                }
-            }
-            // No data, or a hung-up tty (see readBytes())
-            if (isHungUp()) {
-                markLost(loss, "hangup", 0);
-                return -2;
-            }
-            return -1;  // No data
-#endif
-        }();
-        closeLost(loss);
-        return n;
+        unsigned char byte = 0;
+        const int n = readBytes(&byte, 1);
+        return n == 1 ? byte : (n == 0 ? -1 : -2);
     }
 
     // ---------------------------------------------------------------------------
@@ -1254,9 +1198,9 @@ public:
     //   transfer went out, so some bytes past the returned count may have
     //   reached the device too.
     // A write that must never stall the app belongs on a thread of its own:
-    // the other I/O calls do not wait for it (on Windows available() and the
-    // reads still do; see the top of this file).
+    // the receive calls do not wait for it (see the top of this file).
     int writeBytes(const void* buffer, int length) {
+        internal::SerialHeldLog held;
         LossFound loss;
 #if defined(_WIN32)
         bool warnTimeout = false;  // decided under the lock, logged after it
@@ -1268,16 +1212,25 @@ public:
 #endif
         int n = [&]() -> int {
             Shared lock(lock_);
-#if defined(__ANDROID__)
-            if (markLostOnWorker(loss)) return -1;
-#endif
+            if (markLostOnWorker(loss, held)) return -1;
             if (!isOpenLocked()) return -1;
             if (length <= 0) return 0;
 
 #if defined(_WIN32)
             DWORD bytesWritten = 0;
-            if (!WriteFile(handle_, buffer, length, &bytesWritten, nullptr)) {
-                DWORD error = GetLastError();
+            OVERLAPPED operation{};
+            operation.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+            if (!operation.hEvent) {
+                markLost(loss, "CreateEvent", GetLastError());
+                return -1;
+            }
+            BOOL ok = WriteFile(handle_, buffer, length, &bytesWritten, &operation);
+            if (!ok && GetLastError() == ERROR_IO_PENDING) {
+                ok = GetOverlappedResult(handle_, &operation, &bytesWritten, TRUE);
+            }
+            const DWORD error = ok ? ERROR_SUCCESS : GetLastError();
+            CloseHandle(operation.hEvent);
+            if (!ok) {
                 // A driver may report the write timeout as a failure too
                 if (error == ERROR_SEM_TIMEOUT || error == ERROR_TIMEOUT) {
                     warnTimeout = firstWriteTimeout(port);
@@ -1345,6 +1298,10 @@ public:
     void flushInput() {
         Shared lock(lock_);
         if (!isOpenLocked()) return;
+#if !defined(__ANDROID__)
+        std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
+        rx_->buffer.bytes.clear();
+#endif
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR);
 #elif defined(__ANDROID__)
@@ -1371,6 +1328,10 @@ public:
     void flush() {
         Shared lock(lock_);
         if (!isOpenLocked()) return;
+#if !defined(__ANDROID__)
+        std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
+        rx_->buffer.bytes.clear();
+#endif
 #if defined(_WIN32)
         PurgeComm(handle_, PURGE_RXCLEAR | PURGE_TXCLEAR);
 #elif defined(__ANDROID__)
@@ -1395,6 +1356,151 @@ public:
     }
 
 private:
+#if !defined(__ANDROID__)
+    // The worker uses only this stable connection state, never the Serial
+    // object: moving an open Serial simply transfers ownership. It records
+    // loss/warnings; app I/O delivers them with Serial's lock released.
+    struct DesktopRx {
+        internal::SerialRxBuffer buffer;
+        std::thread worker;
+        std::atomic<bool> stop{false};
+        std::atomic<bool> lost{false};
+        std::string lostReason;
+#if defined(_WIN32)
+        DWORD errors = 0;  // pending driver flags, under buffer.mutex
+#endif
+        void lose(std::string reason) {
+            lostReason = std::move(reason);
+            lost = true;  // publishes the reason to app I/O
+        }
+    };
+    std::unique_ptr<DesktopRx> rx_;
+    mutable OnceGate dropWarned_{5.0};
+    mutable OnceGate lineWarned_{5.0};
+
+    void startReader() {
+        rx_ = std::make_unique<DesktopRx>();
+#if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
+        DesktopRx* rx = rx_.get();
+#if defined(_WIN32)
+        const HANDLE port = handle_;
+        rx->worker = std::thread([rx, port] {
+            uint8_t data[4096];
+            OVERLAPPED operation{};
+            operation.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+            if (!operation.hEvent) {
+                rx->lose("reader CreateEvent failed, error " + std::to_string(GetLastError()));
+                return;
+            }
+            while (!rx->stop.load()) {
+                bool idle = true;
+                {
+                    // Reads return immediately with the configured timeouts.
+                    // Hold this across read/append so a flush cannot publish
+                    // bytes that were read before the flush.
+                    std::lock_guard<std::mutex> lock(rx->buffer.mutex);
+                    COMSTAT stat{};
+                    DWORD errors = 0;
+                    if (!ClearCommError(port, &errors, &stat)) {
+                        rx->lose("ClearCommError failed, error " + std::to_string(GetLastError()));
+                        break;
+                    }
+                    rx->errors |= errors;
+                    DWORD n = 0;
+                    ResetEvent(operation.hEvent);
+                    BOOL ok = ReadFile(port, data, sizeof(data), &n, &operation);
+                    if (!ok && GetLastError() == ERROR_IO_PENDING) {
+                        // A bounded wait also makes shutdown independent of a
+                        // driver that does not finish an immediate read.
+                        if (WaitForSingleObject(operation.hEvent, 50) != WAIT_OBJECT_0) {
+                            CancelIoEx(port, &operation);
+                        }
+                        ok = GetOverlappedResult(port, &operation, &n, TRUE);
+                    }
+                    if (!ok) {
+                        const DWORD error = GetLastError();
+                        if (error != ERROR_OPERATION_ABORTED) {
+                            rx->lose("ReadFile failed, error " + std::to_string(error));
+                            break;
+                        }
+                    } else if (n) {
+                        idle = false;
+                        rx->buffer.append(data, n);
+                    }
+                }
+                // Poll briefly with overlapped reads: a waiting writer never
+                // serializes the reader on this handle.
+                if (idle) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            CloseHandle(operation.hEvent);
+        });
+#else
+        const int port = fd_;
+        rx->worker = std::thread([rx, port] {
+            uint8_t data[4096];
+            while (!rx->stop.load()) {
+                pollfd event{port, POLLIN, 0};
+                const int ready = poll(&event, 1, 50);
+                if (ready < 0 && errno == EINTR) continue;
+                if (ready < 0) {
+                    rx->lose(std::string("poll: ") + std::strerror(errno));
+                    break;
+                }
+                if (event.revents & (POLLHUP | POLLERR)) {
+                    rx->lose("hangup");
+                    break;
+                }
+                // Some macOS serial drivers cannot be polled (POLLNVAL).
+                // Still try the nonblocking read, and avoid a busy loop.
+                if (!ready) continue;
+                {
+                    std::lock_guard<std::mutex> lock(rx->buffer.mutex);
+                    const ssize_t n = ::read(port, data, sizeof(data));
+                    if (n > 0) rx->buffer.append(data, static_cast<size_t>(n));
+                    else if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                        rx->lose(std::string("read: ") + std::strerror(errno));
+                        break;
+                    }
+                }
+                if (event.revents & POLLNVAL) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                }
+            }
+        });
+#endif
+#endif
+    }
+
+    void stopReader() const {
+        if (!rx_) return;
+        rx_->stop = true;
+        if (rx_->worker.joinable()) rx_->worker.join();
+        std::lock_guard<std::mutex> lock(rx_->buffer.mutex);
+        rx_->buffer.bytes.clear();
+    }
+
+    // Called with buffer.mutex held. Lines are emitted after the port lock.
+    void reportRxWarnings(internal::SerialHeldLog& held) const {
+        if (rx_->buffer.takeWarning(dropWarned_)) {
+            held(LogLevel::Warning) << "Serial: RX buffer overflow, dropping oldest data; total dropped bytes: "
+                                    << rx_->buffer.dropped.load();
+        }
+#if defined(_WIN32)
+        const DWORD flags = rx_->errors & (CE_RXOVER | CE_OVERRUN | CE_FRAME | CE_RXPARITY);
+        if (flags && lineWarned_.isFirstTime()) {
+            held(LogLevel::Warning) << "Serial: driver reports"
+                << ((flags & CE_RXOVER) ? " RX overflow (data lost)" : "")
+                << ((flags & CE_OVERRUN) ? " overrun (data lost)" : "")
+                << ((flags & CE_FRAME) ? " framing error" : "")
+                << ((flags & CE_RXPARITY) ? " parity error" : "")
+                << "; total buffered bytes dropped: " << rx_->buffer.dropped.load()
+                << " (driver does not report the number of lost bytes)";
+            rx_->errors = 0;
+        }
+#endif
+    }
+#endif
+
     // The port state below is guarded by lock_: the I/O calls read it with
     // the lock shared, and only opening and closing change it, with the lock
     // exclusive. mutable: the const available() closes the port when it
@@ -1595,6 +1701,7 @@ private:
             initialized_ = false;
 #else
             initialized_ = false;  // isConnected() reads it without the lock
+            stopReader();
 #if defined(_WIN32)
             // With some drivers a stale handle keeps the port from being
             // reopened (usbser.sys does not)
@@ -1682,18 +1789,40 @@ private:
     // With the lock shared: the USB worker found the device gone and only
     // recorded it. Returns true when it did; the caller returns its error
     // value, and closeLost() collects the loss from the backend.
-    bool markLostOnWorker(LossFound& loss) const {
+    bool markLostOnWorker(LossFound& loss, internal::SerialHeldLog&) const {
         if (!aimpl_ || !androidserial::isLost(aimpl_)) return false;
         loss.found = true;
         loss.generation = generation_;
         return true;
     }
 #else
+    bool markLostOnWorker(LossFound& loss, internal::SerialHeldLog& held) const {
+        if (!isOpenLocked()) return false;
+        if (rx_) {
+            std::lock_guard<std::mutex> rxLock(rx_->buffer.mutex);
+            reportRxWarnings(held);
+        }
+        if (rx_ && rx_->lost.load()) {
+            loss.found = true;
+            loss.generation = generation_;
+            loss.reason = rx_->lostReason;
+            return true;
+        }
+#if !defined(_WIN32)
+        if (isHungUp()) {
+            markLost(loss, "hangup", 0);
+            return true;
+        }
+#endif
+        return false;
+    }
+
     // Close the port without firing onDisconnect (the destructor, a move
     // assignment, and close() before it notifies). Returns whether it was
     // open. With the lock held exclusive; its log line goes to held.
     bool closePort(internal::SerialHeldLog& held) {
         initialized_ = false;  // isConnected() reads it without the lock
+        stopReader();
 #if defined(_WIN32)
         bool wasOpen = handle_ != INVALID_HANDLE_VALUE;
         if (wasOpen) {
