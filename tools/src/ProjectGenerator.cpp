@@ -397,22 +397,6 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
     windowsPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("windows");
     windowsPreset["generator"] = "Ninja";
     windowsPreset["cacheVariables"]["CMAKE_EXPORT_COMPILE_COMMANDS"] = "ON";
-    // project() initializes MSVC's build type to Debug, before trussc_app's
-    // fallback can run. Pin our intended default, preserving a project override.
-    windowsPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] = "RelWithDebInfo";
-    ifstream savedFile(destPath + "/CMakePresets.json");
-    Json saved = Json::parse(savedFile, nullptr, false);
-    if (saved.is_object() && saved.contains("configurePresets") &&
-        saved["configurePresets"].is_array()) {
-        for (const auto& p : saved["configurePresets"]) {
-            if (p.is_object() && p.contains("name") && p["name"] == "windows" &&
-                p.contains("cacheVariables") && p["cacheVariables"].is_object() &&
-                p["cacheVariables"].contains("CMAKE_BUILD_TYPE")) {
-                windowsPreset["cacheVariables"]["CMAKE_BUILD_TYPE"] =
-                    p["cacheVariables"]["CMAKE_BUILD_TYPE"];
-            }
-        }
-    }
     // Only set TRUSSC_DIR if template default won't work (see getTrusscDirValue)
     if (!trusscDir.empty()) {
         windowsPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
@@ -1130,7 +1114,11 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
 
     // Use vcvarsall.bat to set up VS environment, then run cmake
     // CMAKE_MAKE_PROGRAM is set in CMakeUserPresets.json
-    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
+    // Set the initial default before project() chooses MSVC's Debug default.
+    // Existing caches retain the build type selected by the user.
+    string buildType = fs::exists(fs::path(path) / buildDirForPreset(preset) / "CMakeCache.txt")
+        ? "" : " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
 
     auto [result, output] = executeCommand(cmd);
 

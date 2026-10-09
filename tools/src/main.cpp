@@ -261,8 +261,8 @@ struct CheckResult {
 
 #ifdef _WIN32
 static CheckResult checkWindowsHeaderDependencies(const string& projectPath) {
-    CheckResult r{"header dependencies recorded:", CheckStatus::Skipped,
-                  "not checked (no Ninja build yet)", "", true};
+    CheckResult r{"Header dependencies", CheckStatus::Skipped,
+                  "not checked (no Ninja build yet)", "", false};
     const fs::path dir = fs::absolute(fs::path(projectPath) /
         ProjectGenerator::buildDirForPreset("windows"));
     if (!fs::exists(dir / "build.ninja") || !fs::exists(dir / ".ninja_log")) return r;
@@ -278,10 +278,10 @@ static CheckResult checkWindowsHeaderDependencies(const string& projectPath) {
         r.hint = "Check CMAKE_MAKE_PROGRAM in the project's CMakeCache.txt.";
     } else if (hasMainHeaderDependencies(output)) {
         r.status = CheckStatus::OK;
-        r.detail = "yes (main.cpp.obj, last build)";
+        r.detail = "recorded for main.cpp.obj (last build)";
     } else {
         r.status = CheckStatus::Error;
-        r.detail = "no (main.cpp.obj, last build)";
+        r.detail = "none for main.cpp.obj (last build)";
         r.hint = "Run 'trusscli update' and 'trusscli build --debug' in the same console, "
                  "then run doctor again.";
     }

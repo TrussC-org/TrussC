@@ -1084,23 +1084,6 @@ static void testWindowsHeaderDependencies() {
     check("cache: Ninja path with spaces", readCMakeCacheValue(cache.string(), "CMAKE_MAKE_PROGRAM") ==
           "C:/Program Files/Ninja/ninja.exe");
     check("cache: missing entry", readCMakeCacheValue(cache.string(), "MISSING").empty());
-
-#ifdef _WIN32
-    fs::path project = makeProject("windows-build-type");
-    auto settings = baseSettings(project);
-    check("Windows default preset written", writePresets(settings, project));
-    Json presets = Json::parse(readFile(project / "CMakePresets.json"));
-    check("Windows default is RelWithDebInfo",
-          presets["configurePresets"][0]["cacheVariables"]["CMAKE_BUILD_TYPE"] == "RelWithDebInfo");
-    for (const Json& overrideType : {Json("Release"), Json{{"type", "STRING"}, {"value", "Debug"}}}) {
-        presets["configurePresets"][0]["cacheVariables"]["CMAKE_BUILD_TYPE"] = overrideType;
-        writeFile(project / "CMakePresets.json", presets.dump());
-        check("Windows build type override preset written", writePresets(settings, project));
-        const Json updated = Json::parse(readFile(project / "CMakePresets.json"));
-        check("Windows build type override preserved",
-              updated["configurePresets"][0]["cacheVariables"]["CMAKE_BUILD_TYPE"] == overrideType);
-    }
-#endif
 }
 
 // -----------------------------------------------------------------------------
