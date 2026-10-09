@@ -1,5 +1,5 @@
 // cgltf is not vendored in this repo: CMakeLists.txt fetches the upstream
-// single header at tag v1.14 (github.com/jkuhlmann/cgltf), unmodified.
+// single header at tag v1.15 (github.com/jkuhlmann/cgltf), unmodified.
 // load() runs its own range checks (checkDataRanges()) and then
 // cgltf_validate() on every file, before any accessor, index or image data
 // is read.
@@ -461,7 +461,7 @@ bool GltfModel::load(const string& path) {
     size_t skippedPrimitives = 0;
     try {
         fs::path resolvedPath = getDataPath(path);
-        resolved = resolvedPath.string();
+        resolved = pathToUtf8(resolvedPath);
 
         // Parse with cgltf. The parsed data is freed on every path out of
         // this block, including an exception.

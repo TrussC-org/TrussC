@@ -4,6 +4,7 @@
 // tcEventArgs - Event argument structures
 // =============================================================================
 
+#include <cstdint>
 #include <vector>
 #include <string>
 #include "tcMath.h"   // Vec2
@@ -233,7 +234,7 @@ struct TouchPoint {
 // Touch event arguments (multi-touch)
 // ---------------------------------------------------------------------------
 struct TouchEventArgs {
-    static constexpr int MAX_TOUCHES = 8;  // Matches SAPP_MAX_TOUCHPOINTS
+    static constexpr int MAX_TOUCHES = 32;  // Matches SAPP_MAX_TOUCHPOINTS
     TouchPoint touches[MAX_TOUCHES];
     int numTouches = 0;
     bool cancelled = false;   // true when touchReleased is due to system cancellation
@@ -259,6 +260,12 @@ struct ConsoleEventArgs {
 // ---------------------------------------------------------------------------
 struct ExitRequestEventArgs {
     bool cancel = false;           // Set to true to cancel the exit
+};
+
+// D3D11 device loss. The reason contains GetDeviceRemovedReason HRESULT bits.
+struct DeviceLostEventArgs {
+    uint32_t reason = 0;
+    bool cancel = false;           // Set true to keep running without GPU recovery
 };
 
 } // namespace trussc

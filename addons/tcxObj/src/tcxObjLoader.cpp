@@ -2,6 +2,7 @@
 #include "tiny_obj_loader.h"
 
 #include "tcxObjLoader.h"
+#include <algorithm>
 #include <fstream>
 #include <unordered_map>
 
@@ -23,7 +24,7 @@ bool ObjLoader::load(const fs::path& path) {
         return false;
     }
 
-    fs::path baseDir = objPath.parent_path().string() + "/";
+    fs::path baseDir = objPath.parent_path();
 
     tinyobj::attrib_t attrib;
     vector<tinyobj::shape_t> shapes;
@@ -31,8 +32,8 @@ bool ObjLoader::load(const fs::path& path) {
     string warn, err;
 
     bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
-                               objPath.string().c_str(),
-                               baseDir.string().c_str());
+                               pathToUtf8(objPath).c_str(),
+                               (pathToUtf8(baseDir) + "/").c_str());
 
     if (!warn.empty()) {
         logWarning() << "ObjLoader: " << warn;
@@ -48,7 +49,7 @@ bool ObjLoader::load(const fs::path& path) {
     vector<fs::path> texturePaths(materials.size());
     for (size_t i = 0; i < materials.size(); i++) {
         if (!materials[i].diffuse_texname.empty()) {
-            texturePaths[i] = baseDir / materials[i].diffuse_texname;
+            texturePaths[i] = baseDir / utf8ToPath(materials[i].diffuse_texname);
         }
     }
 
@@ -72,6 +73,7 @@ bool ObjLoader::load(const fs::path& path) {
 
         bool hasNormals = !attrib.normals.empty();
         bool hasTexCoords = !attrib.texcoords.empty();
+        vector<bool> missingNormals;
 
         // Check each face index against the list it is read from.
         const size_t numPositions = attrib.vertices.size() / 3;
@@ -139,6 +141,10 @@ bool ObjLoader::load(const fs::path& path) {
                             float ny = attrib.normals[3 * ni + 1];
                             float nz = attrib.normals[3 * ni + 2];
                             group.mesh.addNormal(nx, ny, nz);
+                            missingNormals.push_back(false);
+                        } else if (hasNormals) {
+                            group.mesh.addNormal(0, 0, 0);
+                            missingNormals.push_back(true);
                         }
 
                         // Texture coordinate
@@ -148,6 +154,8 @@ bool ObjLoader::load(const fs::path& path) {
                             float v_coord = attrib.texcoords[2 * ti + 1];
                             // OBJ V=0 is bottom, TrussC V=0 is top
                             group.mesh.addTexCoord(u, 1.0f - v_coord);
+                        } else if (hasTexCoords) {
+                            group.mesh.addTexCoord(0, 0);
                         }
 
                         // Vertex color (if present in OBJ)
@@ -192,6 +200,8 @@ bool ObjLoader::load(const fs::path& path) {
         // Auto-compute normals if not present
         if (!group.mesh.hasNormals() && group.mesh.hasIndices()) {
             computeNormals(group.mesh);
+        } else if (find(missingNormals.begin(), missingNormals.end(), true) != missingNormals.end()) {
+            computeNormals(group.mesh, missingNormals);
         }
 
         groups_.push_back(std::move(group));
@@ -233,7 +243,7 @@ Mesh ObjLoader::getMesh() const {
 // Compute per-vertex normals (smooth shading)
 // =============================================================================
 
-void ObjLoader::computeNormals(Mesh& mesh) {
+void ObjLoader::computeNormals(Mesh& mesh, const vector<bool>& missingNormals) {
     auto& vertices = mesh.getVertices();
     auto& indices = mesh.getIndices();
     int numVerts = mesh.getNumVertices();
@@ -254,20 +264,28 @@ void ObjLoader::computeNormals(Mesh& mesh) {
         Vec3 e2 = vertices[i2] - vertices[i0];
         Vec3 fn = e1.cross(e2);
 
-        normals[i0] = normals[i0] + fn;
-        normals[i1] = normals[i1] + fn;
-        normals[i2] = normals[i2] + fn;
+        for (auto index : {i0, i1, i2}) {
+            if (missingNormals.empty() || missingNormals[index]) {
+                normals[index] = normals[index] + fn;
+            }
+        }
     }
 
-    // Normalize and add to mesh
-    for (auto& n : normals) {
+    // Fill only missing normals; authored normals keep their exact values.
+    for (size_t i = 0; i < normals.size(); ++i) {
+        if (!missingNormals.empty() && !missingNormals[i]) continue;
+        auto& n = normals[i];
         float len = n.length();
-        if (len > 0.0001f) {
+        if (len > 0.0f) {
             n = n / len;
         } else {
             n = Vec3(0, 0, 1);
         }
-        mesh.addNormal(n);
+        if (missingNormals.empty()) {
+            mesh.addNormal(n);
+        } else {
+            mesh.setNormal(i, n);
+        }
     }
 }
 

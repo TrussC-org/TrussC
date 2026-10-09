@@ -118,14 +118,7 @@ void CollisionManager::forget(b2Body* body) {
         }
     }
 
-    // Pairs that still have contacts are ended by DestroyBody() (EndContact).
-    for (auto& pair : worldPairs_) {
-        if (!pair.contacts.empty()) continue;
-        if (pair.a == body) pair.a = nullptr;
-        if (pair.b == body) pair.b = nullptr;
-        if (pair.exit.a == body) pair.exit.a = nullptr;
-        if (pair.exit.b == body) pair.exit.b = nullptr;
-    }
+    forgetBody(body);
     for (auto& pair : activeContacts_) {
         if (!pair.contacts.empty()) continue;
         for (Collider2D* c : colliders) {
@@ -141,16 +134,22 @@ void CollisionManager::forget(b2Body* body) {
     }
 }
 
+// Unlike forget(), this never reads the body or its fixtures. Call again
+// after DestroyBody() to null the newly queued world-level Exit payloads.
+void CollisionManager::forgetBody(b2Body* body) {
+    if (!body) return;
+    for (auto& pair : worldPairs_) {
+        if (!pair.contacts.empty()) continue;
+        if (pair.a == body) pair.a = nullptr;
+        if (pair.b == body) pair.b = nullptr;
+        if (pair.exit.a == body) pair.exit.a = nullptr;
+        if (pair.exit.b == body) pair.exit.b = nullptr;
+    }
+}
+
 // =============================================================================
 // b2ContactListener Implementation
 // =============================================================================
-
-// True inside b2World::Step() (contact callbacks from Collide / SolveTOI).
-// EndContact also comes outside a step, from DestroyBody(), SetEnabled(false)
-// or SetType(): those Exits fire at once.
-static bool inStep(b2Contact* contact) {
-    return contact->GetFixtureA()->GetBody()->GetWorld()->IsLocked();
-}
 
 void CollisionManager::BeginContact(b2Contact* contact) {
     b2Fixture* fixtureA = contact->GetFixtureA();
@@ -182,13 +181,13 @@ void CollisionManager::BeginContact(b2Contact* contact) {
 void CollisionManager::EndContact(b2Contact* contact) {
     b2Fixture* fixtureA = contact->GetFixtureA();
     b2Fixture* fixtureB = contact->GetFixtureB();
-    const bool stepping = inStep(contact);
 
     // World-level Ended (Mod layer), regardless of Collider2D: when the body
     // pair's last contact ends.
     if (BodyPair* pair = removeContact(worldPairs_, fixtureA->GetBody(), fixtureB->GetBody(), contact)) {
         WorldContact wc = makeWorldContact(contact);
-        if (endPair(worldPairs_, pair, wc, stepping)) contactEnded.notify(wc);
+        pair->exitPending = true;
+        pair->exit = wc;
     }
 
     Collider2D* colliderA = getColliderFromFixture(fixtureA);
@@ -200,13 +199,10 @@ void CollisionManager::EndContact(b2Contact* contact) {
     ColliderPair* pair = removeContact(activeContacts_, colliderA, colliderB, contact);
     if (!pair) return;
 
-    // Dispatch onCollisionExit (after the step when inside one)
+    // Hold every Exit until the Box2D operation has returned.
     ColliderExit exit{createEvent(contact, pair->a, pair->b), createEvent(contact, pair->b, pair->a)};
-    Collider2D* a = pair->a;
-    Collider2D* b = pair->b;
-    if (!endPair(activeContacts_, pair, exit, stepping)) return;
-    a->notifyExit(exit.a);
-    b->notifyExit(exit.b);
+    pair->exitPending = true;
+    pair->exit = exit;
 }
 
 void CollisionManager::PreSolve(b2Contact* contact, const b2Manifold* oldManifold) {
@@ -303,18 +299,6 @@ CollisionManager::ContactPair<T, Exit>* CollisionManager::removeContact(
         return cs.empty() ? &pair : nullptr;
     }
     return nullptr;
-}
-
-template<typename T, typename Exit>
-bool CollisionManager::endPair(std::vector<ContactPair<T, Exit>>& pairs, ContactPair<T, Exit>* pair,
-                               const Exit& exit, bool stepping) {
-    if (stepping) {
-        pair->exitPending = true;
-        pair->exit = exit;
-        return false;
-    }
-    if (!dispatching_) pairs.erase(pairs.begin() + (pair - pairs.data()));
-    return true;
 }
 
 } // namespace tcx::box2d

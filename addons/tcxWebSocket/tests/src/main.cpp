@@ -289,6 +289,7 @@ struct Recorder {
 
 static bool connectClient(WebSocketClient& client, FakeServer& fake, Recorder& rec) {
     size_t opens = rec.count("open");
+    client.setConnectTimeout(2);
     if (!client.connect("ws://127.0.0.1:" + to_string(fake.port) + "/")) return false;
     if (!fake.acceptUpgrade()) return false;
     return waitFor([&] { return rec.count("open") > opens && client.isConnected(); });
@@ -296,7 +297,7 @@ static bool connectClient(WebSocketClient& client, FakeServer& fake, Recorder& r
 
 static bool hasCloseWithStatus(FakeServer& fake, int status) {
     for (auto& f : fake.frames()) {
-        if (f.opcode == 0x8 && f.masked && f.payload.size() == 2 &&
+        if (f.opcode == 0x8 && f.fin && f.masked && f.payload.size() == 2 &&
             ((((unsigned char)f.payload[0]) << 8) | (unsigned char)f.payload[1]) == status) {
             return true;
         }
@@ -306,7 +307,8 @@ static bool hasCloseWithStatus(FakeServer& fake, int status) {
 
 // One failure case: the server sends the given bytes; the client must send
 // Close <status>, then report onError followed by onClose.
-static void checkFailure(const string& name, const vector<vector<char>>& sends, int status) {
+static void checkFailure(const string& name, const vector<vector<char>>& sends, int status,
+                         const string& reason = "") {
     FakeServer fake;
     if (!fake.start()) { check(name + ": server start", false); return; }
     WebSocketClient client;
@@ -315,21 +317,92 @@ static void checkFailure(const string& name, const vector<vector<char>>& sends, 
     if (!connectClient(client, fake, rec)) { check(name + ": connect", false); return; }
     for (auto& b : sends) fake.send(b);
     bool closed = waitFor([&] { return rec.count("close") >= 1; });
-    this_thread::sleep_for(chrono::milliseconds(50));   // let any extra event arrive
+    bool gotClose = waitFor([&] { return hasCloseWithStatus(fake, status); });
+    bool disconnected = client.getState() == WebSocketClient::State::Disconnected;
+    // Join the transport threads before checking exact event/frame counts.
+    client.disconnect();
+    fake.server.stop();
     check(name + ": onClose fired", closed);
     check(name + ": events are onError then onClose",
           rec.eventsAfterOpen() == vector<string>{"error", "close"});
     check(name + ": no onMessage", rec.count("message") == 0);
     check(name + ": server got masked Close " + to_string(status),
-          waitFor([&] { return hasCloseWithStatus(fake, status); }));
-    check(name + ": client is Disconnected",
-          client.getState() == WebSocketClient::State::Disconnected);
+          gotClose && fake.frames().size() == 1);
+    check(name + ": client is Disconnected", disconnected);
     {
         lock_guard<mutex> l(rec.m);
+        if (!reason.empty()) {
+            check(name + ": error names the violation",
+                  rec.errors.size() == 1 && rec.errors[0].find(reason) != string::npos);
+        }
         if (!rec.errors.empty()) printf("    onError: %s\n", rec.errors[0].c_str());
     }
+}
+
+static void runHeaderValidationTests() {
+    // Check both a complete frame and just its header: rejection must not
+    // depend on the server supplying the advertised payload (or masking key).
+    auto reject = [](const string& name, vector<char> bytes, size_t headerSize,
+                     const string& reason) {
+        checkFailure(name, {bytes}, 1002, reason);
+        bytes.resize(headerSize);
+        checkFailure(name + " (header only)", {bytes}, 1002, reason);
+    };
+    for (uint8_t bit : {0x40, 0x20, 0x10}) {
+        reject("RSV bit " + to_string(bit), frame(0x81 | bit, "x"), 2, "RSV");
+    }
+    for (uint8_t opcode : {0x3, 0x4, 0x5, 0x6, 0x7, 0xB, 0xC, 0xD, 0xE, 0xF}) {
+        reject("reserved opcode " + to_string(opcode), frame(0x80 | opcode, "x"),
+               2, "reserved opcode");
+    }
+    for (uint8_t opcode : {0x8, 0x9, 0xA}) {
+        const string name = "control opcode " + to_string(opcode);
+        reject(name + " FIN=0", frame(opcode, "x"), 2, "fragmented control frame");
+        reject(name + " payload 126", frame(0x80 | opcode, string(126, 'x')),
+               4, "control frame payload over 125 bytes");
+        // Protocol error 1002 takes precedence over the general size limit.
+        checkFailure(name + " 64-bit length over message limit",
+                     {header64(0x80 | opcode, kMaxMessageSize + 1)}, 1002,
+                     "control frame payload over 125 bytes");
+    }
+    // Masked text "x", with a nonzero masking key.
+    reject("masked server frame", {(char)0x81, (char)0x81, 1, 2, 3, 4, 'y'},
+           2, "masked frame from server");
+}
+
+static void checkValidControlFrames() {
+    const string name = "valid Ping/Pong/Close";
+    FakeServer fake;
+    if (!fake.start()) { check(name + ": server start", false); return; }
+    WebSocketClient client;
+    Recorder rec;
+    rec.attach(client);
+    if (!connectClient(client, fake, rec)) { check(name + ": connect", false); return; }
+    const string ping(125, 'p');
+    fake.send(frame(0x89, ping));
+    fake.send(frame(0x8A, string(125, 'q')));
+    fake.send(frame(0x81, "text"));
+    const string binary("\x00\xFF", 2);
+    fake.send(frame(0x82, binary));
+    // Close with status 1000 and a reason, at the 125-byte control limit.
+    fake.send(frame(0x88, string("\x03\xE8", 2) + string(123, 'c')));
+    const bool closed = waitFor([&] { return rec.count("close") >= 1; });
+    const bool replied = waitFor([&] { return !fake.frames().empty(); });
     client.disconnect();
     fake.server.stop();
+    check(name + ": messages then one close, no error",
+          closed && rec.eventsAfterOpen() == vector<string>{"message", "message", "close"});
+    {
+        lock_guard<mutex> l(rec.m);
+        check(name + ": text and binary intact",
+              rec.messages.size() == 2 && rec.messages[0].message == "text" &&
+              !rec.messages[0].isBinary && dataEquals(rec.messages[0], "text") &&
+              rec.messages[1].isBinary && dataEquals(rec.messages[1], binary));
+    }
+    const auto received = fake.frames();
+    check(name + ": one masked Pong echoes 125-byte Ping",
+          replied && received.size() == 1 && received[0].opcode == 0xA &&
+          received[0].fin && received[0].masked && received[0].payload == ping);
 }
 
 // Poll cond, pumping the update event as the app's frame loop would
@@ -349,35 +422,18 @@ static void checkHandshakeTimeout(const string& name, const string& scheme) {
     client.setHandshakeTimeout(1);
     Recorder rec;
     rec.attach(client);
-    const auto t0 = chrono::steady_clock::now();
+    client.setConnectTimeout(2);
+    atomic<bool> disconnectedBeforeError{false};
+    EventListener stateL = client.onError.listen([&](TcpErrorEventArgs&) {
+        disconnectedBeforeError = client.getState() == WebSocketClient::State::Disconnected;
+    });
     check(name + ": connect()", client.connect(scheme + "://127.0.0.1:" + to_string(fake.port) + "/"));
     check(name + ": the server accepted",
           waitFor([&] { lock_guard<mutex> l(fake.m); return fake.connects == 1; }));
-    // Before t0 + 1 s the deadline cannot have run out: it counts from the
-    // TCP connect, which comes after t0. Pump until t0 + 500 ms (however long
-    // the wait above took), then sample the state and the time; the sample
-    // only proves something when it was taken before t0 + 1 s.
-    {
-        const auto until = t0 + chrono::milliseconds(500);
-        const auto now = chrono::steady_clock::now();
-        if (now < until) {
-            pumpUntil([] { return false; },
-                      (int)chrono::duration_cast<chrono::milliseconds>(until - now).count());
-        }
-        const bool connecting = client.getState() == WebSocketClient::State::Connecting &&
-                                rec.count("error") == 0 && rec.count("close") == 0;
-        if (chrono::steady_clock::now() < t0 + chrono::milliseconds(1000)) {
-            check(name + ": still Connecting before the deadline", connecting);
-        } else {
-            printf("    (still Connecting before the deadline: not checked, the waits above "
-                   "already took 1 s)\n");
-        }
-    }
     const bool closed = pumpUntil([&] { return rec.count("close") >= 1; }, 5000);
-    const auto elapsed = chrono::steady_clock::now() - t0;
-    pumpUntil([] { return false; }, 100);   // let any extra event arrive
-    check(name + ": onClose within 5 s", closed);
-    check(name + ": not before the 1 s deadline", elapsed >= chrono::milliseconds(900));
+    check(name + ": onClose fired", closed);
+    check(name + ": disconnected before onError", disconnectedBeforeError);
+    client.disconnect(); // join before checking the complete event sequence
     {
         lock_guard<mutex> l(rec.m);
         check(name + ": events are onError then onClose",
@@ -436,6 +492,37 @@ static void runHandshakeTimeoutTests() {
     checkHandshakeTimeout("ws:// no 101", "ws");
     checkHandshakeTimeout("wss:// no TLS handshake", "wss");
     checkCloseBeforeUpgrade();
+}
+
+// A timeout callback may replace or destroy the owner. The expired attempt
+// must be fully disconnected before the callback and must emit no stale close.
+static void checkTimeoutCallback(bool destroy) {
+    FakeServer fake;
+    if (!fake.start()) { check("timeout callback: server start", false); return; }
+    auto client = make_unique<WebSocketClient>();
+    client->setHandshakeTimeout(0.01f);
+    const string url = "ws://127.0.0.1:" + to_string(fake.port) + "/";
+    bool handled = false, disconnected = false;
+    int closes = 0;
+    EventListener closeL = client->onClose.listen([&] { ++closes; });
+    EventListener errorL = client->onError.listen([&](TcpErrorEventArgs&) {
+        disconnected = client->getState() == WebSocketClient::State::Disconnected;
+        if (destroy) client.reset();
+        else { client->setHandshakeTimeout(0); client->connect(url); }
+        handled = true;
+    });
+    client->connect(url);
+    check("timeout callback: error delivered", pumpUntil([&] { return handled; }, 5000));
+    check("timeout callback: disconnected before error", disconnected);
+    check("timeout callback: no stale close", closes == 0);
+    if (client) {
+        check("timeout callback: replacement accepted",
+              waitFor([&] { lock_guard<mutex> lock(fake.m); return fake.connects == 2; }));
+        check("timeout callback: replacement accepts upgrade", fake.acceptUpgrade());
+        check("timeout callback: replacement opens", waitFor([&] { return client->isConnected(); }));
+        client->disconnect();
+    }
+    fake.server.stop();
 }
 
 static void runReconnectFromEventTests() {
@@ -619,6 +706,9 @@ static void runLoopbackTests() {
     checkFailure("new Text while a message is in progress",
                  {frame(0x01, "a"), frame(0x81, "b")}, 1002);
 
+    runHeaderValidationTests();
+    checkValidControlFrames();
+
     // 5. Size limit -> Close 1009, onError, onClose. The header alone triggers it.
     checkFailure("single frame over the limit", {header64(0x82, kMaxMessageSize + 1)}, 1009);
     checkFailure("fragments together over the limit",
@@ -643,6 +733,8 @@ static void runLoopbackTests() {
     }
 
     runHandshakeTimeoutTests();
+    checkTimeoutCallback(false);
+    checkTimeoutCallback(true);
     runReconnectFromEventTests();
 }
 

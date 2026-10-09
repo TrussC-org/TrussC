@@ -6,14 +6,33 @@ and contributors, under the MIT license (see [LICENSES.md](LICENSES.md)).
 
 | File | Version | Source | Commit | Imported | TrussC patches |
 |---|---|---|---|---|---|
-| `src/tiny_obj_loader.h` | 2.0.0 (last entry of the version history in the file) | [tinyobjloader/tinyobjloader](https://github.com/tinyobjloader/tinyobjloader), branch `release` | `966edceaf8cdca7996c4e9a1c5ced2938de63366` (2026-03-10) | 2026-04-19 | 2 |
+| `src/tiny_obj_loader.h` | 2.0.0 (last entry of the version history in the file) | [tinyobjloader/tinyobjloader](https://github.com/tinyobjloader/tinyobjloader), branch `release` | `45636bdcef1a4fec140346b90c0b50bf0bc3e23b` (2026-06-19) | 2026-10-08 | 2 |
 
-"Commit" is the commit of the source repository whose copy of the file is
-byte-identical to TrussC's copy before TrussC patches (git blob
-`af98ac2d3d493a5868042f57c755167cc5927ceb`). The file stayed unchanged on
-`release` until `62ff207968f3dc14a64a1e2378dce67b760e7c4a` (2026-05-22,
-"Add optimized parser with multithreading, SIMD, and custom allocator
-support"), which TrussC has not taken.
+"Commit" pins the `release` branch snapshot used for this update. Before
+TrussC patches, the header is byte-identical to that snapshot. Both patches
+below still apply; neither has been replaced by an upstream equivalent.
+
+The latest tag, `v2.0.0rc13` (2024-01-26), predates the previous vendored
+commit `966edce`. Upstream's [release notes](https://github.com/tinyobjloader/tinyobjloader/releases)
+recommend the `release` branch; this update follows issue #639's Decision.
+
+## Upstream changes since `966edce`
+
+Reviewed the [complete commit interval](https://github.com/tinyobjloader/tinyobjloader/compare/966edceaf8cdca7996c4e9a1c5ced2938de63366...45636bdcef1a4fec140346b90c0b50bf0bc3e23b)
+and the [README changelog](https://github.com/tinyobjloader/tinyobjloader/blob/45636bdcef1a4fec140346b90c0b50bf0bc3e23b/README.md#whats-new).
+There are no intervening release tags.
+
+- Parser hardening includes a joint-ID range check in the classic loader.
+  The new C11 loader also received allocator and I/O callback hardening;
+  those separate C files are not vendored by TrussC.
+- The C++ header adds `LoadObjOpt` / `LoadObjOptTyped`, arena allocation and
+  opt-in SIMD, threading and exceptions. TrussC continues using `LoadObj`
+  with its existing defaults; it does not select the new optimized API.
+- Tag and skin-weight types now have allocator-aware implementations with
+  the existing names retained as default-allocator aliases. The header
+  also guards its implementation against repeated inclusion.
+- The remaining commits update the README and introduce/document the
+  separate C11 loader. The MIT license text is unchanged.
 
 The implementation is compiled in `src/tcxObjLoader.cpp`
 (`TINYOBJLOADER_IMPLEMENTATION`), which calls `tinyobj::LoadObj()` with its
@@ -57,7 +76,8 @@ that no position past the array is read.
 4. Check that `src/tcxObjLoader.cpp` still compiles against it, and run the
    addon tests (`build_all.py --addon-tests-only`) and `example-basic`.
 5. Update this file (commit, date, version, patches) and the tinyobjloader
-   section of [LICENSES.md](LICENSES.md).
+   row of [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)
+   (`tools/check_dependencies.py` compares the two).
 
 To check which upstream commit the file matches, undo the TrussC patches
 and run in a clone of tinyobjloader: `git log --all -m --format='%H %ci'

@@ -26,6 +26,15 @@ checks what the MCP tools would report.
 
 Cases (`src/main.cpp`):
 
+- entry/exit comparisons (#345): a color-payload drop records an untouched
+  `ColorEdit4`; re-picking the current `Combo` / `ListBox` item records
+  nothing; new picks are recorded without stale combo text, even if the
+  combo is hidden immediately. Custom combo/list filters record themselves
+  but not their owner, while Selectable picks still route to it. Nested
+  value widgets do not spuriously touch plain combo/list owners. Snapshot
+  storage is reused and stays paired when collection is disabled mid-call.
+  Dragging the eighth component of a `DragScalarN` records all eight doubles.
+  The menu tests also cover a null `p_selected`.
 - touched record (#322): a toggle `MenuItem(bool*)` in a dropdown is recorded
   with its new value although the menu closes; `Selectable(bool*)` and
   `Checkbox` carry their value; `RadioButton(int*)` reports the variable under

@@ -1,11 +1,11 @@
 // =============================================================================
-// core/tests/streamSeek — behavioral regression test for #280: seeking a
+// core/tests/streamSeek — behavioral regression test for #280 and #448: seeking a
 // streamed Sound moves the audio, and a stream that cannot be read ends
 // instead of spinning the StreamWorker thread.
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // The engine runs on miniaudio's null backend
-// (internal::setNullAudioBackendForTests()), a device-less clock that still
+// (AudioSettings::backend = AudioBackend::Null), a device-less clock that still
 // drives the real mixer callback, so no sound card is needed. The test
 // listens on AudioEngine::audioOut and reads the level of the mix: every
 // test file holds DC levels, so the level tells which part of the file is
@@ -36,9 +36,8 @@
 //   refilling the other streams.
 // - A decoder read error, a failed loop seek and a failed seek request each
 //   end the stream with one error log (a test hook makes the decoder fail).
-//   A non-looping voice then ends; a looping one stays playing but silent
-//   (what isPlaying() should say then is #448), and setPosition() makes it
-//   play again.
+//   Both looping and non-looping voices end. There is no automatic retry;
+//   the app can reload and play again after isPlaying() becomes false.
 // - The frames a failing read still returned are played before the voice
 //   ends.
 // - An MP3 stream's decoder gets a seek table (one point per second, at
@@ -71,6 +70,7 @@
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcStreamSeekDiagnostics.h"
 
 #include <atomic>
 #include <chrono>
@@ -78,6 +78,7 @@
 #include <cstdio>
 #include <fstream>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 #include <utility>
@@ -100,9 +101,12 @@ static void check(const string& name, bool ok, const string& detail = "") {
 static mutex g_logMutex;
 static vector<pair<LogLevel, string>> g_logs;
 
-// While set, the log listener holds the thread that logs "decoder read
-// failed" for 100 ms: the StreamWorker then pauses right where it logs.
-static atomic<bool> g_slowReadFailLog{false};
+// Hold delivery BEFORE capture, after halt() has published endOfStream.
+// The main thread releases this only after observing the voice end without
+// its log. All state is global: an in-flight listener cannot outlive it.
+static atomic<bool> g_holdReadFailLog{false};
+static atomic<bool> g_readFailLogEntered{false};
+static atomic<bool> g_readFailLogTimedOut{false};
 
 static size_t countLogs(LogLevel level, const string& needle) {
     lock_guard<mutex> lock(g_logMutex);
@@ -225,10 +229,11 @@ static bool approx(float a, float b, float tol) { return fabs(a - b) <= tol; }
 // Wait (up to `timeoutMs`) until `pred()` holds.
 template <class Pred>
 static bool waitFor(Pred pred, int timeoutMs) {
-    for (int t = 0; t < timeoutMs; t += 5) {
+    const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(timeoutMs);
+    do {
         if (pred()) return true;
         sleepMs(5);
-    }
+    } while (chrono::steady_clock::now() < deadline);
     return pred();
 }
 
@@ -285,40 +290,108 @@ static PlayedFrom playedFrom(Sound& s, float target, chrono::steady_clock::time_
     return r;
 }
 
-// setPosition(target), then watch getPosition() and the level until the
-// level reaches `newLevel` (up to 2 s): getPosition() never drops below the
-// target meanwhile, and it is still close to the target when the level
-// switches.
-struct SeekTrace {
-    chrono::steady_clock::time_point t0;   // just before the call
-    float first = -1.0f;      // getPosition() right after the call
-    float minSeen = 1e9f;     // lowest getPosition() until the switch
-    float atSwitch = -1.0f;   // getPosition() when the level switched
-    float switchGapSec = 0.0f;   // from the poll before the switch to atSwitch
-    bool switched = false;
+// Capture the level and reported position in audioOut, before the next mix
+// can advance the voice. A Sound copy owns the observed voice; shared state
+// also survives a callback already in flight when the listener disconnects.
+struct SeekBlock {
+    uint64_t frame = 0;
+    int frames = 0;
+    int targetFrames = 0; // includes a partial first block, excludes silence
+    int rate = 0;
+    float level = 0.0f;
+    float position = -1.0f;
+    internal::StreamSeekStateForTests seek;
 };
 
-static SeekTrace seekAndTrace(Sound& s, float target, float newLevel) {
-    SeekTrace t;
-    t.t0 = chrono::steady_clock::now();
-    s.setPosition(target);
-    t.first = s.getPosition();
-    auto lastPoll = t.t0;
-    while (chrono::steady_clock::now() - t.t0 < chrono::milliseconds(2000)) {
-        const auto now = chrono::steady_clock::now();
-        const float p = s.getPosition();
-        if (p < t.minSeen) t.minSeen = p;
-        if (approx(g_level.load(), newLevel, 0.02f)) {
-            t.atSwitch = s.getPosition();
-            // The level switched after the previous poll saw the old one:
-            // the position may have moved on by the time since then.
-            t.switchGapSec = secondsSince(lastPoll);
-            t.switched = true;
-            break;
-        }
-        lastPoll = now;
-        sleepMs(1);
+struct SeekTrace {
+    chrono::steady_clock::time_point t0;
+    float first = -1.0f;
+    float minSeen = 1e9f;
+    float atSwitch = -1.0f;
+    bool switched = false; // still requires a full block at the target level
+    bool observerDelayed = false;
+    SeekBlock firstAudio;
+    string detail() const {
+        const auto& b = firstAudio;
+        return "position=" + to_string(atSwitch) + ", level=" + to_string(b.level) +
+               ", frame=" + to_string(b.frame) + ", frames=" + to_string(b.frames) +
+               ", targetFrames=" + to_string(b.targetFrames) +
+               ", seek request/served/published/applied=" + to_string(b.seek.request) +
+               "/" + to_string(b.seek.served) + "/" + to_string(b.seek.published) +
+               "/" + to_string(b.seek.applied);
     }
+    bool atTarget(float target) const {
+        // Keep the original 0.1 s margin, and additionally check the actual
+        // frames in the first audible block (including a partial block).
+        return switched && atSwitch >= target - 0.001f && atSwitch < target + 0.1f &&
+               firstAudio.rate > 0 &&
+               approx(atSwitch, target + (float)firstAudio.targetFrames / firstAudio.rate, 0.001f);
+    }
+};
+
+static SeekTrace seekAndTrace(Sound& s, float target, float newLevel, bool delayObserver = false) {
+    struct Recording {
+        mutex lock;
+        bool armed = false;
+        vector<SeekBlock> blocks;
+    };
+    auto recording = make_shared<Recording>();
+    auto sub = AudioEngine::getInstance().audioOut.listen(
+        [recording, voice = s, newLevel](AudioOutBuffer& b) {
+            lock_guard<mutex> lock(recording->lock);
+            if (!recording->armed) return;
+            SeekBlock block;
+            block.frame = b.framePosition;
+            block.frames = b.frameCount;
+            block.rate = b.sampleRate;
+            double sum = 0.0;
+            for (int i = 0; i < b.frameCount; ++i) {
+                const float sample = b.data[i * b.channels];
+                sum += sample;
+                if (approx(sample, newLevel, 0.02f)) ++block.targetFrames;
+            }
+            block.level = b.frameCount > 0 ? (float)(sum / b.frameCount) : 0.0f;
+            block.position = voice.getPosition();
+            block.seek = internal::streamSeekStateForTests(voice);
+            recording->blocks.push_back(block);
+        });
+    SeekTrace t;
+    {
+        lock_guard<mutex> lock(recording->lock);
+        t.t0 = chrono::steady_clock::now();
+        s.setPosition(target);
+        t.first = s.getPosition();
+        recording->armed = true;
+    }
+    if (delayObserver) {
+        // Deliberately consume the first target level only AFTER later blocks
+        // have advanced the position beyond the old 0.1 s window. No elapsed
+        // sleep decides success: the recorded playback condition does.
+        t.observerDelayed = waitFor([&] {
+            lock_guard<mutex> lock(recording->lock);
+            return !recording->blocks.empty() && recording->blocks.back().position > target + 0.15f;
+        }, 2000);
+    }
+    waitFor([&] {
+        const float p = s.getPosition();
+        t.minSeen = min(t.minSeen, p);
+        lock_guard<mutex> lock(recording->lock);
+        for (const auto& b : recording->blocks) {
+            t.minSeen = min(t.minSeen, b.position);
+            // A callback mixed just before setPosition can still deliver the
+            // old level; it cannot contain the new target's DC samples.
+            if (b.targetFrames > 0 && t.atSwitch < 0.0f) {
+                t.firstAudio = b;
+                t.atSwitch = b.position;
+            }
+            if (approx(b.level, newLevel, 0.02f)) {
+                t.switched = true;
+                return true;
+            }
+        }
+        return false;
+    }, 2000);
+    sub.disconnect();
     return t;
 }
 
@@ -334,22 +407,22 @@ TC_CORE_TEST_MAIN() {
         _Exit(3);
     }).detach();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
-        {
-            lock_guard<mutex> lock(g_logMutex);
-            g_logs.push_back({e.level, e.message});
+        if (g_holdReadFailLog.load() && e.message.find("decoder read failed") != string::npos) {
+            g_readFailLogEntered.store(true);
+            if (!waitFor([] { return !g_holdReadFailLog.load(); }, 1000)) {
+                g_readFailLogTimedOut.store(true);
+            }
         }
-        if (g_slowReadFailLog.load() && e.message.find("decoder read failed") != string::npos) {
-            sleepMs(100);
-        }
+        lock_guard<mutex> lock(g_logMutex);
+        g_logs.push_back({e.level, e.message});
     });
 
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = kRate;
     settings.channels = 2;
     settings.bufferSize = 256;
@@ -364,9 +437,9 @@ TC_CORE_TEST_MAIN() {
         for (int i = 0; i < b.frameCount; ++i) sum += b.data[i * b.channels];
         const float level = b.frameCount > 0 ? (float)(sum / b.frameCount) : 0.0f;
         g_level.store(level);
+        lock_guard<mutex> lock(g_blockMutex);
         const uint64_t n = g_blocks.fetch_add(1) + 1;
         if (g_record.load()) {
-            lock_guard<mutex> lock(g_blockMutex);
             g_blockLevels.push_back({n, level});
             g_recordSum += sum;
         }
@@ -410,6 +483,72 @@ TC_CORE_TEST_MAIN() {
           writeSilentMp3(shortMp3, 1300) && writeWav(endWav, {{11000.0f / kRate, 0.0f}, {1000.0f / kRate, 0.5f}}) &&
           longMp3Frames > 0 && writeSilentMp3(longMp3, longMp3Frames));
 
+    // --- MP3 preparation is per load, shared across voices and engine rates (#463) ---
+    {
+        const auto scans = internal::streamMp3ScansForTests();
+        const auto builds = internal::streamMp3TableBuildsForTests();
+        auto preparedOnce = [&] {
+            return internal::streamMp3ScansForTests() == scans + 1 &&
+                   internal::streamMp3TableBuildsForTests() == builds + 1;
+        };
+        AudioSettings loadSettings = settings;
+        loadSettings.sampleRate = 44100;
+        check("MP3 cache: load at a non-native engine rate", engine.init(loadSettings));
+        Sound m;
+        check("MP3 cache: load the long file", (bool)m.loadStream(longMp3, 2));
+        check("MP3 cache: load scans and builds once", preparedOnce());
+        Sound other = m; // same source; play() creates independent voices
+        for (int i = 0; i < 3; ++i) {
+            check("MP3 cache: repeated play succeeds", m.play());
+            check("MP3 cache: play does not scan or build", preparedOnce());
+            m.stop();
+        }
+        check("MP3 cache: two simultaneous voices play", m.play() && other.play());
+        const auto first = internal::streamSeekStateForTests(m);
+        const auto second = internal::streamSeekStateForTests(other);
+        check("MP3 cache: both voices bind the same table",
+              first.mp3SeekTable && first.mp3SeekTable == second.mp3SeekTable);
+        check("MP3 cache: initial length uses the engine rate",
+              first.totalFrames == longMp3Total * 44100 / kRate);
+        check("MP3 cache: simultaneous play does not scan or build", preparedOnce());
+        m.setSpeed(0.0f);
+        other.setSpeed(0.0f);
+        for (int rate : {96000, 44100, kRate}) {
+            AudioSettings changed = settings;
+            changed.sampleRate = rate;
+            check("MP3 cache: re-init at another rate", engine.init(changed));
+            const auto migrated = internal::streamSeekStateForTests(m);
+            const auto migratedOther = internal::streamSeekStateForTests(other);
+            check("MP3 cache: re-init retains the same table for both voices",
+                  migrated.mp3SeekTable == first.mp3SeekTable &&
+                  migratedOther.mp3SeekTable == first.mp3SeekTable);
+            // At these rates miniaudio truncates to whole output frames.
+            check("MP3 cache: length converts from the native frame count",
+                  migrated.totalFrames == longMp3Total * rate / kRate &&
+                  migratedOther.totalFrames == migrated.totalFrames);
+            check("MP3 cache: re-init does not scan or build", preparedOnce());
+            for (float target : {900.0f, 100.0f, 600.0f}) {
+                m.setPosition(target);
+                const bool applied = waitFor([&] {
+                    const auto state = internal::streamSeekStateForTests(m);
+                    return state.request != 0 && state.applied == state.request;
+                }, 2000);
+                check("MP3 cache: long forward/backward seek is applied at target",
+                      applied && m.isPlaying() && approx(m.getPosition(), target, 0.001f));
+            }
+        }
+        m.stop();
+        m = Sound{};
+        other.setPosition(800.0f);
+        check("MP3 cache: remaining voice can seek after the original is released",
+              waitFor([&] {
+                  const auto state = internal::streamSeekStateForTests(other);
+                  return state.request != 0 && state.applied == state.request;
+              }, 2000) && approx(other.getPosition(), 800.0f, 0.001f));
+        check("MP3 cache: seeks do not scan or build", preparedOnce());
+        other.stop();
+    }
+
     // --- seek while playing ------------------------------------------------------
     Sound s;
     check("loadStream() opens the DC file", (bool)s.loadStream(dcWav) && s.isStreaming());
@@ -425,10 +564,7 @@ TC_CORE_TEST_MAIN() {
     check("the audio moved to the target (level 0.5)", t.switched, to_string(g_level.load()));
     check("getPosition() never reported the old position meanwhile", t.minSeen >= 2.0f - 0.001f,
           to_string(t.minSeen));
-    // 0.1 s, plus the time since the poll that still heard the old level.
-    check("getPosition() is still the target when the audio moves",
-          t.switched && t.atSwitch >= 2.0f - 0.001f && t.atSwitch < 2.1f + t.switchGapSec,
-          to_string(t.atSwitch) + " (" + to_string(t.switchGapSec) + " s since the last poll)");
+    check("getPosition() is still the target when the audio moves", t.atTarget(2.0f), t.detail());
     PlayedFrom pf = playedFrom(s, 2.0f, t.t0);
     check("then getPosition() follows the playback from the target", pf.ok(2.0f), pf.detail());
 
@@ -481,6 +617,25 @@ TC_CORE_TEST_MAIN() {
     check("repeated while paused: getPosition() follows from the last target", pf.ok(0.4f),
           pf.detail());
     s.stop();
+
+    // Reproduce the level-before-position observation order under a delayed
+    // observer. The original seek checks also run without the injected delay.
+    {
+        Sound delayed;
+        check("delayed observer: the old level plays",
+              (bool)delayed.loadStream(dcWav) && delayed.play() && waitLevel(0.1f));
+        const SeekTrace trace = seekAndTrace(delayed, 2.0f, 0.5f, true);
+        check("delayed observer: later playback precedes reading the first target block",
+              trace.observerDelayed, trace.detail());
+        check("delayed observer: immediate target and no old position",
+              approx(trace.first, 2.0f, 0.001f) && trace.minSeen >= 2.0f - 0.001f, trace.detail());
+        check("delayed observer: target audio and position agree in their block",
+              trace.atTarget(2.0f), trace.detail());
+        const PlayedFrom delayedPlayback = playedFrom(delayed, 2.0f, trace.t0);
+        check("delayed observer: position follows playback",
+              delayedPlayback.ok(2.0f), delayedPlayback.detail());
+        delayed.stop();
+    }
 
     // --- while a seek is pending ---------------------------------------------------
     // The worker is held back (Stalls) so the request stays pending while the
@@ -543,16 +698,46 @@ TC_CORE_TEST_MAIN() {
                           ", isPlaying " + (playing ? "true" : "false");
         }
         check("pending: it is still playing early in the file (position < 0.2)", early,
-              earlyDetail);
+              early ? earlyDetail : earlyDetail + ", " + tcCoreTest::streamSeekFailureState(n, g_level.load()));
         if (early) {
             internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
             n.setPosition(0.0f);
-            sleepMs(400);  // longer than what the ring held
+            const uint64_t pendingAt = g_blocks.load();
+            // Process 0.4 s of callbacks, longer than what the ring held.
+            const bool pending = waitFor([&] {
+                return g_blocks.load() - pendingAt >= kRate * 4 / 10 / settings.bufferSize;
+            }, 2000);
+            const bool playing = pending && n.isPlaying();
             check("pending: a non-looping stream does not end at the old data's end",
-                  n.isPlaying());
-            internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+                  playing, playing ? "" : tcCoreTest::streamSeekFailureState(n, g_level.load()));
+            {
+                lock_guard<mutex> lock(g_blockMutex);
+                g_blockLevels.clear();
+                g_record.store(true);
+                // Arm recording before the worker can produce target audio.
+                internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
+            }
+            bool ended = false;
+            uint64_t endedAt = 0;
+            waitFor([&] {
+                if (!ended && !n.isPlaying()) {
+                    ended = true;
+                    endedAt = g_blocks.load();
+                }
+                // The mixer can end the voice before audioOut records its
+                // final block. Wait for a callback after observing the end.
+                return ended && g_blocks.load() > endedAt;
+            }, 2000);
+            bool heard = false;
+            {
+                lock_guard<mutex> lock(g_blockMutex);
+                g_record.store(false);
+                for (const auto& b : g_blockLevels) {
+                    if (approx(b.second, 0.5f, 0.02f)) heard = true;
+                }
+            }
             check("pending: then it plays from the target (level 0.5)",
-                  waitLevel(0.5f), to_string(g_level.load()));
+                  heard, heard ? "" : tcCoreTest::streamSeekFailureState(n, g_level.load()));
         }
         n.stop();
     }
@@ -649,13 +834,14 @@ TC_CORE_TEST_MAIN() {
               waitFor([&] { return countLogs(LogLevel::Error, "no frames to read") == before + 1; },
                       1000),
               lastLog(LogLevel::Error));
-        sleepMs(1000);   // longer than the other stream's ring holds
-        check("the other stream is still refilled (level 0.5 a second later)", waitLevel(0.5f),
+        check("the emptied looping voice stops",
+              waitFor([&] { return !vanish.isPlaying(); }, 1000));
+        // Advance beyond the other stream's ring capacity, so a stuck
+        // worker cannot pass by playing only already buffered frames.
+        check("the other stream is still refilled beyond its initial ring",
+              waitFor([&] { return bgm.getPosition() > 1.0f; }, 2000) && waitLevel(0.5f),
               to_string(g_level.load()));
-        // A looping voice whose stream halted plays on silently; what
-        // isPlaying() should say then is #448 (undecided), so this pins the
-        // current behaviour.
-        check("the emptied looping voice stays playing, silent (#448)", vanish.isPlaying());
+        check("the emptied looping voice stays stopped", !vanish.isPlaying());
         check("the error is logged once",
               countLogs(LogLevel::Error, "no frames to read") == before + 1);
         vanish.stop();
@@ -677,12 +863,17 @@ TC_CORE_TEST_MAIN() {
         check("the read error is logged once",
               countLogs(LogLevel::Error, "decoder read failed") == 1);
         check("after a read error the voice falls silent", silent, to_string(g_level.load()));
-        // #448: see the emptied stream above.
-        check("after a read error the looping voice stays playing, silent (#448)", c.isPlaying());
+        check("after a read error the looping voice stops",
+              waitFor([&] { return !c.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        c.setPosition(2.0f);
-        check("after a read error setPosition() makes it play again (level 0.5)",
-              waitLevel(0.5f), to_string(g_level.load()));
+        const uint64_t stoppedAt = g_blocks.load();
+        check("audio callbacks continue after the fault is cleared",
+              waitFor([&] { return g_blocks.load() > stoppedAt + 4; }, 1000));
+        check("clearing the read fault does not retry or log again",
+              !c.isPlaying() && engine.getPlayingSounds().empty() &&
+              countLogs(LogLevel::Error, "decoder read failed") == 1);
+        check("the app can reload and play after the read error",
+              (bool)c.loadStream(bgmWav) && c.play() && waitLevel(0.5f), to_string(g_level.load()));
         c.stop();
 
         Sound after;
@@ -708,25 +899,25 @@ TC_CORE_TEST_MAIN() {
         check("the failed loop seek is logged once",
               countLogs(LogLevel::Error, "seek to the start for the loop failed") == 1);
         check("after a failed loop seek the voice falls silent", silent, to_string(g_level.load()));
-        // #448: see the emptied stream above.
-        check("after a failed loop seek the looping voice stays playing, silent (#448)",
-              e.isPlaying());
+        check("after a failed loop seek the looping voice stops",
+              waitFor([&] { return !e.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        e.setPosition(0.0f);
-        check("after a failed loop seek setPosition() makes it play again (level 0.1)",
-              waitLevel(0.1f), to_string(g_level.load()));
+        check("the app can reload and play after the failed loop seek",
+              (bool)e.loadStream(shortWav) && e.play() && waitLevel(0.1f), to_string(g_level.load()));
         e.stop();
     }
 
     // --- failed seek request -----------------------------------------------------
-    {
+    for (bool loop : {false, true}) {
         Sound f;
+        const size_t logged = countLogs(LogLevel::Error, "seek to frame");
+        f.setLoop(loop);
         check("a stream plays", (bool)f.loadStream(dcWav) && f.play() && waitLevel(0.1f),
               to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::SeekFails);
         f.setPosition(2.0f);
         check("a failed seek request ends the stream with an error log",
-              waitFor([] { return countLogs(LogLevel::Error, "seek to frame") == 1; }, 1000),
+              waitFor([&] { return countLogs(LogLevel::Error, "seek to frame") == logged + 1; }, 1000),
               lastLog(LogLevel::Error));
         check("after a failed seek the voice ends", waitFor([&] { return !f.isPlaying(); }, 1000));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
@@ -737,11 +928,12 @@ TC_CORE_TEST_MAIN() {
     // The stream underruns (the worker held back), then the next read returns
     // 1024 frames and an error. Those frames must be published before the
     // stream ends: a mixer that saw the end first would end the voice
-    // without them. The log listener holds the worker for 100 ms where it
-    // logs the error, so that order is observable every time.
-    {
+    // without them. Hold the worker before log capture until the test has
+    // observed the end, deliberately reproducing the macOS failure order.
+    for (bool loop : {false, true}) {
         Sound w;
-        check("read error with frames: a non-looping stream at level 0.5 plays",
+        w.setLoop(loop);
+        check("read error with frames: a stream at level 0.5 plays",
               (bool)w.loadStream(bgmWav) && w.play() && waitLevel(0.5f), to_string(g_level.load()));
         internal::setStreamFaultForTests(internal::StreamFaultForTests::Stalls);
         // The ring (~340 ms) drains: the mixer underruns.
@@ -753,13 +945,23 @@ TC_CORE_TEST_MAIN() {
             g_blockLevels.clear();
         }
         const size_t logged = countLogs(LogLevel::Error, "decoder read failed");
-        g_slowReadFailLog.store(true);
+        g_readFailLogEntered.store(false);
+        g_readFailLogTimedOut.store(false);
+        g_holdReadFailLog.store(true);
         g_record.store(true);
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReadFailsWithFrames);
-        const bool ended = waitFor([&] { return !w.isPlaying(); }, 1000);
+        const bool endBeforeLog = waitFor([&] {
+            return !w.isPlaying() && g_readFailLogEntered.load();
+        }, 1000);
+        check("read error with frames: end is observed before log delivery",
+              endBeforeLog && countLogs(LogLevel::Error, "decoder read failed") == logged &&
+              !g_readFailLogTimedOut.load());
+        g_holdReadFailLog.store(false);
+        const bool endedAndLogged = waitFor([&] {
+            return !w.isPlaying() && countLogs(LogLevel::Error, "decoder read failed") == logged + 1;
+        }, 1000);
         g_record.store(false);
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
-        g_slowReadFailLog.store(false);
         int heard = 0;
         {
             lock_guard<mutex> lock(g_blockMutex);
@@ -768,8 +970,10 @@ TC_CORE_TEST_MAIN() {
             }
         }
         check("read error with frames: the stream ends with an error log",
-              ended && countLogs(LogLevel::Error, "decoder read failed") == logged + 1,
-              lastLog(LogLevel::Error));
+              endedAndLogged && countLogs(LogLevel::Error, "decoder read failed") == logged + 1,
+              string(endedAndLogged ? "" : "timeout: ") + "playing=" + to_string(w.isPlaying()) +
+              ", logs=" + to_string(countLogs(LogLevel::Error, "decoder read failed") - logged) +
+              ", heard=" + to_string(heard) + " blocks; " + lastLog(LogLevel::Error));
         // 1024 frames = 4 blocks of 256 (a partial block reads lower).
         check("read error with frames: the frames it returned are played first",
               heard >= 3, to_string(heard) + " blocks at level 0.5");
@@ -1039,13 +1243,16 @@ TC_CORE_TEST_MAIN() {
         const auto t0 = chrono::steady_clock::now();
         const float before = a.getPosition();
         const size_t warned = countLogs(LogLevel::Warning, "stream playback migration failed");
+        const auto statsBefore = engine.getStats();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::ReopenFails);
         const bool restarted = reinitAt(otherRate());
         const float elapsedSec = chrono::duration<float>(chrono::steady_clock::now() - t0).count();
         internal::setStreamFaultForTests(internal::StreamFaultForTests::None);
         check("reopen fails: the engine restarts", restarted);
         check("reopen fails: both voices end with a warning",
-              !a.isPlaying() &&
+              !a.isPlaying() && !b.isPlaying() &&
+              engine.getStats().voicesStoppedByReinit == statsBefore.voicesStoppedByReinit + 2 &&
+              engine.getStats().droppedPlays == statsBefore.droppedPlays &&
               countLogs(LogLevel::Warning, "stream playback migration failed") == warned + 2,
               lastLog(LogLevel::Warning));
         const float after = a.getPosition();

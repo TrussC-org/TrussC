@@ -486,6 +486,18 @@ desc flags invert this:
   `identifier`, `pos_x/y = targetX/Y * dpi_scale`, `changed = isChanged`
   (7882–7889). Consume unless `bubble_touch_events`. No synthetic mouse events are
   generated from touch — the app gets native touch events.
+- `SAPP_MAX_TOUCHPOINTS = 32`, matching the fixed `TouchEventArgs` array, guarded
+  by a `static_assert` at the TrussC conversion. At or below the cap, the input
+  order is unchanged. Only on overflow, scan the remaining points and replace
+  the last kept unchanged point for each `isChanged` point; already kept changed
+  points are retained. More changed points than slots still cannot fit. Emit
+  `_SAPP_WARN_MSG` once on overflow, with an implementation-local once-flag.
+- Emscripten itself supplies at most 32 points, so with the normal cap the fork
+  receives the whole list. Points lost before this callback cannot be recovered
+  or counted for the warning. The fork's overflow path matters with a lowered cap.
+- Manual regression check: temporarily lower both caps to 2, use 3 fingers on
+  a browser touch screen, and lift each in turn. Every press/release must contain
+  a changed point, with one overflow warning. Restore 32 and repeat with 8 or more fingers.
 
 ### Focus / blur (7896–7916)
 `_sapp_emsc_focus_cb` → FOCUSED, `_sapp_emsc_blur_cb` → UNFOCUSED. Registered on

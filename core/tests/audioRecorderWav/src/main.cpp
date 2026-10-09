@@ -6,7 +6,7 @@
 // The header part works on the header alone (internal::wavSizeFields(),
 // writeWavHeader() and patchWavHeader() on a memory stream), so no 4 GiB
 // file is written. The recording part runs the real AudioEngine on
-// miniaudio's null backend (internal::setNullAudioBackendForTests()), a
+// miniaudio's null backend (AudioSettings::backend = AudioBackend::Null), a
 // device-less clock that still drives the mixer callback.
 //
 // Guards the invariants:
@@ -341,8 +341,6 @@ TC_CORE_TEST_MAIN() {
     checkSizeFields();
     checkHeaderBytes();
 
-    // Device-less engine; set before anything opens a context.
-    internal::setNullAudioBackendForTests(true);
     getMainThreadId();   // this thread is the main thread
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
@@ -353,6 +351,7 @@ TC_CORE_TEST_MAIN() {
 
     auto& engine = AudioEngine::getInstance();
     AudioSettings settings;
+    settings.backend = AudioBackend::Null;
     settings.sampleRate = 48000;
     settings.channels = 2;
     settings.bufferSize = 256;

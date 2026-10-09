@@ -82,7 +82,7 @@ function firstBindableSig(e) {
 const categories = {};
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'func' || e.owner || e.ns || e.hidden || e.noLua || e.deprecated) continue;
+    if (e.kind !== 'func' || e.owner || e.ns || e.hidden || e.lua_skip || e.deprecated) continue;
     if (e.tparams && e.tparams.length) continue;
     const fb = firstBindableSig(e);
     if (!fb) continue;
@@ -94,7 +94,7 @@ for (const id in data) {
 const types = [];
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'type' || e.owner || e.ns || e.hidden || e.noLua) continue;
+    if (e.kind !== 'type' || e.owner || e.ns || e.hidden || e.lua_skip) continue;
     if (UNBOUND_TYPES.has(e.name)) continue;
     // Tween template: emitted as four value-typed instances below.
     if (e.name === 'Tween') continue;
@@ -144,7 +144,7 @@ for (const id in data) {
             const m = data[mid];
             if (m.owner !== e.id) continue;
             if (m.access && m.access !== 'public') continue;
-            if (m.hidden || m.noLua || m.deprecated) continue;
+            if (m.hidden || m.lua_skip || m.deprecated) continue;
             if (/^operator/.test(m.name)) continue;
             if (m.kind === 'field') {
                 const ft = m.type || '';
@@ -187,7 +187,7 @@ for (const id in data) {
 // ---- enums as types (values via static access: BlendMode.Add) ----------------
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'enum' || e.owner || e.ns || e.hidden || e.noLua) continue;
+    if (e.kind !== 'enum' || e.owner || e.ns || e.hidden || e.lua_skip) continue;
     if (!e.members || !e.members.length) continue;
     types.push({
         name: e.name, desc: en(e.description),
@@ -205,7 +205,7 @@ types.push({
 const constants = [];
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'var' || e.owner || e.ns || e.hidden || e.noLua) continue;
+    if (e.kind !== 'var' || e.owner || e.ns || e.hidden || e.lua_skip) continue;
     constants.push({ name: e.name, value: '', desc: en(e.description) });
 }
 

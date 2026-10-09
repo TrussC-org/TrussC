@@ -65,20 +65,9 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                 << fullPath << ")";
         }
 
+        // The path is used as given: VideoWriter::open() already refused a
+        // path inside the app bundle (record to getUserDataPath() instead).
         NSString* nsPath = [NSString stringWithUTF8String:fullPath.c_str()];
-        // The app bundle is read-only on iOS, and getDataPath() resolves there.
-        // Redirect bundle-relative outputs to the writable Documents directory
-        // so startRecording("clip.mp4") just works on device.
-        NSString* bundlePath = [[NSBundle mainBundle] bundlePath];
-        if ([nsPath hasPrefix:bundlePath]) {
-            NSString* docs = [NSSearchPathForDirectoriesInDomains(
-                NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-            if (docs) {
-                nsPath = [docs stringByAppendingPathComponent:[nsPath lastPathComponent]];
-                logNotice("VideoWriter")
-                    << "iOS: writing to Documents -> " << nsPath.UTF8String;
-            }
-        }
         NSURL* url = [NSURL fileURLWithPath:nsPath];
         [[NSFileManager defaultManager] removeItemAtURL:url error:nil];
 

@@ -73,7 +73,7 @@ static void flush_layers(sgl_context ctx, int maxLayer) {
 // =============================================================================
 
 int main(void) {
-    sg_setup(&(sg_desc){ .environment = (sg_environment){0}, .logger.func = slog_func });
+    sg_setup(&(sg_desc){ .logger.func = slog_func });
     sgl_setup(&(sgl_desc_t){ .logger.func = slog_func });
     sgl_context ctx = sgl_make_context(&(sgl_context_desc_t){
         .max_vertices = 1<<16, .max_commands = 1<<14 });

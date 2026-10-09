@@ -157,7 +157,8 @@ inline std::string loadTextFile(const fs::path& path) {
 }
 
 // Save string to text file. Relative paths resolve via getDataPath, and a
-// missing parent folder is created.
+// missing parent folder is created. A path inside the app bundle is refused
+// (use getUserDataPath()).
 // (binary mode: what you pass is what lands on disk on every platform;
 // Windows text mode would expand \n to \r\n, changing the file size)
 inline bool saveTextFile(const fs::path& path, const std::string& content) {
@@ -167,6 +168,7 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
         logError() << "No file name in path: " << fullPath;
         return false;
     }
+    if (!internal::checkWriteTarget(path, fullPath, "File")) return false;
     std::error_code ec;
     fs::path parent = fullPath.parent_path();
     if (!parent.empty()) {
@@ -192,7 +194,8 @@ inline bool saveTextFile(const fs::path& path, const std::string& content) {
 }
 
 // Append string to text file. Relative paths resolve via getDataPath, and a
-// missing parent folder is created.
+// missing parent folder is created. A path inside the app bundle is refused
+// (use getUserDataPath()).
 inline bool appendToFile(const fs::path& path, const std::string& content) {
     fs::path fullPath = getDataPath(path);
     // "" or "out/": fail before creating any folder
@@ -200,6 +203,7 @@ inline bool appendToFile(const fs::path& path, const std::string& content) {
         logError() << "No file name in path: " << fullPath;
         return false;
     }
+    if (!internal::checkWriteTarget(path, fullPath, "File")) return false;
     std::error_code ec;
     fs::path parent = fullPath.parent_path();
     if (!parent.empty()) {
@@ -251,7 +255,8 @@ public:
     }
 
     // Open file (append = true to append to existing file). Relative paths
-    // resolve via getDataPath, and a missing parent folder is created.
+    // resolve via getDataPath, and a missing parent folder is created. A
+    // path inside the app bundle is refused (use getUserDataPath()).
     bool open(const fs::path& path, bool append = false) {
         close();
         fs::path fullPath = getDataPath(path);
@@ -260,6 +265,7 @@ public:
             logError() << "FileWriter: No file name in path: " << fullPath;
             return false;
         }
+        if (!internal::checkWriteTarget(path, fullPath, "FileWriter")) return false;
         std::error_code ec;
         fs::path parent = fullPath.parent_path();
         if (!parent.empty()) {
