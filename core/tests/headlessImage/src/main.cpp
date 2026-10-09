@@ -55,8 +55,8 @@ void checkTexturePaths() {
 
     texture.allocateCubemap(1, TextureFormat::RGBA8, TextureUsage::Dynamic);
     unsigned char faces[24] = {};
-    texture.uploadCubemapFace(0, 0, faces, 4);
-    texture.uploadCubemapMip(0, faces, sizeof(faces));
+    const void* faceData[6] = {faces, faces + 4, faces + 8, faces + 12, faces + 16, faces + 20};
+    texture.loadCubemapData(faceData, 4);
     check("cubemap allocation, uploads and lazy view creation stay empty",
           emptyTexture(texture) && texture.getCubemapFaceAttachmentView(0, 0).id == 0);
 }

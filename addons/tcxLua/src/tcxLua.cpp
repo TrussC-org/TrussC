@@ -393,8 +393,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         [](Texture& f, int w, TextureFormat c, TextureUsage t){ return f.allocateCubemap(w, c, t); },
         [](Texture& f, int w, TextureFormat c, TextureUsage t, int s){ return f.allocateCubemap(w, c, t, s); }
     );
-    tex_type["uploadCubemapFace"] = &Texture::uploadCubemapFace;
-    tex_type["uploadCubemapMip"] = &Texture::uploadCubemapMip;
+    tex_type["loadCubemapData"] = &Texture::loadCubemapData;
     tex_type["getCubemapFaceAttachmentView"] = &Texture::getCubemapFaceAttachmentView;
     tex_type["isCubemap"] = &Texture::isCubemap;
     tex_type["getNumMipLevels"] = &Texture::getNumMipLevels;
