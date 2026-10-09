@@ -2144,10 +2144,32 @@ description.ja = "exitRequested イベントの引数"
 description.ko = "exitRequested 이벤트의 인자"
 related = ["requestExitApp", "events"]
 
+["ExitRequestEventArgs::reason"]
+description.en = "Optional explanation shown by Windows when cancel blocks shutdown or logoff; empty uses a generic busy message"
+description.ja = "cancel で Windows のシャットダウンやログオフを止める理由。空なら汎用の処理中メッセージを表示"
+description.ko = "cancel로 Windows 종료나 로그오프를 막을 때 표시할 이유. 비어 있으면 일반적인 작업 중 메시지 표시"
+
 ["ExitRequestEventArgs::cancel"]
-description.en = "Set true in a listener to cancel the requested exit"
-description.ja = "リスナーで true にすると要求された終了をキャンセル"
-description.ko = "리스너에서 true로 설정하면 요청된 종료를 취소"
+description.en = """
+Set true in a listener to cancel the requested exit. Windowed Windows session
+end (including Restart Manager), macOS termination and Linux/macOS SIGTERM or
+SIGINT use this event too. After a veto the user starts shutdown again. A second
+signal forces termination. Forced OS shutdown cannot be blocked; Windows gives
+exit()/cleanup() only a few seconds after WM_ENDSESSION(TRUE).
+"""
+description.ja = """
+リスナーで true にすると終了要求をキャンセル。ウィンドウ付きアプリの Windows
+セッション終了（Restart Manager を含む）、macOS 終了、Linux/macOS の SIGTERM・SIGINT
+もこのイベントを通る。キャンセル後はユーザーが終了操作をやり直す。2 回目のシグナルは
+強制終了する。OS の強制終了は阻止できず、Windows の WM_ENDSESSION(TRUE) 後に
+exit()/cleanup() を実行できる時間は数秒に限られる。
+"""
+description.ko = """
+리스너에서 true로 설정하면 종료 요청을 취소한다. 창 앱의 Windows 세션 종료
+(Restart Manager 포함), macOS 종료, Linux/macOS SIGTERM 및 SIGINT도 이 이벤트를 거친다.
+취소 후 사용자가 종료를 다시 시작한다. 두 번째 시그널은 강제 종료한다. OS의 강제 종료는
+막을 수 없으며 Windows WM_ENDSESSION(TRUE) 이후 exit()/cleanup() 실행 시간은 몇 초뿐이다.
+"""
 
 ["Fbo"]
 category = "graphics_fbo"

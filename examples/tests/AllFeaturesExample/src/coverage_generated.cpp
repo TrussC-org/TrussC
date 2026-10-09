@@ -1205,6 +1205,7 @@ struct Cover_EventListener : af::Scope<EventListener> {
 struct Cover_ExitRequestEventArgs : af::Scope<ExitRequestEventArgs> {
     static void run() {
         (void)af::val<ExitRequestEventArgs>().cancel;
+        (void)af::val<ExitRequestEventArgs>().reason;
     }
 };
 

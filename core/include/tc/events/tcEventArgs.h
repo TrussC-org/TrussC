@@ -260,6 +260,7 @@ struct ConsoleEventArgs {
 // ---------------------------------------------------------------------------
 struct ExitRequestEventArgs {
     bool cancel = false;           // Set to true to cancel the exit
+    std::string reason;            // Optional Windows shutdown-block explanation
 };
 
 // D3D11 device loss. The reason contains GetDeviceRemovedReason HRESULT bits.

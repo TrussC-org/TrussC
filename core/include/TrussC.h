@@ -129,6 +129,8 @@
 
 // TrussC MCP (Model Context Protocol) Server
 #include "tc/utils/tcMCP.h"
+#include "tc/app/tcExit.h"
+#include <csignal>
 
 // =============================================================================
 // trussc namespace
@@ -308,7 +310,6 @@ namespace internal {
         double drawAccumulator = 0.0;
     };
     MainLoopState& mainLoop();
-    int& appExitCode();  // shared by the host and hot reload guests
 
     // Mouse position/button state + keyboard state moved to WindowContext
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
@@ -2050,6 +2051,7 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
+    internal::setExitReason("request-exit-app");
     sapp_request_quit();
 }
 
@@ -2057,6 +2059,7 @@ inline void requestExitApp() {
 // Use this for forced exit, e.g., after user confirms exit in a dialog
 inline void exitApp(int code = 0) {
     internal::appExitCode() = code;
+    internal::setExitReason("exit-app");
     sapp_quit();
 }
 
@@ -2407,6 +2410,7 @@ namespace internal {
 
     inline void _setup_cb() {
         CrashPhaseScope crashPhase("setup");
+        installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
         // key off this. (sokol's init_cb runs on the main thread.)
@@ -2677,6 +2681,12 @@ namespace internal {
     inline void _frame_cb() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
+        if (int sig = pendingWindowExitSignal()) {
+            setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
+            sapp_request_quit();
+            sapp_skip_present();
+            return;
+        }
         frameReentryGuard = true;
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
@@ -2743,7 +2753,11 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        if (!beginExitCleanup()) return;
         CrashPhaseScope crashPhase("cleanup");
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
+        // Session end may arrive inside a secondary window's modal loop.
+        currentWindowCtx() = &mainWindowContext();
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2765,6 +2779,8 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
+        restoreWindowExitSignals();
 
         #if defined(__APPLE__) && TARGET_OS_OSX
         // AppKit's terminate: would exit(0) right after this.
@@ -3083,15 +3099,20 @@ namespace internal {
                     logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x"
                         << std::hex << ev->device_lost_reason << "; exiting";
                     exitApp(1);
+                    setExitReason("device-lost");
                 }
                 break;
             }
             case SAPP_EVENTTYPE_QUIT_REQUESTED: {
                 // Notify exitRequested event - listeners can cancel by setting args.cancel = true
+                setExitBlockReason("");
                 ExitRequestEventArgs args;
                 events().exitRequested.notify(args);
                 if (args.cancel) {
+                    setExitBlockReason(args.reason);
+                    clearExitReason();
                     sapp_cancel_quit();
+                    cancelWindowExitSignal();
                 }
                 break;
             }
