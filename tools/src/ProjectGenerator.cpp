@@ -43,9 +43,13 @@ static string getCmakePath() {
 static pair<int, string> executeCommand(const string& cmd) {
     string output;
 #ifdef _WIN32
-    // Keep configure and build on the same console/code page (#417).
-    // A GUI invocation without a console still runs children hidden.
-    const bool hasConsole = GetConsoleCP() != 0;
+    // CLI: configure runs on the caller's console, so it records cl's
+    // /showIncludes prefix in the same code page as the later build (#417).
+    // GUI: run hidden with the default (OEM) code page, like a plain cmd or
+    // PowerShell. The GUI's own console mixes code pages (UTF-8 output for
+    // the window app, OEM input), which would garble the recorded prefix,
+    // and the GUI never builds.
+    const bool hasConsole = !ProjectGenerator::runChildrenHidden && GetConsoleCP() != 0;
     string fullCmd = "cmd.exe /c " + cmd + " 2>&1";
 
     SECURITY_ATTRIBUTES sa = {};

@@ -4084,6 +4084,7 @@ int main(int argc, char* argv[]) {
         }
         #endif
         warnIfVersionDrift(autoDetectTcRoot());
+        ProjectGenerator::runChildrenHidden = true;
         WindowSettings settings;
         settings.title = "TrussC Project Generator";
         settings.width = 500;
