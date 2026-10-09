@@ -1455,9 +1455,19 @@ struct SlowHeadlessApp : App {
 // ~1 ms here, far shorter than a 60 Hz step, so whole-step counts over the
 // last 10 passes read 0 most of the time.
 static vector<double> g_lightRates;
+static double g_lightMaxGap = 0.0;
 struct LightHeadlessApp : App {
     int n = 0;
+    chrono::steady_clock::time_point previousUpdate;
     void update() override {
+        const auto now = chrono::steady_clock::now();
+        // Track the whole run: a warm-up stall can lower the first samples.
+        // Catch-up updates run back-to-back, leaving one large gap per stall.
+        if (n > 0) {
+            g_lightMaxGap = max(g_lightMaxGap,
+                chrono::duration<double>(now - previousUpdate).count());
+        }
+        previousUpdate = now;
         if (++n > 15) g_lightRates.push_back(getFrameRate());
         if (n >= 75) requestExit();
     }
@@ -1559,13 +1569,25 @@ static void testHeadlessLoop() {
     checkf("headless: runOnMainThread served within one pass", g_hJobsRun.load() > 0 && g_hMaxQueueLatency.load() <= 11,
            g_hMaxQueueLatency.load());
 
-    runHeadlessApp<LightHeadlessApp>(HeadlessSettings().setFps(60));
+    constexpr double lightFps = 60.0;
+    const double dropThreshold = getMaxUpdateSteps() / lightFps;
+    runHeadlessApp<LightHeadlessApp>(HeadlessSettings().setFps(lightFps));
     int near60 = 0;
-    for (double r : g_lightRates) if (fabs(r - 60.0) <= 1.0) ++near60;
-    char name[128];
-    snprintf(name, sizeof name, "headless: getFrameRate() in update() reads 60 +/-1 (%d of %d)",
-             near60, (int)g_lightRates.size());
-    check(name, !g_lightRates.empty() && near60 * 10 >= (int)g_lightRates.size() * 9);
+    bool ratesBounded = !g_lightRates.empty();
+    for (double r : g_lightRates) {
+        ratesBounded = ratesBounded && r > 0.0 && r <= 61.0;
+        if (fabs(r - lightFps) <= 1.0) ++near60;
+    }
+    check("headless: getFrameRate() in update(): every sample > 0 and <= 61", ratesBounded);
+    // Time is dropped only when owed steps exceed the cap. Below cap / fps,
+    // require the band; otherwise a lower measured rate is valid (#757).
+    const bool keptUp = g_lightMaxGap < dropThreshold;
+    char name[192];
+    snprintf(name, sizeof name,
+             "headless: getFrameRate() in update() reads 60 +/-1 (%d of %d; max gap %.3f ms; band %s)",
+             near60, (int)g_lightRates.size(), g_lightMaxGap * 1000.0,
+             keptUp ? "required" : "skipped");
+    check(name, !keptUp || near60 * 10 >= (int)g_lightRates.size() * 9);
 
     runHeadlessApp<LongPassHeadlessApp>(HeadlessSettings().setFps(1000));
     checkf("headless: 1 kHz, ~16 ms passes: still 10 steps per pass",
