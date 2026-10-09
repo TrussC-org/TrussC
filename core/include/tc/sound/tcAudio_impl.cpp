@@ -2434,6 +2434,9 @@ bool MicInput::start(int sampleRate) {
     ma_context_config contextConfig = ma_context_config_init();
     contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;
     const auto* engineContext = static_cast<const ma_context*>(AudioEngine::getInstance().context_);
+    // Join the engine's active iOS session. A mic-only sketch still activates
+    // its own session when no engine context exists.
+    contextConfig.coreaudio.noAudioSessionActivate = engineContext ? MA_TRUE : MA_FALSE;
     ma_result result = ma_device_init_ex(engineContext ? &engineContext->backend : nullptr,
                                        engineContext ? 1 : 0, &contextConfig, &config, device);
     if (result != MA_SUCCESS) {
