@@ -270,8 +270,8 @@ TC_CORE_TEST_MAIN() {
     testJsonRoundTrip();
     testDerivedMarker();
 
-    mcp::registerInspectionTools();
-    mcp::registerControlTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+    mcp::setToolLevel(mcp::ToolLevel::Control);
     runHeadlessApp<McpApp>(HeadlessSettings().setFps(1000));
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

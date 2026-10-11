@@ -47,6 +47,7 @@ using namespace tc;
 
 // What guest code sees of state the host set (readSharedState).
 struct GuestView {
+    mcp::ToolLevel toolLevel = mcp::ToolLevel::Public;
     bool pixelPerfect = false;
     int sglMaxVertices = 0;
     bool fontSamplerReady = false;
@@ -114,7 +115,7 @@ public:
             }));
         mcp::status("guest_status", std::function<double()>([this]() { return (double)ticks_; }));
         mcp::statusImage("guest_image", [this]() { (void)ticks_; return Pixels(); });
-        mcp::registerControlTools();
+        mcp::setToolLevel(mcp::ToolLevel::Control);
     }
 
     void setup() override;

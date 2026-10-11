@@ -23,9 +23,9 @@
 // each cycle from a fresh unique temp copy, exactly like a real reload.
 //
 // MCP registrations (#227, #249): the guest App registers tools, a status
-// entry and a status image capturing `this`, plus the control tools. Each
-// cycle checks they are visible while the guest lives and gone after unload,
-// while a tool the host registered itself stays. The registry must be the
+// entry and a status image capturing `this`, and grants Control access. Each
+// cycle checks guest registrations are gone after unload, while the grant,
+// core tools and a tool the host registered itself stay. The registry must be the
 // host's on every platform: on Windows the guest is a DLL that compiles its own
 // copy of any header-inline state, so the MCP state is defined non-inline in
 // TrussC.lib (tcMCP.cpp) and the guest imports it from the host.
@@ -35,7 +35,7 @@
 // as the frame loop does): tools/list, a call to the guest's tool that must be
 // answered by THIS generation, a guest tool that defers its reply (the
 // deferral state must be shared too), the host's tc_get_status reading the
-// guest's status entry, and a control tool the guest registered, which must
+// guest's status entry, and a core control tool the guest granted, which must
 // inject into the host's input dispatch. The unload itself happens while
 // deferred replies wait for the afterFrame drain, as a reload does in a real
 // frame: those whose producers run guest code (guest_deferred, which reaches
@@ -478,7 +478,11 @@ static int runCycles(const std::string& guestPath, int port) {
         internal::bitmapFontAtlas().initialized = true;   // flag only; no GPU here
         internal::WindowContext* prevCtx = internal::currentWindowCtx();
         internal::currentWindowCtx() = &secondary;
+        mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
         const GuestView seen = guest->readSharedState();
+        mcp::setToolLevel(mcp::ToolLevel::Control);
+        if (seen.toolLevel != mcp::ToolLevel::ReadOnly)
+            return fail(38, "the guest does not see the host's MCP grant");
         internal::currentWindowCtx() = prevCtx;
         internal::pixelPerfectMode() = false;
         internal::sglBudget().maxVertices = savedBudget;
@@ -681,7 +685,7 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(36, "a host tool's deferred reply pending across the guest's unload did not survive it: " +
                             (hostDeferred.is_discarded() ? std::string("no reply") : hostDeferred.dump()));
         }
-        if (mcp::hasTool("guest_probe") || mcp::hasTool("tc_key_press") ||
+        if (mcp::hasTool("guest_probe") ||
             hasStatus("guest_status") || hasStatusImage("guest_image")) {
             return fail(5, "the destroyed guest's MCP registrations are still listed");
         }
@@ -691,6 +695,8 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(13, "the destroyed guest's tool still answers over HTTP");
         }
         if (!mcp::hasTool("host_probe")) return fail(6, "the host's own tool was removed");
+        if (!mcp::hasTool("tc_key_press") || mcp::getToolLevel() != mcp::ToolLevel::Control)
+            return fail(37, "core tools and the host grant must survive guest unload");
         std::printf("hotReloadLifecycle: cycle %d/%d ok\n", i, kCycles);
     }
     return 0;
@@ -932,8 +938,8 @@ int main(int argc, char** argv) {
             mcp::deferToolResultUntilAfterFrame([]() -> json { return json{{"deferred", true}, {"host", true}}; });
             return json(nullptr);  // replaced by the deferred result
         }));
-    // What TRUSSC_MCP=1 gives a running app: the standard tools + the server.
-    mcp::registerInspectionTools();
+    // Grant inspection access and start the test server explicitly.
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::startHttpServer(0, "localhost");
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {

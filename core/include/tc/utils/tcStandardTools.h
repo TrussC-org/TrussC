@@ -340,14 +340,11 @@ inline void alert(const std::string& msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Inspection Tools (read-only, always available when MCP is enabled)
-//
-// Defined in tcStandardTools.cpp, not inline: the handlers are then host code
-// whoever calls this, so under hot reload they read the core loop's own state
-// (window list, recorder, input dispatch) rather than a guest DLL's copy of it.
+// Compatibility alias; registration is independent of exposure.
 // ---------------------------------------------------------------------------
 
-void registerInspectionTools();
+[[deprecated("use setToolLevel(ToolLevel::ReadOnly); will be removed in v1.0.0")]]
+inline void registerInspectionTools() { setToolLevel(ToolLevel::ReadOnly); }
 
 // ---------------------------------------------------------------------------
 // Key injection helpers (shared by tc_key_press / tc_key_release)
@@ -411,23 +408,14 @@ inline json heldKeysJson() {
 } // namespace detail
 
 // ---------------------------------------------------------------------------
-// Control Tools (opt-in via mcp::registerControlTools())
-//
-// The always-on standard set is strictly read-only; everything that lets the
-// outside OPERATE the app — input injection, node selection/mutation, quit —
-// lives behind this one opt-in. (Formerly registerDebuggerTools(); renamed
-// because the read-only tools are debugging aids too — the real boundary is
-// read vs control.)
-//
-// Defined in tcStandardTools.cpp (see registerInspectionTools above): apps call
-// this from setup(), which is guest code under hot reload, yet the injected
-// input must go through the host's dispatch pointers.
+// Compatibility aliases for granting control access.
 // ---------------------------------------------------------------------------
 
-void registerControlTools();
+[[deprecated("use setToolLevel(ToolLevel::Control); will be removed in v1.0.0")]]
+inline void registerControlTools() { setToolLevel(ToolLevel::Control); }
 
-[[deprecated("renamed to registerControlTools(); will be removed in v1.0.0")]]
-inline void registerDebuggerTools() { registerControlTools(); }
+[[deprecated("use setToolLevel(ToolLevel::Control); will be removed in v1.0.0")]]
+inline void registerDebuggerTools() { setToolLevel(ToolLevel::Control); }
 
 } // namespace mcp
 } // namespace trussc

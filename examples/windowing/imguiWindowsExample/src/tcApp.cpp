@@ -1,7 +1,7 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    mcp::registerControlTools();   // AI-drivable (mouse/key injection)
+    mcp::setToolLevel(mcp::ToolLevel::Control);   // AI-drivable (mouse/key injection)
     imgui::imguiSetup();   // main window's imgui
 
     // Open the second window immediately — it runs its own App + imgui.

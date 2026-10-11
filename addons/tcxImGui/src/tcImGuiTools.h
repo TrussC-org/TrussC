@@ -2,7 +2,7 @@
 
 // =============================================================================
 // tcImGuiTools.h - ImGui MCP Tools
-// Auto-expose ImGui widgets as MCP tools (enabled via registerControlTools())
+// Register ImGui MCP tools; exposure is controlled by mcp::setToolLevel()
 //
 // Uses ImGui Test Engine hooks (IMGUI_ENABLE_TEST_ENGINE) plus the [TrussC]
 // value hook to collect widget info and values each frame, then provides MCP
@@ -559,7 +559,7 @@ inline nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<P
 } // namespace detail
 
 // ---------------------------------------------------------------------------
-// MCP tool registration (call from registerControlTools)
+// MCP tool registration (called by imguiSetup)
 // ---------------------------------------------------------------------------
 inline void registerImGuiTools() {
     using json = nlohmann::json;
@@ -575,6 +575,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_get_widgets — list all widgets
     tc::mcp::tool("tcx_imgui_get_widgets", "List the ImGui widgets drawn in the last frame of every window running imgui: label, window (ImGui panel), windowId (OS window as tc_list_windows numbers it), type, rect, and for value widgets the current value (widget, valueType, value — floats at full precision; colors as the variable holds them, 0-1, with colorSpace; SliderAngle in radians; RadioButton(int*): value = the group's variable, buttonValue = the value this button sets). touched = changed by hand since startup / tcx_imgui_reset_touched")
+        .level(tc::mcp::ToolLevel::ReadOnly)
         .arg<std::string>("window", "Filter by ImGui window (panel) name (optional, omit for all)", false)
         .arg<int>("windowId", "Filter by OS window id from tc_list_windows (optional)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
@@ -621,6 +622,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_get_touched — everything changed by hand
     tc::mcp::tool("tcx_imgui_get_touched", "Values the user changed by hand (dragging, typing, clicking a widget) since startup or the last tcx_imgui_reset_touched, with their current value. widgets: the ImGui value widgets changed (sliders, drags, inputs, colors, combos, text fields, Checkbox, MenuItem/Selectable with a bool*, RadioButton with an int*, ListBox — the list box under its own label with the index), same fields as tcx_imgui_get_widgets; one that is not drawn right now (collapsed, closed) keeps its last known value with visible=false. Items that change no variable are not recorded: buttons, menu headers, action menu items, MenuItem(label, shortcut, bool selected) even when used as a toggle, plain Selectables, RadioButton(label, bool). Other keys come from addons that keep their own record (inspector: tcxNodeInspector edits per node — node type/name/id, mod, member path, value in tc_get_node_tree encoding). Values set from code, by tc_set_node_members or by tcx_imgui_input on a value widget are not recorded (text typed by tcx_imgui_input and clicks by tcx_imgui_click are). Read-only")
+        .level(tc::mcp::ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             json result = {{"status", "ok"}};
             json widgets = detail::touchedWidgetsJson();
@@ -637,6 +639,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_reset_touched — forget the record (does not change any value)
     tc::mcp::tool("tcx_imgui_reset_touched", "Clear the record read by tcx_imgui_get_touched (ImGui widgets and addon records such as the inspector's). Values are not changed. Typical use: after copying the values into code")
+        .level(tc::mcp::ToolLevel::Control)
         .bind(std::function<json()>([]() -> json {
             size_t cleared = detail::touched().size();
             resetTouched();
@@ -648,6 +651,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_click — click a widget by label
     tc::mcp::tool("tcx_imgui_click", "Click an ImGui widget by label. A composite widget (DragFloat3, SliderInt2, InputFloat4, ColorEdit4, ColorPicker4, ...) returns an error: a click would hit one of its parts; set its value with tcx_imgui_input")
+        .level(tc::mcp::ToolLevel::Control)
         .arg<std::string>("label", "Widget label text")
         .arg<std::string>("window", "ImGui window (panel) name (optional, required if label is ambiguous)", false)
         .arg<int>("windowId", "OS window id from tc_list_windows (optional, when the same panel exists in several OS windows)", false)
@@ -683,6 +687,7 @@ inline void registerImGuiTools() {
     // tcx_imgui_input — set the value of a widget: value widgets through the
     // value hook, text fields by typing
     tc::mcp::tool("tcx_imgui_input", "Set the value of an ImGui widget. For widgets that hold a value (and text fields); buttons and other items without a variable are pressed with tcx_imgui_click. Value widgets (slider, drag, number input, SliderAngle, color, checkbox, combo, radio, list box, MenuItem/Selectable with a bool*; composites such as DragFloat3 and ColorEdit4 included): text is the value as JSON, in the units tcx_imgui_get_widgets reports — a number; an array for a composite ([x, y, z]; colors [r, g, b(, a)] as floats 0-1, raw HSV with colorSpace hsv); true/false for a bool; the item index for Combo/ListBox; for a RadioButton(int*), that button's own value (buttonValue in tcx_imgui_get_widgets): target the button whose value you want, another value is refused; radians for SliderAngle. It is written into the app's variable on the widget's next frame, and the widget returns true in that frame (so if (ImGui::DragFloat(\"x\", &x)) node->setX(x); and recompute-on-change code run once; the Edited flag is not set), unless the variable already held the value (then nothing changes and the reply is ok). status ok (with the value read back) means the variable held it at the widget's return and still held it in the next frame; if the app changed it by then (a clamp, a converting setter), ok with a message and the value it holds; if the widget is not drawn in that next frame, or its window renders no frame until 4 s after the call, the read-back at return stands. Errors (nothing written): wrong shape or type (component count, not a number, out of the type's range), the widget not drawn in the frame after the call (collapsed, closed or hidden), disabled (BeginDisabled, a disabled MenuItem/Selectable) or read-only, a RadioButton given another button's value, no variable (a button, an action MenuItem, RadioButton(label, bool): press it with tcx_imgui_click), the widget running more than 2 s after the call (a window rendering slower than one frame per 2 s). Errors after the write: a hand edit in the same frame; the old value back in the next frame (app code that ignores the return value and copies its own value in every frame: such a widget cannot be set from MCP). No clamping to the widget's min/max. Not recorded in tcx_imgui_get_touched. Text fields (InputText): text replaces the text, typed as keystrokes")
+        .level(tc::mcp::ToolLevel::Control)
         .arg<std::string>("label", "Widget label")
         .arg<std::string>("text", "Value widgets: the value as JSON (5, 0.25, [1, 2, 3], true, an index). Text fields: the replacement text")
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)
@@ -778,6 +783,7 @@ inline void registerImGuiTools() {
 
     // tcx_imgui_checkbox — toggle or set a checkbox
     tc::mcp::tool("tcx_imgui_checkbox", "Toggle an ImGui checkbox")
+        .level(tc::mcp::ToolLevel::Control)
         .arg<std::string>("label", "Checkbox label")
         .arg<bool>("value", "Desired state (true/false)", false)
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)

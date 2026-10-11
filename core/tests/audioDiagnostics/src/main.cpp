@@ -1267,7 +1267,7 @@ int main() {
     check("decoder-error drop is logged", countLogs(LogLevel::Warning, "could not reopen") == 1);
 
     // --- MCP: tc_get_audio_state -----------------------------------------------
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     Json state = callAudioState("{}");
     check("tc_get_audio_state answers", state.is_object() && state.value("status", "") == "ok", state.dump());
     if (state.is_object() && state.contains("output")) {

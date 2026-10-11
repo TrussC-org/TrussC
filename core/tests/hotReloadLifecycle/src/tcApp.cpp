@@ -68,6 +68,7 @@ void tcApp::writeSharedState() {
 // guest's inline readers see it.
 GuestView tcApp::readSharedState() {
     GuestView v;
+    v.toolLevel = mcp::getToolLevel();
     v.pixelPerfect = tc::internal::pixelPerfectMode();
     v.sglMaxVertices = tc::internal::sglBudget().maxVertices;
     v.fontSamplerReady = tc::internal::bitmapFontAtlas().initialized;

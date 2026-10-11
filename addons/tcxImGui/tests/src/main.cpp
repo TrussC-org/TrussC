@@ -1209,7 +1209,39 @@ static void testUtf8Capture() {
     capture("日本語 😀", std::string("日本語 😀").size(), false);
 }
 
+// The addon registers independently of the grant, with both queries ReadOnly
+// and every mutating tool Control. Exercise through the production dispatcher.
+static void testToolLevels() {
+    using namespace tc;
+    tcx::imgui::registerImGuiTools();
+    const std::vector<std::string> queries = {"tcx_imgui_get_widgets", "tcx_imgui_get_touched"};
+    const std::vector<std::string> controls = {"tcx_imgui_reset_touched", "tcx_imgui_click",
+                                              "tcx_imgui_input", "tcx_imgui_checkbox"};
+    for (auto grant : {mcp::ToolLevel::Public, mcp::ToolLevel::ReadOnly, mcp::ToolLevel::Control}) {
+        mcp::setToolLevel(grant);
+        const auto list = nlohmann::json::parse(mcp::Server::instance().processMessage(
+            nlohmann::json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/list"}}.dump()));
+        auto listed = [&](const std::string& name) {
+            for (const auto& tool : list["result"]["tools"]) if (tool["name"] == name) return true;
+            return false;
+        };
+        for (const auto& name : queries)
+            check("ImGui query exposure follows ReadOnly", listed(name) == (grant >= mcp::ToolLevel::ReadOnly));
+        for (const auto& name : controls) {
+            check("ImGui control exposure follows Control", listed(name) == (grant >= mcp::ToolLevel::Control));
+            if (grant == mcp::ToolLevel::Control) continue; // Existing widget tests exercise successful calls.
+            const auto reply = nlohmann::json::parse(mcp::Server::instance().processMessage(
+                nlohmann::json{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/call"},
+                              {"params", {{"name", name}, {"arguments", nlohmann::json::object()}}}}.dump()));
+            check("ImGui hidden control call rejected before arguments", reply["result"].value("isError", false) &&
+                reply["result"]["content"][0]["text"].get<std::string>().find("requires Control") != std::string::npos);
+        }
+    }
+}
+
 int main() {
+    testToolLevels();
+    tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
     testUtf8Capture();
     testMenus();
     testPanel();

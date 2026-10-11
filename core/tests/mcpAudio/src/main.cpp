@@ -114,7 +114,7 @@ void ringChecks() {
 
 TC_CORE_TEST_MAIN() {
     ringChecks();
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     const auto schema = json::parse(mcp::Server::instance().processMessage(
         json{{"jsonrpc","2.0"},{"id",1},{"method","tools/list"}}.dump()));
     for (const auto& t : schema["result"]["tools"]) {

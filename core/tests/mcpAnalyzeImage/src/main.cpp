@@ -31,7 +31,7 @@ json named(const json& list,const char* key,const char* name) {
     return nullptr;
 }
 void headlessChecks() {
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     const auto schema=json::parse(mcp::Server::instance().processMessage(
         json{{"jsonrpc","2.0"},{"id",1},{"method","tools/list"}}.dump()));
     for(const auto& t:schema["result"]["tools"]) if(t["name"]=="tc_analyze_image") {

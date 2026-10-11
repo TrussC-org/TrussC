@@ -186,7 +186,7 @@ void checkBackendFailure() {
 
 TC_CORE_TEST_MAIN() {
     checkSelection();
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     checkBackendFailure();
     checkInit("implicit default", "");
     checkInit("unknown name falls back to default", "tc-audio-default-device-missing");

@@ -111,7 +111,7 @@ TC_CORE_TEST_MAIN() {
     g_hidden = &hidden;
     internal::windowOccludedHookForTests() = &occludedHook;
 
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::startHttpServer(0, "localhost");
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {
