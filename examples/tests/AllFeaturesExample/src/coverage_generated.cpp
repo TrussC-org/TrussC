@@ -2844,8 +2844,7 @@ struct Cover_Texture : af::Scope<Texture> {
         (void)af::val<Texture>().allocate(af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<TextureUsage>(), af::val<int>(), af::val<int>());
         (void)af::val<Texture>().allocate(af::val<const Pixels>(), af::val<TextureUsage>(), af::val<bool>());
         (void)af::val<Texture>().allocateCubemap(af::val<int>(), af::val<TextureFormat>(), af::val<TextureUsage>(), af::val<int>());
-        (void)af::val<Texture>().uploadCubemapFace(af::val<int>(), af::val<int>(), af::val<const void *>(), af::val<size_t>());
-        (void)af::val<Texture>().uploadCubemapMip(af::val<int>(), af::val<const void *>(), af::val<size_t>());
+        (void)af::val<Texture>().loadCubemapData(af::val<const void *const *>(), af::val<size_t>());
         (void)af::val<Texture>().getCubemapFaceAttachmentView(af::val<int>(), af::val<int>());
         (void)af::val<Texture>().isCubemap();
         (void)af::val<Texture>().getNumMipLevels();

@@ -10215,10 +10215,10 @@ description.ko = "텍스처를 할당"
 ["Texture::allocateCubemap"]
 category = "graphics_texture"
 keywords = ["skybox", "environment", "ibl"]
-description.en = "Allocate a cubemap texture without initial data"
-description.ja = "初期データなしでキューブマップテクスチャを確保"
-description.ko = "초기 데이터 없이 큐브맵 텍스처를 할당"
-related = ["Texture::uploadCubemapFace", "Texture::uploadCubemapMip", "Texture::isCubemap"]
+description.en = "Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains. Immutable is refused with an error (it would need initial data)."
+description.ja = "初期データなしでキューブマップテクスチャを確保。Dynamic / Stream は1ミップレベルのみ。複数指定はエラーを記録し、未確保の状態にする。RenderTarget はミップチェーンに対応。Immutable は初期データが要るため、エラーを記録して確保しない。"
+description.ko = "초기 데이터 없이 큐브맵 텍스처를 할당. Dynamic / Stream은 밉 레벨 하나만 지원하며, 여러 레벨을 요청하면 오류를 기록하고 할당하지 않습니다. RenderTarget은 밉 체인을 지원합니다. Immutable은 초기 데이터가 필요하므로 오류를 기록하고 할당하지 않습니다."
+related = ["Texture::loadCubemapData", "Texture::isCubemap"]
 
 ["Texture::bind"]
 category = "graphics_texture"
@@ -10395,21 +10395,13 @@ description.ja = "確保済みテクスチャに圧縮ピクセルデータを�
 description.ko = "이미 할당된 텍스처에 압축 픽셀 데이터를 업로드"
 related = ["Texture::isCompressed"]
 
-["Texture::uploadCubemapFace"]
+["Texture::loadCubemapData"]
 category = "graphics_texture"
-keywords = ["data"]
-description.en = "Upload pixel data for one cubemap face at one mip level"
-description.ja = "1つのミップレベルのキューブマップ1面にピクセルデータをアップロード"
-description.ko = "한 밉 레벨의 큐브맵 한 면에 픽셀 데이터를 업로드"
-related = ["Texture::allocateCubemap", "Texture::uploadCubemapMip"]
-
-["Texture::uploadCubemapMip"]
-category = "graphics_texture"
-keywords = ["data"]
-description.en = "Upload pixel data for all six faces of one cubemap mip level"
-description.ja = "キューブマップの1ミップレベルの6面すべてにピクセルデータをアップロード"
-description.ko = "큐브맵 한 밉 레벨의 6면 전체에 픽셀 데이터를 업로드"
-related = ["Texture::allocateCubemap", "Texture::uploadCubemapFace"]
+keywords = ["data", "cubemap"]
+description.en = "Load all six cubemap faces (+X, -X, +Y, -Y, +Z, -Z) in one update. Requires Dynamic / Stream usage and faceSize equal to sideSize squared times bytes per pixel. Immutable / RenderTarget or a size mismatch logs a warning and returns. A second upload to the same image in the same device frame is skipped with the loadData warning. Replaces uploadCubemapFace / uploadCubemapMip in v0.8."
+description.ja = "キューブマップ6面 (+X, -X, +Y, -Y, +Z, -Z) を一括更新。Dynamic / Stream 専用で、faceSize は一辺の長さの2乗×ピクセルあたりのバイト数。Immutable / RenderTarget またはサイズ不一致は警告して戻る。同じデバイスフレームで同じ画像への2回目の更新は loadData と同じ警告を出してスキップ。v0.8 で uploadCubemapFace / uploadCubemapMip を置き換える。"
+description.ko = "큐브맵 6면 (+X, -X, +Y, -Y, +Z, -Z)을 한 번에 갱신. Dynamic / Stream 전용이며 faceSize는 한 변 길이의 제곱×픽셀당 바이트 수여야 합니다. Immutable / RenderTarget 또는 크기 불일치는 경고 후 반환합니다. 같은 장치 프레임에서 같은 이미지의 두 번째 갱신은 loadData와 같은 경고 후 건너뜁니다. v0.8에서 uploadCubemapFace / uploadCubemapMip을 대체합니다."
+related = ["Texture::allocateCubemap", "Texture::loadData"]
 
 ["TextureFilter"]
 description.en = "Texture sampling filter: Nearest or Linear."
