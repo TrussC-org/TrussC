@@ -1,0 +1,149 @@
+#include <TrussC.h>
+#include "../../common/tcCoreTest.h"
+#include <cstdio>
+#include <set>
+
+using namespace tc;
+
+namespace {
+int failures = 0;
+void check(const char* name, bool ok) {
+    std::printf("%-64s %s\n", name, ok ? "PASS" : "FAIL");
+    if (!ok) ++failures;
+}
+
+json request(const std::string& method, const json& params = json::object()) {
+    return json::parse(mcp::Server::instance().processMessage(
+        json{{"jsonrpc", "2.0"}, {"id", "level-test"}, {"method", method},
+             {"params", params}}.dump()));
+}
+std::set<std::string> listed() {
+    std::set<std::string> names;
+    const auto reply = request("tools/list");
+    for (const auto& entry : reply["result"]["tools"])
+        names.insert(entry["name"].get<std::string>());
+    return names;
+}
+json call(const std::string& name) {
+    return request("tools/call", {{"name", name}, {"arguments", json::object()}});
+}
+bool callable(const std::string& name) {
+    const auto reply = call(name);
+    return reply.contains("result") && !reply["result"].value("isError", false);
+}
+
+// Only this compatibility test deliberately calls deprecated APIs. Keep it
+// compiling under TC_DEPRECATED_ERRORS=1 on each supported compiler.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+void aliases() {
+    mcp::registerControlTools();
+    check("control alias grants Control", mcp::getToolLevel() == mcp::ToolLevel::Control);
+    check("debugger query reflects Control", mcp::isDebuggerEnabled());
+    mcp::registerInspectionTools();
+    check("inspection alias lowers to ReadOnly", mcp::getToolLevel() == mcp::ToolLevel::ReadOnly);
+    check("debugger query reflects downgrade", !mcp::isDebuggerEnabled());
+    check("inspection alias keeps tools registered", mcp::hasTool("tc_mouse_click"));
+    mcp::registerDebuggerTools();
+    check("older debugger alias grants Control", mcp::isDebuggerEnabled());
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+} // namespace
+
+TC_CORE_TEST_MAIN() {
+#ifdef __EMSCRIPTEN__
+    mcp::setToolLevel(mcp::ToolLevel::Control);
+    check("Web setter is a no-op", mcp::getToolLevel() == mcp::ToolLevel::Public);
+    check("Web debugger stays disabled", !mcp::isDebuggerEnabled());
+#else
+    check("initial grant is Public", mcp::getToolLevel() == mcp::ToolLevel::Public);
+    // First use may be from a hot reload guest; core tools must remain host-owned.
+    int owner;
+    mcp::detail::setRegistrationOwner(&owner);
+    check("Public lists only built-in health", listed() == std::set<std::string>{"tc_get_health"});
+    check("core initialization preserves registration owner", mcp::detail::registrationOwner() == &owner);
+    mcp::tool("guest_level_probe", "").bind([]() -> json { return true; });
+    mcp::detail::setRegistrationOwner(nullptr);
+
+    int invoked = 0;
+    auto handler = [&]() -> json { ++invoked; return true; };
+    mcp::tool("public_probe", "").bind(handler);
+    mcp::tool("readonly_probe", "").level(mcp::ToolLevel::ReadOnly).bind(handler);
+    mcp::tool("control_probe", "").level(mcp::ToolLevel::Control).bind(handler);
+    mcp::tool("tcx_probe", "").bind(handler);
+    int rejectedLogs = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("tc_ is reserved") != std::string::npos)
+            ++rejectedLogs;
+    });
+    mcp::tool("tc_rejected", "").bind(handler);
+    mcp::tool("tc_get_health", "replacement").bind(handler);
+    check("reserved prefix logs errors without throwing", rejectedLogs == 2);
+    check("reserved prefix is not registered", !mcp::hasTool("tc_rejected"));
+    check("rejected replacement does not run", callable("tc_get_health") && invoked == 0);
+    check("tcx prefix is allowed", callable("tcx_probe"));
+
+    const std::set<std::string> controls = {"tc_quit", "tc_mouse_move", "tc_mouse_press",
+        "tc_mouse_release", "tc_mouse_click", "tc_mouse_scroll", "tc_key_press",
+        "tc_key_release", "tc_select_node", "tc_set_node_members"};
+    mcp::setToolLevel(mcp::ToolLevel::Control);
+    const auto all = listed();
+    for (auto grant : {mcp::ToolLevel::Public, mcp::ToolLevel::ReadOnly, mcp::ToolLevel::Control,
+                       mcp::ToolLevel::ReadOnly, mcp::ToolLevel::Public}) {
+        mcp::setToolLevel(grant);
+        check("getter returns current grant", mcp::getToolLevel() == grant);
+        const auto names = listed();
+        check("user tool defaults to Public", names.count("public_probe") && callable("public_probe"));
+        for (const auto& name : all) {
+            if (name.rfind("tc_", 0) != 0) continue;
+            const auto required = name == "tc_get_health" ? mcp::ToolLevel::Public :
+                controls.count(name) ? mcp::ToolLevel::Control : mcp::ToolLevel::ReadOnly;
+            check(name.c_str(), bool(names.count(name)) == (required <= grant));
+        }
+        for (const auto& probe : {std::make_pair("readonly_probe", mcp::ToolLevel::ReadOnly),
+                                 std::make_pair("control_probe", mcp::ToolLevel::Control)}) {
+            const bool exposed = probe.second <= grant;
+            check("list obeys level", bool(names.count(probe.first)) == exposed);
+            const int before = invoked;
+            check("call obeys level", callable(probe.first) == exposed);
+            check("hidden handler never runs", invoked == before + (exposed ? 1 : 0));
+        }
+        check("debugger query follows current grant", mcp::isDebuggerEnabled() == (grant == mcp::ToolLevel::Control));
+    }
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+    const auto hidden = call("control_probe");
+    const json expectedResult = {
+        {"isError", true}, {"content", json::array({{{"type", "text"},
+            {"text", "Tool 'control_probe' requires Control, current level is ReadOnly"}}})}};
+    check("hidden error retains id and names both levels", hidden == json{
+        {"jsonrpc", "2.0"}, {"id", "level-test"}, {"result", expectedResult}});
+    check("ReadOnly core status callable", callable("tc_get_status"));
+    check("ReadOnly core alerts callable", callable("tc_get_alerts"));
+    mcp::tool("registered_later", "").level(mcp::ToolLevel::Control).bind(handler);
+    check("register after setting level stays hidden", !listed().count("registered_later") && !callable("registered_later"));
+    mcp::setToolLevel(mcp::ToolLevel::Control);
+    check("raising level exposes existing registrations", listed().count("registered_later") && callable("registered_later"));
+    mcp::tool("after_grant", "").level(mcp::ToolLevel::Control).bind(handler);
+    check("register after grant is immediately exposed", listed().count("after_grant") && callable("after_grant"));
+    mcp::detail::removeRegistrationsOwnedBy(&owner);
+    check("reload cleanup drops guest tool", !mcp::hasTool("guest_level_probe"));
+    check("reload cleanup preserves grant and core tools", mcp::getToolLevel() == mcp::ToolLevel::Control && mcp::hasTool("tc_get_health") && mcp::hasTool("tc_mouse_click"));
+    aliases();
+    check("level changes and registration do not start HTTP", mcp::getHttpPort() == 0 && !mcp::detail::getHttpServer());
+#endif
+    return failures ? 1 : 0;
+}

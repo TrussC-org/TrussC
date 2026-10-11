@@ -39,6 +39,27 @@ using json = nlohmann::json;
 namespace trussc {
 namespace mcp {
 
+// Tools are registered independently of the level granted by the host.
+enum class ToolLevel { Public, ReadOnly, Control };
+
+// Defined in tcMCP.cpp: one host setting shared with hot reload guests.
+// Web builds ignore the setter and report Public.
+void setToolLevel(ToolLevel level);
+ToolLevel getToolLevel();
+
+class Server;
+namespace detail {
+void registerStandardTools(Server& server);
+inline const char* toolLevelName(ToolLevel level) {
+    switch (level) {
+        case ToolLevel::Public: return "Public";
+        case ToolLevel::ReadOnly: return "ReadOnly";
+        case ToolLevel::Control: return "Control";
+    }
+    return "Public";
+}
+} // namespace detail
+
 // ---------------------------------------------------------------------------
 // Deferred tool responses
 // ---------------------------------------------------------------------------
@@ -133,17 +154,11 @@ inline void setDeferralOwner(const void* owner) { deferralState().owner = owner;
 
 std::vector<DeferredResponse>& deferredResponses();
 
-// Set by registerControlTools() (which is web-available), so this flag must
-// live outside the server-only #ifndef block below.
-std::atomic<bool>& isDebuggerEnabled();
-
 } // namespace detail
 
-// Check if debugger tools are registered (input injection / scene mutation).
-// The flag is set by registerControlTools() — registering IS the opt-in, so
-// apps/addons can query this to tell whether the debugger surface is exposed.
+// Compatibility query for apps and supervisors that detect input control.
 inline bool isDebuggerEnabled() {
-    return detail::isDebuggerEnabled().load();
+    return getToolLevel() >= ToolLevel::Control;
 }
 
 // Call inside a tool handler to defer its result until just after the next
@@ -241,6 +256,7 @@ class Tool {
 public:
     std::string name;
     std::string description;
+    ToolLevel level = ToolLevel::Public;
     std::vector<ToolArg> args;
     std::function<json(const json&)> handler;
     const void* owner = nullptr;   // see registrationOwner()
@@ -390,6 +406,9 @@ private:
     std::string handleToolsList(const json& req, const json& id) {
         json toolList = json::array();
         for (const auto& [name, tool] : tools_) {
+#ifndef __EMSCRIPTEN__
+            if (tool.level > getToolLevel()) continue;
+#endif
             toolList.push_back({
                 {"name", tool.name},
                 {"description", tool.description},
@@ -407,6 +426,16 @@ private:
         if (tools_.find(name) == tools_.end()) {
             return makeError(id, -32601, "Tool not found: " + name);
         }
+
+#ifndef __EMSCRIPTEN__
+        const auto granted = getToolLevel();
+        if (tools_.at(name).level > granted) {
+            return detail::toolError(id, "Tool '" + name + "' requires " +
+                detail::toolLevelName(tools_.at(name).level) +
+                ", current level is " + detail::toolLevelName(granted));
+        }
+
+#endif
 
         // Wrap a tool's content json into a full JSON-RPC result string.
         auto formatResult = [id](const json& content) -> std::string {
@@ -896,9 +925,8 @@ inline int getHttpPort() {
     return detail::getHttpPort().load();
 }
 
-// Deprecated: registerControlTools() is now the opt-in by itself (it sets the
-// isDebuggerEnabled() flag). This shim is a no-op kept for source compatibility.
-[[deprecated("registerControlTools() now opts in by itself; remove this call. Will be removed in v1.0.0")]]
+// Legacy no-op kept for source compatibility.
+[[deprecated("use setToolLevel(ToolLevel::Control); will be removed in v1.0.0")]]
 inline void enableDebugger() {}
 
 #endif // __EMSCRIPTEN__
@@ -946,12 +974,26 @@ template<> struct TypeName<double> { static constexpr const char* value = "numbe
 template<> struct TypeName<bool> { static constexpr const char* value = "boolean"; };
 template<> struct TypeName<json> { static constexpr const char* value = "object"; };
 
+class ToolBuilder;
+namespace detail {
+ToolBuilder coreTool(Server& server, const std::string& name, const std::string& desc);
+}
+
 // Tool Builder
 class ToolBuilder {
 public:
     ToolBuilder(const std::string& name, const std::string& desc) {
         tool_.name = name;
         tool_.description = desc;
+        if (name.rfind("tc_", 0) == 0) {
+            logError("MCP") << "tool '" << name << "' rejected: tc_ is reserved for core tools";
+            accepted_ = false;
+        }
+    }
+
+    ToolBuilder& level(ToolLevel value) {
+        tool_.level = value;
+        return *this;
     }
 
     template<typename T>
@@ -963,7 +1005,7 @@ public:
     // Simple bind: function receives (const json& args)
     void bind(std::function<json(const json&)> func) {
         tool_.handler = func;
-        Server::instance().registerTool(tool_);
+        registerTool();
     }
 
     // Typed bind helpers (up to 4 args for simplicity)
@@ -971,7 +1013,7 @@ public:
     // 0 args
     void bind(std::function<json()> func) {
         tool_.handler = [func](const json&) { return func(); };
-        Server::instance().registerTool(tool_);
+        registerTool();
     }
 
     // 1 arg
@@ -981,7 +1023,7 @@ public:
         tool_.handler = [func, argName1](const json& args) {
             return func(args.at(argName1).get<T1>());
         };
-        Server::instance().registerTool(tool_);
+        registerTool();
     }
 
     // 2 args
@@ -992,7 +1034,7 @@ public:
         tool_.handler = [func, argName1, argName2](const json& args) {
             return func(args.at(argName1).get<T1>(), args.at(argName2).get<T2>());
         };
-        Server::instance().registerTool(tool_);
+        registerTool();
     }
 
     // 3 args
@@ -1004,12 +1046,29 @@ public:
         tool_.handler = [func, a1, a2, a3](const json& args) {
             return func(args.at(a1).get<T1>(), args.at(a2).get<T2>(), args.at(a3).get<T3>());
         };
-        Server::instance().registerTool(tool_);
+        registerTool();
     }
 
 private:
+    friend ToolBuilder detail::coreTool(Server&, const std::string&, const std::string&);
+    ToolBuilder(Server& server, const std::string& name, const std::string& desc)
+        : server_(&server) {
+        tool_.name = name;
+        tool_.description = desc;
+    }
+    void registerTool() {
+        if (accepted_) (server_ ? *server_ : Server::instance()).registerTool(tool_);
+    }
+    Server* server_ = nullptr;
+    bool accepted_ = true;
     Tool tool_;
 };
+
+namespace detail {
+inline ToolBuilder coreTool(Server& server, const std::string& name, const std::string& desc) {
+    return ToolBuilder(server, name, desc);
+}
+} // namespace detail
 
 // Resource Builder
 class ResourceBuilder {

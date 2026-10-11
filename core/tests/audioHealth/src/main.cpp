@@ -86,7 +86,7 @@ Json audioState() {
 TC_CORE_TEST_MAIN() {
     getMainThreadId();
     auto& engine = AudioEngine::getInstance();
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     check("unused engine has no stall or diagnostic counts",
           !engine.getStats().stalled && engine.getStats().underrunFrames == 0
           && engine.getStats().voicesStoppedByReinit == 0);

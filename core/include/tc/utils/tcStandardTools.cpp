@@ -1,15 +1,9 @@
 // =============================================================================
 // tcStandardTools.cpp - the standard MCP tool sets
 // =============================================================================
-// registerInspectionTools() / registerControlTools() are defined here, not
-// inline in tcStandardTools.h, so every handler they register is code in
-// TrussC.lib, i.e. in the host executable under hot reload. Apps call
-// registerControlTools() from setup() -- guest code -- and on Windows a guest
-// DLL compiles its own copy of every header-inline function and variable: an
-// inline handler would read the guest's copy of the input dispatch pointers
-// (internal::appMousePressedFunc, ...), which only the host sets, and the
-// injected input would never reach the App (#249). Out of line, the handlers
-// read the core loop's own state on every platform.
+// Core handlers are defined in the host library so input dispatch and window
+// state stay shared with hot reload guests. Registration happens once through
+// Server::instance(); the granted level controls exposure on every request.
 // =============================================================================
 
 #include <TrussC.h>
@@ -19,8 +13,10 @@
 namespace trussc {
 namespace mcp {
 
-void registerInspectionTools() {
-    detail::registerAudioTools();
+namespace detail {
+
+void registerStandardTools(Server& server) {
+    registerAudioTools(server);
 
     // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
     // secondary windows in the order tc_list_windows reports). Returns the
@@ -54,7 +50,8 @@ void registerInspectionTools() {
         return &win->context();
     };
 
-    tool("tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
+    coreTool(server, "tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             json arr = json::array();
             // The main window keeps rendering while hidden: no occluded field.
@@ -89,12 +86,15 @@ void registerInspectionTools() {
         }
         return json{{"fbos",arr}};
     };
-    tool("tc_list_images", "List live Images: index, name, width, height, format (RGBA8 or float).")
+    coreTool(server, "tc_list_images", "List live Images: index, name, width, height, format (RGBA8 or float).")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>(listImages));
-    tool("tc_list_fbos", "List live Fbos: index, name, width, height, format (RGBA8 or float).")
+    coreTool(server, "tc_list_fbos", "List live Fbos: index, name, width, height, format (RGBA8 or float).")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>(listFbos));
 
     Tool analyze;
+    analyze.level = ToolLevel::ReadOnly;
     analyze.name = "tc_analyze_image";
     analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:index}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; byte Fbo readback requires RGBA8.";
     analyze.args = {{"source","object","Image source (exactly one selector)",true},
@@ -213,9 +213,10 @@ void registerInspectionTools() {
             return error("unknown image source");
         } catch(const std::exception& e) { return error(e.what()); }
     };
-    Server::instance().registerTool(analyze);
+    server.registerTool(analyze);
 
-    tool("tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+    coreTool(server, "tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+        .level(ToolLevel::ReadOnly)
         .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)
         .arg<int>("width", "Target width in pixels, aspect preserved (clamped 16-4096; never upscales; omit = full resolution)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75; ignored for png)", false)
@@ -262,7 +263,8 @@ void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("tc_save_screenshot", "Save screenshot to file. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+    coreTool(server, "tc_save_screenshot", "Save screenshot to file. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+        .level(ToolLevel::ReadOnly)
         .arg<std::string>("path", "File path")
         .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
         .bind([resolveWindowCtx](const json& args) -> json {
@@ -294,7 +296,8 @@ void registerInspectionTools() {
             return json(nullptr);  // deferred result is sent instead
         });
 
-    tool("tc_get_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors discover this tool via tools/list and forward the payload to their monitoring server.")
+    coreTool(server, "tc_get_status", "App-published ops status: values registered via mcp::status()/mcp::statusGraph() plus the names of mcp::statusImage() images. mode 'graph' means the value wants to be plotted over time. Empty when the app publishes nothing. Supervisors discover this tool via tools/list and forward the payload to their monitoring server.")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             json values = json::array();
             for (auto& e : detail::statusRegistry()) {
@@ -313,7 +316,8 @@ void registerInspectionTools() {
             return json{{"values", values}, {"images", images}};
         }));
 
-    tool("tc_get_alerts", "Drain operator alerts raised by the app via mcp::alert(). Returns and CLEARS the pending list, so exactly one consumer receives each alert. Empty 'alerts' array when nothing is pending. Supervisors (anchorbolt start) poll this on the health cadence and forward entries to their notification sinks.")
+    coreTool(server, "tc_get_alerts", "Drain operator alerts raised by the app via mcp::alert(). Returns and CLEARS the pending list, so exactly one consumer receives each alert. Empty 'alerts' array when nothing is pending. Supervisors (anchorbolt start) poll this on the health cadence and forward entries to their notification sinks.")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             std::deque<json> drained;
             {
@@ -325,7 +329,8 @@ void registerInspectionTools() {
             return json{{"alerts", arr}};
         }));
 
-    tool("tc_get_status_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like tc_get_screenshot (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
+    coreTool(server, "tc_get_status_image", "Fetch an app-published image registered via mcp::statusImage(), downscaled + JPEG-encoded like tc_get_screenshot (pixel grab on the main loop, encode on the HTTP worker — no frame stutter).")
+        .level(ToolLevel::ReadOnly)
         .arg<std::string>("name", "Image name as listed by tc_get_status")
         .arg<int>("width", "Target width in pixels, aspect preserved (default 512, clamped 16-4096; never upscales)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75)", false)
@@ -370,7 +375,8 @@ void registerInspectionTools() {
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    tool("tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
+    coreTool(server, "tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
+        .level(ToolLevel::Public)
         .bind(std::function<json()>([]() -> json {
             return json{{"status", "ok"},
                         {"fps", trussc::getFps()},
@@ -387,7 +393,8 @@ void registerInspectionTools() {
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
 
-    tool("tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; initFailure (last failed init reason, miniaudio result, backend and requested device; omitted after success); stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
+    coreTool(server, "tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; initFailure (last failed init reason, miniaudio result, backend and requested device; omitted after success); stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
+        .level(ToolLevel::ReadOnly)
         .arg<bool>("devices", "Enumerate playback / capture devices (default true)", false)
         .bind([](const json& args) -> json {
             bool enumerate = true;
@@ -457,7 +464,8 @@ void registerInspectionTools() {
 
     // --- Recording tools (native encoder, no ffmpeg) ---
 
-    tool("tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
+    coreTool(server, "tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
+        .level(ToolLevel::ReadOnly)
         .arg<std::string>("path", "Output file path (relative paths resolve to the data dir). Omit for recording-<timestamp>.mp4/.mov in the data dir.", false)
         .arg<float>("duration", "Fixed length in seconds; the file auto-stops & finalizes at that length. Omit or 0 = unlimited (tc_stop_recording to end).", false)
         .arg<float>("fps", "Target frame rate (default 60; ProMotion frames are decimated to it)", false)
@@ -496,7 +504,8 @@ void registerInspectionTools() {
             return r;
         });
 
-    tool("tc_stop_recording", "Stop the current recording and finalize the file. Wins over a pending fixed duration (finalizes immediately at the current length); a no-op if nothing is recording.")
+    coreTool(server, "tc_stop_recording", "Stop the current recording and finalize the file. Wins over a pending fixed duration (finalizes immediately at the current length); a no-op if nothing is recording.")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             if (!trussc::isRecording()) {
                 // Harmless no-op (e.g. a fixed-duration recording already
@@ -516,7 +525,8 @@ void registerInspectionTools() {
 
     // --- Node tree tools ---
 
-    tool("tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos): editable, but not saved, and when a write carries both, the canonical one (pos) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
+    coreTool(server, "tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos): editable, but not saved, and when a write carries both, the canonical one (pos) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
+        .level(ToolLevel::ReadOnly)
         .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
         .bind([](const json& args) -> json {
@@ -538,7 +548,8 @@ void registerInspectionTools() {
             return json{{"status", "ok"}, {"tree", nodeToJson(*root, depth, true)}};
         });
 
-    tool("tc_get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
+    coreTool(server, "tc_get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
+        .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             Node* n = getSelectedNode();
             if (!n) {
@@ -546,15 +557,9 @@ void registerInspectionTools() {
             }
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         }));
-}
 
-void registerControlTools() {
-
-    // Registering the control surface IS the opt-in to input injection /
-    // scene mutation. Mark it so isDebuggerEnabled() reflects reality.
-    detail::isDebuggerEnabled().store(true);
-
-    tool("tc_quit", "Quit the application gracefully")
+    coreTool(server, "tc_quit", "Quit the application gracefully")
+        .level(ToolLevel::Control)
         .bind(std::function<json()>([]() -> json {
             internal::setExitReason("tc-quit");
             sapp_request_quit();
@@ -563,7 +568,8 @@ void registerControlTools() {
 
     // --- Mouse Tools ---
 
-    tool("tc_mouse_move", "Move mouse cursor (with a button held, emits a drag)")
+    coreTool(server, "tc_mouse_move", "Move mouse cursor (with a button held, emits a drag)")
+        .level(ToolLevel::Control)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button held during the move (0:left, 1:right, 2:middle; omit or -1 for a plain move)", false)
@@ -604,7 +610,8 @@ void registerControlTools() {
     // release; tc_mouse_click fires press+release back-to-back, so drag consumers
     // (e.g. EasyCam orbit) never see an open gesture. Anchoring the global
     // mouse position at press keeps the first drag delta sane.
-    tool("tc_mouse_press", "Press and hold a mouse button (start of a drag; pair with tc_mouse_move + tc_mouse_release)")
+    coreTool(server, "tc_mouse_press", "Press and hold a mouse button (start of a drag; pair with tc_mouse_move + tc_mouse_release)")
+        .level(ToolLevel::Control)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -624,7 +631,8 @@ void registerControlTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("tc_mouse_release", "Release a mouse button (end of a drag)")
+    coreTool(server, "tc_mouse_release", "Release a mouse button (end of a drag)")
+        .level(ToolLevel::Control)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -644,7 +652,8 @@ void registerControlTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("tc_mouse_click", "Click mouse button (optionally with modifier keys held)")
+    coreTool(server, "tc_mouse_click", "Click mouse button (optionally with modifier keys held)")
+        .level(ToolLevel::Control)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -677,7 +686,8 @@ void registerControlTools() {
             return json{{"status", "ok"}};
         });
 
-    tool("tc_mouse_scroll", "Scroll mouse wheel")
+    coreTool(server, "tc_mouse_scroll", "Scroll mouse wheel")
+        .level(ToolLevel::Control)
         .arg<float>("dx", "Horizontal scroll delta")
         .arg<float>("dy", "Vertical scroll delta")
         .bind<float, float>([](float dx, float dy) {
@@ -698,12 +708,13 @@ void registerControlTools() {
     // e.shift on the callback and isShiftPressed() in update() see it. Hold a
     // modifier across several keys by pressing its keycode explicitly
     // (tc_key_press 340), then plain presses inherit it.
-    tool("tc_key_press",
+    coreTool(server, "tc_key_press",
          "Press a key (updates the held-key set that isKeyPressed() reads). "
          "A modifier flag also presses that modifier's own key first (shift -> keycode 340, "
          "ctrl -> 341, alt -> 342, super -> 343) and reports it in modifiersPressed; "
          "pair it with the same flag on tc_key_release, or hold a modifier across several "
          "keys by pressing/releasing its keycode explicitly")
+        .level(ToolLevel::Control)
         .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
         .arg<bool>("shift", "Hold Shift for this press", false)
         .arg<bool>("ctrl", "Hold Ctrl for this press", false)
@@ -733,11 +744,12 @@ void registerControlTools() {
                         {"heldKeys", detail::heldKeysJson()}};
         });
 
-    tool("tc_key_release",
+    coreTool(server, "tc_key_release",
          "Release a key (updates the held-key set that isKeyPressed() reads). "
          "A modifier flag also releases that modifier's own key afterwards "
          "(shift -> keycode 340, ctrl -> 341, alt -> 342, super -> 343), "
          "mirroring tc_key_press")
+        .level(ToolLevel::Control)
         .arg<int>("key", "Key code (sokol_app keycode; letters are uppercase ASCII: 'A'=65..'Z'=90)")
         .arg<bool>("shift", "Also release Shift after this key", false)
         .arg<bool>("ctrl", "Also release Ctrl after this key", false)
@@ -769,7 +781,8 @@ void registerControlTools() {
 
     // --- Node Tools ---
 
-    tool("tc_select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
+    coreTool(server, "tc_select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
+        .level(ToolLevel::Control)
         .arg<int>("id", "Instance id from tc_get_node_tree (0 to clear)")
         .bind<int>([](int id) {
             if (id == 0) {
@@ -785,7 +798,8 @@ void registerControlTools() {
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         });
 
-    tool("tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string). A derived member (e.g. globalPos) is applied before its canonical member (pos), so when both are given the canonical one wins")
+    coreTool(server, "tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string). A derived member (e.g. globalPos) is applied before its canonical member (pos), so when both are given the canonical one wins")
+        .level(ToolLevel::Control)
         .arg<int>("id", "Instance id from tc_get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
         .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
@@ -826,6 +840,8 @@ void registerControlTools() {
         });
 
 }
+
+} // namespace detail
 
 } // namespace mcp
 } // namespace trussc

@@ -32,9 +32,10 @@ std::vector<DeferredResponse>& deferredResponses() {
     return v;
 }
 
-std::atomic<bool>& isDebuggerEnabled() {
-    static std::atomic<bool> enabled{false};
-    return enabled;
+// Host storage: never reset by guest registration cleanup or a reload.
+std::atomic<ToolLevel>& grantedToolLevel() {
+    static std::atomic<ToolLevel> level{ToolLevel::Public};
+    return level;
 }
 
 const void*& registrationOwner() {
@@ -114,7 +115,31 @@ std::atomic<bool>& mcpLoopbackOnly() {
 
 Server& Server::instance() {
     static Server server;
+    // Build the core registry once, even when the first registration is from
+    // a guest. Core handlers outlive that guest and must have no guest owner.
+    static const bool registered = [&] {
+        const auto owner = detail::registrationOwner();
+        detail::setRegistrationOwner(nullptr);
+        detail::registerStandardTools(server);
+        detail::setRegistrationOwner(owner);
+        return true;
+    }();
+    (void)registered;
     return server;
+}
+
+void setToolLevel(ToolLevel level) {
+#ifndef __EMSCRIPTEN__
+    detail::grantedToolLevel().store(level);
+#endif
+}
+
+ToolLevel getToolLevel() {
+#ifndef __EMSCRIPTEN__
+    return detail::grantedToolLevel().load();
+#else
+    return ToolLevel::Public;
+#endif
 }
 
 } // namespace mcp

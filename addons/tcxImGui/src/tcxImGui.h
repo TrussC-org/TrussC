@@ -263,11 +263,8 @@ private:
 
 inline void imguiSetup() {
     ImGuiManager::instance().setup();
-    // Auto-register the ImGui MCP tools when MCP is enabled, so ImGui-based
-    // UIs are AI-drivable without an explicit registerImGuiTools() call.
-    if (const char* m = std::getenv("TRUSSC_MCP"); m && std::string(m) == "1") {
-        registerImGuiTools();
-    }
+    // Registration always happens; the host's tool level controls exposure.
+    registerImGuiTools();
 }
 
 inline void imguiShutdown() {

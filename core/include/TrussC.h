@@ -2374,11 +2374,6 @@ namespace internal {
     inline void (*appFilesDroppedFunc)(const std::vector<std::string>&) = nullptr;
 } // namespace internal
 
-namespace mcp {
-    void registerInspectionTools();
-    void registerDebuggerTools();
-}
-
 // Defined in tc/sound/tcSound.h (included later in this header); declared here
 // so the cleanup callback below can stop the audio device on exit.
 inline void shutdownAudio();
@@ -2437,8 +2432,8 @@ namespace internal {
         // Check for MCP mode via environment variable
         const char* envMcp = std::getenv("TRUSSC_MCP");
         if (envMcp && std::string(envMcp) == "1") {
-            // Register inspection tools (screenshot etc.)
-            mcp::registerInspectionTools();
+            // Ensure core tools are registered; exposure uses the host grant.
+            (void)mcp::Server::instance();
 
             // Get port from environment (0 = OS auto-assign)
             int mcpPort = 0;

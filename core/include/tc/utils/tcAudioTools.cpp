@@ -142,8 +142,9 @@ json capture(const json& args) {
 }
 } // namespace
 
-void registerAudioTools() {
-    tool("tc_get_audio_spectrum", "Full post-clamp output spectrum, read-only; never starts the engine. Returns sampleRate, n, binHz, framesWritten (since last init), and channels [{peak, rms, peaks [{hz, dbfs}], spectrum}]. Spectrum values are dBFS rounded to one decimal; null means silence (-infinity). Missing startup frames are zero padded. Frequency bounds select inclusive FFT bins; peak frequencies are interpolated.")
+void registerAudioTools(Server& server) {
+    coreTool(server, "tc_get_audio_spectrum", "Full post-clamp output spectrum, read-only; never starts the engine. Returns sampleRate, n, binHz, framesWritten (since last init), and channels [{peak, rms, peaks [{hz, dbfs}], spectrum}]. Spectrum values are dBFS rounded to one decimal; null means silence (-infinity). Missing startup frames are zero padded. Frequency bounds select inclusive FFT bins; peak frequencies are interpolated.")
+        .level(ToolLevel::ReadOnly)
         .arg<int>("n", "Power of two from 64 up to the two-second ring length (default 1024)", false)
         .arg<std::string>("window", "hann (default) or blackmanharris", false)
         .arg<std::string>("channels", "mix (default, all-channel average) or each", false)
@@ -151,7 +152,8 @@ void registerAudioTools() {
         .arg<double>("fmax", "Highest returned frequency in Hz (default Nyquist)", false)
         .arg<int>("peaks", "Number of strongest peaks (default 3)", false)
         .bind(spectrum);
-    tool("tc_save_audio_capture", "Save the output history ending at the call as float32 WAV; never starts the engine or waits for new audio. Returns path, sampleRate, channels, frames, framesWritten. Relative paths use the data folder; missing folders are created; a missing .wav suffix is appended with a warning. History is capped at two seconds; use AudioRecorder for longer recordings.")
+    coreTool(server, "tc_save_audio_capture", "Save the output history ending at the call as float32 WAV; never starts the engine or waits for new audio. Returns path, sampleRate, channels, frames, framesWritten. Relative paths use the data folder; missing folders are created; a missing .wav suffix is appended with a warning. History is capped at two seconds; use AudioRecorder for longer recordings.")
+        .level(ToolLevel::ReadOnly)
         .arg<std::string>("path", "Output WAV file path")
         .arg<double>("seconds", "Seconds of history (default 1.0, capped by available history)", false)
         .bind(capture);

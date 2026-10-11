@@ -1380,7 +1380,7 @@ static void testRecorderPacing() {
 // 7b. tc_get_health uptime (the MCP tool, called directly)
 // ---------------------------------------------------------------------------
 static void testHealthUptime() {
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     // Window size without a window: pixel-perfect mode reads sokol's
     // framebuffer size (1 x 1 before init) instead of dividing by its DPI (0).
     const bool pixelPerfect = internal::pixelPerfectMode();

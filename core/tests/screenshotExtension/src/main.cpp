@@ -125,7 +125,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         const bool supported = string(name) == "shot.TgA" ? Platform::isWindows() : Platform::isMacOS();
         checkQueued(sandbox / name, sandbox / (string(name) + (supported ? "" : ".png")), !supported);
     }
-    mcp::registerInspectionTools();
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     checkMcp("mcp.xyz", sandbox / "mcp.xyz.png");
     checkMcp(sandbox / "mcp", sandbox / "mcp.png");
     if (argc > 1 && strcmp(argv[1], "--screen") == 0) {
