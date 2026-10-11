@@ -109,8 +109,7 @@ static void testPortInUse() {
 
 // The default host. Started with no arguments, the server picks a port, logs
 // "[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp" and answers a
-// client that connects to the 127.0.0.1 address. Runs last: stopHttpServer()
-// closes the request channel, and GET / does not use it.
+// client that connects to the 127.0.0.1 address.
 static void testDefaultHost() {
     mutex logMutex;
     string portLine;
@@ -174,10 +173,10 @@ struct HeadlessMcpApp : App {
     future<vector<json>> replies;
     void setup() override {
         check("headless setup precedes automatic MCP startup", !mcp::detail::getHttpServer());
+        if (headlessGrantInSetup) mcp::setToolLevel(mcp::ToolLevel::Control);
         mcp::tool("headless_public", "").bind([]() -> json { return "public"; });
         mcp::tool("headless_control", "").level(mcp::ToolLevel::Control)
             .bind([]() -> json { return "control"; });
-        if (headlessGrantInSetup) mcp::setToolLevel(mcp::ToolLevel::Control);
         headlessSetupDone = true;
     }
     void update() override {
@@ -246,29 +245,38 @@ int environmentCase(const string& mode) {
         headlessSetupDone = false;
         if (mode == "headless-port") setEnv("TRUSSC_MCP_PORT", "0");
         else if (mode != "headless-dev") setEnv("TRUSSC_MCP", closed ? "0" : "1");
-        int healthNotices = 0, devWarnings = 0;
+        int healthNotices = 0, devWarnings = 0, exposureNotices = 0;
         auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
             const bool notice = e.level == LogLevel::Notice && e.message ==
                 "[MCP] MCP: health only (ToolLevel Public). The supervisor gets logs, restart and hang detection; for screenshots and status add mcp::setToolLevel(mcp::ToolLevel::ReadOnly) in setup().";
             const bool warning = e.level == LogLevel::Warning && e.message.find("MCP development build:") != string::npos;
             if (notice) ++healthNotices;
             if (warning) ++devWarnings;
-            if (notice || warning) check("headless startup log follows setup", headlessSetupDone);
+            const bool exposure = e.level == LogLevel::Notice && e.message.find("[MCP] ToolLevel ") == 0;
+            if (exposure) {
+                ++exposureNotices;
+                check("exposure Notice includes tool registered after setup grant",
+                      e.message.find("headless_control") != string::npos);
+            }
+            if (notice || warning || exposure) check("headless startup log follows setup", headlessSetupDone);
         });
         check("headless runner succeeds", runHeadlessApp<HeadlessMcpApp>() == 0);
         check("headless health-only Notice occurs exactly once", healthNotices == (!dev && !headlessGrantInSetup && !closed ? 1 : 0));
+        check("headless exposure Notice occurs exactly once when full",
+              exposureNotices == (!closed && (dev || headlessGrantInSetup) ? 1 : 0));
         check("headless dev warning occurs exactly once, even when disabled", devWarnings == (dev ? 1 : 0));
         check("headless cleanup stops HTTP", !mcp::detail::getHttpServer() && mcp::getHttpPort() == 0);
         return g_fail ? 1 : 0;
     }
     const bool dev = mcp::detail::isDevBuild();
     const bool closed = mode == "closed" || mode == "closed-grant" || mode == "closed-explicit";
-    const bool grant = mode == "grant" || mode == "grant-port" || mode == "exit-cleanup" || mode == "closed-grant";
-    const bool explicitStart = mode == "explicit" || mode == "closed-explicit";
-    const bool envAsk = mode == "env" || mode == "port" || mode == "upgrade" || closed;
+    const bool downgrade = mode.rfind("downgrade-", 0) == 0;
+    const bool grant = downgrade || mode == "grant" || mode == "grant-port" || mode == "exit-cleanup" || mode == "closed-grant";
+    const bool explicitStart = mode == "explicit" || mode == "closed-explicit" || mode == "downgrade-explicit";
+    const bool envAsk = mode == "env" || mode == "port" || mode == "upgrade" || mode == "upgrade-grant" || closed;
     if (closed) setEnv("TRUSSC_MCP", "0");
-    else if (mode == "env" || mode == "upgrade") setEnv("TRUSSC_MCP", "1");
-    if (mode == "port" || closed) setEnv("TRUSSC_MCP_PORT", "0");
+    else if (mode == "env" || mode == "upgrade" || mode == "upgrade-grant" || mode == "downgrade-env") setEnv("TRUSSC_MCP", "1");
+    if (mode == "port" || mode == "downgrade-port" || closed) setEnv("TRUSSC_MCP_PORT", "0");
     int configuredPort = 0;
     if (mode == "port" || mode == "grant-port") {
         httplib::Server probe;
@@ -287,23 +295,29 @@ int environmentCase(const string& mode) {
     }
 
     int healthNotices = 0, devWarnings = 0;
+    vector<string> exposureNotices;
     auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
         if (e.level == LogLevel::Notice && e.message ==
             "[MCP] MCP: health only (ToolLevel Public). The supervisor gets logs, restart and hang detection; for screenshots and status add mcp::setToolLevel(mcp::ToolLevel::ReadOnly) in setup().") ++healthNotices;
         if (e.level == LogLevel::Warning && e.message.find("MCP development build:") != string::npos) ++devWarnings;
+        if (e.level == LogLevel::Notice && e.message.find("[MCP] ToolLevel ") == 0)
+            exposureNotices.push_back(e.message);
     });
     mcp::resource("test://public", "public resource").bind([] { return std::string("resource"); });
     mcp::tool("public_probe", "").bind([]() -> json { return "public"; });
     mcp::tool("control_probe", "").level(mcp::ToolLevel::Control).bind([]() -> json { return "control"; });
     check("registration alone never starts HTTP", !mcp::detail::getHttpServer());
-    if (grant) mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     if (explicitStart) mcp::startHttpServer();
+    if (grant) mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     check("code opt-in opens immediately unless disabled",
           bool(mcp::detail::getHttpServer()) == ((grant || explicitStart) && !closed));
+    check("no exposure Notice before initialization", exposureNotices.empty());
     mcp::detail::initializeMcp();
+    mcp::detail::initializeMcp(); // Host initialization is idempotent.
     const bool listening = !closed && (dev || grant || explicitStart || envAsk);
     check("startup listener matches environment/code/build", (mcp::getHttpPort() > 0) == listening);
     const bool healthOnly = listening && !dev && !grant && !explicitStart;
+    check("initialization logs full exposure once", exposureNotices.size() == (listening && !healthOnly ? 1u : 0u));
     check("health-only Notice occurs exactly once", healthNotices == (healthOnly ? 1 : 0));
     check("dev warning follows build even when disabled", devWarnings == (dev ? 1 : 0));
     check("main title marks dev builds", (mcp::detail::mainWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
@@ -345,21 +359,72 @@ int environmentCase(const string& mode) {
     check("Public app tools require code or dev opt-in", call("public_probe")["result"].value("isError", false) == healthOnly);
     check("ReadOnly tools require a grant", call("tc_get_status")["result"].value("isError", false) == (!dev && !grant));
     check("Control tools require Control", call("control_probe")["result"].value("isError", false) == !dev);
-    if (mode == "upgrade") {
-        mcp::startHttpServer();
-        check("explicit start opens Public tools on an existing health listener", !call("public_probe")["result"].value("isError", false));
+    if (mode == "upgrade" || mode == "upgrade-grant") {
         const int port = mcp::getHttpPort();
+        const auto noticesBefore = exposureNotices.size();
+        if (mode == "upgrade") mcp::startHttpServer();
+        else mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+        check("health-only to full logs exposure once", exposureNotices.size() == noticesBefore + (dev ? 0u : 1u));
+        check("exposure Notice lists app tool", !exposureNotices.empty() &&
+              exposureNotices.back().find("public_probe") != string::npos);
+        check("upgrade opens app tools without rebinding", mcp::getHttpPort() == port &&
+              !call("public_probe")["result"].value("isError", false));
+        const auto afterUpgrade = exposureNotices.size();
+        if (mode == "upgrade") mcp::startHttpServer();
+        else mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+        check("repeated opt-in does not duplicate exposure Notice", exposureNotices.size() == afterUpgrade);
+        mcp::setToolLevel(mcp::ToolLevel::Control);
+        check("widening grant logs once", exposureNotices.size() == afterUpgrade + (dev ? 0u : 1u));
+        check("widened exposure Notice lists Control app tool", exposureNotices.back().find("control_probe") != string::npos);
+        const auto afterWidening = exposureNotices.size();
         mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-        check("code grant opens existing health endpoint", mcp::getHttpPort() == port &&
-              !call("public_probe")["result"].value("isError", false) &&
-              !call("tc_get_status")["result"].value("isError", false));
+        check("narrowing grant does not log exposure", exposureNotices.size() == afterWidening);
+    }
+    if (downgrade) {
+        const int port = mcp::getHttpPort();
+        const auto noticesBefore = exposureNotices.size();
         mcp::setToolLevel(mcp::ToolLevel::Public);
-        check("dev grant cannot be lowered by code", mcp::getToolLevel() ==
+        check("dev grant stays Control on Public downgrade", mcp::getToolLevel() ==
               (dev ? mcp::ToolLevel::Control : mcp::ToolLevel::Public));
+        check("Public downgrade does not log exposure", exposureNotices.size() == noticesBefore);
+        const bool remainsOpen = dev || mode != "downgrade-none";
+        const bool narrowsToHealth = !dev && (mode == "downgrade-env" || mode == "downgrade-port");
+        check("Public downgrade preserves or stops listener as requested", mcp::getHttpPort() == (remainsOpen ? port : 0) &&
+              bool(mcp::detail::getHttpServer()) == remainsOpen);
+        check("Public downgrade narrows only grant-opened environment listeners", mcp::detail::healthOnly() == narrowsToHealth);
+        if (remainsOpen) {
+            const auto tools = exchange("tools/list")["result"]["tools"];
+            check("downgraded health listener lists only health", !narrowsToHealth ||
+                  (tools.size() == 1 && tools[0]["name"] == "tc_get_health"));
+            check("downgraded Public tool call follows listener policy",
+                  call("public_probe")["result"].value("isError", false) == narrowsToHealth);
+            check("downgraded resources follow listener policy",
+                  exchange("resources/list")["result"]["resources"].empty() == narrowsToHealth);
+        } else {
+            httplib::Client client("127.0.0.1", port);
+            client.set_connection_timeout(1);
+            check("stopped listener refuses connections", !client.Get("/"));
+        }
+        mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+        check("renewed grant logs reopened or widened exposure", exposureNotices.size() == noticesBefore + (dev ? 0u : 1u));
+        check("renewed grant serves HTTP again", !call("public_probe")["result"].value("isError", false));
     }
     if (mode == "exit-cleanup") return g_fail ? 1 : 0; // exercise host exit hook
     mcp::stopHttpServer();
     check("stop clears reported listener port", mcp::getHttpPort() == 0);
+    if (mode == "downgrade-explicit") {
+        mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+        mcp::setToolLevel(mcp::ToolLevel::Public);
+        check("explicit-start flag does not survive stop", bool(mcp::detail::getHttpServer()) == dev);
+        mcp::stopHttpServer();
+    }
+    if (mode == "explicit") {
+        const auto noticesBefore = exposureNotices.size();
+        mcp::startHttpServer();
+        check("explicit reopening after initialization logs exposure once", exposureNotices.size() == noticesBefore + 1);
+        check("explicit reopening serves HTTP", !call("public_probe")["result"].value("isError", false));
+        mcp::stopHttpServer();
+    }
     return g_fail ? 1 : 0;
 }
 
@@ -382,7 +447,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_CORE_TEST_NAME
     command += " " TC_CORE_TEST_NAME;
 #endif
-    for (const char* mode : {"headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "closed", "closed-grant", "closed-explicit"})
+    for (const char* mode : {"headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "upgrade-grant", "downgrade-explicit", "downgrade-env", "downgrade-port", "downgrade-none", "closed", "closed-grant", "closed-explicit"})
         check(string("environment case: ") + mode,
               std::system((command + " --environment " + mode).c_str()) == 0);
 

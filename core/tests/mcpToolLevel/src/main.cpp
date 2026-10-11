@@ -55,21 +55,25 @@ struct EnvGrantApp : App {
               mcp::getToolLevel() == (grantInSetup ? mcp::ToolLevel::Control : expectedEnvGrant));
         check("Control exposure follows the final app grant",
               bool(listed().count("tc_mouse_click")) == mcp::isDebuggerEnabled());
+        check("mainWindowTitle reflects build kind", mcp::detail::mainWindowTitle("MCP startup test") ==
+              (mcp::detail::isDevBuild() ? "MCP startup test [MCP]" : "MCP startup test"));
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
-        auto nativeTitle = [] {
-            char* title = nullptr;
-            auto* display = static_cast<Display*>(const_cast<void*>(sapp_x11_get_display()));
-            const auto window = static_cast<::Window>(reinterpret_cast<uintptr_t>(sapp_x11_get_window()));
-            XFetchName(display, window, &title);
-            const std::string result = title ? title : "";
-            if (title) XFree(title);
-            return result;
-        };
-        check("initial native title reflects build kind", nativeTitle() ==
-              mcp::detail::mainWindowTitle("MCP startup test"));
-        setWindowTitle("Retitled");
-        check("native main window retains dev marker after retitle", nativeTitle() ==
-              mcp::detail::mainWindowTitle("Retitled"));
+        if (sapp_x11_get_display()) {
+            auto nativeTitle = [] {
+                char* title = nullptr;
+                auto* display = static_cast<Display*>(const_cast<void*>(sapp_x11_get_display()));
+                const auto window = static_cast<::Window>(reinterpret_cast<uintptr_t>(sapp_x11_get_window()));
+                XFetchName(display, window, &title);
+                const std::string result = title ? title : "";
+                if (title) XFree(title);
+                return result;
+            };
+            check("initial native title reflects build kind", nativeTitle() ==
+                  mcp::detail::mainWindowTitle("MCP startup test"));
+            setWindowTitle("Retitled");
+            check("native main window retains dev marker after retitle", nativeTitle() ==
+                  mcp::detail::mainWindowTitle("Retitled"));
+        }
 #endif
     }
     void update() override {

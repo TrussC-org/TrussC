@@ -58,6 +58,7 @@ void registerStandardTools(Server& server);
 bool isDevBuild();
 bool healthOnly();
 bool& healthOnlyEndpoint();
+bool& explicitlyOpened();
 bool environmentClosesMcp();
 void startConfiguredServer();
 void initializeMcp();
@@ -585,6 +586,7 @@ namespace detail {
 
 // HTTP server state, one per process (defined in tcMCP.cpp, see above).
 ThreadChannel<McpRequest>& getHttpChannel();
+void resetHttpChannel();
 std::unique_ptr<httplib::Server>& getHttpServer();
 std::unique_ptr<std::thread>& getHttpThread();
 std::atomic<int>& getHttpPort();
@@ -837,6 +839,7 @@ inline void startHttpServerImpl(int port, const std::string& host,
         return;
     }
     healthOnlyEndpoint() = healthEndpoint;
+    detail::resetHttpChannel();
     detail::getHttpPort().store(actualPort);
     detail::getHttpThread() = std::make_unique<std::thread>([host, actualPort]() {
         auto& svr = detail::getHttpServer();
@@ -855,23 +858,11 @@ inline void startHttpServerImpl(int port, const std::string& host,
         svr->listen_after_bind();
     });
     svr->wait_until_ready();
-    if (!isDevBuild() && !healthEndpoint) {
-        const auto reply = json::parse(Server::instance().processMessage(
-            R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"));
-        std::string names;
-        for (const auto& tool : reply["result"]["tools"]) {
-            if (!names.empty()) names += ", ";
-            names += tool["name"].get<std::string>();
-        }
-        logNotice("MCP") << "ToolLevel " << toolLevelName(getToolLevel()) << ": " << names;
-    }
 }
 } // namespace detail
 
-inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
-                            const std::string& token = "") {
-    detail::startHttpServerImpl(port, host, token, false);
-}
+void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
+                     const std::string& token = "");
 
 // Stop HTTP server
 inline void stopHttpServer() {
@@ -915,6 +906,8 @@ inline void stopHttpServer() {
     t.reset();
     svr.reset();
     detail::getHttpPort().store(0);
+    detail::explicitlyOpened() = false;
+    detail::healthOnlyEndpoint() = false;
 }
 
 // Process HTTP request queue (call every frame from main thread)

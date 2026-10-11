@@ -36,6 +36,15 @@ bool& healthOnlyEndpoint() {
     return enabled;
 }
 
+bool& explicitlyOpened() {
+    static bool opened = false;
+    return opened;
+}
+
+#ifndef __EMSCRIPTEN__
+static bool mcpInitialized = false;
+#endif
+
 bool healthOnly() {
     return healthOnlyEndpoint() && getToolLevel() == ToolLevel::Public;
 }
@@ -43,6 +52,27 @@ bool healthOnly() {
 bool environmentClosesMcp() {
     const char* value = std::getenv("TRUSSC_MCP");
     return value && std::string_view(value) == "0";
+}
+
+bool environmentRequestsMcp() {
+    const char* value = std::getenv("TRUSSC_MCP");
+    return !environmentClosesMcp() &&
+        ((value && std::string_view(value) == "1") || std::getenv("TRUSSC_MCP_PORT"));
+}
+
+void logExposure() {
+#ifndef __EMSCRIPTEN__
+    // setup() may register app/addon tools after granting access or binding.
+    if (!mcpInitialized || !getHttpServer() || healthOnly()) return;
+    const auto reply = json::parse(Server::instance().processMessage(
+        R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})"));
+    std::string names;
+    for (const auto& tool : reply["result"]["tools"]) {
+        if (!names.empty()) names += ", ";
+        names += tool["name"].get<std::string>();
+    }
+    logNotice("MCP") << "ToolLevel " << toolLevelName(getToolLevel()) << ": " << names;
+#endif
 }
 
 const std::string& mainWindowTitle(const std::string& title) {
@@ -60,11 +90,9 @@ void startConfiguredServer() {
         if (getHttpServer()) stopHttpServer();
         return;
     }
-    const char* envMcp = std::getenv("TRUSSC_MCP");
     const char* envPort = std::getenv("TRUSSC_MCP_PORT");
     const bool healthEndpoint = getToolLevel() == ToolLevel::Public;
-    if (!isDevBuild() && healthEndpoint &&
-        !(envMcp && std::string_view(envMcp) == "1") && !envPort) return;
+    if (!isDevBuild() && healthEndpoint && !environmentRequestsMcp()) return;
     if (getHttpServer()) return;
     const char* host = isDevBuild() ? std::getenv("TRUSSC_MCP_HOST") : nullptr;
     const char* token = isDevBuild() ? std::getenv("TRUSSC_MCP_TOKEN") : nullptr;
@@ -80,12 +108,12 @@ void startConfiguredServer() {
 void initializeMcp() {
 #ifndef __EMSCRIPTEN__
     // App::onSetupDone also runs for replacement guests; startup is host state.
-    static bool initialized = false;
-    if (initialized) return;
-    initialized = true;
+    if (mcpInitialized) return;
+    mcpInitialized = true;
     if (isDevBuild())
         logWarning("MCP") << "MCP development build: Control tools are enabled. Do not distribute this build.";
     startConfiguredServer();
+    logExposure();
 #endif
 }
 
@@ -146,9 +174,20 @@ std::mutex& httpQueueMutex() {
     return mutex;
 }
 
-ThreadChannel<McpRequest>& getHttpChannel() {
-    static ThreadChannel<McpRequest> channel;
+static std::unique_ptr<ThreadChannel<McpRequest>>& httpChannelStorage() {
+    static auto channel = std::make_unique<ThreadChannel<McpRequest>>();
     return channel;
+}
+
+ThreadChannel<McpRequest>& getHttpChannel() {
+    return *httpChannelStorage();
+}
+
+void resetHttpChannel() {
+    // A Public downgrade can stop the listener; a later grant starts it again.
+    // Called before starting workers, after any previous workers were joined.
+    std::lock_guard<std::mutex> lock(httpQueueMutex());
+    httpChannelStorage() = std::make_unique<ThreadChannel<McpRequest>>();
 }
 
 std::unique_ptr<httplib::Server>& getHttpServer() {
@@ -207,14 +246,40 @@ Server& Server::instance() {
     return server;
 }
 
+#ifndef __EMSCRIPTEN__
+void startHttpServer(int port, const std::string& host, const std::string& token) {
+    const bool wasFull = detail::getHttpServer() && !detail::healthOnly();
+    detail::startHttpServerImpl(port, host, token, false);
+    if (detail::getHttpServer()) {
+        detail::explicitlyOpened() = true;
+        if (!wasFull) detail::logExposure();
+    }
+}
+#endif
+
 void setToolLevel(ToolLevel level) {
+    const auto previousLevel = getToolLevel();
+#ifndef __EMSCRIPTEN__
+    const bool wasFull = detail::getHttpServer() && !detail::healthOnly();
+#endif
+    // Dev builds stay Control, so the Public downgrade policy never applies.
     detail::grantedToolLevel().store(detail::isDevBuild() ? ToolLevel::Control : level);
-    if (getToolLevel() >= ToolLevel::ReadOnly) {
+    if (detail::environmentClosesMcp()) {
+        detail::startConfiguredServer();
+    } else if (getToolLevel() >= ToolLevel::ReadOnly) {
         detail::healthOnlyEndpoint() = false;
         detail::startConfiguredServer();
-    } else if (detail::environmentClosesMcp()) {
-        detail::startConfiguredServer();
+    } else if (previousLevel > ToolLevel::Public && !detail::explicitlyOpened()) {
+#ifndef __EMSCRIPTEN__
+        if (detail::getHttpServer()) {
+            if (detail::environmentRequestsMcp()) detail::healthOnlyEndpoint() = true;
+            else stopHttpServer();
+        }
+#endif
     }
+#ifndef __EMSCRIPTEN__
+    if (!wasFull || getToolLevel() > previousLevel) detail::logExposure();
+#endif
 }
 
 ToolLevel getToolLevel() {
