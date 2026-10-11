@@ -2432,6 +2432,10 @@ namespace internal {
         // Check for MCP mode via environment variable
         const char* envMcp = std::getenv("TRUSSC_MCP");
         if (envMcp && std::string(envMcp) == "1") {
+            // PR-A preserves inspection access; PR-B replaces this with the
+            // health-only rule. Never lower a Control grant made by app code.
+            if (mcp::getToolLevel() < mcp::ToolLevel::ReadOnly)
+                mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
             // Ensure core tools are registered; exposure uses the host grant.
             (void)mcp::Server::instance();
 

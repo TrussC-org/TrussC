@@ -129,17 +129,11 @@ Server& Server::instance() {
 }
 
 void setToolLevel(ToolLevel level) {
-#ifndef __EMSCRIPTEN__
     detail::grantedToolLevel().store(level);
-#endif
 }
 
 ToolLevel getToolLevel() {
-#ifndef __EMSCRIPTEN__
     return detail::grantedToolLevel().load();
-#else
-    return ToolLevel::Public;
-#endif
 }
 
 } // namespace mcp

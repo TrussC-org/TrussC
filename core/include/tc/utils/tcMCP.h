@@ -40,10 +40,14 @@ namespace trussc {
 namespace mcp {
 
 // Tools are registered independently of the level granted by the host.
-enum class ToolLevel { Public, ReadOnly, Control };
+enum class ToolLevel {
+    Public,   // Health only for built-in tools; user tools default to Public.
+    ReadOnly, // Observe the app (captures may write to disk).
+    Control   // Operate the app (input, scene changes, quit).
+};
 
 // Defined in tcMCP.cpp: one host setting shared with hot reload guests.
-// Web builds ignore the setter and report Public.
+// The level API and list/call checks apply on every platform.
 void setToolLevel(ToolLevel level);
 ToolLevel getToolLevel();
 
@@ -406,9 +410,7 @@ private:
     std::string handleToolsList(const json& req, const json& id) {
         json toolList = json::array();
         for (const auto& [name, tool] : tools_) {
-#ifndef __EMSCRIPTEN__
             if (tool.level > getToolLevel()) continue;
-#endif
             toolList.push_back({
                 {"name", tool.name},
                 {"description", tool.description},
@@ -427,15 +429,12 @@ private:
             return makeError(id, -32601, "Tool not found: " + name);
         }
 
-#ifndef __EMSCRIPTEN__
         const auto granted = getToolLevel();
         if (tools_.at(name).level > granted) {
             return detail::toolError(id, "Tool '" + name + "' requires " +
                 detail::toolLevelName(tools_.at(name).level) +
                 ", current level is " + detail::toolLevelName(granted));
         }
-
-#endif
 
         // Wrap a tool's content json into a full JSON-RPC result string.
         auto formatResult = [id](const json& content) -> std::string {

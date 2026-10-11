@@ -32,6 +32,45 @@ bool callable(const std::string& name) {
     return reply.contains("result") && !reply["result"].value("isError", false);
 }
 
+#ifndef __EMSCRIPTEN__
+// Display-test modes exercise the real environment block in _setup_cb.
+bool grantInSetup = false;
+bool envSetupRan = false;
+mcp::ToolLevel expectedEnvGrant = mcp::ToolLevel::ReadOnly;
+struct EnvGrantApp : App {
+    void setup() override {
+        envSetupRan = true;
+        check("environment grant is applied before App::setup",
+              mcp::getToolLevel() == expectedEnvGrant);
+        check("environment exposes screenshot inspection", listed().count("tc_get_screenshot"));
+        check("environment exposes Control only when code granted it",
+              bool(listed().count("tc_mouse_click")) == (expectedEnvGrant == mcp::ToolLevel::Control));
+        if (grantInSetup) mcp::setToolLevel(mcp::ToolLevel::Control);
+        check("App::setup can retain or raise the environment grant",
+              mcp::getToolLevel() == (grantInSetup ? mcp::ToolLevel::Control : expectedEnvGrant));
+        check("Control exposure follows the final app grant",
+              bool(listed().count("tc_mouse_click")) == mcp::isDebuggerEnabled());
+        exitApp();
+    }
+};
+
+int envStartup(const std::string& mode) {
+    const char* envMcp = std::getenv("TRUSSC_MCP");
+    check("startup test has TRUSSC_MCP=1", envMcp && std::string(envMcp) == "1");
+    if (failures) return 1;
+    grantInSetup = mode == "--env-control-setup";
+    if (mode == "--env-control-before") {
+        mcp::setToolLevel(mcp::ToolLevel::Control);
+        expectedEnvGrant = mcp::ToolLevel::Control;
+    }
+    WindowSettings settings;
+    settings.width = settings.height = 64;
+    check("environment startup and shutdown succeed", runApp<EnvGrantApp>(settings) == 0);
+    check("environment test reached App::setup", envSetupRan);
+    return failures ? 1 : 0;
+}
+#endif
+
 // Only this compatibility test deliberately calls deprecated APIs. Keep it
 // compiling under TC_DEPRECATED_ERRORS=1 on each supported compiler.
 #if defined(_MSC_VER)
@@ -64,12 +103,15 @@ void aliases() {
 #endif
 } // namespace
 
-TC_CORE_TEST_MAIN() {
-#ifdef __EMSCRIPTEN__
-    mcp::setToolLevel(mcp::ToolLevel::Control);
-    check("Web setter is a no-op", mcp::getToolLevel() == mcp::ToolLevel::Public);
-    check("Web debugger stays disabled", !mcp::isDebuggerEnabled());
-#else
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+#ifndef __EMSCRIPTEN__
+    if (argc > 1) {
+        const std::string mode = argv[1];
+        if (mode == "--env-readonly" || mode == "--env-control-before" || mode == "--env-control-setup")
+            return envStartup(mode);
+    }
+#endif
+    // Run the same exposure contract on native and Web; only HTTP is native.
     check("initial grant is Public", mcp::getToolLevel() == mcp::ToolLevel::Public);
     // First use may be from a hot reload guest; core tools must remain host-owned.
     int owner;
@@ -124,6 +166,12 @@ TC_CORE_TEST_MAIN() {
         }
         check("debugger query follows current grant", mcp::isDebuggerEnabled() == (grant == mcp::ToolLevel::Control));
     }
+    const auto hiddenReadOnly = call("readonly_probe");
+    const json expectedReadOnlyResult = {
+        {"isError", true}, {"content", json::array({{{"type", "text"},
+            {"text", "Tool 'readonly_probe' requires ReadOnly, current level is Public"}}})}};
+    check("hidden ReadOnly error retains id and names both levels", hiddenReadOnly == json{
+        {"jsonrpc", "2.0"}, {"id", "level-test"}, {"result", expectedReadOnlyResult}});
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     const auto hidden = call("control_probe");
     const json expectedResult = {
@@ -143,6 +191,7 @@ TC_CORE_TEST_MAIN() {
     check("reload cleanup drops guest tool", !mcp::hasTool("guest_level_probe"));
     check("reload cleanup preserves grant and core tools", mcp::getToolLevel() == mcp::ToolLevel::Control && mcp::hasTool("tc_get_health") && mcp::hasTool("tc_mouse_click"));
     aliases();
+#ifndef __EMSCRIPTEN__
     check("level changes and registration do not start HTTP", mcp::getHttpPort() == 0 && !mcp::detail::getHttpServer());
 #endif
     return failures ? 1 : 0;
