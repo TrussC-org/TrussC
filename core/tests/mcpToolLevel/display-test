@@ -1,4 +1,4 @@
-# PR-A environment grants inspection and preserves Control in either order.
-env TRUSSC_MCP=1 {test} --env-readonly
+# Environment keeps Public; code grants Control in either order.
+env TRUSSC_MCP=1 {test} --env-health
 env TRUSSC_MCP=1 {test} --env-control-before
 env TRUSSC_MCP=1 {test} --env-control-setup

@@ -3178,6 +3178,7 @@ static void printBuildHelp() {
          << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
          << "      --clean                Clean before building (--clean-first)\n"
+         << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n"
@@ -3385,6 +3386,7 @@ static int cmdBuild(const vector<string>& args) {
     string targetPreset;
     string buildType;       // "" = default (RelWithDebInfo); else Debug/Release/RelWithDebInfo
     bool clean = false;
+    bool mcp = false;
     bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3411,6 +3413,7 @@ static int cmdBuild(const vector<string>& args) {
             buildType = bt;
         }
         else if (a == "--clean")   clean = true;
+        else if (a == "--mcp") mcp = true;
         else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -3529,12 +3532,13 @@ static int cmdBuild(const vector<string>& args) {
     // `cmake --build` cannot pass -D and does not configure a build folder
     // that has no cache (or only the cache of a failed configure), so those
     // cases need a configure pass
-    // (`cmake --preset`) first. planConfigure() decides; a steady-state build
-    // whose cache already holds what was asked for stays configure-free.
+    // (`cmake --preset`) first. MCP flag changes also require configure;
+    // every configure explicitly sets the requested MCP dev option.
     // (the cwd is the project now; projectPath may be relative)
     ConfigureInputs cfgIn = inspectBuildFolder(".", targetPreset,
                                                kNativePreset ? kNativePreset : "");
     cfgIn.requestedBuildType = buildType;
+    cfgIn.mcp = mcp;
     cfgIn.warnings = warnings;
     ConfigurePlan plan = planConfigure(cfgIn);
     for (const string& line : plan.messages) cout << line << "\n";
@@ -3574,6 +3578,7 @@ static void printRunHelp() {
          << "      --debug                Build type: Debug (-O0 -g)\n"
          << "      --relwithdebinfo       Build type: RelWithDebInfo (-O2 -g) [default]\n"
          << "      --release              Build type: Release (-O3, no debug info)\n"
+         << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n";
@@ -3584,6 +3589,7 @@ static int cmdRun(const vector<string>& args) {
     string target; // "", "web", "android", "ios"
     string session; // display session backend: "labwc", "x11", ""
     string buildType;  // "" = default; else Debug/Release/RelWithDebInfo
+    bool mcp = false;
     bool warnings = false;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3617,6 +3623,7 @@ static int cmdRun(const vector<string>& args) {
             }
             buildType = bt;
         }
+        else if (a == "--mcp") mcp = true;
         else if (a == "--warnings") warnings = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, explicitPath)) return 1;
@@ -3660,6 +3667,7 @@ static int cmdRun(const vector<string>& args) {
         transform(flag.begin(), flag.end(), flag.begin(), ::tolower);
         buildArgs.push_back("--" + flag);
     }
+    if (mcp) buildArgs.push_back("--mcp");
     if (warnings) buildArgs.push_back("--warnings");
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
@@ -3887,8 +3895,8 @@ _trusscli() {
             local -a opts
             case "$words[2]" in
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
-                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
-                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
+                run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-p:Project path' '--path:Project path') ;;
                 clean)  opts=('--all:Delete all build dirs' '-p:Project path' '--path:Project path') ;;
             esac
             _describe 'option' opts
@@ -3974,8 +3982,8 @@ _trusscli() {
             esac
             case "${COMP_WORDS[1]}" in
                 update) COMPREPLY=($(compgen -W "-p --path --web --android --ios --no-web --no-android --no-ios --ide --tc-root" -- "$cur")) ;;
-                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --warnings -p --path" -- "$cur")) ;;
-                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --warnings -p --path" -- "$cur")) ;;
+                build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --mcp --warnings -p --path" -- "$cur")) ;;
+                run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
             esac
             ;;

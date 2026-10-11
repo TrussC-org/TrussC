@@ -86,7 +86,6 @@ static void testPortInUse() {
     for (int i = 0; i < 300 && bindErrors.load() == 0; i++) {
         this_thread::sleep_for(chrono::milliseconds(10));
     }
-    this_thread::sleep_for(chrono::milliseconds(100)); // a second error would land here
     check("port in use -> exactly one \"Failed to bind\" error", bindErrors.load() == 1,
           to_string(bindErrors.load()) + " errors");
 
@@ -159,9 +158,238 @@ static void testDefaultHost() {
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
 static const string kToken = "test-token-0123456789abcdef";
 
+
+void setEnv(const char* key, const char* value) {
+#ifdef _WIN32
+    _putenv_s(key, value ? value : "");
+#else
+    if (value) setenv(key, value, 1);
+    else unsetenv(key);
+#endif
+}
+
+bool headlessGrantInSetup = false;
+bool headlessSetupDone = false;
+struct HeadlessMcpApp : App {
+    future<vector<json>> replies;
+    void setup() override {
+        check("headless setup precedes automatic MCP startup", !mcp::detail::getHttpServer());
+        mcp::tool("headless_public", "").bind([]() -> json { return "public"; });
+        mcp::tool("headless_control", "").level(mcp::ToolLevel::Control)
+            .bind([]() -> json { return "control"; });
+        if (headlessGrantInSetup) mcp::setToolLevel(mcp::ToolLevel::Control);
+        headlessSetupDone = true;
+    }
+    void update() override {
+        const bool dev = mcp::detail::isDevBuild();
+        const bool closed = mcp::detail::environmentClosesMcp();
+        if (!replies.valid()) {
+            check("headless startup listener follows environment/build", (mcp::getHttpPort() > 0) == !closed);
+            if (closed || mcp::getHttpPort() <= 0) {
+                exitApp();
+                return;
+            }
+            check("headless endpoint uses loopback", mcp::detail::mcpLoopbackOnly());
+            replies = async(launch::async, [] {
+                httplib::Client client("127.0.0.1", mcp::getHttpPort());
+                client.set_connection_timeout(5);
+                client.set_read_timeout(5);
+                vector<json> results;
+                auto exchange = [&](const string& method, const json& params) {
+                    const auto result = client.Post("/mcp", json{{"jsonrpc", "2.0"}, {"id", 1},
+                        {"method", method}, {"params", params}}.dump(), "application/json");
+                    results.push_back(result && result->status == 200
+                        ? json::parse(result->body) : json::object());
+                };
+                exchange("tools/list", json::object());
+                for (const char* name : {"tc_get_health", "headless_public", "headless_control"})
+                    exchange("tools/call", {{"name", name}, {"arguments", json::object()}});
+                return results;
+            });
+        }
+        if (replies.wait_for(chrono::milliseconds(0)) == future_status::ready) {
+            const auto results = replies.get();
+            const bool full = dev || headlessGrantInSetup;
+            const auto listed = results[0].value("result", json::object()).value("tools", json::array());
+            check("headless loop services HTTP", !listed.empty());
+            check("headless environment lists health only", full ||
+                  (listed.size() == 1 && listed[0]["name"] == "tc_get_health"));
+            auto has = [&](const string& name) {
+                return any_of(listed.begin(), listed.end(), [&](const json& tool) { return tool["name"] == name; });
+            };
+            check("headless full endpoint exposes Public, ReadOnly and Control tools",
+                  has("headless_public") == full && has("tc_get_status") == full &&
+                  has("headless_control") == full && has("tc_mouse_click") == full);
+            const auto healthResult = results[1].value("result", json::object());
+            check("headless health call succeeds", healthResult.contains("content"));
+            if (healthResult.contains("content")) {
+                const auto health = json::parse(healthResult["content"][0]["text"].get<string>());
+                check("headless health reports build and grant", health["buildKind"] == (dev ? "dev" : "default") &&
+                      health["toolLevel"] == (full ? "Control" : "Public"));
+            }
+            for (size_t i : {2u, 3u}) {
+                check("headless app tool call follows code/dev grant", results[i].contains("result") &&
+                      results[i]["result"].value("isError", false) == !full);
+            }
+            exitApp();
+        }
+    }
+};
+
+int environmentCase(const string& mode) {
+    for (const char* key : {"TRUSSC_MCP", "TRUSSC_MCP_PORT", "TRUSSC_MCP_HOST", "TRUSSC_MCP_TOKEN"})
+        setEnv(key, nullptr);
+    if (mode.rfind("headless", 0) == 0) {
+        const bool dev = mcp::detail::isDevBuild();
+        const bool closed = mode == "headless-closed";
+        headlessGrantInSetup = mode == "headless-grant";
+        headlessSetupDone = false;
+        if (mode == "headless-port") setEnv("TRUSSC_MCP_PORT", "0");
+        else if (mode != "headless-dev") setEnv("TRUSSC_MCP", closed ? "0" : "1");
+        int healthNotices = 0, devWarnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            const bool notice = e.level == LogLevel::Notice && e.message ==
+                "[MCP] MCP: health only (ToolLevel Public). The supervisor gets logs, restart and hang detection; for screenshots and status add mcp::setToolLevel(mcp::ToolLevel::ReadOnly) in setup().";
+            const bool warning = e.level == LogLevel::Warning && e.message.find("MCP development build:") != string::npos;
+            if (notice) ++healthNotices;
+            if (warning) ++devWarnings;
+            if (notice || warning) check("headless startup log follows setup", headlessSetupDone);
+        });
+        check("headless runner succeeds", runHeadlessApp<HeadlessMcpApp>() == 0);
+        check("headless health-only Notice occurs exactly once", healthNotices == (!dev && !headlessGrantInSetup && !closed ? 1 : 0));
+        check("headless dev warning occurs exactly once, even when disabled", devWarnings == (dev ? 1 : 0));
+        check("headless cleanup stops HTTP", !mcp::detail::getHttpServer() && mcp::getHttpPort() == 0);
+        return g_fail ? 1 : 0;
+    }
+    const bool dev = mcp::detail::isDevBuild();
+    const bool closed = mode == "closed" || mode == "closed-grant" || mode == "closed-explicit";
+    const bool grant = mode == "grant" || mode == "grant-port" || mode == "exit-cleanup" || mode == "closed-grant";
+    const bool explicitStart = mode == "explicit" || mode == "closed-explicit";
+    const bool envAsk = mode == "env" || mode == "port" || mode == "upgrade" || closed;
+    if (closed) setEnv("TRUSSC_MCP", "0");
+    else if (mode == "env" || mode == "upgrade") setEnv("TRUSSC_MCP", "1");
+    if (mode == "port" || closed) setEnv("TRUSSC_MCP_PORT", "0");
+    int configuredPort = 0;
+    if (mode == "port" || mode == "grant-port") {
+        httplib::Server probe;
+        configuredPort = probe.bind_to_any_port("127.0.0.1");
+        if (configuredPort <= 0) return 1;
+        thread probeThread([&] { probe.listen_after_bind(); });
+        probe.wait_until_ready();
+        probe.stop();
+        probeThread.join();
+        setEnv("TRUSSC_MCP_PORT", to_string(configuredPort).c_str());
+    }
+    // A remote bind/token must be ignored by every default-build env path.
+    if (mode != "none") {
+        setEnv("TRUSSC_MCP_HOST", "0.0.0.0");
+        setEnv("TRUSSC_MCP_TOKEN", "environment-token");
+    }
+
+    int healthNotices = 0, devWarnings = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Notice && e.message ==
+            "[MCP] MCP: health only (ToolLevel Public). The supervisor gets logs, restart and hang detection; for screenshots and status add mcp::setToolLevel(mcp::ToolLevel::ReadOnly) in setup().") ++healthNotices;
+        if (e.level == LogLevel::Warning && e.message.find("MCP development build:") != string::npos) ++devWarnings;
+    });
+    mcp::resource("test://public", "public resource").bind([] { return std::string("resource"); });
+    mcp::tool("public_probe", "").bind([]() -> json { return "public"; });
+    mcp::tool("control_probe", "").level(mcp::ToolLevel::Control).bind([]() -> json { return "control"; });
+    check("registration alone never starts HTTP", !mcp::detail::getHttpServer());
+    if (grant) mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+    if (explicitStart) mcp::startHttpServer();
+    check("code opt-in opens immediately unless disabled",
+          bool(mcp::detail::getHttpServer()) == ((grant || explicitStart) && !closed));
+    mcp::detail::initializeMcp();
+    const bool listening = !closed && (dev || grant || explicitStart || envAsk);
+    check("startup listener matches environment/code/build", (mcp::getHttpPort() > 0) == listening);
+    const bool healthOnly = listening && !dev && !grant && !explicitStart;
+    check("health-only Notice occurs exactly once", healthNotices == (healthOnly ? 1 : 0));
+    check("dev warning follows build even when disabled", devWarnings == (dev ? 1 : 0));
+    check("main title marks dev builds", (mcp::detail::mainWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
+    check("main title does not duplicate marker", mcp::detail::mainWindowTitle("Test [MCP]") == "Test [MCP]");
+    if (!listening) return g_fail ? 1 : 0;
+    check("PORT selects the requested listener", !configuredPort || mcp::getHttpPort() == configuredPort);
+    const bool devEnvironment = dev && !explicitStart && mode != "none";
+    check("HOST/TOKEN honored only for dev auto-start", mcp::detail::mcpLoopbackOnly() == !devEnvironment &&
+          mcp::detail::mcpAuthToken() == (devEnvironment ? "environment-token" : ""));
+
+    auto exchange = [](const string& method, const json& params = json::object()) {
+        auto result = async(launch::async, [=] {
+            httplib::Client client("127.0.0.1", mcp::getHttpPort());
+            client.set_connection_timeout(5);
+            client.set_read_timeout(5);
+            client.set_bearer_token_auth(mcp::detail::mcpAuthToken());
+            return client.Post("/mcp", json{{"jsonrpc", "2.0"}, {"id", 1},
+                {"method", method}, {"params", params}}.dump(), "application/json");
+        });
+        const auto deadline = chrono::steady_clock::now() + chrono::seconds(10);
+        while (result.wait_for(chrono::milliseconds(0)) != future_status::ready &&
+               chrono::steady_clock::now() < deadline) {
+            mcp::processHttpQueue();
+            this_thread::yield();
+        }
+        auto reply = result.get();
+        check("native HTTP request succeeds", reply && reply->status == 200);
+        return reply ? json::parse(reply->body) : json::object();
+    };
+    const auto listed = exchange("tools/list")["result"]["tools"];
+    check("health endpoint lists exactly one tool", !healthOnly ||
+          (listed.size() == 1 && listed[0]["name"] == "tc_get_health"));
+    check("health endpoint hides app resources", exchange("resources/list")["result"]["resources"].empty() == healthOnly);
+    check("health endpoint refuses app resource reads", exchange("resources/read", {{"uri", "test://public"}}).contains("error") == healthOnly);
+    auto call = [&](const string& name) { return exchange("tools/call", {{"name", name}, {"arguments", json::object()}}); };
+    const auto health = json::parse(call("tc_get_health")["result"]["content"][0]["text"].get<string>());
+    check("health reports actual build kind", health["buildKind"] == (dev ? "dev" : "default"));
+    check("health reports actual grant", health["toolLevel"] == mcp::detail::toolLevelName(mcp::getToolLevel()));
+    check("Public app tools require code or dev opt-in", call("public_probe")["result"].value("isError", false) == healthOnly);
+    check("ReadOnly tools require a grant", call("tc_get_status")["result"].value("isError", false) == (!dev && !grant));
+    check("Control tools require Control", call("control_probe")["result"].value("isError", false) == !dev);
+    if (mode == "upgrade") {
+        mcp::startHttpServer();
+        check("explicit start opens Public tools on an existing health listener", !call("public_probe")["result"].value("isError", false));
+        const int port = mcp::getHttpPort();
+        mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+        check("code grant opens existing health endpoint", mcp::getHttpPort() == port &&
+              !call("public_probe")["result"].value("isError", false) &&
+              !call("tc_get_status")["result"].value("isError", false));
+        mcp::setToolLevel(mcp::ToolLevel::Public);
+        check("dev grant cannot be lowered by code", mcp::getToolLevel() ==
+              (dev ? mcp::ToolLevel::Control : mcp::ToolLevel::Public));
+    }
+    if (mode == "exit-cleanup") return g_fail ? 1 : 0; // exercise host exit hook
+    mcp::stopHttpServer();
+    check("stop clears reported listener port", mcp::getHttpPort() == 0);
+    return g_fail ? 1 : 0;
+}
+
+string quoteArgument(const string& value) {
+#ifdef _WIN32
+    // Executable paths cannot contain a quote on Windows.
+    return "\"" + value + "\"";
+#else
+    string quoted = "'";
+    for (char c : value) quoted += c == '\'' ? "'\\''" : string(1, c);
+    return quoted + "'";
+#endif
+}
+
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc == 3 && string(argv[1]) == "--environment") return environmentCase(argv[2]);
+    string command = quoteArgument(fs::absolute(argv[0]).string());
+#ifdef TC_CORE_TEST_NAME
+    command += " " TC_CORE_TEST_NAME;
+#endif
+    for (const char* mode : {"headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "closed", "closed-grant", "closed-explicit"})
+        check(string("environment case: ") + mode,
+              std::system((command + " --environment " + mode).c_str()) == 0);
+
+    if (mcp::detail::isDevBuild())
+        check("environment case: headless-dev",
+              std::system((command + " --environment headless-dev").c_str()) == 0);
+
     // Token comparison helper, no server needed.
     {
         using mcp::detail::constantTimeEquals;
@@ -223,8 +451,6 @@ TC_CORE_TEST_MAIN() {
                 }
             }
         }
-        // A moment more, so a duplicate line would show up too.
-        this_thread::sleep_for(chrono::milliseconds(100));
         {
             lock_guard<mutex> lock(logMutex);
             found.clear();

@@ -166,6 +166,13 @@ endif()
 
 add_library(tc::TrussC ALIAS TrussC)
 
+# Only tcMCP.cpp includes this private build flag. A source COMPILE_DEFINITIONS
+# property also rewrites the shared flags.make, rebuilding every core object
+# with Makefiles; a private generated header rebuilds just its one consumer.
+option(TRUSSC_MCP_DEV "Enable MCP development tools and automatic startup" OFF)
+configure_file(cmake/tcMcpBuild.h.in generated/tcMcpBuild.h)
+target_include_directories(TrussC PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
 # Only this small TU depends on the git-derived version. A changing PUBLIC
 # version string would change cache inputs for every core/app/addon TU.
 set_source_files_properties(include/tc/utils/tcVersion.cpp PROPERTIES

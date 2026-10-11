@@ -242,7 +242,14 @@ private:
 
     // Node's post-setup hook: subscribe audioOut() / audioIn() now that the
     // first setup() has returned (#426). final: apps override setup().
-    void onSetupDone() final { internal::attachAppAudio(*this); }
+    void onSetupDone() final {
+        internal::attachAppAudio(*this);
+        // The main App's setup() has now made its code grant (windowed or
+        // headless: both runners register this root before setup). Secondary apps
+        // and hot reload guests must not repeat process startup.
+        if (internal::mainWindowContext().rootNode.lock().get() == this)
+            mcp::detail::initializeMcp();
+    }
 
     // Node's pre-cleanup hook: an App added as a child ends with its
     // subtree's cleanupTree(), so its audio hooks are detached there too.

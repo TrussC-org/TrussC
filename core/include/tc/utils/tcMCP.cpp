@@ -16,11 +16,78 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "tcMcpBuild.h"
 
 namespace trussc {
 namespace mcp {
 
 namespace detail {
+
+bool isDevBuild() {
+#if TRUSSC_MCP_DEV && !defined(__EMSCRIPTEN__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool& healthOnlyEndpoint() {
+    static bool enabled = false;
+    return enabled;
+}
+
+bool healthOnly() {
+    return healthOnlyEndpoint() && getToolLevel() == ToolLevel::Public;
+}
+
+bool environmentClosesMcp() {
+    const char* value = std::getenv("TRUSSC_MCP");
+    return value && std::string_view(value) == "0";
+}
+
+const std::string& mainWindowTitle(const std::string& title) {
+    // buildAppDescriptor returns before sapp_run consumes the title pointer.
+    // Keep its backing string in the host, including on hot reload builds.
+    static std::string windowTitle;
+    windowTitle = isDevBuild() && title.find("[MCP]") == std::string::npos
+        ? title + " [MCP]" : title;
+    return windowTitle;
+}
+
+void startConfiguredServer() {
+#ifndef __EMSCRIPTEN__
+    if (environmentClosesMcp()) {
+        if (getHttpServer()) stopHttpServer();
+        return;
+    }
+    const char* envMcp = std::getenv("TRUSSC_MCP");
+    const char* envPort = std::getenv("TRUSSC_MCP_PORT");
+    const bool healthEndpoint = getToolLevel() == ToolLevel::Public;
+    if (!isDevBuild() && healthEndpoint &&
+        !(envMcp && std::string_view(envMcp) == "1") && !envPort) return;
+    if (getHttpServer()) return;
+    const char* host = isDevBuild() ? std::getenv("TRUSSC_MCP_HOST") : nullptr;
+    const char* token = isDevBuild() ? std::getenv("TRUSSC_MCP_TOKEN") : nullptr;
+    startHttpServerImpl(envPort ? std::atoi(envPort) : 0,
+                        host ? host : "127.0.0.1", token ? token : "", healthEndpoint);
+    if (!getHttpServer()) return;
+    if (healthEndpoint) {
+        logNotice("MCP") << "MCP: health only (ToolLevel Public). The supervisor gets logs, restart and hang detection; for screenshots and status add mcp::setToolLevel(mcp::ToolLevel::ReadOnly) in setup().";
+    }
+#endif
+}
+
+void initializeMcp() {
+#ifndef __EMSCRIPTEN__
+    // App::onSetupDone also runs for replacement guests; startup is host state.
+    static bool initialized = false;
+    if (initialized) return;
+    initialized = true;
+    if (isDevBuild())
+        logWarning("MCP") << "MCP development build: Control tools are enabled. Do not distribute this build.";
+    startConfiguredServer();
+#endif
+}
 
 DeferralState& deferralState() {
     static DeferralState s;
@@ -34,7 +101,7 @@ std::vector<DeferredResponse>& deferredResponses() {
 
 // Host storage: never reset by guest registration cleanup or a reload.
 std::atomic<ToolLevel>& grantedToolLevel() {
-    static std::atomic<ToolLevel> level{ToolLevel::Public};
+    static std::atomic<ToolLevel> level{isDevBuild() ? ToolLevel::Control : ToolLevel::Public};
     return level;
 }
 
@@ -91,6 +158,18 @@ std::unique_ptr<httplib::Server>& getHttpServer() {
 
 std::unique_ptr<std::thread>& getHttpThread() {
     static std::unique_ptr<std::thread> t;
+    // Code grants also work in console apps without runApp's cleanup callback.
+    // Register after all shutdown state, so it remains alive for this hook.
+    static const bool cleanup = [] {
+        (void)getHttpServer();
+        (void)getHttpPort();
+        (void)httpQueueMutex();
+        (void)getHttpChannel();
+        (void)deferredResponses();
+        std::atexit([] { if (getHttpServer()) stopHttpServer(); });
+        return true;
+    }();
+    (void)cleanup;
     return t;
 }
 
@@ -129,7 +208,13 @@ Server& Server::instance() {
 }
 
 void setToolLevel(ToolLevel level) {
-    detail::grantedToolLevel().store(level);
+    detail::grantedToolLevel().store(detail::isDevBuild() ? ToolLevel::Control : level);
+    if (getToolLevel() >= ToolLevel::ReadOnly) {
+        detail::healthOnlyEndpoint() = false;
+        detail::startConfiguredServer();
+    } else if (detail::environmentClosesMcp()) {
+        detail::startConfiguredServer();
+    }
 }
 
 ToolLevel getToolLevel() {
