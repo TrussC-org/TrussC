@@ -1538,6 +1538,10 @@ This also works on the **default screen** (no camera scope): `z = 0` is pixel-id
 
 ### How do I quit the app? (exitApp vs requestExitApp)
 
+Both calls work in windowed and headless apps. In headless mode, `exitApp()`
+stops after the current update step; `requestExitApp()` dispatches the event
+on the main thread after the current pass, including all catch-up steps.
+
 Two options:
 - **`requestExitApp()`**: *requests* exit. Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set `args.cancel = true` to **cancel** it (for a "save before quit?" prompt). Equivalent to oF's `ofExit`.
 - **`exitApp()`**: exits immediately (not cancellable).
@@ -1747,7 +1751,7 @@ int main(int argc, char** argv) {
     return 1;                                                            // exit code
 }
 ```
-If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable).
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
 
 ### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
 
@@ -3841,7 +3845,7 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
+int Serial::available() const  // Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
 void Serial::close()  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
 void Serial::drain()  // Wait until output transmission completes
 void Serial::flush()  // Clear both input and output buffers
@@ -3849,6 +3853,7 @@ void Serial::flushInput()  // Clear the input buffer
 void Serial::flushOutput()  // Clear the output buffer
 std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
 std::string Serial::getDevicePath() const  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
+size_t Serial::getDroppedByteCount() const  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count
 bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
 bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
 std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices

@@ -556,6 +556,7 @@ void registerControlTools() {
 
     tool("tc_quit", "Quit the application gracefully")
         .bind(std::function<json()>([]() -> json {
+            internal::setExitReason("tc-quit");
             sapp_request_quit();
             return json{{"status", "ok"}};
         }));

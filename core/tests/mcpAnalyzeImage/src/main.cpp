@@ -148,8 +148,13 @@ void headlessChecks() {
     check("unnamed Image listed",call("tc_list_images")["images"].back()["name"]=="");
     check("unknown source rejected",analyze({{"texture","known"}},json::array({op("stats")}))["status"]=="error");
     check("multiple selectors rejected",analyze({{"image","known"},{"path","a.png"}},json::array({op("stats")}))["status"]=="error");
+#ifndef __EMSCRIPTEN__
+    // These op errors are reported by throwing; the web build has C++
+    // exception catching disabled (a throw aborts), and there is no MCP
+    // server on the web, so they are checked on native builds only.
     check("out-of-bounds rect rejected",analyze({{"image","known"}},json::array({{{"op","stats"},{"rect",{3,2,2,1}}}}))["status"]=="error");
     check("invalid histogram bins rejected",analyze({{"image","known"}},json::array({{{"op","histogram"},{"bins",0}}}))["status"]=="error");
+#endif
     Image gray;
     gray.setDebugName("gray");gray.getPixels().allocate(1,1,2);
     gray.getPixels().getData()[0]=128;gray.getPixels().getData()[1]=64;

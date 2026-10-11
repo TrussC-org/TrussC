@@ -77,6 +77,7 @@ alone, exactly as before.
    in **every** test's process of `allCoreTests`. No TrussC calls (Logger,
    clock, Window, MCP, sockets, threads) at static init or exit; put such an
    object in the entry as a function-local `static` (see `onceGate/`).
+4. Helpers shared through `core/tests/common/` headers go in namespace `tcCoreTest`.
 
 Use an **`own-binary`** marker file (one line saying why) instead when the
 test cannot share an executable: it replaces or interposes a library
@@ -114,6 +115,28 @@ checked against every combined test directory before runs are selected, so
 an unregistered test still fails the sweep. Do not comment out or delete
 tests to reduce run time. Which tests move to daily-only requires an owner
 Decision after reviewing measured times.
+
+### AddressSanitizer sweep (Linux)
+
+From the repository root, with fresh build directories (CMake caches these
+flags on its first configure):
+
+```sh
+CC=gcc CXX=g++ \
+CFLAGS='-fsanitize=address -fno-omit-frame-pointer -g' \
+CXXFLAGS='-fsanitize=address -fno-omit-frame-pointer -g' \
+LDFLAGS='-fsanitize=address' \
+LSAN_OPTIONS="suppressions=$PWD/core/tests/lsan.supp" \
+  python3 examples/build_all.py --core-tests-only --include-daily
+```
+
+Keep symbolization enabled and a symbolizer available so the named LSan
+suppression can match. `lsan.supp` covers fontconfig's retained cache and
+the deliberately retained reconnect clients; other leaks remain errors.
+`crashHandler` logs each skipped signal case under ASan, while its exception
+and terminate cases still run. Run a normal sweep as well to cover those
+signal cases. Use fresh build directories or explicitly reset the cached
+compiler and linker flags when switching back to a normal build.
 
 ### Also on web (`web-test` marker)
 
@@ -261,6 +284,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   in allCoreTests; the default run is headless. With `--gpu-check`, FBO
   readback checks Points rebuilds/colors/translations and PBR rotations and
   vertex edits, plus independent buffer caching and move assignment.
+- `xml/` — XML serialization and query behavior across pugixml updates:
+  empty text uses an empty element tag, explicit paired-tag formatting works,
+  text and attributes round-trip, XPath selects numeric attributes, and invalid
+  or empty documents report failure. Headless, in `allCoreTests`.
 - `dataPathWrites/` — the core file writers share one path rule (#356):
   `setLogFile`, `FileWriter::open` (also in append mode), `saveTextFile`,
   `appendToFile`, `saveJson`, `Xml::save` and `Pixels::save` resolve a
@@ -310,6 +337,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   separately from dropped plays. Checks MCP fields, main-thread underrun/stall
   warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
   Uses callback gates and condition-based waits.
+- `micInput/` — Sound playback advances across repeated MicInput start/stop
+  cycles on the Null backend (#696). Capture works without initializing
+  playback and its callbacks continue through engine sample-rate re-init,
+  shutdown/restart, and backend replacement. iOS session behavior and passive
+  system-volume reads still require the iPhone checks.
 - `audioDiagnostics/` — a play the AudioEngine refuses is never silent (#231):
   `Sound::play()` returns false for every drop reason, drops are counted and
   reach the TrussC logger (rate limited, and only from the main thread — an
@@ -631,6 +663,18 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   both (`src/fakeDriver.cpp`). POSIX only, except the Windows write timeout
   `setup()` derives from the rate (at least 4 times the wire time plus 5 s),
   which is checked on every platform.
+- `touchAsMouse/` — touch-as-mouse mapping (#295), through
+  `internal::TouchMouseMapper`: the first finger down is the only touch that
+  drives the mouse (one press, drags, one release on ENDED or CANCELLED); it is
+  found by its full `uintptr_t` identifier, not its index in the touch array;
+  no drag after it lifts; an event with no touches clears it; a primary whose
+  end event was lost (not among the touches at the next BEGAN) is dropped so
+  the next finger down presses.
+- `headlessExit/` — headless exit protocol (#378, #383): pending-signal
+  retention and second-signal escalation (POSIX child processes), forced and cancellable
+  exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
+  consecutive runs, and deterministic 100-step catch-up passes that stop only
+  for uncancellable exits. No display or timing-dependent assertions.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
   `getFrameElapsedTime()` constant within a frame (through the main loop's frame

@@ -1249,13 +1249,13 @@ static void testModeSwitchMeasuredDelta() {
 // runs updateTree() twice in it; its timers must not count that update twice
 // (fire a frame early).
 struct MovingNode : Node {
-    shared_ptr<Node> target;
+    weak_ptr<Node> target;
     bool moveNow = false;
     int fired = 0;
     void update() override {
         if (moveNow) {
             moveNow = false;
-            target->addChild(shared_from_this());
+            if (auto parent = target.lock()) parent->addChild(shared_from_this());
         }
     }
 };
@@ -1455,9 +1455,19 @@ struct SlowHeadlessApp : App {
 // ~1 ms here, far shorter than a 60 Hz step, so whole-step counts over the
 // last 10 passes read 0 most of the time.
 static vector<double> g_lightRates;
+static double g_lightMaxGap = 0.0;
 struct LightHeadlessApp : App {
     int n = 0;
+    chrono::steady_clock::time_point previousUpdate;
     void update() override {
+        const auto now = chrono::steady_clock::now();
+        // Track the whole run: a warm-up stall can lower the first samples.
+        // Catch-up updates run back-to-back, leaving one large gap per stall.
+        if (n > 0) {
+            g_lightMaxGap = max(g_lightMaxGap,
+                chrono::duration<double>(now - previousUpdate).count());
+        }
+        previousUpdate = now;
         if (++n > 15) g_lightRates.push_back(getFrameRate());
         if (n >= 75) requestExit();
     }
@@ -1533,8 +1543,7 @@ struct StallHeadlessApp : App {
 };
 
 // HeadlessSleeper: the waits of 21 sleeps, sorted. The median keeps a busy
-// machine's odd late wake-up out of a "returns soon" check, and the minimum
-// keeps its odd slow yield out of a "returns at once" check.
+// machine's odd late wake-up out of a "returns soon" check.
 static vector<double> sleeperWaits(double seconds) {
     internal::HeadlessSleeper sleeper;
     vector<double> took;
@@ -1560,13 +1569,25 @@ static void testHeadlessLoop() {
     checkf("headless: runOnMainThread served within one pass", g_hJobsRun.load() > 0 && g_hMaxQueueLatency.load() <= 11,
            g_hMaxQueueLatency.load());
 
-    runHeadlessApp<LightHeadlessApp>(HeadlessSettings().setFps(60));
+    constexpr double lightFps = 60.0;
+    const double dropThreshold = getMaxUpdateSteps() / lightFps;
+    runHeadlessApp<LightHeadlessApp>(HeadlessSettings().setFps(lightFps));
     int near60 = 0;
-    for (double r : g_lightRates) if (fabs(r - 60.0) <= 1.0) ++near60;
-    char name[128];
-    snprintf(name, sizeof name, "headless: getFrameRate() in update() reads 60 +/-1 (%d of %d)",
-             near60, (int)g_lightRates.size());
-    check(name, !g_lightRates.empty() && near60 * 10 >= (int)g_lightRates.size() * 9);
+    bool ratesBounded = !g_lightRates.empty();
+    for (double r : g_lightRates) {
+        ratesBounded = ratesBounded && r > 0.0 && r <= 61.0;
+        if (fabs(r - lightFps) <= 1.0) ++near60;
+    }
+    check("headless: getFrameRate() in update(): every sample > 0 and <= 61", ratesBounded);
+    // Time is dropped only when owed steps exceed the cap. Below cap / fps,
+    // require the band; otherwise a lower measured rate is valid (#757).
+    const bool keptUp = g_lightMaxGap < dropThreshold;
+    char name[192];
+    snprintf(name, sizeof name,
+             "headless: getFrameRate() in update() reads 60 +/-1 (%d of %d; max gap %.3f ms; band %s)",
+             near60, (int)g_lightRates.size(), g_lightMaxGap * 1000.0,
+             keptUp ? "required" : "skipped");
+    check(name, !keptUp || near60 * 10 >= (int)g_lightRates.size() * 9);
 
     runHeadlessApp<LongPassHeadlessApp>(HeadlessSettings().setFps(1000));
     checkf("headless: 1 kHz, ~16 ms passes: still 10 steps per pass",
@@ -1584,7 +1605,7 @@ static void testHeadlessLoop() {
            g_sMaxPerPass >= 14, g_sMaxPerPass);
     setMaxUpdateSteps(10);
 
-    // Timing-sensitive (real sleeps): medians / minimums of 21 waits, so a
+    // Timing-sensitive (real sleeps): median of 21 waits, so a
     // busy runner's odd late wake-up doesn't decide the result.
     // Lower bound at half the wait: a timer may fire a few microseconds early
     // against steady_clock, but a sleeper that doesn't sleep would busy-spin.
@@ -1592,16 +1613,28 @@ static void testHeadlessLoop() {
     const double shortWait = shortWaits[shortWaits.size() / 2];
     checkf("headless sleeper: 0.2 ms wait < 5 ms (not a 15.6 ms tick; median)",
            shortWait >= 0.0001 && shortWait < 0.005, shortWait);
-    const double noWait = sleeperWaits(0.0).front();
-    checkf("headless sleeper: a 0 wait returns at once (< 1 ms; fastest)", noWait < 0.001, noWait);
+    internal::HeadlessSleeper sleeper;
+    for (int i = 0; i < 21; ++i) {
+        check("headless sleeper: a 0 wait does not wait on the OS", !sleeper.sleep(0.0));
+    }
 
-    // Timing-sensitive (real time over 0.5 s): the bound sits between the
-    // ~1000/s a working sleeper gives and the ~640/s of a 15.6 ms tick, with
-    // room for a busy runner's late wake-ups (each one drops what exceeds 10
-    // steps).
+    // Timing-sensitive: compare with a bare sleeper over the same 0.5 s
+    // window, so the bound follows this runner's wake-up rate. The short
+    // wait median above still guards against a 15.6 ms timer tick.
+    int baselineSleeps = 0;
+    const auto baselineStart = Clk::now();
+    double baselineElapsed;
+    do {
+        sleeper.sleep(0.001);
+        ++baselineSleeps;
+        baselineElapsed = chrono::duration<double>(Clk::now() - baselineStart).count();
+    } while (baselineElapsed < 0.5);
+    const double baselineRate = baselineSleeps / baselineElapsed;
     runHeadlessApp<FastHeadlessApp>(HeadlessSettings().setFps(1000));
-    checkf("headless: 1 kHz keeps up (>= 800/s; 16 ms passes give ~640)",
-           g_fRate >= 800.0, g_fRate);
+    snprintf(name, sizeof name,
+             "headless: 1 kHz >= 80%% of sleeper baseline (loop %.3f/s, baseline %.3f/s)",
+             g_fRate, baselineRate);
+    check(name, g_fRate >= 0.8 * baselineRate);
     checkf("headless: ...within the 10-step cap per pass",
            g_fMaxPerPass >= 1 && g_fMaxPerPass <= 10, g_fMaxPerPass);
 }

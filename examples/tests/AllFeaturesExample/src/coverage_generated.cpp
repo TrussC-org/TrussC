@@ -1205,6 +1205,7 @@ struct Cover_EventListener : af::Scope<EventListener> {
 struct Cover_ExitRequestEventArgs : af::Scope<ExitRequestEventArgs> {
     static void run() {
         (void)af::val<ExitRequestEventArgs>().cancel;
+        (void)af::val<ExitRequestEventArgs>().reason;
     }
 };
 
@@ -2491,6 +2492,7 @@ struct Cover_Serial : af::Scope<Serial> {
         (void)af::val<Serial>().isInitialized();
         (void)af::val<Serial>().getDevicePath();
         (void)af::val<Serial>().available();
+        (void)af::val<Serial>().getDroppedByteCount();
         (void)af::val<Serial>().readBytes(af::val<void *>(), af::val<int>());
         (void)af::val<Serial>().readBytes(af::val<std::string>(), af::val<int>());
         (void)af::val<Serial>().readByte();
@@ -3264,6 +3266,8 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<const fs::path>(), af::val<Image>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
+        (void)af::val<VideoPlayer>().setAudioStreaming(af::val<bool>());
+        (void)af::val<VideoPlayer>().isAudioStreaming();
     }
 };
 

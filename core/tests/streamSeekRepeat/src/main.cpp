@@ -55,7 +55,7 @@ bool writeTailWav(const fs::path& path) {
 
 bool fail(int iteration, const char* reason, const Sound& sound) {
     printf("pending repeat %d/%d FAIL: %s -- %s\n", iteration, kRepeats, reason,
-           streamSeekFailureState(sound, g_level.load()).c_str());
+           tcCoreTest::streamSeekFailureState(sound, g_level.load()).c_str());
     fflush(stdout);
     return false;
 }

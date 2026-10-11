@@ -335,7 +335,6 @@ void installAppMenu() {}
 // ---------------------------------------------------------------------------
 float getSystemVolume() {
     AVAudioSession* session = [AVAudioSession sharedInstance];
-    [session setActive:YES error:nil];
     return session.outputVolume;
 }
 

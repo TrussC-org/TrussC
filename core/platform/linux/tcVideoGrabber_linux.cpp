@@ -431,8 +431,8 @@ void VideoGrabber::updateDelegatePixels() {
 
     auto data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
     data->targetPixels = pixels_;
-    data->pixelsDirty = &pixelsDirty_;
-    data->mutex = &mutex_;
+    data->pixelsDirty = &sharedState_->dirty;
+    data->mutex = &sharedState_->mtx;
     data->frameQueue = frameQueue_.get();
 }
 

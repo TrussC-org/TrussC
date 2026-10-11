@@ -2144,10 +2144,32 @@ description.ja = "exitRequested イベントの引数"
 description.ko = "exitRequested 이벤트의 인자"
 related = ["requestExitApp", "events"]
 
+["ExitRequestEventArgs::reason"]
+description.en = "Optional explanation shown by Windows when cancel blocks shutdown or logoff; empty uses a generic busy message"
+description.ja = "cancel で Windows のシャットダウンやログオフを止める理由。空なら汎用の処理中メッセージを表示"
+description.ko = "cancel로 Windows 종료나 로그오프를 막을 때 표시할 이유. 비어 있으면 일반적인 작업 중 메시지 표시"
+
 ["ExitRequestEventArgs::cancel"]
-description.en = "Set true in a listener to cancel the requested exit"
-description.ja = "リスナーで true にすると要求された終了をキャンセル"
-description.ko = "리스너에서 true로 설정하면 요청된 종료를 취소"
+description.en = """
+Set true in a listener to cancel the requested exit. Windowed Windows session
+end (including Restart Manager), macOS termination and Linux/macOS SIGTERM or
+SIGINT use this event too. After a veto the user starts shutdown again. A second
+signal forces termination. Forced OS shutdown cannot be blocked; Windows gives
+exit()/cleanup() only a few seconds after WM_ENDSESSION(TRUE).
+"""
+description.ja = """
+リスナーで true にすると終了要求をキャンセル。ウィンドウ付きアプリの Windows
+セッション終了（Restart Manager を含む）、macOS 終了、Linux/macOS の SIGTERM・SIGINT
+もこのイベントを通る。キャンセル後はユーザーが終了操作をやり直す。2 回目のシグナルは
+強制終了する。OS の強制終了は阻止できず、Windows の WM_ENDSESSION(TRUE) 後に
+exit()/cleanup() を実行できる時間は数秒に限られる。
+"""
+description.ko = """
+리스너에서 true로 설정하면 종료 요청을 취소한다. 창 앱의 Windows 세션 종료
+(Restart Manager 포함), macOS 종료, Linux/macOS SIGTERM 및 SIGINT도 이 이벤트를 거친다.
+취소 후 사용자가 종료를 다시 시작한다. 두 번째 시그널은 강제 종료한다. OS의 강제 종료는
+막을 수 없으며 Windows WM_ENDSESSION(TRUE) 이후 exit()/cleanup() 실행 시간은 몇 초뿐이다.
+"""
 
 ["Fbo"]
 category = "graphics_fbo"
@@ -8097,10 +8119,14 @@ related = ["SerialDeviceInfo", "SerialDisconnectEventArgs", "TcpClient"]
 platform_note.en = "Real backends only on Windows (Win32 COM), macOS/Linux (POSIX termios), and Android (USB Host CDC-ACM via JNI+usbfs, CDC-ACM class devices only, first connect needs an async USB permission dialog). No serial on iOS (sandbox has no /dev/tty access — the macOS __APPLE__ enumeration branch compiles but never lists/opens a device) or wasm (Emscripten has no serial device; setup() falls into the POSIX open()/termios path against the virtual FS and fails)."
 platform_note.ja = "実バックエンドは Windows (Win32 COM)、macOS/Linux (POSIX termios)、Android (USB Host CDC-ACM、JNI+usbfs、CDC-ACMクラス機器のみ、初回接続は非同期のUSB許可ダイアログが必要) のみ。iOS はサンドボックスで /dev/tty にアクセスできず実質不可 (__APPLE__ の列挙分岐はコンパイルされるが機器を列挙/オープンできない)、wasm はシリアルデバイスが存在せず setup() が POSIX open()/termios 経路に落ちて失敗。"
 
+details.en = "Each open port has a receive worker and a 1 MiB buffer on desktop and Android. When the buffer fills, the oldest bytes are discarded and getDroppedByteCount() counts them. Overflow warnings use a 5 s OnceGate and include the running total. On desktop, overflow and driver warnings are delivered by the next read/write I/O call; device loss is also deferred to app I/O. Windows uses overlapped reads and writes."
+details.ja = "デスクトップと Android では、開いたポートごとに受信ワーカーと 1 MiB のバッファを持つ。容量を超えると古いバイトから破棄し、getDroppedByteCount() で数える。オーバーフロー警告は 5 秒間隔の OnceGate で制限し、累計を含める。デスクトップでは、オーバーフローとドライバの警告は次の読み書き時に出し、切断の通知もアプリの I/O 呼び出しまで遅延する。Windows の読み書きはオーバーラップ I/O を使う。"
+details.ko = "데스크톱과 Android에서는 열린 포트마다 수신 워커와 1 MiB 버퍼를 둔다. 용량을 넘으면 가장 오래된 바이트부터 버리고 getDroppedByteCount()로 센다. 오버플로 경고는 5초 간격 OnceGate로 제한하며 누적 수를 포함한다. 데스크톱에서는 오버플로 및 드라이버 경고를 다음 읽기/쓰기 I/O 호출에서 전달하고, 장치 소실도 앱 I/O까지 지연한다. Windows 읽기와 쓰기는 오버랩 I/O를 사용한다."
+
 ["Serial::available"]
-description.en = "Number of bytes available to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
-description.ja = "読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
-description.ko = "읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
+description.en = "Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)"
+description.ja = "TrussC がバッファに保持している読み取り可能なバイト数。未接続なら0（デバイスの消失を検出するとポートを閉じ、onDisconnect も発火）"
+description.ko = "TrussC 버퍼에서 읽을 수 있는 바이트 수. 연결되지 않았으면 0 (장치 소실을 감지하면 포트를 닫고 onDisconnect도 발생)"
 related = ["Serial::isConnected", "Serial::readBytes", "Serial::onDisconnect"]
 
 ["Serial::close"]
@@ -8136,6 +8162,15 @@ description.ja = "listDevices() の非推奨エイリアス"
 description.ko = "listDevices()의 deprecated 별칭"
 details = "Kept as a backward-compatible alias; new code should call `listDevices()` (same behavior). Scheduled for removal in v1.0.0."
 
+["Serial::getDroppedByteCount"]
+description.en = "Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count"
+description.ja = "直近の setup() 以降、1 MiB の TrussC バッファから破棄された受信バイト数。flush と close では累計を保持"
+description.ko = "마지막 setup() 이후 1 MiB TrussC 버퍼에서 버린 수신 바이트 수. flush와 close는 누적 수를 유지"
+details.en = "Counts only overflow discards, on desktop and Android. Reading and intentional flushing do not increase it. Moving a Serial carries its counter. Windows overrun/RX overflow flags are logged, but the driver does not supply an exact lost-byte count; those losses cannot be included. Framing/parity errors are log-only."
+details.ja = "デスクトップと Android で、容量超過による破棄だけを数える。読み取りや意図した flush では増えない。Serial のムーブでは累計も移る。Windows の overrun/RX overflow は警告するが、ドライバが正確な消失バイト数を提供しないので累計には含められない。framing/parity はログのみ。"
+details.ko = "데스크톱과 Android에서 용량 초과로 버린 바이트만 센다. 읽기나 의도적인 flush로는 증가하지 않는다. Serial 이동 시 누적 수도 이동한다. Windows overrun/RX overflow 플래그는 경고하지만 드라이버가 정확한 손실 바이트 수를 제공하지 않아 누적 수에 포함할 수 없다. framing/parity 오류는 로그만 남긴다."
+related = ["Serial::available", "Serial::flushInput", "Serial::setup"]
+
 ["Serial::getDevicePath"]
 description.en = "Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call"
 description.ja = "現在のデバイスパス。別スレッドの setup() が変えうるので、コピーを返す。setup()、close()、I/O 呼び出しを待たない"
@@ -8167,8 +8202,9 @@ stays true until one of those calls reports the loss (the USB worker thread
 that finds it only records it).
 
 One `Serial` may be used from several threads. Its I/O calls (`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) never
-wait for each other. Opening and closing (`setup()`, `close()`, closing a lost
+`readBytes()`, `readByte()`, `writeBytes()`, the flush calls, `drain()`) share
+its port lock; receive calls also share a buffer mutex. Opening and closing
+(`setup()`, `close()`, closing a lost
 port, the destructor, the moves) wait until the I/O calls in progress have
 returned, so no call ever uses a closed port, and new I/O calls wait behind
 them. `isConnected()` and [`getDevicePath()`](#Serial::getDevicePath) wait
@@ -8176,11 +8212,9 @@ for neither: they answer with the state at that moment. Which thread reads or
 writes what, and in which order, is still up to the app. So a long
 `writeBytes()` (Windows, Android; see [`writeBytes()`](#Serial::writeBytes))
 or `drain()` delays a `setup()` / `close()` on another thread, not the other
-I/O calls. On Android `close()`, the destructor and a move assignment also
-wait for the USB worker thread to stop (up to about 250 ms once connected).
-On Windows the system itself runs the calls on one port handle one at a time
-(it is not opened for overlapped I/O), so there `available()`, the reads and
-the flush calls still wait for a `writeBytes()` in progress.
+I/O calls. Closing also stops the receive worker (desktop polling interval:
+50 ms; Android USB read timeout: 250 ms). Desktop moves transfer the worker
+with the connection. Windows uses overlapped reads and writes.
 
 A [Logger](#Logger) listener that runs inline may call this `Serial`. One
 exception, on Android: the USB worker thread logs too (permission timeout,
@@ -8226,19 +8260,18 @@ USB 許可を与えた時点で true になる。また抜去後は、上の呼�
 報告するまで true のままになる（消失を見つける USB ワーカースレッドは記録するだけ）。
 
 1つの `Serial` を複数のスレッドから使ってよい。I/O の呼び出し（`available()`、
-`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）どうしは互いを
-待たない。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
+`readBytes()`、`readByte()`、`writeBytes()`、flush 系、`drain()`）はポートのロックを
+共有する。受信側の呼び出しはバッファの mutex も共有する。開閉（`setup()`、`close()`、抜けたポートを閉じる処理、デストラクタ、
 ムーブ）は、実行中の I/O 呼び出しが戻るのを待ってからポートを触るので、閉じた
 ポートを使う呼び出しは起きない。新しい I/O 呼び出しはその後ろで待つ。
 `isConnected()` と [`getDevicePath()`](#Serial::getDevicePath) はどちらも待たず、
 その時点の状態を返す。どのスレッドが何をどの順に読み書きするかは、アプリ側で
 決める必要がある。つまり時間のかかる `writeBytes()`（Windows、Android。
 [`writeBytes()`](#Serial::writeBytes) 参照）や `drain()` が遅らせるのは、別スレッドの
-`setup()` / `close()` で、ほかの I/O 呼び出しではない。Android の `close()`、
-デストラクタ、ムーブ代入は、USB ワーカースレッドが止まるのも待つ（接続後なら最大で
-約 250 ms）。Windows では、システム自体が1つのポートハンドルへの呼び出しを1つずつ
-実行する（オーバーラップ I/O で開いていないため）。そのため Windows では
-`available()`、読み込み、flush 系は実行中の `writeBytes()` を待つ。
+`setup()` / `close()` で、ほかの I/O 呼び出しではない。閉じる際は受信ワーカーも
+停止する（デスクトップの poll 間隔は 50 ms、Android の USB 読み取りタイムアウトは
+250 ms）。デスクトップのムーブではワーカーを接続と一緒に移す。
+Windows の読み書きはオーバーラップ I/O を使う。
 
 インラインで動く [Logger](#Logger) のリスナーから、この `Serial` を呼んでよい。
 例外は Android で、USB ワーカースレッドもログを出す（許可のタイムアウト、接続、
@@ -8282,18 +8315,17 @@ Windows에서는 하위 ClearCommError / ReadFile / WriteFile의 실패를 모�
 남는다(소실을 찾는 USB 워커 스레드는 기록만 한다).
 
 하나의 `Serial`을 여러 스레드에서 사용해도 된다. I/O 호출(`available()`,
-`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)끼리는 서로를
-기다리지 않는다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
+`readBytes()`, `readByte()`, `writeBytes()`, flush 계열, `drain()`)은 포트 락을
+공유하며 수신 호출은 버퍼 mutex도 공유한다. 열기와 닫기(`setup()`, `close()`, 소실된 포트를 닫는 처리, 소멸자,
 이동)는 진행 중인 I/O 호출이 반환될 때까지 기다린 뒤 포트를 다루므로, 닫힌 포트를
 쓰는 호출은 생기지 않는다. 새 I/O 호출은 그 뒤에서 기다린다. `isConnected()`와
 [`getDevicePath()`](#Serial::getDevicePath)는 어느 쪽도 기다리지 않고 그 시점의
 상태를 반환한다. 어느 스레드가 무엇을 어떤 순서로 읽고 쓸지는 앱이 정해야 한다.
 즉 오래 걸리는 `writeBytes()`(Windows, Android. [`writeBytes()`](#Serial::writeBytes)
 참조)나 `drain()`이 늦추는 것은 다른 스레드의 `setup()` / `close()`이며, 다른 I/O
-호출이 아니다. Android의 `close()`, 소멸자, 이동 대입은 USB 워커 스레드가 멈추기도
-기다린다(연결 후라면 최대 약 250 ms). Windows에서는 시스템 자체가 하나의 포트
-핸들에 대한 호출을 하나씩 실행한다(오버랩 I/O로 열지 않았기 때문). 그래서
-Windows에서는 `available()`, 읽기, flush 계열이 진행 중인 `writeBytes()`를 기다린다.
+호출이 아니다. 닫을 때 수신 워커도 멈춘다(데스크톱 poll 간격: 50 ms,
+Android USB 읽기 타임아웃: 250 ms). 데스크톱 이동은 워커와 연결을 함께 옮긴다.
+Windows 읽기와 쓰기는 오버랩 I/O를 사용한다.
 
 인라인으로 실행되는 [Logger](#Logger) 리스너에서 이 `Serial`을 호출해도 된다. 예외는
 Android로, USB 워커 스레드도 로그를 남긴다(권한 타임아웃, 연결, 연결 소실, 수신
@@ -8611,9 +8643,8 @@ How long it may take depends on the platform:
   report how much of a timed-out chunk went out, so some bytes past the
   returned count may have reached the device too.
 
-A write that must never stall the app goes on a thread of its own: the other
-I/O calls do not wait for it (see [`isConnected()`](#Serial::isConnected) for
-Windows, where the reads still do).
+A write that must never stall the app goes on a thread of its own: receive
+calls do not wait for it.
 '''
 details.ja = '''
 どれだけ時間がかかりうるかはプラットフォームによる。
@@ -8637,8 +8668,7 @@ details.ja = '''
   先のバイトも機器に届いていることがある。
 
 アプリを止めたくない書き込みは、専用のスレッドから行う。ほかの I/O 呼び出しは
-それを待たない（Windows で読み込みは待つ点は [`isConnected()`](#Serial::isConnected)
-参照）。
+それを待たない。
 '''
 details.ko = '''
 얼마나 걸릴 수 있는지는 플랫폼에 따라 다르다.
@@ -8661,8 +8691,7 @@ details.ko = '''
   알려 주지 않으므로, 반환한 수보다 뒤의 바이트도 장치에 도달했을 수 있다.
 
 앱을 멈추게 하면 안 되는 쓰기는 전용 스레드에서 한다. 다른 I/O 호출은 그것을
-기다리지 않는다(Windows에서 읽기는 기다린다는 점은 [`isConnected()`](#Serial::isConnected)
-참조).
+기다리지 않는다.
 '''
 
 ["SerialDeviceInfo"]
@@ -10573,9 +10602,9 @@ description.ja = "touches 内の有効なエントリ数"
 description.ko = "touches 내의 유효한 항목 수"
 
 ["TouchEventArgs::touches"]
-description.en = "Array of active touch points (up to MAX_TOUCHES = 8)"
-description.ja = "アクティブなタッチ点の配列(最大 MAX_TOUCHES = 8)"
-description.ko = "활성 터치 포인트의 배열(최대 MAX_TOUCHES = 8)"
+description.en = "Array of active touch points (up to MAX_TOUCHES = 32)"
+description.ja = "アクティブなタッチ点の配列(最大 MAX_TOUCHES = 32)"
+description.ko = "활성 터치 포인트의 배열(최대 MAX_TOUCHES = 32)"
 
 ["TouchEventArgs::x"]
 description.en = "Convenience: X position of the first touch point"
@@ -11998,6 +12027,26 @@ platform_note.en = '''
 Video playback is a stub on Android: loadPlatform() logs "Not yet implemented on Android" and returns false; every platform hook is no-op (MediaCodec NDK TODO). Real backends: macOS/iOS AVFoundation, Windows Media Foundation, Linux FFmpeg, web HTML5 <video>.
 '''
 platform_note.ja = "Android はスタブ。loadPlatform() が false を返し全フックが no-op（MediaCodec NDK 未実装）。他は実装あり（mac/ios AVFoundation, win MediaFoundation, linux FFmpeg, web HTML5 video）。"
+
+["VideoPlayer::setAudioStreaming"]
+category = "video"
+keywords = ["audio", "streaming", "preload"]
+description.en = "Choose Linux audio streaming (default true). Call before load(); false preloads the whole track for sample-accurate loops and seeks. Changes apply to the next load."
+description.ja = "Linux の音声ストリーミングを選択（既定 true）。load() 前に false を指定すると音声全体をメモリに読み込み、サンプル精度でループとシークする。変更は次回の load() から適用。"
+description.ko = "Linux 오디오 스트리밍을 선택(기본 true). load() 전에 false로 설정하면 전체 트랙을 메모리에 로드하여 샘플 단위 루프와 탐색을 사용한다. 변경은 다음 load()부터 적용."
+platform_note.en = "Linux only: streaming keeps audio memory bounded, loops in the stream worker without seeking audio at each video loop, and explicit seeks may have a short refill gap. HTTP(S) URLs are supported. macOS/iOS, Windows and Web use native audio playback and ignore this setting, logging a notice once when false is selected. Android currently has no video audio."
+platform_note.ja = "Linux のみ有効。ストリーミングは音声メモリを一定に保ち、動画ループごとに音声をシークせずワーカー内でループする。明示的シークでは短い再充填の隙間が生じる場合がある。HTTP(S) URL にも対応。macOS/iOS、Windows、Web はネイティブ音声再生のため設定を無視し、false 指定時に一度だけ通知ログを出す。Android は動画音声未対応。"
+platform_note.ko = "Linux에서만 유효. 스트리밍은 오디오 메모리를 일정하게 유지하고 매 비디오 루프에서 오디오를 탐색하지 않고 워커 안에서 반복한다. 명시적 탐색에는 짧은 버퍼 충전 공백이 생길 수 있다. HTTP(S) URL도 지원한다. macOS/iOS, Windows, Web은 네이티브 오디오 재생을 사용하여 이 설정을 무시하고 false 선택 시 한 번 알림을 기록한다. Android는 비디오 오디오 미지원."
+related = ["VideoPlayer::isAudioStreaming", "VideoPlayer::load"]
+snippet = "video.setAudioStreaming(false);\nvideo.load(\"movie.mp4\");\nvideo.play();"
+
+["VideoPlayer::isAudioStreaming"]
+category = "video"
+keywords = ["audio", "streaming"]
+description.en = "Return the audio streaming preference (default true); on Linux it applies to the next load(). Native OS players ignore the preference."
+description.ja = "音声ストリーミングの設定を返す（既定 true）。Linux では次回の load() から適用。ネイティブ OS プレイヤーはこの設定を無視する。"
+description.ko = "오디오 스트리밍 설정을 반환(기본 true). Linux에서는 다음 load()부터 적용. 네이티브 OS 플레이어는 이 설정을 무시한다."
+related = ["VideoPlayer::setAudioStreaming"]
 
 ["VideoPlayer::close"]
 category = "video"

@@ -99,6 +99,7 @@
 
 // TrussC event system
 #include "tc/events/tcCoreEvents.h"
+#include "tc/events/tcTouchMouse.h"  // internal::TouchMouseMapper (touch-as-mouse)
 
 // TrussC utilities
 #include "tc/utils/tcFileIO.h"   // fs::path boundary helpers (before all path consumers)
@@ -128,6 +129,8 @@
 
 // TrussC MCP (Model Context Protocol) Server
 #include "tc/utils/tcMCP.h"
+#include "tc/app/tcExit.h"
+#include <csignal>
 
 // =============================================================================
 // trussc namespace
@@ -307,13 +310,13 @@ namespace internal {
         double drawAccumulator = 0.0;
     };
     MainLoopState& mainLoop();
-    int& appExitCode();  // shared by the host and hot reload guests
 
     // Mouse position/button state + keyboard state moved to WindowContext
     // (tc/app/tcWindowContext.h); window-space getters in tc/app/tcMouseGlobal.h.
 
     // Touch-as-mouse mapping
-    // Default ON everywhere — the first touch synthesizes mouse press/drag, so
+    // Default ON everywhere — the first finger down synthesizes mouse press/
+    // drag/release (other fingers don't; tc/events/tcTouchMouse.h), so
     // mouse-based code (incl. the web build on iPad/phones) just works. Apps that
     // want raw touch separate from mouse call setTouchAsMouse(false) in setup().
     // Defined in tcGlobal.cpp: app code sets it, the host's event callback reads it.
@@ -2048,14 +2051,18 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
-    sapp_request_quit();
+    internal::setExitReason("request-exit-app");
+    if (headless::isActive()) headless::quitRequested = true;
+    else sapp_request_quit();
 }
 
 // Immediately exit the application (cannot be cancelled)
 // Use this for forced exit, e.g., after user confirms exit in a dialog
 inline void exitApp(int code = 0) {
     internal::appExitCode() = code;
-    sapp_quit();
+    internal::setExitReason("exit-app");
+    if (headless::isActive()) headless::running = false;
+    else sapp_quit();
 }
 
 // ---------------------------------------------------------------------------
@@ -2405,6 +2412,7 @@ namespace internal {
 
     inline void _setup_cb() {
         CrashPhaseScope crashPhase("setup");
+        installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
         // key off this. (sokol's init_cb runs on the main thread.)
@@ -2675,6 +2683,12 @@ namespace internal {
     inline void _frame_cb() {
         // Guard against reentry (e.g. macOS modal dialogs pump the event loop)
         if (frameReentryGuard) return;
+        if (int sig = pendingWindowExitSignal()) {
+            setExitReason(sig == SIGTERM ? "sigterm" : "sigint");
+            sapp_request_quit();
+            sapp_skip_present();
+            return;
+        }
         frameReentryGuard = true;
         crashFrame(sapp_frame_count());
         CrashPhaseScope crashPhase("frame");
@@ -2741,7 +2755,11 @@ namespace internal {
     }
 
     inline void _cleanup_cb() {
+        if (!beginExitCleanup()) return;
         CrashPhaseScope crashPhase("cleanup");
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
+        // Session end may arrive inside a secondary window's modal loop.
+        currentWindowCtx() = &mainWindowContext();
         // Stop MCP HTTP server
         #ifndef __EMSCRIPTEN__
         mcp::stopHttpServer();
@@ -2763,6 +2781,8 @@ namespace internal {
         trussc::shutdownAudio();
 
         cleanup();
+        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
+        restoreWindowExitSignals();
 
         #if defined(__APPLE__) && TARGET_OS_OSX
         // AppKit's terminate: would exit(0) right after this.
@@ -2951,8 +2971,11 @@ namespace internal {
             case SAPP_EVENTTYPE_TOUCHES_MOVED:
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: {
-                // Build TouchEventArgs from sokol touchpoints
+                // Build TouchEventArgs from sokol touchpoints. The mapper below
+                // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
+                static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
                 TouchEventArgs touchArgs;
+                internal::TouchSample samples[TouchEventArgs::MAX_TOUCHES];
                 touchArgs.numTouches = ev->num_touches;
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
                     touchArgs.numTouches = TouchEventArgs::MAX_TOUCHES;
@@ -2961,60 +2984,74 @@ namespace internal {
                     touchArgs.touches[i].x = ev->touches[i].pos_x * scale;
                     touchArgs.touches[i].y = ev->touches[i].pos_y * scale;
                     touchArgs.touches[i].changed = ev->touches[i].changed;
+                    samples[i].id = ev->touches[i].identifier;
+                    samples[i].x = touchArgs.touches[i].x;
+                    samples[i].y = touchArgs.touches[i].y;
+                    samples[i].changed = ev->touches[i].changed;
                 }
 
                 // Fire touch events
+                internal::TouchPhase phase;
                 if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
+                    phase = internal::TouchPhase::Began;
                     events().touchPressed.notify(touchArgs);
                 } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
+                    phase = internal::TouchPhase::Moved;
                     events().touchMoved.notify(touchArgs);
                 } else {
                     touchArgs.cancelled = (ev->type == SAPP_EVENTTYPE_TOUCHES_CANCELLED);
+                    phase = touchArgs.cancelled ? internal::TouchPhase::Cancelled
+                                                : internal::TouchPhase::Ended;
                     events().touchReleased.notify(touchArgs);
                 }
 
-                // Touch-as-mouse: map first touch to mouse events
-                if (touchAsMouse() && touchArgs.numTouches > 0) {
-                    float tx = touchArgs.touches[0].x;
-                    float ty = touchArgs.touches[0].y;
+                // Touch-as-mouse: only the primary touch (the first finger
+                // down) drives the mouse; see tc/events/tcTouchMouse.h.
+                auto& mapper = internal::touchMouseMapper();
+                if (!touchAsMouse()) {
+                    mapper.reset();
+                    break;
+                }
+                internal::TouchMouseAction action = mapper.update(phase, samples, touchArgs.numTouches);
+                float tx = action.x;
+                float ty = action.y;
 
-                    if (ev->type == SAPP_EVENTTYPE_TOUCHES_BEGAN) {
-                        currentMouseButton = 0;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = 0;
-                        internal::currentWindowContext().mousePressed = true;
+                if (action.kind == internal::TouchMouseAction::Kind::Press) {
+                    currentMouseButton = 0;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = 0;
+                    internal::currentWindowContext().mousePressed = true;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mousePressed.notify(margs);
-                        if (appMousePressedFunc) appMousePressedFunc(margs);
-                    } else if (ev->type == SAPP_EVENTTYPE_TOUCHES_MOVED) {
-                        float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mousePressed.notify(margs);
+                    if (appMousePressedFunc) appMousePressedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
+                    float prevX = internal::currentWindowContext().mouseX, prevY = internal::currentWindowContext().mouseY;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
 
-                        internal::MouseEventRaw margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
-                        events().mouseDragged.notify(dragArgs);
-                        margs.consumed = dragArgs.consumed;
-                        if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
-                    } else {
-                        currentMouseButton = -1;
-                        internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
-                        internal::currentWindowContext().mouseButton = -1;
-                        internal::currentWindowContext().mousePressed = false;
+                    internal::MouseEventRaw margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.delta = margs.globalDelta = Vec2(tx - prevX, ty - prevY);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    MouseDragEventArgs dragArgs = internal::toDragArgs(margs);
+                    events().mouseDragged.notify(dragArgs);
+                    margs.consumed = dragArgs.consumed;
+                    if (appMouseDraggedFunc) appMouseDraggedFunc(margs);
+                } else if (action.kind == internal::TouchMouseAction::Kind::Release) {
+                    currentMouseButton = -1;
+                    internal::currentWindowContext().mouseX = tx; internal::currentWindowContext().mouseY = ty;
+                    internal::currentWindowContext().mouseButton = -1;
+                    internal::currentWindowContext().mousePressed = false;
 
-                        MouseEventArgs margs;
-                        margs.pos = margs.globalPos = Vec2(tx, ty);
-                        margs.button = MOUSE_BUTTON_LEFT;
-                        margs.syncLegacy();
-                        events().mouseReleased.notify(margs);
-                        if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
-                    }
+                    MouseEventArgs margs;
+                    margs.pos = margs.globalPos = Vec2(tx, ty);
+                    margs.button = MOUSE_BUTTON_LEFT;
+                    margs.syncLegacy();
+                    events().mouseReleased.notify(margs);
+                    if (appMouseReleasedFunc) appMouseReleasedFunc(margs);
                 }
                 break;
             }
@@ -3064,15 +3101,20 @@ namespace internal {
                     logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x"
                         << std::hex << ev->device_lost_reason << "; exiting";
                     exitApp(1);
+                    setExitReason("device-lost");
                 }
                 break;
             }
             case SAPP_EVENTTYPE_QUIT_REQUESTED: {
                 // Notify exitRequested event - listeners can cancel by setting args.cancel = true
+                setExitBlockReason("");
                 ExitRequestEventArgs args;
                 events().exitRequested.notify(args);
                 if (args.cancel) {
+                    setExitBlockReason(args.reason);
+                    clearExitReason();
                     sapp_cancel_quit();
+                    cancelWindowExitSignal();
                 }
                 break;
             }
@@ -3216,15 +3258,15 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
 
-    // Windows: switch the console output code page to UTF-8 while the app
-    // runs, so UTF-8 log text is not shown in the OEM code page. Takes effect
-    // whenever the process has a console (Debug builds, TRUSSC_SHOW_CONSOLE);
-    // a GUI-subsystem Release build has none, and the call does nothing.
-    // sokol restores the previous code page when sapp_run() returns, and
-    // internal::ConsoleOutputCPCtrlGuard when Ctrl+C, Ctrl+Break or closing
-    // the console ends the process. std::exit(), abort(), an uncaught
-    // exception and a crash leave the console in UTF-8. Ignored on other
-    // platforms.
+    // Windows: keep console input and output UTF-8 while the app runs.
+    // Takes effect whenever the process has a console (Debug builds,
+    // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none.
+    // sokol restores both code pages when sapp_run() returns. The host's
+    // ConsoleCPCtrlGuard covers Ctrl+C, Ctrl+Break, console close and
+    // std::exit(), and restores during exception unwinding; the Windows
+    // crash handler restores after its report.
+    // abort(), TerminateProcess and external kills cannot restore them.
+    // Ignored on other platforms.
     desc.win32.console_utf8 = true;
 
     return desc;
@@ -3232,37 +3274,57 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
 #ifdef _WIN32
 namespace internal {
-// sokol switches the console output code page to UTF-8 (console_utf8 above)
-// and puts it back when sapp_run() returns. Ctrl+C, Ctrl+Break and closing
-// the console end the process in the default console handler (ExitProcess)
-// instead, which would leave the launching cmd in UTF-8. This handler puts
-// the code page back first and returns FALSE, so the default handling goes
-// on and the process still ends.
-// Host-only state (tools/header_state_allowlist.txt): only the guard around
-// sapp_run() in runApp() / the hot reload host and its handler touch it, and
-// both are compiled into the host, so a guest's copy is never used.
-inline UINT consoleOutputCPBeforeRun = 0;   // 0: the process has no console
+// sokol restores both code pages when sapp_run() returns normally. The guard
+// also restores on destruction, including when an exception escapes sapp_run().
+// Console control events use ExitProcess instead, and std::exit() skips stack
+// destructors. Restore before default control handling, or from the exit hook.
+// Host-only state (tools/header_state_allowlist.txt): the guard around
+// sapp_run() in runApp() / the hot reload host and its handlers live in the
+// host; a guest's copy is never used. Zero means there is no console.
+struct ConsoleCodePages {
+    std::atomic<UINT> output{0};
+    std::atomic<UINT> input{0};
+};
+inline ConsoleCodePages consoleCPBeforeRun;
 
-inline BOOL WINAPI restoreConsoleOutputCPOnCtrl(DWORD type) {
+inline void restoreConsoleCP() {
+    const UINT output = consoleCPBeforeRun.output.load();
+    const UINT input = consoleCPBeforeRun.input.load();
+    if (output != 0) SetConsoleOutputCP(output);
+    if (input != 0) SetConsoleCP(input);
+}
+
+inline BOOL WINAPI restoreConsoleCPOnCtrl(DWORD type) {
     if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
-        SetConsoleOutputCP(consoleOutputCPBeforeRun);
+        restoreConsoleCP();
     }
     return FALSE;
 }
 
-// Installs restoreConsoleOutputCPOnCtrl for its lifetime (around sapp_run()),
-// with the code page the console has before sokol changes it.
-struct ConsoleOutputCPCtrlGuard {
-    ConsoleOutputCPCtrlGuard() {
-        consoleOutputCPBeforeRun = GetConsoleOutputCP();
-        installed = consoleOutputCPBeforeRun != 0 &&
-                    SetConsoleCtrlHandler(restoreConsoleOutputCPOnCtrl, TRUE) != 0;
+// Capture before sokol switches code pages; keep one exit hook per host.
+struct ConsoleCPCtrlGuard {
+    ConsoleCPCtrlGuard() {
+        const UINT output = GetConsoleOutputCP();
+        const UINT input = GetConsoleCP();
+        consoleCPBeforeRun.output = output;
+        consoleCPBeforeRun.input = input;
+        setCrashConsoleCodePages(output, input);
+        static const int exitHook = std::atexit(restoreConsoleCP);
+        (void)exitHook;
+        installed = (output != 0 || input != 0) &&
+                    SetConsoleCtrlHandler(restoreConsoleCPOnCtrl, TRUE) != 0;
     }
-    ~ConsoleOutputCPCtrlGuard() {
-        if (installed) SetConsoleCtrlHandler(restoreConsoleOutputCPOnCtrl, FALSE);
+    ~ConsoleCPCtrlGuard() {
+        // Repeat sokol's normal restore, or perform it during exception unwinding.
+        restoreConsoleCP();
+        if (installed) SetConsoleCtrlHandler(restoreConsoleCPOnCtrl, FALSE);
+        // Disarm only after restoring; do not overwrite later changes at exit.
+        consoleCPBeforeRun.output = 0;
+        consoleCPBeforeRun.input = 0;
+        setCrashConsoleCodePages(0, 0);
     }
-    ConsoleOutputCPCtrlGuard(const ConsoleOutputCPCtrlGuard&) = delete;
-    ConsoleOutputCPCtrlGuard& operator=(const ConsoleOutputCPCtrlGuard&) = delete;
+    ConsoleCPCtrlGuard(const ConsoleCPCtrlGuard&) = delete;
+    ConsoleCPCtrlGuard& operator=(const ConsoleCPCtrlGuard&) = delete;
 
     bool installed = false;
 };
@@ -3291,7 +3353,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     internal::openEnvLogFile();   // before sapp_run(): init-time failures too
     sapp_desc desc = buildAppDescriptor<AppClass>(settings);
 #ifdef _WIN32
-    internal::ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
+    internal::ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
 #endif
     internal::appSetupCalled() = false;
     sapp_run(&desc);

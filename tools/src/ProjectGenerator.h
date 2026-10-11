@@ -66,6 +66,10 @@ public:
 
     explicit ProjectGenerator(const ProjectSettings& settings);
 
+    // Set by the GUI entry point: child processes run hidden instead of on
+    // the inherited console (Windows, #417).
+    static inline bool runChildrenHidden = false;
+
     // Set log callback for progress messages
     void setLogCallback(LogCallback callback) { logCallback_ = callback; }
 

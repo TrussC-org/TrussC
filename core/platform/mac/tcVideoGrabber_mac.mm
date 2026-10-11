@@ -462,8 +462,8 @@ bool VideoGrabber::setupPlatform() {
         TrussCVideoGrabberDelegate* delegate = [[TrussCVideoGrabberDelegate alloc] init];
         delegate.platformData = data;
         delegate.targetPixels = pixels_;
-        delegate.pixelsDirty = &pixelsDirty_;
-        delegate.mutex = &mutex_;
+        delegate.pixelsDirty = &sharedState_->dirty;
+        delegate.mutex = &sharedState_->mtx;
         delegate.frameQueue = frameQueue_.get();
         data->delegate = delegate;
 
@@ -508,6 +508,16 @@ void VideoGrabber::closePlatform() {
 
         if (data->session) {
             [data->session stopRunning];
+        }
+
+        // Stop delivery and wait for queued capture callbacks before freeing
+        // the platform data, pixel buffers or the grabber's shared state.
+        [data->output setSampleBufferDelegate:nil queue:NULL];
+        if (data->captureQueue) {
+            dispatch_sync(data->captureQueue, ^{});
+        }
+
+        if (data->session) {
             [data->session removeInput:data->input];
             [data->session removeOutput:data->output];
         }
@@ -535,7 +545,7 @@ void VideoGrabber::closePlatform() {
 // ---------------------------------------------------------------------------
 void VideoGrabber::updatePlatform() {
     // AVFoundation はバックグラウンドスレッドでフレームを取得するので
-    // ここでは特に何もしない（pixelsDirty_ のチェックは呼び出し元で行う）
+    // ここでは特に何もしない（sharedState_->dirty のチェックは呼び出し元で行う）
 }
 
 // ---------------------------------------------------------------------------

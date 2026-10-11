@@ -6,6 +6,18 @@
 #include <fstream>
 #include <stdexcept>
 #include <thread>
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define TC_TEST_ADDRESS_SANITIZER 1
+#endif
+#endif
+#ifndef TC_TEST_ADDRESS_SANITIZER
+#if defined(__SANITIZE_ADDRESS__)
+#define TC_TEST_ADDRESS_SANITIZER 1
+#else
+#define TC_TEST_ADDRESS_SANITIZER 0
+#endif
+#endif
 #if TC_HAS_CRASH_HANDLER
 #ifdef _WIN32
 #include <windows.h>
@@ -231,6 +243,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #endif
          }) {
         const std::string name(selected);
+#if TC_TEST_ADDRESS_SANITIZER
+        // Keep exception / terminate coverage; ASan owns the fault handlers.
+        if (name != "throw" && name != "non-std" && name != "terminate" &&
+            name != "prior-terminate" && name != "later-terminate" &&
+            name != "setup" && name != "update") {
+            std::printf("SKIP: %s signal case under AddressSanitizer\n", selected);
+            continue;
+        }
+#endif
         const auto directory = root / name;
         fs::create_directories(directory);
         const int status = launch(fs::absolute(argv[0]).string().c_str(), selected, directory);

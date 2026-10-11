@@ -149,6 +149,41 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
+
       # Compiler cache: ccache on mac/linux, sccache on Windows/MSVC (Release
       # builds carry no /Zi, so cl objects are cacheable). Wires the compiler
       # launcher into every cmake invocation (trusscli + all examples/tests) via
@@ -230,10 +265,9 @@ jobs:
 
       # Linux: Install dependencies using shared script
       - name: Install Linux dependencies
+        timeout-minutes: 10
         if: runner.os == 'Linux'
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        uses: ./.github/actions/apt-deps
 
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
@@ -264,6 +298,21 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: python3 tools/tests/test_trusscli_clean.py -v
+
+      # Configure and build must agree on localized /showIncludes bytes (#417).
+      - name: Windows UTF-8 console header dependencies
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          chcp 65001 >NUL
+          python tools/tests/test_windows_header_dependencies.py -v
+
+      # Weekly-only tests go stale unnoticed; run the offline upstream-check
+      # tests on every PR too (ls_remote is patched, no network).
+      - name: upstream-check regression tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
 
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
@@ -309,6 +358,41 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -380,9 +464,8 @@ jobs:
           key: sokol-shdc-v1-${{ runner.os }}
 
       - name: Install Linux dependencies (for trusscli)
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -421,6 +504,41 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -484,9 +602,8 @@ jobs:
           version: '6.0.2'
 
       - name: Install Linux dependencies (for trusscli)
-        run: |
-          chmod +x tools/install_dependencies_linux.sh
-          ./tools/install_dependencies_linux.sh -y
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
         run: |
@@ -523,6 +640,41 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+
+      # Reuse one dependency tree across every configure in this job.
+      - name: Cache FetchContent
+        id: fetchcontent
+        if: github.event_name != 'merge_group'
+        uses: actions/cache@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Cache FetchContent (restore only, merge queue)
+        id: fetchcontent-restore
+        if: github.event_name == 'merge_group'
+        uses: actions/cache/restore@v5
+        with:
+          # Sources and populate stamps only; <dep>-build object trees are
+          # platform-specific and rebuilt anyway.
+          path: |
+            ${{ github.workspace }}/.fetchcontent/*-src
+            ${{ github.workspace }}/.fetchcontent/*-subbuild
+          key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
+
+      - name: Configure shared FetchContent
+        shell: bash
+        env:
+          FETCHCONTENT_CACHE_HIT: ${{ steps.fetchcontent.outputs.cache-hit == 'true' || steps.fetchcontent-restore.outputs.cache-hit == 'true' }}
+        run: |
+          echo "TRUSSC_FETCHCONTENT_DIR=$GITHUB_WORKSPACE/.fetchcontent" >> "$GITHUB_ENV"
+          if [ "$FETCHCONTENT_CACHE_HIT" = "true" ]; then
+            echo "TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON" >> "$GITHUB_ENV"
+          fi
 
       # See the build job: avoid the 429-prone sokol-shdc download.
       - name: Cache sokol-shdc
@@ -633,6 +785,18 @@ jobs:
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: FetchContent CMake regression checks
+        if: always()
+        run: python3 tools/tests/test_fetchcontent_cache.py -v
+
+      - name: apt dependency cache regression checks
+        if: always()
+        run: python3 tools/tests/test_apt_dependencies.py -v
+
+      - name: core test symbol checker regression checks
+        if: always()
+        run: python3 tools/tests/test_core_test_symbols.py -v
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,

@@ -48,6 +48,15 @@ struct GrabberFrame {
 
 namespace internal {
 
+// Capture callbacks keep pointers to these members. Keep their addresses
+// stable when the owning VideoGrabber moves, just like GrabberFrameQueue.
+struct GrabberSharedState {
+    std::mutex mtx;
+    std::atomic<bool> dirty{false};
+};
+
+struct VideoGrabberTestAccess;
+
 // Frame FIFO shared between the capture thread and the main thread.
 // Held by unique_ptr in VideoGrabber so the address stays stable across moves
 // (the capture callback keeps a raw pointer to it).
@@ -214,8 +223,8 @@ public:
         }
 
         // Update texture if buffer was updated
-        if (pixelsDirty_.exchange(false)) {
-            std::lock_guard<std::mutex> lock(mutex_);
+        if (sharedState_->dirty.exchange(false)) {
+            std::lock_guard<std::mutex> lock(sharedState_->mtx);
             texture_.loadData(pixels_, width_, height_, 4);
             frameNew_ = true;
         }
@@ -286,7 +295,7 @@ public:
         if (!initialized_ || !pixels_) return;
 
         image.allocate(width_, height_, 4);
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(sharedState_->mtx);
         std::memcpy(image.getPixelsData(), pixels_, width_ * height_ * 4);
         image.setDirty();
         image.update();
@@ -312,6 +321,8 @@ public:
     static void requestCameraPermission();
 
 private:
+    friend struct internal::VideoGrabberTestAccess;
+
     // Size
     int width_ = 0;
     int height_ = 0;
@@ -331,8 +342,8 @@ private:
     unsigned char* pixels_ = nullptr;
 
     // Thread synchronization
-    mutable std::mutex mutex_;
-    std::atomic<bool> pixelsDirty_{false};
+    std::unique_ptr<internal::GrabberSharedState> sharedState_ =
+        std::make_unique<internal::GrabberSharedState>();
 
     // Timestamped frame FIFO (see getQueuedFrames). unique_ptr keeps the
     // address stable across moves - the capture callback holds a raw pointer.
@@ -362,7 +373,8 @@ private:
         pendingSetup_ = other.pendingSetup_;
         deviceName_ = std::move(other.deviceName_);
         pixels_ = other.pixels_;
-        pixelsDirty_.store(other.pixelsDirty_.load());
+        sharedState_ = std::move(other.sharedState_);
+        other.sharedState_ = std::make_unique<internal::GrabberSharedState>();
         texture_ = std::move(other.texture_);
         platformHandle_ = other.platformHandle_;
         frameQueue_ = std::move(other.frameQueue_);
@@ -410,15 +422,15 @@ private:
 
         // Lock mutex and swap old buffer
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<std::mutex> lock(sharedState_->mtx);
             delete[] pixels_;
             pixels_ = newPixels;
             width_ = newWidth;
             height_ = newHeight;
-        }
 
-        // Notify delegate of new pointer
-        updateDelegatePixels();
+            // Publish the new buffer before capture can use the old pointer.
+            updateDelegatePixels();
+        }
 
         // Recreate texture
         texture_.allocate(width_, height_, 4, TextureUsage::Stream);

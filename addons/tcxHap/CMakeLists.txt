@@ -9,16 +9,13 @@ set(ADDON_NAME tcxHap)
 # Fetch dependencies to libs/ for sharing
 include(FetchContent)
 
-# Allow older CMake versions in dependencies (Snappy uses 2.4)
-set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
-
 # -----------------------------------------------------------------------------
 # Snappy (BSD 3-Clause)
 # -----------------------------------------------------------------------------
 FetchContent_Declare(
     snappy
     GIT_REPOSITORY https://github.com/google/snappy.git
-    GIT_TAG 1.2.1
+    GIT_TAG 1.3.1
 )
 set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)

@@ -35,6 +35,9 @@
 //     by a flag an error (ProjectGenerator::update with a toolchain that
 //     fails on purpose; needs cmake in PATH).
 //
+// Guards (#460): GUI import reads the IDE, targets and backend through the
+// shared read-back, retaining the GUI defaults when saved values are absent.
+//
 // Guards (#357): `trusscli build` and `trusscli clean`.
 //   - ProjectGenerator::buildDirForPreset() is the one preset -> build folder
 //     mapping (ios -> xcode-ios), and the written presets' binaryDir follow it.
@@ -511,6 +514,63 @@ static void testPrecedence() {
         applyGenerationOptions(none, PresetState(), webFlag);
         check("no presets: a flagged target is not kept", !none.webKept);
     }
+}
+
+// -----------------------------------------------------------------------------
+// GUI import through the shared read-back (#460)
+// -----------------------------------------------------------------------------
+static void testGuiImportReadback() {
+    const fs::path project = makeProject("gui-import");
+    {
+        ofstream file(project / "CMakePresets.json");
+        file << R"({
+            "version": 6,
+            "vendor": {"trussc": {"ide": "cursor"}},
+            "configurePresets": [
+                {"name": "web", "cacheVariables": {"TC_WEB_BACKEND": "GLES3"}},
+                {"name": "android"},
+                {"name": "ios"}
+            ]
+        })";
+    }
+
+    // importProject starts with the GUI's current settings, then copies
+    // these fields back to the IDE combo, target checkboxes and backend combo.
+    ProjectSettings gui;
+    applyGenerationOptions(gui, readPresetState(project.string()), GenerationFlags());
+    check("GUI import: remembered IDE preselected", gui.ideType == IdeType::Cursor);
+    check("GUI import: web and android checked, WebGL selected",
+          gui.generateWebBuild && gui.generateAndroidBuild && gui.webBackend == 1);
+#ifdef __APPLE__
+    check("GUI import: ios checked on macOS", gui.generateIosBuild);
+#else
+    check("GUI import: ios unavailable off macOS", !gui.generateIosBuild);
+#endif
+    const auto cli = prepareRegeneration(project.string(), g_root.string(), {}, {}, {});
+    check("GUI import: same selections as CLI regeneration",
+          gui.ideType == cli.settings.ideType &&
+          gui.generateWebBuild == cli.settings.generateWebBuild &&
+          gui.generateAndroidBuild == cli.settings.generateAndroidBuild &&
+          gui.generateIosBuild == cli.settings.generateIosBuild &&
+          gui.webBackend == cli.settings.webBackend);
+
+    const fs::path fresh = makeProject("gui-import-no-presets");
+    applyGenerationOptions(gui, readPresetState(fresh.string()), GenerationFlags());
+    check("GUI import: no presets retains current GUI defaults",
+          gui.ideType == IdeType::Cursor && gui.generateWebBuild &&
+          gui.generateAndroidBuild && gui.webBackend == 1);
+
+    // A native-only project clears selections from the previous import;
+    // older projects without vendor.trussc.ide retain the current IDE.
+    {
+        ofstream file(project / "CMakePresets.json");
+        file << R"({"configurePresets": [{"name": "linux"}]})";
+    }
+    applyGenerationOptions(gui, readPresetState(project.string()), GenerationFlags());
+    check("GUI import: native-only project clears cross-compile checkboxes",
+          !gui.generateWebBuild && !gui.generateAndroidBuild && !gui.generateIosBuild);
+    check("GUI import: missing remembered IDE retains current IDE",
+          gui.ideType == IdeType::Cursor);
 }
 
 // -----------------------------------------------------------------------------
@@ -1051,6 +1111,41 @@ static void testConfigurePlan() {
     }
 }
 
+// #417: doctor must not mistake another object's dependencies for main's.
+static void testWindowsHeaderDependencies() {
+    check("deps: main has headers", hasMainHeaderDependencies(
+        "CMakeFiles/app.dir/src/main.cpp.obj: #deps 133, deps mtime 42 (VALID)\r\n"
+        "    C:/project/src/tcApp.h\r\n\r\n"));
+    check("deps: backslash paths", hasMainHeaderDependencies(
+        "CMakeFiles\\app.dir\\src\\main.cpp.obj: #deps 1, deps mtime 42 (VALID)\n"));
+    check("deps: zero main deps despite another good object", !hasMainHeaderDependencies(
+        "CMakeFiles/app.dir/src/tcApp.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"
+        "CMakeFiles/app.dir/src/main.cpp.obj: #deps 0, deps mtime 42 (VALID)\n"));
+    check("deps: missing main", !hasMainHeaderDependencies(
+        "CMakeFiles/app.dir/src/tcApp.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"));
+    check("deps: empty log", !hasMainHeaderDependencies(""));
+    check("deps: malformed count", !hasMainHeaderDependencies("main.cpp.obj: #deps unknown\n"));
+    check("deps: similarly named object", !hasMainHeaderDependencies(
+        "not-main.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"));
+    check("deps: any zero main record fails", !hasMainHeaderDependencies(
+        "a/main.cpp.obj: #deps 133, deps mtime 42 (VALID)\n"
+        "b/main.cpp.obj: #deps 0, deps mtime 42 (VALID)\n"));
+
+    check("Windows argv: empty", quoteWindowsArgument("") == "\"\"");
+    check("Windows argv: spaces", quoteWindowsArgument("C:\\Program Files\\cmake.exe") ==
+          "\"C:\\Program Files\\cmake.exe\"");
+    check("Windows argv: trailing slash", quoteWindowsArgument("C:\\folder\\") ==
+          "\"C:\\folder\\\\\"");
+    check("Windows argv: embedded quote", quoteWindowsArgument("a\"b") == "\"a\\\"b\"");
+
+    fs::path cache = makeProject("deps-cache") / "CMakeCache.txt";
+    writeFile(cache, "// Comment\nCMAKE_BUILD_TYPE:STRING=RelWithDebInfo\n"
+                    "CMAKE_MAKE_PROGRAM:FILEPATH=C:/Program Files/Ninja/ninja.exe\n");
+    check("cache: Ninja path with spaces", readCMakeCacheValue(cache.string(), "CMAKE_MAKE_PROGRAM") ==
+          "C:/Program Files/Ninja/ninja.exe");
+    check("cache: missing entry", readCMakeCacheValue(cache.string(), "MISSING").empty());
+}
+
 // -----------------------------------------------------------------------------
 // 7b. The build folder on disk: which folder `build` looks at, and what
 //     `clean` removes
@@ -1464,12 +1559,14 @@ TC_CORE_TEST_MAIN() {
     testParseEdgeCases();
     testWebBackend();
     testPrecedence();
+    testGuiImportReadback();
     testPrepareRegeneration();
     testToolchainFiles();
     testKeptTargetConfigureFailure();
     testTargetFlags();
     testBuildDirMapping();
     testConfigurePlan();
+    testWindowsHeaderDependencies();
     testBuildFolders();
     testToolchainCheck();
 #ifdef _WIN32

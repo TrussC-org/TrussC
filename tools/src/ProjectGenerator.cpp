@@ -43,7 +43,13 @@ static string getCmakePath() {
 static pair<int, string> executeCommand(const string& cmd) {
     string output;
 #ifdef _WIN32
-    // CreateProcessでコンソールウィンドウを非表示にして実行
+    // CLI: configure runs on the caller's console, so it records cl's
+    // /showIncludes prefix in the same code page as the later build (#417).
+    // GUI: run hidden with the default (OEM) code page, like a plain cmd or
+    // PowerShell. The GUI's own console mixes code pages (UTF-8 output for
+    // the window app, OEM input), which would garble the recorded prefix,
+    // and the GUI never builds.
+    const bool hasConsole = !ProjectGenerator::runChildrenHidden && GetConsoleCP() != 0;
     string fullCmd = "cmd.exe /c " + cmd + " 2>&1";
 
     SECURITY_ATTRIBUTES sa = {};
@@ -59,17 +65,20 @@ static pair<int, string> executeCommand(const string& cmd) {
 
     STARTUPINFOA si = {};
     si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = hWritePipe;
     si.hStdError = hWritePipe;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-    si.wShowWindow = SW_HIDE;
+    if (!hasConsole) {
+        si.dwFlags |= STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+    }
 
     PROCESS_INFORMATION pi = {};
     BOOL ok = CreateProcessA(
         nullptr, const_cast<char*>(fullCmd.c_str()),
         nullptr, nullptr, TRUE,
-        CREATE_NO_WINDOW,
+        hasConsole ? 0 : CREATE_NO_WINDOW,
         nullptr, nullptr, &si, &pi);
 
     // 書き込み側を閉じる（子プロセスが使うので親では不要）
@@ -1109,7 +1118,11 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
 
     // Use vcvarsall.bat to set up VS environment, then run cmake
     // CMAKE_MAKE_PROGRAM is set in CMakeUserPresets.json
-    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + "\"";
+    // Set the initial default before project() chooses MSVC's Debug default.
+    // Existing caches retain the build type selected by the user.
+    string buildType = fs::exists(fs::path(path) / buildDirForPreset(preset) / "CMakeCache.txt")
+        ? "" : " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
 
     auto [result, output] = executeCommand(cmd);
 

@@ -690,11 +690,11 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
     internal::currentWindowContext().clipboardSize = settings.clipboardSize;
-    desc.win32.console_utf8 = true;   // UTF-8 console output (see buildAppDescriptor)
+    desc.win32.console_utf8 = true;   // UTF-8 console input/output (see buildAppDescriptor)
 
     openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
 #ifdef _WIN32
-    ConsoleOutputCPCtrlGuard consoleCtrl;   // Ctrl+C restores the console code page
+    ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
 #endif
     appExitCode() = 0;
     appSetupCalled() = false;

@@ -4,6 +4,8 @@
 #include <string>
 #include "tc/sound/tcSound.h"
 
+namespace tcCoreTest {
+
 // Shared by the per-PR and daily pending-seek checks. Called on failure,
 // before stop() releases the stream whose state we need to inspect.
 inline std::string streamSeekFailureState(const tc::Sound& sound, float level) {
@@ -23,3 +25,5 @@ inline std::string streamSeekFailureState(const tc::Sound& sound, float level) {
         << ", workerPasses=" << s.workerPasses;
     return out.str();
 }
+
+} // namespace tcCoreTest

@@ -32,23 +32,79 @@ def row(name="library", version="1.2.3", commit=None):
                 not_recorded=False, slug="owner/library", paths=["library.h"])
 
 
+# A fixed copy of docs/LICENSE.md rows, so the parser's exact values are
+# checked without pinning the real inventory (which changes with every bump).
+FIXTURE_LIST = """# License
+
+## Third-Party Libraries
+
+### Core
+
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization |
+|---------|---------|----------------------|----------|---------|---------------------|
+| **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+| **LuaJIT** | 2.1 (rolling), commit not recorded | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall |
+| **branchlib** | branch `x` (not pinned) | `branchlib.h` | https://github.com/owner/branchlib | MIT | Someone |
+
+### Build Tools
+
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |
+|---------|---------|----------------------|----------|---------|---------------------|---------|
+| **sokol-shdc (sokol-tools-bin)** | commit `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z) | `core/cmake/trussc_shaders.cmake` | https://github.com/floooh/sokol-tools-bin | zlib License | Andre Weissflog | linux: `ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df` |
+
+### Addons
+
+| Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
+|---------|---------|----------------------|----------|---------|---------------------|-------|
+| **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
+| **libcurl** | 8.12.1 (Windows, when no system libcurl is found) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
+| **tinyobjloader** | commit `966edce` (branch `release`, + 2 TrussC patches) | `addons/tcxObj/src/tiny_obj_loader.h` | https://github.com/tinyobjloader/tinyobjloader | MIT | Syoyo Fujita and contributors | tcxObj |
+| **HAP** | commit `d847f6bbd3be88575dd4ef33a877243780e3be76` (2024-07-25) | `addons/tcxHap/CMakeLists.txt` | https://github.com/Vidvox/hap | BSD 2-Clause | Tom Butterworth, Vidvox LLC | tcxHap |
+
+## Next Section
+"""
+
+
 class UpstreamTests(unittest.TestCase):
-    def test_inventory(self):
-        rows = check.parse_list((ROOT / check.LIST_FILE).read_text())
-        self.assertEqual(len(rows), 31)
-        by_name = {r["name"]: r for r in rows}
-        self.assertEqual(by_name["mbedTLS"]["version"], "3.6.7")
-        self.assertEqual(by_name["miniaudio"]["version"], "0.11.23")
-        self.assertEqual(by_name["tinyobjloader"]["commit"], "966edce")
-        self.assertEqual(by_name["HAP"]["commit"], "d847f6bbd3be88575dd4ef33a877243780e3be76")
-        self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["commit"], "11d0cf678105d614d675e6d9bd2aaf3eeff12f8c")
+    def test_inventory_shape(self):
+        # Shape only: the weekly workflow runs these tests before the report,
+        # so a pinned value that went stale would stop the report itself.
+        rows = check.parse_list((ROOT / check.LIST_FILE).read_text(encoding="utf-8"))
+        self.assertTrue(rows)
         for r in rows:
-            self.assertTrue(r["slug"], r["name"])
-            self.assertTrue(r["paths"], r["name"])
-            self.assertTrue(all((ROOT / p).exists() for p in r["paths"]))
+            with self.subTest(library=r["name"]):
+                self.assertTrue(r["slug"])
+                self.assertTrue(r["paths"])
+                self.assertTrue(r["version"] or r["commit"] or r["branch"] or r["not_recorded"])
+                for p in r["paths"]:
+                    self.assertTrue((ROOT / p).exists(), p)
+
+    def test_parse_list_values(self):
+        by_name = {r["name"]: r for r in check.parse_list(FIXTURE_LIST)}
+        self.assertEqual(set(by_name), {"earcut.hpp", "LuaJIT", "branchlib",
+                                        "sokol-shdc (sokol-tools-bin)", "mbedTLS", "libcurl",
+                                        "tinyobjloader", "HAP"})
+        self.assertTrue(by_name["earcut.hpp"]["not_recorded"])
+        self.assertIsNone(by_name["earcut.hpp"]["version"])
+        self.assertIsNone(by_name["earcut.hpp"]["commit"])
+        self.assertEqual(by_name["LuaJIT"]["version"], "2.1")
+        self.assertTrue(by_name["LuaJIT"]["not_recorded"])
+        self.assertEqual(by_name["branchlib"]["branch"], "x")
+        self.assertFalse(by_name["branchlib"]["not_recorded"])
+        self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["hashes"],
+                         {"linux": "ed35e89ef381d521a499096ed4ada85e4d135d8011e151cca6b7d893c43b21df"})
+        self.assertEqual(by_name["mbedTLS"]["version"], "3.6.7")
+        self.assertEqual(by_name["mbedTLS"]["slug"], "mbed-tls/mbedtls")
+        self.assertEqual(by_name["libcurl"]["version"], "8.12.1")
+        self.assertEqual(by_name["tinyobjloader"]["commit"], "966edce")
+        self.assertIsNone(by_name["tinyobjloader"]["version"])
+        self.assertEqual(by_name["HAP"]["commit"], "d847f6bbd3be88575dd4ef33a877243780e3be76")
+        self.assertEqual(by_name["sokol-shdc (sokol-tools-bin)"]["commit"],
+                         "11d0cf678105d614d675e6d9bd2aaf3eeff12f8c")
+        self.assertEqual(by_name["HAP"]["paths"], ["addons/tcxHap/CMakeLists.txt"])
 
     def test_new_pins_use_commit_checks_in_weekly_report(self):
-        rows = check.parse_list((ROOT / check.LIST_FILE).read_text())
+        rows = check.parse_list(FIXTURE_LIST)
         for current in rows:
             if current["name"] not in {"HAP", "sokol-shdc (sokol-tools-bin)"}:
                 continue

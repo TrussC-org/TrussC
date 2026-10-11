@@ -62,6 +62,23 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### Windows console UTF-8 input and output (#754)
+
+`console_utf8` saves `orig_output_codepage` and `orig_input_codepage`, then
+sets both console code pages to UTF-8 (output first). The two success flags
+are independent: `_sapp_tc_win32_restore_console()` restores only the code
+pages that were successfully set, each to its own original value. Preserve
+this behavior and the descriptor comments when importing upstream changes.
+
+Outside sokol, `TrussC.h`'s host-only `ConsoleCPCtrlGuard` saves both values
+for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. It also passes
+the pair to the Windows crash handler, which restores after reporting and
+before chaining to a previous exception filter. The guard's destructor restores
+both values before disarming the exit and crash fallbacks: on normal shutdown
+this repeats sokol's restore; if an exception escapes `sapp_run()` and the caller
+catches it, this is the only restore. `abort()`, `TerminateProcess` and external
+kills cannot restore the console. Console input still uses `std::getline(std::cin)`.
+
 ### D3D11 device loss (#258)
 
 All three Present paths (main, secondary, and occlusion test) and ResizeBuffers
@@ -456,3 +473,22 @@ These were previously in sokol_app.h but have been moved to TrussC platform code
 ## Author
 
 All modifications by tettou771
+
+## OS-initiated exit requests (#266)
+
+- Windows `WM_QUERYENDSESSION` shares the main-window quit request, including
+  `ENDSESSION_CLOSEAPP`. Vetoes supply a UTF-8 shutdown-block reason. Accepted
+  queries wait for `WM_ENDSESSION`; cancellation resets the request and block.
+  `WM_ENDSESSION(TRUE)`, including `ENDSESSION_CLOSEAPP`, performs synchronous
+  cleanup even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)`.
+  Interrupted user code, DLL detach and guest static destructors do not resume.
+- macOS `applicationShouldTerminate:` uses the same cancellable request as
+  window close. Known quit Apple event reasons identify logoff/restart/shutdown;
+  a quit without one (Cmd+Q, Dock, AppleScript) records `app-quit` if no origin
+  is recorded yet.
+- Backends identify native exit origins through internal `tcExit` state. Window
+  close preserves an already recorded origin on Windows, macOS, X11 and EGL.
+  `_cleanup_cb` guards cleanup once and freezes its reason; `sapp_run` retains
+  its backend cleanup check. Frame/tree/event paths need no teardown guards.
+- Shared runtime signal handling, Logger markers and MCP drain semantics are
+  documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).

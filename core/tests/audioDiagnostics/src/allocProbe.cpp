@@ -4,7 +4,7 @@
 //
 // The decoders must not size a buffer from a stream's stated length. To see
 // what a load asked for, this file replaces the global operator new / delete
-// (plain and array forms; the nothrow forms forward to them) for the whole
+// (plain, array and nothrow forms share the allocator) for the whole
 // test binary, the statically linked TrussC included. Allocation itself is
 // plain malloc / free.
 //
@@ -53,7 +53,15 @@ void allocProbeFailAbove(size_t bytes) { t_failAbove = bytes; }
 
 void* operator new(size_t n) { return allocate(n); }
 void* operator new[](size_t n) { return allocate(n); }
+void* operator new(size_t n, const std::nothrow_t&) noexcept {
+    try { return allocate(n); } catch (...) { return nullptr; }
+}
+void* operator new[](size_t n, const std::nothrow_t&) noexcept {
+    try { return allocate(n); } catch (...) { return nullptr; }
+}
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
 void operator delete(void* p, size_t) noexcept { std::free(p); }
 void operator delete[](void* p, size_t) noexcept { std::free(p); }

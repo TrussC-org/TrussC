@@ -1,9 +1,9 @@
 /**
- * pugixml parser - version 1.15
+ * pugixml parser - version 1.16
  * --------------------------------------------------------
  * Report bugs and download new versions at https://pugixml.org/
  *
- * SPDX-FileCopyrightText: Copyright (C) 2006-2025, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
+ * SPDX-FileCopyrightText: Copyright (C) 2006-2026, by Arseny Kapoulkine (arseny.kapoulkine@gmail.com)
  * SPDX-License-Identifier: MIT
  *
  * See LICENSE.md or notice at the end of this file.
@@ -14,6 +14,9 @@
 
 // Uncomment this to enable wchar_t mode
 // #define PUGIXML_WCHAR_MODE
+
+// Uncomment this to enable from_chars/to_chars for number conversion
+// #define PUGIXML_CHARCONV_FLOAT
 
 // Uncomment this to enable compact mode
 // #define PUGIXML_COMPACT
@@ -53,7 +56,7 @@
 #endif
 
 /**
- * Copyright (c) 2006-2025 Arseny Kapoulkine
+ * Copyright (c) 2006-2026 Arseny Kapoulkine
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation

@@ -60,13 +60,53 @@ class CoreTestRunnerTests(unittest.TestCase):
                 self.assertEqual(set(runner.find_core_web_tests(self.root, include_daily)),
                                  {regular} | ({daily} if include_daily else set()))
 
-    def combined(self, selected, names, list_status=0):
+    def combined(self, selected, names, list_status=0, symbols_ok=True):
         listing = subprocess.CompletedProcess([], list_status, "\n".join(names).encode())
         with patch.object(runner, "build_test_project", return_value=("fake-binary", None)), \
+                patch.object(runner, "run_command", return_value=symbols_ok) as check, \
                 patch.object(runner.subprocess, "run", return_value=listing), \
                 patch.object(runner, "run_test_binary", return_value=True) as run:
             rc = runner.run_combined_core_tests(selected, "pg", self.platform, self.options)
+        self.symbol_check_calls = check.call_args_list
         return rc, [call.kwargs["args"][0] for call in run.call_args_list]
+
+    def test_symbol_check_runs_on_linux_and_failure_prevents_runs(self):
+        regular = self.project("regular")
+        self.assertEqual(self.combined([regular], ["regular"], symbols_ok=False), (1, []))
+        self.assertIn("FAILED (duplicate-symbols)", self.output.getvalue())
+        self.assertEqual(self.symbol_check_calls[0].args[0], [
+            sys.executable, str(self.root / "tools" / "check_core_test_symbols.py"),
+            str(self.root / "core/tests/allCoreTests/build-linux")])
+
+    def test_symbol_check_is_linux_only(self):
+        regular = self.project("regular")
+        for system in ("macos", "windows"):
+            with self.subTest(system=system):
+                self.platform["os"] = system
+                self.assertEqual(self.combined([regular], ["regular"], symbols_ok=False),
+                                 (0, ["regular"]))
+                self.assertEqual(self.symbol_check_calls, [])
+
+    def test_failed_build_does_not_check_symbols(self):
+        regular = self.project("regular")
+        with patch.object(runner, "build_test_project", return_value=(None, "build")), \
+                patch.object(runner, "run_command") as check:
+            self.assertEqual(runner.run_combined_core_tests(
+                [regular], "pg", self.platform, self.options), 1)
+        check.assert_not_called()
+
+    def test_compile_database_enabled_only_for_linux_runner(self):
+        for system, name in (("linux", "allCoreTests"), ("linux", "own"),
+                             ("macos", "allCoreTests"), ("windows", "allCoreTests")):
+            with self.subTest(system=system, name=name):
+                self.platform["os"] = system
+                with patch.object(runner, "run_command", return_value=True) as commands, \
+                        patch.object(runner, "update_target_flags", return_value=[]), \
+                        patch.object(runner, "find_test_binary", return_value="fake"):
+                    runner.build_test_project(str(self.root / name), "pg",
+                                              self.platform, self.options)
+                self.assertEqual("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON" in commands.call_args_list[1].args[0],
+                                 system == "linux" and name == "allCoreTests")
 
     def test_registered_daily_test_skips_pr_and_runs_daily(self):
         regular = self.project("regular")

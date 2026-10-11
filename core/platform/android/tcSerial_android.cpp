@@ -68,7 +68,6 @@ constexpr int    PERMISSION_TIMEOUT_SEC = 60;   // give up on an unanswered dial
 constexpr int    PERMISSION_POLL_MS     = 200;
 constexpr int    READ_TIMEOUT_MS        = 250;  // per-ioctl bulk read timeout
 constexpr int    CONTROL_TIMEOUT_MS     = 1000; // CDC control requests
-constexpr size_t RX_BUFFER_CAP          = 1 << 20;  // drop oldest beyond 1 MiB
 constexpr int    READ_CHUNK             = 4096;     // multiple of bulk max packet
 constexpr int    WRITE_CHUNK            = internal::serialAndroidWriteChunk;  // usbfs per-urb limit
 
@@ -245,9 +244,8 @@ struct Impl {
     int epIn = 0;                  // bulk IN endpoint address
     int epOut = 0;                 // bulk OUT endpoint address
 
-    std::mutex rxMutex;
-    std::deque<uint8_t> rx;
-    bool rxOverflowWarned = false;
+    internal::SerialRxBuffer rx;
+    OnceGate dropWarned{5.0};  // per Serial backend, including reconnects
 
     // Set by the worker when it finds the device gone. Serial collects it
     // with close() on the app's thread and fires onDisconnect there; the
@@ -492,21 +490,16 @@ void workerRun(Impl* impl) {
         int err = errno;
         if (r > 0) {
             bool warnOverflow = false;
+            size_t dropped = 0;
             {
-                std::lock_guard<std::mutex> lock(impl->rxMutex);
-                impl->rx.insert(impl->rx.end(), buf.begin(), buf.begin() + r);
-                if (impl->rx.size() > RX_BUFFER_CAP) {
-                    if (!impl->rxOverflowWarned) {
-                        impl->rxOverflowWarned = true;
-                        warnOverflow = true;
-                    }
-                    impl->rx.erase(impl->rx.begin(), impl->rx.begin() + (impl->rx.size() - RX_BUFFER_CAP));
-                }
+                std::lock_guard<std::mutex> lock(impl->rx.mutex);
+                impl->rx.append(buf.data(), static_cast<size_t>(r));
+                warnOverflow = impl->rx.takeWarning(impl->dropWarned);
+                dropped = impl->rx.dropped.load();
             }
-            // Logged with rxMutex released: an inline Logger listener may call
-            // available() / readBytes() / flushInput(), which take it
+            // Logged with the buffer mutex released, as before.
             if (warnOverflow) {
-                blog(LogLevel::Warning) << "Serial: RX buffer overflow, dropping oldest data (app is not reading fast enough)";
+                blog(LogLevel::Warning) << "Serial: RX buffer overflow, dropping oldest data; total dropped bytes: " << dropped;
             }
         } else if (r < 0 && (err == ETIMEDOUT || err == EAGAIN || err == EINTR)) {
             continue;
@@ -547,9 +540,8 @@ void releaseConnection(Impl* impl) {
     impl->epOut = 0;
     impl->state = (int)State::Idle;
 
-    std::lock_guard<std::mutex> lock(impl->rxMutex);
-    impl->rx.clear();
-    impl->rxOverflowWarned = false;
+    std::lock_guard<std::mutex> lock(impl->rx.mutex);
+    impl->rx.bytes.clear();
 }
 
 // Whether this runs on impl's worker thread, which cannot wait for itself:
@@ -731,6 +723,8 @@ internal::SerialSetupResult setup(Impl* impl, const std::string& devicePath, int
     ended = closeImpl(impl, lostReason);
     impl->path = devicePath;
     impl->baud = baudRate;
+    impl->rx.dropped = 0;
+    impl->rx.warningPending = false;
 
     JniScope jni;
     if (!jni) {
@@ -801,20 +795,19 @@ int baudRate(const Impl* impl) {
     return impl->baud;
 }
 
+size_t getDroppedByteCount(const Impl* impl) {
+    return impl->rx.dropped.load();
+}
+
 int available(const Impl* impl) {
-    std::lock_guard<std::mutex> lock(const_cast<Impl*>(impl)->rxMutex);
-    return (int)impl->rx.size();
+    std::lock_guard<std::mutex> lock(impl->rx.mutex);
+    return static_cast<int>(impl->rx.bytes.size());
 }
 
 int readBytes(Impl* impl, void* buffer, int length) {
     if (length <= 0) return 0;
-    std::lock_guard<std::mutex> lock(impl->rxMutex);
-    int n = (int)std::min<size_t>((size_t)length, impl->rx.size());
-    for (int i = 0; i < n; i++) {
-        ((unsigned char*)buffer)[i] = impl->rx.front();
-        impl->rx.pop_front();
-    }
-    return n;
+    std::lock_guard<std::mutex> lock(impl->rx.mutex);
+    return impl->rx.read(buffer, length);
 }
 
 int writeBytes(Impl* impl, const void* buffer, int length, int& error, bool& timedOut) {
@@ -852,9 +845,8 @@ int writeBytes(Impl* impl, const void* buffer, int length, int& error, bool& tim
 }
 
 void flushInput(Impl* impl) {
-    std::lock_guard<std::mutex> lock(impl->rxMutex);
-    impl->rx.clear();
-    impl->rxOverflowWarned = false;
+    std::lock_guard<std::mutex> lock(impl->rx.mutex);
+    impl->rx.bytes.clear();
 }
 
 } // namespace androidserial

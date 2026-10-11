@@ -140,6 +140,24 @@ int main() {
     check("Node().callEvery ~= nil", luaBool("Node().callEvery ~= nil"));
     check("Node().cancelTimer ~= nil", luaBool("Node().cancelTimer ~= nil"));
 
+    // Exercise the hand-written XML bindings against the vendored pugixml.
+    checkNoThrow("Xml: serialization and parsing through Lua", true, [&] {
+        auto result = L.safe_script(R"lua(
+            local xml = Xml.new()
+            local root = xml:addRoot("root")
+            root:append_child("empty"):text():set("")
+            root:append_child("item"):append_attribute("value"):set("seven")
+            root:child("item"):text():set("text & <markup>")
+            local serialized = xml:toString()
+            assert(serialized:find("<empty />", 1, true))
+            local restored = parseXml(serialized)
+            assert(restored:root():child("item"):attribute("value"):value() == "seven")
+            assert(restored:root():child("item"):text():get() == "text & <markup>")
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
     // Exercise the bundled sketch's guard, rather than a copy of it.
     fs::path sketch = fs::path(__FILE__).parent_path().parent_path().parent_path() /
         "exampleFileReload/bin/data/sketch.lua";

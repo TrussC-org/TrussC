@@ -42,6 +42,12 @@ struct ConfigurePlan {
 // configure that failed) is configured again.
 ConfigurePlan planConfigure(const ConfigureInputs& in);
 
+// Helpers for Windows process arguments and doctor diagnostics (#417).
+std::string quoteWindowsArgument(const std::string& argument);
+std::string readCMakeCacheValue(const std::string& cachePath, const std::string& key);
+// True only when Ninja reports non-zero dependencies for main.cpp.obj.
+bool hasMainHeaderDependencies(const std::string& ninjaDeps);
+
 // Fill the folder part of ConfigureInputs (buildDir, isNative, hasCache,
 // generated, cachedBuildType) from <projectDir>/<the target preset's build
 // folder> on disk. nativePreset is "" when the platform has none.

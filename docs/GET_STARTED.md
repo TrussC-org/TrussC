@@ -51,6 +51,16 @@ sudo apt install cmake
 > recommended as a reliable fallback. Run `trusscli doctor` to see which CMake
 > is detected.
 
+### Windows 11: Smart App Control
+
+When enabled, Smart App Control can block freshly built unsigned executables,
+including `trusscli.exe` and TrussC examples, even after a successful build.
+To identify a block, open **Event Viewer → Applications and Services Logs →
+Microsoft → Windows → CodeIntegrity → Operational** and look for event **3077**
+with **"Smart App Control Block"**. The setting is under **Windows Security →
+App & browser control → Smart App Control**. Turning it **Off** is a **one-way
+switch**: turning it back on requires reinstalling Windows.
+
 ### Linux Dependencies
 
 > **Headless Linux (no desktop)?** See [GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) for Raspberry Pi Lite, Orange Pi, and other console-only setups.

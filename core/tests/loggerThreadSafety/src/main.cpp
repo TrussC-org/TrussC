@@ -526,6 +526,63 @@ static void testLevels() {
     check("levels: free setLogLevel / setSystemLogLevel use getLogger()", allSet && systemSet);
 }
 
+// Exit records keep NOTICE and bypass only the open file's threshold.
+static void testProtocolLines() {
+    Logger& lg = getLogger();
+    const auto oldConsole = lg.getConsoleLogLevel();
+    const auto oldFile = lg.getFileLogLevel();
+    const auto oldSystem = lg.getSystemLogLevel();
+    for (auto level : {LogLevel::Notice, LogLevel::Warning, LogLevel::Silent}) {
+        const fs::path path = tempFile(string("protocol-") + logLevelToString(level) + ".log");
+        lg.setLogLevel(level == LogLevel::Notice ? LogLevel::Notice : LogLevel::Warning);
+        lg.setFileLogLevel(level);
+        check("protocol: open log file", lg.setLogFile(path));
+        ostringstream out, err;
+        vector<string> seen;
+        bool notice = true;
+        const string begin = "[System] " + internal::exitLogMessage(false);
+        const string clean = "[System] " + internal::exitLogMessage(true);
+        {
+            EventListener listener = lg.onLog.listen([&](LogEventArgs& e) {
+                if (e.message != begin && e.message != clean) return;
+                seen.push_back(e.message);
+                notice = notice && e.level == LogLevel::Notice;
+                if (level != LogLevel::Notice) {
+                    // Reentrant ordinary lines must not inherit the bypass;
+                    // listeners must still run outside the sink mutex.
+                    lg.log(LogLevel::Notice, "ordinary nested notice");
+                    thread other([&] { lg.log(LogLevel::Notice, "ordinary threaded notice"); });
+                    other.join();
+                }
+            });
+            streambuf* oldOut = cout.rdbuf(out.rdbuf());
+            streambuf* oldErr = cerr.rdbuf(err.rdbuf());
+            runWithWatchdog("protocol: reentrant listeners", [&] {
+                lg.log(LogLevel::Verbose, "ordinary filtered verbose");
+                internal::writeProtocolLine(LogLevel::Notice, begin);
+                internal::writeProtocolLine(LogLevel::Notice, clean);
+            });
+            cout.rdbuf(oldOut);
+            cerr.rdbuf(oldErr);
+        }
+        lg.closeFile();
+        const auto lines = readLines(path);
+        check("protocol: open file gets exactly two NOTICE records at every level",
+              lines.size() == 2 && contains(lines, "] [NOTICE] " + begin)
+              && contains(lines, "] [NOTICE] " + clean));
+        check("protocol: console retains its threshold",
+              level == LogLevel::Notice ? splitLines(out.str()).size() == 2 && err.str().empty()
+                                        : out.str().empty() && err.str().empty());
+        check("protocol: listeners receive both NOTICE records once",
+              notice && seen == vector<string>{begin, clean});
+        error_code ec;
+        fs::remove(path, ec);
+    }
+    lg.setConsoleLogLevel(oldConsole);
+    lg.setFileLogLevel(oldFile);
+    lg.setSystemLogLevel(oldSystem);
+}
+
 #ifdef LOGGER_TEST_FORK
 // ---------------------------------------------------------------------------
 // 7. POSIX: panics, each in a forked child (they abort).
@@ -674,6 +731,7 @@ TC_CORE_TEST_MAIN() {
     testReentrantListener();
     testSokolBridge();
     testLevels();
+    testProtocolLines();
 #ifdef LOGGER_TEST_FORK
     testPanicForwards();
     testPanicDoesNotWaitForLock();

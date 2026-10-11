@@ -177,7 +177,7 @@ void VideoGrabber::updatePlatform() {
 
     int result = emscripten_run_script_int(script);
     if (result > 0) {
-        pixelsDirty_.store(true);
+        sharedState_->dirty.store(true);
     }
 }
 

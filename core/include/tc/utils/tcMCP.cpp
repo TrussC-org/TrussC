@@ -73,6 +73,11 @@ std::deque<json>& alertQueue() {
 
 #ifndef __EMSCRIPTEN__
 
+std::mutex& httpQueueMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
 ThreadChannel<McpRequest>& getHttpChannel() {
     static ThreadChannel<McpRequest> channel;
     return channel;

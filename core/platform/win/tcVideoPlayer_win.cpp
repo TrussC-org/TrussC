@@ -482,6 +482,10 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     // Read video metadata before probing audio: silent videos need this too.
     ComPtr<IMFMediaType> videoType;
     UINT32 numerator = 0, denominator = 0;
+    // Known issue (see #697): for Matroska sources Media Foundation reports
+    // half the real rate in MF_MT_FRAME_RATE, while IMFSample::GetSampleDuration
+    // is correct there. Only the frame-index APIs (getFrameRate, frame
+    // stepping) are affected; playback is paced by MediaEngine.
     if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
                                             0, &videoType)) &&
         SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE,

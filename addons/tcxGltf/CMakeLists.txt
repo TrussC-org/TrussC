@@ -11,7 +11,7 @@ include(FetchContent)
 FetchContent_Declare(
     cgltf
     GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-    GIT_TAG v1.14
+    GIT_TAG v1.15
 )
 FetchContent_MakeAvailable(cgltf)
 
