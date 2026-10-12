@@ -112,7 +112,7 @@ TC_CORE_TEST_MAIN() {
     internal::windowOccludedHookForTests() = &occludedHook;
 
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-    mcp::startHttpServer(0, "localhost");
+    mcp::startHttpServer();
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {
         this_thread::sleep_for(chrono::milliseconds(10));
@@ -127,10 +127,10 @@ TC_CORE_TEST_MAIN() {
 
     atomic<bool> done{false};
     thread worker([&] {
-        // Same name the server bound to: "localhost" resolves to ::1 first on
-        // some hosts (CI runners), where 127.0.0.1 would find nothing.
+        // Connect to the listener's actual address. "localhost" tries ::1 first
+        // on Windows, adding a fallback delay for an IPv4 listener.
         auto makeClient = [port] {
-            auto cli = make_unique<httplib::Client>("localhost", port);
+            auto cli = make_unique<httplib::Client>("127.0.0.1", port);
             cli->set_connection_timeout(5);
             cli->set_read_timeout(15);
             return cli;

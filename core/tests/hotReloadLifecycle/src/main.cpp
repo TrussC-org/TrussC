@@ -163,9 +163,9 @@ static PendingPost startPost(int port, const std::string& body) {
     p.ex->body = body;
     auto ex = p.ex;
     p.worker = std::thread([ex, port] {
-        // Same name the server bound to: "localhost" resolves to ::1 first on
-        // some hosts (CI runners), where 127.0.0.1 would find nothing.
-        httplib::Client cli("localhost", port);
+        // Connect to the listener's actual address. "localhost" tries ::1 first
+        // on Windows, adding a fallback delay for an IPv4 listener.
+        httplib::Client cli("127.0.0.1", port);
         cli.set_connection_timeout(5);
         cli.set_read_timeout(10);
         auto r = cli.Post("/mcp", ex->body, "application/json");
@@ -940,7 +940,7 @@ int main(int argc, char** argv) {
         }));
     // Grant inspection access and start the test server explicitly.
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-    mcp::startHttpServer(0, "localhost");
+    mcp::startHttpServer();
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

@@ -60,7 +60,7 @@ bool healthOnly();
 bool& healthOnlyEndpoint();
 bool& explicitlyOpened();
 bool environmentClosesMcp();
-void startConfiguredServer();
+void startConfiguredServer(const char* opener);
 void initializeMcp();
 const std::string& mainWindowTitle(const std::string& title);
 inline const char* toolLevelName(ToolLevel level) {
@@ -591,6 +591,14 @@ std::unique_ptr<httplib::Server>& getHttpServer();
 std::unique_ptr<std::thread>& getHttpThread();
 std::atomic<int>& getHttpPort();
 
+// Retain the first successful opener even after later grants/explicit opt-ins.
+struct HttpListenerConfig {
+    int requestedPort = 0;
+    std::string host;
+    std::string opener;
+};
+HttpListenerConfig& httpListenerConfig();
+
 // Bearer token required on /mcp requests. Empty = no auth (localhost default).
 std::string& mcpAuthToken();
 
@@ -743,7 +751,8 @@ inline void stopHttpServer();
 //           (fail-closed) so input injection is never silently network-exposed.
 namespace detail {
 inline void startHttpServerImpl(int port, const std::string& host,
-                                const std::string& token, bool healthEndpoint) {
+                                const std::string& token, bool healthEndpoint,
+                                const char* opener) {
     if (environmentClosesMcp()) {
         if (getHttpServer()) stopHttpServer();
         return;
@@ -841,26 +850,28 @@ inline void startHttpServerImpl(int port, const std::string& host,
     healthOnlyEndpoint() = healthEndpoint;
     detail::resetHttpChannel();
     detail::getHttpPort().store(actualPort);
-    detail::getHttpThread() = std::make_unique<std::thread>([host, actualPort]() {
-        auto& svr = detail::getHttpServer();
-        // The only line with the actual port (an OS-assigned port is known
-        // only here, after bind). Through the Logger so it also reaches the
-        // log file and onLog listeners: "[MCP] HTTP server listening on
-        // http://HOST:PORT/mcp" at Notice (stdout; hidden when the console
-        // level is Warning or higher). Set TRUSSC_MCP_PORT for a known port.
-        trussc::logNotice("MCP") << "HTTP server listening on http://" << host
-                                 << ":" << actualPort << "/mcp";
-        // The raw stderr copy stays for v0.7 so tools that read stderr keep
-        // working; it is removed in v0.8.0 (#414).
-        std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
-                  << actualPort << "/mcp" << std::endl;
-
-        svr->listen_after_bind();
+    httpListenerConfig() = {port, host, opener};
+    detail::getHttpThread() = std::make_unique<std::thread>([]() {
+        detail::getHttpServer()->listen_after_bind();
     });
     svr->wait_until_ready();
+    // Binding and readiness complete on the caller's thread. Deliver the
+    // Notice here too, so Logger listeners do not run on the HTTP thread.
+    trussc::logNotice("MCP") << "HTTP server listening on http://" << host
+                             << ":" << actualPort << "/mcp";
+    // The raw stderr copy stays for v0.7 so tools that read stderr keep
+    // working; it is removed in v0.8.0 (#414).
+    std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
+              << actualPort << "/mcp" << std::endl;
 }
 } // namespace detail
 
+// The first opener chooses the listener's address and token. To choose them
+// explicitly, call this before setToolLevel(). A later mismatched call logs
+// one Error and changes nothing; it never restarts the listener. Matching
+// parameters reuse it (0 repeats an original OS-assigned port request; the
+// actual assigned port also matches). A matching explicit opt-in still opens
+// Public app tools on an environment health-only listener.
 void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
                      const std::string& token = "");
 

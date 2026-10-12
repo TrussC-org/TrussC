@@ -84,7 +84,7 @@ const std::string& mainWindowTitle(const std::string& title) {
     return windowTitle;
 }
 
-void startConfiguredServer() {
+void startConfiguredServer(const char* opener) {
 #ifndef __EMSCRIPTEN__
     if (environmentClosesMcp()) {
         if (getHttpServer()) stopHttpServer();
@@ -97,7 +97,7 @@ void startConfiguredServer() {
     const char* host = isDevBuild() ? std::getenv("TRUSSC_MCP_HOST") : nullptr;
     const char* token = isDevBuild() ? std::getenv("TRUSSC_MCP_TOKEN") : nullptr;
     startHttpServerImpl(envPort ? std::atoi(envPort) : 0,
-                        host ? host : "127.0.0.1", token ? token : "", healthEndpoint);
+                        host ? host : "127.0.0.1", token ? token : "", healthEndpoint, opener);
     if (!getHttpServer()) return;
     if (healthEndpoint) {
         logNotice("MCP") << "MCP: health only (ToolLevel Public). The supervisor gets logs, restart and hang detection; for screenshots and status add mcp::setToolLevel(mcp::ToolLevel::ReadOnly) in setup().";
@@ -112,7 +112,7 @@ void initializeMcp() {
     mcpInitialized = true;
     if (isDevBuild())
         logWarning("MCP") << "MCP development build: Control tools are enabled. Do not distribute this build.";
-    startConfiguredServer();
+    startConfiguredServer(environmentRequestsMcp() ? "the environment" : "the dev build");
     logExposure();
 #endif
 }
@@ -217,6 +217,11 @@ std::atomic<int>& getHttpPort() {
     return port;
 }
 
+HttpListenerConfig& httpListenerConfig() {
+    static HttpListenerConfig config;
+    return config;
+}
+
 std::string& mcpAuthToken() {
     static std::string token;
     return token;
@@ -248,8 +253,20 @@ Server& Server::instance() {
 
 #ifndef __EMSCRIPTEN__
 void startHttpServer(int port, const std::string& host, const std::string& token) {
+    // Reject before changing exposure or explicit ownership. A rejected call
+    // must not widen a health-only listener or preserve one on Public downgrade.
+    if (detail::getHttpServer() && !detail::environmentClosesMcp()) {
+        const auto& config = detail::httpListenerConfig();
+        if ((port != config.requestedPort && port != getHttpPort()) ||
+            host != config.host || token != detail::mcpAuthToken()) {
+            logError("MCP") << "already listening on " << config.host << ":" << getHttpPort()
+                << ", opened by " << config.opener
+                << "; call startHttpServer(port, host, token) before setToolLevel() to choose the address";
+            return;
+        }
+    }
     const bool wasFull = detail::getHttpServer() && !detail::healthOnly();
-    detail::startHttpServerImpl(port, host, token, false);
+    detail::startHttpServerImpl(port, host, token, false, "startHttpServer()");
     if (detail::getHttpServer()) {
         detail::explicitlyOpened() = true;
         if (!wasFull) detail::logExposure();
@@ -265,10 +282,10 @@ void setToolLevel(ToolLevel level) {
     // Dev builds stay Control, so the Public downgrade policy never applies.
     detail::grantedToolLevel().store(detail::isDevBuild() ? ToolLevel::Control : level);
     if (detail::environmentClosesMcp()) {
-        detail::startConfiguredServer();
+        detail::startConfiguredServer("the grant");
     } else if (getToolLevel() >= ToolLevel::ReadOnly) {
         detail::healthOnlyEndpoint() = false;
-        detail::startConfiguredServer();
+        detail::startConfiguredServer("the grant");
     } else if (previousLevel > ToolLevel::Public && !detail::explicitlyOpened()) {
 #ifndef __EMSCRIPTEN__
         if (detail::getHttpServer()) {

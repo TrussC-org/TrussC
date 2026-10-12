@@ -167,6 +167,87 @@ void setEnv(const char* key, const char* value) {
 #endif
 }
 
+// Each opener gets a fresh process: initializeMcp() is host-once state.
+int firstOpenerCase(const string& mode) {
+    const string token = mode == "first-explicit" ? kToken : "";
+    if (mode == "first-grant") mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+    else if (mode == "first-explicit") mcp::startHttpServer(0, "127.0.0.1", token);
+    else {
+        if (mode == "first-environment") setEnv("TRUSSC_MCP", "1");
+        mcp::detail::initializeMcp();
+    }
+    const int port = mcp::getHttpPort();
+    check("first opener binds a listener", port > 0);
+    if (port <= 0) return 1;
+    const string opener = mode == "first-grant" ? "the grant" :
+        mode == "first-explicit" ? "startHttpServer()" :
+        mode == "first-environment" ? "the environment" : "the dev build";
+    const string expected = "[MCP] already listening on 127.0.0.1:" + to_string(port) +
+        ", opened by " + opener +
+        "; call startHttpServer(port, host, token) before setToolLevel() to choose the address";
+    vector<pair<LogLevel, string>> logs;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        logs.emplace_back(e.level, e.message);
+    });
+    auto* server = mcp::detail::getHttpServer().get();
+    auto* serverThread = mcp::detail::getHttpThread().get();
+    const bool healthOnly = mcp::detail::healthOnly();
+    const bool explicitStart = mcp::detail::explicitlyOpened();
+    const auto level = mcp::getToolLevel();
+    auto reject = [&](int requestedPort, const string& host, const string& requestedToken) {
+        logs.clear();
+        mcp::startHttpServer(requestedPort, host, requestedToken);
+        check("different listener parameters log exactly one Error naming first opener",
+              logs.size() == 1 && logs[0].first == LogLevel::Error && logs[0].second == expected);
+        check("rejected start preserves listener, policy and authentication",
+              mcp::getHttpPort() == port && mcp::detail::getHttpServer().get() == server &&
+              mcp::detail::getHttpThread().get() == serverThread &&
+              mcp::detail::mcpAuthToken() == token && mcp::detail::mcpLoopbackOnly() &&
+              mcp::detail::healthOnly() == healthOnly &&
+              mcp::detail::explicitlyOpened() == explicitStart && mcp::getToolLevel() == level);
+    };
+    reject(0, "localhost", token);
+    reject(port == 65535 ? port - 1 : port + 1, "127.0.0.1", token);
+    reject(0, "127.0.0.1", token + "different");
+
+    // Verify actual HTTP replies and auth, including health-only filtering.
+    auto reply = async(launch::async, [&] {
+        httplib::Client client("127.0.0.1", port);
+        client.set_connection_timeout(5);
+        client.set_read_timeout(5);
+        client.set_bearer_token_auth(token);
+        return client.Post("/mcp", kListTools, "application/json");
+    });
+    while (reply.wait_for(chrono::milliseconds(0)) != future_status::ready) {
+        mcp::processHttpQueue();
+        this_thread::yield();
+    }
+    auto response = reply.get();
+    check("original listener still serves HTTP with original token", response && response->status == 200);
+    if (response && response->status == 200) {
+        auto listed = json::parse(response->body)["result"]["tools"];
+        check("rejected explicit start leaves health endpoint restricted", !healthOnly ||
+              (listed.size() == 1 && listed[0]["name"] == "tc_get_health"));
+    }
+    // An accepted explicit opt-in may widen health-only exposure, as before.
+    // Once opted in, identical calls and the actual assigned port are no-ops.
+    mcp::startHttpServer(0, "127.0.0.1", token);
+    logs.clear();
+    mcp::startHttpServer(0, "127.0.0.1", token);
+    mcp::startHttpServer(port, "127.0.0.1", token);
+    check("matching starts produce no logs and do not restart",
+          logs.empty() && mcp::detail::getHttpServer().get() == server &&
+          mcp::getHttpPort() == port && mcp::detail::getHttpThread().get() == serverThread);
+    // A successful repeat must not replace the original opener in diagnostics.
+    logs.clear();
+    mcp::startHttpServer(0, "localhost", token);
+    check("matching explicit opt-in preserves original opener",
+          logs.size() == 1 && logs[0].second == expected);
+    listener.disconnect();
+    mcp::stopHttpServer();
+    return g_fail ? 1 : 0;
+}
+
 bool headlessGrantInSetup = false;
 bool headlessSetupDone = false;
 struct HeadlessMcpApp : App {
@@ -238,6 +319,7 @@ struct HeadlessMcpApp : App {
 int environmentCase(const string& mode) {
     for (const char* key : {"TRUSSC_MCP", "TRUSSC_MCP_PORT", "TRUSSC_MCP_HOST", "TRUSSC_MCP_TOKEN"})
         setEnv(key, nullptr);
+    if (mode.rfind("first-", 0) == 0) return firstOpenerCase(mode);
     if (mode.rfind("headless", 0) == 0) {
         const bool dev = mcp::detail::isDevBuild();
         const bool closed = mode == "headless-closed";
@@ -362,7 +444,8 @@ int environmentCase(const string& mode) {
     if (mode == "upgrade" || mode == "upgrade-grant") {
         const int port = mcp::getHttpPort();
         const auto noticesBefore = exposureNotices.size();
-        if (mode == "upgrade") mcp::startHttpServer();
+        if (mode == "upgrade") mcp::startHttpServer(0, dev ? "0.0.0.0" : "127.0.0.1",
+                                                   dev ? "environment-token" : "");
         else mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
         check("health-only to full logs exposure once", exposureNotices.size() == noticesBefore + (dev ? 0u : 1u));
         check("exposure Notice lists app tool", !exposureNotices.empty() &&
@@ -370,7 +453,8 @@ int environmentCase(const string& mode) {
         check("upgrade opens app tools without rebinding", mcp::getHttpPort() == port &&
               !call("public_probe")["result"].value("isError", false));
         const auto afterUpgrade = exposureNotices.size();
-        if (mode == "upgrade") mcp::startHttpServer();
+        if (mode == "upgrade") mcp::startHttpServer(0, dev ? "0.0.0.0" : "127.0.0.1",
+                                                   dev ? "environment-token" : "");
         else mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
         check("repeated opt-in does not duplicate exposure Notice", exposureNotices.size() == afterUpgrade);
         mcp::setToolLevel(mcp::ToolLevel::Control);
@@ -447,9 +531,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_CORE_TEST_NAME
     command += " " TC_CORE_TEST_NAME;
 #endif
-    for (const char* mode : {"headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "upgrade-grant", "downgrade-explicit", "downgrade-env", "downgrade-port", "downgrade-none", "closed", "closed-grant", "closed-explicit"})
+    for (const char* mode : {"first-grant", "first-explicit", "first-environment", "headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "upgrade-grant", "downgrade-explicit", "downgrade-env", "downgrade-port", "downgrade-none", "closed", "closed-grant", "closed-explicit"})
         check(string("environment case: ") + mode,
               std::system((command + " --environment " + mode).c_str()) == 0);
+
+    if (mcp::detail::isDevBuild())
+        check("environment case: first-dev",
+              std::system((command + " --environment first-dev").c_str()) == 0);
 
     if (mcp::detail::isDevBuild())
         check("environment case: headless-dev",
@@ -478,20 +566,24 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("empty header -> no match", !bearerTokenMatches("", kToken));
     }
 
-    // Capture the Logger's lines (onLog runs on the logging thread, here the
-    // server thread) and send them to a log file too.
+    // Capture the caller-thread startup logs and send them to a log file too.
+    const auto callerThread = this_thread::get_id();
+    atomic<bool> startupOnCaller{true};
     mutex logMutex;
     vector<pair<LogLevel, string>> logLines;
     EventListener logListener = getLogger().onLog.listen([&](LogEventArgs& e) {
         lock_guard<mutex> lock(logMutex);
         logLines.emplace_back(e.level, e.message);
+        if (this_thread::get_id() != callerThread) startupOnCaller = false;
     });
     const fs::path logPath = fs::temp_directory_path() /
         ("trussc_mcpHttpGuard_" +
          to_string(chrono::steady_clock::now().time_since_epoch().count()) + ".log");
     check("log file opened", setLogFile(logPath));
 
-    mcp::startHttpServer(0, "localhost", kToken);
+    mcp::startHttpServer(0, "127.0.0.1", kToken);
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+    check("startup logs run on the calling thread", startupOnCaller.load());
     int port = 0;
     for (int i = 0; i < 500 && port <= 0; i++) {
         this_thread::sleep_for(chrono::milliseconds(10));
@@ -501,24 +593,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (port <= 0) return 1;
     const string p = to_string(port);
 
-    // The port line: logged by the server thread right after it stores the
-    // port, so wait for it.
+    // The port line is delivered synchronously before startHttpServer returns.
     {
-        const string portLine = "[MCP] HTTP server listening on http://localhost:" + p + "/mcp";
+        const string portLine = "[MCP] HTTP server listening on http://127.0.0.1:" + p + "/mcp";
         vector<pair<LogLevel, string>> found;
-        auto lineDeadline = chrono::steady_clock::now() + chrono::seconds(5);
-        while (found.empty() && chrono::steady_clock::now() < lineDeadline) {
-            this_thread::sleep_for(chrono::milliseconds(10));
-            lock_guard<mutex> lock(logMutex);
-            for (auto& line : logLines) {
-                if (line.second.find("HTTP server listening on") != string::npos) {
-                    found.push_back(line);
-                }
-            }
-        }
         {
             lock_guard<mutex> lock(logMutex);
-            found.clear();
             for (auto& line : logLines) {
                 if (line.second.find("HTTP server listening on") != string::npos) {
                     found.push_back(line);
@@ -546,9 +626,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 
     atomic<bool> done{false};
     thread worker([&] {
-        // Same name the server bound to: "localhost" resolves to ::1 first on
-        // some hosts (CI runners), where 127.0.0.1 would find nothing.
-        httplib::Client cli("localhost", port);
+        // Connect to the listener's actual address. "localhost" tries ::1 first
+        // on Windows, adding a fallback delay for an IPv4 listener.
+        httplib::Client cli("127.0.0.1", port);
         cli.set_connection_timeout(5);
         cli.set_read_timeout(10);
         cli.set_bearer_token_auth(kToken);
@@ -584,7 +664,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 
         // Bearer token on /mcp. `raw` sends only the headers given here.
         {
-            httplib::Client raw("localhost", port);
+            httplib::Client raw("127.0.0.1", port);
             raw.set_connection_timeout(5);
             raw.set_read_timeout(10);
             auto postAuth = [&](const string& value) {
