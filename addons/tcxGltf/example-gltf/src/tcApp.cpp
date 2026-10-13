@@ -71,7 +71,7 @@ void tcApp::filesDropped(const vector<string>& files) {
 }
 
 void tcApp::loadModel(const string& path) {
-    if (model.load(path)) {
+    if (model.load(utf8ToPath(path))) {  // dropped paths are UTF-8
         // Extract filename for display
         auto pos = path.find_last_of("/\\");
         modelName = (pos != string::npos) ? path.substr(pos + 1) : path;

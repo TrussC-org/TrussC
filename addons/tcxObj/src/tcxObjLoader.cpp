@@ -14,15 +14,13 @@ namespace tcx::obj {
 // Load
 // =============================================================================
 
-bool ObjLoader::load(const fs::path& path) {
+LoadResult ObjLoader::load(const fs::path& path) {
     clear();
 
-    fs::path objPath = getDataPath(path);   // absolute paths pass through
+    fs::path objPath = tc::internal::resolveLoadPath(path);
 
-    if (!fs::exists(objPath)) {
-        logError() << "ObjLoader::load: file not found: " << objPath;
-        return false;
-    }
+    auto entry = tc::internal::checkLoadFile(objPath, "ObjLoader");
+    if (!entry) return entry;
 
     fs::path baseDir = objPath.parent_path();
 
@@ -31,6 +29,8 @@ bool ObjLoader::load(const fs::path& path) {
     vector<tinyobj::material_t> materials;
     string warn, err;
 
+    // This bundled tinyobjloader converts UTF-8 to wide paths for both
+    // LoadObj and MaterialFileReader on Windows (including long paths).
     bool ok = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
                                pathToUtf8(objPath).c_str(),
                                (pathToUtf8(baseDir) + "/").c_str());
@@ -38,11 +38,11 @@ bool ObjLoader::load(const fs::path& path) {
     if (!warn.empty()) {
         logWarning() << "ObjLoader: " << warn;
     }
-    if (!err.empty()) {
-        logError() << "ObjLoader: " << err;
-    }
-    if (!ok) {
-        return false;
+    if (!ok || !err.empty()) {
+        string message = (err.empty() ? "failed to parse OBJ" : err) +
+                         ": " + tc::internal::pathToDisplayUtf8(objPath);
+        logError("ObjLoader") << message;
+        return LoadResult::fail(LoadError::DecodeFailed, message);
     }
 
     // Load material textures
@@ -224,7 +224,7 @@ bool ObjLoader::load(const fs::path& path) {
     }
 
     logNotice() << "ObjLoader: loaded " << objPath << " (" << groups_.size() << " groups)";
-    return true;
+    return LoadResult::success();
 }
 
 // =============================================================================

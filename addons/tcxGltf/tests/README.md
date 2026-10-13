@@ -32,7 +32,7 @@ model data is validated before it is read:
   file name, so there the image is skipped because the file does not exist;
 - an exception while the model is read (injected through
   `internal::setTextureLoadHookForTests()`, a `std::exception` and one that
-  is not) fails the load, logs a warning (with `what()` when there is one)
+  is not) fails the load, logs an Error (with `what()` when there is one)
   and leaves the model empty, also of the primitive read before it. Under
   ASan this also checks that the parsed data is freed on that path;
 - a component type glTF 2.0 does not allow fails validation;
@@ -48,7 +48,7 @@ model data is validated before it is read:
 Texture cases use sokol's dummy graphics backend (no window or GPU). On
 Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.
 
-Every failed load logs a warning and leaves the model empty.
+Every failed load logs one Error and leaves the model empty.
 
 `load()` also catches an allocation failure (`std::bad_alloc`,
 `std::length_error`) and fails the same way. No case here reaches it, since
@@ -66,3 +66,9 @@ trusscli run -p .          # from this directory
 # or from the repo root, run every addon test harness:
 ./examples/build_all.py --addon-tests-only --verbose
 ```
+
+The load-entry tests check `FileNotFound` and the exact shared missing-file
+Error, `DecodeFailed` with exactly one Error for rejected data, relative paths
+through `getDataPath()`, Japanese model/buffer/texture filenames, escaped spaces
+and UTF-8 in buffer/image URIs, and `%25` decoded exactly once. All fixtures
+are generated at runtime.

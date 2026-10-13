@@ -12,8 +12,11 @@
 #include <atomic>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <new>
 #include <stdexcept>
 #include <system_error>
@@ -22,6 +25,59 @@ using namespace std;
 using namespace tc;
 
 namespace tcx::gltf {
+
+// cgltf receives an empty model filename. The callback keeps the native path
+// intact; external buffer URIs are decoded on cgltf's temporary copy before
+// reaching this callback (cgltf_load_buffer_file with an empty base filename).
+// No cgltf operation opens a narrow filename, and '%' in the model directory
+// is never interpreted as a URI escape.
+struct GltfFileContext {
+    fs::path modelPath;
+    bool readingModel = true;
+};
+
+static void releaseGltfFile(const cgltf_memory_options* memory,
+                            const cgltf_file_options*, void* data) {
+    if (memory->free_func) memory->free_func(memory->user_data, data);
+    else std::free(data);
+}
+
+static cgltf_result readGltfFile(const cgltf_memory_options* memory,
+                                 const cgltf_file_options* options,
+                                 const char* uri, cgltf_size* size, void** data) {
+    try {
+        auto& context = *static_cast<GltfFileContext*>(options->user_data);
+        fs::path path = context.modelPath;
+        if (!context.readingModel) {
+            path = path.parent_path();
+            path += "/";
+            path += utf8ToPath(uri);
+        }
+        ifstream file(path, ios::binary | ios::ate);
+        if (!file) return cgltf_result_file_not_found;
+        auto length = file.tellg();
+        if (length < 0) return cgltf_result_io_error;
+        cgltf_size bytes = *size ? *size : static_cast<cgltf_size>(length);
+        if (bytes > static_cast<cgltf_size>(length) ||
+            bytes > static_cast<cgltf_size>((numeric_limits<streamsize>::max)()))
+            return cgltf_result_io_error;
+        file.seekg(0);
+        void* buffer = memory->alloc_func ? memory->alloc_func(memory->user_data, bytes)
+                                         : std::malloc(bytes);
+        if (!buffer) return cgltf_result_out_of_memory;
+        if (!file.read(static_cast<char*>(buffer), static_cast<streamsize>(bytes))) {
+            releaseGltfFile(memory, options, buffer);
+            return cgltf_result_io_error;
+        }
+        *size = bytes;
+        *data = buffer;
+        return cgltf_result_success;
+    } catch (const bad_alloc&) {
+        return cgltf_result_out_of_memory;
+    } catch (...) {
+        return cgltf_result_io_error;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -250,6 +306,8 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
         // Skip data URIs (base64 inline) for now
         if (uri.rfind("data:", 0) == 0) return nullptr;
 
+        uri.resize(cgltf_decode_uri(uri.data()));
+
         // glTF uris are UTF-8: utf8ToPath() converts them without going
         // through the Windows code page, and on Windows it throws for bytes
         // that are not valid UTF-8. Only that image is skipped then. The uri
@@ -447,51 +505,59 @@ static void bakeTransform(Mesh& mesh, const Mat4& m) {
 // GltfModel implementation
 // ---------------------------------------------------------------------------
 
-bool GltfModel::load(const string& path) {
+LoadResult GltfModel::load(const fs::path& path) {
     nodes_.clear();
     textures_.clear();
     loaded_ = false;
 
-    // Any failure below either logs a warning and returns before anything is
-    // built, or sets `failure` (the warning text) and stops; the model is then
+    // Any failure below either logs an Error and returns before anything is
+    // built, or sets `failure` and stops; the model is then
     // left empty. An exception from any step is a failure too: load() does
     // not throw and does not leave a half-built model.
-    string resolved = path;  // the path named in warnings
+    string resolved = tc::internal::pathToDisplayUtf8(path);
+    auto decodeFailure = [&](const string& reason) {
+        string message = reason + ": " + resolved;
+        logError("GltfModel") << message;
+        return LoadResult::fail(LoadError::DecodeFailed, message);
+    };
     string failure;
     size_t skippedPrimitives = 0;
     try {
-        fs::path resolvedPath = getDataPath(path);
-        resolved = pathToUtf8(resolvedPath);
+        fs::path resolvedPath = tc::internal::resolveLoadPath(path);
+        resolved = tc::internal::pathToDisplayUtf8(resolvedPath);
+        auto entry = tc::internal::checkLoadFile(resolvedPath, "GltfModel");
+        if (!entry) return entry;
 
         // Parse with cgltf. The parsed data is freed on every path out of
         // this block, including an exception.
+        GltfFileContext files{resolvedPath};
         cgltf_options options = {};
+        options.file.read = readGltfFile;
+        options.file.release = releaseGltfFile;
+        options.file.user_data = &files;
         cgltf_data* parsed = nullptr;
-        cgltf_result result = cgltf_parse_file(&options, resolved.c_str(), &parsed);
+        cgltf_result result = cgltf_parse_file(&options, "", &parsed);
         unique_ptr<cgltf_data, decltype(&cgltf_free)> dataOwner(parsed, &cgltf_free);
         cgltf_data* data = dataOwner.get();
         if (result != cgltf_result_success) {
-            logWarning() << "[GltfModel] failed to parse: " << resolved;
-            return false;
+            return decodeFailure("failed to parse");
         }
 
         // Load external buffers (for .gltf with separate .bin)
-        result = cgltf_load_buffers(&options, data, resolved.c_str());
+        files.readingModel = false;
+        result = cgltf_load_buffers(&options, data, "");
         if (result != cgltf_result_success) {
-            logWarning() << "[GltfModel] failed to load buffers: " << resolved;
-            return false;
+            return decodeFailure("failed to load buffers");
         }
 
         // Validate the model data before reading any of it
         if (const char* reason = checkDataRanges(data)) {
-            logWarning() << "[GltfModel] " << reason << ": " << resolved;
-            return false;
+            return decodeFailure(reason);
         }
         result = cgltf_validate(data);
         if (result != cgltf_result_success) {
-            logWarning() << "[GltfModel] model data failed validation (cgltf result "
-                         << (int)result << "): " << resolved;
-            return false;
+            return decodeFailure("model data failed validation (cgltf result " +
+                                 to_string(static_cast<int>(result)) + ")");
         }
         // Base directory for relative texture paths
         fs::path baseDir = resolvedPath.parent_path();
@@ -603,10 +669,9 @@ bool GltfModel::load(const string& path) {
     }
 
     if (!failure.empty()) {
-        logWarning() << "[GltfModel] " << failure << ": " << resolved;
         nodes_.clear();
         textures_.clear();
-        return false;
+        return decodeFailure(failure);
     }
     if (skippedPrimitives > 0) {
         logWarning() << "[GltfModel] skipped " << skippedPrimitives
@@ -615,7 +680,7 @@ bool GltfModel::load(const string& path) {
     loaded_ = true;
     logNotice() << "[GltfModel] loaded " << nodes_.size() << " nodes, "
                 << textures_.size() << " textures from " << path;
-    return true;
+    return LoadResult::success();
 }
 
 void GltfModel::draw() const {

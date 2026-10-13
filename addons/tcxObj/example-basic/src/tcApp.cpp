@@ -81,7 +81,7 @@ void tcApp::filesDropped(const vector<string>& files) {
         // Find first .obj file
         if (toLower(getFileExtension(utf8ToPath(file))) == "obj") {
             loader_.clear();
-            if (loader_.load(file)) {
+            if (loader_.load(utf8ToPath(file))) {  // dropped paths are UTF-8
                 hasModel_ = true;
                 logNotice() << "Loaded: " << file << " (" << loader_.getNumGroups() << " groups)";
             }

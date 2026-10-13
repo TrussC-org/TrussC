@@ -84,3 +84,17 @@ What else changes:
 - `saveScreenshot()` still returns `bool`, meaning "queued". A failed write later logs one Error. On Web it is still a browser download.
 - `AudioRecorder` ends the take at the first failed write; `getRecordedSeconds()` counts what was actually written.
 - `VideoWriter::getFrameCount()` counts frames the encoder accepted; a backend that stops accepting data ends the take, including macOS audio input that stays "not ready" for 5 s (previously that chunk was dropped while video recording continued). A wrong-size frame or other caller mistake fails that call only; the take goes on.
+
+## OBJ and glTF loading return `LoadResult`
+
+`tcx::obj::ObjLoader::load()` and `tcx::gltf::GltfModel::load()` now return `LoadResult` instead of `bool` (#761 PR-C). Missing model files return `FileNotFound` with the shared `file not found: <resolved path>` Error; rejected model data returns `DecodeFailed` with one Error. Relative paths resolve through `getDataPath()`. Neither loader gains `getPath()`.
+
+`if (model.load(path))` keeps working. Code that assigns, passes or returns the result as a `bool` needs `.ok()` or an explicit cast:
+
+```cpp
+bool loaded = model.load("model.gltf").ok();
+auto result = model.load("model.gltf");
+if (!result) { /* inspect result.error and result.message; already logged */ }
+```
+
+`GltfModel::load()` now takes `const fs::path&`; a `std::string` still converts. For UTF-8 text on Windows, pass `utf8ToPath(text)` so it becomes a native filesystem path. External buffer and image URIs now decode percent escapes, such as `a%20b.png` for `a b.png`. `ObjExporter` is unchanged.
