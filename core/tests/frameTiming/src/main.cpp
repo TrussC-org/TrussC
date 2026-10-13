@@ -1386,7 +1386,7 @@ static void testHealthUptime() {
     const bool pixelPerfect = internal::pixelPerfectMode();
     internal::pixelPerfectMode() = true;
     resetElapsedTimeCounter();
-    string reply = mcp::Server::instance().processMessage(
+    string reply = mcp::internal::Server::instance().processMessage(
         R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tc_get_health","arguments":{}}})");
     internal::pixelPerfectMode() = pixelPerfect;
     double up = -1.0;

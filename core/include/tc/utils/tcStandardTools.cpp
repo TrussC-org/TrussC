@@ -13,7 +13,7 @@
 namespace trussc {
 namespace mcp {
 
-namespace detail {
+namespace internal {
 
 void registerStandardTools(Server& server) {
     registerAudioTools(server);
@@ -108,7 +108,7 @@ void registerStandardTools(Server& server) {
             if (source.contains("path")) {
                 Pixels p;
                 if (!p.load(trussc::internal::utf8ToPath(source.at("path").get<std::string>()))) return error("failed to load source image");
-                return detail::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
+                return internal::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
             }
             if (source.contains("image") || source.contains("fbo")) {
                 const bool fbo = source.contains("fbo");
@@ -144,7 +144,7 @@ void registerStandardTools(Server& server) {
                 if (!object) return error("image source no longer exists or was not found");
                 if (!fbo) {
                     const auto& p=static_cast<Image*>(object)->getPixels();
-                    return detail::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
+                    return internal::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
                 }
 #ifdef __EMSCRIPTEN__
                 return error("Fbo readback is unavailable on web");
@@ -189,7 +189,7 @@ void registerStandardTools(Server& server) {
                     }
                     return [p,args,ok,error,colorSpace]() -> json {
                         if(!ok) return error("Fbo disappeared or readback failed");
-                        return detail::analyzeImage(*p,args,colorSpace);
+                        return internal::analyzeImage(*p,args,colorSpace);
                     };
                 });
                 return nullptr;
@@ -205,7 +205,7 @@ void registerStandardTools(Server& server) {
                     bool ok=grabScreen(*p);
                     return [p,args,ok,error]() -> json {
                         if(!ok) return error("failed to grab screen");
-                        return detail::analyzeImage(*p,args,"sRGB");
+                        return internal::analyzeImage(*p,args,"sRGB");
                     };
                 },ctx->isMain?nullptr:ctx);
                 return nullptr;
@@ -257,7 +257,7 @@ void registerStandardTools(Server& server) {
                     if (!grabbed) {
                         return json{{"status", "error"}, {"message", "Failed to grab screen"}};
                     }
-                    return detail::imageContentResult(detail::pixelsToImageJson(*px, format, reqWidth, quality));
+                    return internal::imageContentResult(internal::pixelsToImageJson(*px, format, reqWidth, quality));
                 };
             }, ctx->isMain ? nullptr : ctx);
             return json(nullptr);  // ignored — deferred result is sent instead
@@ -300,7 +300,7 @@ void registerStandardTools(Server& server) {
         .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             json values = json::array();
-            for (auto& e : detail::statusRegistry()) {
+            for (auto& e : internal::statusRegistry()) {
                 json v;
                 try {
                     v = e.getter();
@@ -312,7 +312,7 @@ void registerStandardTools(Server& server) {
                                   {"mode", e.graph ? "graph" : "status"}});
             }
             json images = json::array();
-            for (auto& e : detail::statusImageRegistry()) images.push_back(e.name);
+            for (auto& e : internal::statusImageRegistry()) images.push_back(e.name);
             return json{{"values", values}, {"images", images}};
         }));
 
@@ -321,8 +321,8 @@ void registerStandardTools(Server& server) {
         .bind(std::function<json()>([]() -> json {
             std::deque<json> drained;
             {
-                std::lock_guard<std::mutex> lock(detail::alertMutex());
-                drained.swap(detail::alertQueue());
+                std::lock_guard<std::mutex> lock(internal::alertMutex());
+                drained.swap(internal::alertQueue());
             }
             json arr = json::array();
             for (auto& a : drained) arr.push_back(std::move(a));
@@ -345,7 +345,7 @@ void registerStandardTools(Server& server) {
 
             std::function<trussc::Pixels()> getter;
             const void* getterOwner = nullptr;
-            for (auto& e : detail::statusImageRegistry()) {
+            for (auto& e : internal::statusImageRegistry()) {
                 if (e.name == name) { getter = e.getter; getterOwner = e.owner; break; }
             }
             if (!getter) {
@@ -366,12 +366,12 @@ void registerStandardTools(Server& server) {
                         return json{{"status", "error"},
                                     {"message", "image getter returned no pixels"}};
                     }
-                    return detail::imageContentResult(detail::pixelsToImageJson(*px, "jpg", reqWidth, quality));
+                    return internal::imageContentResult(internal::pixelsToImageJson(*px, "jpg", reqWidth, quality));
                 };
             });
             // The getter is the registering app's code (a hot reload guest's):
             // unloading it answers this reply with an error instead of running it.
-            mcp::detail::setDeferralOwner(getterOwner);
+            mcp::internal::setDeferralOwner(getterOwner);
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
@@ -379,8 +379,8 @@ void registerStandardTools(Server& server) {
         .level(ToolLevel::Public)
         .bind(std::function<json()>([]() -> json {
             return json{{"status", "ok"},
-                        {"buildKind", detail::isDevBuild() ? "dev" : "default"},
-                        {"toolLevel", detail::toolLevelName(getToolLevel())},
+                        {"buildKind", internal::isDevBuild() ? "dev" : "default"},
+                        {"toolLevel", internal::toolLevelName(getToolLevel())},
                         {"fps", trussc::getFps()},
                         {"frameCount", trussc::getFrameCount()},
                         // Process uptime: the framework clock, which
@@ -389,8 +389,8 @@ void registerStandardTools(Server& server) {
                         {"width", trussc::getWindowWidth()},
                         {"height", trussc::getWindowHeight()},
                         {"version", trussc::getVersion()},
-                        {"pid", detail::currentPid()},
-                        {"rssBytes", detail::processRssBytes()},
+                        {"pid", internal::currentPid()},
+                        {"rssBytes", internal::processRssBytes()},
                         {"mainQueuePending", trussc::internal::getMainThreadQueuePending()},
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
         }));
@@ -563,7 +563,7 @@ void registerStandardTools(Server& server) {
     coreTool(server, "tc_quit", "Quit the application gracefully")
         .level(ToolLevel::Control)
         .bind(std::function<json()>([]() -> json {
-            internal::setExitReason("tc-quit");
+            trussc::internal::setExitReason("tc-quit");
             sapp_request_quit();
             return json{{"status", "ok"}};
         }));
@@ -583,18 +583,18 @@ void registerStandardTools(Server& server) {
             int button = a.value("button", -1);
             // If button is pressed, treat as drag
             if (button >= 0) {
-                internal::MouseEventRaw args;
+                trussc::internal::MouseEventRaw args;
                 args.pos = args.globalPos = Vec2(x, y);
                 args.button = button;
-                MouseDragEventArgs dragArgs = internal::toDragArgs(args);
+                MouseDragEventArgs dragArgs = trussc::internal::toDragArgs(args);
                 events().mouseDragged.notify(dragArgs);
 
                 if (::trussc::internal::appMouseDraggedFunc)
                     ::trussc::internal::appMouseDraggedFunc(args);
             } else {
-                internal::MouseEventRaw args;
+                trussc::internal::MouseEventRaw args;
                 args.pos = args.globalPos = Vec2(x, y);
-                MouseMoveEventArgs moveArgs = internal::toMoveArgs(args);
+                MouseMoveEventArgs moveArgs = trussc::internal::toMoveArgs(args);
                 events().mouseMoved.notify(moveArgs);
 
                 if (::trussc::internal::appMouseMovedFunc)
@@ -730,7 +730,7 @@ void registerStandardTools(Server& server) {
             json pressedMods = json::array();
             auto holdMod = [&](const char* flag, bool alreadyHeld, int code) {
                 if (a.value(flag, false) && !alreadyHeld) {
-                    detail::injectKeyDown(code);
+                    internal::injectKeyDown(code);
                     pressedMods.push_back(code);
                 }
             };
@@ -739,11 +739,11 @@ void registerStandardTools(Server& server) {
             holdMod("alt",   isAltPressed(),     SAPP_KEYCODE_LEFT_ALT);
             holdMod("super", isSuperPressed(),   SAPP_KEYCODE_LEFT_SUPER);
 
-            detail::injectKeyDown(key);
+            internal::injectKeyDown(key);
 
             return json{{"status", "ok"},
                         {"modifiersPressed", pressedMods},
-                        {"heldKeys", detail::heldKeysJson()}};
+                        {"heldKeys", internal::heldKeysJson()}};
         });
 
     coreTool(server, "tc_key_release",
@@ -762,12 +762,12 @@ void registerStandardTools(Server& server) {
 
             // The key goes up first — while the modifiers are still held, so
             // this event still carries them (as it does on a real keyboard).
-            detail::injectKeyUp(key);
+            internal::injectKeyUp(key);
 
             json releasedMods = json::array();
             auto dropMod = [&](const char* flag, int code) {
                 if (a.value(flag, false) && isKeyPressed(code)) {
-                    detail::injectKeyUp(code);
+                    internal::injectKeyUp(code);
                     releasedMods.push_back(code);
                 }
             };
@@ -778,7 +778,7 @@ void registerStandardTools(Server& server) {
 
             return json{{"status", "ok"},
                         {"modifiersReleased", releasedMods},
-                        {"heldKeys", detail::heldKeysJson()}};
+                        {"heldKeys", internal::heldKeysJson()}};
         });
 
     // --- Node Tools ---
@@ -843,7 +843,7 @@ void registerStandardTools(Server& server) {
 
 }
 
-} // namespace detail
+} // namespace internal
 
 } // namespace mcp
 } // namespace trussc

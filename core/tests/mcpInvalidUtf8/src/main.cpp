@@ -21,7 +21,7 @@ std::string request(const std::string& name) {
 }
 
 json call(const std::string& name) {
-    return json::parse(mcp::Server::instance().processMessage(request(name)));
+    return json::parse(mcp::internal::Server::instance().processMessage(request(name)));
 }
 
 json content(const json& reply) {
@@ -32,11 +32,11 @@ json content(const json& reply) {
 
 #ifndef __EMSCRIPTEN__
 json deferredCall(const std::string& name) {
-    auto promise = std::make_shared<std::promise<mcp::detail::ReplyThunk>>();
+    auto promise = std::make_shared<std::promise<mcp::internal::ReplyThunk>>();
     auto future = promise->get_future();
-    mcp::detail::getHttpChannel().send(mcp::McpRequest{request(name), promise});
+    mcp::internal::getHttpChannel().send(mcp::McpRequest{request(name), promise});
     mcp::processHttpQueue();
-    mcp::drainDeferredResponses();
+    mcp::internal::drainDeferredResponses();
     return json::parse(future.get()());
 }
 #endif
@@ -76,7 +76,7 @@ TC_CORE_TEST_MAIN() {
         const json expected = {{"jsonrpc", "2.0"}, {"id", 324},
             {"result", {{"content", json::array({json{{"type", "text"}, {"text", valid.dump()}}})}}}};
         check("valid reply stays byte-for-byte identical",
-              mcp::Server::instance().processMessage(request("valid_reply")) == expected.dump());
+              mcp::internal::Server::instance().processMessage(request("valid_reply")) == expected.dump());
         mcp::tool("incomplete_utf8", "").bind([]() -> json { return {{"s", "end \xe6\x97"}}; });
         check("incomplete trailing code point becomes U+FFFD",
               content(call("incomplete_utf8")).at("s") == "end \xef\xbf\xbd");
@@ -128,21 +128,21 @@ TC_CORE_TEST_MAIN() {
                   content(deferredCall(resultName)).at("s") == repaired);
         }
         httplib::Response rejected;
-        mcp::detail::rejectRequest(rejected, 403, bad);
+        mcp::internal::rejectRequest(rejected, 403, bad);
         check("HTTP error reply escapes and replaces its message",
               rejected.status == 403 && json::parse(rejected.body).at("error") == repaired);
 
         // Exercise the cancellation replies used during owner unload and normal shutdown.
         int owner;
         for (bool shutdown : {false, true}) {
-            mcp::detail::DeferredResponse pending;
+            mcp::internal::DeferredResponse pending;
             pending.id = 324;
             pending.owner = &owner;
-            pending.response = std::make_shared<std::promise<mcp::detail::ReplyThunk>>();
+            pending.response = std::make_shared<std::promise<mcp::internal::ReplyThunk>>();
             auto future = pending.response->get_future();
-            mcp::detail::deferredResponses().push_back(std::move(pending));
+            mcp::internal::deferredResponses().push_back(std::move(pending));
             if (shutdown) mcp::stopHttpServer();
-            else mcp::detail::removeRegistrationsOwnedBy(&owner);
+            else mcp::internal::removeRegistrationsOwnedBy(&owner);
             auto reply = json::parse(future.get()());
             check("shutdown/unload cancellation is valid JSON",
                   reply.at("result").at("content").at(0).at("text").get<std::string>().find(shutdown ? "shut down" : "unloaded") != std::string::npos);

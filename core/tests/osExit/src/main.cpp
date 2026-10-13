@@ -103,7 +103,7 @@ void testHttpShutdown() {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         return ready();
     };
-    const bool listening = waitFor([] { return mcp::getHttpPort() > 0 && mcp::detail::getHttpServer()->is_running(); });
+    const bool listening = waitFor([] { return mcp::getHttpPort() > 0 && mcp::internal::getHttpServer()->is_running(); });
     check(listening, "HTTP server ready");
     if (!listening) { mcp::stopHttpServer(); return; }
     mcp::tool("http_defer", "test").bind(std::function<json()>([] {
@@ -120,10 +120,10 @@ void testHttpShutdown() {
         });
     };
     auto deferred = send(1, "tools/call");
-    check(waitFor([] { return !mcp::detail::getHttpChannel().empty(); }), "deferred HTTP request queued");
+    check(waitFor([] { return !mcp::internal::getHttpChannel().empty(); }), "deferred HTTP request queued");
     mcp::processHttpQueue();
     auto queued = send(2, "ping");
-    check(waitFor([] { return !mcp::detail::getHttpChannel().empty(); }), "last-frame HTTP request queued");
+    check(waitFor([] { return !mcp::internal::getHttpChannel().empty(); }), "last-frame HTTP request queued");
     mcp::stopHttpServer(); // joins real server workers; must not strand either request
     for (auto* future : {&deferred, &queued}) {
         const auto reply = json::parse(future->get(), nullptr, false);
@@ -175,9 +175,9 @@ void testShared() {
     // Queue a normal request and a deferred tool, then stop without another
     // frame. All futures must receive JSON-RPC replies with their original IDs.
     auto enqueue = [](const std::string& body) {
-        auto promise = std::make_shared<std::promise<mcp::detail::ReplyThunk>>();
+        auto promise = std::make_shared<std::promise<mcp::internal::ReplyThunk>>();
         auto future = promise->get_future();
-        mcp::detail::enqueueHttpRequest({body, promise});
+        mcp::internal::enqueueHttpRequest({body, promise});
         return future;
     };
     mcp::tool("exit_test_defer", "test").bind(std::function<json()>([] {
@@ -186,10 +186,10 @@ void testShared() {
     }));
     auto deferred = enqueue(R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exit_test_defer"}})");
     mcp::processHttpQueue();
-    check(mcp::hasDeferredResponses(), "request deferred until next frame");
+    check(mcp::internal::hasDeferredResponses(), "request deferred until next frame");
     auto queued = enqueue(R"({"jsonrpc":"2.0","id":"queued","method":"ping"})");
     // A racing sender is either drained from the queue or answered directly.
-    std::future<mcp::detail::ReplyThunk> raced;
+    std::future<mcp::internal::ReplyThunk> raced;
     std::thread sender([&] { raced = enqueue(R"({"jsonrpc":"2.0","id":3,"method":"ping"})"); });
     mcp::stopHttpServer();
     sender.join();
@@ -204,7 +204,7 @@ void testShared() {
               "reply explains normal exit and reason");
     };
     verify(deferred, 1); verify(queued, "queued"); verify(raced, 3); verify(late, 4);
-    check(!mcp::hasDeferredResponses(), "no deferred producers left at shutdown");
+    check(!mcp::internal::hasDeferredResponses(), "no deferred producers left at shutdown");
 #endif
     check(internal::beginExitCleanup(), "first cleanup accepted");
     check(!internal::beginExitCleanup(), "reentrant cleanup rejected");

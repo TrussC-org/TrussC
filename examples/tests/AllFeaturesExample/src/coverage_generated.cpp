@@ -30,6 +30,12 @@ static void cover_audioengine() {
     (void)getMicAnalysisBuffer(af::val<float *>(), af::val<size_t>());
 }
 
+static void cover_console() {
+    (void)console::start();
+    (void)console::stop();
+    (void)console::isEnabled();
+}
+
 static void cover_file() {
     (void)getDataPath(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
@@ -338,6 +344,26 @@ static void cover_math_random() {
 static void cover_math_trig() {
     (void)deg2rad(af::val<float>());
     (void)rad2deg(af::val<float>());
+}
+
+static void cover_mcp() {
+    (void)mcp::setToolLevel(af::val<mcp::ToolLevel>());
+    (void)mcp::getToolLevel();
+    (void)mcp::isDebuggerEnabled();
+    (void)mcp::deferToolResultUntilAfterFrame(af::val<std::function<json ()>>(), af::val<const void *>());
+    (void)mcp::deferToolResultTwoStage(af::val<std::function<std::function<json ()> ()>>(), af::val<const void *>());
+    (void)mcp::stopHttpServer();
+    (void)mcp::startHttpServer(af::val<int>(), af::val<const std::string>(), af::val<const std::string>());
+    (void)mcp::processHttpQueue();
+    (void)mcp::getHttpPort();
+    (void)mcp::hasTool(af::val<const std::string>());
+    (void)mcp::tool(af::val<const std::string>(), af::val<const std::string>());
+    (void)mcp::resource(af::val<const std::string>(), af::val<const std::string>());
+    (void)mcp::status(af::val<const std::string>(), af::val<std::function<double ()>>());
+    (void)mcp::status(af::val<const std::string>(), af::val<std::function<std::string ()>>());
+    (void)mcp::statusGraph(af::val<const std::string>(), af::val<std::function<double ()>>());
+    (void)mcp::statusImage(af::val<const std::string>(), af::val<std::function<trussc::Pixels ()>>());
+    (void)mcp::alert(af::val<const std::string>());
 }
 
 static void cover_memory() {
@@ -3439,11 +3465,62 @@ struct Cover_Xml : af::Scope<Xml> {
     }
 };
 
+struct Cover_mcp__Resource : af::Scope<mcp::Resource> {
+    static void run() {
+        (void)af::val<mcp::Resource>().uri;
+        (void)af::val<mcp::Resource>().name;
+        (void)af::val<mcp::Resource>().mimeType;
+        (void)af::val<mcp::Resource>().description;
+        (void)af::val<mcp::Resource>().handler;
+        (void)af::val<mcp::Resource>().owner;
+    }
+};
+
+struct Cover_mcp__ResourceBuilder : af::Scope<mcp::ResourceBuilder> {
+    static void run() {
+        (void)mcp::ResourceBuilder(af::val<const std::string>(), af::val<const std::string>());
+        (void)af::val<mcp::ResourceBuilder>().desc(af::val<const std::string>());
+        (void)af::val<mcp::ResourceBuilder>().mime(af::val<const std::string>());
+        (void)af::val<mcp::ResourceBuilder>().bind(af::val<std::function<std::string ()>>());
+    }
+};
+
+struct Cover_mcp__Tool : af::Scope<mcp::Tool> {
+    static void run() {
+        (void)af::val<mcp::Tool>().name;
+        (void)af::val<mcp::Tool>().description;
+        (void)af::val<mcp::Tool>().level;
+        (void)af::val<mcp::Tool>().args;
+        (void)af::val<mcp::Tool>().handler;
+        (void)af::val<mcp::Tool>().owner;
+        (void)af::val<mcp::Tool>().getSchema();
+    }
+};
+
+struct Cover_mcp__ToolArg : af::Scope<mcp::ToolArg> {
+    static void run() {
+        (void)af::val<mcp::ToolArg>().name;
+        (void)af::val<mcp::ToolArg>().type;
+        (void)af::val<mcp::ToolArg>().description;
+        (void)af::val<mcp::ToolArg>().required;
+    }
+};
+
+struct Cover_mcp__ToolBuilder : af::Scope<mcp::ToolBuilder> {
+    static void run() {
+        (void)mcp::ToolBuilder(af::val<const std::string>(), af::val<const std::string>());
+        (void)af::val<mcp::ToolBuilder>().level(af::val<mcp::ToolLevel>());
+        (void)af::val<mcp::ToolBuilder>().bind(af::val<std::function<json (const json &)>>());
+        (void)af::val<mcp::ToolBuilder>().bind(af::val<std::function<json ()>>());
+    }
+};
+
 } // namespace af_generated
 
 void af::coverGenerated() {
     af_generated::cover_animation();
     af_generated::cover_audioengine();
+    af_generated::cover_console();
     af_generated::cover_file();
     af_generated::cover_font();
     af_generated::cover_graphics_3d_setup();
@@ -3461,6 +3538,7 @@ void af::coverGenerated() {
     af_generated::cover_math_interpolation();
     af_generated::cover_math_random();
     af_generated::cover_math_trig();
+    af_generated::cover_mcp();
     af_generated::cover_memory();
     af_generated::cover_network();
     af_generated::cover_other();
@@ -3607,6 +3685,11 @@ void af::coverGenerated() {
     af_generated::Cover_Window::run();
     af_generated::Cover_WindowSettings::run();
     af_generated::Cover_Xml::run();
+    af_generated::Cover_mcp__Resource::run();
+    af_generated::Cover_mcp__ResourceBuilder::run();
+    af_generated::Cover_mcp__Tool::run();
+    af_generated::Cover_mcp__ToolArg::run();
+    af_generated::Cover_mcp__ToolBuilder::run();
 }
 
 } // namespace trussc

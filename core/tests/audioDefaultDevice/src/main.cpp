@@ -56,7 +56,7 @@ void checkSelection() {
 }
 
 Json audioState() {
-    const string reply = mcp::Server::instance().processMessage(
+    const string reply = mcp::internal::Server::instance().processMessage(
         R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"tc_get_audio_state","arguments":{"devices":false}}})");
     try {
         return Json::parse(Json::parse(reply).at("result").at("content").at(0)

@@ -98,7 +98,7 @@ public:
             unloadProbe->appWasRoot = getRootNode() == static_cast<Node*>(this);
         });
         // The owner the host tagged this generation with (an identity only)
-        const uint64_t generation = (uint64_t)(uintptr_t)mcp::detail::registrationOwner();
+        const uint64_t generation = (uint64_t)(uintptr_t)mcp::internal::registrationOwner();
         mcp::tool("guest_probe", "hotReloadLifecycle guest tool")
             .bind(std::function<json()>([this, generation]() -> json {
                 return json{{"ticks", ticks_}, {"generation", generation}};

@@ -248,7 +248,7 @@ private:
         // headless: both runners register this root before setup). Secondary apps
         // and hot reload guests must not repeat process startup.
         if (internal::mainWindowContext().rootNode.lock().get() == this)
-            mcp::detail::initializeMcp();
+            mcp::internal::initializeMcp();
     }
 
     // Node's pre-cleanup hook: an App added as a child ends with its

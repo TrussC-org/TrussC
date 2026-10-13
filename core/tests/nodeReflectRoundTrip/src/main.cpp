@@ -213,7 +213,7 @@ static void testDerivedMarker() {
 static Json callTool(const string& name, const Json& args) {
     Json req = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
                 {"params", {{"name", name}, {"arguments", args}}}};
-    string reply = mcp::Server::instance().processMessage(req.dump());
+    string reply = mcp::internal::Server::instance().processMessage(req.dump());
     try {
         Json j = Json::parse(reply);
         return Json::parse(j.at("result").at("content").at(0).at("text").get<string>());

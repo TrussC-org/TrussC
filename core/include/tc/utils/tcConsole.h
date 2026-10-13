@@ -37,7 +37,7 @@ namespace console {
 // ---------------------------------------------------------------------------
 // Internal state
 // ---------------------------------------------------------------------------
-namespace detail {
+namespace internal {
 
 // One stdin reader per process, defined in tcGlobal.cpp. The host starts it and
 // drains the channel every frame; console::stop() / isEnabled() are typically
@@ -77,7 +77,7 @@ inline void readThread() {
     }
 }
 
-} // namespace detail
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -91,14 +91,14 @@ inline void start() {
     logWarning("Console") << "console::start() is not available on web platform";
     return;
 #else
-    if (detail::isRunning().load()) {
+    if (internal::isRunning().load()) {
         return; // Already running
     }
 
-    detail::isRunning().store(true);
+    internal::isRunning().store(true);
     // getline may block indefinitely; detach now so std::exit() cannot
     // destroy a joinable thread even if stop() was never called.
-    std::thread(detail::readThread).detach();
+    std::thread(internal::readThread).detach();
 #endif
 }
 
@@ -109,14 +109,16 @@ inline void stop() {
     // No-op on web
     return;
 #else
-    if (!detail::isRunning().load()) {
+    if (!internal::isRunning().load()) {
         return; // Already stopped
     }
 
-    detail::isRunning().store(false);
-    detail::getChannel().close();
+    internal::isRunning().store(false);
+    internal::getChannel().close();
 #endif
 }
+
+namespace internal {
 
 /// Process commands in queue
 /// Called every frame within _frame_cb() in TrussC.h
@@ -126,23 +128,25 @@ inline void processQueue() {
     // No-op on web
     return;
 #else
-    if (!detail::isRunning().load()) {
+    if (!internal::isRunning().load()) {
         return;
     }
 
     ConsoleEventArgs args;
-    while (detail::getChannel().tryReceive(args)) {
+    while (internal::getChannel().tryReceive(args)) {
         events().console.notify(args);
     }
 #endif
 }
+
+} // namespace internal
 
 /// Whether console is enabled
 inline bool isEnabled() {
 #ifdef __EMSCRIPTEN__
     return false;
 #else
-    return detail::isRunning().load();
+    return internal::isRunning().load();
 #endif
 }
 

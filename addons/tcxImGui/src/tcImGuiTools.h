@@ -481,7 +481,7 @@ inline constexpr std::chrono::seconds kPendingValueLifetime{2};
 inline constexpr std::chrono::seconds kValueCheckDeadline{4};
 static_assert(kPendingValueLifetime < kValueCheckDeadline,
               "a written value must get time for its check frame");
-static_assert(kValueCheckDeadline + std::chrono::seconds{1} <= tc::mcp::detail::kTargetedDeferralTimeout,
+static_assert(kValueCheckDeadline + std::chrono::seconds{1} <= tc::mcp::internal::kTargetedDeferralTimeout,
               "the check must be settled before the deferred reply's timeout");
 
 // The refusal of a RadioButton(int*) given a value other than its own: in
@@ -740,7 +740,7 @@ inline void registerImGuiTools() {
                                                   std::move(bytes), detail::kPendingValueLifetime,
                                                   detail::kValueCheckDeadline, nullptr);
                 const void* token = pending.get();
-                pending->onDone = [token]() { tc::mcp::drainDeferredResponses(token); };
+                pending->onDone = [token]() { tc::mcp::internal::drainDeferredResponses(token); };
                 std::string panel = w.windowName;
                 tc::mcp::deferToolResultUntilAfterFrame([ctx, pending, label, panel]() -> json {
                     return detail::injectionResult(ctx, pending, label, panel);

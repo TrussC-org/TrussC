@@ -194,11 +194,11 @@ static std::vector<std::string> awaitPosts(std::vector<PendingPost>& posts, size
     bool hooked = !beforeDrain;
     while (!allDone() && std::chrono::steady_clock::now() < deadline) {
         mcp::processHttpQueue();
-        if (!hooked && mcp::detail::deferredResponses().size() >= deferred) {
+        if (!hooked && mcp::internal::deferredResponses().size() >= deferred) {
             beforeDrain();
             hooked = true;
         }
-        if (hooked) mcp::drainDeferredResponses();
+        if (hooked) mcp::internal::drainDeferredResponses();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     std::vector<std::string> replies;
@@ -300,11 +300,11 @@ static int runCycles(const std::string& guestPath, int port) {
     using namespace trussc::hot_reload;
 
     auto hasStatus = [](const char* name) {
-        for (auto& e : mcp::detail::statusRegistry()) if (e.name == name) return true;
+        for (auto& e : mcp::internal::statusRegistry()) if (e.name == name) return true;
         return false;
     };
     auto hasStatusImage = [](const char* name) {
-        for (auto& e : mcp::detail::statusImageRegistry()) if (e.name == name) return true;
+        for (auto& e : mcp::internal::statusImageRegistry()) if (e.name == name) return true;
         return false;
     };
 
@@ -425,8 +425,8 @@ static int runCycles(const std::string& guestPath, int port) {
         internal::overlayFocusedQuery() = nullptr;
         setBeepVolume(0.5f);
         {
-            std::lock_guard<std::mutex> lock(mcp::detail::alertMutex());
-            mcp::detail::alertQueue().clear();
+            std::lock_guard<std::mutex> lock(mcp::internal::alertMutex());
+            mcp::internal::alertQueue().clear();
         }
         guest->writeSharedState();
         const FpsSettings fps = getFpsSettings();
@@ -507,7 +507,7 @@ static int runCycles(const std::string& guestPath, int port) {
             {in.screenRecorder, &internal::globalScreenRecorder(), "screen recorder"},
             {in.asyncScheduler, &internal::AsyncScheduler::get(), "AsyncScheduler"},
             {in.beepManager, &internal::getManager(), "beep manager"},
-            {in.consoleRunning, &console::detail::isRunning(), "console state"},
+            {in.consoleRunning, &console::internal::isRunning(), "console state"},
             {in.pbrPipeline, &internal::getPbrPipeline(), "PBR pipeline"},
             {in.pointPipeline, &internal::getPointPipeline(), "point pipeline"},
             {in.fboShared, &internal::fboSharedMap(), "FBO context cache (a new sokol_gl context per reload)"},

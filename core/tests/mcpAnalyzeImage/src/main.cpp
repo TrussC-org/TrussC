@@ -17,7 +17,7 @@ json decode(const string& response) {
     return json::parse(r.at("result").at("content").at(0).at("text").get<string>());
 }
 string request(const string& tool,const json& args=json::object()) {
-    return mcp::Server::instance().processMessage(json({{"jsonrpc","2.0"},{"id",1},{"method","tools/call"},
+    return mcp::internal::Server::instance().processMessage(json({{"jsonrpc","2.0"},{"id",1},{"method","tools/call"},
         {"params",{{"name",tool},{"arguments",args}}}}).dump());
 }
 json call(const string& tool,const json& args=json::object()) {return decode(request(tool,args));}
@@ -32,7 +32,7 @@ json named(const json& list,const char* key,const char* name) {
 }
 void headlessChecks() {
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-    const auto schema=json::parse(mcp::Server::instance().processMessage(
+    const auto schema=json::parse(mcp::internal::Server::instance().processMessage(
         json{{"jsonrpc","2.0"},{"id",1},{"method","tools/list"}}.dump()));
     for(const auto& t:schema["result"]["tools"]) if(t["name"]=="tc_analyze_image") {
         check("MCP exposes source, ops, optional nullable save only",
@@ -171,7 +171,7 @@ void headlessChecks() {
 class CaptureApp : public App {
     Fbo fbo_,hdr_,moved_,changing_;
     EventListener after_;
-    vector<function<mcp::detail::ReplyThunk()>> pending_;
+    vector<function<mcp::internal::ReplyThunk()>> pending_;
 public:
     void setup() override {
         fbo_.allocate(8,8);fbo_.setDebugName("round-trip");
@@ -195,7 +195,7 @@ public:
         auto defer=[this](json source) {
             string response=request("tc_analyze_image",{{"source",source},{"ops",json::array({{{"op","pixel"},{"x",0},{"y",0}}})}});
             check("GPU source response is deferred",response.empty());
-            pending_.push_back(std::move(mcp::detail::deferralState().envelope));
+            pending_.push_back(std::move(mcp::internal::deferralState().envelope));
         };
         defer({{"fbo","round-trip"}});
         fbo_.begin(1,0,0,1); fbo_.end();fbo_.begin(0,1,0,1);fbo_.end();

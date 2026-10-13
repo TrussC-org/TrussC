@@ -4,7 +4,7 @@
 #include "tc/sound/tcAudioRecorder.h"
 #include "tc/math/tcFFT.h"
 
-namespace trussc::mcp::detail {
+namespace trussc::mcp::internal {
 namespace {
 json error(const std::string& message) {
     return {{"status", "error"}, {"message", message}};
@@ -36,7 +36,7 @@ json spectrum(const json& args) {
     if (peaks < 0) return error("peaks must be a non-negative integer");
     if (!number(args, "fmin") || !number(args, "fmax")) return error("frequency bounds must be finite numbers");
 
-    auto data = internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), n);
+    auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), n);
     if (!data.channels) return error("Audio output history is unavailable; start audio or retry after a concurrent callback");
     if (size_t(n) > data.capacity) return error("n exceeds the ring length");
     const double binHz = double(data.sampleRate) / n;
@@ -112,32 +112,32 @@ json capture(const json& args) {
     if (!number(args, "seconds")) return error("seconds must be a finite positive number");
     const double seconds = args.value("seconds", 1.0);
     if (seconds <= 0) return error("seconds must be a finite positive number");
-    auto data = internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), std::numeric_limits<size_t>::max());
+    auto data = trussc::internal::AudioAnalysisAccess::snapshot(AudioEngine::getInstance(), std::numeric_limits<size_t>::max());
     if (!data.channels || data.samples.empty()) return error("Audio output history is unavailable or empty; retry after audio has been produced");
     const size_t requested = size_t(std::min(seconds, 2.0) * data.sampleRate);
     const size_t frames = std::min(requested, data.samples.size() / data.channels);
     if (!frames) return error("seconds must include at least one audio frame");
-    auto destination = internal::utf8ToPath(path);
+    auto destination = trussc::internal::utf8ToPath(path);
     if (destination.is_relative()) destination = getDataPath(destination);
-    std::string extension = internal::pathToUtf8(destination.extension());
+    std::string extension = trussc::internal::pathToUtf8(destination.extension());
     std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) { return char(std::tolower(c)); });
     if (extension != ".wav") {
         destination += ".wav";
-        logWarning("MCP") << "tc_save_audio_capture: appending .wav to " << internal::pathToDisplayUtf8(destination);
+        logWarning("MCP") << "tc_save_audio_capture: appending .wav to " << trussc::internal::pathToDisplayUtf8(destination);
     }
     std::error_code ec;
     if (destination.has_parent_path()) fs::create_directories(destination.parent_path(), ec);
     if (ec) return error("Could not create audio capture directory: " + ec.message());
     std::ofstream out(destination, std::ios::binary | std::ios::trunc);
     if (!out) return error("Could not open audio capture file");
-    const auto header = internal::writeWavHeader(out, data.sampleRate, data.channels, true);
+    const auto header = trussc::internal::writeWavHeader(out, data.sampleRate, data.channels, true);
     const size_t samples = frames * size_t(data.channels);
     out.write(reinterpret_cast<const char*>(data.samples.data() + data.samples.size() - samples),
               std::streamsize(samples * sizeof(float)));
-    internal::patchWavHeader(out, header, frames, data.channels, true);
+    trussc::internal::patchWavHeader(out, header, frames, data.channels, true);
     out.close();
     if (!out) return error("Could not write audio capture file");
-    return {{"path", internal::pathToUtf8(destination)}, {"sampleRate", data.sampleRate},
+    return {{"path", trussc::internal::pathToUtf8(destination)}, {"sampleRate", data.sampleRate},
             {"channels", data.channels}, {"frames", frames}, {"framesWritten", data.framesWritten}};
 }
 } // namespace
@@ -158,4 +158,4 @@ void registerAudioTools(Server& server) {
         .arg<double>("seconds", "Seconds of history (default 1.0, capped by available history)", false)
         .bind(capture);
 }
-} // namespace trussc::mcp::detail
+} // namespace trussc::mcp::internal

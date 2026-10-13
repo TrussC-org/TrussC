@@ -85,12 +85,13 @@ After `imguiBegin()`, use the standard [Dear ImGui API](https://github.com/ocorn
 
 When using TrussC's MCP interface, tcxImGui provides tools for AI agents to inspect and interact with ImGui widgets.
 
-To enable, call `imguiSetup()` before `mcp::registerControlTools()`:
+Call `imguiSetup()` to register the tools and grant Control in `setup()` to
+operate widgets (ReadOnly suffices for queries). The order is independent:
 
 ```cpp
 void tcApp::setup() {
     imguiSetup();
-    mcp::registerControlTools();  // ImGui tools auto-registered
+    mcp::setToolLevel(mcp::ToolLevel::Control);  // Allow widget interaction
 }
 ```
 
@@ -269,7 +270,7 @@ the code, and calls `tcx_imgui_reset_touched`.
   own `buttonValue`).
 - A widget that is not drawn right now (collapsed header, closed window) keeps
   its last known value and reports `"visible": false`.
-- The record starts when the MCP tools are registered (`TRUSSC_MCP=1`) and is
+- The record starts when `imguiSetup()` registers the MCP tools and is
   kept until `tcx_imgui_reset_touched`.
 - Other keys come from addons that keep their own record. tcxNodeInspector adds
   `inspector`: the node members edited in its panel or moved with its gizmo,

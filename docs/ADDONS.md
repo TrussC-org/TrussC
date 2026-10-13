@@ -808,3 +808,38 @@ WebSocket client and server.
   server's `101`. On expiry: `onError`, then `onClose`
 - Events fire on the client's network threads; use `Deliver::Main` for
   listeners that touch the scene or GPU (see `tcWebSocketClient.h`)
+
+## MCP tools in addons (v0.8)
+
+Registration declares tools; the app or a dev build grants access. Official
+addons declare a level on every tool; third-party authors choose their own
+levels and are responsible for what they expose. For example:
+
+```cpp
+mcp::tool("tcx_example_reset", "Reset the simulation")
+    .level(mcp::ToolLevel::Control)
+    .bind(std::function<json()>([] { return json{{"reset", true}}; }));
+```
+
+Use `ReadOnly` for inspection and `Control` for mutations. Omitted `.level()`
+means `Public`; use that only for data/actions intended for ordinary access,
+or exclude development-only tools with a preprocessor guard. Only `tc_` is
+reserved for core (registration is rejected); `tcx_` is free for everyone.
+Register during addon setup regardless of the grant, and let the app call
+`mcp::setToolLevel(mcp::ToolLevel::ReadOnly)` (or `Control`) in `setup()`.
+Registration alone never starts a listener. `Control` includes `ReadOnly`;
+list/call checks use the current grant regardless of registration order.
+
+For development use `trusscli run --mcp` (`TRUSSC_MCP_DEV=ON`, Control).
+A build without `--mcp` clears the switch. In an ordinary build,
+`TRUSSC_MCP=1` or `TRUSSC_MCP_PORT` opens only loopback `tc_get_health`,
+which reports `toolLevel`; it does not expose addon tools. `TRUSSC_MCP=0`
+closes even dev builds. HOST/TOKEN environment settings are dev-only;
+ordinary apps choose an address with `startHttpServer(port, host, token)`
+before granting a level. The first opener decides the address.
+
+Without a code grant or a dev build, core and official addons expose nothing
+beyond the loopback health exception. Third-party addons may register Public
+tools; check the startup exposure log or `tools/list` after opting in to a
+listener. See [AI_AUTOMATION.md](AI_AUTOMATION.md) for grants, custom Public
+listeners, compatibility aliases, and the supervisor model.

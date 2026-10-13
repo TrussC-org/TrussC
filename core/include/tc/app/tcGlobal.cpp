@@ -1166,7 +1166,7 @@ std::thread::id Thread::getMainThreadId() {
 }
 
 namespace console {
-namespace detail {
+namespace internal {
 ThreadChannel<ConsoleEventArgs>& getChannel() {
     static ThreadChannel<ConsoleEventArgs> channel;
     return channel;
@@ -1175,7 +1175,7 @@ std::atomic<bool>& isRunning() {
     static std::atomic<bool> running{false};
     return running;
 }
-} // namespace detail
+} // namespace internal
 } // namespace console
 
 namespace internal {

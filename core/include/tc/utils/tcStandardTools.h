@@ -17,7 +17,7 @@
 #include <deque>
 #include <mutex>
 
-// Platform bits for detail::currentPid() / detail::processRssBytes()
+// Platform bits for internal::currentPid() / internal::processRssBytes()
 #if defined(__APPLE__)
 #include <mach/mach.h>
 #include <unistd.h>
@@ -104,7 +104,7 @@ inline Json nodeToJson(Node& node, int maxDepth = -1, bool includeDerived = fals
 
 namespace mcp {
 
-namespace detail {
+namespace internal {
 
 // Area-average (box filter) downscale for interleaved 8-bit images. Good
 // enough for monitoring thumbnails at any ratio; never called to upscale.
@@ -197,14 +197,14 @@ struct StatusEntry {
     std::string name;
     std::function<json()> getter;   // returns a number or string json value
     bool graph = false;             // display hint: plot as time series
-    const void* owner = nullptr;    // mcp::detail::registrationOwner() at registration
+    const void* owner = nullptr;    // mcp::internal::registrationOwner() at registration
 };
 
-// Both registries drop an owner's entries in mcp::detail::removeRegistrationsOwnedBy()
+// Both registries drop an owner's entries in mcp::internal::removeRegistrationsOwnedBy()
 // (hot reload: a guest generation's getters capture its App, #227).
 template <class Entry>
 inline void hookOwnerCleanup(std::vector<Entry>& reg) {
-    mcp::detail::ownerCleanupHooks().push_back([&reg](const void* owner) {
+    mcp::internal::ownerCleanupHooks().push_back([&reg](const void* owner) {
         reg.erase(std::remove_if(reg.begin(), reg.end(),
                                  [owner](const Entry& e) { return e.owner == owner; }),
                   reg.end());
@@ -224,7 +224,7 @@ struct StatusImageEntry {
 std::vector<StatusImageEntry>& statusImageRegistry();
 
 inline void addStatusEntry(StatusEntry entry) {
-    entry.owner = mcp::detail::registrationOwner();
+    entry.owner = mcp::internal::registrationOwner();
     auto& reg = statusRegistry();
     for (auto& e : reg) {
         if (e.name == entry.name) { e = std::move(entry); return; }
@@ -279,7 +279,7 @@ inline int64_t processRssBytes() {
 #endif
 }
 
-} // namespace detail
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // App-published ops status
@@ -295,21 +295,25 @@ inline int64_t processRssBytes() {
 // Registering the same name again replaces the previous entry.
 // ---------------------------------------------------------------------------
 
+/// Publish a numeric or string getter through ReadOnly tc_get_status.
 inline void status(const std::string& name, std::function<double()> getter) {
-    detail::addStatusEntry({name, [getter]() { return json(getter()); }, false});
+    internal::addStatusEntry({name, [getter]() { return json(getter()); }, false});
 }
 
+/// Publish a numeric or string getter through ReadOnly tc_get_status.
 inline void status(const std::string& name, std::function<std::string()> getter) {
-    detail::addStatusEntry({name, [getter]() { return json(getter()); }, false});
+    internal::addStatusEntry({name, [getter]() { return json(getter()); }, false});
 }
 
+/// Publish a numeric getter marked for time-series plotting.
 inline void statusGraph(const std::string& name, std::function<double()> getter) {
-    detail::addStatusEntry({name, [getter]() { return json(getter()); }, true});
+    internal::addStatusEntry({name, [getter]() { return json(getter()); }, true});
 }
 
+/// Publish a Pixels getter through ReadOnly tc_get_status_image.
 inline void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
-    auto& reg = detail::statusImageRegistry();
-    const void* owner = mcp::detail::registrationOwner();
+    auto& reg = internal::statusImageRegistry();
+    const void* owner = mcp::internal::registrationOwner();
     for (auto& e : reg) {
         if (e.name == name) { e.getter = getter; e.owner = owner; return; }
     }
@@ -330,10 +334,11 @@ inline void statusImage(const std::string& name, std::function<trussc::Pixels()>
 // Thread-safe; callable from sensor callbacks / async timers.
 // ---------------------------------------------------------------------------
 
+/// Log an operator warning and queue it for ReadOnly tc_get_alerts (thread-safe).
 inline void alert(const std::string& msg) {
     trussc::logWarning("alert") << msg;
-    std::lock_guard<std::mutex> lock(detail::alertMutex());
-    auto& q = detail::alertQueue();
+    std::lock_guard<std::mutex> lock(internal::alertMutex());
+    auto& q = internal::alertQueue();
     q.push_back(json{{"at", trussc::getTimestampString("%Y-%m-%dT%H:%M:%S")},
                      {"text", msg}});
     if (q.size() > 100) q.pop_front();
@@ -357,7 +362,7 @@ inline void registerInspectionTools() { setToolLevel(ToolLevel::ReadOnly); }
 // with the modifier keycode) shows up on every event that follows it, and
 // e.shift agrees with what isShiftPressed() reports.
 // ---------------------------------------------------------------------------
-namespace detail {
+namespace internal {
 
 // Modifier flags for the event carrying `key`, as of AFTER this event's own
 // state change — which is what the OS reports: a Shift key-down already has
@@ -405,7 +410,7 @@ inline json heldKeysJson() {
     return json(held);
 }
 
-} // namespace detail
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Compatibility aliases for granting control access.

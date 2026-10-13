@@ -24,7 +24,7 @@
 // VisibilityNotify) are checked by hand on each platform.
 //
 // The main thread pumps mcp::processHttpQueue() and the main window's
-// mcp::drainDeferredResponses() the way the frame loop does; the requests run
+// mcp::internal::drainDeferredResponses() the way the frame loop does; the requests run
 // on worker threads with a deadline.
 // =============================================================================
 
@@ -219,7 +219,7 @@ TC_CORE_TEST_MAIN() {
     auto deadline = chrono::steady_clock::now() + chrono::seconds(40);
     while (!done && chrono::steady_clock::now() < deadline) {
         mcp::processHttpQueue();
-        mcp::drainDeferredResponses();
+        mcp::internal::drainDeferredResponses();
         this_thread::sleep_for(chrono::milliseconds(1));
     }
     check("finished before the deadline", done.load());

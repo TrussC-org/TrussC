@@ -13,20 +13,80 @@ By enabling MCP mode, your app becomes a "tool" for AI, enabling:
 
 ## Enabling MCP Mode
 
-To start your app in MCP mode, set the `TRUSSC_MCP` environment variable to `1`.
+In v0.8, registration declares tools; code or a dev build opens access.
+The grant is `mcp::ToolLevel::Public` (default), `ReadOnly`, or `Control`.
+`Control` includes `ReadOnly`. Each `tools/list` and `tools/call` checks the
+current grant; a hidden tool returns an error naming the required and current
+levels. Registration order does not matter, and the grant can change at runtime.
+
+For development:
 
 ```bash
-# Auto-assign port (printed on startup, see below)
-TRUSSC_MCP=1 ./myApp
-
-# Or specify a port (a guaranteed, known port)
-TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./myApp
+trusscli run --mcp
+# Use a known port if your client needs one:
+TRUSSC_MCP_PORT=8080 trusscli run --mcp
 ```
 
-When enabled:
-1. An **HTTP server** starts on the specified port (or an OS-assigned port).
-2. **Inspection tools** (`tc_get_screenshot`, `tc_save_screenshot`) are automatically registered.
-3. Once the port is bound, the server endpoint URL is printed: `[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp`. The line is a Logger Notice, so it also reaches the log file (`TRUSSC_LOG_FILE`) and `onLog` listeners; on the console it goes to stdout, and it is hidden when the console level is Warning or higher. In v0.7 the same line is also written raw to stderr, as before (that copy is removed in v0.8.0). For a port that does not depend on reading this line, set `TRUSSC_MCP_PORT`.
+`trusscli build --mcp` / `run --mcp` set the CMake option `TRUSSC_MCP_DEV=ON`.
+A build without `--mcp` explicitly sets it OFF. Dev builds grant `Control`,
+start the server automatically, show `[MCP]` in the window title, and log a
+startup warning. Code cannot lower the dev build's grant. Use ordinary builds
+for distributed apps and production installations.
+
+A production app grants inspection in `setup()` (use `Control` for input and
+scene changes):
+
+```cpp
+void tcApp::setup() {
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
+}
+```
+
+This opens the HTTP listener on `127.0.0.1`, using `TRUSSC_MCP_PORT` or an
+OS-assigned port. `getToolLevel()` reports the grant; `isDebuggerEnabled()`
+means the grant is at least `Control`. The grant belongs to the host across
+hot reloads. Registering a tool or resource alone never starts the listener.
+To serve only your own Public tools, call `mcp::startHttpServer()` explicitly.
+Web builds have no HTTP listener.
+
+### Environment and supervisors
+
+Environment variables configure, close, or open the loopback health endpoint;
+all other access needs code or a dev build.
+
+| Variable | v0.8 behavior |
+|----------|---------------|
+| `TRUSSC_MCP=1` | No longer opens inspection/control tools. In a default Public app, opens loopback health only |
+| `TRUSSC_MCP_PORT` | Chooses the port (0 = OS-assigned); at Public also requests loopback health only |
+| `TRUSSC_MCP=0` | Prevents the listener from starting, including in dev builds |
+| `TRUSSC_MCP_HOST`, `TRUSSC_MCP_TOKEN` | Honored only by dev builds; ordinary apps choose these in code |
+
+With neither `TRUSSC_MCP=1` nor `TRUSSC_MCP_PORT`, an ordinary Public app
+listens on nothing. The environment-opened health endpoint exposes only
+`tc_get_health`, including `toolLevel: "Public"` and the build kind; it exposes
+no custom tools, resources, screenshots, status, or alerts. Startup logs one
+Notice explaining that the supervisor gets logs, restart and hang detection,
+and how to grant ReadOnly for screenshots and status. `TRUSSC_LOG_FILE` works
+independently of MCP. Supervisors can collect logs and restart an app even
+when there is no listener; a health reply additionally enables hang detection.
+Use `tc_get_health.toolLevel` (`Public`, `ReadOnly`, `Control`) and `tools/list`
+to show the access available for each run.
+
+A loopback supervisor such as anchorbolt keeps passing `TRUSSC_MCP_PORT`.
+Health monitoring needs zero code changes; screenshots and app-published status
+need the one-line grant above, or `Control` for input. HOST/TOKEN are not
+involved in that loopback setup.
+
+The bound endpoint is logged as a Notice and reaches `TRUSSC_LOG_FILE` and
+`onLog`. Use a configured port when the client cannot read Notice-level logs.
+
+### Compatibility until v1.0.0
+
+`registerInspectionTools()` is deprecated in favor of `setToolLevel(ReadOnly)`;
+`registerControlTools()` and `registerDebuggerTools()` are deprecated in favor
+of `setToolLevel(Control)`. `enableDebugger()` remains a deprecated no-op;
+replace it with the appropriate grant. All four aliases are scheduled for
+removal at v1.0.0. The environment change is breaking in v0.8.0.
 
 ### Related: `TRUSSC_LOG_FILE`
 
@@ -80,13 +140,12 @@ TrussC uses **HTTP transport** for MCP. All JSON-RPC messages are sent as HTTP P
 Tool names are namespaced by origin, so the framework never collides with
 your own tools:
 
-- **`tc_*`** — provided by TrussC core (registered by default, or generated
-  by core sugar like `mcp::status()`)
-- **`tcx_<addon>_*`** — provided by an official addon (e.g. `tcx_imgui_click`)
-- **anything else** — yours; custom tools created with `mcp::tool()` should
-  NOT use these prefixes
+- **`tc_`** is reserved for core. `mcp::tool()` rejects these names with an
+  error log and does not register them.
+- Everything else is yours, including **`tcx_`**. Addons conventionally use
+  `tcx_<addon>_*`, but the prefix is free for app and third-party tools too.
 
-### Inspection Tools (always available in MCP mode)
+### Inspection Tools (ReadOnly, except Public health)
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236). A secondary window is captured inside its own frame, so it must be visible: see [Hidden secondary windows](#hidden-secondary-windows) |
@@ -95,7 +154,7 @@ your own tools:
 | `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `playingSounds` `[{slot, path (as given, the same string as `getPath()` and the logs, UTF-8), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the playback's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, polyphonyLimit, streamLimit, decoderError, notRunning}` (plays refused since startup; `polyphonyLimit` = every playback slot busy); `thread` `{cpuUsage, cpuUsagePeak}` (fraction of audio-thread time: mix time / audio time over ~0.5 s of audio, 1.0 = a callback took as long as the audio it produced; `cpuUsagePeak` = the worst single callback, > 1 = a dropout); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getPlayingSounds()` |
 | `tc_get_audio_spectrum` | `n`?, `window`?, `channels`?, `fmin`?, `fmax`?, `peaks`? | Full output FFT: `n` is a power of two from 64 up to the two-second ring length (default 1024); `window` is `hann` (default) or `blackmanharris`; `channels` is `mix` (default, all-channel average) or `each`; `peaks` defaults to 3. Returns `{sampleRate, n, binHz, framesWritten, channels: [{peak, rms, peaks: [{hz, dbfs}], spectrum}]}`. Peak/RMS are linear; spectrum is amplitude dBFS rounded to one decimal, with `null` for zero amplitude (−∞). All n/2+1 bins are returned unless inclusive `fmin`/`fmax` bounds select a range. Bin frequencies start at `ceil(fmin / binHz) * binHz`. Peaks use coherent-gain normalization and frequency interpolation. |
 | `tc_save_audio_capture` | `path`, `seconds`? | Save the last `seconds` (default 1.0), ending at the call, as float32 WAV. Returns `{path, sampleRate, channels, frames, framesWritten}`. Relative paths resolve through `getDataPath()`; missing directories are created; paths without a `.wav` extension get `.wav` appended with a log warning. Duration is capped by the two-second ring and available history. Use `AudioRecorder` for longer recordings. |
-| `tc_get_health` | (none) | Lightweight liveness snapshot: `{fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, mainQueuePending, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `mainQueuePending` is how many `runOnMainThread` / `Deliver::Main` calls this frame's drain started with (each frame runs only those, so frames keep starting; a number that keeps growing means workers queue faster than the app runs them); `memoryBytes` is sokol-tracked allocations only |
+| `tc_get_health` | (none) | Lightweight liveness snapshot: `{buildKind, toolLevel, fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, mainQueuePending, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `mainQueuePending` is how many `runOnMainThread` / `Deliver::Main` calls this frame's drain started with (each frame runs only those, so frames keep starting; a number that keeps growing means workers queue faster than the app runs them); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
 | `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
@@ -137,20 +196,18 @@ capture it inside its own frame. So:
 - The main window (index 0) keeps running while hidden, so none of this
   applies to it.
 
-### Recording Tools (always available in MCP mode)
+### Recording Tools (Control)
 
-The video counterpart of `tc_save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Always registered when MCP is enabled, but unlike the inspection tools these *write* (start/stop a recording), so they are listed separately.
+The video counterpart of `tc_save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Registered independently of exposure; these require Control because they start/stop a recording.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
 | `tc_start_recording` | `path`, `duration`, `fps`, `codec` (all optional) | Start recording the window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
 | `tc_stop_recording` | (none) | Stop the current recording and finalize the file. A manual stop **always wins** over a pending fixed `duration` — it finalizes immediately at the current length. Returns `{status, recording:false, path, frames, length}` (`length` = measured output seconds). Idle is not an error: returns `{status:"ok", recording:false, message:"not recording"}` |
 
-### Control Tools (opt-in via `mcp::registerControlTools()`)
+### Control Tools (Control)
 
-Everything that lets the outside *operate* the app — the always-on set above is
-strictly read-only. (Renamed from `registerDebuggerTools()` — the old name still
-works, deprecated until v1.0.0.)
+Tools that operate the app require a Control grant.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
@@ -190,21 +247,16 @@ GUI (e.g. with the `tcxNodeInspector` addon's gizmo), then `tc_get_node_tree` to
 read the exact values back and bake them into code — or drive the scene the
 other way with `tc_set_node_members`.
 
-To enable the control tools, call `mcp::registerControlTools()` in your `setup()`.
-Registering the tools *is* the opt-in — there is no separate enable step, and
-`mcp::isDebuggerEnabled()` will report `true` once they are registered:
-
-```cpp
-void tcApp::setup() {
-    mcp::registerControlTools();
-}
-```
-
-These tools are inert unless the MCP server is also running (`TRUSSC_MCP=1`).
+To enable these tools in a default build, call
+`mcp::setToolLevel(mcp::ToolLevel::Control)` in `setup()`.
+Dev builds already grant Control.
 
 ### ImGui Tools (requires tcxImGui addon)
 
-The **tcxImGui** addon provides additional MCP tools for AI agents to inspect and interact with ImGui widgets. To use these, add `tcxImGui` to your project via `trusscli addon add tcxImGui` or `addons.make`, then call `imguiSetup()` before `mcp::registerControlTools()`.
+Add `tcxImGui` via `trusscli addon add tcxImGui` or `addons.make`, and call
+`imguiSetup()`. It always registers the tools: widget/touched queries require
+ReadOnly; click/input/checkbox and resetting the touched record require Control.
+The grant can be set before or after `imguiSetup()`.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
@@ -230,6 +282,7 @@ dashboard.
 
 ```cpp
 void tcApp::setup() {
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly); // publish status to the supervisor
     mcp::status("scene",         [&] { return sceneName; });     // shown as-is
     mcp::statusGraph("visitors", [&] { return visitorCount; });  // plotted over time
     mcp::statusImage("entranceCam", [&] { return camPixels; });  // e.g. a webcam
@@ -255,7 +308,7 @@ mcp::alert("IR camera disconnected!");
 ```
 
 The message is written to the log (WARNING level) and queued; a supervisor
-drains the standard `tc_get_alerts` tool on its health cadence and forwards
+drains the ReadOnly `tc_get_alerts` tool on its health cadence and forwards
 each entry to its notification sinks (Slack / Discord / ntfy...), so an
 alert can literally end up on someone's phone. It is deliberately named
 **alert**, not notify: raise them for exceptional, human-relevant events,
@@ -270,17 +323,20 @@ You can easily expose your own application logic to AI using the `mcp::tool` bui
 #include <TrussC.h>
 
 void tcApp::setup() {
-    // Expose a function as an MCP tool
+    mcp::setToolLevel(mcp::ToolLevel::Control);
+
+    // Register a mutating tool; exposure follows the current grant
     mcp::tool("place_stone", "Place a stone on the board")
+        .level(mcp::ToolLevel::Control)
         .arg<int>("x", "X coordinate (0-7)")
         .arg<int>("y", "Y coordinate (0-7)")
-        .bind([this](int x, int y) {
+        .bind(std::function<json(int, int)>([this](int x, int y) {
             bool success = board.place(x, y);
             return json{
                 {"status", success ? "ok" : "error"},
                 {"turn", (int)board.currentTurn}
             };
-        });
+        }));
 
     // Expose state as an MCP resource
     mcp::resource("app://board", "Current Board State")
@@ -290,6 +346,13 @@ void tcApp::setup() {
         });
 }
 ```
+
+Tools default to Public when `.level()` is omitted. Mark mutating tools
+Control and inspection tools ReadOnly (or exclude development-only tools with
+a preprocessor guard). Core and official addons declare every tool's level.
+Third-party addons choose their own levels: review their startup exposure log
+or `tools/list`. In ordinary builds without a code grant, core and official
+addons expose only the loopback health exception described above.
 
 ## Protocol Details
 
@@ -361,8 +424,8 @@ the metadata:
 ## Testing with curl
 
 ```bash
-# Start app in MCP mode
-TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./bin/MyApp.app/Contents/MacOS/MyApp &
+# Build and start with Control for this development session
+TRUSSC_MCP_PORT=8080 trusscli run --mcp &
 
 # Initialize
 curl -X POST http://127.0.0.1:8080/mcp \
@@ -374,7 +437,7 @@ curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":2,"params":{"name":"tc_save_screenshot","arguments":{"path":"/tmp/test.png"}}}'
 
-# Mouse click (requires registerControlTools())
+# Mouse click (requires Control)
 curl -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"tc_mouse_click","arguments":{"x":100,"y":200}}}'
@@ -398,7 +461,8 @@ curl -X POST http://127.0.0.1:8080/mcp \
 
 ```bash
 # Start app, wait, take screenshot, then kill
-TRUSSC_MCP=1 TRUSSC_MCP_PORT=8080 ./bin/myApp.app/Contents/MacOS/myApp &
+# myApp was built with trusscli build --mcp
+TRUSSC_MCP_PORT=8080 ./bin/myApp.app/Contents/MacOS/myApp &
 sleep 2
 curl -s -X POST http://127.0.0.1:8080/mcp \
   -H "Content-Type: application/json" \
@@ -436,13 +500,14 @@ Configure your MCP client with the HTTP URL:
 
 ## Security Model
 
-| Category | Tools | Enabled by |
-|----------|-------|------------|
-| Inspection (read-only) | `tc_get_screenshot`, `tc_save_screenshot`, `tc_get_health`, `tc_get_audio_state`, `tc_get_audio_spectrum`, `tc_save_audio_capture`, `tc_get_node_tree`, `tc_get_selected_node` | Automatic when MCP is enabled |
-| Recording (window capture to video) | `tc_start_recording`, `tc_stop_recording` | Automatic when MCP is enabled |
-| Control (input injection / scene mutation / quit) | `tc_mouse_click`, `tc_mouse_press`, `tc_mouse_release`, `tc_key_press`, `tc_mouse_move`, `tc_mouse_scroll`, `tc_key_release`, `tc_select_node`, `tc_set_node_members`, `tc_quit` | `mcp::registerControlTools()` |
-| ImGui (widget reading / interaction) | `tcx_imgui_get_widgets`, `tcx_imgui_get_touched`, `tcx_imgui_reset_touched` (read-only: the reset clears the record, not app state), `tcx_imgui_click`, `tcx_imgui_input`, `tcx_imgui_checkbox` | Requires tcxImGui addon + `mcp::registerControlTools()` |
-| Custom | `mcp::tool(...)` | Your code |
+| Category | Required grant |
+|----------|----------------|
+| `tc_get_health` | Public; also the sole tool on the environment-opened health endpoint |
+| Inspection, screenshots, audio capture, status and alerts | ReadOnly |
+| Recording, input, scene mutation and quit | Control |
+| ImGui widget/touched queries | ReadOnly |
+| ImGui interaction and touched-record reset | Control |
+| Custom tools | Declared `.level()`, default Public; explicit listener opt-in still required |
 
 ### Network exposure
 
@@ -465,13 +530,20 @@ spec requires):
 | An `Origin` header, if present, must be the server's own (`http://localhost:PORT`, `http://127.0.0.1:PORT`, `http://[::1]:PORT`) — a browser page on any other origin, including another localhost port, is refused. Native MCP clients send none | 403 |
 | `POST /mcp` must be `Content-Type: application/json` (parameters such as `; charset=utf-8` are fine) | 415 |
 
-To expose it directly instead, set both:
+In a dev build, direct exposure can be configured with both:
 
 | Variable | Effect |
 |----------|--------|
 | `TRUSSC_MCP_HOST` | Bind address — e.g. `0.0.0.0` for all interfaces (default `127.0.0.1`) |
 | `TRUSSC_MCP_TOKEN` | Bearer token required on every `/mcp` request (`Authorization: Bearer <token>`) |
 
-Binding a non-loopback host **without** `TRUSSC_MCP_TOKEN` is refused
+Binding a non-loopback host **without** a token is refused
 (fail-closed) — the MCP surface can inject input and mutate the scene, so it is
 never silently exposed to the network.
+
+In ordinary builds HOST/TOKEN environment variables are ignored. Choose an
+address in code with `mcp::startHttpServer(port, host, token)` **before**
+`setToolLevel()`. The first opener decides the address: a later call with
+different host, port or token logs an Error and changes nothing; matching
+parameters are a no-op. A grant opens loopback automatically, so granting
+first cannot be followed by silently changing the address.

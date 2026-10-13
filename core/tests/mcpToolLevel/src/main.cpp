@@ -16,7 +16,7 @@ void check(const char* name, bool ok) {
 }
 
 json request(const std::string& method, const json& params = json::object()) {
-    return json::parse(mcp::Server::instance().processMessage(
+    return json::parse(mcp::internal::Server::instance().processMessage(
         json{{"jsonrpc", "2.0"}, {"id", "level-test"}, {"method", method},
              {"params", params}}.dump()));
 }
@@ -55,8 +55,8 @@ struct EnvGrantApp : App {
               mcp::getToolLevel() == (grantInSetup ? mcp::ToolLevel::Control : expectedEnvGrant));
         check("Control exposure follows the final app grant",
               bool(listed().count("tc_mouse_click")) == mcp::isDebuggerEnabled());
-        check("mainWindowTitle reflects build kind", mcp::detail::mainWindowTitle("MCP startup test") ==
-              (mcp::detail::isDevBuild() ? "MCP startup test [MCP]" : "MCP startup test"));
+        check("mainWindowTitle reflects build kind", mcp::internal::mainWindowTitle("MCP startup test") ==
+              (mcp::internal::isDevBuild() ? "MCP startup test [MCP]" : "MCP startup test"));
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         if (sapp_x11_get_display()) {
             auto nativeTitle = [] {
@@ -69,17 +69,17 @@ struct EnvGrantApp : App {
                 return result;
             };
             check("initial native title reflects build kind", nativeTitle() ==
-                  mcp::detail::mainWindowTitle("MCP startup test"));
+                  mcp::internal::mainWindowTitle("MCP startup test"));
             setWindowTitle("Retitled");
             check("native main window retains dev marker after retitle", nativeTitle() ==
-                  mcp::detail::mainWindowTitle("Retitled"));
+                  mcp::internal::mainWindowTitle("Retitled"));
         }
 #endif
     }
     void update() override {
         envUpdateRan = true;
         check("startup opens HTTP unless environment disables it", (mcp::getHttpPort() > 0) ==
-              !mcp::detail::environmentClosesMcp());
+              !mcp::internal::environmentClosesMcp());
         if (mcp::getToolLevel() == mcp::ToolLevel::Public)
             check("startup environment exposes health only", listed() == std::set<std::string>{"tc_get_health"});
         exitApp();
@@ -88,9 +88,9 @@ struct EnvGrantApp : App {
 
 int envStartup(const std::string& mode) {
     const char* envMcp = std::getenv("TRUSSC_MCP");
-    check("startup test has TRUSSC_MCP=1 or is a dev build", mcp::detail::isDevBuild() ||
+    check("startup test has TRUSSC_MCP=1 or is a dev build", mcp::internal::isDevBuild() ||
           (envMcp && std::string(envMcp) == "1"));
-    if (mcp::detail::isDevBuild()) expectedEnvGrant = mcp::ToolLevel::Control;
+    if (mcp::internal::isDevBuild()) expectedEnvGrant = mcp::ToolLevel::Control;
     if (failures) return 1;
     grantInSetup = mode == "--env-control-setup";
     if (mode == "--env-control-before") {
@@ -158,11 +158,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("initial grant is Public", mcp::getToolLevel() == mcp::ToolLevel::Public);
     // First use may be from a hot reload guest; core tools must remain host-owned.
     int owner;
-    mcp::detail::setRegistrationOwner(&owner);
+    mcp::internal::setRegistrationOwner(&owner);
     check("Public lists only built-in health", listed() == std::set<std::string>{"tc_get_health"});
-    check("core initialization preserves registration owner", mcp::detail::registrationOwner() == &owner);
+    check("core initialization preserves registration owner", mcp::internal::registrationOwner() == &owner);
     mcp::tool("guest_level_probe", "").bind([]() -> json { return true; });
-    mcp::detail::setRegistrationOwner(nullptr);
+    mcp::internal::setRegistrationOwner(nullptr);
 
     int invoked = 0;
     auto handler = [&]() -> json { ++invoked; return true; };
@@ -230,12 +230,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("raising level exposes existing registrations", listed().count("registered_later") && callable("registered_later"));
     mcp::tool("after_grant", "").level(mcp::ToolLevel::Control).bind(handler);
     check("register after grant is immediately exposed", listed().count("after_grant") && callable("after_grant"));
-    mcp::detail::removeRegistrationsOwnedBy(&owner);
+    mcp::internal::removeRegistrationsOwnedBy(&owner);
     check("reload cleanup drops guest tool", !mcp::hasTool("guest_level_probe"));
     check("reload cleanup preserves grant and core tools", mcp::getToolLevel() == mcp::ToolLevel::Control && mcp::hasTool("tc_get_health") && mcp::hasTool("tc_mouse_click"));
     aliases();
 #ifndef __EMSCRIPTEN__
-    check("TRUSSC_MCP=0 prevents HTTP even after code grants", mcp::getHttpPort() == 0 && !mcp::detail::getHttpServer());
+    check("TRUSSC_MCP=0 prevents HTTP even after code grants", mcp::getHttpPort() == 0 && !mcp::internal::getHttpServer());
 #endif
     return failures ? 1 : 0;
 }

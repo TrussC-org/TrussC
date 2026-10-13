@@ -40,6 +40,7 @@ namespace trussc {
 namespace mcp {
 
 // Tools are registered independently of the level granted by the host.
+/// Required tool grant: Public < ReadOnly < Control.
 enum class ToolLevel {
     Public,   // Health only for built-in tools; user tools default to Public.
     ReadOnly, // Observe the app (captures may write to disk).
@@ -48,11 +49,13 @@ enum class ToolLevel {
 
 // Defined in tcMCP.cpp: one host setting shared with hot reload guests.
 // The level API and list/call checks apply on every platform.
+/// Set the host grant; ReadOnly/Control opens loopback HTTP unless the environment closes it.
 void setToolLevel(ToolLevel level);
+/// Return the current host grant (shared across hot reloads).
 ToolLevel getToolLevel();
 
+namespace internal {
 class Server;
-namespace detail {
 void registerStandardTools(Server& server);
 // Host-owned build/start policy, also shared with hot reload guests.
 bool isDevBuild();
@@ -71,7 +74,7 @@ inline const char* toolLevelName(ToolLevel level) {
     }
     return "Public";
 }
-} // namespace detail
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Deferred tool responses
@@ -90,7 +93,7 @@ inline const char* toolLevelName(ToolLevel level) {
 // there — #243). The main window drains untargeted entries from its afterFrame
 // listener; each secondary window drains its own from its tick.
 
-namespace detail {
+namespace internal {
 
 // Replies preserve valid UTF-8 and silently replace malformed bytes with U+FFFD.
 inline std::string dumpReply(const json& j) {
@@ -167,7 +170,7 @@ inline void setDeferralOwner(const void* owner) { deferralState().owner = owner;
 
 std::vector<DeferredResponse>& deferredResponses();
 
-} // namespace detail
+} // namespace internal
 
 // Compatibility query for apps and supervisors that detect input control.
 inline bool isDebuggerEnabled() {
@@ -181,9 +184,9 @@ inline bool isDebuggerEnabled() {
 // producer then runs inside that window's tick, with its context current.
 inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
                                            const void* targetWindow = nullptr) {
-    detail::deferralState().requested = true;
-    detail::deferralState().produce = std::move(produce);
-    detail::deferralState().target = targetWindow;
+    internal::deferralState().requested = true;
+    internal::deferralState().produce = std::move(produce);
+    internal::deferralState().target = targetWindow;
 }
 
 // Two-stage variant for tools whose result is expensive to build (e.g.
@@ -195,10 +198,12 @@ inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
 // `targetWindow`: as for deferToolResultUntilAfterFrame().
 inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainStage,
                                     const void* targetWindow = nullptr) {
-    detail::deferralState().twoStageRequested = true;
-    detail::deferralState().produceTwoStage = std::move(mainStage);
-    detail::deferralState().target = targetWindow;
+    internal::deferralState().twoStageRequested = true;
+    internal::deferralState().produceTwoStage = std::move(mainStage);
+    internal::deferralState().target = targetWindow;
 }
+
+namespace internal {
 
 // Run the deferred main stages aimed at `targetWindow` (null = the main
 // window) and unblock their HTTP workers. Call right after that window's
@@ -207,23 +212,23 @@ inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainS
 // returned thunk executes on the HTTP worker. The main window's call also
 // answers targeted entries that ran past their deadline.
 inline void drainDeferredResponses(const void* targetWindow = nullptr) {
-    auto& list = detail::deferredResponses();
+    auto& list = internal::deferredResponses();
     if (list.empty()) return;
     const auto now = std::chrono::steady_clock::now();
-    std::vector<detail::DeferredResponse> keep;
+    std::vector<internal::DeferredResponse> keep;
     for (auto& d : list) {
         if (d.target == targetWindow) {
-            detail::ReplyThunk thunk;
+            internal::ReplyThunk thunk;
             try {
                 thunk = d.makeEnvelope();
             } catch (const std::exception& e) {
                 const std::string message = std::string("deferred response failed: ") + e.what();
-                std::string err = detail::toolError(d.id, message);
+                std::string err = internal::toolError(d.id, message);
                 thunk = [err]() { return err; };
             }
             d.response->set_value(std::move(thunk));
         } else if (!targetWindow && d.target && now >= d.deadline) {
-            std::string reply = detail::toolError(d.id,
+            std::string reply = internal::toolError(d.id,
                 "the window rendered no frame within 5 s (minimized, hidden or closed?)");
             d.response->set_value([reply]() { return reply; });
         } else {
@@ -233,7 +238,9 @@ inline void drainDeferredResponses(const void* targetWindow = nullptr) {
     list.swap(keep);
 }
 
-inline bool hasDeferredResponses() { return !detail::deferredResponses().empty(); }
+inline bool hasDeferredResponses() { return !internal::deferredResponses().empty(); }
+
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // Types & Interfaces
@@ -249,15 +256,16 @@ inline bool hasDeferredResponses() { return !detail::deferredResponses().empty()
 // App is deleted. Plain apps never set one (tag null = permanent).
 // Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
 // registers under it, so they must see the same one on every platform.
-namespace detail {
+namespace internal {
 const void*& registrationOwner();
 // Registries defined elsewhere (the status registries of tcStandardTools.h,
 // in tcMCP.cpp) hook their own cleanup in here the first time they are used.
 std::vector<std::function<void(const void*)>>& ownerCleanupHooks();
 inline void setRegistrationOwner(const void* owner) { registrationOwner() = owner; }
 inline void removeRegistrationsOwnedBy(const void* owner);   // after Server
-} // namespace detail
+} // namespace internal
 
+/// A named argument in a tool input schema.
 struct ToolArg {
     std::string name;
     std::string type; // "string", "int", "float", "boolean", "object", "array"
@@ -265,6 +273,7 @@ struct ToolArg {
     bool required = true;
 };
 
+/// Tool metadata, required level and main-thread handler.
 class Tool {
 public:
     std::string name;
@@ -297,6 +306,7 @@ public:
     }
 };
 
+/// URI-addressed resource metadata and text producer.
 class Resource {
 public:
     std::string uri;
@@ -310,6 +320,8 @@ public:
 // ---------------------------------------------------------------------------
 // MCP Server Core
 // ---------------------------------------------------------------------------
+
+namespace internal {
 
 class Server {
 public:
@@ -326,12 +338,12 @@ public:
             logWarning("MCP") << "tool '" << tool.name << "' re-registered; previous handler replaced";
         }
         tools_[tool.name] = tool;
-        tools_[tool.name].owner = detail::registrationOwner();
+        tools_[tool.name].owner = internal::registrationOwner();
     }
 
     void registerResource(const Resource& res) {
         resources_[res.uri] = res;
-        resources_[res.uri].owner = detail::registrationOwner();
+        resources_[res.uri].owner = internal::registrationOwner();
     }
 
     bool hasTool(const std::string& name) const { return tools_.count(name) != 0; }
@@ -413,20 +425,20 @@ private:
                 {"resources", {}}
             }}
         };
-        return detail::makeResult(id, result);
+        return internal::makeResult(id, result);
     }
 
     std::string handleToolsList(const json& req, const json& id) {
         json toolList = json::array();
         for (const auto& [name, tool] : tools_) {
-            if (tool.level > getToolLevel() || (detail::healthOnly() && name != "tc_get_health")) continue;
+            if (tool.level > getToolLevel() || (internal::healthOnly() && name != "tc_get_health")) continue;
             toolList.push_back({
                 {"name", tool.name},
                 {"description", tool.description},
                 {"inputSchema", tool.getSchema()}
             });
         }
-        return detail::makeResult(id, {{"tools", toolList}});
+        return internal::makeResult(id, {{"tools", toolList}});
     }
 
     std::string handleToolsCall(const json& req, const json& id) {
@@ -439,14 +451,14 @@ private:
         }
 
         const auto granted = getToolLevel();
-        if (detail::healthOnly() && name != "tc_get_health" && tools_.at(name).level == ToolLevel::Public) {
-            return detail::toolError(id, "Tool '" + name +
+        if (internal::healthOnly() && name != "tc_get_health" && tools_.at(name).level == ToolLevel::Public) {
+            return internal::toolError(id, "Tool '" + name +
                 "' requires an explicit code opt-in, current level is Public (health only)");
         }
         if (tools_.at(name).level > granted) {
-            return detail::toolError(id, "Tool '" + name + "' requires " +
-                detail::toolLevelName(tools_.at(name).level) +
-                ", current level is " + detail::toolLevelName(granted));
+            return internal::toolError(id, "Tool '" + name + "' requires " +
+                internal::toolLevelName(tools_.at(name).level) +
+                ", current level is " + internal::toolLevelName(granted));
         }
 
         // Wrap a tool's content json into a full JSON-RPC result string.
@@ -457,14 +469,14 @@ private:
             } else {
                 result = {{"content", {{
                     {"type", "text"},
-                    {"text", detail::dumpReply(content)}
+                    {"text", internal::dumpReply(content)}
                 }}}};
             }
-            return detail::makeResult(id, result);
+            return internal::makeResult(id, result);
         };
 
         try {
-            auto& ds = detail::deferralState();
+            auto& ds = internal::deferralState();
             ds.requested = false;
             ds.twoStageRequested = false;
             ds.id = id;
@@ -481,7 +493,7 @@ private:
                 ds.hasEnvelope = true;
                 // Everything runs on main at drain time; the worker thunk just
                 // hands back the prebuilt string.
-                ds.envelope = [formatResult, produce]() -> detail::ReplyThunk {
+                ds.envelope = [formatResult, produce]() -> internal::ReplyThunk {
                     std::string reply = formatResult(produce());
                     return [reply]() { return reply; };
                 };
@@ -495,13 +507,13 @@ private:
                 auto mainStage = std::move(ds.produceTwoStage);
                 ds.twoStageRequested = false;
                 ds.hasEnvelope = true;
-                ds.envelope = [id, formatResult, mainStage]() -> detail::ReplyThunk {
+                ds.envelope = [id, formatResult, mainStage]() -> internal::ReplyThunk {
                     std::function<json()> workerStage = mainStage();
                     return [id, formatResult, workerStage]() -> std::string {
                         try {
                             return formatResult(workerStage());
                         } catch (const std::exception& e) {
-                            return detail::toolError(id, std::string("deferred worker stage failed: ") + e.what());
+                            return internal::toolError(id, std::string("deferred worker stage failed: ") + e.what());
                         }
                     };
                 };
@@ -511,16 +523,16 @@ private:
             return formatResult(content);
 
         } catch (const std::exception& e) {
-            return detail::toolError(id, std::string("Tool execution error: ") + e.what());
+            return internal::toolError(id, std::string("Tool execution error: ") + e.what());
         } catch (...) {
-            return detail::toolError(id, "Tool execution error: unknown exception");
+            return internal::toolError(id, "Tool execution error: unknown exception");
         }
     }
 
     std::string handleResourcesList(const json& req, const json& id) {
         json resList = json::array();
         for (const auto& [uri, res] : resources_) {
-            if (detail::healthOnly()) continue;
+            if (internal::healthOnly()) continue;
             resList.push_back({
                 {"uri", res.uri},
                 {"name", res.name},
@@ -528,12 +540,12 @@ private:
                 {"mimeType", res.mimeType.empty() ? nullptr : json(res.mimeType)}
             });
         }
-        return detail::makeResult(id, {{"resources", resList}});
+        return internal::makeResult(id, {{"resources", resList}});
     }
 
     std::string handleResourcesRead(const json& req, const json& id) {
         std::string uri = req["params"]["uri"];
-        if (detail::healthOnly())
+        if (internal::healthOnly())
             return makeError(id, -32000, "Resources require an explicit code opt-in (health only)");
 
         if (resources_.find(uri) == resources_.end()) {
@@ -547,7 +559,7 @@ private:
                 {"mimeType", resources_[uri].mimeType}
             };
             resourceContent["text"] = content;
-            return detail::makeResult(id, {{"contents", {resourceContent}}});
+            return internal::makeResult(id, {{"contents", {resourceContent}}});
 
         } catch (const std::exception& e) {
             return makeError(id, -32000, std::string("Resource read error: ") + e.what());
@@ -564,9 +576,11 @@ private:
                 {"message", message}
             }}
         };
-        return detail::dumpReply(res);
+        return internal::dumpReply(res);
     }
 };
+
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // HTTP Server (main thread synchronization via ThreadChannel + promise)
@@ -577,12 +591,12 @@ private:
 struct McpRequest {
     std::string body;
     // Carries a thunk the HTTP worker executes to obtain the reply string —
-    // see detail::ReplyThunk. Normal replies are prebuilt (thunk just returns
+    // see internal::ReplyThunk. Normal replies are prebuilt (thunk just returns
     // them); two-stage tool replies do their heavy encode inside the thunk.
-    std::shared_ptr<std::promise<detail::ReplyThunk>> response;
+    std::shared_ptr<std::promise<internal::ReplyThunk>> response;
 };
 
-namespace detail {
+namespace internal {
 
 // HTTP server state, one per process (defined in tcMCP.cpp, see above).
 ThreadChannel<McpRequest>& getHttpChannel();
@@ -709,14 +723,14 @@ inline bool checkRequest(const httplib::Request& req, httplib::Response& res, bo
     return true;
 }
 
-} // namespace detail
+} // namespace internal
 
-namespace detail {
+namespace internal {
 // Serializes enqueue against close + drain. A worker arriving during shutdown
 // receives a reply directly; it must never wait on an unserviceable promise.
 std::mutex& httpQueueMutex();
 inline std::string normalExitMessage() {
-    const auto reason = internal::exitReason();
+    const auto reason = trussc::internal::exitReason();
     return "the app is exiting normally" + (reason.empty() ? std::string() : " (reason=" + reason + ")");
 }
 inline std::string normalExitReply(const std::string& body) {
@@ -735,7 +749,7 @@ inline void enqueueHttpRequest(McpRequest request) {
         request.response->set_value([reply] { return reply; });
     }
 }
-} // namespace detail
+} // namespace internal
 
 inline void stopHttpServer();
 
@@ -749,7 +763,7 @@ inline void stopHttpServer();
 //   token : bearer token required on /mcp. MUST be non-empty when host is not
 //           a loopback address — binding non-local without a token is refused
 //           (fail-closed) so input injection is never silently network-exposed.
-namespace detail {
+namespace internal {
 inline void startHttpServerImpl(int port, const std::string& host,
                                 const std::string& token, bool healthEndpoint,
                                 const char* opener) {
@@ -759,7 +773,7 @@ inline void startHttpServerImpl(int port, const std::string& host,
     }
     // An explicit start opens Public app tools even on an existing health listener.
     if (!healthEndpoint) healthOnlyEndpoint() = false;
-    auto& svr = detail::getHttpServer();
+    auto& svr = internal::getHttpServer();
     if (svr) return; // Already running
 
     const bool isLoopback = (host == "localhost" || host == "127.0.0.1" || host == "::1");
@@ -770,8 +784,8 @@ inline void startHttpServerImpl(int port, const std::string& host,
                "surface can inject input and mutate the scene).";
         return;
     }
-    detail::mcpAuthToken() = token;
-    detail::mcpLoopbackOnly().store(isLoopback);
+    internal::mcpAuthToken() = token;
+    internal::mcpLoopbackOnly().store(isLoopback);
 
     svr = std::make_unique<httplib::Server>();
 
@@ -793,37 +807,37 @@ inline void startHttpServerImpl(int port, const std::string& host,
     // ignore CORS, while a wildcard origin would let any web page in the user's
     // browser drive the local server. (OPTIONS preflight handler dropped too.)
     svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
-        if (!detail::checkRequest(req, res, true)) return;
+        if (!internal::checkRequest(req, res, true)) return;
 
         // Bearer auth when a token is configured (always so for non-loopback).
-        const std::string& tok = detail::mcpAuthToken();
+        const std::string& tok = internal::mcpAuthToken();
         if (!tok.empty()) {
             auto it = req.headers.find("Authorization");
-            if (it == req.headers.end() || !detail::bearerTokenMatches(it->second, tok)) {
+            if (it == req.headers.end() || !internal::bearerTokenMatches(it->second, tok)) {
                 res.status = 401;
                 res.set_content("{\"error\":\"unauthorized\"}", "application/json");
                 return;
             }
         }
 
-        auto p = std::make_shared<std::promise<detail::ReplyThunk>>();
+        auto p = std::make_shared<std::promise<internal::ReplyThunk>>();
         auto f = p->get_future();
 
         McpRequest mcpReq;
         mcpReq.body = req.body;
         mcpReq.response = p;
 
-        detail::enqueueHttpRequest(std::move(mcpReq));
+        internal::enqueueHttpRequest(std::move(mcpReq));
 
         // Block until main thread processes the request, then execute the
         // reply thunk HERE — heavy two-stage work (thumbnail encode etc.) runs
         // on this worker thread, not the frame loop.
-        detail::ReplyThunk thunk = f.get();
+        internal::ReplyThunk thunk = f.get();
         std::string result;
         try {
             result = thunk();
         } catch (const std::exception& e) {
-            result = detail::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
+            result = internal::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
         }
 
         res.set_content(result, "application/json");
@@ -831,13 +845,13 @@ inline void startHttpServerImpl(int port, const std::string& host,
 
     // GET / — Server info
     svr->Get("/", [](const httplib::Request& req, httplib::Response& res) {
-        if (!detail::checkRequest(req, res, false)) return;
+        if (!internal::checkRequest(req, res, false)) return;
         json info = {
             {"name", "TrussC MCP Server"},
             {"transport", "http"},
             {"endpoint", "/mcp"}
         };
-        res.set_content(detail::dumpReply(info), "application/json");
+        res.set_content(internal::dumpReply(info), "application/json");
     });
 
     int actualPort = port > 0 ? (svr->bind_to_port(host.c_str(), port) ? port : -1)
@@ -848,11 +862,11 @@ inline void startHttpServerImpl(int port, const std::string& host,
         return;
     }
     healthOnlyEndpoint() = healthEndpoint;
-    detail::resetHttpChannel();
-    detail::getHttpPort().store(actualPort);
+    internal::resetHttpChannel();
+    internal::getHttpPort().store(actualPort);
     httpListenerConfig() = {port, host, opener};
-    detail::getHttpThread() = std::make_unique<std::thread>([]() {
-        detail::getHttpServer()->listen_after_bind();
+    internal::getHttpThread() = std::make_unique<std::thread>([]() {
+        internal::getHttpServer()->listen_after_bind();
     });
     svr->wait_until_ready();
     // Binding and readiness complete on the caller's thread. Deliver the
@@ -864,7 +878,7 @@ inline void startHttpServerImpl(int port, const std::string& host,
     std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
               << actualPort << "/mcp" << std::endl;
 }
-} // namespace detail
+} // namespace internal
 
 // The first opener chooses the listener's address and token. To choose them
 // explicitly, call this before setToolLevel(). A later mismatched call logs
@@ -878,11 +892,11 @@ void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
 // Stop HTTP server
 inline void stopHttpServer() {
     {
-        std::lock_guard<std::mutex> lock(detail::httpQueueMutex());
-        auto queued = detail::getHttpChannel().receiveAll();
-        detail::getHttpChannel().close();
+        std::lock_guard<std::mutex> lock(internal::httpQueueMutex());
+        auto queued = internal::getHttpChannel().receiveAll();
+        internal::getHttpChannel().close();
         for (auto& request : queued) {
-            const auto reply = detail::normalExitReply(request.body);
+            const auto reply = internal::normalExitReply(request.body);
             request.response->set_value([reply] { return reply; });
         }
     }
@@ -890,58 +904,58 @@ inline void stopHttpServer() {
     // will be presented, so their producers would never run (and a blocked
     // worker would stall the server shutdown below).
     {
-        auto& list = detail::deferredResponses();
+        auto& list = internal::deferredResponses();
         for (auto& d : list) {
             // During an app exit, say so (with the reason); otherwise the
             // server was just stopped.
-            const std::string message = internal::exitReason().empty()
+            const std::string message = trussc::internal::exitReason().empty()
                 ? std::string("the MCP server shut down before the reply was produced")
-                : detail::normalExitMessage();
-            std::string reply = detail::toolError(d.id, message);
+                : internal::normalExitMessage();
+            std::string reply = internal::toolError(d.id, message);
             d.response->set_value([reply]() { return reply; });
         }
         list.clear();
     }
 
-    auto& svr = detail::getHttpServer();
+    auto& svr = internal::getHttpServer();
     if (svr) {
         svr->stop();
     }
 
-    detail::getHttpChannel().close();
+    internal::getHttpChannel().close();
 
-    auto& t = detail::getHttpThread();
+    auto& t = internal::getHttpThread();
     if (t && t->joinable()) {
         t->join();
     }
     t.reset();
     svr.reset();
-    detail::getHttpPort().store(0);
-    detail::explicitlyOpened() = false;
-    detail::healthOnlyEndpoint() = false;
+    internal::getHttpPort().store(0);
+    internal::explicitlyOpened() = false;
+    internal::healthOnlyEndpoint() = false;
 }
 
 // Process HTTP request queue (call every frame from main thread)
 inline void processHttpQueue() {
     McpRequest req;
-    while (detail::getHttpChannel().tryReceive(req)) {
-        auto& ds = detail::deferralState();
+    while (internal::getHttpChannel().tryReceive(req)) {
+        auto& ds = internal::deferralState();
         ds.hasEnvelope = false;
         ds.target = nullptr;
         ds.owner = nullptr;
-        std::string result = Server::instance().processMessage(req.body);
+        std::string result = internal::Server::instance().processMessage(req.body);
         if (ds.hasEnvelope) {
             // Tool deferred its reply until after present(): stash the promise
             // and answer it from drainDeferredResponses(). The HTTP worker stays
             // blocked on its future a few ms longer (correct, not a hang).
-            detail::DeferredResponse d;
+            internal::DeferredResponse d;
             d.id = std::move(ds.id);
             d.response = req.response;
             d.makeEnvelope = std::move(ds.envelope);
             d.target = ds.target;
-            d.deadline = std::chrono::steady_clock::now() + detail::kTargetedDeferralTimeout;
+            d.deadline = std::chrono::steady_clock::now() + internal::kTargetedDeferralTimeout;
             d.owner = ds.owner;
-            detail::deferredResponses().push_back(std::move(d));
+            internal::deferredResponses().push_back(std::move(d));
             ds.hasEnvelope = false;
             ds.target = nullptr;
             continue;
@@ -956,7 +970,7 @@ inline void processHttpQueue() {
 
 // Get the actual HTTP port (0 if not started)
 inline int getHttpPort() {
-    return detail::getHttpPort().load();
+    return internal::getHttpPort().load();
 }
 
 // Legacy no-op kept for source compatibility.
@@ -965,10 +979,10 @@ inline void enableDebugger() {}
 
 #endif // __EMSCRIPTEN__
 
-namespace detail {
+namespace internal {
 inline void removeRegistrationsOwnedBy(const void* owner) {
     if (!owner) return;
-    Server::instance().removeOwnedBy(owner);
+    internal::Server::instance().removeOwnedBy(owner);
     for (auto& hook : ownerCleanupHooks()) hook(owner);
     // Deferred replies whose producers run this owner's code: answer them
     // now, with an error, instead of running them at the next drain, after
@@ -985,16 +999,16 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
         }
         const std::string message = "the app code behind this reply was unloaded by a hot reload "
                                     "before the reply was produced";
-        std::string reply = detail::toolError(d.id, message);
+        std::string reply = internal::toolError(d.id, message);
         d.response->set_value([reply]() { return reply; });
     }
     pending.swap(keep);
 }
-} // namespace detail
+} // namespace internal
 
 // Whether a tool with this name is currently registered.
 inline bool hasTool(const std::string& name) {
-    return Server::instance().hasTool(name);
+    return internal::Server::instance().hasTool(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -1009,7 +1023,7 @@ template<> struct TypeName<bool> { static constexpr const char* value = "boolean
 template<> struct TypeName<json> { static constexpr const char* value = "object"; };
 
 class ToolBuilder;
-namespace detail {
+namespace internal {
 ToolBuilder coreTool(Server& server, const std::string& name, const std::string& desc);
 }
 
@@ -1025,11 +1039,13 @@ public:
         }
     }
 
+    /// Declare the grant required to expose this tool.
     ToolBuilder& level(ToolLevel value) {
         tool_.level = value;
         return *this;
     }
 
+    /// Add a typed input argument; required defaults to true.
     template<typename T>
     ToolBuilder& arg(const std::string& name, const std::string& desc, bool required = true) {
         tool_.args.push_back({name, TypeName<T>::value, desc, required});
@@ -1084,25 +1100,25 @@ public:
     }
 
 private:
-    friend ToolBuilder detail::coreTool(Server&, const std::string&, const std::string&);
-    ToolBuilder(Server& server, const std::string& name, const std::string& desc)
+    friend ToolBuilder internal::coreTool(internal::Server&, const std::string&, const std::string&);
+    ToolBuilder(internal::Server& server, const std::string& name, const std::string& desc)
         : server_(&server) {
         tool_.name = name;
         tool_.description = desc;
     }
     void registerTool() {
-        if (accepted_) (server_ ? *server_ : Server::instance()).registerTool(tool_);
+        if (accepted_) (server_ ? *server_ : internal::Server::instance()).registerTool(tool_);
     }
-    Server* server_ = nullptr;
+    internal::Server* server_ = nullptr;
     bool accepted_ = true;
     Tool tool_;
 };
 
-namespace detail {
+namespace internal {
 inline ToolBuilder coreTool(Server& server, const std::string& name, const std::string& desc) {
     return ToolBuilder(server, name, desc);
 }
-} // namespace detail
+} // namespace internal
 
 // Resource Builder
 class ResourceBuilder {
@@ -1112,19 +1128,22 @@ public:
         res_.name = name;
     }
 
+    /// Set the resource description.
     ResourceBuilder& desc(const std::string& d) {
         res_.description = d;
         return *this;
     }
 
+    /// Set the resource MIME type.
     ResourceBuilder& mime(const std::string& m) {
         res_.mimeType = m;
         return *this;
     }
 
+    /// Register the main-thread resource text producer.
     void bind(std::function<std::string()> func) {
         res_.handler = func;
-        Server::instance().registerResource(res_);
+        internal::Server::instance().registerResource(res_);
     }
 
 private:
@@ -1135,10 +1154,12 @@ private:
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Build a tool registration; tc_ is reserved, tcx_ is free. Registration never opens HTTP.
 inline ToolBuilder tool(const std::string& name, const std::string& desc) {
     return ToolBuilder(name, desc);
 }
 
+/// Build a URI-addressed resource registration; finish with bind().
 inline ResourceBuilder resource(const std::string& uri, const std::string& name) {
     return ResourceBuilder(uri, name);
 }
