@@ -9,7 +9,8 @@
 //
 // Usage:
 //   // Receiver side (e.g., in tcApp::setup())
-//   tcEvents().console.listen([](const ConsoleEventArgs& e) {
+//   console::start();  // Opt in to stdin commands
+//   events().console.listen([](const ConsoleEventArgs& e) {
 //       if (e.args[0] == "spawn") {
 //           spawnEnemy(stoi(e.args[1]), stoi(e.args[2]));
 //       }
@@ -18,17 +19,18 @@
 //   // Sender side (external process)
 //   echo "spawn 100 200" | ./myapp
 //
-// Enabled by default. Call console::stop() in setup() to disable.
+// Opt-in: call console::start() in setup() in windowed or headless apps.
+// One detached reader owns stdin after the first start(), until EOF or process
+// exit. start()/stop() enable/disable delivery; lines read while stopped are dropped.
 //
 // =============================================================================
 
 #include <thread>
 #include <atomic>
-#include <iostream>
+#include <istream>
 #include <sstream>
 #ifdef _WIN32
 #include <windows.h>
-#include <io.h>
 #else
 #include <cerrno>
 #include <unistd.h>
@@ -46,12 +48,11 @@ namespace console {
 // ---------------------------------------------------------------------------
 namespace internal {
 
-// One stdin reader per process, defined in tcGlobal.cpp. The host starts it and
-// drains the channel every frame; console::stop() / isEnabled() are typically
-// called from setup(), which is guest code under hot reload. Header-inline, a
-// Windows guest had its own (never started) copy, so stop() was a no-op (#249).
+// Shared state, defined in tcGlobal.cpp, including across hot-reload guests
+// (#249). Apps opt in; both runners drain the channel on the main thread.
 ThreadChannel<ConsoleEventArgs>& getChannel();
 std::atomic<bool>& isRunning();
+std::atomic<bool>& spawned();
 
 // Parse line by whitespace and create ConsoleEventArgs
 // Comments: everything after '#' is ignored
@@ -83,7 +84,7 @@ protected:
     int_type underflow() override {
 #ifdef _WIN32
         DWORD count = 0;
-        const HANDLE handle = reinterpret_cast<HANDLE>(_get_osfhandle(0));
+        const HANDLE handle = GetStdHandle(STD_INPUT_HANDLE);
         if (!ReadFile(handle, buffer_, sizeof(buffer_), &count, nullptr) || count == 0)
             return traits_type::eof();
 #else
@@ -99,20 +100,23 @@ private:
     char buffer_[4096];
 };
 
-// stdin reading thread (the console owns stdin while enabled)
+// Consume until EOF even while delivery is stopped. Kept separate from the
+// raw stream so the delivery boundaries can also be tested deterministically.
+inline void readLines(std::istream& input) {
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!isRunning().load()) continue;
+        // Raw reads bypass text-mode CRLF translation on every platform.
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        getChannel().send(parseLine(line));
+    }
+}
+
 inline void readThread() {
     StdinBuffer buffer;
     std::istream input(&buffer);
-    std::string line;
-    while (isRunning().load() && std::getline(input, line)) {
-#ifdef _WIN32
-        // ReadFile bypasses the CRT's text-mode CRLF translation.
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-#endif
-        if (line.empty()) continue;
-        auto args = parseLine(line);
-        getChannel().send(std::move(args));
-    }
+    readLines(input);
 }
 
 } // namespace internal
@@ -121,43 +125,44 @@ inline void readThread() {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Start console input thread
-/// Called automatically by the windowed and headless runners
+/// Enable stdin command delivery (opt-in; call in setup()).
+/// The first call starts the process's only reader; later calls reuse it.
 inline void start() {
 #ifdef __EMSCRIPTEN__
     // Console input is not available on web (no stdin/threads)
     logWarning("Console") << "console::start() is not available on web platform";
     return;
 #else
-    if (internal::isRunning().load() || internal::getChannel().isClosed()) {
-        return; // Already running, or explicitly stopped (including in setup)
-    }
+    if (internal::isRunning().load()) return;
+
+    // Discard anything queued after stop() drained, before enabling delivery.
+    internal::getChannel().receiveAll();
 
     internal::isRunning().store(true);
     // getline may block indefinitely; detach now so std::exit() cannot
     // destroy a joinable thread even if stop() was never called.
-    std::thread(internal::readThread).detach();
+    if (!internal::spawned().exchange(true)) {
+        std::thread(internal::readThread).detach();
+    }
 #endif
 }
 
-/// Stop console input thread
-/// Call in setup() to disable
+/// Disable delivery and discard pending commands. The reader keeps consuming
+/// stdin until EOF; start() can enable delivery again without another thread.
 inline void stop() {
 #ifdef __EMSCRIPTEN__
     // No-op on web
     return;
 #else
-    // Remember an opt-out even before the runner's automatic start(). The
-    // channel cannot reopen; do not launch another reader after it closes.
     internal::isRunning().store(false);
-    internal::getChannel().close();
+    internal::getChannel().receiveAll();
 #endif
 }
 
 namespace internal {
 
 /// Process commands in queue
-/// Called every frame within _frame_cb() in TrussC.h
+/// Called each loop by the windowed and headless runners
 /// Fires events to events().console if commands exist
 inline void processQueue() {
 #ifdef __EMSCRIPTEN__

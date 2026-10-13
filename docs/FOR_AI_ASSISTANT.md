@@ -1739,6 +1739,14 @@ Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDispla
 
 ## Console / CLI apps
 
+### How do I receive stdin commands?
+
+Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain an `events().console.listen(...)` listener. Both runners deliver queued `ConsoleEventArgs` on the main thread each loop and call `console::stop()` before app exit/cleanup.
+
+There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
+
+**v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
+
 ### How do I make a console / CLI app (and optionally open a GUI)?
 
 There's no framework arg API — handle raw `argc`/`argv` in `main()`. A common shape (this is how `trusscli` itself works) launches the **GUI when given no arguments** and dispatches subcommands otherwise, returning an exit code:

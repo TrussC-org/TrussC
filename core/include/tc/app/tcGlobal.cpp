@@ -1175,6 +1175,10 @@ std::atomic<bool>& isRunning() {
     static std::atomic<bool> running{false};
     return running;
 }
+std::atomic<bool>& spawned() {
+    static std::atomic<bool> once{false};
+    return once;
+}
 } // namespace internal
 } // namespace console
 

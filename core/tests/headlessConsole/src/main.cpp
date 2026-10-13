@@ -36,20 +36,43 @@ void check(bool ok, const char* message) {
     }
 }
 
+bool noInput() { return mode == "disabled" || mode == "setup-exit"; }
+
 struct ConsoleApp : App {
     EventListener listener;
     void setup() override {
         appThread = std::this_thread::get_id();
-        check(!console::isEnabled(), "automatic start follows setup");
+        check(!console::isEnabled() && !console::internal::spawned(),
+              "runner does not start a reader before setup");
         listener = events().console.listen([](ConsoleEventArgs& args) {
             check(std::this_thread::get_id() == appThread && isMainThread(),
                   "console callback runs on the main thread");
             ++received;
+            if (mode == "lines") {
+                const std::vector<std::string> raw{"a b", "c", "partial"};
+                const std::vector<std::vector<std::string>> parsed{{"a", "b"}, {"c"}, {"partial"}};
+                check(received <= 3 && args.raw == raw[received - 1] &&
+                      args.args == parsed[received - 1], "CRLF, LF and partial EOF raw/args");
+                if (received == 3) exitApp();
+                return;
+            }
             check(args.raw == (received == 1 ? "before setup" : "during loop"),
                   "stdin lines arrive in order without duplication");
             check(args.args.size() == 2, "console parses stdin arguments");
             if (received == 1) {
-                // Parent sends the next line only after a real callback.
+                if (mode == "restart") {
+                    console::internal::getChannel().send(console::internal::parseLine("pending"));
+                    console::stop();
+                    console::stop();
+                    check(console::internal::getChannel().empty(), "stop drains pending input");
+                    check(!console::internal::getChannel().isClosed(), "stop leaves channel open");
+                    // Model a send that passed the running check just before stop.
+                    console::internal::getChannel().send(console::internal::parseLine("late"));
+                    console::start();
+                    console::start();
+                    check(console::internal::getChannel().empty(), "restart drains late input");
+                    check(console::internal::spawned(), "restart retains the existing reader");
+                }
                 std::puts("NEXT");
                 std::fflush(stdout);
             } else {
@@ -65,36 +88,23 @@ struct ConsoleApp : App {
                 }
             }
         });
-        if (mode == "manual" || mode == "manual-optout") {
+        if (mode != "disabled") {
             console::start();
             console::start();
-            check(console::isEnabled(), "double manual start stays enabled");
-        }
-        if (mode == "optout" || mode == "manual-optout") {
-            check(console::internal::getChannel().send(
-                      console::internal::parseLine("queued before opt-out")),
-                  "seed pending input before setup opt-out");
-            console::stop();
-            console::stop();
-            check(!console::isEnabled(), "double setup stop disables console");
+            check(console::isEnabled(), "double start stays enabled");
         }
         if (mode == "setup-exit") exitApp();
     }
     void update() override {
-        if (mode == "optout" || mode == "manual-optout") {
-            check(!console::isEnabled(), "automatic start respects setup opt-out");
-            console::internal::processQueue();
-            check(received == 0, "setup opt-out delivers no queued input");
+        if (mode == "disabled") {
+            check(!console::isEnabled() && !console::internal::spawned(),
+                  "app without opt-in starts no reader");
+            check(received == 0, "app without opt-in gets no input");
             exitApp();
-        } else {
-            const bool enabled = console::isEnabled();
-            check(enabled, "runner enables console before update");
-            if (!enabled) exitApp();
-            if (mode == "manual") {
-                console::internal::processQueue();
-                manualPumped = true;
-                if (received == 2) exitApp();
-            }
+        } else if (mode == "manual") {
+            console::internal::processQueue();
+            manualPumped = true;
+            if (received == 2) exitApp();
         }
     }
     void exit() override {
@@ -109,15 +119,46 @@ struct ConsoleApp : App {
         ++cleanups;
         check(exits == 1, "exit precedes cleanup");
         check(!console::isEnabled(), "console disabled in cleanup");
-        // Even work queued before stop cannot be delivered after stop.
         const int before = received;
-        check(!console::internal::getChannel().send(
-                  console::internal::parseLine("after stop")),
-              "stopped reader channel rejects later input");
         console::internal::processQueue();
         check(received == before, "no console event after stop");
     }
 };
+
+// Feed one complete line per underflow. The second underflow happens only
+// after readLines has consumed/discarded the stopped line, so restart has a
+// deterministic boundary without sleeps or assumptions about thread timing.
+class RestartBuffer : public std::streambuf {
+    int chunk = 0;
+    std::string data;
+    int_type underflow() override {
+        if (chunk == 0) {
+            data = "written while stopped\r\n";
+        } else if (chunk == 1) {
+            check(console::internal::getChannel().empty(), "line read while stopped is discarded");
+            console::start();
+            data = "再開 café\r\n";
+        } else {
+            return traits_type::eof();
+        }
+        ++chunk;
+        setg(data.data(), data.data(), data.data() + data.size());
+        return traits_type::to_int_type(*gptr());
+    }
+};
+
+void stoppedLines() {
+    console::start();
+    console::stop();
+    RestartBuffer buffer;
+    std::istream input(&buffer);
+    console::internal::readLines(input);
+    auto queued = console::internal::getChannel().receiveAll();
+    check(queued.size() == 1 && queued[0].raw == "再開 café" &&
+          queued[0].args == std::vector<std::string>{"再開", "café"},
+          "only the restarted line arrives; UTF-8 and CRLF preserved/normalized");
+    console::stop();
+}
 
 #ifdef _WIN32
 int makePipe(int* descriptors) { return _pipe(descriptors, 4096, _O_BINARY); }
@@ -154,7 +195,14 @@ void writeLine(int descriptor, const char* line) {
 void runChild(const char* executable, const char* scenario) {
     int input[2], output[2];
     require(makePipe(input) == 0 && makePipe(output) == 0, "create child pipes");
-    writeLine(input[1], "before setup\n");
+    const std::string scenarioName(scenario);
+    const bool eofCase = scenarioName == "lines";
+    if (eofCase) {
+        require(writeFd(input[1], "a b\r\nc\npartial", 14) == 14, "write mixed line endings and partial line");
+    } else if (scenarioName != "std-exit" && scenarioName != "stop-exit" &&
+               scenarioName != "stopped-lines") {
+        writeLine(input[1], "before setup\n");
+    }
     std::fflush(nullptr);
 #ifdef _WIN32
     // _spawn passes the CRT descriptors, including redirected stdin/stdout.
@@ -187,9 +235,10 @@ void runChild(const char* executable, const char* scenario) {
 #endif
     closeFd(input[0]);
     closeFd(output[1]);
+    if (eofCase) closeFd(input[1]);
     // Bound a broken reader/pump/teardown without leaving an orphan holding
     // the suite's output pipe open. This is a hang guard, not a speed check
-    // (the seven successful cases together take less than a second locally).
+    // with no elapsed-time correctness assertion.
     std::mutex watchdogMutex;
     std::condition_variable watchdogWake;
     bool completed = false;
@@ -234,31 +283,40 @@ void runChild(const char* executable, const char* scenario) {
     do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
     require(waited == child && WIFEXITED(status) && WEXITSTATUS(status) == 0, scenario);
 #endif
-    // No EOF was sent: process termination must not wait for getline.
+    // Except for the explicit EOF fixture, stdin stays open until exit.
     // Correctness depends on exit/delivery state, not elapsed-time checks.
-    closeFd(input[1]);
+    if (!eofCase) closeFd(input[1]);
     closeFd(output[0]);
-    std::printf("PASS: %s (exited with stdin writer open)\n", scenario);
+    std::printf("PASS: %s (%s)\n", scenario, eofCase ? "EOF delivered" : "exited with stdin writer open");
 }
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--child") {
         mode = argv[2];
+        if (mode == "std-exit" || mode == "stop-exit") {
+            console::start();
+            if (mode == "stop-exit") console::stop();
+            std::exit(0);
+        }
+        if (mode == "stopped-lines") {
+            stoppedLines();
+            return failures ? 1 : 0;
+        }
         const int result = runHeadlessApp<ConsoleApp>();
         check(result == 0 && exits == 1 && cleanups == 1, "runner completes lifecycle once");
-        const bool noInput = mode == "optout" || mode == "manual-optout" || mode == "setup-exit";
-        check(received == (noInput ? 0 : 2), "expected total console callbacks");
+        const int expected = noInput() ? 0 : (mode == "lines" ? 3 : 2);
+        check(received == expected, "expected total console callbacks");
         check(!console::isEnabled(), "console remains disabled after cleanup");
         if (mode == "manual") check(manualPumped, "manual update pump ran alongside runner pump");
         if (mode == "sigint" || mode == "sigterm")
             check(internal::exitReason() == mode, "signal reached normal cleanup path");
         console::internal::processQueue();
-        check(received == (noInput ? 0 : 2), "no callbacks after runner returns");
+        check(received == expected, "no callbacks after runner returns");
         return failures ? 1 : 0;
     }
-    for (const char* scenario : {"automatic", "manual", "optout", "manual-optout",
-                                 "sigint", "sigterm", "setup-exit"}) {
+    for (const char* scenario : {"opt-in", "manual", "disabled", "restart", "stopped-lines",
+                                 "lines", "std-exit", "stop-exit", "sigint", "sigterm", "setup-exit"}) {
         runChild(argv[0], scenario);
     }
     return 0;

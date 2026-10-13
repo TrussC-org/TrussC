@@ -32,6 +32,8 @@ void tcApp::setup() {
         }
     });
 
+    console::start();  // Opt in to stdin commands.
+
     // JSON output for external process communication (intentionally using cout)
     cout << "consoleExample started. Ready for commands." << endl;
     cout << "Try: tcdebug info, spawn 100 200, clear" << endl;

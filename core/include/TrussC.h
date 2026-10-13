@@ -2422,15 +2422,6 @@ namespace internal {
         // setup() runs. getDataPath() also probes on an earlier call; probing
         // here is too early to see a valid executable path on iOS.
 
-        // Start console input thread (enabled by default)
-        // To disable, call console::stop() in setup()
-        // Note: Console is not available on web platform (no stdin/threads)
-        #ifndef __EMSCRIPTEN__
-
-        console::start();
-
-        #endif
-
         // Drain deferred screenshot/MCP captures right after present(), where the
         // swapchain is committed and we are outside any pass — the only safe
         // readback point (see grabScreen()/saveScreenshot()).
