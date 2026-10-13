@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "GeneratedFile.h"
 #include "ProjectState.h"
 #include "BuildSetup.h"
 #include "VsDetector.h"
@@ -699,19 +700,15 @@ static int regenerateProject(const string& projectPath, const string& tcRoot,
 
 // Write an addons.make file containing the selected addon names. Called from
 // add / remove after modifying the selection set.
-static bool writeAddonsMake(const string& projectPath,
+static void writeAddonsMake(const string& projectPath,
                             const vector<string>& selectedAddons) {
     string path = projectPath + "/addons.make";
-    ofstream out(path);
-    if (!out) {
-        cerr << "Error: could not write " << path << "\n";
-        return false;
-    }
+    ostringstream out;
     out << "# TrussC addons - one addon per line\n";
     for (const string& name : selectedAddons) {
         out << name << "\n";
     }
-    return true;
+    writeGeneratedFile(path, out.str());
 }
 
 // Forward declarations for functions defined later
@@ -1165,7 +1162,7 @@ static int cmdCp(const vector<string>& args) {
                     fs::copy(srcBinData, dstBinData, fs::copy_options::recursive);
                 } else {
                     fs::create_directories(dstBinData);
-                    ofstream gitkeep((dstBinData / ".gitkeep").string());
+                    writeGeneratedFile(dstBinData / ".gitkeep", "");
                 }
             } catch (const fs::filesystem_error& e) {
                 cerr << "Error: copy failed: " << e.what() << "\n";
@@ -1581,7 +1578,7 @@ static int cmdAdd(const vector<string>& args) {
         if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
     }
 
-    if (!writeAddonsMake(projectPath, selectedNames)) return 1;
+    writeAddonsMake(projectPath, selectedNames);
 
     if (addedNow.empty()) {
         cout << "No changes to addons.make. Regenerating build files anyway...\n";
@@ -1700,7 +1697,7 @@ static int cmdRemove(const vector<string>& args) {
         if (addonSelected[i]) selectedNames.push_back(availableAddons[i]);
     }
 
-    if (!writeAddonsMake(projectPath, selectedNames)) return 1;
+    writeAddonsMake(projectPath, selectedNames);
 
     if (removedNow.empty()) {
         cout << "No changes to addons.make. Regenerating build files anyway...\n";
@@ -1841,9 +1838,7 @@ static void writeRegistryCache(const string& jsonText) {
     string path = registryCachePath();
     if (path.empty()) return;
     try {
-        fs::create_directories(fs::path(path).parent_path());
-        ofstream f(path, ios::binary);
-        f.write(jsonText.data(), static_cast<streamsize>(jsonText.size()));
+        writeGeneratedFile(path, jsonText);
     } catch (...) {
         // Best-effort; cache is optional.
     }
@@ -3364,16 +3359,7 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
              << "Close programs that use files in it and run 'trusscli build' again.\n";
         return 1;
     }
-    {
-        ofstream out(presetsPath, ios::binary | ios::trunc);
-        out << repinned;
-        out.close();
-        if (!out) {
-            cerr << "Error: " << changed << ", and CMakePresets.json could not be "
-                    "written. Check that it is writable and run 'trusscli build' again.\n";
-            return 1;
-        }
-    }
+    writeGeneratedFile(presetsPath, repinned);
 
     cout << "[build] " << changed << ": pinned " << vs.displayName
          << " in CMakePresets.json and removed " << buildDir << "\n";
@@ -3740,7 +3726,7 @@ static int cmdRun(const vector<string>& args) {
             // keep the X session alive with sleep infinity.
             string xinitrcPath = "/tmp/trusscli-x11-" + to_string(getpid()) + ".sh";
             {
-                ofstream f(xinitrcPath);
+                ostringstream f;
                 f << "#!/bin/sh\n"
                   << "if command -v twm >/dev/null 2>&1; then\n"
                   << "    exec twm\n"
@@ -3749,6 +3735,7 @@ static int cmdRun(const vector<string>& args) {
                   << "else\n"
                   << "    exec sleep infinity\n"
                   << "fi\n";
+                writeGeneratedFile(xinitrcPath, f.str());
             }
             chmod(xinitrcPath.c_str(), 0755);
 
@@ -4075,7 +4062,7 @@ static void printTopHelp() {
 // main: subcommand dispatch
 // =============================================================================
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
     vector<string> args(argv + 1, argv + argc);
 
     // No args → launch the GUI (TrussC Project Generator)
@@ -4139,5 +4126,8 @@ int main(int argc, char* argv[]) {
 
     cerr << "Error: unknown command '" << first << "'\n"
          << "Run 'trusscli --help' for usage.\n";
+    return 1;
+} catch (const std::exception& e) {
+    cerr << "Error: " << e.what() << "\n";
     return 1;
 }
