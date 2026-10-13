@@ -188,11 +188,12 @@ public:
     // already be initialized (playing a Sound or calling AudioEngine::init()
     // does that); returns SaveResult for path preparation and checked header writing.
     SaveResult start(const fs::path& path, const AudioRecordSettings& settings = {}) {
-        path_.clear(); // A rejected start never exposes this or a previous take's name.
         if (isRecording()) {
+            // Refused, not a failed take: the running take keeps its name.
             logWarning("AudioRecorder") << "start: already recording";
             return SaveResult::fail(SaveError::WriteFailed, "Cannot start audio recording");
         }
+        path_.clear(); // A failed start never exposes this or a previous take's name.
         auto& engine = AudioEngine::getInstance();
         if (!engine.isInitialized()) {
             logWarning("AudioRecorder")

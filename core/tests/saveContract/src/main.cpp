@@ -263,8 +263,8 @@ TC_CORE_TEST_MAIN() {
         check(engine.init(settings), "null audio engine for start path contract");
         const auto take = dir / "path-take.wav";
         check(rec.start(take).ok() && rec.getPath() == take, "audio publishes path after successful header");
-        check(!rec.start(dir / "already.wav") && rec.getPath().empty() && rec.isRecording(),
-              "rejected restart clears path while preserving running take");
+        check(!rec.start(dir / "already.wav") && rec.getPath() == take && rec.isRecording(),
+              "refused restart keeps the running take and its path");
         check(rec.stop().ok(), "take finalizes after rejected restart");
         check(rec.start(take).ok() && rec.stop().ok(), "successful earlier audio take");
         check(!rec.start("") && rec.getPath().empty(), "failed audio preparation clears earlier successful path");
