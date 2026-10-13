@@ -1505,7 +1505,7 @@ inline bool warnIfSecondaryWindowControl(OnceGate& warned, const char* fn, const
 // main window as before.
 inline void setWindowTitle(const std::string& title) {
     if (internal::routeSetWindowTitleToWindow(title)) return;
-    sapp_set_window_title(title.c_str());
+    sapp_set_window_title(mcp::detail::mainWindowTitle(title).c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -2429,37 +2429,6 @@ namespace internal {
 
         console::start();
 
-        // Check for MCP mode via environment variable
-        const char* envMcp = std::getenv("TRUSSC_MCP");
-        if (envMcp && std::string(envMcp) == "1") {
-            // PR-A preserves inspection access; PR-B replaces this with the
-            // health-only rule. Never lower a Control grant made by app code.
-            if (mcp::getToolLevel() < mcp::ToolLevel::ReadOnly)
-                mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-            // Ensure core tools are registered; exposure uses the host grant.
-            (void)mcp::Server::instance();
-
-            // Get port from environment (0 = OS auto-assign)
-            int mcpPort = 0;
-            const char* envPort = std::getenv("TRUSSC_MCP_PORT");
-            if (envPort) {
-                mcpPort = std::atoi(envPort);
-            }
-
-            // Host defaults to 127.0.0.1 (loopback-only, the same address on
-            // every OS; see startHttpServer). Set TRUSSC_MCP_HOST
-            // (e.g. 0.0.0.0) to expose externally — requires TRUSSC_MCP_TOKEN,
-            // otherwise startHttpServer refuses to bind (fail-closed).
-            const char* envHost = std::getenv("TRUSSC_MCP_HOST");
-            std::string mcpHost = envHost ? envHost : "127.0.0.1";
-            const char* envToken = std::getenv("TRUSSC_MCP_TOKEN");
-            std::string mcpToken = envToken ? envToken : "";
-
-            // Start HTTP server for MCP transport
-            // The server thread logs "[MCP] HTTP server listening on
-            // http://HOST:PORT/mcp" once it has bound the port.
-            mcp::startHttpServer(mcpPort, mcpHost, mcpToken);
-        }
         #endif
 
         // Drain deferred screenshot/MCP captures right after present(), where the
@@ -3236,7 +3205,8 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         desc.width = settings.width;
         desc.height = settings.height;
     }
-    desc.window_title = settings.title.c_str();
+    const auto& windowTitle = mcp::detail::mainWindowTitle(settings.title);
+    desc.window_title = windowTitle.c_str();
     desc.high_dpi = settings.highDpi;
     desc.sample_count = settings.sampleCount;
     desc.fullscreen = settings.fullscreen;

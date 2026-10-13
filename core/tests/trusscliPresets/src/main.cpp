@@ -44,7 +44,7 @@
 //   - planConfigure(): a build folder without a CMake cache, or with only the
 //     cache of a failed configure, is configured first (one message, the
 //     build-type pin folded in); a cache that holds what was asked for stays
-//     configure-free.
+//     configure-free. MCP changes configure with explicit ON/OFF.
 //   - inspectBuildFolder() / buildFoldersToClean(): the folder `build` looks
 //     at (ios -> xcode-ios) and what it finds there on a real filesystem,
 //     and the folders `clean` / `clean --all` remove; buildScriptsToClean():
@@ -1007,10 +1007,33 @@ static void testConfigurePlan() {
     native.isNative = true;
 
     {
+        ConfigureInputs in = native;
+        in.hasCache = in.generated = true;
+        in.cachedBuildType = "RelWithDebInfo";
+        in.mcp = true;
+        const auto enabled = planConfigure(in);
+        check("--mcp on an OFF folder configures ON", enabled.configure &&
+              hasDefine(enabled, "-DTRUSSC_MCP_DEV=ON"));
+        in.cachedMcp = true;
+        const auto steady = planConfigure(in);
+        check("--mcp on an ON folder stays configure-free", !steady.configure &&
+              steady.defines.empty() && steady.messages.empty());
+        in.mcp = false;
+        const auto plain = planConfigure(in);
+        check("dev folder without --mcp configures OFF", plain.configure &&
+              hasDefine(plain, "-DTRUSSC_MCP_DEV=OFF") && !hasDefine(plain, "-DTRUSSC_MCP_DEV=ON"));
+        in.mcp = true;
+        in.requestedBuildType = "Debug";
+        const auto debug = planConfigure(in);
+        check("build-type configure passes matching MCP ON explicitly", debug.configure &&
+              hasDefine(debug, "-DCMAKE_BUILD_TYPE=Debug") && hasDefine(debug, "-DTRUSSC_MCP_DEV=ON"));
+
+    }
+    {
         // `trusscli clean` then a plain `trusscli build`
         ConfigurePlan p = planConfigure(native);
-        check("no cache, no flag: configure, no -D, one message",
-              p.configure && p.defines.empty() && p.messages.size() == 1 &&
+        check("no cache, no flag: configure, MCP OFF, one message",
+              p.configure && (p.defines.size() == 1 && hasDefine(p, "-DTRUSSC_MCP_DEV=OFF")) && p.messages.size() == 1 &&
               firstMessageHas(p, "No CMake cache in build-linux"));
     }
     {
@@ -1018,7 +1041,7 @@ static void testConfigurePlan() {
         in.requestedBuildType = "Release";
         ConfigurePlan p = planConfigure(in);
         check("no cache, --release: one configure with the type, one message",
-              p.configure && p.defines.size() == 1 &&
+              p.configure && p.defines.size() == 2 &&
               hasDefine(p, "-DCMAKE_BUILD_TYPE=Release") && p.messages.size() == 1 &&
               firstMessageHas(p, "No CMake cache in build-linux") &&
               firstMessageHas(p, "CMAKE_BUILD_TYPE=Release"));
@@ -1058,8 +1081,8 @@ static void testConfigurePlan() {
         in.cachedBuildType = "RelWithDebInfo";
         in.warnings = true;
         ConfigurePlan p = planConfigure(in);
-        check("--warnings with a cache: configure with TRUSSC_WARNINGS only",
-              p.configure && p.defines.size() == 1 && hasDefine(p, "-DTRUSSC_WARNINGS=ON"));
+        check("--warnings with a cache: configure with TRUSSC_WARNINGS and MCP OFF",
+              p.configure && p.defines.size() == 2 && hasDefine(p, "-DTRUSSC_WARNINGS=ON"));
     }
     {
         ConfigureInputs in;
@@ -1067,7 +1090,7 @@ static void testConfigurePlan() {
         in.requestedBuildType = "Release";
         ConfigurePlan p = planConfigure(in);
         check("web, no cache: configure, keeps the preset's build type",
-              p.configure && p.defines.empty() && p.messages.size() == 1 &&
+              p.configure && (p.defines.size() == 1 && hasDefine(p, "-DTRUSSC_MCP_DEV=OFF")) && p.messages.size() == 1 &&
               firstMessageHas(p, "No CMake cache in build-web"));
     }
     {
@@ -1085,7 +1108,7 @@ static void testConfigurePlan() {
         in.buildDir = "xcode-ios";
         ConfigurePlan p = planConfigure(in);
         check("no cache: the message names the folder it was given",
-              p.configure && p.defines.empty() && firstMessageHas(p, "xcode-ios"));
+              p.configure && (p.defines.size() == 1 && hasDefine(p, "-DTRUSSC_MCP_DEV=OFF")) && firstMessageHas(p, "xcode-ios"));
     }
     {
         // A configure that failed (emsdk not active, a broken local.cmake)
@@ -1095,7 +1118,7 @@ static void testConfigurePlan() {
         in.cachedBuildType = "RelWithDebInfo";
         ConfigurePlan p = planConfigure(in);
         check("cache without build files (failed configure): configure again",
-              p.configure && p.defines.empty() && p.messages.size() == 1 &&
+              p.configure && (p.defines.size() == 1 && hasDefine(p, "-DTRUSSC_MCP_DEV=OFF")) && p.messages.size() == 1 &&
               firstMessageHas(p, "No build files in build-linux"));
     }
     {
@@ -1105,7 +1128,7 @@ static void testConfigurePlan() {
         in.requestedBuildType = "Debug";
         ConfigurePlan p = planConfigure(in);
         check("failed configure, --debug: one configure with the type, one message",
-              p.configure && p.defines.size() == 1 &&
+              p.configure && p.defines.size() == 2 &&
               hasDefine(p, "-DCMAKE_BUILD_TYPE=Debug") && p.messages.size() == 1 &&
               firstMessageHas(p, "No build files in build-linux"));
     }
@@ -1156,7 +1179,7 @@ static void testBuildFolders() {
         ConfigureInputs in = inspectBuildFolder(project.string(), "linux", "linux");
         check("inspect: empty project -> build-linux, native, no cache",
               in.buildDir == "build-linux" && in.isNative && !in.hasCache &&
-              !in.generated && in.cachedBuildType.empty());
+              !in.generated && in.cachedBuildType.empty() && !in.cachedMcp);
     }
     {
         // A configure that failed: the cache (with a build type) and no Makefile
@@ -1169,6 +1192,18 @@ static void testBuildFolders() {
         writeFile(project / "build-linux" / "Makefile", "all:\n");
         in = inspectBuildFolder(project.string(), "linux", "linux");
         check("inspect: cache + Makefile -> generated", in.hasCache && in.generated);
+        check("inspect: missing MCP entry counts as OFF", !in.cachedMcp);
+        for (const auto& value : {"ON", "OFF", "1", "true", "FALSE"}) {
+            writeFile(project / "build-linux" / "CMakeCache.txt",
+                      string("CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\nTRUSSC_MCP_DEV:BOOL=") + value + "\n");
+            in = inspectBuildFolder(project.string(), "linux", "linux");
+            const bool enabled = string(value) == "ON" || string(value) == "1" || string(value) == "true";
+            check(string("inspect: reads cached MCP ") + value, in.cachedMcp == enabled);
+            const auto plain = planConfigure(in);
+            check(string("inspected MCP cache plans plain build: ") + value,
+                  plain.configure == enabled && (enabled
+                      ? hasDefine(plain, "-DTRUSSC_MCP_DEV=OFF") : plain.defines.empty()));
+        }
     }
     {
         fs::create_directories(project / "build-web");

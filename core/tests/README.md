@@ -611,7 +611,10 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   "Failed to bind" error through the Logger, and the other server keeps
   answering every request. And the default host: `mcp::startHttpServer()`
   with no host argument logs `http://127.0.0.1:PORT/mcp` and answers a client
-  that connects to 127.0.0.1.
+  that connects to 127.0.0.1. The startup Notice runs on the caller thread.
+  First-opener cases cover grants, explicit starts, environment and dev startup:
+  a later host, port or token mismatch logs one Error and preserves the listener,
+  authentication and exposure; matching starts reuse the listener.
 - `mcpOccludedWindow/` — the MCP screenshot tools and hidden secondary
   windows (#347): `tc_list_windows` reports `Window::isOccluded()` as
   `occluded` on each secondary entry (none on the main one), and

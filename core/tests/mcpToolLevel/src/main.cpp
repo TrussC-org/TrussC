@@ -2,6 +2,9 @@
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <set>
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+#include <X11/Xlib.h>
+#endif
 
 using namespace tc;
 
@@ -33,16 +36,18 @@ bool callable(const std::string& name) {
 }
 
 #ifndef __EMSCRIPTEN__
-// Display-test modes exercise the real environment block in _setup_cb.
+// Display-test modes exercise startup after the main App has run setup().
 bool grantInSetup = false;
 bool envSetupRan = false;
-mcp::ToolLevel expectedEnvGrant = mcp::ToolLevel::ReadOnly;
+bool envUpdateRan = false;
+mcp::ToolLevel expectedEnvGrant = mcp::ToolLevel::Public;
 struct EnvGrantApp : App {
     void setup() override {
         envSetupRan = true;
-        check("environment grant is applied before App::setup",
+        check("environment does not raise the code grant",
               mcp::getToolLevel() == expectedEnvGrant);
-        check("environment exposes screenshot inspection", listed().count("tc_get_screenshot"));
+        check("screenshots require a code grant", bool(listed().count("tc_get_screenshot")) ==
+              (expectedEnvGrant >= mcp::ToolLevel::ReadOnly));
         check("environment exposes Control only when code granted it",
               bool(listed().count("tc_mouse_click")) == (expectedEnvGrant == mcp::ToolLevel::Control));
         if (grantInSetup) mcp::setToolLevel(mcp::ToolLevel::Control);
@@ -50,13 +55,42 @@ struct EnvGrantApp : App {
               mcp::getToolLevel() == (grantInSetup ? mcp::ToolLevel::Control : expectedEnvGrant));
         check("Control exposure follows the final app grant",
               bool(listed().count("tc_mouse_click")) == mcp::isDebuggerEnabled());
+        check("mainWindowTitle reflects build kind", mcp::detail::mainWindowTitle("MCP startup test") ==
+              (mcp::detail::isDevBuild() ? "MCP startup test [MCP]" : "MCP startup test"));
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        if (sapp_x11_get_display()) {
+            auto nativeTitle = [] {
+                char* title = nullptr;
+                auto* display = static_cast<Display*>(const_cast<void*>(sapp_x11_get_display()));
+                const auto window = static_cast<::Window>(reinterpret_cast<uintptr_t>(sapp_x11_get_window()));
+                XFetchName(display, window, &title);
+                const std::string result = title ? title : "";
+                if (title) XFree(title);
+                return result;
+            };
+            check("initial native title reflects build kind", nativeTitle() ==
+                  mcp::detail::mainWindowTitle("MCP startup test"));
+            setWindowTitle("Retitled");
+            check("native main window retains dev marker after retitle", nativeTitle() ==
+                  mcp::detail::mainWindowTitle("Retitled"));
+        }
+#endif
+    }
+    void update() override {
+        envUpdateRan = true;
+        check("startup opens HTTP unless environment disables it", (mcp::getHttpPort() > 0) ==
+              !mcp::detail::environmentClosesMcp());
+        if (mcp::getToolLevel() == mcp::ToolLevel::Public)
+            check("startup environment exposes health only", listed() == std::set<std::string>{"tc_get_health"});
         exitApp();
     }
 };
 
 int envStartup(const std::string& mode) {
     const char* envMcp = std::getenv("TRUSSC_MCP");
-    check("startup test has TRUSSC_MCP=1", envMcp && std::string(envMcp) == "1");
+    check("startup test has TRUSSC_MCP=1 or is a dev build", mcp::detail::isDevBuild() ||
+          (envMcp && std::string(envMcp) == "1"));
+    if (mcp::detail::isDevBuild()) expectedEnvGrant = mcp::ToolLevel::Control;
     if (failures) return 1;
     grantInSetup = mode == "--env-control-setup";
     if (mode == "--env-control-before") {
@@ -65,8 +99,9 @@ int envStartup(const std::string& mode) {
     }
     WindowSettings settings;
     settings.width = settings.height = 64;
+    settings.title = "MCP startup test";
     check("environment startup and shutdown succeed", runApp<EnvGrantApp>(settings) == 0);
-    check("environment test reached App::setup", envSetupRan);
+    check("environment test reached App::setup and update", envSetupRan && envUpdateRan);
     return failures ? 1 : 0;
 }
 #endif
@@ -107,9 +142,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifndef __EMSCRIPTEN__
     if (argc > 1) {
         const std::string mode = argv[1];
-        if (mode == "--env-readonly" || mode == "--env-control-before" || mode == "--env-control-setup")
+        if (mode == "--env-health" || mode == "--env-control-before" || mode == "--env-control-setup" || mode == "--dev-startup")
             return envStartup(mode);
     }
+#endif
+#ifndef __EMSCRIPTEN__
+    // This mode tests levels only. Server opt-in is covered by mcpHttpGuard.
+#ifdef _WIN32
+    _putenv_s("TRUSSC_MCP", "0");
+#else
+    setenv("TRUSSC_MCP", "0", 1);
+#endif
 #endif
     // Run the same exposure contract on native and Web; only HTTP is native.
     check("initial grant is Public", mcp::getToolLevel() == mcp::ToolLevel::Public);
@@ -192,7 +235,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check("reload cleanup preserves grant and core tools", mcp::getToolLevel() == mcp::ToolLevel::Control && mcp::hasTool("tc_get_health") && mcp::hasTool("tc_mouse_click"));
     aliases();
 #ifndef __EMSCRIPTEN__
-    check("level changes and registration do not start HTTP", mcp::getHttpPort() == 0 && !mcp::detail::getHttpServer());
+    check("TRUSSC_MCP=0 prevents HTTP even after code grants", mcp::getHttpPort() == 0 && !mcp::detail::getHttpServer());
 #endif
     return failures ? 1 : 0;
 }

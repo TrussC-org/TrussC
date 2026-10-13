@@ -292,6 +292,9 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             internal::EntryStackGuard guard(internal::AppEntry::Prelude);
             internal::drainMainThreadQueue();
             internal::pumpAudioDiagnostics();
+#ifndef __EMSCRIPTEN__
+            mcp::processHttpQueue();
+#endif
         }
 
         internal::runHeadlessUpdatePass(*app, ctx, accumulator, elapsed, targetDelta);
@@ -303,6 +306,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             std::chrono::steady_clock::now() - now).count();
         sleeper.sleep(internal::headlessSleepTime(accumulator, targetDelta, spent));
     }
+
+    // Finish MCP workers before their app-owned handlers are destroyed.
+#ifndef __EMSCRIPTEN__
+    mcp::stopHttpServer();
+#endif
 
     // Call exit and cleanup
     {

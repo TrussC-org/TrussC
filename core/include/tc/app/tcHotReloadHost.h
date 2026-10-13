@@ -674,7 +674,8 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         desc.width = settings.width;
         desc.height = settings.height;
     }
-    desc.window_title = settings.title.c_str();
+    const auto& windowTitle = mcp::detail::mainWindowTitle(settings.title);
+    desc.window_title = windowTitle.c_str();
     desc.high_dpi = settings.highDpi;
     desc.sample_count = settings.sampleCount;
     desc.fullscreen = settings.fullscreen;

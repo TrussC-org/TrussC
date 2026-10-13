@@ -28,6 +28,8 @@ struct ConfigureInputs {
                                       // (Makefile, build.ninja, *.xcodeproj, ...) exists
     std::string cachedBuildType;      // CMAKE_BUILD_TYPE in that cache ("" if none)
     std::string requestedBuildType;   // from --debug / --release / --relwithdebinfo ("" if none)
+    bool cachedMcp = false;           // TRUSSC_MCP_DEV in that cache (missing is OFF)
+    bool mcp = false;                 // --mcp (never sticky)
     bool warnings = false;            // --warnings
 };
 
@@ -37,9 +39,8 @@ struct ConfigurePlan {
     std::vector<std::string> messages;   // lines to print, in order
 };
 
-// Decide the configure pass. A build with a cache that already holds what
-// was asked for stays configure-free. A cache without a build system (a
-// configure that failed) is configured again.
+// A cache that holds the requested build type and MCP flag stays configure-free.
+// Missing or incomplete build folders are configured again.
 ConfigurePlan planConfigure(const ConfigureInputs& in);
 
 // Helpers for Windows process arguments and doctor diagnostics (#417).
@@ -49,7 +50,7 @@ std::string readCMakeCacheValue(const std::string& cachePath, const std::string&
 bool hasMainHeaderDependencies(const std::string& ninjaDeps);
 
 // Fill the folder part of ConfigureInputs (buildDir, isNative, hasCache,
-// generated, cachedBuildType) from <projectDir>/<the target preset's build
+// generated, cachedBuildType, cachedMcp) from <projectDir>/<the target preset's build
 // folder> on disk. nativePreset is "" when the platform has none.
 ConfigureInputs inspectBuildFolder(const std::string& projectDir,
                                    const std::string& targetPreset,

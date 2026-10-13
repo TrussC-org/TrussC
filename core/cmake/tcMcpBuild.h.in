@@ -1,0 +1,3 @@
+#pragma once
+// Private to tcMCP.cpp: never include from a public header or an app TU.
+#cmakedefine01 TRUSSC_MCP_DEV

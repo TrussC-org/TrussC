@@ -2,6 +2,7 @@
 #include "ProjectGenerator.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -12,6 +13,8 @@ namespace fs = std::filesystem;
 
 ConfigurePlan planConfigure(const ConfigureInputs& in) {
     ConfigurePlan plan;
+    // --mcp is not sticky, but an already matching cache needs no configure.
+    plan.configure = in.mcp != in.cachedMcp;
 
     // --warnings: turn on -Wall/-Wextra for the app's own sources. The cache
     // var is sticky: it stays on for later builds until a configure without
@@ -47,7 +50,7 @@ ConfigurePlan planConfigure(const ConfigureInputs& in) {
         // ("... is not a directory" / "could not load cache"), so configure
         // first. A configure that failed leaves CMakeCache.txt but no build
         // system ("No rule to make target 'Makefile'"), so that folder is
-        // configured again too. Without a build-type flag no -D is added and
+        // configured again too. Without a build-type flag no type pin is added and
         // the trussc_app.cmake default applies, as after `trusscli update`.
         string msg = in.hasCache
             ? "[build] No build files in " + in.buildDir +
@@ -65,6 +68,9 @@ ConfigurePlan planConfigure(const ConfigureInputs& in) {
                                     " -> " + pinType + " ...");
         }
     }
+    // Any configure must override preset/cache MCP values explicitly.
+    if (plan.configure)
+        plan.defines.push_back(in.mcp ? "-DTRUSSC_MCP_DEV=ON" : "-DTRUSSC_MCP_DEV=OFF");
     return plan;
 }
 
@@ -146,6 +152,13 @@ ConfigureInputs inspectBuildFolder(const string& projectDir,
     in.hasCache = fs::is_regular_file(dir / "CMakeCache.txt", ec);
     in.generated = hasBuildSystem(dir);
     in.cachedBuildType = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "CMAKE_BUILD_TYPE");
+    string mcp = readCMakeCacheValue((dir / "CMakeCache.txt").string(), "TRUSSC_MCP_DEV");
+    transform(mcp.begin(), mcp.end(), mcp.begin(),
+              [](unsigned char c) { return static_cast<char>(toupper(c)); });
+    // CMake's false constants, including an absent entry and NOTFOUND values.
+    in.cachedMcp = !(mcp.empty() || mcp == "0" || mcp == "OFF" || mcp == "NO" ||
+                     mcp == "FALSE" || mcp == "N" || mcp == "IGNORE" ||
+                     mcp == "NOTFOUND" || mcp.ends_with("-NOTFOUND"));
     return in;
 }
 

@@ -379,6 +379,8 @@ void registerStandardTools(Server& server) {
         .level(ToolLevel::Public)
         .bind(std::function<json()>([]() -> json {
             return json{{"status", "ok"},
+                        {"buildKind", detail::isDevBuild() ? "dev" : "default"},
+                        {"toolLevel", detail::toolLevelName(getToolLevel())},
                         {"fps", trussc::getFps()},
                         {"frameCount", trussc::getFrameCount()},
                         // Process uptime: the framework clock, which

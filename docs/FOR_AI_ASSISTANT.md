@@ -882,8 +882,9 @@ Details: docs/ARCHITECTURE.md, "One instance per process".
 
 ## AI Automation (MCP)
 
-Every TrussC app can run as an MCP server: launch with `TRUSSC_MCP=1` and the app
-exposes screenshots, input injection, and live node-tree read/write over HTTP —
+Build with `trusscli run --mcp` to expose screenshots, input injection, and live
+node-tree read/write over HTTP. In default builds, `TRUSSC_MCP=1` or
+`TRUSSC_MCP_PORT` opens only loopback health; other tools need a code grant.
 AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
 (details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
@@ -1375,7 +1376,7 @@ While audio is recorded, the **video PTS runs on the audio device clock** (frame
 
 ### Can an AI agent start/stop recording over MCP?
 
-Yes — every TrussC app in MCP mode (`TRUSSC_MCP=1`) exposes `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`, always available). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+Yes — dev builds (`trusscli run --mcp`) or apps granting `mcp::ToolLevel::ReadOnly` expose `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
 
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
@@ -1812,11 +1813,11 @@ For the other direction, path → string (display, `Font`, JSON, a string compar
 
 ### What makes TrussC "AI-native"?
 
-Every TrussC app can become an **MCP server.** Launch with `TRUSSC_MCP=1` and the app exposes screenshots, input injection, and **live read/write of the Node tree** over HTTP / JSON-RPC. An AI agent can both **drive and verify** a running app (the app screenshots itself, so no X11 or screen-recording permission is needed). The key is that state comes out as **queryable numbers** (pos / rotation / color …), not pixels. This is built into the design from the start, not bolted on.
+Every TrussC app can become an **MCP server.** Build and launch with `trusscli run --mcp` and the app exposes screenshots, input injection, and **live read/write of the Node tree** over HTTP / JSON-RPC. An AI agent can both **drive and verify** a running app (the app screenshots itself, so no X11 or screen-recording permission is needed). The key is that state comes out as **queryable numbers** (pos / rotation / color …), not pixels. This is built into the design from the start, not bolted on.
 
 ### How does an AI tune/verify a running app over MCP?
 
-A rebuild-free loop: launch (`TRUSSC_MCP=1`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. Mouse/key injection is opt-in via `mcp::registerControlTools()` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. `tcx_imgui_get_widgets` also returns each value widget's current value (full-precision floats, `DragFloat3` as one array, colors 0-1 as the variable holds them, `SliderAngle` in radians). When the user says "make it like this" after tweaking sliders or the NodeInspector by hand, call `tcx_imgui_get_touched`: it lists exactly what they changed since startup, with current values (ImGui value widgets — including `Checkbox`, `MenuItem`/`Selectable` with a `bool*`, `RadioButton` with an `int*` and `ListBox` — + per-node inspector edits; buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` toggles, plain `Selectable`s and `RadioButton(label, bool)` change no variable and are not listed); write those into the code, then `tcx_imgui_reset_touched`. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
+A rebuild-free loop: build and launch (`trusscli run --mcp`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. In default builds, mouse/key injection is opt-in via `mcp::setToolLevel(mcp::ToolLevel::Control)` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. `tcx_imgui_get_widgets` also returns each value widget's current value (full-precision floats, `DragFloat3` as one array, colors 0-1 as the variable holds them, `SliderAngle` in radians). When the user says "make it like this" after tweaking sliders or the NodeInspector by hand, call `tcx_imgui_get_touched`: it lists exactly what they changed since startup, with current values (ImGui value widgets — including `Checkbox`, `MenuItem`/`Selectable` with a `bool*`, `RadioButton` with an `int*` and `ListBox` — + per-node inspector edits; buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` toggles, plain `Selectable`s and `RadioButton(label, bool)` change no variable and are not listed); write those into the code, then `tcx_imgui_reset_touched`. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
 
 ## Community & support
 

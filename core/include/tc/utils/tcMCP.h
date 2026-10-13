@@ -54,6 +54,15 @@ ToolLevel getToolLevel();
 class Server;
 namespace detail {
 void registerStandardTools(Server& server);
+// Host-owned build/start policy, also shared with hot reload guests.
+bool isDevBuild();
+bool healthOnly();
+bool& healthOnlyEndpoint();
+bool& explicitlyOpened();
+bool environmentClosesMcp();
+void startConfiguredServer(const char* opener);
+void initializeMcp();
+const std::string& mainWindowTitle(const std::string& title);
 inline const char* toolLevelName(ToolLevel level) {
     switch (level) {
         case ToolLevel::Public: return "Public";
@@ -410,7 +419,7 @@ private:
     std::string handleToolsList(const json& req, const json& id) {
         json toolList = json::array();
         for (const auto& [name, tool] : tools_) {
-            if (tool.level > getToolLevel()) continue;
+            if (tool.level > getToolLevel() || (detail::healthOnly() && name != "tc_get_health")) continue;
             toolList.push_back({
                 {"name", tool.name},
                 {"description", tool.description},
@@ -430,6 +439,10 @@ private:
         }
 
         const auto granted = getToolLevel();
+        if (detail::healthOnly() && name != "tc_get_health" && tools_.at(name).level == ToolLevel::Public) {
+            return detail::toolError(id, "Tool '" + name +
+                "' requires an explicit code opt-in, current level is Public (health only)");
+        }
         if (tools_.at(name).level > granted) {
             return detail::toolError(id, "Tool '" + name + "' requires " +
                 detail::toolLevelName(tools_.at(name).level) +
@@ -507,6 +520,7 @@ private:
     std::string handleResourcesList(const json& req, const json& id) {
         json resList = json::array();
         for (const auto& [uri, res] : resources_) {
+            if (detail::healthOnly()) continue;
             resList.push_back({
                 {"uri", res.uri},
                 {"name", res.name},
@@ -519,6 +533,8 @@ private:
 
     std::string handleResourcesRead(const json& req, const json& id) {
         std::string uri = req["params"]["uri"];
+        if (detail::healthOnly())
+            return makeError(id, -32000, "Resources require an explicit code opt-in (health only)");
 
         if (resources_.find(uri) == resources_.end()) {
             return makeError(id, -32602, "Resource not found: " + uri);
@@ -570,9 +586,18 @@ namespace detail {
 
 // HTTP server state, one per process (defined in tcMCP.cpp, see above).
 ThreadChannel<McpRequest>& getHttpChannel();
+void resetHttpChannel();
 std::unique_ptr<httplib::Server>& getHttpServer();
 std::unique_ptr<std::thread>& getHttpThread();
 std::atomic<int>& getHttpPort();
+
+// Retain the first successful opener even after later grants/explicit opt-ins.
+struct HttpListenerConfig {
+    int requestedPort = 0;
+    std::string host;
+    std::string opener;
+};
+HttpListenerConfig& httpListenerConfig();
 
 // Bearer token required on /mcp requests. Empty = no auth (localhost default).
 std::string& mcpAuthToken();
@@ -712,6 +737,8 @@ inline void enqueueHttpRequest(McpRequest request) {
 }
 } // namespace detail
 
+inline void stopHttpServer();
+
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
 //   host  : "127.0.0.1" (default) keeps it loopback-only. The default is an
@@ -722,8 +749,16 @@ inline void enqueueHttpRequest(McpRequest request) {
 //   token : bearer token required on /mcp. MUST be non-empty when host is not
 //           a loopback address — binding non-local without a token is refused
 //           (fail-closed) so input injection is never silently network-exposed.
-inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
-                            const std::string& token = "") {
+namespace detail {
+inline void startHttpServerImpl(int port, const std::string& host,
+                                const std::string& token, bool healthEndpoint,
+                                const char* opener) {
+    if (environmentClosesMcp()) {
+        if (getHttpServer()) stopHttpServer();
+        return;
+    }
+    // An explicit start opens Public app tools even on an existing health listener.
+    if (!healthEndpoint) healthOnlyEndpoint() = false;
     auto& svr = detail::getHttpServer();
     if (svr) return; // Already running
 
@@ -731,7 +766,7 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
     if (!isLoopback && token.empty()) {
         trussc::logError("MCP")
             << "Refusing to bind MCP server to non-local host '" << host
-            << "' without a token. Set TRUSSC_MCP_TOKEN to expose it (the MCP "
+            << "' without a token. Pass a token to startHttpServer to expose it (the MCP "
                "surface can inject input and mutate the scene).";
         return;
     }
@@ -805,43 +840,40 @@ inline void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
         res.set_content(detail::dumpReply(info), "application/json");
     });
 
-    detail::getHttpThread() = std::make_unique<std::thread>([port, host]() {
-        auto& svr = detail::getHttpServer();
-        if (!svr) return;
-
-        int actualPort = 0;
-        if (port > 0) {
-            // Bind to specific port
-            if (!svr->bind_to_port(host.c_str(), port)) {
-                trussc::logError("MCP") << "Failed to bind HTTP server to " << host << ":" << port;
-                return;
-            }
-            actualPort = port;
-        } else {
-            // Let OS assign a free port
-            actualPort = svr->bind_to_any_port(host.c_str());
-            if (actualPort < 0) {
-                trussc::logError("MCP") << "Failed to bind HTTP server to any port on " << host;
-                return;
-            }
-        }
-        detail::getHttpPort().store(actualPort);
-
-        // The only line with the actual port (an OS-assigned port is known
-        // only here, after bind). Through the Logger so it also reaches the
-        // log file and onLog listeners: "[MCP] HTTP server listening on
-        // http://HOST:PORT/mcp" at Notice (stdout; hidden when the console
-        // level is Warning or higher). Set TRUSSC_MCP_PORT for a known port.
-        trussc::logNotice("MCP") << "HTTP server listening on http://" << host
-                                 << ":" << actualPort << "/mcp";
-        // The raw stderr copy stays for v0.7 so tools that read stderr keep
-        // working; it is removed in v0.8.0 (#414).
-        std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
-                  << actualPort << "/mcp" << std::endl;
-
-        svr->listen_after_bind();
+    int actualPort = port > 0 ? (svr->bind_to_port(host.c_str(), port) ? port : -1)
+                              : svr->bind_to_any_port(host.c_str());
+    if (actualPort <= 0) {
+        trussc::logError("MCP") << "Failed to bind HTTP server to " << host << ":" << port;
+        svr.reset();
+        return;
+    }
+    healthOnlyEndpoint() = healthEndpoint;
+    detail::resetHttpChannel();
+    detail::getHttpPort().store(actualPort);
+    httpListenerConfig() = {port, host, opener};
+    detail::getHttpThread() = std::make_unique<std::thread>([]() {
+        detail::getHttpServer()->listen_after_bind();
     });
+    svr->wait_until_ready();
+    // Binding and readiness complete on the caller's thread. Deliver the
+    // Notice here too, so Logger listeners do not run on the HTTP thread.
+    trussc::logNotice("MCP") << "HTTP server listening on http://" << host
+                             << ":" << actualPort << "/mcp";
+    // The raw stderr copy stays for v0.7 so tools that read stderr keep
+    // working; it is removed in v0.8.0 (#414).
+    std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
+              << actualPort << "/mcp" << std::endl;
 }
+} // namespace detail
+
+// The first opener chooses the listener's address and token. To choose them
+// explicitly, call this before setToolLevel(). A later mismatched call logs
+// one Error and changes nothing; it never restarts the listener. Matching
+// parameters reuse it (0 repeats an original OS-assigned port request; the
+// actual assigned port also matches). A matching explicit opt-in still opens
+// Public app tools on an environment health-only listener.
+void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
+                     const std::string& token = "");
 
 // Stop HTTP server
 inline void stopHttpServer() {
@@ -884,6 +916,9 @@ inline void stopHttpServer() {
     }
     t.reset();
     svr.reset();
+    detail::getHttpPort().store(0);
+    detail::explicitlyOpened() = false;
+    detail::healthOnlyEndpoint() = false;
 }
 
 // Process HTTP request queue (call every frame from main thread)
