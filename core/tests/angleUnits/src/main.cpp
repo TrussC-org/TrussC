@@ -150,7 +150,7 @@ private:
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto listener = getLogger().onLog.listen([](LogEventArgs& e) {
-        if (e.level == LogLevel::Warning && e.message.find("FOV must be radians") != std::string::npos) ++fovWarnings;
+        if (e.level == LogLevel::Warning && e.message.find("FOV out of range") != std::string::npos) ++fovWarnings;
     });
     testArcs();
     testDefaults();

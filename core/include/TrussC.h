@@ -837,8 +837,8 @@ namespace internal {
         if (fovRadians > 0.0f && fovRadians < HALF_TAU) return true;
         static OnceGate warned;
         if (warned.isFirstTime()) {
-            logWarning("ScreenFov") << "FOV must be radians in 0 < fov < TAU/2; "
-                "use a Deg-suffixed function for degrees. Call ignored.";
+            logWarning("ScreenFov") << "FOV out of range: needs 0 < fov < TAU/2 radians "
+                "(0 < fov < 180 for the Deg functions). Call ignored.";
         }
         return false;
     }
