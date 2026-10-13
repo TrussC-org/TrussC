@@ -75,7 +75,8 @@ typedef struct {
     HICON big_icon, small_icon;
     HCURSOR standard_cursors[_SAPP_MOUSECURSOR_NUM];  // LR_SHARED (global-ish)
     HCURSOR custom_cursors[_SAPP_MOUSECURSOR_NUM];
-    UINT orig_codepage;           // to restore console CP on exit
+    UINT orig_output_codepage;    // restore console output CP on exit
+    UINT orig_input_codepage;     // restore console input CP on exit
     WCHAR surrogate;              // WM_CHAR high-surrogate accumulator
     RECT stored_window_rect;      // saved windowed pos/size for fullscreen→windowed restore
     bool is_win10_or_greater;     // gates FLIP_DISCARD + DXGI_PRESENT_DO_NOT_WAIT
@@ -169,8 +170,10 @@ resize itself is picked up by the loop's `_sapp_win32_update_dimensions()` next 
 Gated on `desc.win32.console_create` / `console_attach` / `console_utf8`:
 - `console_attach` → `AttachConsole(ATTACH_PARENT_PROCESS)`; if that fails and
   `console_create` → `AllocConsole()`. On success `freopen_s` redirects stdout+stderr to `"CON"`.
-- `console_utf8` → save `orig_codepage = GetConsoleOutputCP()`, `SetConsoleOutputCP(CP_UTF8)`.
-- Restore on exit sets the codepage back.
+- `console_utf8` → save `orig_output_codepage = GetConsoleOutputCP()` and
+  `orig_input_codepage = GetConsoleCP()`; set both `SetConsoleOutputCP(CP_UTF8)`
+  and `SetConsoleCP(CP_UTF8)` so input and output use UTF-8.
+- Restore on exit restores both saved codepages with their corresponding setters.
 
 ### The main loop (10178–10208)
 ```c

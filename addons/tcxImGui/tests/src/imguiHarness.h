@@ -165,7 +165,7 @@ private:
 inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const nlohmann::json& args,
                                bool* deferred = nullptr, int* frames = nullptr, int maxFrames = 10,
                                const std::function<void(int)>& beforeFrame = nullptr) {
-    namespace md = tc::mcp::detail;
+    namespace md = tc::mcp::internal;
     tcx::imgui::registerImGuiTools();   // idempotent
     nlohmann::json req = {{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
                           {"params", {{"name", name}, {"arguments", args}}}};
@@ -173,7 +173,7 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
     ds.hasEnvelope = false;
     ds.target = nullptr;
     ds.owner = nullptr;
-    std::string reply = tc::mcp::Server::instance().processMessage(req.dump());
+    std::string reply = tc::mcp::internal::Server::instance().processMessage(req.dump());
     if (deferred) *deferred = ds.hasEnvelope;
     if (frames) *frames = 0;
     if (ds.hasEnvelope) {
@@ -194,7 +194,7 @@ inline nlohmann::json callTool(ImGuiHarness& h, const std::string& name, const n
             // The main window's afterFrame: ImGuiManager's overdue listener
             // (BeforeApp), then the core's drain
             tcx::imgui::detail::settleOverdueValues(h.context());
-            tc::mcp::drainDeferredResponses();
+            tc::mcp::internal::drainDeferredResponses();
             if (frames) *frames = i + 1;
             if (future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                 reply = future.get()();

@@ -85,7 +85,7 @@ GuestInstances tcApp::sharedInstances() {
     g.screenRecorder = &tc::internal::globalScreenRecorder();
     g.asyncScheduler = &tc::internal::AsyncScheduler::get();
     g.beepManager = &tc::internal::getManager();
-    g.consoleRunning = &tc::console::detail::isRunning();
+    g.consoleRunning = &tc::console::internal::isRunning();
     g.pbrPipeline = &tc::internal::getPbrPipeline();
     g.pointPipeline = &tc::internal::getPointPipeline();
     g.fboShared = &tc::internal::fboSharedMap();

@@ -28,15 +28,15 @@ void checkError(const char* name, const json& reply, const json& id,
 }
 
 #ifndef __EMSCRIPTEN__
-std::future<mcp::detail::ReplyThunk> queue(const std::string& name, const json& id) {
-    auto promise = std::make_shared<std::promise<mcp::detail::ReplyThunk>>();
+std::future<mcp::internal::ReplyThunk> queue(const std::string& name, const json& id) {
+    auto promise = std::make_shared<std::promise<mcp::internal::ReplyThunk>>();
     auto future = promise->get_future();
-    mcp::detail::getHttpChannel().send(mcp::McpRequest{request(name, id), promise});
+    mcp::internal::getHttpChannel().send(mcp::McpRequest{request(name, id), promise});
     mcp::processHttpQueue();
     return future;
 }
 
-json reply(std::future<mcp::detail::ReplyThunk>& future) {
+json reply(std::future<mcp::internal::ReplyThunk>& future) {
     // Completion is synchronous after drain/cancel; never hang on a regression.
     if (future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
         throw std::runtime_error("reply was not completed");
@@ -49,7 +49,7 @@ json reply(std::future<mcp::detail::ReplyThunk>& future) {
 
 TC_CORE_TEST_MAIN() {
     try {
-        auto& server = mcp::Server::instance();
+        auto& server = mcp::internal::Server::instance();
         mcp::tool("throws_inline", "").bind([]() -> json {
             throw std::runtime_error("inline failed");
         });
@@ -82,7 +82,7 @@ TC_CORE_TEST_MAIN() {
         });
         {
             auto future = queue("throws_main", "main");
-            mcp::drainDeferredResponses();
+            mcp::internal::drainDeferredResponses();
             checkError("main exception", reply(future),
                        "main", "deferred response failed: main failed");
         }
@@ -95,7 +95,7 @@ TC_CORE_TEST_MAIN() {
                 return nullptr;
             });
             auto future = queue(mainThrows ? "two_main" : "two_worker", 685);
-            mcp::drainDeferredResponses();
+            mcp::internal::drainDeferredResponses();
             checkError(mainThrows ? "two-stage main exception" : "two-stage worker exception",
                        reply(future), 685, mainThrows ? "deferred response failed: two-stage main failed"
                                                     : "deferred worker stage failed: worker failed");
@@ -108,20 +108,20 @@ TC_CORE_TEST_MAIN() {
                 produced = true;
                 return nullptr;
             }, &target);
-            mcp::detail::setDeferralOwner(&owner);
+            mcp::internal::setDeferralOwner(&owner);
             return nullptr;
         });
         {
             auto timed = queue("pending", "timeout");
-            auto& pending = mcp::detail::deferredResponses().back();
+            auto& pending = mcp::internal::deferredResponses().back();
             // Exercise expiry without depending on how long the test waited.
             pending.deadline = std::chrono::steady_clock::time_point::min();
-            mcp::drainDeferredResponses();
+            mcp::internal::drainDeferredResponses();
             checkError("timeout", reply(timed), "timeout",
                        "the window rendered no frame within 5 s (minimized, hidden or closed?)");
 
             auto unloaded = queue("pending", "unload");
-            mcp::detail::removeRegistrationsOwnedBy(&owner);
+            mcp::internal::removeRegistrationsOwnedBy(&owner);
             checkError("unload", reply(unloaded), "unload",
                        "the app code behind this reply was unloaded by a hot reload before the reply was produced");
         }
@@ -131,7 +131,7 @@ TC_CORE_TEST_MAIN() {
         const std::string shutdown = "the MCP server shut down before the reply was produced";
         checkError("shutdown", reply(stopped), 686, shutdown);
         check("cancelled producers never run", !produced);
-        check("all deferred responses completed", !mcp::hasDeferredResponses());
+        check("all deferred responses completed", !mcp::internal::hasDeferredResponses());
 #endif
     } catch (const std::exception& e) {
         std::printf("FAIL: %s\n", e.what());

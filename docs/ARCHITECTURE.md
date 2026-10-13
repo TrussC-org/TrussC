@@ -522,11 +522,14 @@ can't add/move/reparent one.
 
 TrussC natively supports **Model Context Protocol (MCP)**, enabling seamless integration with AI agents.
 
-- **MCP Server:** Built-in JSON-RPC server over stdio.
+- **MCP Server:** Built-in JSON-RPC server over HTTP only. Stdin commands use the separate console API.
 - **Tools & Resources:** Apps can expose functions and state to AI using `mcp::tool` and `mcp::resource`.
 - **Standard Tools:** Mouse/Keyboard simulation and Screenshot capabilities are available out-of-the-box.
 
-To enable, run with environment variable: `TRUSSC_MCP=1`.
+For development, use `trusscli run --mcp`. Production apps grant inspection
+with `mcp::setToolLevel(mcp::ToolLevel::ReadOnly)` in `setup()` (or `Control`
+for input). In default builds `TRUSSC_MCP=1` or `TRUSSC_MCP_PORT` opens
+only the loopback health endpoint. Registration alone never starts a listener.
 
 See [AI_AUTOMATION.md](AI_AUTOMATION.md) for full reference.
 

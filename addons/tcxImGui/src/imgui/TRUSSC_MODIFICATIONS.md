@@ -49,7 +49,7 @@ for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
   `ImGuiTestEngineHook_ItemInfo`, `ImGuiTestEngineHook_Log`,
   `ImGuiTestEngine_FindItemDebugLabel`) are implemented in `tcImGuiHooks.h`.
   They run only for contexts whose `TestEngineHookItems` is set, which
-  tcxImGui does only while the MCP tools are registered (`TRUSSC_MCP=1`).
+  tcxImGui does when `imguiSetup()` registers its MCP tools (independent of the grant).
 
 ### 2. Widget value hook (`IMGUI_TC_ITEM_VALUE`)
 
@@ -387,7 +387,7 @@ done
    the touched record through real clicks — menus, check boxes, radio buttons,
    list boxes — and setting values through the hook, read back per
    component). Build every project that uses imgui (see step 3). Run one with
-   `TRUSSC_MCP=1` and check `tcx_imgui_get_widgets`: values present, a
+   `trusscli run --mcp` and check `tcx_imgui_get_widgets`: values present, a
    `DragFloat3` listed under its own label, `tcx_imgui_input` with
    `[1, 2, 3]` into it returns ok and `tcx_imgui_get_widgets` then shows
    exactly `[1, 2, 3]` (every component, not only one), and it does not show

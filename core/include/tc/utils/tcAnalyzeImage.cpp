@@ -4,7 +4,7 @@
 #include <climits>
 #include <stdexcept>
 
-namespace trussc::mcp::detail {
+namespace trussc::mcp::internal {
 namespace {
 using Channels = std::array<double, 4>;
 struct Rect { int x, y, w, h; };

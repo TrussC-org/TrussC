@@ -72,7 +72,7 @@ With `EVENT_DRIVEN` (0 Hz), `update()` is not called automatically — use timer
 
 ### Use cases
 
-- **MCP server mode** (`TRUSSC_MCP=1`) — AI-driven automation without a screen
+- **MCP development mode** (`trusscli run --mcp`) — AI-driven automation without a screen
 - **Network tools** — OSC receivers, TCP/UDP servers
 - **Batch processing** — image/video processing, audio generation
 - **Sensor data collection** — read sensors on an SBC, log to file or send over network
@@ -285,7 +285,7 @@ sudo pacman -S mesa
 
 ### App runs but no display output (labwc, no physical monitor)
 
-This is expected — labwc creates a Wayland session without a physical display. The app runs in the background. Connect a monitor to see the output, or use MCP mode (`TRUSSC_MCP=1`) for headless interaction.
+This is expected — labwc creates a Wayland session without a physical display. The app runs in the background. Connect a monitor to see the output, or use MCP with a ReadOnly/Control grant in `setup()` (or `trusscli run --mcp` during development) for headless interaction.
 
 ### Monitor goes to sleep / screen blanks during long runs
 

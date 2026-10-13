@@ -14,7 +14,7 @@ void check(const char* name, bool ok) {
     if (!ok) ++failures;
 }
 json call(const char* name, json args = json::object()) {
-    const auto response = json::parse(mcp::Server::instance().processMessage(json{
+    const auto response = json::parse(mcp::internal::Server::instance().processMessage(json{
         {"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
         {"params", {{"name", name}, {"arguments", args}}}}.dump()));
     if (response.contains("error")) return {{"status", "error"}};
@@ -115,7 +115,7 @@ void ringChecks() {
 TC_CORE_TEST_MAIN() {
     ringChecks();
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-    const auto schema = json::parse(mcp::Server::instance().processMessage(
+    const auto schema = json::parse(mcp::internal::Server::instance().processMessage(
         json{{"jsonrpc","2.0"},{"id",1},{"method","tools/list"}}.dump()));
     for (const auto& t : schema["result"]["tools"]) {
         if (t["name"] == "tc_get_audio_spectrum") check("spectrum schema has exactly the Decision's six arguments",

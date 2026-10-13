@@ -316,9 +316,9 @@ function enumerate(objs) {
 }
 
 // --- 3. visibility + symbol-id grammar --------------------------------------
-const HIDDEN = ['internal', 'mcp', 'headless', 'hot_reload', 'console', 'bitmapfont', 'colors'];   // colors:: is rendered as the swatch palette, not the flat symbol list
+const HIDDEN = ['internal', 'headless', 'hot_reload', 'bitmapfont', 'colors'];   // colors:: is rendered as the swatch palette, not the flat symbol list
 const nsSegs = (ns) => (ns || '').split('::').filter(x => x && x !== 'trussc' && x !== '(anon)');
-const isHidden = (s) => nsSegs(s.ns).some(seg => HIDDEN.includes(seg));   // hidden namespace (internal::, mcp::, …); per-symbol hide is doc-side (`hide = true`)
+const isHidden = (s) => nsSegs(s.ns).some(seg => HIDDEN.includes(seg));   // hidden namespace (internal:: at any depth, …); per-symbol hide is doc-side (`hide = true`)
 const nsPrefix = (s) => nsSegs(s.ns).join('::');
 const isTc = (f) => /core\/include\/(tc\/|tc[A-Z]\w*\.h|TrussC\.h)/.test(f || '');
 const noise = (s) => (s.flags || []).some(f => ['implicit', 'defaulted', 'deleted'].includes(f))
@@ -330,8 +330,7 @@ function symbolId(s) {
         // Members are qualified like everything else: a type in a sub-namespace
         // would otherwise be `mcp::ToolBuilder` while its own method is a bare
         // `ToolBuilder::arg`, and generic member names (`Tool::name`) would read
-        // as top-level ids. No visible symbol sits in a sub-namespace today, so
-        // this leaves every current id byte-identical.
+        // as top-level ids. Keep the feature namespace on public MCP members.
         case 'method': case 'field': return q(s.owner + '::' + s.name);
         case 'enum': return s.owner ? q(s.owner + '::' + s.name) : q(s.name);
         case 'type': { const b = s.owner ? q(s.owner + '::' + s.name) : q(s.name); return s.tparams && s.tparams.length ? `${b}<${s.tparams.join(', ')}>` : b; }

@@ -1505,7 +1505,7 @@ inline bool warnIfSecondaryWindowControl(OnceGate& warned, const char* fn, const
 // main window as before.
 inline void setWindowTitle(const std::string& title) {
     if (internal::routeSetWindowTitleToWindow(title)) return;
-    sapp_set_window_title(mcp::detail::mainWindowTitle(title).c_str());
+    sapp_set_window_title(mcp::internal::mainWindowTitle(title).c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -2124,7 +2124,7 @@ namespace internal {
     inline void drainPendingScreenshots() {
         auto& ctx = currentWindowContext();
         #ifndef __EMSCRIPTEN__
-        if (!ctx.isMain) mcp::drainDeferredResponses(&ctx);
+        if (!ctx.isMain) mcp::internal::drainDeferredResponses(&ctx);
         #endif
         auto& queue = ctx.pendingScreenshotPaths;
         if (queue.empty()) return;
@@ -2440,7 +2440,7 @@ namespace internal {
             // drain their own in windowTick).
             internal::drainPendingScreenshots();
             #ifndef __EMSCRIPTEN__
-            mcp::drainDeferredResponses();
+            mcp::internal::drainDeferredResponses();
             #endif
         });
 
@@ -2620,7 +2620,7 @@ namespace internal {
             internal::pumpAudioDiagnostics();
 
             // Process console input (fire events)
-            console::processQueue();
+            console::internal::processQueue();
 
             // Process MCP HTTP requests on main thread
             #ifndef __EMSCRIPTEN__
@@ -2670,7 +2670,7 @@ namespace internal {
         // be served and a blocked MCP HTTP worker would hang.
         if (!mainWindowContext().pendingScreenshotPaths.empty()
             #ifndef __EMSCRIPTEN__
-            || mcp::hasDeferredResponses()
+            || mcp::internal::hasDeferredResponses()
             #endif
         ) {
             shouldDraw = true;
@@ -3205,7 +3205,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
         desc.width = settings.width;
         desc.height = settings.height;
     }
-    const auto& windowTitle = mcp::detail::mainWindowTitle(settings.title);
+    const auto& windowTitle = mcp::internal::mainWindowTitle(settings.title);
     desc.window_title = windowTitle.c_str();
     desc.high_dpi = settings.highDpi;
     desc.sample_count = settings.sampleCount;

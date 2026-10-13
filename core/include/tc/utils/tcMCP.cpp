@@ -21,7 +21,7 @@
 namespace trussc {
 namespace mcp {
 
-namespace detail {
+namespace internal {
 
 bool isDevBuild() {
 #if TRUSSC_MCP_DEV && !defined(__EMSCRIPTEN__)
@@ -234,42 +234,42 @@ std::atomic<bool>& mcpLoopbackOnly() {
 
 #endif // __EMSCRIPTEN__
 
-} // namespace detail
-
 Server& Server::instance() {
     static Server server;
     // Build the core registry once, even when the first registration is from
     // a guest. Core handlers outlive that guest and must have no guest owner.
     static const bool registered = [&] {
-        const auto owner = detail::registrationOwner();
-        detail::setRegistrationOwner(nullptr);
-        detail::registerStandardTools(server);
-        detail::setRegistrationOwner(owner);
+        const auto owner = internal::registrationOwner();
+        internal::setRegistrationOwner(nullptr);
+        internal::registerStandardTools(server);
+        internal::setRegistrationOwner(owner);
         return true;
     }();
     (void)registered;
     return server;
 }
 
+} // namespace internal
+
 #ifndef __EMSCRIPTEN__
 void startHttpServer(int port, const std::string& host, const std::string& token) {
     // Reject before changing exposure or explicit ownership. A rejected call
     // must not widen a health-only listener or preserve one on Public downgrade.
-    if (detail::getHttpServer() && !detail::environmentClosesMcp()) {
-        const auto& config = detail::httpListenerConfig();
+    if (internal::getHttpServer() && !internal::environmentClosesMcp()) {
+        const auto& config = internal::httpListenerConfig();
         if ((port != config.requestedPort && port != getHttpPort()) ||
-            host != config.host || token != detail::mcpAuthToken()) {
+            host != config.host || token != internal::mcpAuthToken()) {
             logError("MCP") << "already listening on " << config.host << ":" << getHttpPort()
                 << ", opened by " << config.opener
                 << "; call startHttpServer(port, host, token) before setToolLevel() to choose the address";
             return;
         }
     }
-    const bool wasFull = detail::getHttpServer() && !detail::healthOnly();
-    detail::startHttpServerImpl(port, host, token, false, "startHttpServer()");
-    if (detail::getHttpServer()) {
-        detail::explicitlyOpened() = true;
-        if (!wasFull) detail::logExposure();
+    const bool wasFull = internal::getHttpServer() && !internal::healthOnly();
+    internal::startHttpServerImpl(port, host, token, false, "startHttpServer()");
+    if (internal::getHttpServer()) {
+        internal::explicitlyOpened() = true;
+        if (!wasFull) internal::logExposure();
     }
 }
 #endif
@@ -277,30 +277,30 @@ void startHttpServer(int port, const std::string& host, const std::string& token
 void setToolLevel(ToolLevel level) {
     const auto previousLevel = getToolLevel();
 #ifndef __EMSCRIPTEN__
-    const bool wasFull = detail::getHttpServer() && !detail::healthOnly();
+    const bool wasFull = internal::getHttpServer() && !internal::healthOnly();
 #endif
     // Dev builds stay Control, so the Public downgrade policy never applies.
-    detail::grantedToolLevel().store(detail::isDevBuild() ? ToolLevel::Control : level);
-    if (detail::environmentClosesMcp()) {
-        detail::startConfiguredServer("the grant");
+    internal::grantedToolLevel().store(internal::isDevBuild() ? ToolLevel::Control : level);
+    if (internal::environmentClosesMcp()) {
+        internal::startConfiguredServer("the grant");
     } else if (getToolLevel() >= ToolLevel::ReadOnly) {
-        detail::healthOnlyEndpoint() = false;
-        detail::startConfiguredServer("the grant");
-    } else if (previousLevel > ToolLevel::Public && !detail::explicitlyOpened()) {
+        internal::healthOnlyEndpoint() = false;
+        internal::startConfiguredServer("the grant");
+    } else if (previousLevel > ToolLevel::Public && !internal::explicitlyOpened()) {
 #ifndef __EMSCRIPTEN__
-        if (detail::getHttpServer()) {
-            if (detail::environmentRequestsMcp()) detail::healthOnlyEndpoint() = true;
+        if (internal::getHttpServer()) {
+            if (internal::environmentRequestsMcp()) internal::healthOnlyEndpoint() = true;
             else stopHttpServer();
         }
 #endif
     }
 #ifndef __EMSCRIPTEN__
-    if (!wasFull || getToolLevel() > previousLevel) detail::logExposure();
+    if (!wasFull || getToolLevel() > previousLevel) internal::logExposure();
 #endif
 }
 
 ToolLevel getToolLevel() {
-    return detail::grantedToolLevel().load();
+    return internal::grantedToolLevel().load();
 }
 
 } // namespace mcp

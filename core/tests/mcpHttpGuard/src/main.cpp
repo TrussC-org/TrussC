@@ -14,7 +14,7 @@
 //
 // The server runs with a token, so /mcp also needs "Authorization: Bearer
 // <token>": a missing, shorter, longer or different token -> 401. The token
-// comparison helper (detail::constantTimeEquals) is also checked directly.
+// comparison helper (mcp::internal::constantTimeEquals) is also checked directly.
 //
 // The main thread pumps mcp::processHttpQueue() the way the frame loop does;
 // the requests run on a worker with a deadline.
@@ -174,7 +174,7 @@ int firstOpenerCase(const string& mode) {
     else if (mode == "first-explicit") mcp::startHttpServer(0, "127.0.0.1", token);
     else {
         if (mode == "first-environment") setEnv("TRUSSC_MCP", "1");
-        mcp::detail::initializeMcp();
+        mcp::internal::initializeMcp();
     }
     const int port = mcp::getHttpPort();
     check("first opener binds a listener", port > 0);
@@ -189,10 +189,10 @@ int firstOpenerCase(const string& mode) {
     auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
         logs.emplace_back(e.level, e.message);
     });
-    auto* server = mcp::detail::getHttpServer().get();
-    auto* serverThread = mcp::detail::getHttpThread().get();
-    const bool healthOnly = mcp::detail::healthOnly();
-    const bool explicitStart = mcp::detail::explicitlyOpened();
+    auto* server = mcp::internal::getHttpServer().get();
+    auto* serverThread = mcp::internal::getHttpThread().get();
+    const bool healthOnly = mcp::internal::healthOnly();
+    const bool explicitStart = mcp::internal::explicitlyOpened();
     const auto level = mcp::getToolLevel();
     auto reject = [&](int requestedPort, const string& host, const string& requestedToken) {
         logs.clear();
@@ -200,11 +200,11 @@ int firstOpenerCase(const string& mode) {
         check("different listener parameters log exactly one Error naming first opener",
               logs.size() == 1 && logs[0].first == LogLevel::Error && logs[0].second == expected);
         check("rejected start preserves listener, policy and authentication",
-              mcp::getHttpPort() == port && mcp::detail::getHttpServer().get() == server &&
-              mcp::detail::getHttpThread().get() == serverThread &&
-              mcp::detail::mcpAuthToken() == token && mcp::detail::mcpLoopbackOnly() &&
-              mcp::detail::healthOnly() == healthOnly &&
-              mcp::detail::explicitlyOpened() == explicitStart && mcp::getToolLevel() == level);
+              mcp::getHttpPort() == port && mcp::internal::getHttpServer().get() == server &&
+              mcp::internal::getHttpThread().get() == serverThread &&
+              mcp::internal::mcpAuthToken() == token && mcp::internal::mcpLoopbackOnly() &&
+              mcp::internal::healthOnly() == healthOnly &&
+              mcp::internal::explicitlyOpened() == explicitStart && mcp::getToolLevel() == level);
     };
     reject(0, "localhost", token);
     reject(port == 65535 ? port - 1 : port + 1, "127.0.0.1", token);
@@ -236,8 +236,8 @@ int firstOpenerCase(const string& mode) {
     mcp::startHttpServer(0, "127.0.0.1", token);
     mcp::startHttpServer(port, "127.0.0.1", token);
     check("matching starts produce no logs and do not restart",
-          logs.empty() && mcp::detail::getHttpServer().get() == server &&
-          mcp::getHttpPort() == port && mcp::detail::getHttpThread().get() == serverThread);
+          logs.empty() && mcp::internal::getHttpServer().get() == server &&
+          mcp::getHttpPort() == port && mcp::internal::getHttpThread().get() == serverThread);
     // A successful repeat must not replace the original opener in diagnostics.
     logs.clear();
     mcp::startHttpServer(0, "localhost", token);
@@ -253,7 +253,7 @@ bool headlessSetupDone = false;
 struct HeadlessMcpApp : App {
     future<vector<json>> replies;
     void setup() override {
-        check("headless setup precedes automatic MCP startup", !mcp::detail::getHttpServer());
+        check("headless setup precedes automatic MCP startup", !mcp::internal::getHttpServer());
         if (headlessGrantInSetup) mcp::setToolLevel(mcp::ToolLevel::Control);
         mcp::tool("headless_public", "").bind([]() -> json { return "public"; });
         mcp::tool("headless_control", "").level(mcp::ToolLevel::Control)
@@ -261,15 +261,15 @@ struct HeadlessMcpApp : App {
         headlessSetupDone = true;
     }
     void update() override {
-        const bool dev = mcp::detail::isDevBuild();
-        const bool closed = mcp::detail::environmentClosesMcp();
+        const bool dev = mcp::internal::isDevBuild();
+        const bool closed = mcp::internal::environmentClosesMcp();
         if (!replies.valid()) {
             check("headless startup listener follows environment/build", (mcp::getHttpPort() > 0) == !closed);
             if (closed || mcp::getHttpPort() <= 0) {
                 exitApp();
                 return;
             }
-            check("headless endpoint uses loopback", mcp::detail::mcpLoopbackOnly());
+            check("headless endpoint uses loopback", mcp::internal::mcpLoopbackOnly());
             replies = async(launch::async, [] {
                 httplib::Client client("127.0.0.1", mcp::getHttpPort());
                 client.set_connection_timeout(5);
@@ -321,7 +321,7 @@ int environmentCase(const string& mode) {
         setEnv(key, nullptr);
     if (mode.rfind("first-", 0) == 0) return firstOpenerCase(mode);
     if (mode.rfind("headless", 0) == 0) {
-        const bool dev = mcp::detail::isDevBuild();
+        const bool dev = mcp::internal::isDevBuild();
         const bool closed = mode == "headless-closed";
         headlessGrantInSetup = mode == "headless-grant";
         headlessSetupDone = false;
@@ -347,10 +347,10 @@ int environmentCase(const string& mode) {
         check("headless exposure Notice occurs exactly once when full",
               exposureNotices == (!closed && (dev || headlessGrantInSetup) ? 1 : 0));
         check("headless dev warning occurs exactly once, even when disabled", devWarnings == (dev ? 1 : 0));
-        check("headless cleanup stops HTTP", !mcp::detail::getHttpServer() && mcp::getHttpPort() == 0);
+        check("headless cleanup stops HTTP", !mcp::internal::getHttpServer() && mcp::getHttpPort() == 0);
         return g_fail ? 1 : 0;
     }
-    const bool dev = mcp::detail::isDevBuild();
+    const bool dev = mcp::internal::isDevBuild();
     const bool closed = mode == "closed" || mode == "closed-grant" || mode == "closed-explicit";
     const bool downgrade = mode.rfind("downgrade-", 0) == 0;
     const bool grant = downgrade || mode == "grant" || mode == "grant-port" || mode == "exit-cleanup" || mode == "closed-grant";
@@ -388,34 +388,34 @@ int environmentCase(const string& mode) {
     mcp::resource("test://public", "public resource").bind([] { return std::string("resource"); });
     mcp::tool("public_probe", "").bind([]() -> json { return "public"; });
     mcp::tool("control_probe", "").level(mcp::ToolLevel::Control).bind([]() -> json { return "control"; });
-    check("registration alone never starts HTTP", !mcp::detail::getHttpServer());
+    check("registration alone never starts HTTP", !mcp::internal::getHttpServer());
     if (explicitStart) mcp::startHttpServer();
     if (grant) mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     check("code opt-in opens immediately unless disabled",
-          bool(mcp::detail::getHttpServer()) == ((grant || explicitStart) && !closed));
+          bool(mcp::internal::getHttpServer()) == ((grant || explicitStart) && !closed));
     check("no exposure Notice before initialization", exposureNotices.empty());
-    mcp::detail::initializeMcp();
-    mcp::detail::initializeMcp(); // Host initialization is idempotent.
+    mcp::internal::initializeMcp();
+    mcp::internal::initializeMcp(); // Host initialization is idempotent.
     const bool listening = !closed && (dev || grant || explicitStart || envAsk);
     check("startup listener matches environment/code/build", (mcp::getHttpPort() > 0) == listening);
     const bool healthOnly = listening && !dev && !grant && !explicitStart;
     check("initialization logs full exposure once", exposureNotices.size() == (listening && !healthOnly ? 1u : 0u));
     check("health-only Notice occurs exactly once", healthNotices == (healthOnly ? 1 : 0));
     check("dev warning follows build even when disabled", devWarnings == (dev ? 1 : 0));
-    check("main title marks dev builds", (mcp::detail::mainWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
-    check("main title does not duplicate marker", mcp::detail::mainWindowTitle("Test [MCP]") == "Test [MCP]");
+    check("main title marks dev builds", (mcp::internal::mainWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
+    check("main title does not duplicate marker", mcp::internal::mainWindowTitle("Test [MCP]") == "Test [MCP]");
     if (!listening) return g_fail ? 1 : 0;
     check("PORT selects the requested listener", !configuredPort || mcp::getHttpPort() == configuredPort);
     const bool devEnvironment = dev && !explicitStart && mode != "none";
-    check("HOST/TOKEN honored only for dev auto-start", mcp::detail::mcpLoopbackOnly() == !devEnvironment &&
-          mcp::detail::mcpAuthToken() == (devEnvironment ? "environment-token" : ""));
+    check("HOST/TOKEN honored only for dev auto-start", mcp::internal::mcpLoopbackOnly() == !devEnvironment &&
+          mcp::internal::mcpAuthToken() == (devEnvironment ? "environment-token" : ""));
 
     auto exchange = [](const string& method, const json& params = json::object()) {
         auto result = async(launch::async, [=] {
             httplib::Client client("127.0.0.1", mcp::getHttpPort());
             client.set_connection_timeout(5);
             client.set_read_timeout(5);
-            client.set_bearer_token_auth(mcp::detail::mcpAuthToken());
+            client.set_bearer_token_auth(mcp::internal::mcpAuthToken());
             return client.Post("/mcp", json{{"jsonrpc", "2.0"}, {"id", 1},
                 {"method", method}, {"params", params}}.dump(), "application/json");
         });
@@ -437,7 +437,7 @@ int environmentCase(const string& mode) {
     auto call = [&](const string& name) { return exchange("tools/call", {{"name", name}, {"arguments", json::object()}}); };
     const auto health = json::parse(call("tc_get_health")["result"]["content"][0]["text"].get<string>());
     check("health reports actual build kind", health["buildKind"] == (dev ? "dev" : "default"));
-    check("health reports actual grant", health["toolLevel"] == mcp::detail::toolLevelName(mcp::getToolLevel()));
+    check("health reports actual grant", health["toolLevel"] == mcp::internal::toolLevelName(mcp::getToolLevel()));
     check("Public app tools require code or dev opt-in", call("public_probe")["result"].value("isError", false) == healthOnly);
     check("ReadOnly tools require a grant", call("tc_get_status")["result"].value("isError", false) == (!dev && !grant));
     check("Control tools require Control", call("control_probe")["result"].value("isError", false) == !dev);
@@ -474,8 +474,8 @@ int environmentCase(const string& mode) {
         const bool remainsOpen = dev || mode != "downgrade-none";
         const bool narrowsToHealth = !dev && (mode == "downgrade-env" || mode == "downgrade-port");
         check("Public downgrade preserves or stops listener as requested", mcp::getHttpPort() == (remainsOpen ? port : 0) &&
-              bool(mcp::detail::getHttpServer()) == remainsOpen);
-        check("Public downgrade narrows only grant-opened environment listeners", mcp::detail::healthOnly() == narrowsToHealth);
+              bool(mcp::internal::getHttpServer()) == remainsOpen);
+        check("Public downgrade narrows only grant-opened environment listeners", mcp::internal::healthOnly() == narrowsToHealth);
         if (remainsOpen) {
             const auto tools = exchange("tools/list")["result"]["tools"];
             check("downgraded health listener lists only health", !narrowsToHealth ||
@@ -499,7 +499,7 @@ int environmentCase(const string& mode) {
     if (mode == "downgrade-explicit") {
         mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
         mcp::setToolLevel(mcp::ToolLevel::Public);
-        check("explicit-start flag does not survive stop", bool(mcp::detail::getHttpServer()) == dev);
+        check("explicit-start flag does not survive stop", bool(mcp::internal::getHttpServer()) == dev);
         mcp::stopHttpServer();
     }
     if (mode == "explicit") {
@@ -535,18 +535,18 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check(string("environment case: ") + mode,
               std::system((command + " --environment " + mode).c_str()) == 0);
 
-    if (mcp::detail::isDevBuild())
+    if (mcp::internal::isDevBuild())
         check("environment case: first-dev",
               std::system((command + " --environment first-dev").c_str()) == 0);
 
-    if (mcp::detail::isDevBuild())
+    if (mcp::internal::isDevBuild())
         check("environment case: headless-dev",
               std::system((command + " --environment headless-dev").c_str()) == 0);
 
     // Token comparison helper, no server needed.
     {
-        using mcp::detail::constantTimeEquals;
-        using mcp::detail::bearerTokenMatches;
+        using mcp::internal::constantTimeEquals;
+        using mcp::internal::bearerTokenMatches;
         check("equal strings -> equal", constantTimeEquals("abc123", "abc123"));
         check("both empty -> equal", constantTimeEquals("", ""));
         check("same length, last byte differs -> not equal", !constantTimeEquals("abc123", "abc124"));

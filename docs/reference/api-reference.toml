@@ -19697,3 +19697,341 @@ category = "sound"
 description.en = "Static backend name resolved from the atomic failure snapshot. Empty when no backend context opened or no failure is recorded."
 description.ja = "atomic な失敗スナップショットから解決する静的なバックエンド名。コンテキストが開かなかった場合や失敗記録がない場合は空。"
 description.ko = "atomic 실패 스냅샷에서 해석한 정적 백엔드 이름. 컨텍스트를 열지 못했거나 실패 기록이 없으면 비어 있다."
+
+["console::start"]
+category = "console"
+description.en = "Start stdin command input; runApp() starts it automatically. Unavailable on Web."
+description.ja = "標準入力のコマンド読み取りを開始する。runApp() が自動で開始する。Web では利用不可。"
+description.ko = "표준 입력 명령 수신을 시작한다. runApp()이 자동으로 시작한다. Web에서는 사용할 수 없다."
+
+["console::stop"]
+category = "console"
+description.en = "Disable stdin command input; call in setup() to opt out. No-op on Web."
+description.ja = "標準入力のコマンド読み取りを無効にする。無効化するには setup() で呼ぶ。Web では何もしない。"
+description.ko = "표준 입력 명령 수신을 비활성화한다. setup()에서 호출한다. Web에서는 아무 작업도 하지 않는다."
+
+["console::isEnabled"]
+category = "console"
+description.en = "Whether stdin command input is enabled; always false on Web."
+description.ja = "標準入力のコマンド読み取りが有効か。Web では常に false。"
+description.ko = "표준 입력 명령 수신 활성화 여부. Web에서는 항상 false이다."
+
+["mcp::ToolLevel"]
+category = "mcp"
+description.en = "Tool exposure level: Public < ReadOnly < Control. Tools default to Public; Control includes inspection."
+description.ja = "ツールの公開レベル。Public < ReadOnly < Control。既定は Public。Control は検査も含む。"
+description.ko = "도구 공개 수준: Public < ReadOnly < Control. 기본값은 Public이며 Control에는 조회도 포함된다."
+
+value_desc.Public.en = "Default grant; health is the only Public built-in. Custom tools also default to Public."
+value_desc.Public.ja = "既定の許可。組み込みで Public なのはヘルスのみ。カスタムツールも既定は Public。"
+value_desc.Public.ko = "기본 허용 수준. 내장 도구 중 Public은 상태 확인뿐이다. 사용자 도구의 기본값도 Public이다."
+value_desc.ReadOnly.en = "Inspection, screenshots, status and alerts; captures may write files."
+value_desc.ReadOnly.ja = "検査、スクリーンショット、ステータス、アラート。キャプチャはファイルを書き込む場合がある。"
+value_desc.ReadOnly.ko = "조회, 스크린샷, 상태 및 알림. 캡처는 파일을 쓸 수 있다."
+value_desc.Control.en = "Input, scene changes, recording and quit; includes ReadOnly."
+value_desc.Control.ja = "入力、シーン変更、録画、終了。ReadOnly を含む。"
+value_desc.Control.ko = "입력, 장면 변경, 녹화 및 종료. ReadOnly를 포함한다."
+
+["mcp::setToolLevel"]
+category = "mcp"
+description.en = "Set the host grant. ReadOnly or Control opens loopback HTTP unless TRUSSC_MCP=0; dev builds retain Control. Registration order is independent; the grant survives hot reload."
+description.ja = "ホストの許可レベルを設定する。ReadOnly または Control は TRUSSC_MCP=0 を除きループバック HTTP を開く。開発ビルドは Control を維持する。登録順に依存せず、ホットリロード後も保持される。"
+description.ko = "호스트 허용 수준을 설정한다. TRUSSC_MCP=0이 아니면 ReadOnly 또는 Control이 루프백 HTTP를 연다. 개발 빌드는 Control을 유지한다. 등록 순서와 무관하며 핫 리로드 후에도 유지된다."
+
+["mcp::getToolLevel"]
+category = "mcp"
+description.en = "Return the current host grant, checked for every tools/list and tools/call."
+description.ja = "tools/list と tools/call ごとに確認される現在のホスト許可レベルを返す。"
+description.ko = "tools/list와 tools/call마다 확인하는 현재 호스트 허용 수준을 반환한다."
+
+["mcp::isDebuggerEnabled"]
+category = "mcp"
+description.en = "Compatibility query: true when getToolLevel() is at least Control."
+description.ja = "互換用の問い合わせ。getToolLevel() が Control 以上なら true。"
+description.ko = "호환성 조회: getToolLevel()이 Control 이상이면 true이다."
+
+["mcp::tool"]
+category = "mcp"
+description.en = "Build a tool registration. Only tc_ is reserved; tcx_ is free. Registration never starts the listener."
+description.ja = "ツール登録を組み立てる。予約済み接頭辞は tc_ のみ。tcx_ は自由に使える。登録だけではリスナーは起動しない。"
+description.ko = "도구 등록을 구성한다. tc_만 예약되어 있고 tcx_는 자유롭게 사용할 수 있다. 등록만으로 리스너가 시작되지 않는다."
+
+["mcp::ToolBuilder"]
+category = "mcp"
+description.en = "Fluent tool registration builder; finish with bind(). Tools default to Public."
+description.ja = "ツール登録用のビルダー。bind() で完了する。既定レベルは Public。"
+description.ko = "도구 등록 빌더. bind()로 완료하며 기본 수준은 Public이다."
+
+["mcp::ToolBuilder::level"]
+category = "mcp"
+description.en = "Declare the required grant for this tool. Core and official addons specify every tool's level."
+description.ja = "このツールに必要な許可レベルを宣言する。コアと公式アドオンは全ツールのレベルを明示する。"
+description.ko = "이 도구에 필요한 허용 수준을 선언한다. 코어와 공식 애드온은 모든 도구의 수준을 명시한다."
+
+["mcp::ToolBuilder::arg"]
+category = "mcp"
+description.en = "Add a typed named argument and its description; required defaults to true."
+description.ja = "型付きの引数名と説明を追加する。required の既定値は true。"
+description.ko = "형식이 지정된 인수 이름과 설명을 추가한다. required 기본값은 true이다."
+
+["mcp::ToolBuilder::bind"]
+category = "mcp"
+description.en = "Register a handler taking JSON arguments or a typed std::function. Runs on the main thread; exposure follows the current grant."
+description.ja = "JSON 引数または型付き std::function のハンドラーを登録する。メインスレッドで実行され、公開は現在の許可レベルに従う。"
+description.ko = "JSON 인수 또는 형식이 지정된 std::function 핸들러를 등록한다. 메인 스레드에서 실행되며 현재 허용 수준에 따라 공개된다."
+
+["mcp::resource"]
+category = "mcp"
+description.en = "Build a URI-addressed text resource registration; registration alone does not open HTTP."
+description.ja = "URI で参照するテキストリソースの登録を組み立てる。登録だけでは HTTP は開かない。"
+description.ko = "URI로 참조하는 텍스트 리소스 등록을 구성한다. 등록만으로 HTTP가 열리지 않는다."
+
+["mcp::ResourceBuilder"]
+category = "mcp"
+description.en = "Resource registration builder; finish with bind()."
+description.ja = "リソース登録用ビルダー。bind() で完了する。"
+description.ko = "리소스 등록 빌더. bind()로 완료한다."
+
+["mcp::ResourceBuilder::desc"]
+category = "mcp"
+description.en = "Set the resource description."
+description.ja = "リソースの説明を設定する。"
+description.ko = "리소스 설명을 설정한다."
+
+["mcp::ResourceBuilder::mime"]
+category = "mcp"
+description.en = "Set the resource MIME type."
+description.ja = "リソースの MIME タイプを設定する。"
+description.ko = "리소스 MIME 형식을 설정한다."
+
+["mcp::ResourceBuilder::bind"]
+category = "mcp"
+description.en = "Register the resource's text producer, called on the main thread."
+description.ja = "メインスレッドで呼ばれるリソースのテキスト生成関数を登録する。"
+description.ko = "메인 스레드에서 호출되는 리소스 텍스트 생성 함수를 등록한다."
+
+["mcp::hasTool"]
+category = "mcp"
+description.en = "Whether a tool is registered, regardless of its current exposure."
+description.ja = "現在の公開状態によらずツールが登録されているかを返す。"
+description.ko = "현재 공개 상태와 무관하게 도구 등록 여부를 반환한다."
+
+["mcp::Tool"]
+category = "mcp"
+description.en = "Tool registration data: name, description, level, arguments and handler."
+description.ja = "ツール登録データ。名前、説明、レベル、引数、ハンドラーを持つ。"
+description.ko = "도구 등록 데이터: 이름, 설명, 수준, 인수 및 핸들러."
+
+["mcp::ToolArg"]
+category = "mcp"
+description.en = "One argument in a tool's input schema."
+description.ja = "ツール入力スキーマの引数。"
+description.ko = "도구 입력 스키마의 인수 하나."
+
+["mcp::Resource"]
+category = "mcp"
+description.en = "URI-addressed resource metadata and content handler."
+description.ja = "URI で参照するリソースのメタデータと内容ハンドラー。"
+description.ko = "URI로 참조하는 리소스 메타데이터와 콘텐츠 핸들러."
+
+["mcp::startHttpServer"]
+category = "mcp"
+description.en = "Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web."
+description.ja = "HTTP を明示的に開く。既定は 127.0.0.1、ポート 0 は OS が選択する。非ループバックにはトークンが必要。TRUSSC_MCP=0 では開かない。アドレス指定は setToolLevel() より前に行う。最初の指定が有効で、後の不一致は Error を記録して変更しない。Web では何もしない。"
+description.ko = "HTTP를 명시적으로 연다. 기본 주소는 127.0.0.1이며 포트 0은 OS가 선택한다. 외부 주소에는 토큰이 필요하다. TRUSSC_MCP=0이면 열리지 않는다. 주소를 선택하려면 setToolLevel() 전에 호출한다. 첫 설정을 유지하며 이후 불일치는 Error를 기록하고 변경하지 않는다. Web에서는 아무 작업도 하지 않는다."
+
+["mcp::stopHttpServer"]
+category = "mcp"
+description.en = "Stop the HTTP listener and answer pending requests before joining the worker. No-op on Web."
+description.ja = "HTTP リスナーを停止し、保留中の要求に応答してからワーカーを終了する。Web では何もしない。"
+description.ko = "HTTP 리스너를 중지하고 대기 중인 요청에 응답한 뒤 작업 스레드를 종료한다. Web에서는 아무 작업도 하지 않는다."
+
+["mcp::processHttpQueue"]
+category = "mcp"
+description.en = "Process queued HTTP requests on the main thread; called automatically by the frame loop. No-op on Web."
+description.ja = "キュー内の HTTP 要求をメインスレッドで処理する。フレームループが自動で呼ぶ。Web では何もしない。"
+description.ko = "대기 중인 HTTP 요청을 메인 스레드에서 처리한다. 프레임 루프가 자동으로 호출한다. Web에서는 아무 작업도 하지 않는다."
+
+["mcp::getHttpPort"]
+category = "mcp"
+description.en = "Return the bound HTTP port, or 0 when stopped or on Web."
+description.ja = "バインドされた HTTP ポートを返す。停止中または Web では 0。"
+description.ko = "바인딩된 HTTP 포트를 반환한다. 중지 상태나 Web에서는 0이다."
+
+["mcp::deferToolResultUntilAfterFrame"]
+category = "mcp"
+description.en = "In a tool handler, defer the JSON result producer until after the target window's present; null targets the main window."
+description.ja = "ツールハンドラー内で JSON 結果の生成を対象ウィンドウの present 後まで遅延する。null はメインウィンドウ。"
+description.ko = "도구 핸들러에서 JSON 결과 생성을 대상 창의 present 이후로 지연한다. null은 기본 창이다."
+
+["mcp::deferToolResultTwoStage"]
+category = "mcp"
+description.en = "Defer a main-thread stage until after present; its returned JSON producer runs on the HTTP worker for expensive encoding."
+description.ja = "メインスレッドの処理を present 後に遅延する。返された JSON 生成関数は HTTP ワーカーで実行され、重いエンコードを分離できる。"
+description.ko = "메인 스레드 단계를 present 이후로 지연한다. 반환된 JSON 생성 함수는 HTTP 작업 스레드에서 실행되어 무거운 인코딩을 처리한다."
+
+["mcp::status"]
+category = "mcp"
+description.en = "Publish a numeric or string getter through ReadOnly tc_get_status; registering the same name replaces it."
+description.ja = "数値または文字列の取得関数を ReadOnly の tc_get_status で公開する。同名の登録は置き換える。"
+description.ko = "숫자 또는 문자열 조회 함수를 ReadOnly tc_get_status로 공개한다. 같은 이름을 등록하면 교체된다."
+
+["mcp::statusGraph"]
+category = "mcp"
+description.en = "Publish a numeric getter marked for time-series plotting through ReadOnly tc_get_status."
+description.ja = "時系列グラフ用の数値取得関数を ReadOnly の tc_get_status で公開する。"
+description.ko = "시계열 그래프용 숫자 조회 함수를 ReadOnly tc_get_status로 공개한다."
+
+["mcp::statusImage"]
+category = "mcp"
+description.en = "Publish a Pixels getter through ReadOnly tc_get_status_image, evaluated on demand on the main thread."
+description.ja = "Pixels の取得関数を ReadOnly の tc_get_status_image で公開する。要求時にメインスレッドで評価する。"
+description.ko = "Pixels 조회 함수를 ReadOnly tc_get_status_image로 공개한다. 요청 시 메인 스레드에서 평가한다."
+
+["mcp::alert"]
+category = "mcp"
+description.en = "Log an operator warning and queue it for ReadOnly tc_get_alerts; thread-safe, retains the latest 100 pending alerts."
+description.ja = "運用者向けの警告をログに記録し ReadOnly の tc_get_alerts 用にキューへ入れる。スレッドセーフで未取得の最新 100 件を保持する。"
+description.ko = "운영자 경고를 기록하고 ReadOnly tc_get_alerts용 큐에 넣는다. 스레드 안전하며 최근 미수신 경고 100개를 유지한다."
+
+["mcp::registerInspectionTools"]
+category = "mcp"
+description.en = "Deprecated alias of setToolLevel(ToolLevel::ReadOnly); removal at v1.0.0."
+description.ja = "setToolLevel(ToolLevel::ReadOnly) の非推奨別名。v1.0.0 で削除予定。"
+description.ko = "setToolLevel(ToolLevel::ReadOnly)의 사용 중단 예정 별칭. v1.0.0에서 제거 예정."
+
+["mcp::registerControlTools"]
+category = "mcp"
+description.en = "Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0."
+description.ja = "setToolLevel(ToolLevel::Control) の非推奨別名。v1.0.0 で削除予定。"
+description.ko = "setToolLevel(ToolLevel::Control)의 사용 중단 예정 별칭. v1.0.0에서 제거 예정."
+
+["mcp::registerDebuggerTools"]
+category = "mcp"
+description.en = "Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0."
+description.ja = "setToolLevel(ToolLevel::Control) の非推奨別名。v1.0.0 で削除予定。"
+description.ko = "setToolLevel(ToolLevel::Control)의 사용 중단 예정 별칭. v1.0.0에서 제거 예정."
+
+["mcp::enableDebugger"]
+category = "mcp"
+description.en = "Deprecated no-op; use setToolLevel(ToolLevel::Control). Removal at v1.0.0."
+description.ja = "非推奨の無操作関数。setToolLevel(ToolLevel::Control) を使用する。v1.0.0 で削除予定。"
+description.ko = "사용 중단 예정인 무동작 함수. setToolLevel(ToolLevel::Control)을 사용한다. v1.0.0에서 제거 예정."
+
+["mcp::ToolArg::name"]
+category = "mcp"
+description.en = "Argument name."
+description.ja = "引数名。"
+description.ko = "인수 이름."
+
+["mcp::ToolArg::type"]
+category = "mcp"
+description.en = "JSON schema type."
+description.ja = "JSON スキーマの型。"
+description.ko = "JSON 스키마 형식."
+
+["mcp::ToolArg::description"]
+category = "mcp"
+description.en = "Argument description."
+description.ja = "引数の説明。"
+description.ko = "인수 설명."
+
+["mcp::ToolArg::required"]
+category = "mcp"
+description.en = "Whether the argument is required (default true)."
+description.ja = "引数が必須か。既定は true。"
+description.ko = "인수 필수 여부. 기본값은 true."
+
+["mcp::Tool::name"]
+category = "mcp"
+description.en = "Tool name."
+description.ja = "ツール名。"
+description.ko = "도구 이름."
+
+["mcp::Tool::description"]
+category = "mcp"
+description.en = "Tool description."
+description.ja = "ツールの説明。"
+description.ko = "도구 설명."
+
+["mcp::Tool::level"]
+category = "mcp"
+description.en = "Required grant (default Public)."
+description.ja = "必要な許可レベル。既定は Public。"
+description.ko = "필요한 허용 수준. 기본값은 Public."
+
+["mcp::Tool::args"]
+category = "mcp"
+description.en = "Ordered input argument definitions."
+description.ja = "入力引数定義の順序付きリスト。"
+description.ko = "입력 인수 정의의 순서 있는 목록."
+
+["mcp::Tool::handler"]
+category = "mcp"
+description.en = "Main-thread handler receiving JSON arguments and returning tool content."
+description.ja = "JSON 引数を受け取りツール内容を返すメインスレッドのハンドラー。"
+description.ko = "JSON 인수를 받아 도구 콘텐츠를 반환하는 메인 스레드 핸들러."
+
+["mcp::Tool::owner"]
+category = "mcp"
+description.en = "Framework registration owner for hot-reload cleanup."
+description.ja = "ホットリロード時の解放に使うフレームワークの登録所有者。"
+description.ko = "핫 리로드 정리에 사용하는 프레임워크 등록 소유자."
+
+["mcp::Tool::getSchema"]
+category = "mcp"
+description.en = "Build the JSON input schema from the arguments."
+description.ja = "引数から JSON 入力スキーマを生成する。"
+description.ko = "인수로 JSON 입력 스키마를 생성한다."
+
+["mcp::Resource::uri"]
+category = "mcp"
+description.en = "Resource URI."
+description.ja = "リソースの URI。"
+description.ko = "리소스 URI."
+
+["mcp::Resource::name"]
+category = "mcp"
+description.en = "Resource display name."
+description.ja = "リソースの表示名。"
+description.ko = "리소스 표시 이름."
+
+["mcp::Resource::mimeType"]
+category = "mcp"
+description.en = "Resource MIME type."
+description.ja = "リソースの MIME タイプ。"
+description.ko = "리소스 MIME 형식."
+
+["mcp::Resource::description"]
+category = "mcp"
+description.en = "Resource description."
+description.ja = "リソースの説明。"
+description.ko = "리소스 설명."
+
+["mcp::Resource::handler"]
+category = "mcp"
+description.en = "Main-thread producer of resource text."
+description.ja = "リソースのテキストを生成するメインスレッドの関数。"
+description.ko = "리소스 텍스트를 생성하는 메인 스레드 함수."
+
+["mcp::Resource::owner"]
+category = "mcp"
+description.en = "Framework registration owner for hot-reload cleanup."
+description.ja = "ホットリロード時の解放に使うフレームワークの登録所有者。"
+description.ko = "핫 리로드 정리에 사용하는 프레임워크 등록 소유자."
+
+# Transport/builder implementation detail; not part of the documented API.
+["mcp::McpRequest"]
+hide = true
+
+# Transport/builder implementation detail; not part of the documented API.
+["mcp::McpRequest::body"]
+hide = true
+
+# Transport/builder implementation detail; not part of the documented API.
+["mcp::McpRequest::response"]
+hide = true
+
+# Transport/builder implementation detail; not part of the documented API.
+["mcp::TypeName<T>"]
+hide = true

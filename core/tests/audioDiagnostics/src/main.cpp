@@ -188,7 +188,7 @@ static void waitReportInterval() { this_thread::sleep_for(chrono::milliseconds(2
 
 // Call tc_get_audio_state through the MCP server, return its payload.
 static Json callAudioState(const string& arguments) {
-    string reply = mcp::Server::instance().processMessage(
+    string reply = mcp::internal::Server::instance().processMessage(
         R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"tc_get_audio_state","arguments":)"
         + arguments + "}}");
     try {

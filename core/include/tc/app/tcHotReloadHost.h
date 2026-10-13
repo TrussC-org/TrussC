@@ -129,7 +129,7 @@ struct GuestLibrary {
             // identity, never dereferenced.
             static uintptr_t generation = 0;  // host-only: only the host creates guests
             mcpOwner = reinterpret_cast<const void*>(++generation);
-            mcp::detail::setRegistrationOwner(mcpOwner);
+            mcp::internal::setRegistrationOwner(mcpOwner);
             App* raw = createApp();
             auto deleter = destroyApp;
             app = std::shared_ptr<App>(raw, [deleter](App* p) {
@@ -144,8 +144,8 @@ struct GuestLibrary {
 
     void destroy() {
         if (mcpOwner) {
-            mcp::detail::removeRegistrationsOwnedBy(mcpOwner);
-            mcp::detail::setRegistrationOwner(nullptr);
+            mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
+            mcp::internal::setRegistrationOwner(nullptr);
             mcpOwner = nullptr;
         }
         // Audio keeps running across a reload. End this generation before
@@ -674,7 +674,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         desc.width = settings.width;
         desc.height = settings.height;
     }
-    const auto& windowTitle = mcp::detail::mainWindowTitle(settings.title);
+    const auto& windowTitle = mcp::internal::mainWindowTitle(settings.title);
     desc.window_title = windowTitle.c_str();
     desc.high_dpi = settings.highDpi;
     desc.sample_count = settings.sampleCount;

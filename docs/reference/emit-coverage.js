@@ -72,8 +72,21 @@ function argExpr(type) {
     return rvalue ? `std::move(${e})` : e;
 }
 
-function callArgs(sig) {
-    return (sig.args || []).map(a => argExpr(a.type)).join(', ');
+// Clang keeps namespace-relative type names in signatures (ToolLevel in
+// mcp::setToolLevel). The canary lives in trussc::af_generated, so qualify
+// those names as well as the callable and its owner.
+function callArgs(sig, ns) {
+    return (sig.args || []).map(a => {
+        let type = a.type;
+        if (ns) {
+            for (const entry of Object.values(data)) {
+                if (entry.ns !== ns || entry.owner ||
+                    !['type', 'enum', 'typedef'].includes(entry.kind)) continue;
+                type = type.replace(new RegExp(`(?<![\\w:])${entry.name}(?![\\w])`, 'g'), `${ns}::${entry.name}`);
+            }
+        }
+        return argExpr(type);
+    }).join(', ');
 }
 
 // provider 'std': std:: functions documented for users (sin, lerp, ...), not TrussC's.
@@ -100,22 +113,23 @@ for (const [id, v] of Object.entries(data)) {
     if (!usable(v)) continue;
     if (v.owner && (templateOwners.has(v.owner) || v.owner.includes('<'))) continue;
     const guard = platformGuard(v.platforms);
+    const owner = v.owner && (v.ns ? `${v.ns}::${v.owner}` : v.owner);
 
     if (v.kind === 'func') {
-        const lines = v.signatures.filter(usableSig).map(s => `(void)${qualify(v)}(${callArgs(s)});`);
+        const lines = v.signatures.filter(usableSig).map(s => `(void)${qualify(v)}(${callArgs(s, v.ns)});`);
         if (lines.length) push(free, v.category || 'other', guard, lines);
     } else if (v.kind === 'var' && !v.owner) {
         push(free, v.category || 'other', guard, [`(void)${qualify(v)};`]);
     } else if (v.kind === 'method' && v.owner) {
         if (v.name === v.owner || v.name.startsWith('~')) continue;   // ctors via 'constructors', no dtors
-        const lines = v.signatures.filter(usableSig).map(s => `(void)af::val<${v.owner}>().${v.name}(${callArgs(s)});`);
-        if (lines.length) push(owners, v.owner, guard, lines);
+        const lines = v.signatures.filter(usableSig).map(s => `(void)af::val<${owner}>().${v.name}(${callArgs(s, v.ns)});`);
+        if (lines.length) push(owners, owner, guard, lines);
     } else if (v.kind === 'field' && v.owner) {
-        push(owners, v.owner, guard, [`(void)af::val<${v.owner}>().${v.name};`]);
+        push(owners, owner, guard, [`(void)af::val<${owner}>().${v.name};`]);
     } else if (v.kind === 'type' && v.constructors && v.constructors.length && !v.owner &&
                !(v.tparams && v.tparams.length)) {
-        const lines = v.constructors.filter(usableSig).map(s => `(void)${qualify(v)}(${callArgs(s)});`);
-        if (lines.length) push(owners, v.name, guard, lines);
+        const lines = v.constructors.filter(usableSig).map(s => `(void)${qualify(v)}(${callArgs(s, v.ns)});`);
+        if (lines.length) push(owners, qualify(v), guard, lines);
     }
 }
 

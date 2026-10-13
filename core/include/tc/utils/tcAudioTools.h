@@ -1,7 +1,7 @@
 #pragma once
 
-namespace trussc::mcp { class Server; }
+namespace trussc::mcp::internal { class Server; }
 
-namespace trussc::mcp::detail {
+namespace trussc::mcp::internal {
 void registerAudioTools(Server& server);
 }

@@ -47,7 +47,7 @@ void checkMcp(const fs::path& requested, const fs::path& expected) {
                 {"params", {{"name", "tc_save_screenshot"},
                             {"arguments", {{"path", internal::pathToUtf8(requested)}}}}}};
     const auto count = warnings.size();
-    Json response = Json::parse(mcp::Server::instance().processMessage(req.dump()));
+    Json response = Json::parse(mcp::internal::Server::instance().processMessage(req.dump()));
     Json result = Json::parse(response.at("result").at("content").at(0).at("text").get<string>());
     check("MCP screenshot returns ok", result.value("status", "") == "ok");
     check("MCP reports actual destination",
