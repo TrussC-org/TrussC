@@ -2196,11 +2196,11 @@ IVec2 getWindowPosition() [macos,windows]  // Get window position in screen coor
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Capture current screen to Pixels
 bool isFullscreen()  // Check if window is fullscreen
 bool isRecording()  // Check whether a recording is in progress
-int recordingFrameCount()  // Number of frames captured so far in the current recording
+int recordingFrameCount()  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
 fs::path recordingPath()  // Output file path of the current recording
 void redraw(int count = 1)  // Request extra redraws (useful for event-driven rendering)
 int runHeadlessApp(const HeadlessSettings & settings = HeadlessSettings())  // Run an app class without a window or graphics context (update loop only). Updates are fixed steps at the target rate (getDeltaTime() is 1 / fps), at most setMaxUpdateSteps() per loop pass (default 10; between passes the loop sleeps until the next step is due, at most 1 ms); time beyond that (after a stall, or when update() is slower than its rate) is dropped with a one-time warning. Template on the app type; returns the process exit code
-bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when capture is queued; on native platforms the destination folder is prepared first. This does not mean the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+bool saveScreenshot(const std::filesystem::path & path)  // Save a screenshot of the rendered frame (format picked from the extension, case-insensitive: png/jpg/bmp on most platforms; see the platform note). Safe to call from anywhere; capture is deferred to after present(). Returns true when capture is queued; on native platforms the destination folder is prepared first. This does not mean the file is already written. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned. Keeps bool on every platform: true means queued. Native entry synchronously checks path, parent creation and bundle refusal through prepareOutputPath; the deferred atomic checked write logs one Error on failure. Web remains a download: encoded output is handed to the browser, with no folders or .tmp and no disk-completion guarantee.
 void setClipboardString(const std::string & text)  // Copy text to clipboard
 void setFullscreen(bool full)  // Set fullscreen mode
 void setIndependentFps(float updateFps, float drawFps)  // Set independent update and draw rates. A fixed update rate runs fixed steps (getDeltaTime() is 1 / updateFps for each), at most setMaxUpdateSteps() per frame (default 10): time beyond that (after a stall, when update() is too slow, or when updateFps is more than that many times the display rate) is dropped with a one-time warning. Switching at runtime starts the new rate from the switch (no catch-up; on the next frame a fixed update rate runs one step, a VSYNC update's getDeltaTime() counts from the call, or from the update's start when called inside an update, and a fixed draw rate draws). Calling it again with the current rates does nothing, and changing only the draw rate keeps the update's phase and drops no time; switching between a synced (setFps) and an independent update counts as an update-mode change even at the same rate (setFps(VSYNC) to setIndependentFps(VSYNC, 30) drops up to a frame). Entering a fixed update rate restarts with one step, which can count more or less than the time since the last update (from a 144 Hz display to a fixed 60, the step is ~9.7 ms longer than the 1/144 s since the last update); entering a VSYNC update drops the time since the last update (under a frame in the usual modes, long only after an idle like EVENT_DRIVEN), and on that frame, called outside update(), its dt counts only from the call
@@ -2212,8 +2212,8 @@ void setWindowPosition(int x, int y) [macos,windows]  // Set window position in 
 void setWindowSize(int width, int height)  // Set window size. Resizing the main window is not implemented on Linux yet
 void setWindowSizeLogical(int width, int height)  // Resize the window to the given logical size (logical pixels)
 void setWindowTitle(const std::string & title)  // Set window title
-bool startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten)
-void stopRecording()  // Stop the current recording and finalize the file
+SaveResult startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start recording the window — or an Fbo (clean, GUI-free output) — to a video file (native encoder, no ffmpeg). Pass a seconds argument (or VideoRecordSettings.duration) for a fixed-length clip that auto-stops and finalizes itself; 0 = unlimited. Calling it again while recording finalizes the current file first, then starts fresh (same path = the old file is overwritten). Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
+SaveResult stopRecording()  // Stop the current recording and finalize the file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
 void toggleFullscreen()  // Toggle fullscreen mode
 ```
 
@@ -2250,7 +2250,7 @@ Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflecte
 void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame. Each frame runs, in order, what was queued when its drain started; work queued during the drain runs in the next frame. Nothing is dropped and there is no limit (a callback may edit the tree or free something); the tc_get_health MCP tool reports the count as mainQueuePending. Code that may queue faster than the app runs it, and can drop values, keeps its own bounded or latest-value buffer
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
-bool setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
 void setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
 void setSystemLogLevel(LogLevel level)  // Set the minimum log level written to the OS log: os_log on macOS, OutputDebugStringW on Windows
 const std::string & shortTypeName(const std::type_info & ti)  // Short (unqualified) readable name for a type, cached per type
@@ -2267,7 +2267,7 @@ LogStream tcLogVerbose(const std::string & module = std::string("")) ⚠️depre
 LogStream tcLogWarning(const std::string & module = std::string("")) ⚠️deprecated  // Deprecated alias for logWarning()
 void tcSetConsoleLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setConsoleLogLevel()
 void tcSetFileLogLevel(LogLevel level) ⚠️deprecated  // Deprecated alias for setFileLogLevel()
-bool tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
+SaveResult tcSetLogFile(const fs::path & path) ⚠️deprecated  // Deprecated alias for setLogFile()
 std::string toBase64(const unsigned char * bytes, size_t len) [+2]  // Encode raw bytes as a Base64 string
 std::string toBinary(int value) [+4]  // Convert an integer to a binary string
 bool toBool(const std::string & str)  // Parse a string into a bool
@@ -2289,7 +2289,7 @@ const std::string & typeName(const std::type_info & ti) [+1]  // Readable (deman
 ### File
 
 ```cpp
-bool appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult appendToFile(const fs::path & path, const std::string & content)  // Append string to file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns a failed SaveResult and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
 bool createDirectory(const fs::path & path)  // Create directory (and parents)
 bool directoryExists(const fs::path & path)  // Check if directory exists
 bool fileExists(const fs::path & path)  // Check if file exists
@@ -2313,8 +2313,8 @@ std::string loadTextFile(const fs::path & path)  // Load entire text file
 Xml loadXml(const fs::path & path)  // Load an XML file and return it as an Xml object. Relative paths are resolved via getDataPath.
 std::string pathToUtf8(const fs::path & p)  // Convert a path to a UTF-8 std::string, the same on every platform. Use it instead of path.string(), which on Windows converts to the process code page and can throw for characters outside it. On Windows it can still throw for a name that is not valid UTF-16 (an unpaired surrogate); to log a path, use log << path, which does not throw.
 bool removeFile(const fs::path & path)  // Remove file
-bool saveJson(const Json & j, const fs::path & path, int indent = 2)  // Write a Json object to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the pretty-print width (negative for compact). The JSON is serialized before the file is opened, so a serialization error leaves an existing file untouched. Written in binary mode (LF line endings on every platform). Returns true on success; when serializing, opening, writing or closing fails it logs an error and returns false. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
-bool saveTextFile(const fs::path & path, const std::string & content)  // Save string to text file. Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created, the file cannot be opened, or writing or closing it fails. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult saveJson(const Json & j, const fs::path & path, int indent = 2)  // Serialize and save JSON (indent sets the pretty-print width; negative means compact). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
+SaveResult saveTextFile(const fs::path & path, const std::string & content)  // Save text bytes unchanged in binary mode. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void setDataPathRoot(const fs::path & path)  // Set the root directory used to resolve relative data paths. A relative root is resolved against the executable directory; an absolute root (fs::path::is_absolute, e.g. C:/ on Windows) is used as-is. Call it before starting threads that load files (e.g. in setup()).
 void setDataPathToResources() [macos,ios]  // Point the data path root at the macOS app bundle's Contents/Resources/data folder for distribution. No-op on non-macOS platforms. Call it before starting threads that load files (e.g. in setup()).
 void setUserDataPathRoot(const fs::path & path)  // Fix the folder getUserDataPath() returns, for installations, several instances of one app, or tests. Mirrors setDataPathRoot(): a relative root is resolved against the executable directory, an absolute root is used as is. The folder is created on first use. A root inside the app bundle (macOS / iOS) still gets its writes refused.
@@ -2377,14 +2377,21 @@ void setSelectedNode(Node * n)  // Set the currently selected node. Pass nullptr
 void disable3D() ⚠️deprecated  // Deprecated alias for setupScreenOrtho()
 void enable3D() ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
 void enable3DPerspective(float fovY = 0.785000026, float nearZ = 0.100000001, float farZ = 1000.0) ⚠️deprecated  // Deprecated alias for setupScreenPerspective()
-float getDefaultScreenFov()  // Get current default screen FOV
+float getDefaultScreenFov()  // Get default screen FOV in radians
+float getDefaultScreenFovDeg()  // Get default screen FOV in degrees
 Vec3 screenToWorld(const Vec2 & screenPos, float worldZ = 0.0)  // Convert screen coordinate to world coordinate on Z plane
-void setDefaultScreenFov(float fovDeg)  // Set default screen FOV (applied at frame start)
+void setDefaultScreenFov(float fovRadians)  // Set default screen FOV in radians (frame start and FBO begin)
+void setDefaultScreenFovDeg(float fovDeg)  // Set default screen FOV in degrees
+void setDefaultScreenOrtho()  // Set orthographic projection as the default (frame start and FBO begin)
 void setFarClip(float farDist)  // Set the default-screen far clipping plane (0 = auto-calculate)
 void setNearClip(float nearDist)  // Set the default-screen near clipping plane (0 = auto-calculate)
-void setupScreenFov(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Set up screen projection with specified FOV (0 = ortho, >0 = perspective)
+void setupScreenFov(float fovRadians, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in radians
+void setupScreenFovDeg(float fovDeg, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in degrees
+void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective with explicit viewport size and FOV in radians
+void setupScreenFovWithSizeDeg(float fovDeg, float viewW, float viewH, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective with explicit viewport size and FOV in degrees
 void setupScreenOrtho()  // Set up orthographic projection (2D mode)
-void setupScreenPerspective(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Set up perspective projection (oF-style default 3D)
+void setupScreenPerspective(float fovRadians = …, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in radians (default TAU/8)
+void setupScreenPerspectiveDeg(float fovDeg = 45.0, float nearDist = 0.0, float farDist = 0.0)  // Set up screen perspective with FOV in degrees (default 45)
 Vec3 worldToScreen(const Vec3 & worldPos)  // Convert a world coordinate to screen coordinate (x, y = screen pixels, z = depth 0-1)
 ```
 
@@ -2463,6 +2470,39 @@ std::vector<NetworkInterface> listNetworkInterfaces() [macos,windows,linux,andro
 void printNetworkInterfaces() [macos,windows,linux,android,ios]  // Log the interface list (one line per entry)
 bool sameSubnet(const std::string & a, const std::string & b, const std::string & netmask)  // True if IPv4 a and b are on the same subnet under netmask
 const char * sendErrorName(SendError e)  // Short label for a SendError value ("QueueFull", ...). For log messages
+```
+
+### MCP
+
+```cpp
+void mcp::alert(const std::string & msg)  // Log an operator warning and queue it for ReadOnly tc_get_alerts; thread-safe, retains the latest 100 pending alerts.
+void mcp::deferToolResultTwoStage(std::function<std::function<json ()> ()> mainStage, const void * targetWindow = nullptr)  // Defer a main-thread stage until after present; its returned JSON producer runs on the HTTP worker for expensive encoding.
+void mcp::deferToolResultUntilAfterFrame(std::function<json ()> produce, const void * targetWindow = nullptr)  // In a tool handler, defer the JSON result producer until after the target window's present; null targets the main window.
+void mcp::enableDebugger() ⚠️deprecated [macos,windows,linux,ios,android]  // Deprecated no-op; use setToolLevel(ToolLevel::Control). Removal at v1.0.0.
+int mcp::getHttpPort() [macos,windows,linux,ios,android]  // Return the bound HTTP port, or 0 when stopped or on Web.
+ToolLevel mcp::getToolLevel()  // Return the current host grant, checked for every tools/list and tools/call.
+bool mcp::hasTool(const std::string & name)  // Whether a tool is registered, regardless of its current exposure.
+bool mcp::isDebuggerEnabled()  // Compatibility query: true when getToolLevel() is at least Control.
+void mcp::processHttpQueue() [macos,windows,linux,ios,android]  // Process queued HTTP requests on the main thread; called automatically by the frame loop. No-op on Web.
+void mcp::registerControlTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
+void mcp::registerDebuggerTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::Control); removal at v1.0.0.
+void mcp::registerInspectionTools() ⚠️deprecated  // Deprecated alias of setToolLevel(ToolLevel::ReadOnly); removal at v1.0.0.
+ResourceBuilder mcp::resource(const std::string & uri, const std::string & name)  // Build a URI-addressed text resource registration; registration alone does not open HTTP.
+void mcp::setToolLevel(ToolLevel level)  // Set the host grant. ReadOnly or Control opens loopback HTTP unless TRUSSC_MCP=0; dev builds retain Control. Registration order is independent; the grant survives hot reload.
+void mcp::startHttpServer(int port = 0, const std::string & host = std::string("127.0.0.1"), const std::string & token = std::string("")) [macos,windows,linux,ios,android]  // Explicitly open HTTP (default 127.0.0.1, port 0 chooses an OS port); non-loopback requires a token. TRUSSC_MCP=0 closes. Call before setToolLevel() to choose the address: the first opener wins; mismatched later parameters log an Error and change nothing. No-op on Web.
+void mcp::status(const std::string & name, std::function<double ()> getter) [+1]  // Publish a numeric or string getter through ReadOnly tc_get_status; registering the same name replaces it.
+void mcp::statusGraph(const std::string & name, std::function<double ()> getter)  // Publish a numeric getter marked for time-series plotting through ReadOnly tc_get_status.
+void mcp::statusImage(const std::string & name, std::function<trussc::Pixels ()> getter)  // Publish a Pixels getter through ReadOnly tc_get_status_image, evaluated on demand on the main thread.
+void mcp::stopHttpServer() [macos,windows,linux,ios,android]  // Stop the HTTP listener and answer pending requests before joining the worker. No-op on Web.
+ToolBuilder mcp::tool(const std::string & name, const std::string & desc)  // Build a tool registration. Only tc_ is reserved; tcx_ is free. Registration never starts the listener.
+```
+
+### Console
+
+```cpp
+bool console::isEnabled()  // Whether stdin command delivery is enabled. False until the app calls start(), and after stop(); always false on Web.
+void console::start()  // Opt in to stdin commands: call in setup() for windowed or headless apps. Neither runner starts input automatically (breaking in v0.8.0). Drains pending commands before enabling delivery; the first call creates the process's only detached reader, which reads until EOF. Later starts reuse it. LF/CRLF and a partial last line at EOF are supported. Unavailable on Web.
+void console::stop()  // Disable stdin command delivery and discard queued commands. The detached reader continues consuming stdin until EOF, dropping lines read while stopped. start() enables delivery again. Both runners stop delivery before app exit/cleanup. No-op on Web.
 ```
 
 ### Other
@@ -2575,7 +2615,7 @@ int AudioEngine::getMaxPolyphony() const  // Maximum number of simultaneously-pl
 std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Snapshot of the sounds currently playing or paused (PlayingSoundInfo: slot, path, streaming, position, duration, volume, pan, speed, loop, paused, level). Playbacks left in their slots after shutdown() are listed with level 0. Copied under the engine lock: call it from the main thread, not from an audioOut / audioIn listener.
 int AudioEngine::getSampleRate() const  // Current engine output sample rate (Hz). Returns the default (48000) before init().
 AudioStats AudioEngine::getStats() const  // Engine health snapshot (AudioStats): plays dropped since startup, in total and by reason; stream underrun frames, stalled callbacks and voices stopped by re-init; hard-clipped output samples; master peak / RMS; audio-thread CPU usage. Reads atomics and a steady clock, so it is cheap from any thread. The tc_get_audio_state MCP tool reports the same numbers.
-bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device. Re-init on a running engine migrates active voices to the new settings. With no usable audio backend, miniaudio falls back to its silent Null device: init() then succeeds and logs a warning. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
+bool AudioEngine::init() [+1]  // Initialize the engine, or re-initialize it with an AudioSettings override. init(settings) keeps the sample rate, channels, buffer size and polyphony even when it fails; init() with no arguments reuses the last ones (the defaults if init(settings) was never called) but always opens the system default device on AudioBackend::Default. Re-init on a running engine migrates active voices to the new settings. miniaudio reaches Null only when no real backend context can be created; if a context opens but its device cannot, init() returns false without switching backend. Set AudioSettings::backend = AudioBackend::Null for intentional silent operation (one Notice per init). getStats() retains the last init failure until a successful init. Returns true on success, false when no output device can be opened; the failure is logged through logError("AudioEngine") with the requested device name. A failed re-init leaves the engine stopped: the running device is closed before the new one is tried. It may be called again later; each failed try opens the device and logs again, so retry on a timer (about once a second) or on a user action, not every frame. Sound::load*() calls init() while the engine is not initialized, so after a failed init(settings) it opens the system default device with those settings; call init(settings) again before loading sounds if you want the requested device.
 bool AudioEngine::isInitialized() const  // True after a successful init().
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Enumerate available playback devices (name + isDefault). Empty if unsupported on the platform.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Audio output callback: mix all playing sounds into the buffer (internal, called from the audio thread).
@@ -2604,10 +2644,10 @@ bool AudioEngine::waitForAudioCallbacks()  // Teardown barrier for audioOut / au
 ```cpp
 uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
 fs::path AudioRecorder::getPath() const  // Resolved path of the file being written
-double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far
+double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far. Counts complete frames actually written divided by sample rate, including a short write; queued or failed frames are excluded.
 bool AudioRecorder::isRecording() const  // True while recording
-bool AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start recording the master mix into a WAV file (relative paths resolve via getDataPath). The audio engine must already be initialized; returns false otherwise or when the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
-void AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForAudioCallbacks(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile
+SaveResult AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start an in-place WAV recording of the master mix. Returns SaveResult after shared path preparation, opening and checked header writing; the AudioEngine must already be initialized. Relative paths use getDataPath, missing parents are created, and app bundle paths are refused. Every subsequent write is checked; the first failure ends the take and logs exactly one Error.
+SaveResult AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForAudioCallbacks(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile. Returns SaveResult for checked header patching and close, or the first take failure. Repeated stop calls preserve that result without another Error. Recording writes in place, without a temporary or rename.
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -2871,7 +2911,7 @@ bool Fbo::isAllocated() const  // Check if allocated
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Lifetime token for observers holding a raw pointer to this Fbo (e.g. ScreenRecorder auto-stops when the recorded Fbo dies). Per-object: it does not transfer on move
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android]  // Read FBO contents into a CPU buffer (8-bit per channel)
 bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android]  // Read FBO contents into a CPU buffer (32-bit float per channel)
-bool Fbo::save(const fs::path & path) const  // Save FBO contents to file
+SaveResult Fbo::save(const fs::path & path) const  // Read back and save FBO pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void Fbo::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_fbos lists live objects with index, name, width, height and format. tc_analyze_image accepts source={fbo:name or index} and reads the final Fbo pass after the frame. Moves transfer the name/index and remove the moved-from object; destruction removes the entry. Empty names remain available by index. Web readback and iOS float readback return errors. Byte Fbo readback supports RGBA8; other integer formats return an error. Texture is not a source; draw it into a named Fbo.
 ```
 
@@ -2901,7 +2941,7 @@ size_t FileReader::tell()  // Get current position
 void FileWriter::close()  // Close file
 void FileWriter::flush()  // Flush buffer to disk
 bool FileWriter::isOpen() const  // Check if file is open
-bool FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns false and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult FileWriter::open(const fs::path & path, bool append = false)  // Open file for writing (append = true appends to an existing file). Relative paths resolve via getDataPath, and a missing parent folder is created. Returns a failed SaveResult and logs an error when the folder cannot be created or the file cannot be opened. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Write data to file
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Write line with newline
 ```
@@ -2955,7 +2995,7 @@ bool Font::isLoaded() const  // Check if loaded
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
-LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins.
+LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails.
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
@@ -3018,7 +3058,7 @@ Texture & HasTexture::getTexture() [+1]  // Get internal texture
 TextureWrap HasTexture::getWrapU() const  // Return the texture wrap mode on the U axis.
 TextureWrap HasTexture::getWrapV() const  // Return the texture wrap mode on the V axis.
 bool HasTexture::hasTexture() const  // Return true if the underlying texture is allocated.
-bool HasTexture::save(const fs::path & path) const  // Save the texture contents to a file; return true on success.
+SaveResult HasTexture::save(const fs::path & path) const  // Save texture contents (subclasses implement saving). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void HasTexture::setFilter(TextureFilter filter)  // Set both the minification and magnification filters.
 void HasTexture::setMagFilter(TextureFilter filter)  // Set the texture magnification filter.
 void HasTexture::setMinFilter(TextureFilter filter)  // Set the texture minification filter.
@@ -3085,13 +3125,13 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given.
-LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths.
-bool Image::save(const fs::path & path) const  // Save image to file. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult Image::save(const fs::path & path) const  // Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
 void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources.
 void Image::setDirty()  // Mark image as needing update
@@ -3237,7 +3277,7 @@ bool Logger::isFileOpen() const  // Check whether a log file is currently open
 void Logger::log(LogLevel level, const std::string & message)  // Emit a log message at the given level
 void Logger::setConsoleLogLevel(LogLevel level)  // Set the minimum console log level
 void Logger::setFileLogLevel(LogLevel level)  // Set the minimum file log level
-bool Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns false, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
+SaveResult Logger::setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path
 void Logger::setLogLevel(LogLevel level)  // Set the console, file and system log levels at once (a later per-output call wins)
 void Logger::setSystemLogLevel(LogLevel level)  // Set the minimum system (OS log) level: os_log on macOS, OutputDebugStringW on Windows
 ```
@@ -3487,7 +3527,7 @@ int Node::getChildIndex() const  // This node's index among its parent's childre
 std::vector<Ptr> Node::getChildren() const  // Get a copy of the child node list (safe to iterate while modifying) (C++ only)
 std::string Node::getDisplayName() const  // Short type-anchored label for trees / inspectors, e.g. "RectNode" or "RectNode (play)" (C++ only) 
 Vec3 Node::getEuler() const  // Get rotation as Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-Vec3 Node::getEulerDeg() const  // Get rotation as Euler angles in degrees (C++ only)
+Vec3 Node::getEulerDeg() const  // Get rotation as Euler angles in degrees
 const Mat4 & Node::getGlobalMatrix() const  // Get this node's global transform matrix, including parent transforms (cached) (C++ only)
 Mat4 Node::getGlobalMatrixInverse() const  // Get the inverse of the global transform matrix (C++ only)
 Vec3 Node::getGlobalPos() const  // Get the node's origin in global (world) space (C++ only)
@@ -3506,7 +3546,7 @@ float Node::getPMouseY() const  // Get previous-frame mouse Y in this node's loc
 const Vec3 & Node::getPos() const  // Get local position (C++ only)
 const Quaternion & Node::getQuaternion() const  // Get rotation as a quaternion (C++ only)
 float Node::getRot() const  // Get 2D Z-axis rotation in radians (C++ only)
-float Node::getRotDeg() const  // Get 2D Z-axis rotation in degrees (C++ only)
+float Node::getRotDeg() const  // Get 2D Z-axis rotation in degrees
 const Vec3 & Node::getScale() const  // Get local scale (C++ only)
 float Node::getScaleX() const  // Get local X scale (C++ only)
 float Node::getScaleY() const  // Get local Y scale (C++ only)
@@ -3552,7 +3592,7 @@ std::pair<const CameraContext *, Ray> Node::resolvePickRay(internal::PickRaySour
 void Node::setActive(bool active)  // Set the active state (inactive: update and draw are skipped) (C++ only)
 void Node::setCameraContext(std::shared_ptr<const CameraContext> ctx)  // Set the camera context for a manually-managed node (normally set automatically by drawTree).
 void Node::setEuler(const Vec3 & euler) [+1]  // Set rotation from Euler angles in radians (pitch=X, yaw=Y, roll=Z) (C++ only)
-void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees (C++ only)
+void Node::setEulerDeg(const Vec3 & deg)  // Set rotation from Euler angles in degrees
 void Node::setGlobalPos(const Vec3 & global) [+1]  // Set the node's position in global (world) space (C++ only)
 void Node::setIsActive(bool active) ⚠️deprecated  // Deprecated alias for setActive()
 void Node::setIsVisible(bool visible) ⚠️deprecated  // Deprecated alias for setVisible()
@@ -3560,7 +3600,7 @@ Node & Node::setName(const std::string & name)  // Set an optional instance name
 void Node::setPos(const Vec3 & pos) [+1]  // Set local position (C++ only)
 void Node::setQuaternion(const Quaternion & q)  // Set rotation from a quaternion (C++ only)
 void Node::setRot(float radians)  // Set 2D Z-axis rotation in radians (C++ only)
-void Node::setRotDeg(float degrees)  // Set 2D Z-axis rotation in degrees (C++ only)
+void Node::setRotDeg(float degrees)  // Set 2D Z-axis rotation in degrees
 void Node::setScale(const Vec3 & s) [+2]  // Set local scale (vector, uniform, or per-axis) (C++ only)
 void Node::setScaleX(float sx)  // Set local X scale (C++ only)
 void Node::setScaleY(float sy)  // Set local Y scale (C++ only)
@@ -3591,7 +3631,8 @@ void OnceGate::reset()  // Restore the never-fired state so the next isFirstTime
 ```cpp
 void Path::addVertex(float x, float y) [+3]  // Add a vertex
 void Path::addVertices(const std::vector<Vec2> & verts) [+1]  // Add multiple vertices
-void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Add an arc (angles in radians)
+void Path::arc(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+5]  // Add a circular or elliptical arc (all angles in radians)
+void Path::arcDeg(const Vec3 & center, float radiusX, float radiusY, float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) [+2]  // Add an elliptical arc with angles in degrees (all elliptical overloads)
 void Path::bezierTo(const Vec3 & cp1, const Vec3 & cp2, const Vec3 & to, int resolution) [+2]  // Add cubic bezier curve (resolution=-1 uses current curve style)
 std::vector<std::array<float, 2>> Path::buildFillTriangles() const  // Triangulate the path interior into a flat list of 2D triangle vertices
 void Path::clear()  // Clear all vertices
@@ -3645,7 +3686,7 @@ void Pixels::mirror(bool horizontal, bool vertical)  // Flip in place. Both true
 void Pixels::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
 void Pixels::mirrorV()  // Mirror vertically (alias for mirror(false, true))
 void Pixels::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8.
-bool Pixels::save(const fs::path & path) const  // Save image to file. The format follows the extension, case-insensitive: .png, .jpg/.jpeg, .bmp (anything else is written as PNG), and the file is written under the name as given. Relative paths resolve via getDataPath, and a missing parent folder is created. The image is encoded in memory before the file is opened, so an encode error leaves an existing file untouched. When encoding fails, the folder cannot be created, or opening, writing or closing the file fails, an error is logged and false returned. The file is written in place, so a crash, power loss or full disk during the save can leave it truncated; apps that need a crash-safe save handle it themselves, for example by writing a new file and renaming it. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult Pixels::save(const fs::path & path) const  // Save pixels (JPG/JPEG, BMP, otherwise PNG; preserve the requested filename). Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 void Pixels::setColor(int x, int y, const Color & c)  // Set pixel color at position
 void Pixels::setFromFloats(const float * srcData, int width, int height, int channels)  // Fill the buffer from a float array (allocates as needed)
 void Pixels::setFromPixels(const unsigned char * srcData, int width, int height, int channels)  // Copy from external pixel data
@@ -3782,14 +3823,22 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Handle one reflecte
 ```cpp
 ```
 
+### SaveResult — Result of a checked save, stream open, recorder submission or finalization. Carries SaveError and a failure message.
+
+```cpp
+SaveResult SaveResult::fail(SaveError error, std::string message = std::string())  // Make a failure result with an error kind and optional message (static)
+bool SaveResult::ok() const  // true if this operation succeeded (error == SaveError::None); recorder submission is backend acceptance, while close/stop checks finalization.
+SaveResult SaveResult::success()  // Make a success result (static)
+```
+
 ### ScreenRecorder — Captures the rendered output to a video file (start/stop recording of the on-screen frames)
 
 ```cpp
-int ScreenRecorder::getFrameCount() const  // Number of frames captured so far
+int ScreenRecorder::getFrameCount() const  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
 fs::path ScreenRecorder::getPath() const  // Output file path of the current recording
 bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-bool ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically
-void ScreenRecorder::stop()  // Stop live capture and finalize the file
+SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
+SaveResult ScreenRecorder::stop()  // Stop live capture and finalize the file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
 VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
 ```
 
@@ -3966,18 +4015,18 @@ void SoundBuffer::generateSquareWave(float frequency, float duration, float volu
 void SoundBuffer::generateTriangleWave(float frequency, float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with a mono triangle wave.
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
-fs::path SoundBuffer::getPath() const  // File the samples were decoded from (for AAC, when loaded through load()); empty for memory, PCM and generated buffers.
-LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure.
-LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms).
+fs::path SoundBuffer::getPath() const  // Resolved path of the last successful file load, including direct loadAac(). Empty after a failed load, a memory/PCM load, or generation.
+LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure. Relative paths resolve via getDataPath(); absolute paths pass through.
+LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms). Relative paths resolve via getDataPath(); absolute paths pass through. On Web, load waits for decoded PCM using OfflineAudioContext, including in setup().
 LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
-LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM.
+LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
-LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM.
+LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadMp3FromMemory(const void * data, size_t dataSize)  // Decode MP3 data from a memory buffer.
-LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis).
+LoadResult SoundBuffer::loadOgg(const fs::path & path)  // Decode an OGG Vorbis file into PCM (via stb_vorbis). Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  // Decode OGG Vorbis data from a memory buffer.
 LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold.
-LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM.
+LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
 void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged.
 ```
@@ -3994,8 +4043,8 @@ Kind SoundSource::kind() const  // Source kind (Eager for SoundBuffer, Stream fo
 ```cpp
 float SoundStream::getDuration() const  // Decoded file duration in seconds. 0 when the file does not record its length (e.g. a FLAC encoded to a pipe); such a stream plays to its end but cannot seek, and an engine re-init at another sample rate restarts it from the beginning.
 int SoundStream::getMaxPolyphony() const  // Number of concurrent decoder slots reserved at loadStream().
-fs::path SoundStream::getPath() const  // Path the stream was opened from.
-LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed).
+fs::path SoundStream::getPath() const  // Path the stream was opened from. Relative names are resolved via getDataPath(); empty after a failed load.
+LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed). Relative paths resolve via getDataPath(); absolute paths pass through.
 ```
 
 ### StrokeMesh — Variable-width polyline stroke geometry with caps, joins and miter limit; build it from points or a Path, then update() and draw()
@@ -4125,7 +4174,7 @@ int TcpServerClient::getPort() const  // Client port
 ```cpp
 void Texture::allocate(int width, int height, int channels = 4, TextureUsage usage = Immutable, int sampleCount = 1) [+2]  // Allocate texture
 void Texture::allocateCompressed(int width, int height, sg_pixel_format format, const void * data, size_t dataSize)  // Allocate an immutable compressed texture (BC1/BC3/BC7 etc.) from the given data.
-void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data
+void Texture::allocateCubemap(int sideSize, TextureFormat format, TextureUsage usage = RenderTarget, int mipLevels = 1)  // Allocate a cubemap texture without initial data. Dynamic / Stream requires one mip level; requesting more logs an error and leaves the texture unallocated. RenderTarget supports mip chains. Immutable is refused with an error (it would need initial data).
 void Texture::bind() const  // Bind texture for rendering
 void Texture::clear()  // Release texture resources
 void Texture::draw(float x, float y) const [+1]  // Draw texture
@@ -4153,6 +4202,7 @@ bool Texture::isAllocated() const  // Check if allocated
 bool Texture::isCompressed() const  // Whether this texture uses a compressed pixel format
 bool Texture::isCubemap() const  // Whether this texture is a cubemap
 bool Texture::isPremultipliedAlpha() const  // Whether the texture color is premultiplied by alpha
+void Texture::loadCubemapData(const void *const * faces, size_t faceSize)  // Load all six cubemap faces (+X, -X, +Y, -Y, +Z, -Z) in one update. Requires Dynamic / Stream usage and faceSize equal to sideSize squared times bytes per pixel. Immutable / RenderTarget or a size mismatch logs a warning and returns. A second upload to the same image in the same device frame is skipped with the loadData warning. Replaces uploadCubemapFace / uploadCubemapMip in v0.8.
 void Texture::loadData(const Pixels & pixels) [+2]  // Load pixel data to texture
 void Texture::setFilter(TextureFilter filter)  // Set both min and mag filters
 void Texture::setMagFilter(TextureFilter filter)  // Set magnification filter
@@ -4163,8 +4213,6 @@ void Texture::setWrapU(TextureWrap wrap)  // Set horizontal wrap mode
 void Texture::setWrapV(TextureWrap wrap)  // Set vertical wrap mode
 void Texture::unbind() const  // Unbind texture
 void Texture::updateCompressed(const void * data, size_t dataSize)  // Upload compressed pixel data to an already-allocated texture
-void Texture::uploadCubemapFace(int face, int mipLevel, const void * data, size_t dataSize)  // Upload pixel data for one cubemap face at one mip level
-void Texture::uploadCubemapMip(int mipLevel, const void * data, size_t dataSize)  // Upload pixel data for all six faces of one cubemap mip level
 ```
 
 ### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread).
@@ -4436,12 +4484,14 @@ float VideoPlayer::getPosition() const  // Get current position (0.0 to 1.0)
 int VideoPlayer::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
 bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
 bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
+bool VideoPlayer::isAudioStreaming() const  // Return the audio streaming preference (default true); on Linux it applies to the next load(). Native OS players ignore the preference.
 bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
-LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file
+LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file On Web, load waits for a decoded first frame instead of returning placeholder dimensions.
 void VideoPlayer::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
 void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
 void VideoPlayer::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::setAudioStreaming(bool streaming)  // Choose Linux audio streaming (default true). Call before load(); false preloads the whole track for sample-accurate loops and seeks. Changes apply to the next load.
 void VideoPlayer::setAutoPoster(bool on)  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
 void VideoPlayer::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
 void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
@@ -4538,20 +4588,20 @@ void VideoPlayerBase::update()  // Decode the next frame and refresh internal st
 ### VideoWriter — Encodes frames to a video file: open a path, write frames, then close to finalize the file
 
 ```cpp
-bool VideoWriter::addFrame(const Fbo & fbo) [+1]  // Append one frame at the fixed-rate clock (frameIndex/fps)
-bool VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2]  // Append one frame at an explicit presentation time (seconds)
-void VideoWriter::close()  // Finalize and flush the video file
+SaveResult VideoWriter::addFrame(const Fbo & fbo) [+1]  // Append one frame at the fixed-rate clock (frameIndex/fps). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2]  // Append one frame at an explicit presentation time (seconds). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::close()  // Finalize and flush the video file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
 float VideoWriter::getFps() const  // Fixed encoding frame rate
-int VideoWriter::getFrameCount() const  // Number of frames written so far
+int VideoWriter::getFrameCount() const  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
 int VideoWriter::getHeight() const  // Encoder output height in pixels
 fs::path VideoWriter::getPath() const  // Resolved output file path
 const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
 int VideoWriter::getWidth() const  // Encoder output width in pixels
 bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-bool VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the encoder at the given size (path resolved via getDataPath). A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
-bool VideoWriter::submitFrame(double timeSec) [macos]  // Append the previously locked frame at the given presentation time (seconds)
-bool VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec)  // Append interleaved float32 samples to the audio track at an explicit PTS (seconds, same timeline as addFrameAt). Only meaningful when opened with settings.audio = true and audioSampleRate/audioChannels set; returns false otherwise
+SaveResult VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the native encoder. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
+SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submit the previously locked frame at the given PTS. Returns SaveResult from the append BOOL and AVAssetWriter status/error. Accepted frames increase getFrameCount(); close() checks finalization.
+SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec)  // Append float32 audio at the given PTS; an absent audio track returns a failed SaveResult. Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
 ```
 
 ### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
@@ -4602,13 +4652,47 @@ bool Xml::empty() const  // Return true if the document has no content.
 bool Xml::load(const fs::path & path)  // Load an XML document from a file. Relative paths are resolved via getDataPath. Returns true on success.
 bool Xml::parse(const std::string & str)  // Parse an XML document from a string. Returns true on success.
 XmlNode Xml::root() [+1]  // Get the document's root element node.
-bool Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Save the document to a file. Relative paths are resolved via getDataPath, and a missing parent folder is created. indent sets the per-level indentation string. Returns true on success; on failure it logs an error and returns false. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and false returned.
+SaveResult Xml::save(const fs::path & path, const std::string & indent = std::string("  ")) const  // Serialize and save XML. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
 std::string Xml::toString(const std::string & indent = std::string("  ")) const  // Serialize the document to an XML string. indent sets the per-level indentation string.
+```
+
+### mcp::Resource — URI-addressed resource metadata and content handler.
+
+```cpp
+```
+
+### mcp::ResourceBuilder — Resource registration builder; finish with bind().
+
+```cpp
+void mcp::ResourceBuilder::bind(std::function<std::string ()> func)  // Register the resource's text producer, called on the main thread.
+ResourceBuilder & mcp::ResourceBuilder::desc(const std::string & d)  // Set the resource description.
+ResourceBuilder & mcp::ResourceBuilder::mime(const std::string & m)  // Set the resource MIME type.
+```
+
+### mcp::Tool — Tool registration data: name, description, level, arguments and handler.
+
+```cpp
+json mcp::Tool::getSchema() const  // Build the JSON input schema from the arguments.
+```
+
+### mcp::ToolArg — One argument in a tool's input schema.
+
+```cpp
+```
+
+### mcp::ToolBuilder — Fluent tool registration builder; finish with bind(). Tools default to Public.
+
+```cpp
+ToolBuilder & mcp::ToolBuilder::arg(const std::string & name, const std::string & desc, bool required = true)  // Add a typed named argument and its description; required defaults to true.
+void mcp::ToolBuilder::bind(std::function<json (const json &)> func) [+4]  // Register a handler taking JSON arguments or a typed std::function. Runs on the main thread; exposure follows the current grant.
+ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Declare the required grant for this tool. Core and official addons specify every tool's level.
 ```
 
 ## Enums
 
 ```cpp
+enum AudioBackend { Default, Null }  // Audio backend selection: Default uses the platform backend order; Null explicitly runs the real mixer silently without a device.
+enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Initialization failure stage: None, NoBackend (context creation), DeviceOpen, or DeviceStart.
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // WAV sample format: S16 = 16-bit PCM (default), F32 = 32-bit IEEE float (headroom survives, no clipping in the file)
 enum AxisMode { None, Fill, Content }  // Layout axis sizing: None (fixed), Fill (expand to the parent), Content (fit children).
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Built-in system beep sounds (ping, success, error, …) for beep().
@@ -4626,8 +4710,9 @@ enum ImageType { Color, Grayscale }  // Image type: Color or Grayscale.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Line-breaking (kinsoku) strictness for vertical / Japanese text
 enum LayoutDirection { Vertical, Horizontal }  // Layout axis direction: Vertical or Horizontal.
 enum LightType { Directional, Point, Spot }  // Light type: Directional, Point, or Spot.
-enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown.
+enum LoadError { None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled }  // Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled.
 enum LogLevel { Verbose, Notice, Warning, Error, Fatal, Silent }  // Log severity, from Verbose (most detailed) to Fatal. Each output (console, file, system) shows lines at its own level and above; Silent as an output's level turns that output off.
+enum mcp::ToolLevel { Public, ReadOnly, Control }  // Tool exposure level: Public < ReadOnly < Control. Tools default to Public; Control includes inspection.
 enum MixMode { Auto, DownmixMono }  // Sound channel mixing: Auto (match the output) or DownmixMono.
 enum MouseButton { Left, Right, Middle, None }  // Mouse button: Left, Right, Middle, or None.
 enum Orientation { Portrait, PortraitUpsideDown, LandscapeLeft, LandscapeRight, Landscape, All, AllButUpsideDown }  // Screen orientation mask passed to setOrientation (iOS/Android); values are bit flags and can be combined with |
@@ -4635,6 +4720,7 @@ enum PixelFormat { U8, F32 }  // CPU pixel data format: U8 (8-bit) or F32 (float
 enum PointStyle { Square, Round, Pixel }  // Shape used to draw points: Square, Round, Pixel.
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Draw primitive mode: Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Geometry primitive type: Points, Lines, LineStrip, Triangles, TriangleStrip, Quads.
+enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Save failure kind: None, AccessDenied (including bundle refusal), NoSpace, WriteFailed, Unknown. Rename failure is always WriteFailed.
 enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Why a send could not be queued, or how a queued one finished: None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning.
 enum SoundSource::Kind { Eager, Stream }  // Source kind tag on SoundSource, letting the mixer dispatch without a per-frame virtual call: Eager (SoundBuffer, full PCM in RAM) vs Stream (SoundStream, decoded on demand).
 enum StrokeCap { Butt, Round, Square }  // Line cap style for strokes: Butt, Round, Square.
