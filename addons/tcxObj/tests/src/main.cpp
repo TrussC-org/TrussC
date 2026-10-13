@@ -152,6 +152,14 @@ static int runTests() {
         check("broken OBJ: DecodeFailed and exactly one Error",
               result.error == LoadError::DecodeFailed && !result.message.empty() &&
               errors.size() == 1 && errors[0] == "[ObjLoader] " + result.message && loader.getNumGroups() == 0);
+        // A malformed .mtl is not a failed load: LoadObj returns true with the
+        // material reader's error in err. The geometry is usable, so the model
+        // loads and the material message is a Warning, not an Error.
+        errors.clear();
+        ofstream(g_dir / "broken.mtl", ios::binary) << "newmtl red\nKd x y z\n";
+        result = loader.load(writeObj("mtllib broken.mtl\n" + TRI_V + "f 1 2 3\n"));
+        check("OBJ with a malformed .mtl still loads without an Error",
+              result.ok() && errors.empty() && loader.getNumGroups() > 0);
         setDataPathRoot(oldRoot);
     }
 

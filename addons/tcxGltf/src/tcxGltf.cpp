@@ -49,9 +49,8 @@ static cgltf_result readGltfFile(const cgltf_memory_options* memory,
         auto& context = *static_cast<GltfFileContext*>(options->user_data);
         fs::path path = context.modelPath;
         if (!context.readingModel) {
-            path = path.parent_path();
-            path += "/";
-            path += utf8ToPath(uri);
+            // operator/ appends a relative URI and keeps an absolute one.
+            path = path.parent_path() / utf8ToPath(uri);
         }
         ifstream file(path, ios::binary | ios::ate);
         if (!file) return cgltf_result_file_not_found;

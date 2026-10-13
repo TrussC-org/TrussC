@@ -38,11 +38,16 @@ LoadResult ObjLoader::load(const fs::path& path) {
     if (!warn.empty()) {
         logWarning() << "ObjLoader: " << warn;
     }
-    if (!ok || !err.empty()) {
+    if (!ok) {
         string message = (err.empty() ? "failed to parse OBJ" : err) +
                          ": " + tc::internal::pathToDisplayUtf8(objPath);
         logError("ObjLoader") << message;
         return LoadResult::fail(LoadError::DecodeFailed, message);
+    }
+    // LoadObj can succeed with text in err: it appends the material reader's
+    // errors (an unreadable .mtl) and keeps going. The model still loads.
+    if (!err.empty()) {
+        logWarning("ObjLoader") << err;
     }
 
     // Load material textures
