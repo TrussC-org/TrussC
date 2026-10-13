@@ -194,7 +194,10 @@ jobs:
         with:
           variant: ${{ matrix.launcher }}
           key: ${{ matrix.os }}-build
-          max-size: 800M
+          # 2G per OS (#762): at 800M the Linux cache overflowed mid-job (1.0 GB,
+          # hundreds of cleanups) and the hit rate fell. Three OS caches at 2G
+          # stay well under the 10 GB per-repo limit. Same cap for sccache.
+          max-size: 2G
           save: ${{ github.event_name != 'merge_group' }}
 
       - name: Enable compiler launcher
