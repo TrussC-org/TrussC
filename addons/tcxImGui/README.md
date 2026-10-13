@@ -103,7 +103,7 @@ void tcApp::setup() {
 | `tcx_imgui_get_touched` | — | The value widgets the user changed by hand since startup (or the last reset), with the current value of their variable. Includes widgets not drawn right now, and the edits recorded by addons such as tcxNodeInspector. Items that change no variable (buttons, menu headers, action menu items) are not listed — see [Touched](#touched-what-the-user-changed-by-hand) |
 | `tcx_imgui_reset_touched` | — | Clear that record. No value is changed |
 | `tcx_imgui_click` | `label`, `window`, `windowId` (optional) | Click a widget by label. A composite widget (`DragFloat3`, `ColorEdit4`, ...) is an error: set it with `tcx_imgui_input` |
-| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: for widgets that hold a value (and text fields); buttons and other items without a variable are pressed with `tcx_imgui_click`. A value widget gets `text` as JSON, written into its variable and read back (see [Setting values](#setting-values)); a text field gets `text` typed in |
+| `tcx_imgui_input` | `label`, `text`, `window`, `windowId` (optional) | Set a widget's value: for widgets that hold a value (and text fields); buttons and other items without a variable are pressed with `tcx_imgui_click`. A value widget gets `text` as JSON in the reported variable form (`SliderAngle`: radians), written into its variable and read back (see [Setting values](#setting-values)); a text field gets `text` typed in |
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
@@ -171,7 +171,8 @@ frame.
  "widget": "drag", "valueType": "float", "value": [0.5, -1, 2.25]}
 ```
 
-- `text` is the value as JSON, in the units `tcx_imgui_get_widgets` reports: a
+- `text` is the value as JSON, in the form `tcx_imgui_get_widgets` and
+  `tcx_imgui_get_touched` report (the variable's form): a
   number; an array for a composite widget, one element per component
   (`[x, y, z]`; a color `[r, g, b]` or `[r, g, b, a]` as floats 0-1, or the raw
   HSV the variable holds with `colorSpace` `hsv`); `true` / `false` for a
@@ -181,7 +182,10 @@ frame.
   want. Another value is refused, because in ImGui `true` from a radio button
   means the variable now holds that button's value (`if
   (ImGui::RadioButton("B", &mode, 1)) onB();` must run for 1 only); radians
-  for `SliderAngle`.
+  for `SliderAngle`. Its display stays in degrees: input `"1.5707964"` for
+  a quarter turn (90 degrees). The response includes `"unit": "rad"` and
+  the value read back in radians. Non-numeric or non-finite angle text returns
+  `{"status": "error", "message": "..."}` without changing the variable.
 - A value the variable already holds changes nothing: the widget does not
   return `true` (a toggle handler such as `if (ImGui::MenuItem("Fullscreen",
   nullptr, &fs)) toggleFullscreen();` does not run), and the reply is `ok`. A

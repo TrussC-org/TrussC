@@ -492,6 +492,79 @@ static nlohmann::json input(ImGuiHarness& h, const string& label, const string& 
 static bool isOk(const nlohmann::json& r) { return r.is_object() && r.value("status", "") == "ok"; }
 static bool isError(const nlohmann::json& r) { return r.is_object() && r.value("status", "") == "error"; }
 
+// SliderAngle input uses the variable's radians, like both reporting tools (#325).
+static void testSliderAngleInput() {
+    ImGuiHarness h;
+    tcx::imgui::resetTouched();
+    float heading = 0;
+    int changes = 0;
+    string displayed;
+    h.setUi([&] {
+        ImGui::SetNextWindowPos(ImVec2(10, 10));
+        ImGui::SetNextWindowSize(ImVec2(400, 150));
+        ImGui::Begin("Angles");
+        ImGui::LogToBuffer();
+        if (ImGui::SliderAngle("heading", &heading)) ++changes;
+        displayed = h.context()->LogBuffer.c_str();
+        ImGui::LogFinish();
+        ImGui::End();
+    });
+    h.frames(3);
+
+    auto angleEntry = [&](const char* tool) {
+        const auto reply = callTool(h, tool, nlohmann::json::object());
+        if (reply.contains("widgets")) {
+            for (const auto& entry : reply["widgets"]) {
+                if (entry.value("label", "") == "heading") return entry;
+            }
+        }
+        return nlohmann::json::object();
+    };
+    auto reportsRadians = [](const nlohmann::json& entry, float expected) {
+        return entry.is_object() && entry.value("widget", "") == "slider_angle" &&
+               entry.value("unit", "") == "rad" && entry.contains("value") &&
+               entry["value"].is_number() && entry["value"].get<float>() == expected;
+    };
+
+    for (float radians : {0.0f, 0.7854f, 1.5708f, -tc::TAU / 3, tc::TAU}) {
+        heading = radians;
+        h.frame();
+        auto entry = angleEntry("tcx_imgui_get_widgets");
+        check("angle: get_widgets reports the variable in radians", reportsRadians(entry, radians));
+        const int before = changes;
+        auto reply = input(h, "heading", entry.value("value", nlohmann::json()).dump());
+        check("angle: writing the reported value back leaves it exactly unchanged",
+              isOk(reply) && reportsRadians(reply, radians) && heading == radians && changes == before);
+    }
+
+    const float quarterTurn = tc::TAU / 4;
+    auto reply = input(h, "heading", nlohmann::json(quarterTurn).dump());
+    check("angle: TAU/4 input and reply are radians",
+          isOk(reply) && heading == quarterTurn && reportsRadians(reply, quarterTurn));
+    check("angle: the unchanged widget format displays 90 deg",
+          displayed.find("90 deg") != string::npos);
+
+    // Read a real hand edit through get_touched, then write that value back.
+    check("angle: widget available for a hand edit", h.click("heading"));
+    const float edited = heading;
+    auto entry = angleEntry("tcx_imgui_get_touched");
+    check("angle: get_touched reports the hand edit in radians", reportsRadians(entry, edited));
+    const int before = changes;
+    reply = input(h, "heading", entry.value("value", nlohmann::json()).dump());
+    check("angle: writing the touched value back leaves it exactly unchanged",
+          isOk(reply) && reportsRadians(reply, edited) && heading == edited && changes == before);
+
+    for (const char* text : {"abc", "", "nan", "inf", "-inf", "1e999", "1e39", "1.5junk", "1 2"}) {
+        bool deferred = false;
+        reply = input(h, "heading", text, &deferred);
+        check(string("angle: invalid input returns status/error and message: ") + text,
+              isError(reply) && reply.contains("message") && reply["message"].is_string() &&
+              !reply["message"].get<string>().empty() && !deferred);
+        h.frame();
+        check("angle: invalid input leaves the variable unchanged", heading == edited && changes == before);
+    }
+}
+
 static void testValueInput() {
     ImGuiHarness h;
     tcx::imgui::resetTouched();
@@ -1251,6 +1324,7 @@ int main() {
     testCustomFilters();
     testColorDropAndLargeDrag();
     testSnapshotPairingAndRouting();
+    testSliderAngleInput();
     testValueInput();
     testValueInputReturnsTrue();
     testCopyOnReturn();

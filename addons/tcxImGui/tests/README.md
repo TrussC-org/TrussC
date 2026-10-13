@@ -43,6 +43,11 @@ Cases (`src/main.cpp`):
   action menu items, `MenuItem(bool selected)` toggles, plain `Selectable`s and
   `RadioButton(bool)` are not recorded; a `Checkbox` scrolled out of view still
   reports its variable; a custom list box inside a combo popup owns its picks.
+- angle input (#325): values read from `tcx_imgui_get_widgets` and
+  `tcx_imgui_get_touched` write back exactly unchanged; `TAU/4` sets the
+  variable in radians and the widget logs `90 deg` with its default format;
+  input replies carry `"unit": "rad"`; non-numeric, non-finite, overflow and
+  trailing text return the error shape without changing the variable.
 - setting values (#321): `tcx_imgui_input` writes a `DragFloat2` (whose
   centre is the gap between its fields), `DragFloat3`, `ColorEdit4`,
   `SliderAngle`, `Checkbox`, `Combo`, `InputInt`, `RadioButton`, `ListBox`,

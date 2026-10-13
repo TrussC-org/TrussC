@@ -265,6 +265,13 @@ The grant can be set before or after `imguiSetup()`.
 | `tcx_imgui_reset_touched` | (none) | Clear that record (both lists). No value changes |
 | `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox` | `label` + tool args, `window` / `windowId` (optional) | Drive a widget by label. `tcx_imgui_input` is for widgets that hold a value (and text fields); buttons and other items without a variable are pressed with `tcx_imgui_click`. `tcx_imgui_input` on a value widget takes the value as JSON in the units `tcx_imgui_get_widgets` reports (`[x, y, z]`, colors 0-1, radians, `true`, an index; for a `RadioButton(int*)` target the button whose value you want: another button's value is refused), writes it into the variable on the next frame (the widget returns true in that frame, so `if (DragFloat(...)) apply();` code runs, unless the variable already held the value) and reads it back, then checks it again in the frame after; text fields are typed into, items with no variable (buttons, `RadioButton(label, bool)`) are refused with a pointer to `tcx_imgui_click`. A composite widget (`DragFloat3`, `ColorEdit4`) cannot be clicked |
 
+`tcx_imgui_input` takes the form reported by `tcx_imgui_get_widgets` and
+`tcx_imgui_get_touched`: the variable's form. For `SliderAngle`, send radians
+(e.g. `"1.5707964"` for 90 degrees), even though the widget displays degrees.
+The input response includes `"unit": "rad"` and the value read back in radians.
+Non-numeric or non-finite angle text returns `{"status": "error", "message": "..."}`
+and leaves the variable unchanged.
+
 The "tweak by hand, then bake" loop: the user adjusts sliders / the inspector in
 the running app → `tcx_imgui_get_touched` → write the values into the source →
 `tcx_imgui_reset_touched`.
