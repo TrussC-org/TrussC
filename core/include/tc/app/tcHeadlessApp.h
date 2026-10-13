@@ -261,6 +261,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // audioIn() are subscribed only once setup() has returned (#426).
     internal::setupNodeOnce(*app);
 
+    // Match the windowed launcher; stop() in setup() opts out.
+#ifndef __EMSCRIPTEN__
+    console::start();
+#endif
+
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main
     // loop's cap per frame, setMaxUpdateSteps; default 10). After a stall
@@ -293,6 +298,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             internal::drainMainThreadQueue();
             internal::pumpAudioDiagnostics();
 #ifndef __EMSCRIPTEN__
+            console::internal::processQueue();
             mcp::processHttpQueue();
 #endif
         }
@@ -311,6 +317,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 #ifndef __EMSCRIPTEN__
     mcp::stopHttpServer();
 #endif
+    console::stop();
 
     // Call exit and cleanup
     {

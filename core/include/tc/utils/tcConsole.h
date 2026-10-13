@@ -26,6 +26,13 @@
 #include <atomic>
 #include <iostream>
 #include <sstream>
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#else
+#include <cerrno>
+#include <unistd.h>
+#endif
 #include "tcThreadChannel.h"
 #include "tcLog.h"
 #include "../events/tcEventArgs.h"
@@ -67,10 +74,41 @@ inline ConsoleEventArgs parseLine(const std::string& line) {
     return args;
 }
 
-// stdin reading thread
+// Read stdin without holding a C stdio lock across a blocking read. Reading
+// std::cin (synchronized with stdin by default) can hold that lock forever,
+// preventing normal process exit when libc flushes its streams. This buffer
+// belongs to the detached reader, not to the process's static stream objects.
+class StdinBuffer : public std::streambuf {
+protected:
+    int_type underflow() override {
+#ifdef _WIN32
+        DWORD count = 0;
+        const HANDLE handle = reinterpret_cast<HANDLE>(_get_osfhandle(0));
+        if (!ReadFile(handle, buffer_, sizeof(buffer_), &count, nullptr) || count == 0)
+            return traits_type::eof();
+#else
+        ssize_t count;
+        do { count = ::read(STDIN_FILENO, buffer_, sizeof(buffer_)); }
+        while (count < 0 && errno == EINTR);
+        if (count <= 0) return traits_type::eof();
+#endif
+        setg(buffer_, buffer_, buffer_ + count);
+        return traits_type::to_int_type(*gptr());
+    }
+private:
+    char buffer_[4096];
+};
+
+// stdin reading thread (the console owns stdin while enabled)
 inline void readThread() {
+    StdinBuffer buffer;
+    std::istream input(&buffer);
     std::string line;
-    while (isRunning().load() && std::getline(std::cin, line)) {
+    while (isRunning().load() && std::getline(input, line)) {
+#ifdef _WIN32
+        // ReadFile bypasses the CRT's text-mode CRLF translation.
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+#endif
         if (line.empty()) continue;
         auto args = parseLine(line);
         getChannel().send(std::move(args));
@@ -84,15 +122,15 @@ inline void readThread() {
 // ---------------------------------------------------------------------------
 
 /// Start console input thread
-/// Called automatically within runApp() in TrussC.h
+/// Called automatically by the windowed and headless runners
 inline void start() {
 #ifdef __EMSCRIPTEN__
     // Console input is not available on web (no stdin/threads)
     logWarning("Console") << "console::start() is not available on web platform";
     return;
 #else
-    if (internal::isRunning().load()) {
-        return; // Already running
+    if (internal::isRunning().load() || internal::getChannel().isClosed()) {
+        return; // Already running, or explicitly stopped (including in setup)
     }
 
     internal::isRunning().store(true);
@@ -109,10 +147,8 @@ inline void stop() {
     // No-op on web
     return;
 #else
-    if (!internal::isRunning().load()) {
-        return; // Already stopped
-    }
-
+    // Remember an opt-out even before the runner's automatic start(). The
+    // channel cannot reopen; do not launch another reader after it closes.
     internal::isRunning().store(false);
     internal::getChannel().close();
 #endif
