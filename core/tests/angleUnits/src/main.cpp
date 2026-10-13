@@ -59,6 +59,15 @@ void testDefaults() {
     check("radian default reads as 60 degrees", approxEq(getDefaultScreenFovDeg(), 60));
     setDefaultScreenFovDeg(30);
     check("degree default reads as TAU/12 radians", approxEq(getDefaultScreenFov(), TAU / 12));
+    setDefaultScreenFov(0);
+    check("zero default is orthographic", getDefaultScreenFov() == 0);
+    setDefaultScreenFovDeg(30);
+    setDefaultScreenFovDeg(0);
+    check("zero degree default is orthographic", getDefaultScreenFov() == 0 && getDefaultScreenFovDeg() == 0);
+    setDefaultScreenFov(TAU / 8);
+    setDefaultScreenOrtho();
+    check("named orthographic default returns zero", getDefaultScreenFov() == 0);
+    check("zero defaults do not warn", fovWarnings == 0);
     setDefaultScreenFov(TAU / 8);
 }
 
@@ -77,7 +86,7 @@ void testInvalid() {
     setupScreenPerspective(60);
     setupScreenPerspective(60);
     check("60 radians warns once and preserves projection", fovWarnings == 1 && unchanged());
-    for (float bad : {60.0f, 0.0f, -1.0f, HALF_TAU,
+    for (float bad : {60.0f, -1.0f, HALF_TAU,
                       std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
         setupScreenFov(bad);
         setupScreenPerspective(bad);
@@ -85,7 +94,7 @@ void testInvalid() {
         setDefaultScreenFov(bad);
         check("all radian public entry points ignore invalid FOV", unchanged());
     }
-    for (float bad : {0.0f, -1.0f, 180.0f, 360.0f,
+    for (float bad : {-1.0f, 180.0f, 360.0f,
                       std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
         setupScreenFovDeg(bad);
         setupScreenPerspectiveDeg(bad);
@@ -94,6 +103,57 @@ void testInvalid() {
         check("all degree public entry points ignore invalid FOV", unchanged());
     }
     check("invalid screen FOV warnings remain once-only", fovWarnings == 1);
+}
+
+// Start each call in perspective so a rejected zero cannot pass by leaving ortho unchanged.
+void testZeroFov(Fbo& fbo) {
+    auto& ctx = internal::currentWindowContext();
+    const int warningsBefore = fovWarnings;
+    setupScreenOrtho();
+    const Mat4 ortho = ctx.currentProjectionMatrix;
+    const Mat4 view = ctx.currentViewMatrix;
+    const float width = ctx.currentViewW, height = ctx.currentViewH;
+    const auto checkSetup = [&](const char* name, auto setup) {
+        setupScreenPerspective(TAU / 6);
+        setup();
+        check(name, ctx.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentProjectionMatrix) &&
+              sameMatrix(view, ctx.currentViewMatrix) && ctx.currentViewW == width && ctx.currentViewH == height);
+    };
+    checkSetup("setupScreenFov(0) matches setupScreenOrtho", [] { setupScreenFov(0); });
+    checkSetup("setupScreenFovDeg(0) matches setupScreenOrtho", [] { setupScreenFovDeg(0); });
+    checkSetup("setupScreenPerspective(0) matches setupScreenOrtho", [] { setupScreenPerspective(0); });
+    checkSetup("setupScreenPerspectiveDeg(0) matches setupScreenOrtho", [] { setupScreenPerspectiveDeg(0); });
+    checkSetup("setupScreenFovWithSize(0) matches setupScreenOrtho",
+               [&] { setupScreenFovWithSize(0, width, height); });
+    checkSetup("setupScreenFovWithSizeDeg(0) matches setupScreenOrtho",
+               [&] { setupScreenFovWithSizeDeg(0, width, height); });
+
+    // FBO begin consumes the public default, using the same setup as frame start.
+    fbo.begin();
+    setupScreenFovWithSize(0, fbo.getWidth(), fbo.getHeight());
+    const Mat4 fboOrtho = ctx.currentProjectionMatrix;
+    const Mat4 fboView = ctx.currentViewMatrix;
+    fbo.end();
+    const auto checkDefault = [&](const char* name, auto setDefault) {
+        setDefaultScreenFov(TAU / 6);
+        setupScreenPerspective(TAU / 6);
+        const Mat4 before = ctx.currentProjectionMatrix;
+        setDefault();
+        const bool defaultState = getDefaultScreenFov() == 0 && getDefaultScreenFovDeg() == 0 &&
+                                  approxEq(ctx.currentScreenFov, TAU / 6) && sameMatrix(before, ctx.currentProjectionMatrix);
+        internal::setupScreenFov(getDefaultScreenFov());
+        const bool frameOrtho = ctx.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentProjectionMatrix) &&
+                                sameMatrix(view, ctx.currentViewMatrix);
+        fbo.begin();
+        check(name, defaultState && frameOrtho && ctx.currentScreenFov == 0 &&
+              sameMatrix(fboOrtho, ctx.currentProjectionMatrix) && sameMatrix(fboView, ctx.currentViewMatrix));
+        fbo.end();
+    };
+    checkDefault("setDefaultScreenFov(0) selects orthographic projection", [] { setDefaultScreenFov(0); });
+    checkDefault("setDefaultScreenFovDeg(0) selects orthographic projection", [] { setDefaultScreenFovDeg(0); });
+    checkDefault("setDefaultScreenOrtho matches setDefaultScreenFov(0)", [] { setDefaultScreenOrtho(); });
+    check("zero public FOV calls do not warn", fovWarnings == warningsBefore);
+    setDefaultScreenFov(TAU / 8);
 }
 
 class AngleApp : public App {
@@ -121,6 +181,7 @@ public:
         const Mat4 sized = ctx.currentProjectionMatrix;
         setupScreenFovWithSizeDeg(60, 80, 40, 0.25f, 750);
         check("explicit-size radian/Deg projection matches", sameMatrix(sized, ctx.currentProjectionMatrix));
+        testZeroFov(fbo_);
         testInvalid();
 
         // The FBO saves/restores radians, then the fullscreen-shader restore
@@ -135,7 +196,7 @@ public:
         internal::setupScreenFovWithSize(ctx.currentScreenFov, ctx.currentViewW, ctx.currentViewH);
         check("shader-style restore retains the projection", sameMatrix(projection, ctx.currentProjectionMatrix));
         setupScreenOrtho();
-        check("public ortho still selects the internal zero sentinel", ctx.currentScreenFov == 0.0f);
+        check("public ortho selects zero FOV", ctx.currentScreenFov == 0.0f);
         const Mat4 ortho = ctx.currentProjectionMatrix;
         internal::setupScreenFov(0);
         check("internal zero still restores orthographic projection", sameMatrix(ortho, ctx.currentProjectionMatrix));

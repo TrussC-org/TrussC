@@ -1015,9 +1015,11 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   are written, and the MCP tools read and write both.
 - `angleUnits/` — every angle API is radians, with `Deg` companions (#236):
   elliptical `Path::arc()` in radians matches `arcDeg()` for all overloads;
-  `setDefaultScreenFov()` / `getDefaultScreenFovDeg()` convert; a FOV outside
-  0 < fov < TAU/2 (60, 0, negative, TAU/2, infinity, NaN) warns once and
-  leaves the projection unchanged. With `--gpu-check` (display mode): radian
-  and `Deg` setups give the same projection and camera, an Fbo applies and
-  restores the radian default, and `setupScreenOrtho()` still selects the
-  internal zero sentinel.
+  `setDefaultScreenFov()` / `getDefaultScreenFovDeg()` convert; invalid FOVs
+  (60 radians, negative, TAU/2 or greater, infinity, NaN) warn once and leave
+  the projection unchanged. Zero is valid and selects orthographic projection.
+  With `--gpu-check` (display mode): radian and `Deg` setups give the same
+  projection and camera, an Fbo applies and restores the radian default,
+  and zero at every public FOV entry point
+  (including `Deg`) matches `setupScreenOrtho()`. `setDefaultScreenOrtho()`
+  matches `setDefaultScreenFov(0)` and leaves `getDefaultScreenFov() == 0`.

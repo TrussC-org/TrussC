@@ -481,6 +481,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     ));
     lua->set_function("setupScreenOrtho", []() { return trussc::setupScreenOrtho(); });
     lua->set_function("setDefaultScreenFov", [](float fovRadians) { return trussc::setDefaultScreenFov(fovRadians); });
+    lua->set_function("setDefaultScreenOrtho", []() { return trussc::setDefaultScreenOrtho(); });
     lua->set_function("getDefaultScreenFov", []() { return trussc::getDefaultScreenFov(); });
     lua->set_function("setDefaultScreenFovDeg", [](float fovDeg) { return trussc::setDefaultScreenFovDeg(fovDeg); });
     lua->set_function("getDefaultScreenFovDeg", []() { return trussc::getDefaultScreenFovDeg(); });

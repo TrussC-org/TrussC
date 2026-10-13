@@ -85,6 +85,7 @@ static void cover_graphics_3d_setup() {
     (void)setupScreenPerspective(af::val<float>(), af::val<float>(), af::val<float>());
     (void)setupScreenOrtho();
     (void)setDefaultScreenFov(af::val<float>());
+    (void)setDefaultScreenOrtho();
     (void)getDefaultScreenFov();
     (void)setupScreenFovWithSize(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)setupScreenFovWithSizeDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());

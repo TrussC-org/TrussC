@@ -830,21 +830,20 @@ namespace internal {
     }
 } // namespace internal
 
-// Public perspective entry points reject invalid radians, including NaN.
-// Internal callers retain zero as the orthographic sentinel.
+// Public FOV entry points accept fov == 0 (orthographic) or 0 < fov < TAU/2.
 namespace internal {
     inline bool validScreenFov(float fovRadians) {
-        if (fovRadians > 0.0f && fovRadians < HALF_TAU) return true;
+        if (fovRadians == 0.0f || (fovRadians > 0.0f && fovRadians < HALF_TAU)) return true;
         static OnceGate warned;
         if (warned.isFirstTime()) {
-            logWarning("ScreenFov") << "FOV out of range: needs 0 < fov < TAU/2 radians "
+            logWarning("ScreenFov") << "FOV out of range: needs 0 (orthographic) or 0 < fov < TAU/2 radians "
                 "(0 < fov < 180 for the Deg functions). Call ignored.";
         }
         return false;
     }
 }
 
-// Set up perspective with explicit viewport dimensions. FOV is in radians.
+// Set up projection with explicit viewport dimensions. FOV is in radians; 0 is orthographic.
 inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH,
                                    float nearDist = 0.0f, float farDist = 0.0f) {
     if (!internal::validScreenFov(fovRadians)) return;
@@ -856,7 +855,7 @@ inline void setupScreenFovWithSizeDeg(float fovDeg, float viewW, float viewH,
     setupScreenFovWithSize(deg2rad(fovDeg), viewW, viewH, nearDist, farDist);
 }
 
-// Set up screen perspective with FOV in radians (0 < fov < TAU/2).
+// Set up screen projection: 0 is orthographic; perspective uses 0 < fov < TAU/2 radians.
 inline void setupScreenFov(float fovRadians, float nearDist = 0.0f, float farDist = 0.0f) {
     if (!internal::validScreenFov(fovRadians)) return;
     internal::setupScreenFov(fovRadians, nearDist, farDist);
@@ -866,7 +865,7 @@ inline void setupScreenFovDeg(float fovDeg, float nearDist = 0.0f, float farDist
     setupScreenFov(deg2rad(fovDeg), nearDist, farDist);
 }
 
-// Camera above viewport center, looking at Z=0. Default TAU/8 = 45 degrees.
+// Camera above viewport center, looking at Z=0. Default TAU/8 = 45 degrees; 0 is orthographic.
 inline void setupScreenPerspective(float fovRadians = (TAU / 8.0f), float nearDist = 0.0f, float farDist = 0.0f) {
     setupScreenFov(fovRadians, nearDist, farDist);
 }
@@ -875,15 +874,20 @@ inline void setupScreenPerspectiveDeg(float fovDeg = 45.0f, float nearDist = 0.0
     setupScreenPerspective(deg2rad(fovDeg), nearDist, farDist);
 }
 
-// Setup orthographic projection (2D mode, origin at top-left)
+// Setup orthographic projection (2D mode, origin at top-left); readable setupScreenFov(0).
 inline void setupScreenOrtho() {
     internal::setupScreenFov(0.0f);
 }
 
-// Default perspective FOV in radians, applied at frame start and FBO begin.
+// Default screen FOV in radians (0 = orthographic), applied at frame start and FBO begin.
 inline void setDefaultScreenFov(float fovRadians) {
     if (!internal::validScreenFov(fovRadians)) return;
     internal::defaultScreenFov() = fovRadians;
+}
+
+// Default orthographic projection; readable setDefaultScreenFov(0).
+inline void setDefaultScreenOrtho() {
+    setDefaultScreenFov(0.0f);
 }
 
 inline float getDefaultScreenFov() {

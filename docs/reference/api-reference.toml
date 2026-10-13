@@ -16812,9 +16812,9 @@ description.en = "Set default screen FOV in radians (frame start and FBO begin)"
 description.ja = "デフォルトFOVをラジアンで設定（フレーム開始・FBO開始時）"
 description.ko = "기본 FOV를 라디안으로 설정 (프레임 및 FBO 시작 시)"
 related = ["getDefaultScreenFov"]
-details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
-details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
-details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+details.en = "Accepts 0 (orthographic) or 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. setupScreenOrtho() and setDefaultScreenOrtho() are the readable spellings for orthographic setup and defaults."
+details.ja = "0（正投影）または 0 < fov < TAU/2 のラジアンを受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影の設定とデフォルト値には、意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "0(정사영) 또는 0 < fov < TAU/2 라디안을 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영 설정과 기본값에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["setDefaultScreenFovDeg"]
 category = "graphics_3d_setup"
@@ -16822,9 +16822,20 @@ description.en = "Set default screen FOV in degrees"
 description.ja = "デフォルトFOVを度数で設定"
 description.ko = "기본 FOV를 도 단위로 설정"
 related = ["setDefaultScreenFov"]
-details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
-details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
-details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
+details.en = "Degree companion: accepts 0 (orthographic) or 0 < fov < 180. Invalid values warn once and are ignored. setupScreenOrtho() and setDefaultScreenOrtho() are the readable orthographic spellings."
+details.ja = "度数版。0（正投影）または 0 < fov < 180 を受け付け、範囲外は一度だけ警告して無視する。正投影には意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "도 단위 버전. 0(정사영) 또는 0 < fov < 180을 허용하며 범위 밖 값은 한 번 경고하고 무시한다. 정사영에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
+
+["setDefaultScreenOrtho"]
+category = "graphics_3d_setup"
+keywords = ["orthographic", "2d mode", "default", "projection"]
+description.en = "Set orthographic projection as the default (frame start and FBO begin)"
+description.ja = "正投影をデフォルトに設定（フレーム開始・FBO開始時）"
+description.ko = "정사영을 기본 투영으로 설정 (프레임 및 FBO 시작 시)"
+details.en = "Readable spelling of setDefaultScreenFov(0), paired with setupScreenOrtho(). getDefaultScreenFov() returns 0 afterward."
+details.ja = "setDefaultScreenFov(0) の意図が明確な表記で、setupScreenOrtho() と対になる。呼び出し後は getDefaultScreenFov() が 0 を返す。"
+details.ko = "setDefaultScreenFov(0)의 의도를 명확히 표현하며 setupScreenOrtho()와 짝을 이룬다. 호출 후 getDefaultScreenFov()는 0을 반환한다."
+related = ["setupScreenOrtho", "setDefaultScreenFov", "getDefaultScreenFov"]
 
 ["setEnvironment"]
 category = "graphics_lighting"
@@ -17260,9 +17271,9 @@ description.en = "Set up screen perspective with FOV in radians"
 description.ja = "ラジアンのFOVで画面の透視投影を設定"
 description.ko = "라디안 FOV로 화면 원근 투영 설정"
 related = ["setDefaultScreenFov", "EasyCam::setFov"]
-details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
-details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
-details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+details.en = "Accepts 0 (orthographic) or 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. setupScreenOrtho() and setDefaultScreenOrtho() are the readable spellings for orthographic setup and defaults."
+details.ja = "0（正投影）または 0 < fov < TAU/2 のラジアンを受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影の設定とデフォルト値には、意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "0(정사영) 또는 0 < fov < TAU/2 라디안을 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영 설정과 기본값에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["setupScreenFovDeg"]
 category = "graphics_3d_setup"
@@ -17270,9 +17281,9 @@ description.en = "Set up screen perspective with FOV in degrees"
 description.ja = "度数のFOVで画面の透視投影を設定"
 description.ko = "도 단위 FOV로 화면 원근 투영 설정"
 related = ["setupScreenFov"]
-details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
-details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
-details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
+details.en = "Degree companion: accepts 0 (orthographic) or 0 < fov < 180. Invalid values warn once and are ignored. setupScreenOrtho() and setDefaultScreenOrtho() are the readable orthographic spellings."
+details.ja = "度数版。0（正投影）または 0 < fov < 180 を受け付け、範囲外は一度だけ警告して無視する。正投影には意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "도 단위 버전. 0(정사영) 또는 0 < fov < 180을 허용하며 범위 밖 값은 한 번 경고하고 무시한다. 정사영에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["setupScreenFovWithSize"]
 category = "graphics_3d_setup"
@@ -17280,9 +17291,9 @@ description.en = "Set up perspective with explicit viewport size and FOV in radi
 description.ja = "明示的な画面サイズとラジアンのFOVで透視投影を設定"
 description.ko = "명시적 뷰포트 크기와 라디안 FOV로 원근 투영 설정"
 related = ["setupScreenFov"]
-details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
-details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
-details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+details.en = "Accepts 0 (orthographic) or 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. setupScreenOrtho() and setDefaultScreenOrtho() are the readable spellings for orthographic setup and defaults."
+details.ja = "0（正投影）または 0 < fov < TAU/2 のラジアンを受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影の設定とデフォルト値には、意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "0(정사영) 또는 0 < fov < TAU/2 라디안을 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영 설정과 기본값에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["setupScreenFovWithSizeDeg"]
 category = "graphics_3d_setup"
@@ -17290,9 +17301,9 @@ description.en = "Set up perspective with explicit viewport size and FOV in degr
 description.ja = "明示的な画面サイズと度数のFOVで透視投影を設定"
 description.ko = "명시적 뷰포트 크기와 도 단위 FOV로 원근 투영 설정"
 related = ["setupScreenFovWithSize"]
-details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
-details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
-details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
+details.en = "Degree companion: accepts 0 (orthographic) or 0 < fov < 180. Invalid values warn once and are ignored. setupScreenOrtho() and setDefaultScreenOrtho() are the readable orthographic spellings."
+details.ja = "度数版。0（正投影）または 0 < fov < 180 を受け付け、範囲外は一度だけ警告して無視する。正投影には意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "도 단위 버전. 0(정사영) 또는 0 < fov < 180을 허용하며 범위 밖 값은 한 번 경고하고 무시한다. 정사영에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["setupScreenOrtho"]
 category = "graphics_3d_setup"
@@ -17301,7 +17312,10 @@ of = ["ofSetupScreenOrtho"]
 description.en = "Set up orthographic projection (2D mode)"
 description.ja = "正投影を設定（2Dモード）"
 description.ko = "정사영 투영을 설정 (2D 모드)"
-related = ["setupScreenFov", "Mat4::ortho"]
+related = ["setupScreenFov", "setDefaultScreenOrtho", "Mat4::ortho"]
+details.en = "Readable spelling of setupScreenFov(0). Use setDefaultScreenOrtho() to make orthographic projection the default."
+details.ja = "setupScreenFov(0) の意図が明確な表記。正投影をデフォルトにするには setDefaultScreenOrtho() を使う。"
+details.ko = "setupScreenFov(0)의 의도를 명확히 표현한다. 정사영을 기본값으로 설정하려면 setDefaultScreenOrtho()를 사용한다."
 
 ["setupScreenPerspective"]
 category = "graphics_3d_setup"
@@ -17310,9 +17324,9 @@ description.en = "Set up screen perspective with FOV in radians (default TAU/8)"
 description.ja = "ラジアンのFOVで透視投影を設定（既定 TAU/8）"
 description.ko = "라디안 FOV로 원근 투영 설정 (기본 TAU/8)"
 related = ["setupScreenFov", "Mat4::perspective"]
-details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
-details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
-details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+details.en = "Accepts 0 (orthographic) or 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. setupScreenOrtho() and setDefaultScreenOrtho() are the readable spellings for orthographic setup and defaults."
+details.ja = "0（正投影）または 0 < fov < TAU/2 のラジアンを受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影の設定とデフォルト値には、意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "0(정사영) 또는 0 < fov < TAU/2 라디안을 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영 설정과 기본값에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["setupScreenPerspectiveDeg"]
 of = ["ofSetupScreenPerspective"]
@@ -17321,9 +17335,9 @@ description.en = "Set up screen perspective with FOV in degrees (default 45)"
 description.ja = "度数のFOVで透視投影を設定（既定45）"
 description.ko = "도 단위 FOV로 원근 투영 설정 (기본 45)"
 related = ["setupScreenPerspective"]
-details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
-details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
-details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
+details.en = "Degree companion: accepts 0 (orthographic) or 0 < fov < 180. Invalid values warn once and are ignored. setupScreenOrtho() and setDefaultScreenOrtho() are the readable orthographic spellings."
+details.ja = "度数版。0（正投影）または 0 < fov < 180 を受け付け、範囲外は一度だけ警告して無視する。正投影には意図が明確な setupScreenOrtho() と setDefaultScreenOrtho() を使える。"
+details.ko = "도 단위 버전. 0(정사영) 또는 0 < fov < 180을 허용하며 범위 밖 값은 한 번 경고하고 무시한다. 정사영에는 의도가 명확한 setupScreenOrtho()와 setDefaultScreenOrtho()를 사용할 수 있다."
 
 ["shadowDraw"]
 category = "graphics_lighting"

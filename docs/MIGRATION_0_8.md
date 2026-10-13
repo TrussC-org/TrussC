@@ -52,7 +52,7 @@ The last APIs that took degrees now take radians (breaking change, #236). The fu
 
 `setupScreenFovWithSize()` / `setupScreenFovWithSizeDeg()` are new public functions (radians / degrees) for an explicit viewport size.
 
-The screen FOV functions accept only `0 < fov < TAU/2` (180 degrees for the `Deg` names). Any other value, such as 60 left over from the degree version, logs one warning and is ignored, so the view stays as it was. Use `setupScreenOrtho()` for an orthographic view.
+The screen FOV functions accept `0` (orthographic) or `0 < fov < TAU/2` (`0 < fov < 180` for the `Deg` names). Any other value, such as 60 left over from the degree version, logs one warning and is ignored, so the view stays as it was. Zero degrees also selects orthographic projection. `setupScreenOrtho()` and `setDefaultScreenOrtho()` are the readable spellings of `setupScreenFov(0)` and `setDefaultScreenFov(0)`; `getDefaultScreenFov()` returns `0` after either default setter.
 
 Saved JSON: `rotation` is now read as radians, so a file saved before v0.8.0 (degrees under `rotation`) loads with wrong rotations. Convert those values with `deg2rad()`, or rename the key to `rotationDeg` in the file, which is still read and converted. New files save only `rotation`, in radians.
 
