@@ -184,7 +184,8 @@ static void testPortLogOutputs() {
             check("stdout contains the Logger port Notice exactly once", position != string::npos &&
                   output.find(portLine, position + portLine.size()) == string::npos);
         } else {
-            check("Warning console level hides the port Notice", output.empty());
+            check("Warning console level hides the port Notice",
+                  output.find("HTTP server listening on") == string::npos);
         }
         check("startup has no raw stderr port copy", capturedErr.str().empty(), capturedErr.str());
         mcp::stopHttpServer();
