@@ -385,7 +385,7 @@ static void testReentrantListener() {
         // missing folder (#356), but cannot make one out of a file.
         const fs::path notDir = tempFile("not_a_dir_265");
         { ofstream out(notDir); out << "x"; }
-        const bool opened = lg.setLogFile(notDir / "x.log");
+        const bool opened = lg.setLogFile(notDir / "x.log").ok();
         check("setLogFile: a failed open returns false and logs an Error", !opened && sawError && !lg.isFileOpen());
         error_code ec;
         fs::remove(notDir, ec);
@@ -536,7 +536,7 @@ static void testProtocolLines() {
         const fs::path path = tempFile(string("protocol-") + logLevelToString(level) + ".log");
         lg.setLogLevel(level == LogLevel::Notice ? LogLevel::Notice : LogLevel::Warning);
         lg.setFileLogLevel(level);
-        check("protocol: open log file", lg.setLogFile(path));
+        check("protocol: open log file", lg.setLogFile(path).ok());
         ostringstream out, err;
         vector<string> seen;
         bool notice = true;

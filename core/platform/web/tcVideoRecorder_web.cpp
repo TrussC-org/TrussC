@@ -36,7 +36,7 @@ bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false;
 
 bool VideoWriter::appendPlatform(const unsigned char*, double) { return false; }
 
-void VideoWriter::closePlatform() {}
+SaveResult VideoWriter::closePlatform() { return SaveResult::success(); }
 
 } // namespace trussc
 

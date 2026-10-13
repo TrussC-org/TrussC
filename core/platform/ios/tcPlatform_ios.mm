@@ -259,9 +259,8 @@ bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem:
     const auto ext = toLower(getFileExtension(path));
     if (ext == "bmp") {
         // Pixels uses stbi_write_bmp, as on the other native platforms.
-        const bool success = pixels.save(path);
+        const bool success = pixels.save(path).ok();
         if (success) logVerbose("Screenshot") << "Saved: " << path;
-        else logError("Screenshot") << "Failed to save: " << path;
         return success;
     }
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
@@ -311,16 +310,7 @@ bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem:
         return false;
     }
 
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
-    BOOL success = [data writeToFile:nsPath atomically:YES];
-
-    if (success) {
-        logVerbose() << "[Screenshot] Saved: " << path;
-    } else {
-        logError() << "[Screenshot] Failed to save: " << path;
-    }
-
-    return success;
+    return internal::atomicWrite(path, data.bytes, data.length, "Screenshot").ok();
 }
 
 // ---------------------------------------------------------------------------

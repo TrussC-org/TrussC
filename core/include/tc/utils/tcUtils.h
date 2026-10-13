@@ -196,7 +196,7 @@ namespace internal {
     // Error (module `module`) naming the file and getUserDataPath(), when
     // `resolved` is inside the app bundle. On macOS / iOS, the first relative
     // write into the data folder outside a bundle logs one Notice per process.
-    bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+    SaveResult checkWriteTarget(const fs::path& requested, const fs::path& resolved,
                           const char* module);
 
     // Tests: treat `bundle` as the running app bundle (empty: the platform's

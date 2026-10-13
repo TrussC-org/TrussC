@@ -57,32 +57,21 @@ public:
     // Save to file (relative paths resolved via getDataPath, like saveJson;
     // a missing parent folder is created; a path inside the app bundle is
     // refused, use getUserDataPath())
-    bool save(const fs::path& path, const std::string& indent = "  ") const {
-        fs::path fullPath = getDataPath(path);
-        // "" or "out/": fail before creating any folder
-        if (fullPath.filename().empty()) {
-            logError() << "No file name in XML file path: " << fullPath;
-            return false;
+    SaveResult save(const fs::path& path, const std::string& indent = "  ") const {
+        std::string text;
+        try {
+            std::ostringstream stream;
+            stream.exceptions(std::ios::badbit | std::ios::failbit);
+            doc_.save(stream, indent.c_str());
+            text = stream.str();
+        } catch (const std::exception& e) {
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
+                "XML serialize error: " + internal::pathToDisplayUtf8(path) + " - " + e.what()), "Xml");
         }
-        if (!internal::checkWriteTarget(path, fullPath, "Xml")) return false;
-        std::error_code ec;
-        fs::path parent = fullPath.parent_path();
-        if (!parent.empty()) {
-            std::filesystem::create_directories(parent, ec);
-            if (ec) {
-                logError() << "Cannot create folder for XML file: " << parent
-                           << " (" << ec.message() << ")";
-                return false;
-            }
-        }
-        // Wide save_file overload on Windows (see load)
-        bool success = doc_.save_file(fullPath.c_str(), indent.c_str());
-        if (!success) {
-            logError() << "XML write error: " << path;
-            return false;
-        }
-        logVerbose() << "XML saved: " << fullPath;
-        return true;
+        fs::path fullPath;
+        auto prepared = internal::prepareOutputPath(path, fullPath, "Xml");
+        if (!prepared) return prepared;
+        return internal::atomicWrite(fullPath, text.data(), text.size(), "Xml");
     }
 
     // Convert to string

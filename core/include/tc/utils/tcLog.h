@@ -205,11 +205,11 @@ public:
 
     // Open a log file (append mode). A relative path resolves against the
     // data folder (getDataPath), and a missing parent folder is created. On
-    // failure it logs the reason and returns false, and the current log file
+    // failure it logs the reason and returns a failed SaveResult, and the current log file
     // (if any) stays open. After a successful call, getLogFilePath()
     // returns the resolved path.
     // In tcGlobal.cpp: getDataPath (tcUtils.h) cannot be included here.
-    bool setLogFile(const fs::path& path);
+    SaveResult setLogFile(const fs::path& path);
 
     void closeFile() {
         TC_LOCK_GUARD(mutex_);
@@ -241,7 +241,7 @@ public:
     // A copy taken under the lock (empty when no file is open).
     std::string getLogFilePath() const {
         TC_LOCK_GUARD(mutex_);
-        return filePath_;
+        return internal::pathToDisplayUtf8(filePath_);
     }
 
     bool isFileOpen() const {
@@ -276,13 +276,23 @@ private:
             } unlock{mutex_};
             writeSystem(e);
             writeConsole(e);
-            writeFile(e);
+            auto result = writeFile(e);
+            if (!result) {
+                LogEventArgs failure(LogLevel::Error, "[Logger] " + result.message);
+                writeConsole(failure);
+                writeSystem(failure);
+            }
             return;
         }
-        TC_LOCK_GUARD(mutex_);
-        writeSystem(e);
-        writeConsole(e);
-        writeFile(e);
+        SaveResult result;
+        {
+            TC_LOCK_GUARD(mutex_);
+            writeSystem(e);
+            writeConsole(e);
+            result = writeFile(e);
+        }
+        // The failed file is already closed; listeners run outside the lock.
+        if (!result) log(LogLevel::Error, "[Logger] " + result.message);
     }
 
     static bool passes(LogLevel lineLevel, LogLevel level) {
@@ -325,21 +335,35 @@ private:
 #endif
     }
 
-    void writeFile(const LogEventArgs& e) {
-        if (!fileStream_.is_open() || (!e.protocolLine_ && !passes(e.level, fileLevel_.load()))) return;
+    SaveResult writeFile(const LogEventArgs& e) {
+        if (!fileStream_.is_open() || (!e.protocolLine_ && !passes(e.level, fileLevel_.load())))
+            return SaveResult::success();
+        errno = 0;
         fileStream_ << "[" << e.timestamp << "] "
                     << "[" << logLevelToString(e.level) << "] "
-                    << e.message << std::endl;
-        fileStream_.flush();
+                    << e.message << '\n';
+        auto result = internal::checkOutputStream(fileStream_, filePath_);
+        if (!result) {
+            // Disable before reporting to avoid recursion and repeated errors.
+            closeFileLocked(false);
+        }
+        return result;
     }
 
-    void closeFileLocked() {
+    void closeFileLocked(bool report = true) {
         if (crashLogOwner_) {
             internal::closeCrashLogFile();
             crashLogOwner_ = false;
         }
         if (fileStream_.is_open()) {
+            errno = 0;
             fileStream_.close();
+            if (report && fileStream_.fail()) {
+                LogEventArgs failure(LogLevel::Error, "[Logger] " +
+                    internal::saveErrno(filePath_, "Close error").message);
+                writeConsole(failure);
+                writeSystem(failure);
+            }
         }
         filePath_.clear();
     }
@@ -357,7 +381,7 @@ private:
     // File
     std::ofstream fileStream_;
     bool crashLogOwner_ = false;
-    std::string filePath_;
+    fs::path filePath_;
     std::atomic<LogLevel> fileLevel_{LogLevel::Notice};
 
     // Last: disconnected first on destruction, before the state it writes.
@@ -410,7 +434,7 @@ inline void setSystemLogLevel(LogLevel level) {
     getLogger().setSystemLogLevel(level);
 }
 
-inline bool setLogFile(const fs::path& path) {
+inline SaveResult setLogFile(const fs::path& path) {
     return getLogger().setLogFile(path);
 }
 
@@ -432,7 +456,7 @@ inline void tcSetConsoleLogLevel(LogLevel level) { setConsoleLogLevel(level); }
 inline void tcSetFileLogLevel(LogLevel level) { setFileLogLevel(level); }
 
 [[deprecated("Use setLogFile() instead. Will be removed in v1.0.0")]]
-inline bool tcSetLogFile(const fs::path& path) { return setLogFile(path); }
+inline SaveResult tcSetLogFile(const fs::path& path) { return setLogFile(path); }
 
 [[deprecated("Use closeLogFile() instead. Will be removed in v1.0.0")]]
 inline void tcCloseLogFile() { closeLogFile(); }

@@ -465,7 +465,7 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     IMFMediaBuffer* buffer = nullptr;
     HRESULT hr = MFCreateMemoryBuffer(byteCount, &buffer);
     if (FAILED(hr) || !buffer) {
-        logError("VideoWriter") << "MFCreateMemoryBuffer (audio) failed";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "MFCreateMemoryBuffer (audio) failed");
         pd->failed = true;
         return false;
     }
@@ -473,6 +473,7 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     BYTE* dst = nullptr;
     hr = buffer->Lock(&dst, nullptr, nullptr);
     if (FAILED(hr)) {
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
         buffer->Release();
         pd->failed = true;
         return false;
@@ -496,8 +497,7 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     buffer->Release();
 
     if (FAILED(hr)) {
-        logError("VideoWriter") << "WriteSample (audio) failed (hr=0x"
-                                  << std::hex << (unsigned)hr << ")";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
         pd->failed = true;
         return false;
     }
@@ -519,7 +519,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     IMFMediaBuffer* buffer = nullptr;
     HRESULT hr = MFCreateMemoryBuffer(frameBytes, &buffer);
     if (FAILED(hr) || !buffer) {
-        logError("VideoWriter") << "MFCreateMemoryBuffer failed";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "MFCreateMemoryBuffer failed");
         pd->failed = true;
         return false;
     }
@@ -527,6 +527,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     BYTE* dst = nullptr;
     hr = buffer->Lock(&dst, nullptr, nullptr);
     if (FAILED(hr)) {
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
         buffer->Release();
         pd->failed = true;
         return false;
@@ -564,8 +565,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     buffer->Release();
 
     if (FAILED(hr)) {
-        logError("VideoWriter") << "WriteSample failed (hr=0x"
-                                  << std::hex << (unsigned)hr << ")";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
         pd->failed = true;
         return false;
     }
@@ -575,16 +575,18 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 // ---------------------------------------------------------------------------
 // closePlatform - finalize the file and release MF resources
 // ---------------------------------------------------------------------------
-void VideoWriter::closePlatform() {
+SaveResult VideoWriter::closePlatform() {
     VideoWriterPlatformData* pd = platform_;
-    if (!pd) return;
+    if (!pd) return SaveResult::success();
+    auto result = SaveResult::success();
 
+    if (pd->failed) result = internal::saveFailure(path_, "WriteSample failed");
     if (pd->writer) {
         if (!pd->failed) {
             HRESULT hr = pd->writer->Finalize();
             if (FAILED(hr)) {
-                logError("VideoWriter") << "Finalize failed (hr=0x"
-                                          << std::hex << (unsigned)hr << ")";
+                result = SaveResult::fail(SaveError::WriteFailed,
+                    "IMFSinkWriter::Finalize HRESULT=" + std::to_string((long)hr));
             }
         }
         pd->writer->Release();
@@ -595,6 +597,7 @@ void VideoWriter::closePlatform() {
 
     delete pd;
     platform_ = nullptr;
+    return result;
 }
 
 } // namespace trussc

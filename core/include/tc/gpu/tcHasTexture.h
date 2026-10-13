@@ -92,9 +92,9 @@ public:
     // Save texture contents to file
     // Image: saves pixels directly (no copy needed)
     // Fbo: reads pixels from texture and saves
-    virtual bool save(const fs::path& path) const {
+    virtual SaveResult save(const fs::path& path) const {
         (void)path;
-        return false;  // Default is not implemented
+        return SaveResult::fail(SaveError::WriteFailed, "Texture saving is not implemented");
     }
 };
 

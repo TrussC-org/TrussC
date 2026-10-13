@@ -37,12 +37,12 @@ static void cover_console() {
 }
 
 static void cover_file() {
+    (void)loadErrorName(af::val<LoadError>());
     (void)getDataPath(af::val<const fs::path>());
     (void)pathToUtf8(af::val<const fs::path>());
     (void)utf8ToPath(af::val<std::string_view>());
     (void)getExecutablePath();
     (void)getExecutableDir();
-    (void)loadErrorName(af::val<LoadError>());
     (void)setDataPathRoot(af::val<const fs::path>());
     (void)getDataPathRoot();
 #if defined(AF_MACOS) || defined(AF_IOS)
@@ -2441,6 +2441,16 @@ struct Cover_ResizeEventArgs : af::Scope<ResizeEventArgs> {
     }
 };
 
+struct Cover_SaveResult : af::Scope<SaveResult> {
+    static void run() {
+        (void)af::val<SaveResult>().error;
+        (void)af::val<SaveResult>().message;
+        (void)af::val<SaveResult>().ok();
+        (void)af::val<SaveResult>().success();
+        (void)af::val<SaveResult>().fail(af::val<SaveError>(), af::val<std::string>());
+    }
+};
+
 struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
@@ -3267,6 +3277,8 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)VideoPlayer();
 #endif
+        (void)af::val<VideoPlayer>().setAudioStreaming(af::val<bool>());
+        (void)af::val<VideoPlayer>().isAudioStreaming();
         (void)af::val<VideoPlayer>().load(af::val<const fs::path>());
         (void)af::val<VideoPlayer>().close();
         (void)af::val<VideoPlayer>().update();
@@ -3310,8 +3322,6 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<const fs::path>(), af::val<Image>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
-        (void)af::val<VideoPlayer>().setAudioStreaming(af::val<bool>());
-        (void)af::val<VideoPlayer>().isAudioStreaming();
     }
 };
 
@@ -3655,6 +3665,7 @@ void af::coverGenerated() {
     af_generated::Cover_RectNodeButton::run();
     af_generated::Cover_Reflector::run();
     af_generated::Cover_ResizeEventArgs::run();
+    af_generated::Cover_SaveResult::run();
     af_generated::Cover_ScreenRecorder::run();
     af_generated::Cover_ScrollBar::run();
     af_generated::Cover_ScrollContainer::run();

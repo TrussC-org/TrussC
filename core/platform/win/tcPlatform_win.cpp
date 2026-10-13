@@ -418,38 +418,23 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
-
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    const unsigned char* data = pixels.getData();
-
-    // 拡張子から形式を判定
-    // Case-insensitive extension match on the resolved destination
-    std::string ext = toLower(getFileExtension(path));
-
-    int result = 0;
-    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
-
-    if (ext == "png") {
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == "jpg" || ext == "jpeg") {
-        result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == "bmp") {
-        result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
-    } else if (ext == "tga") {
-        result = stbi_write_tga(pathStr.c_str(), width, height, 4, data);
-    } else {
-        // デフォルトは PNG
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    }
-
-    if (result) {
-        logVerbose() << "[Screenshot] Saved: " << pathStr;
-        return true;
-    } else {
-        logError() << "[Screenshot] Failed to save: " << pathStr;
-        return false;
-    }
+    return internal::atomicWrite(path, [&](std::FILE* file) {
+        struct Sink { std::FILE* file; const fs::path& path; SaveResult result; } sink{file, path, {}};
+        auto write = [](void* context, void* data, int size) {
+            auto& sink = *static_cast<Sink*>(context);
+            if (sink.result) sink.result = internal::checkedWriteUnflushed(sink.file, data, size, sink.path);
+        };
+        const auto ext = toLower(getFileExtension(path));
+        const int w = pixels.getWidth(), h = pixels.getHeight(), ch = pixels.getChannels();
+        const auto* data = pixels.getData();
+        int encoded;
+        if (ext == "jpg" || ext == "jpeg") encoded = stbi_write_jpg_to_func(write, &sink, w, h, ch, data, 90);
+        else if (ext == "bmp") encoded = stbi_write_bmp_to_func(write, &sink, w, h, ch, data);
+        else if (ext == "tga") encoded = stbi_write_tga_to_func(write, &sink, w, h, ch, data);
+        else encoded = stbi_write_png_to_func(write, &sink, w, h, ch, data, w * ch);
+        if (!sink.result) return sink.result;
+        return encoded ? SaveResult::success() : internal::saveFailure(path, "Screenshot encoding failed");
+    }, "Screenshot").ok();
 }
 
 // ---------------------------------------------------------------------------

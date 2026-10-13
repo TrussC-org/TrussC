@@ -93,8 +93,8 @@ TC_CORE_TEST_MAIN() {
     px.setColor(0, 0, Color(1, 0, 0, 1));
 
     const vector<Writer> writers = {
-        {"saveTextFile", ".txt", [](const fs::path& p) { return saveTextFile(p, "hello"); }},
-        {"appendToFile", ".txt", [](const fs::path& p) { return appendToFile(p, "hello"); }},
+        {"saveTextFile", ".txt", [](const fs::path& p) { return saveTextFile(p, "hello").ok(); }},
+        {"appendToFile", ".txt", [](const fs::path& p) { return appendToFile(p, "hello").ok(); }},
         {"FileWriter::open", ".txt", [](const fs::path& p) {
             FileWriter w;
             if (!w.open(p)) return false;
@@ -110,16 +110,16 @@ TC_CORE_TEST_MAIN() {
         {"saveJson", ".json", [](const fs::path& p) {
             Json j;
             j["v"] = 1;
-            return saveJson(j, p);
+            return saveJson(j, p).ok();
         }},
         {"Xml::save", ".xml", [](const fs::path& p) {
             Xml xml;
             xml.addRoot("root");
-            return xml.save(p);
+            return xml.save(p).ok();
         }},
-        {"Pixels::save", ".png", [&px](const fs::path& p) { return px.save(p); }},
+        {"Pixels::save", ".png", [&px](const fs::path& p) { return px.save(p).ok(); }},
         {"setLogFile", ".log", [](const fs::path& p) {
-            const bool ok = setLogFile(p);
+            const bool ok = setLogFile(p).ok();
             closeLogFile();
             return ok;
         }},
@@ -228,7 +228,7 @@ TC_CORE_TEST_MAIN() {
     // --- setLogFile specifics ---
     {
         // getLogFilePath() is the resolved absolute path, and lines land in it
-        check("setLogFile(relative): returns true", setLogFile("logs/first.log"));
+        check("setLogFile(relative): returns true", setLogFile("logs/first.log").ok());
         const fs::path first = data / "logs" / "first.log";
         const string firstPath = getLogger().getLogFilePath();
         check("setLogFile(relative): getLogFilePath() is absolute, under the data folder",
@@ -239,11 +239,11 @@ TC_CORE_TEST_MAIN() {
         {
             { ofstream out(data / "logfile_blocker"); out << "x"; }
             ErrorCapture cap;
-            const bool ok = setLogFile("logfile_blocker/second.log");
+            const bool ok = setLogFile("logfile_blocker/second.log").ok();
             check("setLogFile(folder failure): returns false", !ok);
             check("setLogFile(folder failure): logs an Error",
                   !cap.errors.empty() &&
-                  cap.errors.back().find("Failed to open log file") != string::npos);
+                  cap.errors.back().find("[Logger]") != string::npos);
             check("setLogFile(folder failure): current log still open, same path",
                   getLogger().isFileOpen() && getLogger().getLogFilePath() == firstPath);
         }
@@ -251,22 +251,22 @@ TC_CORE_TEST_MAIN() {
         {
             fs::create_directories(data / "a_folder.log");
             ErrorCapture cap;
-            const bool ok = setLogFile("a_folder.log");
+            const bool ok = setLogFile("a_folder.log").ok();
             check("setLogFile(open failure): returns false", !ok);
             check("setLogFile(open failure): logs an Error",
                   !cap.errors.empty() &&
-                  cap.errors.back().find("Failed to open log file") != string::npos);
+                  cap.errors.back().find("[Logger]") != string::npos);
             check("setLogFile(open failure): current log still open, same path",
                   getLogger().isFileOpen() && getLogger().getLogFilePath() == firstPath);
         }
         // No file name: keeps the current log
         {
             ErrorCapture cap;
-            const bool ok = setLogFile("logs_nofile/");
+            const bool ok = setLogFile("logs_nofile/").ok();
             check("setLogFile(no file name): returns false", !ok);
             check("setLogFile(no file name): logs an Error",
                   !cap.errors.empty() &&
-                  cap.errors.back().find("Failed to open log file") != string::npos);
+                  cap.errors.back().find("[Logger]") != string::npos);
             check("setLogFile(no file name): current log still open, same path, no folder",
                   getLogger().isFileOpen() && getLogger().getLogFilePath() == firstPath &&
                   !fs::exists(data / "logs_nofile"));
@@ -276,12 +276,12 @@ TC_CORE_TEST_MAIN() {
 
         const string text = readText(first);
         check("setLogFile failures: the error lines land in the current log",
-              text.find("[ERROR] Failed to open log file") != string::npos);
+              text.find("[ERROR] [Logger]") != string::npos);
         check("setLogFile failures: later lines still land in the current log",
               text.find("line one") != string::npos && text.find("line two") != string::npos);
 
         // A successful switch moves to the new file and stops the old one
-        check("setLogFile(switch): returns true", setLogFile("logs/new/third.log"));
+        check("setLogFile(switch): returns true", setLogFile("logs/new/third.log").ok());
         logNotice() << "line three";
         closeLogFile();
         check("setLogFile(switch): new lines go to the new file only",

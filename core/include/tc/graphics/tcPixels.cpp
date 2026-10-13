@@ -6,20 +6,13 @@
 
 namespace trussc {
 
-bool Pixels::save(const fs::path& path) const {
-    if (!allocated_ || !data_ || format_ == PixelFormat::F32) return false;
-
-    // Convert relative paths to data path
-    fs::path savePath = path;
-    if (path.is_relative()) {
-        savePath = getDataPath(path);
-    }
-    // "" or "out/": fail before creating any folder
-    if (savePath.filename().empty()) {
-        logError("Pixels") << "No file name in path: " << savePath;
-        return false;
-    }
-    if (!internal::checkWriteTarget(path, savePath, "Pixels")) return false;
+SaveResult Pixels::save(const fs::path& path) const {
+    if (!allocated_ || !data_ || format_ == PixelFormat::F32)
+        return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
+            "Cannot save empty or floating-point pixels"), "Pixels");
+    fs::path savePath;
+    auto prepared = internal::prepareOutputPath(path, savePath, "Pixels");
+    if (!prepared) return prepared;
 
     // Encode to memory first: an encode error leaves an existing file
     // untouched. The encoder follows the extension, whatever its case
@@ -40,37 +33,9 @@ bool Pixels::save(const fs::path& path) const {
         // Default is PNG
         result = stbi_write_png_to_func(append, &encoded, width_, height_, channels_, data_, width_ * channels_);
     }
-    if (result == 0 || encoded.empty()) {
-        logError("Pixels") << "Cannot encode image: " << savePath;
-        return false;
-    }
-
-    // Create a missing parent folder, like saveScreenshot()
-    std::error_code ec;
-    fs::path parent = savePath.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
-        if (ec) {
-            logError("Pixels") << "Cannot create folder: " << parent
-                               << " (" << ec.message() << ")";
-            return false;
-        }
-    }
-
-    // fs::path keeps Windows paths wide; the write and the close are checked
-    std::ofstream file(savePath, std::ios::binary);
-    if (!file.is_open()) {
-        logError("Pixels") << "Cannot create file: " << savePath;
-        return false;
-    }
-    file.write(reinterpret_cast<const char*>(encoded.data()),
-               static_cast<std::streamsize>(encoded.size()));
-    file.close();
-    if (file.fail()) {
-        logError("Pixels") << "Write error: " << savePath;
-        return false;
-    }
-    return true;
+    if (result == 0 || encoded.empty())
+        return internal::reportSaveFailure(internal::saveFailure(savePath, "Cannot encode image"), "Pixels");
+    return internal::atomicWrite(savePath, encoded.data(), encoded.size(), "Pixels");
 }
 
 // Platform-specific image loader fallback (non-Apple stub)

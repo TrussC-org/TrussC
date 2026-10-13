@@ -127,30 +127,23 @@ public:
     VideoWriter& operator=(const VideoWriter&) = delete;
 
     // Open the encoder. `path` is resolved via getDataPath() when relative; the
-    // parent directory is created if missing. Returns false if the encoder (or
+    // parent directory is created if missing. Returns a failed SaveResult if the encoder (or
     // the requested codec on this platform) could not be created.
-    bool open(const fs::path& path, int width, int height,
+    SaveResult open(const fs::path& path, int width, int height,
               const VideoRecordSettings& settings = {}) {
         close();
+        result_ = SaveResult::success();
         if (width <= 0 || height <= 0) {
             logError("VideoWriter") << "invalid size " << width << "x" << height;
-            return false;
+            return result_ = internal::saveFailure(path_, "Recording backend rejected operation");
         }
         if ((width & 1) || (height & 1)) {
             logWarning("VideoWriter")
                 << "size " << width << "x" << height
                 << " is odd; most codecs need even dimensions";
         }
-        path_ = getDataPath(path);
-        if (!internal::checkWriteTarget(path, path_, "VideoWriter")) {
-            path_.clear();
-            return false;
-        }
-        {   // native encoders won't create intermediate directories
-            std::error_code ec;
-            fs::path parent = path_.parent_path();
-            if (!parent.empty()) std::filesystem::create_directories(parent, ec);
-        }
+        auto prepared = internal::prepareOutputPath(path, path_, "VideoWriter");
+        if (!prepared) return result_ = prepared;
         width_ = width;
         height_ = height;
         settings_ = settings;
@@ -163,26 +156,31 @@ public:
             logError("VideoWriter")
                 << "failed to open " << videoCodecName(settings_.codec)
                 << " encoder for " << path_;
-            return false;
+            return result_ = internal::saveFailure(path_, "Recording backend rejected operation");
         }
         open_ = true;
         logNotice("VideoWriter")
             << "writing " << width_ << "x" << height_ << " @ " << fps_ << "fps "
             << videoCodecName(settings_.codec) << " -> " << path_;
-        return true;
+        return SaveResult::success();
     }
 
-    // Finalize and flush the file. Safe to call multiple times.
-    void close() {
+    // Checked in-place finalization. Repeated calls retain the take result.
+    SaveResult close() {
         if (open_) {
-            closePlatform();
-            logNotice("VideoWriter")
-                << "saved " << frameCount_ << " frames -> " << path_;
+            auto finalized = closePlatform();
+            if (result_) {
+                result_ = finalized;
+                if (!result_) internal::reportSaveFailure(result_, "VideoWriter");
+            }
+            if (result_) logNotice("VideoWriter") << "saved " << frameCount_ << " frames -> " << path_;
         }
         open_ = false;
+        return result_;
     }
 
     bool isOpen() const { return open_; }
+    // Frames accepted by the backend; close() reports finalization separately.
     int  getFrameCount() const { return frameCount_; }
     int  getWidth() const { return width_; }
     int  getHeight() const { return height_; }
@@ -192,37 +190,37 @@ public:
 
     // Append one frame at the fixed-rate clock (frameIndex / fps) — deterministic
     // offline render. Source size must match the writer's size.
-    bool addFrame(const Fbo& fbo)      { return addFrameAt(fbo, frameCount_ / (double)fps_); }
-    bool addFrame(const Pixels& pixels){ return addFrameAt(pixels, frameCount_ / (double)fps_); }
+    SaveResult addFrame(const Fbo& fbo)      { return addFrameAt(fbo, frameCount_ / (double)fps_); }
+    SaveResult addFrame(const Pixels& pixels){ return addFrameAt(pixels, frameCount_ / (double)fps_); }
 
     // Append one frame at an explicit presentation time (seconds). Used by
     // ScreenRecorder for wall-clock live capture, or for custom timing.
-    bool addFrameAt(const Fbo& fbo, double timeSec) {
-        if (!open_) return false;
+    SaveResult addFrameAt(const Fbo& fbo, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (fbo.getWidth() != width_ || fbo.getHeight() != height_) {
-            logError("VideoWriter")
-                << "fbo size " << fbo.getWidth() << "x" << fbo.getHeight()
-                << " != writer " << width_ << "x" << height_;
-            return false;
+            return sizeMismatch("fbo", fbo.getWidth(), fbo.getHeight());
         }
+        if (!fbo.isAllocated()) return callFailed("fbo is not allocated");
+        if (internal::currentWindowContext().inFboPass)
+            return callFailed("fbo readPixels requires fbo.end() first");
         if (!fbo.readPixels(scratch_.data())) {
-            logError("VideoWriter") << "fbo readPixels failed";
-            return false;
+            // Native readback reports its own error; keep only this call failed.
+            return internal::saveFailure(path_, "fbo readPixels failed");
         }
         return appendRGBA(scratch_.data(), timeSec);
     }
-    bool addFrameAt(const Pixels& pixels, double timeSec) {
-        if (!open_) return false;
+    SaveResult addFrameAt(const Pixels& pixels, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (pixels.getWidth() != width_ || pixels.getHeight() != height_) {
-            logError("VideoWriter")
-                << "pixels size " << pixels.getWidth() << "x" << pixels.getHeight()
-                << " != writer " << width_ << "x" << height_;
-            return false;
+            return sizeMismatch("pixels", pixels.getWidth(), pixels.getHeight());
         }
         if (pixels.getChannels() == 4) return appendRGBA(pixels.getData(), timeSec);
         // Expand to RGBA into the scratch buffer.
         const unsigned char* src = pixels.getData();
         const int ch = pixels.getChannels();
+        if (!src) return callFailed("null pixel data");
         const size_t n = (size_t)width_ * height_;
         for (size_t i = 0; i < n; ++i) {
             unsigned char r = src[i * ch + 0];
@@ -237,13 +235,11 @@ public:
     // Append a tightly-packed RGBA8 buffer directly (no Pixels wrapper). Used by
     // ScreenRecorder's async capture, where pixels arrive in a raw GPU readback
     // buffer on a background thread.
-    bool addFrameAt(const unsigned char* rgba, int w, int h, double timeSec) {
-        if (!open_) return false;
+    SaveResult addFrameAt(const unsigned char* rgba, int w, int h, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (w != width_ || h != height_) {
-            logError("VideoWriter")
-                << "frame size " << w << "x" << h
-                << " != writer " << width_ << "x" << height_;
-            return false;
+            return sizeMismatch("frame", w, h);
         }
         return appendRGBA(rgba, timeSec);
     }
@@ -262,47 +258,67 @@ public:
     // on the machine it was generated on. Elsewhere the call fails instead.
     TC_PLATFORMS("macos") unsigned char* lockFrame(int& strideOut) {
 #if TC_ASYNC_SCREEN_CAPTURE
-        if (!open_) return nullptr;
-        return lockFramePlatform(strideOut);
+        if (!open_) { callFailed("not open"); return nullptr; }
+        if (!result_) return nullptr;
+        auto* frame = lockFramePlatform(strideOut);
+        return frame;
 #else
         (void)strideOut;
         return nullptr;
 #endif
     }
-    TC_PLATFORMS("macos") bool submitFrame(double timeSec) {
+    TC_PLATFORMS("macos") SaveResult submitFrame(double timeSec) {
 #if TC_ASYNC_SCREEN_CAPTURE
-        if (!open_) return false;
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
         if (!submitFramePlatform(timeSec)) {
-            logError("VideoWriter") << "encoder rejected frame " << frameCount_;
-            return false;
+            return backendRejected("encoder rejected frame " + std::to_string(frameCount_));
         }
         ++frameCount_;
-        return true;
+        return SaveResult::success();
 #else
         (void)timeSec;
-        return false;
+        return callFailed("direct frame submission is not supported on this platform");
 #endif
     }
 
     // Append interleaved float samples to the audio track at an explicit PTS
     // (seconds, same timeline as addFrameAt). Only meaningful when the writer
     // was opened with settings.audio = true (and audioSampleRate/Channels set);
-    // no-op false otherwise. Channel count / rate must match the settings.
-    bool writeAudio(const float* interleaved, int frames, double timeSec) {
-        if (!open_ || !interleaved || frames <= 0) return false;
-        if (!settings_.audio) return false;
-        return appendAudioPlatform(interleaved, frames, timeSec);
+    // Returns a failed SaveResult otherwise. Channel count / rate must match the settings.
+    SaveResult writeAudio(const float* interleaved, int frames, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
+        if (!interleaved) return callFailed("null audio data");
+        if (frames <= 0) return callFailed("audio frames must be > 0 (got " + std::to_string(frames) + ")");
+        if (!settings_.audio) return callFailed("writer has no audio track");
+        return appendAudioPlatform(interleaved, frames, timeSec)
+            ? SaveResult::success() : backendRejected("encoder rejected audio");
     }
 
 private:
-    bool appendRGBA(const unsigned char* rgba, double timeSec) {
-        if (!open_ || !rgba) return false;
+    SaveResult callFailed(const std::string& message) const {
+        return internal::reportSaveFailure(internal::saveFailure(path_, message.c_str()), "VideoWriter");
+    }
+    SaveResult sizeMismatch(const char* source, int w, int h) const {
+        return callFailed(std::string(source) + " size " + std::to_string(w) + "x" +
+            std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_));
+    }
+    // Backends supply details without logging. Report only the first rejected
+    // submission; subsequent calls return result_ before reaching the backend.
+    SaveResult backendRejected(const std::string& message) {
+        if (result_) result_ = internal::saveFailure(path_, message.c_str());
+        return internal::reportSaveFailure(result_, "VideoWriter");
+    }
+    SaveResult appendRGBA(const unsigned char* rgba, double timeSec) {
+        if (!open_) return callFailed("not open");
+        if (!result_) return result_;
+        if (!rgba) return callFailed("null frame data");
         if (!appendPlatform(rgba, timeSec)) {
-            logError("VideoWriter") << "encoder rejected frame " << frameCount_;
-            return false;
+            return backendRejected("encoder rejected frame " + std::to_string(frameCount_));
         }
         ++frameCount_;
-        return true;
+        return SaveResult::success();
     }
 
     // Platform hooks (defined in platform/<os>/tcVideoRecorder_<os>.*)
@@ -310,7 +326,7 @@ private:
                       const VideoRecordSettings& settings);
     bool appendPlatform(const unsigned char* rgba, double timeSec);
     bool appendAudioPlatform(const float* interleaved, int frames, double timeSec);
-    void closePlatform();
+    SaveResult closePlatform();
 #if TC_ASYNC_SCREEN_CAPTURE
     // Direct-buffer hooks for the zero-intermediate capture path (macOS).
     unsigned char* lockFramePlatform(int& strideOut);   // lock & return encoder buffer
@@ -326,6 +342,7 @@ private:
     VideoRecordSettings settings_;
     int   frameCount_ = 0;
     bool  open_ = false;
+    SaveResult result_;
 };
 
 // ---------------------------------------------------------------------------
@@ -449,13 +466,13 @@ public:
 
     // Record the whole window (swapchain) — the same fully-composited image
     // tc_get_screenshot returns. Size is taken from the framebuffer.
-    bool start(const fs::path& path, const VideoRecordSettings& settings = {}) {
+    SaveResult start(const fs::path& path, const VideoRecordSettings& settings = {}) {
         return startSource(Source::Swapchain, nullptr,
                            sapp_width(), sapp_height(), path, settings);
     }
 
     // Record an offscreen Fbo every frame (clean output, GUI-free).
-    bool start(const Fbo& fbo, const fs::path& path,
+    SaveResult start(const Fbo& fbo, const fs::path& path,
                const VideoRecordSettings& settings = {}) {
         return startSource(Source::Fbo, &fbo,
                            fbo.getWidth(), fbo.getHeight(), path, settings);
@@ -464,19 +481,19 @@ public:
     // Fixed-duration convenience: record for `durationSec` seconds, then auto-stop
     // and finalize the file at exactly that length. Same as filling
     // settings.duration. (durationSec <= 0 records until stop(), like the default.)
-    bool start(const fs::path& path, float durationSec) {
+    SaveResult start(const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(path, s);
     }
-    bool start(const Fbo& fbo, const fs::path& path, float durationSec) {
+    SaveResult start(const Fbo& fbo, const fs::path& path, float durationSec) {
         VideoRecordSettings s;
         s.duration = durationSec;
         return start(fbo, path, s);
     }
 
     // Stop capturing and finalize the file. Safe to call multiple times.
-    void stop() {
+    SaveResult stop() {
         afterFrameListener_ = EventListener{};   // no new captures get queued
         exitListener_ = EventListener{};
         audioListener_ = EventListener{};        // audio thread stops feeding
@@ -495,7 +512,7 @@ public:
             std::lock_guard<std::mutex> lk(writerMutex_);
             if (audioActive_) drainAudio();      // flush the tail of the ring
             audioActive_ = false;
-            writer_.close();
+            return writer_.close();
         }
     }
 
@@ -507,7 +524,7 @@ public:
 private:
     enum class Source { None, Swapchain, Fbo };
 
-    bool startSource(Source src, const Fbo* fbo, int w, int h,
+    SaveResult startSource(Source src, const Fbo* fbo, int w, int h,
                      const fs::path& path,
                      const VideoRecordSettings& settings) {
         stop();
@@ -524,7 +541,8 @@ private:
                 if (s.audioChannels   <= 0) s.audioChannels   = engine.getChannels();
             }
         }
-        if (!writer_.open(path, w, h, s)) return false;
+        auto opened = writer_.open(path, w, h, s);
+        if (!opened) return opened;
         source_ = src;
         fbo_ = fbo;
         fboAlive_ = fbo ? fbo->lifetimeToken() : std::shared_ptr<void>{};
@@ -545,7 +563,7 @@ private:
         //   passed Fbo, not the swapchain).
         afterFrameListener_ = events().afterFrame.listen([this]() { onAfterFrame(); });
         exitListener_ = events().exit.listen([this]() { stop(); });
-        return true;
+        return SaveResult::success();
     }
 
     void onAfterFrame() {
@@ -791,7 +809,7 @@ namespace internal {
 
 // Start recording the whole window to a video file. `path` is required;
 // relative paths resolve via getDataPath(). Auto-finalizes on app exit.
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(path, settings);
 }
@@ -799,7 +817,7 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // Fixed-duration convenience: record the whole window for `durationSec` seconds,
 // then auto-stop and finalize at exactly that length. (durationSec <= 0 behaves
 // like the unlimited overload above — record until stopRecording().)
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const fs::path& path,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(path, durationSec);
 }
@@ -807,20 +825,20 @@ TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const
 // Record an offscreen Fbo instead of the window (clean, GUI-free output).
 // The Fbo must stay alive while recording — if it is destroyed mid-recording,
 // the recording stops and finalizes automatically.
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const Fbo& fbo,
                            const fs::path& path,
                            const VideoRecordSettings& settings = {}) {
     return internal::globalScreenRecorder().start(fbo, path, settings);
 }
 
 // Fixed-duration Fbo recording (see above).
-TC_PLATFORMS("macos,windows,linux,android,ios") inline bool startRecording(const Fbo& fbo,
+TC_PLATFORMS("macos,windows,linux,android,ios") inline SaveResult startRecording(const Fbo& fbo,
                            const fs::path& path,
                            float durationSec) {
     return internal::globalScreenRecorder().start(fbo, path, durationSec);
 }
 
-inline void stopRecording() { internal::globalScreenRecorder().stop(); }
+inline SaveResult stopRecording() { return internal::globalScreenRecorder().stop(); }
 inline bool isRecording()   { return internal::globalScreenRecorder().isRecording(); }
 inline int  recordingFrameCount() { return internal::globalScreenRecorder().getFrameCount(); }
 inline fs::path recordingPath() { return internal::globalScreenRecorder().getPath(); }

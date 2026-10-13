@@ -2197,30 +2197,18 @@ namespace internal {
 // with the actual destination and supported formats.
 //
 // Web: queue a canvas download (PNG/JPEG). Only the filename is used; an empty
-// name gets a timestamped default. Returns true when queued; later failures
+// name gets a timestamped default. Returns true when queued; encoded output is
+// handed to the browser (disk completion is not observable). Later failures
 // (including a tainted canvas) are logged. The browser may ask for permission
 // to allow multiple downloads.
 inline bool saveScreenshot(const std::filesystem::path& path) {
-    // Resolve native destinations or web download names before queuing.
-    #ifdef __EMSCRIPTEN__
-    std::filesystem::path resolved = internal::resolveScreenshotDownloadName(path);
-    #else
-    std::filesystem::path resolved = internal::resolveScreenshotPath(path);
-    // Inside the app bundle: refused, with an Error naming getUserDataPath()
-    if (!internal::checkWriteTarget(path, resolved, "Screenshot")) return false;
-
-    // Auto-create the parent directory (mirrors VideoRecorder). This is the
-    // failure users want to catch synchronously (missing/unwritable folder).
-    std::error_code ec;
-    std::filesystem::path parent = resolved.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
-        if (ec) {
-            logError("Screenshot") << "Cannot prepare destination directory: "
-                                   << parent << " (" << ec.message() << ")";
-            return false;
-        }
-    }
+    std::filesystem::path resolved;
+#ifdef __EMSCRIPTEN__
+    auto name = internal::resolveScreenshotDownloadName(path);
+    if (!internal::prepareOutputPath(name, resolved, "Screenshot", "", {}, true)) return false;
+#else
+    if (!internal::prepareOutputPath(path, resolved, "Screenshot")) return false;
+    resolved = internal::resolveScreenshotPath(resolved);
 #endif
 
     internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));

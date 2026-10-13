@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -105,8 +106,12 @@ static void rgbaToNV12(const unsigned char* rgba, int w, int h,
 // Drain available encoded output into the muxer. On the first FORMAT_CHANGED we
 // learn the real output format (with CSD) and start the muxer.
 // ---------------------------------------------------------------------------
-static bool drainOutput(VideoWriterPlatformData* pd, bool endOfStream) {
+static bool drainOutput(VideoWriterPlatformData* pd, bool endOfStream, SaveResult& result) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     for (;;) {
+        if (endOfStream && std::chrono::steady_clock::now() >= deadline) {
+            pd->failed = true; return false;
+        }
         AMediaCodecBufferInfo info;
         ssize_t idx = AMediaCodec_dequeueOutputBuffer(
             pd->codec, &info, endOfStream ? 10000 : 0);
@@ -117,15 +122,16 @@ static bool drainOutput(VideoWriterPlatformData* pd, bool endOfStream) {
         }
         if (idx == kInfoOutputFormatChanged) {
             AMediaFormat* fmt = AMediaCodec_getOutputFormat(pd->codec);
+            if (!fmt) { pd->failed = true; return false; }
             pd->track = AMediaMuxer_addTrack(pd->muxer, fmt);
             AMediaFormat_delete(fmt);
             if (pd->track < 0) {
-                logError("VideoWriter") << "muxer addTrack failed";
+                result = SaveResult::fail(SaveError::WriteFailed, "muxer addTrack failed");
                 pd->failed = true;
                 return false;
             }
             if (AMediaMuxer_start(pd->muxer) != AMEDIA_OK) {
-                logError("VideoWriter") << "muxer start failed";
+                result = SaveResult::fail(SaveError::WriteFailed, "muxer start failed");
                 pd->failed = true;
                 return false;
             }
@@ -133,7 +139,7 @@ static bool drainOutput(VideoWriterPlatformData* pd, bool endOfStream) {
             continue;
         }
         if (idx == kInfoOutputBuffersChanged) continue;  // deprecated, ignore
-        if (idx < 0) continue;
+        if (idx < 0) { pd->failed = true; return false; }
 
         size_t outSize = 0;
         uint8_t* buf = AMediaCodec_getOutputBuffer(pd->codec, idx, &outSize);
@@ -142,9 +148,12 @@ static bool drainOutput(VideoWriterPlatformData* pd, bool endOfStream) {
         if (info.flags & kFlagCodecConfig) info.size = 0;
 
         if (info.size > 0 && pd->muxerStarted && buf) {
-            AMediaMuxer_writeSampleData(pd->muxer, pd->track, buf, &info);
+            if (AMediaMuxer_writeSampleData(pd->muxer, pd->track, buf, &info) != AMEDIA_OK)
+                pd->failed = true;
         }
-        AMediaCodec_releaseOutputBuffer(pd->codec, idx, false);
+        if (info.size > 0 && (!pd->muxerStarted || !buf)) pd->failed = true;
+        if (AMediaCodec_releaseOutputBuffer(pd->codec, idx, false) != AMEDIA_OK) pd->failed = true;
+        if (pd->failed) return false;
 
         if (info.flags & kFlagEndOfStream) return true;
     }
@@ -257,16 +266,18 @@ bool VideoWriter::appendAudioPlatform(const float*, int, double) { return false;
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->codec || pd->failed) return false;
+    if (!drainOutput(pd, false, result_)) return false;
 
     // Wait (briefly) for an input buffer — offline writers can outrun the codec.
     ssize_t inIdx = -1;
     for (int spins = 0; spins < 1000; ++spins) {
         inIdx = AMediaCodec_dequeueInputBuffer(pd->codec, 10000);
         if (inIdx >= 0) break;
-        if (!drainOutput(pd, false)) return false;   // make room
+        if (inIdx != kInfoTryAgainLater) { pd->failed = true; return false; }
+        if (!drainOutput(pd, false, result_)) return false;   // make room
     }
     if (inIdx < 0) {
-        logError("VideoWriter") << "no encoder input buffer (timeout)";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "no encoder input buffer (timeout)");
         pd->failed = true;
         return false;
     }
@@ -274,7 +285,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     size_t cap = 0;
     uint8_t* in = AMediaCodec_getInputBuffer(pd->codec, inIdx, &cap);
     if (!in) {
-        logError("VideoWriter") << "null input buffer";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "null input buffer");
         pd->failed = true;
         return false;
     }
@@ -305,47 +316,51 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     int64_t ptsUs = (int64_t)(timeSec * 1e6);
     if (AMediaCodec_queueInputBuffer(pd->codec, inIdx, 0, qsize, ptsUs, 0)
             != AMEDIA_OK) {
-        logError("VideoWriter") << "queueInputBuffer failed";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "queueInputBuffer failed");
         pd->failed = true;
         return false;
     }
 
-    return drainOutput(pd, false);
+    return true; // queue accepted this frame; poll output again on next append/close
 }
 
 // ---------------------------------------------------------------------------
 // closePlatform - signal EOS, flush the tail, finalize and release.
 // ---------------------------------------------------------------------------
-void VideoWriter::closePlatform() {
+SaveResult VideoWriter::closePlatform() {
     VideoWriterPlatformData* pd = platform_;
-    if (!pd) return;
+    if (!pd) return SaveResult::success();
+    auto result = SaveResult::success();
 
     if (pd->codec && !pd->failed) {
         // Queue an end-of-stream marker on an empty input buffer.
         ssize_t inIdx = -1;
         for (int spins = 0; spins < 1000 && inIdx < 0; ++spins) {
             inIdx = AMediaCodec_dequeueInputBuffer(pd->codec, 10000);
-            if (inIdx < 0) drainOutput(pd, false);
+            if (inIdx < 0 && inIdx != kInfoTryAgainLater) { pd->failed = true; break; }
+            if (inIdx < 0 && !drainOutput(pd, false, result)) break;
         }
         if (inIdx >= 0) {
-            AMediaCodec_queueInputBuffer(pd->codec, inIdx, 0, 0, 0,
-                                         kFlagEndOfStream);
-            drainOutput(pd, true);
-        }
+            if (AMediaCodec_queueInputBuffer(pd->codec, inIdx, 0, 0, 0,
+                                         kFlagEndOfStream) != AMEDIA_OK ||
+                !drainOutput(pd, true, result)) pd->failed = true;
+        } else pd->failed = true;
     }
 
     if (pd->muxer) {
-        if (pd->muxerStarted) AMediaMuxer_stop(pd->muxer);
+        if (!pd->muxerStarted || AMediaMuxer_stop(pd->muxer) != AMEDIA_OK) pd->failed = true;
         AMediaMuxer_delete(pd->muxer);
     }
     if (pd->codec) {
-        AMediaCodec_stop(pd->codec);
+        if (AMediaCodec_stop(pd->codec) != AMEDIA_OK) pd->failed = true;
         AMediaCodec_delete(pd->codec);
     }
-    if (pd->fd >= 0) ::close(pd->fd);
+    if (pd->fd >= 0 && ::close(pd->fd) != 0) pd->failed = true;
+    if (pd->failed && result) result = internal::saveFailure(path_, "Android recording/finalization failed");
 
     delete pd;
     platform_ = nullptr;
+    return result;
 }
 
 } // namespace trussc

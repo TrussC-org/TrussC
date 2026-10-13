@@ -140,7 +140,7 @@ TC_CORE_TEST_MAIN() {
         px.allocate(4, 4, 4);
         px.setColor(1, 2, Color(1, 0, 0, 1));
         check("Pixels::save(\"a.png\") writes into the data folder",
-              px.save("a.png") && fs::exists(data / "a.png"));
+              px.save("a.png").ok() && fs::exists(data / "a.png"));
         Pixels q;
         LoadResult r = q.load("a.png");
         check("Pixels::load(\"a.png\") reads it back", r.ok() && q.getWidth() == 4 &&

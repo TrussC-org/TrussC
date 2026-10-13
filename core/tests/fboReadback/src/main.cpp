@@ -154,7 +154,7 @@ private:
         Image copy;
         check("copyTo succeeds", fbo_.copyTo(copy));
         check("copyTo has correct pixels", copy.isAllocated() && expected(copy.getPixelsData()));
-        check("save succeeds synchronously", fbo_.save(path_));
+        check("save succeeds synchronously", fbo_.save(path_).ok());
         Image saved;
         check("saved file loads immediately", static_cast<bool>(saved.load(path_)));
         check("saved file has correct pixels", saved.isAllocated() && expected(saved.getPixelsData()));

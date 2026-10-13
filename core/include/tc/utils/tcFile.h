@@ -162,71 +162,25 @@ inline std::string loadTextFile(const fs::path& path) {
 // (use getUserDataPath()).
 // (binary mode: what you pass is what lands on disk on every platform;
 // Windows text mode would expand \n to \r\n, changing the file size)
-inline bool saveTextFile(const fs::path& path, const std::string& content) {
-    fs::path fullPath = getDataPath(path);
-    // "" or "out/": fail before creating any folder
-    if (fullPath.filename().empty()) {
-        logError() << "No file name in path: " << fullPath;
-        return false;
-    }
-    if (!internal::checkWriteTarget(path, fullPath, "File")) return false;
-    std::error_code ec;
-    fs::path parent = fullPath.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
-        if (ec) {
-            logError() << "Cannot create folder: " << parent << " (" << ec.message() << ")";
-            return false;
-        }
-    }
-    std::ofstream file(fullPath, std::ios::binary);
-    if (!file.is_open()) {
-        logError() << "Cannot create file: " << path;
-        return false;
-    }
-
-    file << content;
-    file.close();
-    if (file.fail()) {
-        logError() << "Write error: " << path;
-        return false;
-    }
-    return true;
+inline SaveResult saveTextFile(const fs::path& path, const std::string& content) {
+    fs::path fullPath;
+    auto prepared = internal::prepareOutputPath(path, fullPath, "File");
+    if (!prepared) return prepared;
+    return internal::atomicWrite(fullPath, content.data(), content.size(), "File");
 }
 
-// Append string to text file. Relative paths resolve via getDataPath, and a
-// missing parent folder is created. A path inside the app bundle is refused
-// (use getUserDataPath()).
-inline bool appendToFile(const fs::path& path, const std::string& content) {
-    fs::path fullPath = getDataPath(path);
-    // "" or "out/": fail before creating any folder
-    if (fullPath.filename().empty()) {
-        logError() << "No file name in path: " << fullPath;
-        return false;
-    }
-    if (!internal::checkWriteTarget(path, fullPath, "File")) return false;
-    std::error_code ec;
-    fs::path parent = fullPath.parent_path();
-    if (!parent.empty()) {
-        std::filesystem::create_directories(parent, ec);
-        if (ec) {
-            logError() << "Cannot create folder: " << parent << " (" << ec.message() << ")";
-            return false;
-        }
-    }
-    std::ofstream file(fullPath, std::ios::app | std::ios::binary);
-    if (!file.is_open()) {
-        logError() << "Cannot open file for append: " << path;
-        return false;
-    }
-
-    file << content;
-    file.close();
-    if (file.fail()) {
-        logError() << "Write error: " << path;
-        return false;
-    }
-    return true;
+// Append in place, checking both the flushed write and the close.
+inline SaveResult appendToFile(const fs::path& path, const std::string& content) {
+    fs::path fullPath;
+    auto prepared = internal::prepareOutputPath(path, fullPath, "File");
+    if (!prepared) return prepared;
+    errno = 0;
+    auto* file = internal::openFile(fullPath, "ab");
+    if (!file) return internal::reportSaveFailure(internal::saveErrno(fullPath, "Cannot open file"), "File");
+    auto result = internal::checkedWrite(file, content.data(), content.size(), fullPath);
+    auto closed = internal::checkedClose(file, fullPath);
+    if (result) result = closed;
+    return result ? result : internal::reportSaveFailure(result, "File");
 }
 
 // =============================================================================
@@ -246,11 +200,12 @@ public:
     FileWriter& operator=(const FileWriter&) = delete;
 
     // Movable
-    FileWriter(FileWriter&& other) noexcept : file_(std::move(other.file_)) {}
+    FileWriter(FileWriter&& other) noexcept : file_(std::move(other.file_)), path_(std::move(other.path_)) {}
     FileWriter& operator=(FileWriter&& other) noexcept {
         if (this != &other) {
             close();
             file_ = std::move(other.file_);
+            path_ = std::move(other.path_);
         }
         return *this;
     }
@@ -258,40 +213,23 @@ public:
     // Open file (append = true to append to existing file). Relative paths
     // resolve via getDataPath, and a missing parent folder is created. A
     // path inside the app bundle is refused (use getUserDataPath()).
-    bool open(const fs::path& path, bool append = false) {
+    SaveResult open(const fs::path& path, bool append = false) {
         close();
-        fs::path fullPath = getDataPath(path);
-        // "" or "out/": fail before creating any folder
-        if (fullPath.filename().empty()) {
-            logError() << "FileWriter: No file name in path: " << fullPath;
-            return false;
-        }
-        if (!internal::checkWriteTarget(path, fullPath, "FileWriter")) return false;
-        std::error_code ec;
-        fs::path parent = fullPath.parent_path();
-        if (!parent.empty()) {
-            std::filesystem::create_directories(parent, ec);
-            if (ec) {
-                logError() << "FileWriter: Cannot create folder: " << parent
-                           << " (" << ec.message() << ")";
-                return false;
-            }
-        }
-        auto mode = std::ios::out | std::ios::binary;
-        if (append) mode |= std::ios::app;
-
-        file_.open(fullPath, mode);
-        if (!file_.is_open()) {
-            logError() << "FileWriter: Cannot open file: " << path;
-            return false;
-        }
-        return true;
+        auto result = internal::prepareOutputPath(path, path_, "FileWriter");
+        if (!result) return result;
+        errno = 0;
+        file_.open(path_, std::ios::out | std::ios::binary | (append ? std::ios::app : std::ios::trunc));
+        if (!file_.is_open())
+            return internal::reportSaveFailure(internal::saveErrno(path_, "Cannot open file"), "FileWriter");
+        return SaveResult::success();
     }
 
     // Close file
     void close() {
         if (file_.is_open()) {
+            errno = 0;
             file_.close();
+            if (file_.fail()) internal::reportSaveFailure(internal::saveErrno(path_, "Close error"), "FileWriter");
         }
     }
 
@@ -303,8 +241,9 @@ public:
     // Write string
     FileWriter& write(const std::string& text) {
         if (file_.is_open()) {
+            errno = 0;
             file_.write(text.data(), text.size());
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
@@ -312,8 +251,9 @@ public:
     // Write single character
     FileWriter& write(char c) {
         if (file_.is_open()) {
+            errno = 0;
             file_.put(c);
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
@@ -321,8 +261,9 @@ public:
     // Write binary data
     FileWriter& write(const void* data, size_t size) {
         if (file_.is_open()) {
+            errno = 0;
             file_.write(static_cast<const char*>(data), size);
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
@@ -337,7 +278,7 @@ public:
     // Explicit flush (already done after each write, but available if needed)
     void flush() {
         if (file_.is_open()) {
-            file_.flush();
+            checkWrite();
         }
     }
 
@@ -345,14 +286,24 @@ public:
     template<typename T>
     FileWriter& operator<<(const T& value) {
         if (file_.is_open()) {
+            errno = 0;
             file_ << value;
-            file_.flush();
+            checkWrite();
         }
         return *this;
     }
 
 private:
+    void checkWrite() {
+        auto result = internal::checkOutputStream(file_, path_);
+        if (!result) {
+            // Stop on the first failure, before reporting (listeners may write).
+            file_.close();
+            internal::reportSaveFailure(result, "FileWriter");
+        }
+    }
     std::ofstream file_;
+    fs::path path_;
 };
 
 // =============================================================================

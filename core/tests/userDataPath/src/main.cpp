@@ -241,7 +241,7 @@ TC_CORE_TEST_MAIN() {
         Json j;
         j["v"] = 7;
         check("saveJson(getUserDataPath(...)) returns true",
-              saveJson(j, getUserDataPath("settings.json")));
+              saveJson(j, getUserDataPath("settings.json")).ok());
         check("... the file lands in the set root", fs::is_regular_file(root / "settings.json"));
         check("... and loadJson(getUserDataPath(...)) reads it back",
               loadJson(getUserDataPath("settings.json")).value("v", 0) == 7);
@@ -271,36 +271,36 @@ TC_CORE_TEST_MAIN() {
     img.allocate(2, 2, 4);
 
     const vector<Writer> writers = {
-        {"saveTextFile", ".txt", [](const fs::path& p) { return saveTextFile(p, "hello"); }},
-        {"appendToFile", ".txt", [](const fs::path& p) { return appendToFile(p, "hello"); }},
+        {"saveTextFile", ".txt", [](const fs::path& p) { return saveTextFile(p, "hello").ok(); }},
+        {"appendToFile", ".txt", [](const fs::path& p) { return appendToFile(p, "hello").ok(); }},
         {"FileWriter::open", ".txt", [](const fs::path& p) {
             FileWriter w;
-            return w.open(p);
+            return w.open(p).ok();
         }},
         {"FileWriter::open(append)", ".txt", [](const fs::path& p) {
             FileWriter w;
-            return w.open(p, true);
+            return w.open(p, true).ok();
         }},
         {"saveJson", ".json", [](const fs::path& p) {
             Json j;
             j["v"] = 1;
-            return saveJson(j, p);
+            return saveJson(j, p).ok();
         }},
         {"Xml::save", ".xml", [](const fs::path& p) {
             Xml xml;
             xml.addRoot("root");
-            return xml.save(p);
+            return xml.save(p).ok();
         }},
-        {"Pixels::save", ".png", [&px](const fs::path& p) { return px.save(p); }},
-        {"Image::save", ".png", [&img](const fs::path& p) { return img.save(p); }},
+        {"Pixels::save", ".png", [&px](const fs::path& p) { return px.save(p).ok(); }},
+        {"Image::save", ".png", [&img](const fs::path& p) { return img.save(p).ok(); }},
         {"setLogFile", ".log", [](const fs::path& p) {
-            const bool ok = setLogFile(p);
+            const bool ok = setLogFile(p).ok();
             closeLogFile();
             return ok;
         }},
         {"VideoWriter::open", ".mp4", [](const fs::path& p) {
             VideoWriter w;
-            return w.open(p, 16, 16);
+            return w.open(p, 16, 16).ok();
         }},
 #ifndef __EMSCRIPTEN__
         // Queues the capture (a console test has no frame to drain it)
@@ -308,7 +308,7 @@ TC_CORE_TEST_MAIN() {
 #endif
         {"AudioRecorder::start", ".wav", [](const fs::path& p) {
             AudioRecorder rec;
-            const bool ok = rec.start(p);
+            const bool ok = rec.start(p).ok();
             rec.stop();
             return ok;
         }},
@@ -369,7 +369,7 @@ TC_CORE_TEST_MAIN() {
         const fs::path target = getUserDataPath("inside.txt");
         check("getUserDataPath(inside the bundle): does not create its root",
               !fs::exists(target.parent_path()) && cap.errors.empty());
-        const bool ok = saveTextFile(target, "x");
+        const bool ok = saveTextFile(target, "x").ok();
         check("setUserDataPathRoot(inside the bundle): writes still refused",
               !ok && cap.errors.size() == 1 &&
               !fs::exists(target.parent_path()));
@@ -379,10 +379,10 @@ TC_CORE_TEST_MAIN() {
     // refusal and later messages recorded there.
     {
         const fs::path logPath = userRoot / "active.log";
-        check("setLogFile: opens a user data log", setLogFile(logPath));
+        check("setLogFile: opens a user data log", setLogFile(logPath).ok());
         LogCapture cap;
         check("setLogFile: bundle refusal keeps the current log open",
-              !setLogFile(bundleData / "refused.log") && cap.errors.size() == 1 &&
+              !setLogFile(bundleData / "refused.log").ok() && cap.errors.size() == 1 &&
               getLogger().isFileOpen() && samePath(getLogger().getLogFilePath(), logPath));
         logError("userDataPath") << "after bundle refusal";
         closeLogFile();
@@ -401,7 +401,7 @@ TC_CORE_TEST_MAIN() {
         setDataPathRoot(devData);
         LogCapture cap;
         check("no bundle: a relative write into the data folder works",
-              saveTextFile("dev.txt", "x") && fs::is_regular_file(devData / "dev.txt") &&
+              saveTextFile("dev.txt", "x").ok() && fs::is_regular_file(devData / "dev.txt") &&
               cap.errors.empty());
 #ifdef __APPLE__
         auto noticeCount = [&cap] {

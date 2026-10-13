@@ -424,12 +424,12 @@ public:
     }
 
     // save() override - Save FBO contents to file
-    bool save(const fs::path& path) const override {
+    SaveResult save(const fs::path& path) const override {
         Image img;
         if (copyTo(img)) {
             return img.save(path);
         }
-        return false;
+        return SaveResult::fail(SaveError::WriteFailed, "Cannot read Fbo pixels");
     }
 
     // Access to internal resources (for advanced users).

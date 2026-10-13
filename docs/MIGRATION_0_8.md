@@ -57,3 +57,30 @@ The screen FOV functions accept `0` (orthographic) or `0 < fov < TAU/2` (`0 < fo
 Saved JSON: `rotation` is now read as radians, so a file saved before v0.8.0 (degrees under `rotation`) loads with wrong rotations. Convert those values with `deg2rad()`, or rename the key to `rotationDeg` in the file, which is still read and converted. New files save only `rotation`, in radians.
 
 Not angles, unchanged: hue (`ColorHSB::h`, `ColorOKLCH::H`, 0–1 of a turn) and `tcx::geo::LatLon` (geographic degrees).
+
+## Saving and recording return `SaveResult`
+
+The save and record functions now report what went wrong instead of a plain `bool` or nothing (breaking change, #761 PR-B, #445, #440). `SaveResult` has `ok()`, an `error` (`AccessDenied`, `NoSpace`, `WriteFailed`, `Unknown`) and a `message`. It converts to `bool` explicitly, so `if (img.save("out.png"))` keeps working. Code that stores the result in a `bool`, passes it on as a `bool`, or returns it from a function that returns `bool` needs `.ok()`:
+
+```cpp
+bool saved = img.save("out.png").ok();
+auto result = saveJson(json, "settings.json");
+if (!result) logError() << result.message;
+```
+
+`bool` → `SaveResult`:
+- `Pixels::save`, `Image::save`, `Fbo::save`, and `HasTexture::save` (an override in your own class must return `SaveResult` too)
+- `saveJson`, `saveTextFile`, `appendToFile`, `FileWriter::open`, `Xml::save`
+- `setLogFile` (and `Logger::setLogFile`, deprecated `tcSetLogFile`)
+- `AudioRecorder::start`, `VideoWriter::open` / `addFrame` / `addFrameAt` / `writeAudio` / `submitFrame`, `ScreenRecorder::start`, `startRecording`
+
+`void` → `SaveResult`: `AudioRecorder::stop()`, `VideoWriter::close()`, `ScreenRecorder::stop()`, `stopRecording()`. Ignoring the result still compiles, but finalizing a recording can fail (disk full, encoder error), and only this result tells you.
+
+In Lua, test `result:ok()`: the result object itself is always truthy.
+
+What else changes:
+- `Pixels` / `Image` / `Fbo::save`, `saveJson`, `saveTextFile` and `Xml::save` write to `<file>.tmp` and then replace the file, so a failed save leaves the previous file as it was.
+- `appendToFile`, `FileWriter`, the log file and the recorders write in place, and check every write.
+- `saveScreenshot()` still returns `bool`, meaning "queued". A failed write later logs one Error. On Web it is still a browser download.
+- `AudioRecorder` ends the take at the first failed write; `getRecordedSeconds()` counts what was actually written.
+- `VideoWriter::getFrameCount()` counts frames the encoder accepted. A wrong-size frame or other caller mistake fails that call only; the take goes on.
