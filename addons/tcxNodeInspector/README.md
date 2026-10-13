@@ -159,7 +159,7 @@ recorded, as in tcxImGui.
 
 With MCP on, `tcx_imgui_get_touched` returns the record under `inspector`,
 next to tcxImGui's own `widgets`. Each entry carries the member's current value
-in the `tc_get_node_tree` encoding (rotation in degrees, colors `[r,g,b,a]`):
+in the `tc_get_node_tree` encoding (rotation in radians, derived rotationDeg in degrees, colors `[r,g,b,a]`):
 
 ```json
 {"nodeType": "Ball", "nodeName": "a", "nodeId": 2, "member": "outline.color",

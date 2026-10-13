@@ -269,11 +269,33 @@ static void testDerived() {
     insp.resetTouched();
 }
 
+// #236: inspector edits and the radian gizmo report the matching key/unit.
+static void testRotationUnits() {
+    auto& insp = NodeInspector::instance();
+    insp.resetTouched();
+    auto node = make_shared<Node>();
+    reflectFromJson(*node, Json{{"rotationDeg", {10, 20, 30}}});
+    tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), nullptr, "rotationDeg");
+    auto degreeEntries = entries(node->getInstanceId(), "", "rotationDeg");
+    check("rotationDeg edit: touched value is degrees", degreeEntries.size() == 1 &&
+          std::abs(degreeEntries[0]["value"][2].get<float>() - 30.0f) < 0.0001f);
+    node->setEuler(Vec3(0.1f, 0.2f, 0.3f)); // same write as the rotation gizmo
+    tcx::nodeinspector::internal::recordTouchedForTests(insp, node.get(), nullptr, "rotation");
+    auto radianEntries = entries(node->getInstanceId(), "", "rotation");
+    check("rotation gizmo: touched value is radians", radianEntries.size() == 1 &&
+          std::abs(radianEntries[0]["value"][2].get<float>() - 0.3f) < 0.0001f);
+    degreeEntries = entries(node->getInstanceId(), "", "rotationDeg");
+    check("derived rotationDeg tracks later radian edits", degreeEntries.size() == 1 &&
+          std::abs(degreeEntries[0]["value"][2].get<float>() - rad2deg(0.3f)) < 0.0001f);
+    insp.resetTouched();
+}
+
 int main() {
     std::printf("=== tcxNodeInspector tests ===\n");
     testDestroyed();
     testMods();
     testDerived();
+    testRotationUnits();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

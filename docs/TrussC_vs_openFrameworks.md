@@ -354,7 +354,7 @@ Reference for oF users finding equivalent features in TrussC.
 | openFrameworks | TrussC | Notes |
 |:---|:---|:---|
 | `ofSetupScreenOrtho` | `setupScreenOrtho()` |  |
-| `ofSetupScreenPerspective` | `setupScreenPerspective(fovDeg, nearDist, farDist)` |  |
+| `ofSetupScreenPerspective` | `setupScreenPerspectiveDeg(fovDeg, nearDist, farDist)` |  |
 | `ofWorldToScreen` | `worldToScreen(worldPos)` |  |
 
 ### **Video**

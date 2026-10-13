@@ -527,7 +527,7 @@ void registerStandardTools(Server& server) {
 
     // --- Node tree tools ---
 
-    coreTool(server, "tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos): editable, but not saved, and when a write carries both, the canonical one (pos) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
+    coreTool(server, "tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in radians, derived rotationDeg in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos, rotationDeg from rotation): editable, but not saved, and when a write carries both, the canonical one (pos or rotation) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
         .level(ToolLevel::ReadOnly)
         .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
@@ -800,7 +800,7 @@ void registerStandardTools(Server& server) {
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         });
 
-    coreTool(server, "tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in degrees, enums by label string). A derived member (e.g. globalPos) is applied before its canonical member (pos), so when both are given the canonical one wins")
+    coreTool(server, "tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in radians, derived rotationDeg in degrees, enums by label string). A derived member (e.g. globalPos or rotationDeg) is applied before its canonical member (pos or rotation), so when both are given the canonical one wins")
         .level(ToolLevel::Control)
         .arg<int>("id", "Instance id from tc_get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")

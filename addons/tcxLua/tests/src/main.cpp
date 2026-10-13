@@ -140,6 +140,43 @@ int main() {
     check("Node().callEvery ~= nil", luaBool("Node().callEvery ~= nil"));
     check("Node().cancelTimer ~= nil", luaBool("Node().cancelTimer ~= nil"));
 
+    // #236: the generated degree companions are callable from Lua.
+    checkNoThrow("angles: radians and Deg Lua bindings", true, [&] {
+        auto result = L.safe_script(R"lua(
+            assert(type(setupScreenPerspectiveDeg) == "function")
+            assert(type(setupScreenFovDeg) == "function")
+            assert(type(setupScreenFovWithSize) == "function")
+            assert(type(setupScreenFovWithSizeDeg) == "function")
+            setDefaultScreenFovDeg(60)
+            assert(math.abs(getDefaultScreenFov() - TAU / 6) < 0.0001)
+            setDefaultScreenFov(0)
+            assert(getDefaultScreenFov() == 0)
+            setDefaultScreenFovDeg(30)
+            setDefaultScreenFovDeg(0)
+            assert(getDefaultScreenFov() == 0 and getDefaultScreenFovDeg() == 0)
+            setDefaultScreenFov(TAU / 8)
+            setDefaultScreenOrtho()
+            assert(getDefaultScreenFov() == 0)
+            setDefaultScreenFov(TAU / 8)
+            assert(math.abs(getDefaultScreenFovDeg() - 45) < 0.0001)
+            -- Invalid calls are safe without a GPU and leave state unchanged.
+            setupScreenPerspective(60)
+            setupScreenFovDeg(180)
+            setupScreenFovWithSize(60, 64, 64)
+            setupScreenFovWithSizeDeg(180, 64, 64)
+            local r, d = Path(), Path()
+            r:arc(Vec3(0, 0, 0), 20, 10, 0, TAU / 4, true, 32)
+            d:arcDeg(Vec3(0, 0, 0), 20, 10, 0, 90, true, 32)
+            assert(r:size() == d:size())
+            for i = 0, r:size() - 1 do
+                assert(math.abs(r[i].x - d[i].x) < 0.0001)
+                assert(math.abs(r[i].y - d[i].y) < 0.0001)
+            end
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
     // Exercise the hand-written XML bindings against the vendored pugixml.
     checkNoThrow("Xml: serialization and parsing through Lua", true, [&] {
         auto result = L.safe_script(R"lua(

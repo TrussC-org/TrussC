@@ -1449,8 +1449,8 @@ bool& pixelPerfectMode() {
 }
 
 float& defaultScreenFov() {
-    static float fovDeg = 45.0f;
-    return fovDeg;
+    static float fovRadians = TAU / 8.0f;
+    return fovRadians;
 }
 
 float& nearClipOverride() {

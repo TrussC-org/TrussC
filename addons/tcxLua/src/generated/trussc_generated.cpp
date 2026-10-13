@@ -447,20 +447,44 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float fovY, float nearZ) { return trussc::enable3DPerspective(fovY, nearZ); },
         [](float fovY, float nearZ, float farZ) { return trussc::enable3DPerspective(fovY, nearZ, farZ); }
     ));
+    lua->set_function("setupScreenFovWithSize", sol::overload(
+        [](float fovRadians, float viewW, float viewH) { return trussc::setupScreenFovWithSize(fovRadians, viewW, viewH); },
+        [](float fovRadians, float viewW, float viewH, float nearDist) { return trussc::setupScreenFovWithSize(fovRadians, viewW, viewH, nearDist); },
+        [](float fovRadians, float viewW, float viewH, float nearDist, float farDist) { return trussc::setupScreenFovWithSize(fovRadians, viewW, viewH, nearDist, farDist); }
+    ));
+    lua->set_function("setupScreenFovWithSizeDeg", sol::overload(
+        [](float fovDeg, float viewW, float viewH) { return trussc::setupScreenFovWithSizeDeg(fovDeg, viewW, viewH); },
+        [](float fovDeg, float viewW, float viewH, float nearDist) { return trussc::setupScreenFovWithSizeDeg(fovDeg, viewW, viewH, nearDist); },
+        [](float fovDeg, float viewW, float viewH, float nearDist, float farDist) { return trussc::setupScreenFovWithSizeDeg(fovDeg, viewW, viewH, nearDist, farDist); }
+    ));
     lua->set_function("setupScreenFov", sol::overload(
-        [](float fovDeg) { return trussc::setupScreenFov(fovDeg); },
-        [](float fovDeg, float nearDist) { return trussc::setupScreenFov(fovDeg, nearDist); },
-        [](float fovDeg, float nearDist, float farDist) { return trussc::setupScreenFov(fovDeg, nearDist, farDist); }
+        [](float fovRadians) { return trussc::setupScreenFov(fovRadians); },
+        [](float fovRadians, float nearDist) { return trussc::setupScreenFov(fovRadians, nearDist); },
+        [](float fovRadians, float nearDist, float farDist) { return trussc::setupScreenFov(fovRadians, nearDist, farDist); }
+    ));
+    lua->set_function("setupScreenFovDeg", sol::overload(
+        [](float fovDeg) { return trussc::setupScreenFovDeg(fovDeg); },
+        [](float fovDeg, float nearDist) { return trussc::setupScreenFovDeg(fovDeg, nearDist); },
+        [](float fovDeg, float nearDist, float farDist) { return trussc::setupScreenFovDeg(fovDeg, nearDist, farDist); }
     ));
     lua->set_function("setupScreenPerspective", sol::overload(
         []() { return trussc::setupScreenPerspective(); },
-        [](float fovDeg) { return trussc::setupScreenPerspective(fovDeg); },
-        [](float fovDeg, float nearDist) { return trussc::setupScreenPerspective(fovDeg, nearDist); },
-        [](float fovDeg, float nearDist, float farDist) { return trussc::setupScreenPerspective(fovDeg, nearDist, farDist); }
+        [](float fovRadians) { return trussc::setupScreenPerspective(fovRadians); },
+        [](float fovRadians, float nearDist) { return trussc::setupScreenPerspective(fovRadians, nearDist); },
+        [](float fovRadians, float nearDist, float farDist) { return trussc::setupScreenPerspective(fovRadians, nearDist, farDist); }
+    ));
+    lua->set_function("setupScreenPerspectiveDeg", sol::overload(
+        []() { return trussc::setupScreenPerspectiveDeg(); },
+        [](float fovDeg) { return trussc::setupScreenPerspectiveDeg(fovDeg); },
+        [](float fovDeg, float nearDist) { return trussc::setupScreenPerspectiveDeg(fovDeg, nearDist); },
+        [](float fovDeg, float nearDist, float farDist) { return trussc::setupScreenPerspectiveDeg(fovDeg, nearDist, farDist); }
     ));
     lua->set_function("setupScreenOrtho", []() { return trussc::setupScreenOrtho(); });
-    lua->set_function("setDefaultScreenFov", [](float fovDeg) { return trussc::setDefaultScreenFov(fovDeg); });
+    lua->set_function("setDefaultScreenFov", [](float fovRadians) { return trussc::setDefaultScreenFov(fovRadians); });
+    lua->set_function("setDefaultScreenOrtho", []() { return trussc::setDefaultScreenOrtho(); });
     lua->set_function("getDefaultScreenFov", []() { return trussc::getDefaultScreenFov(); });
+    lua->set_function("setDefaultScreenFovDeg", [](float fovDeg) { return trussc::setDefaultScreenFovDeg(fovDeg); });
+    lua->set_function("getDefaultScreenFovDeg", []() { return trussc::getDefaultScreenFovDeg(); });
     lua->set_function("setNearClip", [](float nearDist) { return trussc::setNearClip(nearDist); });
     lua->set_function("setFarClip", [](float farDist) { return trussc::setFarClip(farDist); });
     lua->set_function("getNearClip", []() { return trussc::getNearClip(); });

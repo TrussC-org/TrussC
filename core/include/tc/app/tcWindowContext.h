@@ -147,7 +147,7 @@ struct WindowContext {
     std::shared_ptr<const CameraContext> currentCameraContext;
     Mat4 currentViewMatrix = Mat4::identity();
     Mat4 currentProjectionMatrix = Mat4::identity();
-    float currentScreenFov = 45.0f;
+    float currentScreenFov = TAU / 8.0f; // radians; zero is orthographic
     float currentViewW = 0.0f;
     float currentViewH = 0.0f;
     float currentCameraDist = 0.0f;  // Distance from camera to Z=0 plane
