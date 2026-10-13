@@ -484,7 +484,7 @@ TC_CORE_TEST_MAIN() {
     {
         const fs::path wav = fs::temp_directory_path() / "tc_audioListenerTeardown.wav";
         AudioRecorder rec;
-        const bool recording = rec.start(wav);
+        const bool recording = rec.start(wav).ok();
         check("AudioRecorder starts", recording);
         atomic<bool> inside{false};
         atomic<bool> slept{false};
@@ -527,7 +527,7 @@ TC_CORE_TEST_MAIN() {
         });
         const fs::path wav = fs::temp_directory_path() / "tc_audioListenerTeardown_inflight.wav";
         AudioRecorder rec;   // engine 2 ch -> stereo s16
-        const bool recording = rec.start(wav);
+        const bool recording = rec.start(wav).ok();
         const bool some = waitFor([&] { return accepted.load() >= 2048; }, 3000);
         armed = true;
         const bool held = waitFor([&] { return holding.load(); }, 3000);

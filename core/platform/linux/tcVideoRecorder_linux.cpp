@@ -255,9 +255,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // rather than silently writing a different format than requested.
     CodecPlan plan;
     if (!codecPlan(settings.codec, plan)) {
-        logError("VideoWriter")
-            << "codec " << videoCodecName(settings.codec)
-            << " is not available on Linux (macOS only); use H.264 or HEVC";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("codec ") +
+            videoCodecName(settings.codec) + " is not available on Linux (macOS only); use H.264 or HEVC");
         return false;
     }
 
@@ -301,9 +300,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // first probed-OK hardware option, else software. Resolved once, cached.
     const EncoderOption* opt = selectEncoder(plan, w, h);
     if (!opt) {
-        logError("VideoWriter")
-            << "no working " << plan.label << " GStreamer encoder found "
-            << "(check gst-plugins-ugly/bad and your GPU's VA-API/NVENC plugins)";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("no working ") + plan.label +
+            " GStreamer encoder found (check gst-plugins-ugly/bad and your GPU's VA-API/NVENC plugins)");
         return false;
     }
 
@@ -338,9 +336,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     GError* err = nullptr;
     GstElement* pipeline = gst_parse_launch(desc.c_str(), &err);
     if (!pipeline || err) {
-        logError("VideoWriter")
-            << "failed to build pipeline: "
-            << (err ? err->message : "unknown") << " [" << desc << "]";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("failed to build pipeline: ") +
+            (err ? err->message : "unknown") + " [" + desc + "]");
         if (err) g_error_free(err);
         if (pipeline) gst_object_unref(pipeline);
         return false;
@@ -350,7 +347,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     GstElement* enc    = gst_bin_get_by_name(GST_BIN(pipeline), "enc");
     GstElement* sink   = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
     if (!appsrc || !sink) {
-        logError("VideoWriter") << "pipeline missing src/sink";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "pipeline missing src/sink");
         if (appsrc) gst_object_unref(appsrc);
         if (enc) gst_object_unref(enc);
         if (sink) gst_object_unref(sink);
@@ -427,10 +424,37 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         }
     }
 
-    if (gst_element_set_state(pipeline, GST_STATE_PLAYING) ==
-        GST_STATE_CHANGE_FAILURE) {
-        logError("VideoWriter")
-            << "could not start pipeline (encoder: " << opt->encName << ")";
+    const auto state = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstBus* bus = gst_element_get_bus(pipeline);
+    GstMessage* openError = gst_bus_pop_filtered(bus, GST_MESSAGE_ERROR);
+    gst_object_unref(bus);
+    if (state == GST_STATE_CHANGE_FAILURE || openError) {
+        result_ = SaveResult::fail(SaveError::WriteFailed,
+            std::string("could not start pipeline (encoder: ") + opt->encName + ")");
+        if (openError) {
+            GError* error = nullptr;
+            gchar* debug = nullptr;
+            gst_message_parse_error(openError, &error, &debug);
+            if (error) result_.message = error->message;
+            // filesink's OPEN_WRITE carries GST_ERROR_SYSTEM in the debug text,
+            // not a numeric errno field. Match its localized g_strerror suffix;
+            // do not use this thread's errno after the state transition.
+            if (error && error->domain == GST_RESOURCE_ERROR &&
+                error->code == GST_RESOURCE_ERROR_OPEN_WRITE && debug) {
+                for (int code : {EACCES, EPERM, EROFS, ENOSPC}) {
+                    const std::string reason = std::string("system error: ") + g_strerror(code);
+                    if (g_str_has_suffix(debug, reason.c_str())) {
+                        result_.error = code == ENOSPC ? SaveError::NoSpace : SaveError::AccessDenied;
+                        result_.message += " (" + std::string(g_strerror(code)) + ")";
+                        break;
+                    }
+                }
+            }
+            if (error) g_error_free(error);
+            g_free(debug);
+            gst_message_unref(openError);
+        }
+        gst_element_set_state(pipeline, GST_STATE_NULL);
         gst_object_unref(appsrc);
         if (audiosrc) gst_object_unref(audiosrc);
         gst_object_unref(sink);
@@ -464,16 +488,33 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
 // ---------------------------------------------------------------------------
 // appendAudioPlatform - push interleaved float samples into the audio branch
 // ---------------------------------------------------------------------------
+// Poll without waiting on every append: downstream file/encoder failures can
+// arrive after appsrc accepted the preceding buffer.
+static bool pollRecordingError(VideoWriterPlatformData* pd, SaveResult& result) {
+    GstBus* bus = gst_element_get_bus(pd->pipeline);
+    GstMessage* msg = gst_bus_pop_filtered(bus, GST_MESSAGE_ERROR);
+    gst_object_unref(bus);
+    if (!msg) return !pd->failed;
+    GError* error = nullptr;
+    gst_message_parse_error(msg, &error, nullptr);
+    result = SaveResult::fail(SaveError::WriteFailed, error ? error->message : "GStreamer pipeline error");
+    if (error) g_error_free(error);
+    gst_message_unref(msg);
+    pd->failed = true;
+    return false;
+}
+
 bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
                                       double timeSec) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->audiosrc || !pd->hasAudio || pd->failed) return false;
     if (!interleaved || frames <= 0) return false;
 
+    if (!pollRecordingError(pd, result_)) return false;
     const gsize size = (gsize)frames * pd->audioChannels * sizeof(float);
     GstBuffer* buf = gst_buffer_new_allocate(nullptr, size, nullptr);
     if (!buf) {
-        logError("VideoWriter") << "could not allocate audio buffer";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "could not allocate audio buffer");
         pd->failed = true;
         return false;
     }
@@ -486,8 +527,8 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     GstFlowReturn ret =
         gst_app_src_push_buffer(GST_APP_SRC(pd->audiosrc), buf);  // takes ownership
     if (ret != GST_FLOW_OK) {
-        logError("VideoWriter")
-            << "audio appsrc rejected buffer: " << gst_flow_get_name(ret);
+        result_ = SaveResult::fail(SaveError::WriteFailed,
+            std::string("GStreamer appsrc: ") + gst_flow_get_name(ret));
         pd->failed = true;
         return false;
     }
@@ -498,10 +539,11 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;
     if (!pd || !pd->appsrc || pd->failed) return false;
 
+    if (!pollRecordingError(pd, result_)) return false;
     const gsize size = (gsize)pd->width * pd->height * 4;
     GstBuffer* buf = gst_buffer_new_allocate(nullptr, size, nullptr);
     if (!buf) {
-        logError("VideoWriter") << "could not allocate frame buffer";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "could not allocate frame buffer");
         pd->failed = true;
         return false;
     }
@@ -518,8 +560,8 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     GstFlowReturn ret =
         gst_app_src_push_buffer(GST_APP_SRC(pd->appsrc), buf);  // takes ownership
     if (ret != GST_FLOW_OK) {
-        logError("VideoWriter")
-            << "appsrc rejected frame: " << gst_flow_get_name(ret);
+        result_ = SaveResult::fail(SaveError::WriteFailed,
+            std::string("GStreamer appsrc: ") + gst_flow_get_name(ret));
         pd->failed = true;
         return false;
     }
@@ -529,40 +571,33 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 // ---------------------------------------------------------------------------
 // closePlatform - end the stream, wait for the muxer to finalize, tear down
 // ---------------------------------------------------------------------------
-void VideoWriter::closePlatform() {
+SaveResult VideoWriter::closePlatform() {
     VideoWriterPlatformData* pd = platform_;
-    if (!pd) return;
-
-    if (pd->pipeline && pd->appsrc && !pd->failed) {
-        // Signal EOS on every source so mp4mux writes its moov atom (the muxer
-        // waits for EOS on ALL its pads), then wait for the EOS (or ERROR) to
-        // travel the pipeline - otherwise the file is left truncated.
-        if (pd->audiosrc) {
-            gst_app_src_end_of_stream(GST_APP_SRC(pd->audiosrc));
-        }
-        if (gst_app_src_end_of_stream(GST_APP_SRC(pd->appsrc)) == GST_FLOW_OK) {
+    if (!pd) return SaveResult::success();
+    auto result = SaveResult::success();
+    if (!pollRecordingError(pd, result) && result)
+        result = internal::saveFailure(path_, "GStreamer recording failed");
+    if (result && pd->pipeline && pd->appsrc) {
+        bool eos = !pd->audiosrc ||
+            gst_app_src_end_of_stream(GST_APP_SRC(pd->audiosrc)) == GST_FLOW_OK;
+        eos = (gst_app_src_end_of_stream(GST_APP_SRC(pd->appsrc)) == GST_FLOW_OK) && eos;
+        if (!eos) result = internal::saveFailure(path_, "GStreamer rejected EOS");
+        else {
             GstBus* bus = gst_element_get_bus(pd->pipeline);
-            if (bus) {
-                // Generous timeout: software H.264 flush of a long clip.
-                GstMessage* msg = gst_bus_timed_pop_filtered(
-                    bus, 30 * GST_SECOND,
-                    (GstMessageType)(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
-                if (!msg) {
-                    logWarning("VideoWriter")
-                        << "timed out waiting for EOS; file may be incomplete";
-                } else {
-                    if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
-                        GError* e = nullptr;
-                        gst_message_parse_error(msg, &e, nullptr);
-                        logError("VideoWriter")
-                            << "pipeline error on finalize: "
-                            << (e ? e->message : "unknown");
-                        if (e) g_error_free(e);
-                    }
-                    gst_message_unref(msg);
+            GstMessage* msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND,
+                (GstMessageType)(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+            if (!msg) result = internal::saveFailure(path_, "GStreamer finalize timed out");
+            else {
+                if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR) {
+                    GError* error = nullptr;
+                    gst_message_parse_error(msg, &error, nullptr);
+                    result = SaveResult::fail(SaveError::WriteFailed,
+                        error ? error->message : "GStreamer finalize failed");
+                    if (error) g_error_free(error);
                 }
-                gst_object_unref(bus);
+                gst_message_unref(msg);
             }
+            gst_object_unref(bus);
         }
     }
 
@@ -575,6 +610,7 @@ void VideoWriter::closePlatform() {
 
     delete pd;
     platform_ = nullptr;
+    return result;
 }
 
 } // namespace trussc

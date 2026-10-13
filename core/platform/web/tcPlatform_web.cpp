@@ -133,7 +133,7 @@ bool captureWindow(Pixels& outPixels) {
 }
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& path) {
-    return pixels.save(internal::resolveScreenshotPath(path));
+    return pixels.save(internal::resolveScreenshotPath(path)).ok();
 }
 
 std::filesystem::path internal::resolveScreenshotDownloadName(const std::filesystem::path& path) {

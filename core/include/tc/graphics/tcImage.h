@@ -128,7 +128,7 @@ public:
 
     // Save image (override of HasTexture::save())
     // Image has pixels, so save directly (no need to read back from texture)
-    bool save(const fs::path& path) const override {
+    SaveResult save(const fs::path& path) const override {
         return pixels_.save(path);
     }
 

@@ -85,7 +85,7 @@ void roundTrip(bool mipmaps) {
     image.update();
     image.draw(0, 0);
     image.draw(0, 0, 10, 10);
-    check("save allocated CPU pixels", image.save(source));
+    check("save allocated CPU pixels", image.save(source).ok());
 
     Image loaded;
     const bool loadedOk = static_cast<bool>(loaded.load(source, mipmaps));
@@ -99,7 +99,7 @@ void roundTrip(bool mipmaps) {
         loaded.setDirty();
         loaded.update();
         loaded.draw(0, 0);
-        check("save edited CPU pixels", loaded.save(edited));
+        check("save edited CPU pixels", loaded.save(edited).ok());
 
         Image reloaded;
         const bool reloadedOk = static_cast<bool>(reloaded.load(edited, mipmaps));

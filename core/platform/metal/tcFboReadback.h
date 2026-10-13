@@ -14,17 +14,17 @@ namespace trussc {
 // Internal helper: blit GPU texture to CPU-readable staging and copy bytes
 static bool readPixelsInternal(sg_image srcImage, int width, int height,
                                MTLPixelFormat mtlFormat, size_t bytesPerRow,
-                               void* dstBuffer) {
+                               void* dstBuffer, bool reportError = true) {
     id<MTLCommandQueue> cmdQueue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
     if (!cmdQueue) {
-        tc::logError() << "[FBO] Failed to get Metal command queue";
+        if (reportError) tc::logError() << "[FBO] Failed to get Metal command queue";
         return false;
     }
 
     sg_mtl_image_info info = sg_mtl_query_image_info(srcImage);
     id<MTLTexture> srcTexture = (__bridge id<MTLTexture>)info.tex[info.active_slot];
     if (!srcTexture) {
-        tc::logError() << "[FBO] Failed to get source MTLTexture";
+        if (reportError) tc::logError() << "[FBO] Failed to get source MTLTexture";
         return false;
     }
 
@@ -39,7 +39,7 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
 
     id<MTLTexture> dstTexture = [device newTextureWithDescriptor:desc];
     if (!dstTexture) {
-        tc::logError() << "[FBO] Failed to create staging texture";
+        if (reportError) tc::logError() << "[FBO] Failed to create staging texture";
         return false;
     }
 
@@ -78,17 +78,17 @@ static bool readPixelsInternal(sg_image srcImage, int width, int height,
     return true;
 }
 
-bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
+bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     if (!allocated_ || !pixels) return false;
 
     if (format_ != TextureFormat::RGBA8) {
-        logError("Fbo") << "readPixels() requires RGBA8; use readPixelsFloat() for other formats";
+        if (reportError) logError("Fbo") << "readPixels() requires RGBA8; use readPixelsFloat() for other formats";
         return false;
     }
 
     size_t bytesPerRow = width_ * 4;  // RGBA8
     return readPixelsInternal(curColorTex_().getImage(), width_, height_,
-                              MTLPixelFormatRGBA8Unorm, bytesPerRow, pixels);
+                              MTLPixelFormatRGBA8Unorm, bytesPerRow, pixels, reportError);
 }
 
 // Map sokol pixel format to Metal pixel format

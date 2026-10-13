@@ -265,10 +265,10 @@ bool ObjExporter::savePixels(const Pixels& pixels, const fs::path& path) const {
     if (maxTextureSize_ > 0 &&
         (pixels.getWidth() > maxTextureSize_ || pixels.getHeight() > maxTextureSize_)) {
         Pixels resized = resizePixels(pixels, maxTextureSize_);
-        return resized.save(path);
+        return resized.save(path).ok();
     }
 
-    return pixels.save(path);
+    return pixels.save(path).ok();
 }
 
 // =============================================================================

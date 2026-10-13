@@ -64,7 +64,7 @@ void imageSizeChecks() {
     const int limit = sg_query_limits().max_image_size_2d;
     Pixels pixels;
     pixels.allocate(limit + 1, 1, 4);
-    check("oversize PNG fixture", pixels.save(dataRoot / "large.png"));
+    check("oversize PNG fixture", pixels.save(dataRoot / "large.png").ok());
     Pixels decoded;
     check("Pixels accepts size above GPU limit", decoded.load("large.png").ok() && decoded.getWidth() == limit + 1);
     Image image;
@@ -82,10 +82,10 @@ void imageSizeChecks() {
     auto bytes = readBytes(dataRoot / "large.png");
     tooLarge("Image memory rejects width above GPU limit", limit + 1, 1, {}, [&] { return image.loadFromMemory(bytes.data(), int(bytes.size())); });
     pixels.allocate(1, limit + 1, 4);
-    check("tall PNG fixture", pixels.save(dataRoot / "tall.png"));
+    check("tall PNG fixture", pixels.save(dataRoot / "tall.png").ok());
     tooLarge("Image rejects height above GPU limit", 1, limit + 1, "tall.png", [&] { return image.load("tall.png"); });
     pixels.allocate(limit, 1, 4);
-    check("boundary PNG fixture", pixels.save(dataRoot / "boundary.png"));
+    check("boundary PNG fixture", pixels.save(dataRoot / "boundary.png").ok());
     check("Image accepts GPU boundary", image.load("boundary.png").ok() && image.getTexture().isAllocated());
 }
 void cpuChecks() {
@@ -154,7 +154,7 @@ void cpuChecks() {
     source.allocate(2, 2, 4);
     for (int y = 0; y < 2; ++y)
         for (int x = 0; x < 2; ++x) source.setColor(x, y, Color(1, 0, 0, 1));
-    check("PNG fixture", source.save(dataRoot / "image.png"));
+    check("PNG fixture", source.save(dataRoot / "image.png").ok());
     const float hdrPixels[3] = {1, 0.5f, 0.25f};
     check("HDR fixture", stbi_write_hdr(internal::pathToUtf8(dataRoot / "image.hdr").c_str(), 1, 1, 3, hdrPixels));
     Pixels px;

@@ -497,7 +497,7 @@ void registerStandardTools(Server& server) {
                 path = "recording-" + trussc::getTimestampString("%Y-%m-%d-%H-%M-%S")
                      + (isProRes ? ".mov" : ".mp4");
             }
-            bool ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
+            auto ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
             json r{{"status", ok ? "ok" : "error"},
                    {"path", trussc::internal::pathToUtf8(trussc::recordingPath())},
                    {"fps", settings.fps},
@@ -510,17 +510,18 @@ void registerStandardTools(Server& server) {
         .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             if (!trussc::isRecording()) {
-                // Harmless no-op (e.g. a fixed-duration recording already
-                // auto-stopped, or nothing was started). Not an error.
-                return json{{"status", "ok"}, {"recording", false},
-                            {"message", "not recording"}};
+                // Retain an automatic stop's finalization failure too.
+                auto result = trussc::stopRecording();
+                return json{{"status", result ? "ok" : "error"}, {"recording", false},
+                            {"message", result ? "not recording" : result.message}};
             }
             std::string path = trussc::internal::pathToUtf8(trussc::recordingPath());
             int frames = trussc::recordingFrameCount();
             float fps  = trussc::internal::globalScreenRecorder().writer().getFps();
-            trussc::stopRecording();
-            json r{{"status", "ok"}, {"recording", false},
+            auto result = trussc::stopRecording();
+            json r{{"status", result ? "ok" : "error"}, {"recording", false},
                    {"path", path}, {"frames", frames}};
+            if (!result) r["message"] = result.message;
             if (fps > 0.0f) r["length"] = frames / fps;   // measured output length (s)
             return r;
         }));

@@ -449,16 +449,7 @@ bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem:
         return false;
     }
 
-    NSString* nsPath = [NSString stringWithUTF8String:path.c_str()];
-    BOOL success = [data writeToFile:nsPath atomically:YES];
-
-    if (success) {
-        logVerbose() << "[Screenshot] 保存完了: " << path;
-    } else {
-        logError() << "[Screenshot] 保存に失敗しました: " << path;
-    }
-
-    return success;
+    return internal::atomicWrite(path, data.bytes, data.length, "Screenshot").ok();
 }
 
 // ---------------------------------------------------------------------------

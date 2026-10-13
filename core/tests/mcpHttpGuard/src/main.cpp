@@ -165,7 +165,7 @@ static void testPortLogOutputs() {
          to_string(chrono::steady_clock::now().time_since_epoch().count()) + ".log");
     setFileLogLevel(LogLevel::Notice);
     for (auto level : {LogLevel::Notice, LogLevel::Warning}) {
-        check("port discovery log file opened", setLogFile(logPath));
+        check("port discovery log file opened", setLogFile(logPath).ok());
         setConsoleLogLevel(level);
         ostringstream capturedOut, capturedErr;
         auto* savedOut = cout.rdbuf(capturedOut.rdbuf());
@@ -627,7 +627,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     const fs::path logPath = fs::temp_directory_path() /
         ("trussc_mcpHttpGuard_" +
          to_string(chrono::steady_clock::now().time_since_epoch().count()) + ".log");
-    check("log file opened", setLogFile(logPath));
+    check("log file opened", setLogFile(logPath).ok());
 
     mcp::startHttpServer(0, "127.0.0.1", kToken);
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);

@@ -23,6 +23,9 @@
 // openFile() are internal plumbing.
 
 #include "tcLoadResult.h"
+#include "tcSaveResult.h"
+#include <cerrno>
+#include <fstream>
 #include <filesystem>
 #include <cstdio>
 #include <string>
@@ -31,6 +34,7 @@
 namespace trussc {
 
 namespace fs = std::filesystem;
+class Pixels;
 
 // Resolve a relative path against the data folder; absolute paths pass
 // through. Defined in tcUtils.h (included by TrussC.h); declared here so the
@@ -130,6 +134,121 @@ inline std::FILE* openFile(const fs::path& p, const char* mode) {
 #else
     return std::fopen(p.c_str(), mode);
 #endif
+}
+
+// Saving helpers are stateless; callers retain only their stream and resolved path.
+SaveResult checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+                            const char* module);
+// A null module returns the failure silently for a caller-owned logger.
+SaveResult reportSaveFailure(SaveResult result, const char* module);
+
+inline SaveResult saveFailure(const fs::path& path, const char* operation,
+                              std::error_code ec = {}) {
+    SaveError error = SaveError::WriteFailed;
+    if (ec == std::errc::permission_denied || ec == std::errc::operation_not_permitted ||
+        ec == std::errc::read_only_file_system) error = SaveError::AccessDenied;
+    else if (ec == std::errc::no_space_on_device) error = SaveError::NoSpace;
+    return SaveResult::fail(error, std::string(operation) + ": " + pathToDisplayUtf8(path) +
+                            (ec ? " (" + ec.message() + ")" : ""));
+}
+
+inline SaveResult saveErrno(const fs::path& path, const char* operation) {
+    return saveFailure(path, operation, std::error_code(errno, std::generic_category()));
+}
+
+// Prepare the final output filename; format-specific extension rules belong to callers.
+inline SaveResult prepareOutputPath(const fs::path& requested, fs::path& resolved,
+                                    const char* module, bool browserDownload = false) {
+    resolved = browserDownload || requested.is_absolute() ? requested : getDataPath(requested);
+    if (requested.empty() || resolved.filename().empty())
+        return reportSaveFailure(saveFailure(resolved, "No file name in path"), module);
+    if (browserDownload) return SaveResult::success(); // browser owns destination; no folders or temporary
+    auto result = checkWriteTarget(requested, resolved, module);
+    if (!result) return result;
+    std::error_code ec;
+    if (fs::is_directory(resolved, ec))
+        return reportSaveFailure(saveFailure(resolved, "Destination is a directory"), module);
+    ec.clear();
+    if (!resolved.parent_path().empty()) fs::create_directories(resolved.parent_path(), ec);
+    if (ec) return reportSaveFailure(saveFailure(resolved, "Cannot create folder", ec), module);
+    return SaveResult::success();
+}
+
+// Encoder callbacks share a buffered file; checkedClose reports the final flush.
+SaveResult writePixelsEncoded(std::FILE* file, const Pixels& pixels,
+                              const std::string& extension, const fs::path& path);
+
+inline SaveResult checkedWriteUnflushed(std::FILE* file, const void* data, size_t size,
+                                        const fs::path& path) {
+    errno = 0;
+    if (size && std::fwrite(data, 1, size, file) != size)
+        return saveErrno(path, "Write error");
+    return SaveResult::success();
+}
+
+// Flush each operation so buffered failures are reported by that operation.
+inline SaveResult checkedWrite(std::FILE* file, const void* data, size_t size,
+                               const fs::path& path) {
+    auto result = checkedWriteUnflushed(file, data, size, path);
+    if (!result) return result;
+    errno = 0;
+    return std::fflush(file) == 0 ? SaveResult::success() : saveErrno(path, "Write error");
+}
+
+inline SaveResult checkedClose(std::FILE* file, const fs::path& path) {
+    errno = 0;
+    return std::fclose(file) == 0 ? SaveResult::success() : saveErrno(path, "Close error");
+}
+
+inline SaveResult checkOutputStream(std::ofstream& stream, const fs::path& path) {
+    if (stream.fail()) return saveErrno(path, "Write error");
+    stream.flush();
+    return stream.fail() ? saveErrno(path, "Write error") : SaveResult::success();
+}
+
+// The fixed sibling temporary is reused on retries. Never remove the destination
+// before rename: filesystem::rename replaces an existing file on every platform.
+template<class Write>
+inline SaveResult atomicWrite(const fs::path& path, Write write, const char* module) {
+    std::error_code ec;
+    auto status = fs::status(path, ec);
+    if (ec && ec != std::errc::no_such_file_or_directory)
+        return reportSaveFailure(saveFailure(path, "Cannot inspect target", ec), module);
+    if (fs::exists(status) && !fs::is_regular_file(status))
+        return reportSaveFailure(saveFailure(path, "Not a regular file"), module);
+    fs::path temporary = path;
+    temporary += ".tmp";
+    errno = 0;
+    auto* file = openFile(temporary, "wb");
+    auto result = file ? SaveResult::success() : saveErrno(path, "Cannot create file");
+    if (file) {
+        try {
+            result = write(file);
+        } catch (const std::exception& e) {
+            result = SaveResult::fail(SaveError::Unknown, e.what());
+        } catch (...) {
+            result = SaveResult::fail(SaveError::Unknown, "Writer threw an unknown exception");
+        }
+        auto closed = checkedClose(file, path);
+        if (result) result = closed;
+    }
+    if (result) {
+        fs::rename(temporary, path, ec);
+        if (ec) result = SaveResult::fail(SaveError::WriteFailed,
+            "Cannot replace file: " + pathToDisplayUtf8(path) + " (" + ec.message() + ")");
+    }
+    if (!result) {
+        fs::remove(temporary, ec);
+        return reportSaveFailure(result, module);
+    }
+    return result;
+}
+
+inline SaveResult atomicWrite(const fs::path& path, const void* data, size_t size,
+                              const char* module) {
+    return atomicWrite(path, [&](std::FILE* file) {
+        return checkedWrite(file, data, size, path);
+    }, module);
 }
 
 // Loading entry. URLs opt out of filesystem resolution and opening.

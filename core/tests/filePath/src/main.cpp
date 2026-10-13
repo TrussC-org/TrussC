@@ -196,12 +196,12 @@ TC_CORE_TEST_MAIN() {
 
     // --- 2. text round-trip: ASCII / Japanese name / Japanese content ---
     {
-        check("saveTextFile: ASCII name", saveTextFile("ascii.txt", "hello"));
+        check("saveTextFile: ASCII name", saveTextFile("ascii.txt", "hello").ok());
         check("loadTextFile: ASCII round-trip", loadTextFile("ascii.txt") == "hello");
 
         const string jpName = "日本語ファイル名.txt";
         const string jpBody = "こんにちはTrussC。改行\nもある。";
-        check("saveTextFile: Japanese name", saveTextFile(jpName, jpBody));
+        check("saveTextFile: Japanese name", saveTextFile(jpName, jpBody).ok());
         check("loadTextFile: Japanese name + content round-trip",
               loadTextFile(jpName) == jpBody);
         check("fileExists: Japanese name", fileExists(jpName));
@@ -213,7 +213,7 @@ TC_CORE_TEST_MAIN() {
         const string dir = "新しいフォルダー (2)";
         check("createDirectory: Japanese + space + parens", createDirectory(dir));
         const string f = dir + "/テスト ファイル.txt";
-        check("saveTextFile: file inside that directory", saveTextFile(f, "data"));
+        check("saveTextFile: file inside that directory", saveTextFile(f, "data").ok());
         check("loadTextFile: reads it back", loadTextFile(f) == "data");
 
         auto listing = listDirectory(dir);
@@ -236,7 +236,7 @@ TC_CORE_TEST_MAIN() {
 
         const string imgPath = "画像/テスト画像.png";
         createDirectory("画像");
-        check("Pixels::save: PNG with Japanese path", px.save(imgPath));
+        check("Pixels::save: PNG with Japanese path", px.save(imgPath).ok());
 
         Pixels loaded;
         bool ok = loaded.load(getDataPath(imgPath)).ok();
@@ -269,7 +269,7 @@ TC_CORE_TEST_MAIN() {
         j["名前"] = "トラス";
         j["value"] = 42;
         createDirectory("設定");   // the save helpers create it too (#356)
-        check("saveJson: Japanese path", saveJson(j, "設定/データ.json"));
+        check("saveJson: Japanese path", saveJson(j, "設定/データ.json").ok());
         Json k = loadJson("設定/データ.json");
         check("loadJson: values round-trip",
               k.value("value", 0) == 42 && k.value("名前", string()) == "トラス");
@@ -277,7 +277,7 @@ TC_CORE_TEST_MAIN() {
         Xml xml;
         XmlNode root = xml.addRoot("root");
         root.append_attribute("名") = "値";
-        check("Xml::save: Japanese path", xml.save("設定/データ.xml"));
+        check("Xml::save: Japanese path", xml.save("設定/データ.xml").ok());
         Xml xml2;
         check("Xml::load: back from Japanese path", xml2.load("設定/データ.xml"));
         check("Xml round-trip: root + Japanese attribute survive",
@@ -291,7 +291,7 @@ TC_CORE_TEST_MAIN() {
         createDirectory("書き込み");
         {
             FileWriter w;
-            check("FileWriter::open: Japanese path", w.open(txtPath));
+            check("FileWriter::open: Japanese path", w.open(txtPath).ok());
             w.writeLine("一行目");
             w.writeLine("second line");
         }
@@ -411,7 +411,7 @@ TC_CORE_TEST_MAIN() {
             Xml out;
             out.addRoot("root");
             Xml in;
-            return out.save(p) && in.load(p) && string(in.root().name()) == "root";
+            return out.save(p).ok() && in.load(p) && string(in.root().name()) == "root";
         });
 
         // Entry: a narrow UTF-8 literal names the file by its real name
@@ -610,9 +610,9 @@ TC_CORE_TEST_MAIN() {
                 seen.clear();
                 const string previousPath = logger.getLogFilePath();
                 // A directory cannot be opened as a log file.
-                const bool failed = !logger.setLogFile(fullDir);
+                const bool failed = !logger.setLogFile(fullDir).ok();
                 const bool kept = logger.isFileOpen() && logger.getLogFilePath() == previousPath;
-                const bool displayed = logged("Failed to open log file: ", "f" + R);
+                const bool displayed = logged("[Logger] Failed to open log file: ", "f" + R);
                 logger.closeFile();
                 std::ifstream in(logPath, std::ios::binary);
                 const string text((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());

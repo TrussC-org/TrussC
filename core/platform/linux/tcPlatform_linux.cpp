@@ -240,35 +240,9 @@ bool internal::captureWindowToFile(const std::filesystem::path& requestedPath) {
 
 bool internal::saveScreenshotPixels(const Pixels& pixels, const std::filesystem::path& requestedPath) {
     const auto path = internal::resolveScreenshotPath(requestedPath);
-
-    // Use stb_image_write to save
-    // Case-insensitive extension match on the resolved destination
-    std::string ext = toLower(getFileExtension(path));
-    std::string pathStr = internal::pathToUtf8(path);   // UTF-8 for stb (STBIW_WINDOWS_UTF8)
-
-    int width = pixels.getWidth();
-    int height = pixels.getHeight();
-    const unsigned char* data = pixels.getData();
-
-    int result = 0;
-    if (ext == "png") {
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    } else if (ext == "jpg" || ext == "jpeg") {
-        result = stbi_write_jpg(pathStr.c_str(), width, height, 4, data, 90);
-    } else if (ext == "bmp") {
-        result = stbi_write_bmp(pathStr.c_str(), width, height, 4, data);
-    } else {
-        // Default to PNG
-        result = stbi_write_png(pathStr.c_str(), width, height, 4, data, width * 4);
-    }
-
-    if (result) {
-        logVerbose("Screenshot") << "Saved: " << path;
-        return true;
-    } else {
-        logError("Screenshot") << "Failed to save: " << path;
-        return false;
-    }
+    return internal::atomicWrite(path, [&](std::FILE* file) {
+        return internal::writePixelsEncoded(file, pixels, toLower(getFileExtension(path)), path);
+    }, "Screenshot").ok();
 }
 
 // ---------------------------------------------------------------------------

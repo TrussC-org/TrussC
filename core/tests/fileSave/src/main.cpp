@@ -46,7 +46,7 @@ static fs::path makeTestDir() {
 
 static void checkJsonKeepsFileOnSerializeError(const fs::path& dir) {
     fs::path file = dir / "settings.json";
-    check("saveJson {\"a\":1} returns true", saveJson(Json{{"a", 1}}, file));
+    check("saveJson {\"a\":1} returns true", saveJson(Json{{"a", 1}}, file).ok());
 
     Json bad;
     bad["name"] = string("\x82\xa0");   // CP932 bytes, not valid UTF-8
@@ -60,21 +60,21 @@ static void checkJsonKeepsFileOnSerializeError(const fs::path& dir) {
 
     // Overwrite works, and the bytes on disk are dump()'s (LF, no CR)
     Json j2{{"b", Json::array({1, 2})}};
-    check("saveJson overwrite returns true", saveJson(j2, file));
+    check("saveJson overwrite returns true", saveJson(j2, file).ok());
     string onDisk = loadTextFile(file);
     check("saveJson writes dump(2) byte for byte", onDisk == j2.dump(2));
     check("saveJson writes no CR", onDisk.find('\r') == string::npos);
 
     // Compact (indent < 0)
-    check("saveJson compact returns true", saveJson(j2, file, -1));
+    check("saveJson compact returns true", saveJson(j2, file, -1).ok());
     check("saveJson compact writes dump()", loadTextFile(file) == j2.dump());
 }
 
 static void checkSuccessPaths(const fs::path& dir) {
     fs::path txt = dir / "a.txt";
-    check("saveTextFile returns true", saveTextFile(txt, "one\n"));
-    check("saveTextFile overwrite returns true", saveTextFile(txt, "two\n"));
-    check("appendToFile returns true", appendToFile(txt, "three\n"));
+    check("saveTextFile returns true", saveTextFile(txt, "one\n").ok());
+    check("saveTextFile overwrite returns true", saveTextFile(txt, "two\n").ok());
+    check("appendToFile returns true", appendToFile(txt, "three\n").ok());
     string text = loadTextFile(txt);
     check("text file holds the overwrite plus the append", text == "two\nthree\n", text);
 
@@ -82,7 +82,7 @@ static void checkSuccessPaths(const fs::path& dir) {
     px.allocate(16, 8, 4);
     for (const char* name : {"p.png", "p.jpg", "p.bmp"}) {
         fs::path f = dir / name;
-        check(string("Pixels::save ") + name + " returns true", px.save(f));
+        check(string("Pixels::save ") + name + " returns true", px.save(f).ok());
         std::error_code ec;
         auto size = fs::file_size(f, ec);
         check(string("Pixels::save ") + name + " writes a non-empty file", !ec && size > 0);

@@ -221,7 +221,7 @@ TC_CORE_TEST_MAIN() {
     };
     for (auto& c : saves) {
         const fs::path p = dir / c.name;
-        bool saved = px.save(p);
+        bool saved = px.save(p).ok();
         auto b = head(p, 4);
         bool right = c.kind == 0 ? isPng(b) : c.kind == 1 ? isJpeg(b) : isBmp(b);
         const char* want = c.kind == 0 ? "PNG" : c.kind == 1 ? "JPEG" : "BMP";

@@ -959,42 +959,28 @@ LoadResult internal::reportWebLoadTimeout(const fs::path& path, const char* modu
 }
 #endif
 
+SaveResult internal::reportSaveFailure(SaveResult result, const char* module) {
+    if (module) logError(module) << result.message;
+    return result;
+}
+
 // Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
 // (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
-bool Logger::setLogFile(const fs::path& path) {
-    // Relative paths resolve against the data folder, like every other writer.
-    // An absolute path skips getDataPath(), so it never reads the data path
-    // state (unlocked, and written by the first call on Apple).
-    const fs::path resolved = path.is_absolute() ? path : getDataPath(path);
-    const std::string pathUtf8 = internal::pathToDisplayUtf8(resolved);
-
-    // "" or "logs/": fail before creating any folder (the current log stays
-    // open, as with the failures below).
-    if (resolved.filename().empty()) {
-        log(LogLevel::Error, "Failed to open log file: " + pathUtf8 + " (no file name in path)");
-        return false;
+SaveResult Logger::setLogFile(const fs::path& path) {
+    fs::path resolved;
+    // Report through this Logger's listeners, including for non-global loggers.
+    auto prepared = internal::prepareOutputPath(path, resolved, nullptr);
+    if (!prepared) {
+        log(LogLevel::Error, "[Logger] Failed to open log file: " + prepared.message);
+        return prepared;
     }
-    // Inside the app bundle: refused (logged, the current log stays open)
-    if (!internal::checkWriteTarget(path, resolved, "Logger")) return false;
-
-    // Create a missing parent folder, like saveScreenshot().
-    std::error_code ec;
-    const fs::path parent = resolved.parent_path();
-    if (!parent.empty()) {
-        fs::create_directories(parent, ec);
-        if (ec) {
-            log(LogLevel::Error, "Failed to open log file: " + pathUtf8
-                + " (cannot create its folder: " + ec.message() + ")");
-            return false;
-        }
-    }
-
-    // Open into a local stream first: a failed call leaves the current log
-    // open, so the error line below still lands in it.
+    // A failed open preserves the current log file.
+    errno = 0;
     std::ofstream stream(resolved, std::ios::app);
     if (!stream.is_open()) {
-        log(LogLevel::Error, "Failed to open log file: " + pathUtf8);
-        return false;
+        auto result = internal::saveErrno(resolved, "Failed to open log file");
+        log(LogLevel::Error, "[Logger] " + result.message);
+        return result;
     }
 
     {
@@ -1004,13 +990,13 @@ bool Logger::setLogFile(const fs::path& path) {
         TC_LOCK_GUARD(mutex_);
         closeFileLocked();
         fileStream_ = std::move(stream);
-        filePath_ = pathUtf8;
+        filePath_ = resolved;
         if (this == &getLogger()) {
             internal::setCrashLogFile(resolved);
             crashLogOwner_ = true;
         }
     }
-    return true;
+    return SaveResult::success();
 }
 
 namespace internal {
@@ -1630,16 +1616,16 @@ void resetUserDataPathForTests() {
     s.createdTempRoot.clear();
 }
 
-bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
+SaveResult checkWriteTarget(const fs::path& requested, const fs::path& resolved,
                       const char* module) {
     const fs::path bundle = appBundlePath();
     if (!bundle.empty() && isInsideFolder(resolved, bundle)) {
         const fs::path name = requested.filename().empty() ? resolved.filename()
                                                            : requested.filename();
-        logError(module) << "Cannot write " << pathToDisplayUtf8(resolved)
-                         << ": it is inside the app bundle. Write to getUserDataPath(\""
-                         << pathToDisplayUtf8(name) << "\") instead";
-        return false;
+        return reportSaveFailure(SaveResult::fail(SaveError::AccessDenied,
+            "Cannot write " + pathToDisplayUtf8(resolved) +
+            ": it is inside the app bundle. Write to getUserDataPath(\"" +
+            pathToDisplayUtf8(name) + "\") instead"), module);
     }
 #ifdef __APPLE__
     // Development on macOS / iOS: the data folder is outside a bundle, so
@@ -1648,13 +1634,13 @@ bool checkWriteTarget(const fs::path& requested, const fs::path& resolved,
         static OnceGate noticed;
         if (isInsideFolder(resolved, getDataPath(fs::path()))
             && noticed.isFirstTime()) {
-            logNotice(module) << "Writing " << pathToDisplayUtf8(requested)
+            logNotice(module ? module : "Logger") << "Writing " << pathToDisplayUtf8(requested)
                               << " into the data folder. In a packaged .app this write"
                                  " would be refused; use getUserDataPath()";
         }
     }
 #endif
-    return true;
+    return SaveResult::success();
 }
 
 std::function<bool()>& overlayHoveredQuery() {

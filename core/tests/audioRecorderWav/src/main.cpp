@@ -26,10 +26,8 @@
 //     the JUNK chunk, its sizes match the frames written, and it loads through
 //     SoundBuffer with numSamples == getRecordedSeconds() * sampleRate. No
 //     RF64 notice is logged for it.
-//   - (Linux) A take whose file writes fail (recorded into /dev/full) logs an
-//     error on stop() and neither an RF64 notice nor the "stopped" notice:
-//     the frame count says what was handed to the stream, not what reached
-//     the file.
+//   - (Linux) /dev/full fails at the checked header write; no frames are
+//     counted and stop() retains the failure without another Error.
 // =============================================================================
 
 #include <TrussC.h>
@@ -270,7 +268,7 @@ static void recordTake(AudioRecordSettings::SampleFormat format, int sampleRate)
     AudioRecordSettings rs;
     rs.format = format;
     AudioRecorder rec;   // engine 2 ch -> stereo file
-    const bool started = rec.start(wav, rs);
+    const bool started = rec.start(wav, rs).ok();
     const bool some = started && waitFor([&] { return rec.getRecordedSeconds() >= 0.25; }, 5000);
     rec.stop();
     check(name + " take records on the null backend", started && some);
@@ -307,21 +305,13 @@ static void recordTake(AudioRecordSettings::SampleFormat format, int sampleRate)
 // ENOSPC, like a full disk or a file that hit the FAT32 size limit.
 static void recordIntoFullDevice() {
 #if defined(__linux__)
-    const size_t noticesBefore = countNotices("[AudioRecorder]");
+    const size_t before = countErrors("[AudioRecorder]");
     AudioRecorder rec;
-    const bool started = rec.start(fs::path("/dev/full"));
-    // Past the stream's buffer, so writes fail before stop().
-    const bool some = started && waitFor([&] { return rec.getRecordedSeconds() >= 0.25; }, 5000);
-    rec.stop();
-    check("a take into /dev/full starts and counts frames", started && some);
-    check("... stop() logs the failed write as an error",
-          countErrors("[AudioRecorder] writing /dev/full failed") == 1);
-    // start() logs "recording ->"; stop() must add neither the RF64 notice
-    // nor "stopped:", which would report the counted frames as written.
-    check("... and no RF64 or \"stopped\" notice",
-          countNotices("[AudioRecorder]") == noticesBefore + 1
-          && countNotices("RF64") == 0,
-          to_string(countNotices("[AudioRecorder]") - noticesBefore) + " notices");
+    auto result = rec.start(fs::path("/dev/full"));
+    check("/dev/full fails synchronously at the checked WAV header", !result && !rec.isRecording());
+    check("failed header counts no frames", rec.getRecordedSeconds() == 0);
+    check("stop retains the failure without another Error", !rec.stop() &&
+          countErrors("[AudioRecorder]") == before + 1);
 #else
     printf("%-72s SKIP (no /dev/full)\n", "a take into /dev/full logs an error on stop()");
 #endif
