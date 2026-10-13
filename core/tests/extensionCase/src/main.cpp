@@ -59,6 +59,8 @@ static const char* errorName(LoadError e) {
         case LoadError::FileNotFound:      return "FileNotFound";
         case LoadError::UnsupportedFormat: return "UnsupportedFormat";
         case LoadError::DecodeFailed:      return "DecodeFailed";
+        case LoadError::TooLarge:          return "TooLarge";
+        case LoadError::Cancelled:         return "Cancelled";
         case LoadError::Unknown:           return "Unknown";
     }
     return "?";

@@ -21,10 +21,11 @@ using Json = nlohmann::json;
 // Relative paths are resolved via getDataPath (like oF)
 // ---------------------------------------------------------------------------
 inline Json loadJson(const fs::path& path) {
-    fs::path fullPath = getDataPath(path);
+    fs::path fullPath = internal::resolveLoadPath(path);
+    if (!internal::checkLoadFile(fullPath, "Json")) return Json();
     std::ifstream file(fullPath);
     if (!file.is_open()) {
-        logError() << "Cannot open JSON file: " << path;
+        internal::reportMissingLoad(fullPath, "Json");
         return Json();
     }
 

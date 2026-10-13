@@ -77,15 +77,23 @@ public:
     LoadResult load(const fs::path& path, bool mipmaps = false) {
         clear();
 
-        fs::path resolved = getDataPath(path);   // absolute paths pass through
-        LoadResult r = pixels_.load(resolved);
+        LoadResult r = pixels_.load(path);
         if (!r) {
             return r;
         }
 
+        r = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
+        if (!r) {
+            clear();
+            return r;
+        }
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
         texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (sg_isvalid() && !texture_.isAllocated()) {
+            clear();
+            return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
+        }
         return LoadResult::success();
     }
 
@@ -98,9 +106,18 @@ public:
             return r;
         }
 
+        r = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
+        if (!r) {
+            clear();
+            return r;
+        }
         mipmaps_ = mipmaps;
         usage_ = TextureUsage::Immutable;
         texture_.allocate(pixels_, TextureUsage::Immutable, mipmaps);
+        if (sg_isvalid() && !texture_.isAllocated()) {
+            clear();
+            return LoadResult::fail(LoadError::Unknown, "image texture upload failed");
+        }
         return LoadResult::success();
     }
 

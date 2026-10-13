@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include "stb/stb_image.h"
 #include "stb/stb_image_write.h"
 #include "tc/utils/tcFileIO.h"   // internal::pathToUtf8
@@ -269,15 +270,13 @@ public:
     LoadResult load(const fs::path& filePath) {
         clear();
 
-        const fs::path path = getDataPath(filePath);   // absolute paths pass through
-        std::error_code ec;
-        if (!std::filesystem::exists(path, ec)) {
-            logError("Pixels") << "file not found: " << path;
-            return LoadResult::fail(LoadError::FileNotFound,
-                                    "file not found: " + internal::pathToDisplayUtf8(path));
-        }
+        const fs::path path = internal::resolveLoadPath(filePath);
+        LoadResult entry;
+        std::unique_ptr<FILE, decltype(&std::fclose)> file(
+            internal::openLoadFile(path, "Pixels", entry), &std::fclose);
+        if (!file) return entry;
         int w, h, channels;
-        unsigned char* loaded = stbi_load(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 4);
+        unsigned char* loaded = stbi_load_from_file(file.get(), &w, &h, &channels, 4);
         if (!loaded) {
             const char* stbReason = stbi_failure_reason();
             // Fallback to platform-specific loader (ImageIO on macOS)
@@ -307,15 +306,13 @@ public:
     LoadResult loadHDR(const fs::path& filePath) {
         clear();
 
-        const fs::path path = getDataPath(filePath);   // absolute paths pass through
-        std::error_code ec;
-        if (!std::filesystem::exists(path, ec)) {
-            logError("Pixels") << "file not found: " << path;
-            return LoadResult::fail(LoadError::FileNotFound,
-                                    "file not found: " + internal::pathToDisplayUtf8(path));
-        }
+        const fs::path path = internal::resolveLoadPath(filePath);
+        LoadResult entry;
+        std::unique_ptr<FILE, decltype(&std::fclose)> file(
+            internal::openLoadFile(path, "Pixels", entry), &std::fclose);
+        if (!file) return entry;
         int w, h, channels;
-        float* loaded = stbi_loadf(internal::pathToUtf8(path).c_str(), &w, &h, &channels, 3);
+        float* loaded = stbi_loadf_from_file(file.get(), &w, &h, &channels, 3);
         if (!loaded) {
             const char* stbReason = stbi_failure_reason();
             return LoadResult::fail(LoadError::DecodeFailed,

@@ -321,16 +321,15 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
 // OGG Vorbis: stb_vorbis (miniaudio does not bundle a Vorbis decoder)
 // -----------------------------------------------------------------------------
 
-LoadResult SoundBuffer::loadOgg(const fs::path& path) {
+LoadResult SoundBuffer::loadOgg(const fs::path& filePath) {
+    internal::recordLoadName(path_);
+    const auto path = internal::resolveLoadPath(filePath);
     std::string pathStr = internal::pathToDisplayUtf8(path);
     // stb_vorbis has no UTF-8 filename mode on Windows — open the FILE*
     // ourselves (wide API) and hand it over (close_handle_on_close=TRUE).
-    FILE* f = internal::openFile(path, "rb");
-    if (!f) {
-        logError("SoundBuffer") << "failed to open " << path;
-        return LoadResult::fail(LoadError::FileNotFound,
-                                "failed to open: " + pathStr);
-    }
+    LoadResult entry;
+    FILE* f = internal::openLoadFile(path, "SoundBuffer", entry);
+    if (!f) return entry;
     int error = 0;
     stb_vorbis* vorbis = stb_vorbis_open_file(f, 1, &error, nullptr);
     if (!vorbis) {
@@ -347,7 +346,7 @@ LoadResult SoundBuffer::loadOgg(const fs::path& path) {
     const uintmax_t fileBytes = fs::file_size(path, sizeEc);
     LoadResult r = drainVorbis(vorbis, sizeEc ? 0 : (uint64_t)fileBytes, pathStr, *this);
     if (!r) return r;
-    path_ = path;
+    internal::recordLoadName(path_, path, true);
     logVerbose("SoundBuffer") << "loaded " << path << " (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";
     return LoadResult::success();
@@ -364,12 +363,8 @@ namespace {
 // cheaply).
 LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
                                 const char* label, SoundBuffer& out) {
-    std::error_code ec;
-    if (!fs::exists(path, ec)) {
-        logError("SoundBuffer") << "file not found: " << path;
-        return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToDisplayUtf8(path));
-    }
+    auto entry = internal::checkLoadFile(path, "SoundBuffer");
+    if (!entry) return entry;
     if (!decodeFileWithMiniaudio(path, hint, label, out)) {
         return LoadResult::fail(LoadError::DecodeFailed,
                                 std::string(label) + " decode failed: " +
@@ -380,47 +375,53 @@ LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
 
 } // namespace
 
-LoadResult SoundBuffer::loadWav(const fs::path& path) {
+LoadResult SoundBuffer::loadWav(const fs::path& filePath) {
+    internal::recordLoadName(path_);
+    const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
-    if (r) path_ = path;
+    internal::recordLoadName(path_, path, r.ok());
     return r;
 }
 
-LoadResult SoundBuffer::loadMp3(const fs::path& path) {
+LoadResult SoundBuffer::loadMp3(const fs::path& filePath) {
+    internal::recordLoadName(path_);
+    const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
-    if (r) path_ = path;
+    internal::recordLoadName(path_, path, r.ok());
     return r;
 }
 
-LoadResult SoundBuffer::loadFlac(const fs::path& path) {
+LoadResult SoundBuffer::loadFlac(const fs::path& filePath) {
+    internal::recordLoadName(path_);
+    const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
-    if (r) path_ = path;
+    internal::recordLoadName(path_, path, r.ok());
     return r;
 }
 
 LoadResult SoundBuffer::loadWavFromMemory(const void* data, size_t dataSize) {
-    path_.clear();
+    internal::recordLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_wav, "WAV", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "WAV decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadMp3FromMemory(const void* data, size_t dataSize) {
-    path_.clear();
+    internal::recordLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_mp3, "MP3", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "MP3 decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadFlacFromMemory(const void* data, size_t dataSize) {
-    path_.clear();
+    internal::recordLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_flac, "FLAC", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "FLAC decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
-    path_.clear();
+    internal::recordLoadName(path_);
     if (data == nullptr || dataSize == 0) {
         logError("SoundBuffer") << "empty memory range for OGG decode";
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");
@@ -445,12 +446,26 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
 }
 
 // -----------------------------------------------------------------------------
+// AAC's file entry is shared; only the decode belongs to the platform.
+// -----------------------------------------------------------------------------
+LoadResult SoundBuffer::loadAac(const fs::path& filePath) {
+    internal::recordLoadName(path_);
+    const auto path = internal::resolveLoadPath(filePath);
+    auto entry = internal::checkLoadFile(path, "SoundBuffer");
+    if (!entry) return entry;
+    auto result = loadAacPlatform(path);
+    internal::recordLoadName(path_, path, result.ok());
+    return result;
+}
+
+// -----------------------------------------------------------------------------
 // Auto-detect by extension. Sound::load() delegates here; callers that
 // already have a SoundBuffer (e.g., for sharing across multiple Sounds) can
 // use it directly.
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::load(const fs::path& path) {
+    internal::recordLoadName(path_);
     // Lowercase the extension once
     std::string ext = toLower(getFileExtension(path));
 
@@ -459,12 +474,11 @@ LoadResult SoundBuffer::load(const fs::path& path) {
     if (ext == "ogg")  return loadOgg(path);
     if (ext == "flac") return loadFlac(path);
     if (ext == "aac" || ext == "m4a") {
-        // loadAac is per platform; record the path here for all of them.
-        LoadResult r = loadAac(path);
-        if (r) path_ = path;
-        return r;
+        return loadAac(path);
     }
 
+    auto entry = internal::checkLoadFile(internal::resolveLoadPath(path), "SoundBuffer");
+    if (!entry) return entry;
     logError("SoundBuffer") << "unsupported extension '." << ext << "' for "
                             << path;
     return LoadResult::fail(LoadError::UnsupportedFormat,

@@ -589,7 +589,7 @@ TC_CORE_TEST_MAIN() {
                 const LoadResult r = buffer.load(bad(L"missing", L".ogg"));
                 return !r && r.error == LoadError::FileNotFound &&
                        r.message.find("missing" + R + ".ogg") != string::npos &&
-                       logged("[SoundBuffer] failed to open ", "missing" + R + ".ogg");
+                       logged("[SoundBuffer] file not found: ", "missing" + R + ".ogg");
             });
             const fs::path logPath = bad(L"g", L".log");
             Logger& logger = getLogger();

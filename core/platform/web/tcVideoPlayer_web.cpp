@@ -115,15 +115,30 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
         return false;
     }
 
-    // Set initial values (metadata loaded asynchronously)
-    width_ = 640;
-    height_ = 480;
+    // A successful synchronous load has a decoded first frame, including in setup().
+    while (!emscripten_run_script_int(
+        "!!window._trussc_player_error || (window._trussc_player_ready && "
+        "window._trussc_player_video.readyState >= 2)")) {
+        emscripten_sleep(10);
+    }
+    if (emscripten_run_script_int("!!window._trussc_player_error")) {
+        logError("VideoPlayer") << "failed to decode '" << pathStr << "' [Web]";
+        closePlatform();
+        return false;
+    }
+    width_ = emscripten_run_script_int("window._trussc_player_width");
+    height_ = emscripten_run_script_int("window._trussc_player_height");
+    if (width_ <= 0 || height_ <= 0) {
+        closePlatform();
+        return false;
+    }
 
     // Allocate pixel buffer
     pixels_ = new unsigned char[width_ * height_ * 4];
     std::memset(pixels_, 0, width_ * height_ * 4);
 
-    logNotice("VideoPlayer") << "loading '" << pathStr << "' [Web]";
+    updatePlatform();
+    logNotice("VideoPlayer") << "loaded '" << pathStr << "' [Web]";
     return true;
 }
 

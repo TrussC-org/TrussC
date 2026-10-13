@@ -54,7 +54,9 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
         "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
         "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown));
+        "Unknown", sol::var(trussc::LoadError::Unknown),
+        "TooLarge", sol::var(trussc::LoadError::TooLarge),
+        "Cancelled", sol::var(trussc::LoadError::Cancelled));
     {
         sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
         t["id"] = &trussc::TouchPoint::id;

@@ -10,19 +10,10 @@
 //
 //     if (img.load("photo.png")) { ... }        // still fine
 //
-// Rule: a loader that returns LoadResult also logs a missing file at Error,
-// naming the path. Most use the same text as `message`; loadOgg() logs
-// "failed to open <path>" and Font logs "FontAtlasManager: not a regular
-// file: <path>". Callers that load optional files check for the file first, at
-// the path the loader opens: Image, VideoPlayer, Pixels and Sound resolve a
-// relative path via getDataPath(), so check fs::exists(getDataPath(path))
-// there. SoundBuffer opens the path as given. Font also accepts system font
-// names, so a file check does not cover it.
-//
-// Error taxonomy is deliberately coarse for now (v0.7): the enum can gain
-// values and messages can get richer without breaking anything. What CAN'T
-// change compatibly is the return type — which is why the shape lands in
-// the v0.7 breaking window.
+// File loaders resolve relative paths via getDataPath() and share one
+// missing-file report. Font first tries a data file, then a system font name.
+// Existing getPath() accessors are empty after failure or a memory load.
+// The taxonomy can grow without changing the result shape.
 // =============================================================================
 
 #include <string>
@@ -36,6 +27,8 @@ enum class LoadError {
     UnsupportedFormat,  // extension / container not supported on this platform
     DecodeFailed,       // the decoder rejected the data (corrupt / truncated / wrong codec)
     Unknown,            // anything the loader could not classify
+    TooLarge,           // exceeds the GPU texture limit
+    Cancelled,          // loading was cancelled
 };
 
 // Result of a load operation. Truthy on success.
@@ -59,6 +52,8 @@ inline const char* loadErrorName(LoadError e) {
         case LoadError::FileNotFound:      return "FileNotFound";
         case LoadError::UnsupportedFormat: return "UnsupportedFormat";
         case LoadError::DecodeFailed:      return "DecodeFailed";
+        case LoadError::TooLarge:          return "TooLarge";
+        case LoadError::Cancelled:         return "Cancelled";
         case LoadError::Unknown:           return "Unknown";
     }
     return "Unknown";

@@ -1571,10 +1571,9 @@ public:
         std::string actualPath = nameStr;
         int actualFace = faceIndex;
         if (!isUrl(nameStr)) {
-            const fs::path filePath = getDataPath(nameOrPath);   // absolute paths pass through
+            const fs::path filePath = internal::resolveLoadPath(nameOrPath);   // absolute paths pass through
             actualPath = internal::pathToUtf8(filePath);
-            std::ifstream test(filePath, std::ios::binary);
-            if (!test.good()) {
+            if (!internal::isLoadFile(filePath)) {
                 // Not a usable file path — try as a system font name. The OS
                 // gives the file and the face inside it.
                 internal::SystemFontFace resolved = internal::systemFontFace(nameStr);
@@ -1613,15 +1612,20 @@ public:
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
-            // Async load - returns immediately, font available after fetch completes
-            loadFromUrlAsync(actualPath, physicalSize, actualFace);
-            return LoadResult::success();  // Will be loaded asynchronously
+            // Yield via Asyncify until fetching and decoding have completed.
+            loadFromUrl(actualPath, physicalSize, actualFace);
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "URL loading only supported in WebAssembly: " + actualPath);
 #endif
         } else {
+            auto entry = internal::checkLoadFile(internal::utf8ToPath(actualPath), "Font");
+            if (!entry) {
+                atlasManager_.reset();
+                if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+                return entry;
+            }
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
         }
 
@@ -1636,7 +1640,7 @@ public:
             // was never found (bad path or unresolvable system-font name);
             // otherwise the file opened but stb_truetype rejected it.
             std::error_code ec;
-            if (!fs::exists(internal::utf8ToPath(actualPath), ec)) {
+            if (!isUrl(actualPath) && !fs::exists(internal::utf8ToPath(actualPath), ec)) {
                 std::string msg = "font not found: \"" + nameStr + "\"";
                 if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
                 return LoadResult::fail(LoadError::FileNotFound, msg);
@@ -1658,6 +1662,7 @@ private:
     struct FontLoadContext {
         Font* font;
         internal::FontCacheKey key;
+        bool complete = false;
     };
 
     static void onFetchSuccess(emscripten_fetch_t* fetch) {
@@ -1667,7 +1672,7 @@ private:
         // refused. setupFromMemory() rejects an empty response with a warning.
         if (fetch->numBytes > (uint64_t)SIZE_MAX) {
             logWarning() << "Font: response too large for " << ctx->key.fontPath;
-            delete ctx;
+            ctx->complete = true;
             emscripten_fetch_close(fetch);
             return;
         }
@@ -1682,7 +1687,7 @@ private:
             logNotice("Font") << "Loaded from URL: " << ctx->key.fontPath;
         }
 
-        delete ctx;
+        ctx->complete = true;
         emscripten_fetch_close(fetch);
     }
 
@@ -1690,11 +1695,11 @@ private:
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
         logError() << "Font: failed to fetch " << ctx->key.fontPath
                      << " (status: " << fetch->status << ")";
-        delete ctx;
+        ctx->complete = true;
         emscripten_fetch_close(fetch);
     }
 
-    void loadFromUrlAsync(const std::string& url, int size, int faceIndex) {
+    void loadFromUrl(const std::string& url, int size, int faceIndex) {
         // Check cache first (don't try to load from file)
         internal::FontCacheKey key{url, size};
         key.faceIndex = faceIndex;
@@ -1705,7 +1710,8 @@ private:
         }
 
         // Start async fetch
-        FontLoadContext* ctx = new FontLoadContext{this, key};
+        atlasManager_.reset();
+        FontLoadContext ctx{this, key};
 
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
@@ -1713,9 +1719,10 @@ private:
         attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
         attr.onsuccess = onFetchSuccess;
         attr.onerror = onFetchError;
-        attr.userData = ctx;
+        attr.userData = &ctx;
 
-        emscripten_fetch(&attr, url.c_str());
+        if (!emscripten_fetch(&attr, url.c_str())) return;
+        while (!ctx.complete) emscripten_sleep(10);
     }
 #endif
 

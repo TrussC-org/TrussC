@@ -71,6 +71,7 @@ public:
     bool isAudioStreaming() const { return audioStreaming_; }
 
     LoadResult load(const fs::path& path) override {
+        internal::recordLoadName(sourcePath_);
         const auto previousError = errorMessage_;
         if (initialized_) {
             close();
@@ -83,18 +84,10 @@ public:
         // names holding unpaired UTF-16 surrogates.
         const std::string pathStr = internal::pathToDisplayUtf8(path);
         bool isUrl = pathStr.rfind("http://", 0) == 0 || pathStr.rfind("https://", 0) == 0;
-        fs::path resolvedPath = isUrl ? path : getDataPath(path);
+        fs::path resolvedPath = internal::resolveLoadPath(path, isUrl);
 
-        // Missing files are classified up front (URLs skip the check —
-        // the platform backends stream straight from them).
-        if (!isUrl) {
-            std::error_code ec;
-            if (!fs::exists(resolvedPath, ec)) {
-                logError("VideoPlayer") << "file not found: " << resolvedPath;
-                return LoadResult::fail(LoadError::FileNotFound,
-                                        "file not found: " + internal::pathToDisplayUtf8(resolvedPath));
-            }
-        }
+        auto entry = internal::checkLoadFile(resolvedPath, "VideoPlayer", isUrl);
+        if (!entry) return entry;
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
@@ -105,7 +98,7 @@ public:
 
         // Remember the resolved path so instance-level frame extraction
         // (extractFrame / extractKeyFrame with no path arg) and getPath() work.
-        sourcePath_ = resolvedPath;
+        internal::recordLoadName(sourcePath_, resolvedPath, true);
 
         // Create texture(s) for per-frame updates
         if (width_ > 0 && height_ > 0) {
@@ -137,8 +130,14 @@ public:
         // Frame 0 is always a keyframe, so this is exact AND fast.
         // Stream textures accept ONE loadData per frame, so the poster and
         // the black-clear are alternatives, never both.
+#ifdef __EMSCRIPTEN__
+        // loadPlatform already waited for a decoded frame. Upload it now;
+        // the Web frame-extraction stub cannot provide an auto-poster.
+        update();
+#else
         bool postered = autoPoster_ && loadPosterFrame(0.0f);
         if (!postered) clearTexture();
+#endif
         return LoadResult::success();
     }
 
