@@ -165,7 +165,7 @@ static void testPortLogOutputs() {
          to_string(chrono::steady_clock::now().time_since_epoch().count()) + ".log");
     setFileLogLevel(LogLevel::Notice);
     for (auto level : {LogLevel::Notice, LogLevel::Warning}) {
-        check("port discovery log file opened", setLogFile(logPath));
+        check("port discovery log file opened", setLogFile(logPath).ok());
         setConsoleLogLevel(level);
         ostringstream capturedOut, capturedErr;
         auto* savedOut = cout.rdbuf(capturedOut.rdbuf());
