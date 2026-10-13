@@ -350,7 +350,7 @@ jobs:
           if [ "${{ matrix.launcher }}" = "sccache" ]; then
             sccache --show-stats || true
           else
-            ccache -s || true
+            ccache -sv || true
           fi
 
   build-android:
@@ -497,7 +497,7 @@ jobs:
 
       - name: Compiler cache stats
         if: always()
-        run: ccache -s || true
+        run: ccache -sv || true
 
   build-web:
     needs: changes
@@ -623,7 +623,7 @@ jobs:
 
       - name: Compiler cache stats
         if: always()
-        run: ccache -s || true
+        run: ccache -sv || true
 
   # Compile-only iOS gate: AllFeaturesExample and soundPlayerExample against
   # the device SDK with code signing disabled — every documented core API
@@ -800,6 +800,41 @@ jobs:
       - name: core test symbol checker regression checks
         if: always()
         run: python3 tools/tests/test_core_test_symbols.py -v
+
+  # ---------------------------------------------------------------------------
+  # Keep one compiler-cache save per platform (#776). Every ccache-action save
+  # gets a new timestamped key, and the old ones stay until the repository's
+  # 10 GB Actions cache evicts entries, which then drops the newest ccache too.
+  # After the build jobs (and their post-step saves) on a main push, delete all
+  # but the newest main entry per prefix (key minus the timestamp). PR runs
+  # still restore the newest main save through restore-keys. Not part of ci-ok.
+  # ---------------------------------------------------------------------------
+  ccache-prune:
+    runs-on: ubuntu-latest
+    needs: [build, build-android, build-web]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: write
+    steps:
+      - name: Delete older compiler-cache saves on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/caches?ref=refs/heads/main&sort=created_at&direction=desc&per_page=100" \
+            --jq '.actions_caches[] | select(.key | test("^s?ccache-")) | "\(.id) \(.key)"' > caches.txt
+          # Newest first: the first entry per prefix is kept, later ones deleted.
+          declare -A seen
+          while read -r id key; do
+            prefix="${key%-????-??-??T*}"
+            if [ -n "${seen[$prefix]:-}" ]; then
+              echo "delete $key"
+              gh api -X DELETE "repos/$REPO/actions/caches/$id" || echo "  (could not delete $id)"
+            else
+              seen[$prefix]=1
+              echo "keep   $key"
+            fi
+          done < caches.txt
 
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,

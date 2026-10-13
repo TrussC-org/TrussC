@@ -140,6 +140,21 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                                 expected_lines.append('TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON')
                             self.assertEqual(env_file.read_text().splitlines(), expected_lines)
 
+    def test_ccache_prune_runs_only_after_main_builds(self):
+        # #776: one compiler-cache save per platform. The prune job deletes
+        # Actions caches, so it must run only on main pushes, after every job
+        # that saves a ccache, and must not gate merges.
+        jobs = self.workflow['jobs']
+        prune = jobs['ccache-prune']
+        self.assertEqual(prune['if'],
+                         "always() && github.event_name == 'push' && github.ref == 'refs/heads/main'")
+        self.assertEqual(prune['permissions'], {'actions': 'write'})
+        savers = sorted(name for name, job in jobs.items()
+                        if any(step.get('uses', '').startswith('hendrikmuhs/ccache-action@')
+                               for step in job.get('steps', [])))
+        self.assertEqual(sorted(prune['needs']), savers)
+        self.assertNotIn('ccache-prune', jobs['ci-ok']['needs'])
+
     def test_regression_runs_in_pr_ci(self):
         matches = [step for step in self.workflow['jobs']['header-state-check']['steps']
                    if step.get('run') == 'python3 tools/tests/test_build_workflow_caches.py -v']
