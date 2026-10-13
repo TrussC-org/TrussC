@@ -26,7 +26,6 @@
 #include "tcSaveResult.h"
 #include <cerrno>
 #include <fstream>
-#include <initializer_list>
 #include <filesystem>
 #include <cstdio>
 #include <string>
@@ -35,6 +34,7 @@
 namespace trussc {
 
 namespace fs = std::filesystem;
+class Pixels;
 
 // Resolve a relative path against the data folder; absolute paths pass
 // through. Defined in tcUtils.h (included by TrussC.h); declared here so the
@@ -156,26 +156,15 @@ inline SaveResult saveErrno(const fs::path& path, const char* operation) {
     return saveFailure(path, operation, std::error_code(errno, std::generic_category()));
 }
 
-// Optional extension policy: append the default for a missing/unsupported suffix;
-// matching is ASCII case-insensitive and the requested spelling is retained.
-// Writers without an extension policy preserve the requested filename.
+// Prepare the final output filename; format-specific extension rules belong to callers.
 inline SaveResult prepareOutputPath(const fs::path& requested, fs::path& resolved,
-                                    const char* module, const char* defaultExtension = "",
-                                    std::initializer_list<std::string_view> extensions = {},
-                                    bool browserDownload = false) {
+                                    const char* module, bool browserDownload = false) {
     resolved = browserDownload || requested.is_absolute() ? requested : getDataPath(requested);
     if (requested.empty() || resolved.filename().empty())
         return reportSaveFailure(saveFailure(resolved, "No file name in path"), module);
     if (browserDownload) return SaveResult::success(); // browser owns destination; no folders or temporary
     auto result = checkWriteTarget(requested, resolved, module);
     if (!result) return result;
-    if (*defaultExtension) {
-        auto ext = pathToUtf8(resolved.extension());
-        for (auto& c : ext) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
-        bool supported = false;
-        for (auto candidate : extensions) if (ext == candidate) supported = true;
-        if (!supported) resolved += defaultExtension;
-    }
     std::error_code ec;
     if (fs::is_directory(resolved, ec))
         return reportSaveFailure(saveFailure(resolved, "Destination is a directory"), module);
@@ -186,6 +175,9 @@ inline SaveResult prepareOutputPath(const fs::path& requested, fs::path& resolve
 }
 
 // Encoder callbacks share a buffered file; checkedClose reports the final flush.
+SaveResult writePixelsEncoded(std::FILE* file, const Pixels& pixels,
+                              const std::string& extension, const fs::path& path);
+
 inline SaveResult checkedWriteUnflushed(std::FILE* file, const void* data, size_t size,
                                         const fs::path& path) {
     errno = 0;

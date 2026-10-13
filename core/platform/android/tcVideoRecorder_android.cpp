@@ -175,14 +175,13 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         case VideoCodec::HEVC: mime = "video/hevc"; break;
         case VideoCodec::ProRes422:
         case VideoCodec::ProRes4444:
-            logError("VideoWriter")
-                << "ProRes is not available on Android (use H264 or HEVC)";
+            result_ = SaveResult::fail(SaveError::WriteFailed, "ProRes is not available on Android (use H264 or HEVC)");
             return false;
     }
 
     AMediaCodec* codec = AMediaCodec_createEncoderByType(mime);
     if (!codec) {
-        logError("VideoWriter") << "no encoder for " << mime;
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("no encoder for ") + mime);
         return false;
     }
 
@@ -209,12 +208,12 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         codec, fmt, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
     AMediaFormat_delete(fmt);
     if (cfg != AMEDIA_OK) {
-        logError("VideoWriter") << "encoder configure failed (" << mime << ")";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("encoder configure failed (") + mime + ")");
         AMediaCodec_delete(codec);
         return false;
     }
     if (AMediaCodec_start(codec) != AMEDIA_OK) {
-        logError("VideoWriter") << "encoder start failed";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "encoder start failed");
         AMediaCodec_delete(codec);
         return false;
     }
@@ -230,14 +229,15 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
 
     int fd = ::open(fullPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0) {
-        logError("VideoWriter") << "cannot open output file " << fullPath;
+        result_ = internal::saveErrno(internal::utf8ToPath(fullPath), "cannot open output file");
         AMediaCodec_stop(codec);
         AMediaCodec_delete(codec);
         return false;
     }
+    errno = 0;
     AMediaMuxer* muxer = AMediaMuxer_new(fd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
     if (!muxer) {
-        logError("VideoWriter") << "muxer create failed";
+        result_ = internal::saveErrno(internal::utf8ToPath(fullPath), "muxer create failed");
         ::close(fd);
         AMediaCodec_stop(codec);
         AMediaCodec_delete(codec);

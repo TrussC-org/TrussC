@@ -2205,10 +2205,14 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
     std::filesystem::path resolved;
 #ifdef __EMSCRIPTEN__
     auto name = internal::resolveScreenshotDownloadName(path);
-    if (!internal::prepareOutputPath(name, resolved, "Screenshot", "", {}, true)) return false;
+    if (!internal::prepareOutputPath(name, resolved, "Screenshot", true)) return false;
 #else
-    if (!internal::prepareOutputPath(path, resolved, "Screenshot")) return false;
-    resolved = internal::resolveScreenshotPath(resolved);
+    if (path.empty()) {
+        internal::reportSaveFailure(internal::saveFailure(getDataPath(path), "No file name in path"), "Screenshot");
+        return false;
+    }
+    const auto destination = internal::resolveScreenshotPath(path);
+    if (!internal::prepareOutputPath(destination, resolved, "Screenshot")) return false;
 #endif
 
     internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));

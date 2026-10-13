@@ -19,6 +19,8 @@
 #include "TrussC.h"
 #include <cmath>
 
+#include "../metal/tcVideoWriterError.h"
+
 namespace trussc {
 
 namespace internal {
@@ -75,9 +77,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         AVAssetWriter* writer =
             [[AVAssetWriter alloc] initWithURL:url fileType:fileType error:&err];
         if (!writer) {
-            logError("VideoWriter")
-                << "AVAssetWriter init failed: "
-                << (err ? err.localizedDescription.UTF8String : "unknown");
+            result_ = internal::videoOpenFailure(err, "AVAssetWriter init failed");
             return false;
         }
 
@@ -116,17 +116,14 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                                             sourcePixelBufferAttributes:sourceAttrs];
 
         if (![writer canAddInput:input]) {
-            logError("VideoWriter") << "writer cannot add video input (codec "
-                                    << videoCodecName(settings.codec) << ")";
+            result_ = SaveResult::fail(SaveError::WriteFailed, std::string("writer cannot add video input (codec ") +
+                videoCodecName(settings.codec) + ")");
             return false;
         }
         [writer addInput:input];
 
         if (![writer startWriting]) {
-            logError("VideoWriter")
-                << "startWriting failed: "
-                << (writer.error ? writer.error.localizedDescription.UTF8String
-                                 : "unknown");
+            result_ = internal::videoOpenFailure(writer.error, "startWriting failed");
             return false;
         }
         [writer startSessionAtSourceTime:kCMTimeZero];

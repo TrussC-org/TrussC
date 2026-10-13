@@ -188,6 +188,7 @@ public:
     // already be initialized (playing a Sound or calling AudioEngine::init()
     // does that); returns SaveResult for path preparation and checked header writing.
     SaveResult start(const fs::path& path, const AudioRecordSettings& settings = {}) {
+        path_.clear(); // A rejected start never exposes this or a previous take's name.
         if (isRecording()) {
             logWarning("AudioRecorder") << "start: already recording";
             return SaveResult::fail(SaveError::WriteFailed, "Cannot start audio recording");
@@ -214,19 +215,21 @@ public:
         fs::path resolved;
         auto prepared = internal::prepareOutputPath(path, resolved, "AudioRecorder");
         if (!prepared) return result_ = prepared;
+        recordingPath_ = resolved;
         errno = 0;
         file_ = internal::openFile(resolved, "wb");
-        path_ = resolved;
         framesWritten_.store(0, std::memory_order_relaxed);
-        if (!file_) return fail(internal::saveErrno(path_, "Cannot open recording"));
+        if (!file_) return fail(internal::saveErrno(resolved, "Cannot open recording"));
         // Unbuffered writes expose the number of complete frames actually written,
         // including a short write in the middle of a chunk.
         std::setvbuf(file_, nullptr, _IONBF, 0);
         if (!writeHeader(false)) {
-            auto error = internal::saveErrno(path_, "Cannot write WAV header");
+            auto error = internal::saveErrno(resolved, "Cannot write WAV header");
             std::fclose(file_); file_ = nullptr;
             return fail(error);
         }
+
+        path_ = resolved; // Publish the name only after the header succeeds.
 
         // Ring sized for ~4 seconds of engine output: overflow only happens if
         // the writer thread stalls that long, in which case frames are counted
@@ -275,8 +278,8 @@ public:
         }
         if (file_) {
             if (result_ && !writeHeader(true))
-                fail(internal::saveErrno(path_, "Cannot finalize WAV header"));
-            auto closed = internal::checkedClose(file_, path_);
+                fail(internal::saveErrno(recordingPath_, "Cannot finalize WAV header"));
+            auto closed = internal::checkedClose(file_, recordingPath_);
             file_ = nullptr;
             if (result_ && !closed) fail(closed);
             if (result_) {
@@ -284,8 +287,8 @@ public:
                 if (dropped) logWarning("AudioRecorder") << "stopped, " << dropped << " frames dropped";
                 if (internal::wavSizeFields(framesWritten_.load(), outChannels_,
                         isFloat() ? 4 : 2, header_.dataStart).rf64)
-                    logNotice("AudioRecorder") << "take finalized as RF64: " << path_;
-                logNotice("AudioRecorder") << "stopped: " << path_ << " (" << getRecordedSeconds() << " s)";
+                    logNotice("AudioRecorder") << "take finalized as RF64: " << recordingPath_;
+                logNotice("AudioRecorder") << "stopped: " << recordingPath_ << " (" << getRecordedSeconds() << " s)";
             }
         }
         return result_;
@@ -428,7 +431,7 @@ private:
         const size_t written = std::fwrite(data, sampleBytes * outChannels_, frames, file_);
         framesWritten_.fetch_add(written, std::memory_order_relaxed);
         if (written != frames || std::fflush(file_) != 0) {
-            fail(internal::saveErrno(path_, "Cannot write audio frames"));
+            fail(internal::saveErrno(recordingPath_, "Cannot write audio frames"));
             std::fclose(file_); file_ = nullptr; // first failure ends the take
         }
     }
@@ -441,12 +444,13 @@ private:
         const auto data = bytes.str();
         errno = 0;
         if (finalize && std::fseek(file_, 0, SEEK_SET) != 0) return false;
-        return internal::checkedWrite(file_, data.data(), data.size(), path_).ok();
+        return internal::checkedWrite(file_, data.data(), data.size(), recordingPath_).ok();
     }
 
     // --- state ---------------------------------------------------------------
     AudioRecordSettings settings_;
     fs::path      path_;
+    fs::path      recordingPath_; // Worker-owned take name; unchanged until stop joins it.
     std::FILE* file_ = nullptr;
     SaveResult result_;
     internal::WavHeaderLayout header_;

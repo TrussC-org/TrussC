@@ -18,14 +18,14 @@
 
 namespace trussc {
 
-bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
+bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     if (!allocated_ || !pixels) return false;
 
     ID3D11Device* device = (ID3D11Device*)sg_d3d11_device();
     ID3D11DeviceContext* context = (ID3D11DeviceContext*)sg_d3d11_device_context();
 
     if (!device || !context) {
-        logError() << "[FBO] Failed to get D3D11 device/context";
+        if (reportError) logError() << "[FBO] Failed to get D3D11 device/context";
         return false;
     }
 
@@ -33,7 +33,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     ID3D11Texture2D* srcTexture = (ID3D11Texture2D*)info.tex2d;
 
     if (!srcTexture) {
-        logError() << "[FBO] Failed to get source D3D11 texture";
+        if (reportError) logError() << "[FBO] Failed to get source D3D11 texture";
         return false;
     }
 
@@ -50,7 +50,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     ID3D11Texture2D* stagingTexture = nullptr;
     HRESULT hr = device->CreateTexture2D(&stagingDesc, nullptr, &stagingTexture);
     if (FAILED(hr) || !stagingTexture) {
-        logError() << "[FBO] Failed to create staging texture";
+        if (reportError) logError() << "[FBO] Failed to create staging texture";
         return false;
     }
 
@@ -60,7 +60,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
     hr = context->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mapped);
     if (FAILED(hr)) {
         stagingTexture->Release();
-        logError() << "[FBO] Failed to map staging texture";
+        if (reportError) logError() << "[FBO] Failed to map staging texture";
         return false;
     }
 

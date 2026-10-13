@@ -133,9 +133,13 @@ public:
               const VideoRecordSettings& settings = {}) {
         close();
         result_ = SaveResult::success();
+        callerMistakeLogged_ = false;
+        path_.clear();
         if (width <= 0 || height <= 0) {
-            logError("VideoWriter") << "invalid size " << width << "x" << height;
-            return result_ = internal::saveFailure(path_, "Recording backend rejected operation");
+            const auto message = "invalid size " + std::to_string(width) + "x" + std::to_string(height);
+            // Validation precedes path resolution; report this request, not the previous take.
+            return result_ = internal::reportSaveFailure(
+                internal::saveFailure(path, message.c_str()), "VideoWriter");
         }
         if ((width & 1) || (height & 1)) {
             logWarning("VideoWriter")
@@ -153,10 +157,9 @@ public:
 
         // Platform encoders take UTF-8 (converted to native inside)
         if (!openPlatform(internal::pathToUtf8(path_), width_, height_, fps_, settings_)) {
-            logError("VideoWriter")
-                << "failed to open " << videoCodecName(settings_.codec)
-                << " encoder for " << path_;
-            return result_ = internal::saveFailure(path_, "Recording backend rejected operation");
+            if (result_) result_ = SaveResult::fail(SaveError::WriteFailed, "Recording backend rejected operation");
+            result_.message = "Cannot open recording: " + internal::pathToDisplayUtf8(path_) + ": " + result_.message;
+            return internal::reportSaveFailure(result_, "VideoWriter");
         }
         open_ = true;
         logNotice("VideoWriter")
@@ -173,7 +176,9 @@ public:
                 result_ = finalized;
                 if (!result_) internal::reportSaveFailure(result_, "VideoWriter");
             }
-            if (result_) logNotice("VideoWriter") << "saved " << frameCount_ << " frames -> " << path_;
+            if (frameCount_ == 0 && callerMistakeLogged_)
+                logWarning("VideoWriter") << "take accepted 0 frames after caller mistakes -> " << path_;
+            else if (result_) logNotice("VideoWriter") << "saved " << frameCount_ << " frames -> " << path_;
         }
         open_ = false;
         return result_;
@@ -204,10 +209,8 @@ public:
         if (!fbo.isAllocated()) return callFailed("fbo is not allocated");
         if (internal::currentWindowContext().inFboPass)
             return callFailed("fbo readPixels requires fbo.end() first");
-        if (!fbo.readPixels(scratch_.data())) {
-            // Native readback reports its own error; keep only this call failed.
-            return internal::saveFailure(path_, "fbo readPixels failed");
-        }
+        if (!fbo.readPixelsPlatform(scratch_.data(), false))
+            return callFailed("fbo readPixels failed");
         return appendRGBA(scratch_.data(), timeSec);
     }
     SaveResult addFrameAt(const Pixels& pixels, double timeSec) {
@@ -264,6 +267,7 @@ public:
         return frame;
 #else
         (void)strideOut;
+        callFailed("direct frame locking is not supported on this platform");
         return nullptr;
 #endif
     }
@@ -297,10 +301,15 @@ public:
     }
 
 private:
-    SaveResult callFailed(const std::string& message) const {
-        return internal::reportSaveFailure(internal::saveFailure(path_, message.c_str()), "VideoWriter");
+    SaveResult callFailed(const std::string& message) {
+        auto failure = internal::saveFailure(path_, message.c_str());
+        if (!callerMistakeLogged_) {
+            callerMistakeLogged_ = true;
+            internal::reportSaveFailure(failure, "VideoWriter");
+        }
+        return failure;
     }
-    SaveResult sizeMismatch(const char* source, int w, int h) const {
+    SaveResult sizeMismatch(const char* source, int w, int h) {
         return callFailed(std::string(source) + " size " + std::to_string(w) + "x" +
             std::to_string(h) + " != writer " + std::to_string(width_) + "x" + std::to_string(height_));
     }
@@ -342,6 +351,7 @@ private:
     VideoRecordSettings settings_;
     int   frameCount_ = 0;
     bool  open_ = false;
+    bool  callerMistakeLogged_ = false;
     SaveResult result_;
 };
 

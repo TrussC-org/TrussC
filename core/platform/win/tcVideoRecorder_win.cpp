@@ -54,6 +54,7 @@
 #include "TrussC.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -92,6 +93,12 @@ struct VideoWriterPlatformData {
 using internal::VideoWriterPlatformData;
 
 namespace {
+
+std::string formatHresult(HRESULT hr) {
+    char text[11];
+    std::snprintf(text, sizeof(text), "0x%08X", static_cast<unsigned>(hr));
+    return text;
+}
 
 // Split a float fps into an exact rational (num/den) for MF_MT_FRAME_RATE.
 void fpsToRatio(double fps, UINT32& num, UINT32& den) {
@@ -242,6 +249,29 @@ bool streamUsesHardwareEncoder(IMFSinkWriter* writer, DWORD streamIndex) {
     return isHw;
 }
 
+bool isFileOpenFailure(HRESULT hr) {
+    return hr == E_ACCESSDENIED ||
+           hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) ||
+           hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED) ||
+           hr == HRESULT_FROM_WIN32(ERROR_DISK_FULL) ||
+           hr == HRESULT_FROM_WIN32(ERROR_HANDLE_DISK_FULL) ||
+           hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION);
+}
+
+SaveResult openFailure(HRESULT hr, const std::string& operation) {
+    SaveError error = SaveError::WriteFailed;
+    if (hr == E_ACCESSDENIED || hr == HRESULT_FROM_WIN32(ERROR_ACCESS_DENIED))
+        error = SaveError::AccessDenied;
+    else if (hr == HRESULT_FROM_WIN32(ERROR_DISK_FULL) || hr == HRESULT_FROM_WIN32(ERROR_HANDLE_DISK_FULL))
+        error = SaveError::NoSpace;
+    const char* reason = "";
+    if (error == SaveError::AccessDenied) reason = ": access denied";
+    else if (error == SaveError::NoSpace) reason = ": no space left on device";
+    else if (hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)) reason = ": path not found";
+    else if (hr == HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION)) reason = ": sharing violation";
+    return SaveResult::fail(error, operation + reason + " (hr=" + formatHresult(hr) + ")");
+}
+
 // Create a sink writer for `wpath`, configure the compressed/RGB32 streams and
 // begin writing, with hardware encoder MFTs enabled or disabled. On success the
 // caller owns *outWriter; *outHardware reports the encoder actually resolved.
@@ -327,16 +357,15 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // This backend encodes H.264 and HEVC (both into .mp4). ProRes is a macOS-
     // only mastering codec; reject it clearly rather than silently substituting.
     if (settings.codec != VideoCodec::H264 && settings.codec != VideoCodec::HEVC) {
-        logError("VideoWriter") << "codec " << videoCodecName(settings.codec)
-                                << " not supported on Windows (use H.264 or HEVC)";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("codec ") +
+            videoCodecName(settings.codec) + " not supported on Windows (use H.264 or HEVC)");
         return false;
     }
 
     // Media Foundation startup (ref-counted internally; matched in close()).
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
     if (FAILED(hr)) {
-        logError("VideoWriter") << "MFStartup failed (hr=0x"
-                                  << std::hex << (unsigned)hr << ")";
+        result_ = openFailure(hr, "MFStartup failed");
         return false;
     }
 
@@ -380,12 +409,13 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
                     &writer, &streamIndex, &audioStreamIndex, &isHw);
 
     // Software fallback: a failed open normally means "hardware encoder
-    // unusable on this machine" -> retry pure software.
-    if (FAILED(hr) || !writer) {
+    // unusable on this machine" -> retry pure software. File errors cannot be
+    // fixed by changing encoders (or by dropping the audio track).
+    if ((FAILED(hr) || !writer) && !isFileOpenFailure(hr)) {
         logWarning("VideoWriter")
             << "hardware " << videoCodecName(codec)
-            << " encoder path unavailable (hr=0x"
-            << std::hex << (unsigned)hr << "); falling back to software";
+            << " encoder path unavailable (hr="
+            << formatHresult(hr) << "); falling back to software";
         DeleteFileW(wpath.c_str());
         hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
                         /*hwEnabled*/ false, audio,
@@ -395,16 +425,16 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // Last resort with audio requested: the AAC stream itself may be what
     // failed (sink writer streams can't be removed, so a failed audio setup
     // fails the whole open). Degrade to video-only rather than not recording.
-    if ((FAILED(hr) || !writer) && audio.wanted) {
+    if ((FAILED(hr) || !writer) && audio.wanted && !isFileOpenFailure(hr)) {
         logWarning("VideoWriter")
-            << "could not set up the AAC audio track (hr=0x"
-            << std::hex << (unsigned)hr << ") - recording video only";
+            << "could not set up the AAC audio track (hr="
+            << formatHresult(hr) << ") - recording video only";
         audio.wanted = false;
         DeleteFileW(wpath.c_str());
         hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
                         /*hwEnabled*/ true, audio,
                         &writer, &streamIndex, &audioStreamIndex, &isHw);
-        if (FAILED(hr) || !writer) {
+        if ((FAILED(hr) || !writer) && !isFileOpenFailure(hr)) {
             DeleteFileW(wpath.c_str());
             hr = openWriter(wpath, w, h, fpsNum, fpsDen, br, codec, kf,
                             /*hwEnabled*/ false, audio,
@@ -413,9 +443,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     }
 
     if (FAILED(hr) || !writer) {
-        logError("VideoWriter")
-            << "failed to open " << videoCodecName(codec)
-            << " sink writer (hr=0x" << std::hex << (unsigned)hr << ")";
+        result_ = openFailure(FAILED(hr) ? hr : E_FAIL,
+            std::string("failed to open ") + videoCodecName(codec) + " sink writer");
         MFShutdown();
         delete pd;
         return false;
@@ -473,7 +502,7 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     BYTE* dst = nullptr;
     hr = buffer->Lock(&dst, nullptr, nullptr);
     if (FAILED(hr)) {
-        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + formatHresult(hr));
         buffer->Release();
         pd->failed = true;
         return false;
@@ -497,7 +526,7 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     buffer->Release();
 
     if (FAILED(hr)) {
-        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + formatHresult(hr));
         pd->failed = true;
         return false;
     }
@@ -527,7 +556,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     BYTE* dst = nullptr;
     hr = buffer->Lock(&dst, nullptr, nullptr);
     if (FAILED(hr)) {
-        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + formatHresult(hr));
         buffer->Release();
         pd->failed = true;
         return false;
@@ -565,7 +594,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     buffer->Release();
 
     if (FAILED(hr)) {
-        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + std::to_string((long)hr));
+        result_ = SaveResult::fail(SaveError::WriteFailed, "IMFSinkWriter append HRESULT=" + formatHresult(hr));
         pd->failed = true;
         return false;
     }
@@ -586,7 +615,7 @@ SaveResult VideoWriter::closePlatform() {
             HRESULT hr = pd->writer->Finalize();
             if (FAILED(hr)) {
                 result = SaveResult::fail(SaveError::WriteFailed,
-                    "IMFSinkWriter::Finalize HRESULT=" + std::to_string((long)hr));
+                    "IMFSinkWriter::Finalize HRESULT=" + formatHresult(hr));
             }
         }
         pd->writer->Release();

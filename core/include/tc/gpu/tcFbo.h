@@ -990,7 +990,8 @@ private:
     }
 
     // Platform-specific pixel reading (implemented in platform files)
-    bool readPixelsPlatform(unsigned char* pixels) const;
+    friend class VideoWriter;
+    bool readPixelsPlatform(unsigned char* pixels, bool reportError = true) const;
     bool readPixelsFloatPlatform(float* pixels) const;
 };
 

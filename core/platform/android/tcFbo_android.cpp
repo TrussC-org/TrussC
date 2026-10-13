@@ -13,12 +13,12 @@ namespace trussc {
 // Helper: read from GL texture via temp FBO
 static bool readFromGLTexture(sg_image image, int width, int height,
                               GLenum glFormat, GLenum glType,
-                              void* buffer, size_t rowBytes, bool flipY) {
+                              void* buffer, size_t rowBytes, bool flipY, bool reportError = true) {
     sg_gl_image_info info = sg_gl_query_image_info(image);
     GLuint texID = info.tex[0];
 
     if (texID == 0) {
-        tc::logError("Fbo") << "Failed to get GL texture handle";
+        if (reportError) tc::logError("Fbo") << "Failed to get GL texture handle";
         return false;
     }
 
@@ -48,7 +48,7 @@ static bool readFromGLTexture(sg_image image, int width, int height,
         }
         ok = true;
     } else {
-        tc::logError("Fbo") << "Temporary FBO is incomplete";
+        if (reportError) tc::logError("Fbo") << "Temporary FBO is incomplete";
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, prevFbo);
@@ -56,12 +56,12 @@ static bool readFromGLTexture(sg_image image, int width, int height,
     return ok;
 }
 
-bool Fbo::readPixelsPlatform(unsigned char* pixels) const {
+bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     if (!allocated_ || !pixels) return false;
 
     size_t rowBytes = width_ * 4;
     return readFromGLTexture(colorTexture_.getImage(), width_, height_,
-                             GL_RGBA, GL_UNSIGNED_BYTE, pixels, rowBytes, true);
+                             GL_RGBA, GL_UNSIGNED_BYTE, pixels, rowBytes, true, reportError);
 }
 
 bool Fbo::readPixelsFloatPlatform(float* pixels) const {

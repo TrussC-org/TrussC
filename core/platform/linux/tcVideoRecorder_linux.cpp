@@ -255,9 +255,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // rather than silently writing a different format than requested.
     CodecPlan plan;
     if (!codecPlan(settings.codec, plan)) {
-        logError("VideoWriter")
-            << "codec " << videoCodecName(settings.codec)
-            << " is not available on Linux (macOS only); use H.264 or HEVC";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("codec ") +
+            videoCodecName(settings.codec) + " is not available on Linux (macOS only); use H.264 or HEVC");
         return false;
     }
 
@@ -301,9 +300,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     // first probed-OK hardware option, else software. Resolved once, cached.
     const EncoderOption* opt = selectEncoder(plan, w, h);
     if (!opt) {
-        logError("VideoWriter")
-            << "no working " << plan.label << " GStreamer encoder found "
-            << "(check gst-plugins-ugly/bad and your GPU's VA-API/NVENC plugins)";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("no working ") + plan.label +
+            " GStreamer encoder found (check gst-plugins-ugly/bad and your GPU's VA-API/NVENC plugins)");
         return false;
     }
 
@@ -338,9 +336,8 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     GError* err = nullptr;
     GstElement* pipeline = gst_parse_launch(desc.c_str(), &err);
     if (!pipeline || err) {
-        logError("VideoWriter")
-            << "failed to build pipeline: "
-            << (err ? err->message : "unknown") << " [" << desc << "]";
+        result_ = SaveResult::fail(SaveError::WriteFailed, std::string("failed to build pipeline: ") +
+            (err ? err->message : "unknown") + " [" + desc + "]");
         if (err) g_error_free(err);
         if (pipeline) gst_object_unref(pipeline);
         return false;
@@ -350,7 +347,7 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     GstElement* enc    = gst_bin_get_by_name(GST_BIN(pipeline), "enc");
     GstElement* sink   = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
     if (!appsrc || !sink) {
-        logError("VideoWriter") << "pipeline missing src/sink";
+        result_ = SaveResult::fail(SaveError::WriteFailed, "pipeline missing src/sink");
         if (appsrc) gst_object_unref(appsrc);
         if (enc) gst_object_unref(enc);
         if (sink) gst_object_unref(sink);
@@ -427,10 +424,37 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
         }
     }
 
-    if (gst_element_set_state(pipeline, GST_STATE_PLAYING) ==
-        GST_STATE_CHANGE_FAILURE) {
-        logError("VideoWriter")
-            << "could not start pipeline (encoder: " << opt->encName << ")";
+    const auto state = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstBus* bus = gst_element_get_bus(pipeline);
+    GstMessage* openError = gst_bus_pop_filtered(bus, GST_MESSAGE_ERROR);
+    gst_object_unref(bus);
+    if (state == GST_STATE_CHANGE_FAILURE || openError) {
+        result_ = SaveResult::fail(SaveError::WriteFailed,
+            std::string("could not start pipeline (encoder: ") + opt->encName + ")");
+        if (openError) {
+            GError* error = nullptr;
+            gchar* debug = nullptr;
+            gst_message_parse_error(openError, &error, &debug);
+            if (error) result_.message = error->message;
+            // filesink's OPEN_WRITE carries GST_ERROR_SYSTEM in the debug text,
+            // not a numeric errno field. Match its localized g_strerror suffix;
+            // do not use this thread's errno after the state transition.
+            if (error && error->domain == GST_RESOURCE_ERROR &&
+                error->code == GST_RESOURCE_ERROR_OPEN_WRITE && debug) {
+                for (int code : {EACCES, EPERM, EROFS, ENOSPC}) {
+                    const std::string reason = std::string("system error: ") + g_strerror(code);
+                    if (g_str_has_suffix(debug, reason.c_str())) {
+                        result_.error = code == ENOSPC ? SaveError::NoSpace : SaveError::AccessDenied;
+                        result_.message += " (" + std::string(g_strerror(code)) + ")";
+                        break;
+                    }
+                }
+            }
+            if (error) g_error_free(error);
+            g_free(debug);
+            gst_message_unref(openError);
+        }
+        gst_element_set_state(pipeline, GST_STATE_NULL);
         gst_object_unref(appsrc);
         if (audiosrc) gst_object_unref(audiosrc);
         gst_object_unref(sink);

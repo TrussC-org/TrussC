@@ -83,4 +83,4 @@ What else changes:
 - `appendToFile`, `FileWriter`, the log file and the recorders write in place, and check every write.
 - `saveScreenshot()` still returns `bool`, meaning "queued". A failed write later logs one Error. On Web it is still a browser download.
 - `AudioRecorder` ends the take at the first failed write; `getRecordedSeconds()` counts what was actually written.
-- `VideoWriter::getFrameCount()` counts frames the encoder accepted. A wrong-size frame or other caller mistake fails that call only; the take goes on.
+- `VideoWriter::getFrameCount()` counts frames the encoder accepted; a backend that stops accepting data ends the take, including macOS audio input that stays "not ready" for 5 s (previously that chunk was dropped while video recording continued). A wrong-size frame or other caller mistake fails that call only; the take goes on.

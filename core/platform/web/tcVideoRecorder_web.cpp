@@ -27,7 +27,7 @@ using internal::VideoWriterPlatformData;
 
 bool VideoWriter::openPlatform(const std::string&, int, int, float,
                                const VideoRecordSettings&) {
-    logWarning("VideoWriter") << "video recording is not implemented on web yet";
+    result_ = SaveResult::fail(SaveError::WriteFailed, "video recording is not implemented on web yet");
     return false;
 }
 

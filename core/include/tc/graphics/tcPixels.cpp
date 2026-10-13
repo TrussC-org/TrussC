@@ -6,6 +6,24 @@
 
 namespace trussc {
 
+SaveResult internal::writePixelsEncoded(std::FILE* file, const Pixels& pixels,
+                                        const std::string& ext, const fs::path& path) {
+    struct Sink { std::FILE* file; const fs::path& path; SaveResult result; } sink{file, path, {}};
+    auto write = [](void* context, void* data, int size) {
+        auto& sink = *static_cast<Sink*>(context);
+        if (sink.result) sink.result = internal::checkedWriteUnflushed(sink.file, data, size, sink.path);
+    };
+    const int w = pixels.getWidth(), h = pixels.getHeight(), ch = pixels.getChannels();
+    const auto* data = pixels.getData();
+    int encoded;
+    if (ext == "jpg" || ext == "jpeg") encoded = stbi_write_jpg_to_func(write, &sink, w, h, ch, data, 90);
+    else if (ext == "bmp") encoded = stbi_write_bmp_to_func(write, &sink, w, h, ch, data);
+    else if (ext == "tga") encoded = stbi_write_tga_to_func(write, &sink, w, h, ch, data);
+    else encoded = stbi_write_png_to_func(write, &sink, w, h, ch, data, w * ch);
+    if (!sink.result) return sink.result;
+    return encoded ? SaveResult::success() : internal::saveFailure(path, "Screenshot encoding failed");
+}
+
 SaveResult Pixels::save(const fs::path& path) const {
     if (!allocated_ || !data_ || format_ == PixelFormat::F32)
         return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
