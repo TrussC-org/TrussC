@@ -19713,21 +19713,21 @@ description.ko = "atomic 실패 스냅샷에서 해석한 정적 백엔드 이�
 
 ["console::start"]
 category = "console"
-description.en = "Start stdin command input; runApp() starts it automatically. Unavailable on Web."
-description.ja = "標準入力のコマンド読み取りを開始する。runApp() が自動で開始する。Web では利用不可。"
-description.ko = "표준 입력 명령 수신을 시작한다. runApp()이 자동으로 시작한다. Web에서는 사용할 수 없다."
+description.en = "Opt in to stdin commands: call in setup() for windowed or headless apps. Neither runner starts input automatically (breaking in v0.8.0). Drains pending commands before enabling delivery; the first call creates the process's only detached reader, which reads until EOF. Later starts reuse it. LF/CRLF and a partial last line at EOF are supported. Unavailable on Web."
+description.ja = "標準入力コマンドを有効にする。ウィンドウ付き・ヘッドレスとも setup() で明示的に呼ぶ。ランナーは自動で開始しない（v0.8.0 の破壊的変更）。保留中のコマンドを破棄してから配信を有効にする。初回のみプロセスで唯一の detached リーダーを作成し、EOF まで読み取る。再開時は同じリーダーを使う。LF・CRLF と EOF 前の改行なし最終行に対応。Web では利用不可。"
+description.ko = "표준 입력 명령을 명시적으로 활성화한다. 창 앱과 헤드리스 앱 모두 setup()에서 호출해야 하며 러너는 자동 시작하지 않는다(v0.8.0 호환성 변경). 대기 중인 명령을 버린 뒤 전달을 활성화한다. 최초 호출만 프로세스의 유일한 detached 리더를 생성하며 EOF까지 읽는다. 재시작은 같은 리더를 사용한다. LF/CRLF와 EOF 앞의 개행 없는 마지막 줄을 지원한다. Web에서는 사용할 수 없다."
 
 ["console::stop"]
 category = "console"
-description.en = "Disable stdin command input; call in setup() to opt out. No-op on Web."
-description.ja = "標準入力のコマンド読み取りを無効にする。無効化するには setup() で呼ぶ。Web では何もしない。"
-description.ko = "표준 입력 명령 수신을 비활성화한다. setup()에서 호출한다. Web에서는 아무 작업도 하지 않는다."
+description.en = "Disable stdin command delivery and discard queued commands. The detached reader continues consuming stdin until EOF, dropping lines read while stopped. start() enables delivery again. Both runners stop delivery before app exit/cleanup. No-op on Web."
+description.ja = "標準入力コマンドの配信を無効にしてキューを破棄する。detached リーダーは EOF まで読み取りを続け、停止中に読んだ行を捨てる。start() で配信を再開できる。両ランナーはアプリの exit()/cleanup() 前に配信を停止する。Web では何もしない。"
+description.ko = "표준 입력 명령 전달을 비활성화하고 큐를 비운다. detached 리더는 EOF까지 계속 읽으며 중지 중에 읽은 줄은 버린다. start()로 전달을 재개한다. 두 러너 모두 앱의 exit()/cleanup() 전에 전달을 중지한다. Web에서는 아무 작업도 하지 않는다."
 
 ["console::isEnabled"]
 category = "console"
-description.en = "Whether stdin command input is enabled; always false on Web."
-description.ja = "標準入力のコマンド読み取りが有効か。Web では常に false。"
-description.ko = "표준 입력 명령 수신 활성화 여부. Web에서는 항상 false이다."
+description.en = "Whether stdin command delivery is enabled. False until the app calls start(), and after stop(); always false on Web."
+description.ja = "標準入力コマンドの配信が有効か。アプリが start() を呼ぶまでは false、stop() 後も false。Web では常に false。"
+description.ko = "표준 입력 명령 전달 활성화 여부. 앱이 start()를 호출하기 전과 stop() 후에는 false이며 Web에서는 항상 false이다."
 
 ["mcp::ToolLevel"]
 category = "mcp"

@@ -293,6 +293,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             internal::drainMainThreadQueue();
             internal::pumpAudioDiagnostics();
 #ifndef __EMSCRIPTEN__
+            console::internal::processQueue();
             mcp::processHttpQueue();
 #endif
         }
@@ -311,6 +312,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 #ifndef __EMSCRIPTEN__
     mcp::stopHttpServer();
 #endif
+    console::stop();
 
     // Call exit and cleanup
     {
