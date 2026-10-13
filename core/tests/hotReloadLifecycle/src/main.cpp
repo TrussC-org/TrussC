@@ -418,7 +418,7 @@ static int runCycles(const std::string& guestPath, int port) {
         setTouchAsMouse(true);
         setNearClip(0.0f);
         setFarClip(0.0f);
-        setDefaultScreenFov(45.0f);
+        setDefaultScreenFovDeg(45.0f);
         setDataPathRoot("data");
         bitmapfont::internal::registry().clear();
         internal::overlayHoveredQuery() = nullptr;
@@ -440,7 +440,7 @@ static int runCycles(const std::string& guestPath, int port) {
         }
         if (internal::mainLoop().redrawCount != 3) return fail(15, "redraw() from the guest did not reach the host's loop");
         if (getTouchAsMouse()) return fail(16, "setTouchAsMouse() from the guest did not reach the host");
-        if (getNearClip() != 0.25f || getFarClip() != 750.0f || getDefaultScreenFov() != 30.0f) {
+        if (getNearClip() != 0.25f || getFarClip() != 750.0f || std::abs(getDefaultScreenFovDeg() - 30.0f) > 0.0001f) {
             return fail(17, "setNearClip / setFarClip / setDefaultScreenFov from the guest did not reach the host");
         }
         if (getDataPathRoot() != fs::path("guest-data-root")) {
@@ -463,7 +463,7 @@ static int runCycles(const std::string& guestPath, int port) {
         setTouchAsMouse(true);
         setNearClip(0.0f);
         setFarClip(0.0f);
-        setDefaultScreenFov(45.0f);
+        setDefaultScreenFovDeg(45.0f);
         setDataPathRoot("data");
         setBeepVolume(0.5f);
         bitmapfont::internal::registry().clear();   // it points into the guest's image

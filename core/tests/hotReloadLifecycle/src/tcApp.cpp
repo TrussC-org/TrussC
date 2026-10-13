@@ -51,7 +51,7 @@ void tcApp::writeSharedState() {
     setTouchAsMouse(false);
     setNearClip(0.25f);
     setFarClip(750.0f);
-    setDefaultScreenFov(30.0f);
+    setDefaultScreenFovDeg(30.0f);
     setDataPathRoot("guest-data-root");
     setBeepVolume(0.37f);
     mcp::alert("hotReloadLifecycle guest alert");

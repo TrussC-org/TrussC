@@ -1074,9 +1074,9 @@ description.ja = "明度 (0.0-1.0)"
 description.ko = "명도 (0.0-1.0)"
 
 ["ColorHSB::h"]
-description.en = "Hue (0.0-1.0)"
-description.ja = "色相 (0.0-1.0)"
-description.ko = "색상 (0.0-1.0)"
+description.en = "Hue (0–1 of a turn): color data, not a rotation angle"
+description.ja = "色相（1周を0〜1で表す）。回転角ではなく色データ"
+description.ko = "색상 (한 바퀴를 0–1로 표현): 회전각이 아닌 색 데이터"
 
 ["ColorHSB::lerp"]
 category = "types_colorhsb"
@@ -1220,9 +1220,9 @@ description.ja = "彩度 (0.0 - ~0.4)"
 description.ko = "채도 (0.0 - ~0.4)"
 
 ["ColorOKLCH::H"]
-description.en = "Hue (0.0-1.0)"
-description.ja = "色相 (0.0-1.0)"
-description.ko = "색상 (0.0-1.0)"
+description.en = "Hue (0–1 of a turn): color data, not a rotation angle"
+description.ja = "色相（1周を0〜1で表す）。回転角ではなく色データ"
+description.ko = "색상 (한 바퀴를 0–1로 표현): 회전각이 아닌 색 데이터"
 
 ["ColorOKLCH::L"]
 description.en = "Lightness (0.0-1.0)"
@@ -5763,6 +5763,9 @@ description.en = "Base scene-graph node: transform hierarchy with parent/childre
 description.ja = "シーングラフの基底ノード。親子の変換階層、update/draw、入力イベント、アタッチ可能な Mod を持つ（C++専用、shared_ptr / NodePtr で管理）"
 description.ko = "씬 그래프 기반 노드: 부모/자식 변환 계층, update/draw, 입력 이벤트, 부착 가능한 Mod를 가짐(C++ 전용, shared_ptr / NodePtr로 관리)"
 related = ["Node::addChild", "RectNode", "getRootNode", "Mod"]
+details.en = "Reflected rotation is canonical Euler radians; rotationDeg is derived Euler degrees. Both are readable and writable in MCP and the inspector. Only rotation is saved to JSON; when a write includes both, rotation wins. Old degree-valued rotation data must be converted or loaded under rotationDeg."
+details.ja = "反映キー rotation は正規のオイラー角（ラジアン）、rotationDeg は派生値（度数）。MCPとインスペクタで両方を読み書きできる。JSON保存は rotation のみ。同時に指定した場合は rotation が優先。旧データの度数 rotation は変換するか rotationDeg として読み込む。"
+details.ko = "리플렉션 키 rotation은 정규 오일러 라디안이며 rotationDeg는 파생 오일러 도 값이다. MCP와 인스펙터에서 둘 다 읽고 쓸 수 있다. JSON에는 rotation만 저장하며 동시 쓰기에서는 rotation이 우선한다. 기존 도 단위 rotation 데이터는 변환하거나 rotationDeg로 읽어야 한다."
 
 ["Node::addChild"]
 category = "scene_graph"
@@ -5974,9 +5977,9 @@ related = ["Node::setEuler", "Node::getEulerDeg"]
 ["Node::getEulerDeg"]
 category = "scene_graph"
 keywords = ["rotation", "degrees"]
-description.en = "Get rotation as Euler angles in degrees (C++ only)"
-description.ja = "回転をオイラー角（度数）で取得（C++のみ）"
-description.ko = "회전을 오일러 각(도)으로 얻음 (C++ 전용)"
+description.en = "Get rotation as Euler angles in degrees"
+description.ja = "回転をオイラー角（度数）で取得"
+description.ko = "회전을 오일러 각(도)으로 얻음"
 related = ["Node::setEulerDeg", "Node::getEuler"]
 
 ["Node::getGlobalMatrix"]
@@ -6132,9 +6135,9 @@ related = ["Node::setRot", "Node::getRotDeg"]
 ["Node::getRotDeg"]
 category = "scene_graph"
 keywords = ["rotation", "2d", "z axis", "degrees"]
-description.en = "Get 2D Z-axis rotation in degrees (C++ only)"
-description.ja = "2DのZ軸回転を度数で取得（C++のみ）"
-description.ko = "2D Z축 회전을 도로 얻음 (C++ 전용)"
+description.en = "Get 2D Z-axis rotation in degrees"
+description.ja = "2DのZ軸回転を度数で取得"
+description.ko = "2D Z축 회전을 도로 얻음"
 related = ["Node::setRotDeg", "Node::getRot"]
 
 ["Node::getScale"]
@@ -6379,9 +6382,9 @@ related = ["Node::getEuler", "Node::setEulerDeg"]
 ["Node::setEulerDeg"]
 category = "scene_graph"
 keywords = ["rotation", "degrees"]
-description.en = "Set rotation from Euler angles in degrees (C++ only)"
-description.ja = "回転をオイラー角（度数）で設定（C++のみ）"
-description.ko = "회전을 오일러 각(도)으로 설정 (C++ 전용)"
+description.en = "Set rotation from Euler angles in degrees"
+description.ja = "回転をオイラー角（度数）で設定"
+description.ko = "회전을 오일러 각(도)으로 설정"
 related = ["Node::getEulerDeg", "Node::setEuler"]
 
 ["Node::setGlobalPos"]
@@ -6445,9 +6448,9 @@ related = ["Node::getRot", "Node::setRotDeg"]
 ["Node::setRotDeg"]
 category = "scene_graph"
 keywords = ["rotation", "2d", "z axis", "degrees"]
-description.en = "Set 2D Z-axis rotation in degrees (C++ only)"
-description.ja = "2DのZ軸回転を度数で設定（C++のみ）"
-description.ko = "2D Z축 회전을 도로 설정 (C++ 전용)"
+description.en = "Set 2D Z-axis rotation in degrees"
+description.ja = "2DのZ軸回転を度数で設定"
+description.ko = "2D Z축 회전을 도로 설정"
 related = ["Node::getRotDeg", "Node::setRot"]
 
 ["Node::setScale"]
@@ -6667,10 +6670,17 @@ description.ko = "여러 정점을 추가"
 ["Path::arc"]
 category = "types_path"
 keywords = ["circle", "round", "sweep", "angle"]
-description.en = "Add an arc (angles in radians)"
-description.ja = "円弧を追加（角度はradian）"
-description.ko = "호를 추가 (각도는 radian)"
+description.en = "Add a circular or elliptical arc (all angles in radians)"
+description.ja = "円弧・楕円弧を追加（すべての角度はラジアン）"
+description.ko = "원호 또는 타원호 추가 (모든 각도는 라디안)"
 related = ["drawArc", "appendArc", "Path::lineTo"]
+
+["Path::arcDeg"]
+category = "types_path"
+description.en = "Add an elliptical arc with angles in degrees (all elliptical overloads)"
+description.ja = "度数の角度で楕円弧を追加（全楕円オーバーロード）"
+description.ko = "도 단위 각도로 타원호 추가 (모든 타원 오버로드)"
+related = ["Path::arc"]
 
 ["Path::bezierTo"]
 category = "types_path"
@@ -14410,8 +14420,10 @@ keywords = ["3d", "fov", "deprecated"]
 description.en = "Deprecated alias for setupScreenPerspective()"
 description.ja = "setupScreenPerspective() の非推奨エイリアス"
 description.ko = "setupScreenPerspective()의 deprecated 별칭"
-details = "Use `setupScreenPerspective(fovDeg)` or `setupScreenFov(fovDeg)`. WARNING: the FOV unit changed from radians to degrees, so a literal value must be converted (e.g. 0.785 rad ≈ 45 deg). Scheduled for removal in v1.0.0."
 related = ["setupScreenPerspective", "setupScreenFov"]
+details.en = "Use setupScreenPerspective(fovRadians) or setupScreenFov(fovRadians); both use radians. Degree input uses the Deg companions. Scheduled for removal in v1.0.0."
+details.ja = "setupScreenPerspective(fovRadians) または setupScreenFov(fovRadians) を使う。どちらもラジアン。度数には Deg 版を使う。v1.0.0で削除予定。"
+details.ko = "setupScreenPerspective(fovRadians) 또는 setupScreenFov(fovRadians)를 사용한다. 둘 다 라디안이며 도 단위 입력에는 Deg 버전을 사용한다. v1.0.0에서 제거 예정."
 
 ["endLines"]
 category = "graphics_shapes"
@@ -14869,10 +14881,17 @@ description.ko = "현재 일 (1-31)"
 ["getDefaultScreenFov"]
 category = "graphics_3d_setup"
 keywords = ["field of view", "projection"]
-description.en = "Get current default screen FOV"
-description.ja = "現在のデフォルトスクリーンFOVを取得"
-description.ko = "현재 기본 스크린 FOV를 얻음"
+description.en = "Get default screen FOV in radians"
+description.ja = "デフォルトFOVをラジアンで取得"
+description.ko = "기본 FOV를 라디안으로 얻음"
 related = ["setDefaultScreenFov"]
+
+["getDefaultScreenFovDeg"]
+category = "graphics_3d_setup"
+description.en = "Get default screen FOV in degrees"
+description.ja = "デフォルトFOVを度数で取得"
+description.ko = "기본 FOV를 도 단위로 얻음"
+related = ["getDefaultScreenFov"]
 
 ["getDeltaTime"]
 category = "time_frame"
@@ -16789,10 +16808,23 @@ related = ["getUserDataPath", "setDataPathRoot"]
 ["setDefaultScreenFov"]
 category = "graphics_3d_setup"
 keywords = ["field of view", "projection", "perspective"]
-description.en = "Set default screen FOV (applied at frame start)"
-description.ja = "デフォルトのスクリーンFOVを設定（フレーム開始時に適用）"
-description.ko = "기본 스크린 FOV를 설정 (프레임 시작 시 적용)"
+description.en = "Set default screen FOV in radians (frame start and FBO begin)"
+description.ja = "デフォルトFOVをラジアンで設定（フレーム開始・FBO開始時）"
+description.ko = "기본 FOV를 라디안으로 설정 (프레임 및 FBO 시작 시)"
 related = ["getDefaultScreenFov"]
+details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
+details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
+details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+
+["setDefaultScreenFovDeg"]
+category = "graphics_3d_setup"
+description.en = "Set default screen FOV in degrees"
+description.ja = "デフォルトFOVを度数で設定"
+description.ko = "기본 FOV를 도 단위로 설정"
+related = ["setDefaultScreenFov"]
+details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
+details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
+details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
 
 ["setEnvironment"]
 category = "graphics_lighting"
@@ -17224,10 +17256,43 @@ related = ["cleanup", "runApp"]
 ["setupScreenFov"]
 category = "graphics_3d_setup"
 keywords = ["field of view", "projection", "perspective", "ortho", "screen setup"]
-description.en = "Set up screen projection with specified FOV (0 = ortho, >0 = perspective)"
-description.ja = "指定したFOVで画面投影を設定（0 = 正投影、0より大 = パースペクティブ）"
-description.ko = "지정한 FOV로 화면 투영을 설정 (0 = 정사영, 0보다 크면 원근)"
+description.en = "Set up screen perspective with FOV in radians"
+description.ja = "ラジアンのFOVで画面の透視投影を設定"
+description.ko = "라디안 FOV로 화면 원근 투영 설정"
 related = ["setDefaultScreenFov", "EasyCam::setFov"]
+details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
+details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
+details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+
+["setupScreenFovDeg"]
+category = "graphics_3d_setup"
+description.en = "Set up screen perspective with FOV in degrees"
+description.ja = "度数のFOVで画面の透視投影を設定"
+description.ko = "도 단위 FOV로 화면 원근 투영 설정"
+related = ["setupScreenFov"]
+details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
+details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
+details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
+
+["setupScreenFovWithSize"]
+category = "graphics_3d_setup"
+description.en = "Set up perspective with explicit viewport size and FOV in radians"
+description.ja = "明示的な画面サイズとラジアンのFOVで透視投影を設定"
+description.ko = "명시적 뷰포트 크기와 라디안 FOV로 원근 투영 설정"
+related = ["setupScreenFov"]
+details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
+details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
+details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+
+["setupScreenFovWithSizeDeg"]
+category = "graphics_3d_setup"
+description.en = "Set up perspective with explicit viewport size and FOV in degrees"
+description.ja = "明示的な画面サイズと度数のFOVで透視投影を設定"
+description.ko = "명시적 뷰포트 크기와 도 단위 FOV로 원근 투영 설정"
+related = ["setupScreenFovWithSize"]
+details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
+details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
+details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
 
 ["setupScreenOrtho"]
 category = "graphics_3d_setup"
@@ -17241,11 +17306,24 @@ related = ["setupScreenFov", "Mat4::ortho"]
 ["setupScreenPerspective"]
 category = "graphics_3d_setup"
 keywords = ["projection", "3d mode", "frustum", "ofSetupScreenPerspective", "fov"]
-of = ["ofSetupScreenPerspective"]
-description.en = "Set up perspective projection (oF-style default 3D)"
-description.ja = "パースペクティブ投影を設定（oF風デフォルト3D）"
-description.ko = "원근 투영을 설정 (oF 스타일 기본 3D)"
+description.en = "Set up screen perspective with FOV in radians (default TAU/8)"
+description.ja = "ラジアンのFOVで透視投影を設定（既定 TAU/8）"
+description.ko = "라디안 FOV로 원근 투영 설정 (기본 TAU/8)"
 related = ["setupScreenFov", "Mat4::perspective"]
+details.en = "Accepts only 0 < fov < TAU/2 radians. Invalid values warn once and are ignored, preserving the current projection/default. Use setupScreenOrtho() for orthographic projection; zero is only an internal sentinel."
+details.ja = "0 < fov < TAU/2 のラジアンのみ受け付ける。範囲外は一度だけ警告して無視し、現在の投影・デフォルト値を維持する。正投影には setupScreenOrtho() を使う。0 は内部専用の値。"
+details.ko = "0 < fov < TAU/2 라디안만 허용한다. 범위 밖 값은 한 번 경고하고 무시하여 현재 투영과 기본값을 유지한다. 정사영에는 setupScreenOrtho()를 사용한다. 0은 내부 전용 값이다."
+
+["setupScreenPerspectiveDeg"]
+of = ["ofSetupScreenPerspective"]
+category = "graphics_3d_setup"
+description.en = "Set up screen perspective with FOV in degrees (default 45)"
+description.ja = "度数のFOVで透視投影を設定（既定45）"
+description.ko = "도 단위 FOV로 원근 투영 설정 (기본 45)"
+related = ["setupScreenPerspective"]
+details.en = "Degree companion: accepts only 0 < fov < 180. Invalid values warn once and are ignored."
+details.ja = "度数版。0 < fov < 180 のみ受け付け、範囲外は一度だけ警告して無視する。"
+details.ko = "도 단위 버전. 0 < fov < 180만 허용하며 범위 밖 값은 한 번 경고하고 무시한다."
 
 ["shadowDraw"]
 category = "graphics_lighting"

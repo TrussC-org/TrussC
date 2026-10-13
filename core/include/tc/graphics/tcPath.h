@@ -311,22 +311,18 @@ public:
         curveTo(Vec3{to.x, to.y, 0}, resolution);
     }
 
-    // Arc
+    // Elliptical arc (radians)
     void arc(const Vec3& center, float radiusX, float radiusY,
              float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) {
 
-        // Degrees to radians
-        float startRad = angleBegin * TAU / 360.0f;
-        float endRad = angleEnd * TAU / 360.0f;
-
-        float diff = endRad - startRad;
+        float diff = angleEnd - angleBegin;
 
         // Adjust segment count based on angle size
         int segments = std::max(2, (int)(std::abs(diff) / TAU * circleResolution));
 
         for (int i = 0; i <= segments; i++) {
             float t = (float)i / segments;
-            float angle = clockwise ? (startRad + diff * t) : (startRad - diff * t);
+            float angle = clockwise ? (angleBegin + diff * t) : (angleBegin - diff * t);
 
             Vec3 p;
             p.x = center.x + std::cos(angle) * radiusX;
@@ -347,13 +343,28 @@ public:
         arc(Vec3{center.x, center.y, 0}, radiusX, radiusY, angleBegin, angleEnd, true, circleResolution);
     }
 
+    // Degree companions for every elliptical overload.
+    void arcDeg(const Vec3& center, float radiusX, float radiusY,
+                float angleBegin, float angleEnd, bool clockwise = true, int circleResolution = 20) {
+        arc(center, radiusX, radiusY, deg2rad(angleBegin), deg2rad(angleEnd), clockwise, circleResolution);
+    }
+
+    void arcDeg(float x, float y, float radiusX, float radiusY,
+                float angleBegin, float angleEnd, int circleResolution = 20) {
+        arcDeg(Vec3{x, y, 0}, radiusX, radiusY, angleBegin, angleEnd, true, circleResolution);
+    }
+
+    void arcDeg(const Vec2& center, float radiusX, float radiusY,
+                float angleBegin, float angleEnd, int circleResolution = 20) {
+        arcDeg(Vec3{center.x, center.y, 0}, radiusX, radiusY, angleBegin, angleEnd, true, circleResolution);
+    }
+
     // -----------------------------------------------------------------------
     // Circular arc — radians, tolerance-aware (uses current CurveStyle).
     //
     // Disambiguated from the elliptical overloads above by parameter count:
     // these take a single `radius` instead of `radiusX, radiusY`. Angles
-    // are in **radians** (matches TrussC's overall convention; the older
-    // overloads take degrees for backward-compat reasons).
+    // are in radians, like the elliptical overloads.
     // -----------------------------------------------------------------------
     void arc(const Vec3& center, float radius,
              float angleBegin, float angleEnd, bool clockwise = true) {

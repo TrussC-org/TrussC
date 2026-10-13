@@ -86,6 +86,12 @@ static void cover_graphics_3d_setup() {
     (void)setupScreenOrtho();
     (void)setDefaultScreenFov(af::val<float>());
     (void)getDefaultScreenFov();
+    (void)setupScreenFovWithSize(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setupScreenFovWithSizeDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setupScreenFovDeg(af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setupScreenPerspectiveDeg(af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setDefaultScreenFovDeg(af::val<float>());
+    (void)getDefaultScreenFovDeg();
     (void)setNearClip(af::val<float>());
     (void)setFarClip(af::val<float>());
     (void)worldToScreen(af::val<const Vec3>());
@@ -2181,6 +2187,9 @@ struct Cover_Path : af::Scope<Path> {
         (void)af::val<Path>().curveTo(af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().curveTo(af::val<const Vec2>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>(), af::val<int>());
+        (void)af::val<Path>().arcDeg(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>(), af::val<int>());
+        (void)af::val<Path>().arcDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
+        (void)af::val<Path>().arcDeg(af::val<const Vec2>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<const Vec2>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>());

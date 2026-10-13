@@ -449,7 +449,8 @@ public:
     TC_REFLECT_ROOT(Node) {
         TC_DERIVED(globalPos, getGlobalPos, setGlobalPos)
         TC_VALUE(pos,       getPos,       setPos)
-        TC_VALUE(rotation,  getEulerDeg,  setEulerDeg)   // euler X/Y/Z, degrees
+        TC_DERIVED(rotationDeg, getEulerDeg, setEulerDeg) // degrees; not saved
+        TC_VALUE(rotation, getEuler, setEuler)           // canonical Euler X/Y/Z, radians
         TC_VALUE(scale,     getScale,     setScale)
         TC_VALUE(visible,   isVisible,    setVisible)
         TC_VALUE(active,    isActive,     setActive)

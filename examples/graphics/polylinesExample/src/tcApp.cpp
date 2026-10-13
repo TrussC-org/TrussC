@@ -56,7 +56,7 @@ void tcApp::setupPolylines() {
 
     // Arc (col 3, row 2)
     arcPolyline.clear();
-    arcPolyline.arc(800.0f, 480.0f, 80.0f, 80.0f, 0.0f, 270.0f, 32);
+    arcPolyline.arcDeg(800.0f, 480.0f, 80.0f, 80.0f, 0.0f, 270.0f, 32);
 }
 
 void tcApp::update() {

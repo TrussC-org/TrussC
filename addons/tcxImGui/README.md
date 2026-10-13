@@ -195,7 +195,7 @@ frame.
   window rendering less often than once every 2 s, or one that stopped — the
   first read-back stands). If the app took the value and
   changed it by the next frame (a clamp, a setter that converts it, such as
-  the inspector's `rotation` in degrees), the reply is still `ok`, with a
+  the inspector's `rotationDeg` in degrees), the reply is still `ok`, with a
   `message` saying so and `value` = what the variable holds.
 - Errors, with nothing written: a value of the wrong shape or type (component
   count, not a number, a fraction for an int, out of the C++ type's range); a

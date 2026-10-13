@@ -456,7 +456,7 @@ private:
     int  numMipLevels_ = 1;
 
     // Screen camera state captured in beginInternal(), restored in end()
-    float savedScreenFov_ = 0.0f;
+    float savedScreenFov_ = 0.0f; // radians; zero is orthographic
     float savedViewW_ = 0.0f;
     float savedViewH_ = 0.0f;
     float savedCameraDist_ = 0.0f;

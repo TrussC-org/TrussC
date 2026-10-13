@@ -1010,3 +1010,14 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   MCP tools on a headless App: `tc_get_node_tree` shows `globalPos` and names
   it under `derived`, writing the read object back with an edited `pos` via
   `tc_set_node_members` applies the edit, and `globalPos` alone moves the node.
+  Node's `rotation` (#236) is canonical radians; `rotationDeg` is derived:
+  only `rotation` is saved, both keys round-trip, `rotation` wins when both
+  are written, and the MCP tools read and write both.
+- `angleUnits/` — every angle API is radians, with `Deg` companions (#236):
+  elliptical `Path::arc()` in radians matches `arcDeg()` for all overloads;
+  `setDefaultScreenFov()` / `getDefaultScreenFovDeg()` convert; a FOV outside
+  0 < fov < TAU/2 (60, 0, negative, TAU/2, infinity, NaN) warns once and
+  leaves the projection unchanged. With `--gpu-check` (display mode): radian
+  and `Deg` setups give the same projection and camera, an Fbo applies and
+  restores the radian default, and `setupScreenOrtho()` still selects the
+  internal zero sentinel.

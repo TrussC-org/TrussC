@@ -1,0 +1,2 @@
+# Projection checks use --gpu-check under Xvfb.
+{test} --gpu-check

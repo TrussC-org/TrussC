@@ -759,7 +759,7 @@ void NodeInspector::gizmoDragHandler(MouseDragEventArgs& e) {
                 case 2: euler.z += dragAngleAccum_; break;
             }
             node->setEuler(euler);
-            recordTouched(node, nullptr, "rotation");
+            recordTouched(node, nullptr, "rotation"); // setEuler writes canonical radians
         }
     }
     e.consumed = true;

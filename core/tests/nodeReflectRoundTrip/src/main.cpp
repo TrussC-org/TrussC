@@ -178,13 +178,33 @@ static void testJsonRoundTrip() {
           exact(child->getPos(), Vec3(10, 0, 0)), str(child->getPos()));
 }
 
+static void testRotation() {
+    auto n = make_shared<Node>();
+    n->setEuler(Vec3(0.2f, 0.3f, 0.4f));
+    Json saved = reflectToJson(*n);
+    check("rotation save: canonical radians only", saved.contains("rotation") && !saved.contains("rotationDeg"));
+    check("rotation save: radian value", fabs(saved["rotation"][2].get<float>() - 0.4f) < 1e-4f);
+    auto restored = make_shared<Node>();
+    reflectFromJson(*restored, saved);
+    check("rotation radians round-trip", nearlyEqual(restored->getEuler(), n->getEuler()));
+    Json live = reflectToJson(*n, true);
+    check("rotation live: degrees are readable", live.contains("rotationDeg") &&
+          fabs(live["rotationDeg"][2].get<float>() - rad2deg(0.4f)) < 1e-4f);
+    reflectFromJson(*restored, Json{{"rotationDeg", live["rotationDeg"]}});
+    check("rotation degrees round-trip", nearlyEqual(restored->getEuler(), n->getEuler()));
+    auto result = reflectFromJson(*restored, Json{{"rotation", {0.1f, 0.2f, 0.3f}}, {"rotationDeg", {40, 50, 60}}});
+    check("both rotation keys: canonical radians win", nearlyEqual(restored->getEuler(), Vec3(0.1f, 0.2f, 0.3f)));
+    check("rotationDeg is applied before rotation", indexOf(result.applied, "rotationDeg") >= 0 &&
+          indexOf(result.applied, "rotationDeg") < indexOf(result.applied, "rotation"));
+}
+
 static void testDerivedMarker() {
     auto n = make_shared<Node>();
     DerivedProbe p;
     n->reflectMembers(p);
     check("isDerived(): globalPos is visited as derived", contains(p.derived, "globalPos"));
     check("isDerived(): pos is not derived", contains(p.plain, "pos") && !contains(p.derived, "pos"));
-    check("isDerived(): scope closed after the derived value", p.derived.size() == 1);
+    check("isDerived(): scope closed after the derived value", p.derived.size() == 2 && contains(p.derived, "rotationDeg"));
 
     auto sp = make_shared<SpanNode>();
     SpanNode& s = *sp;
@@ -260,6 +280,14 @@ public:
         check("MCP set: globalPos alone gives pos (200,0,0)",
               nearlyEqual(child->getPos(), Vec3(200, 0, 0)), str(child->getPos()));
 
+        check("MCP get: both rotation keys readable and degrees marked derived",
+              members.contains("rotation") && members.contains("rotationDeg") &&
+              contains(node["derived"].get<vector<string>>(), "rotationDeg"));
+        callTool("tc_set_node_members", Json{{"id", id}, {"members", {{"rotationDeg", {10, 20, 30}}}}});
+        check("MCP set: degree key writable", nearlyEqual(child->getEulerDeg(), Vec3(10, 20, 30)));
+        callTool("tc_set_node_members", Json{{"id", id}, {"members", {
+            {"rotation", {0.1f, 0.2f, 0.3f}}, {"rotationDeg", {40, 50, 60}}}}});
+        check("MCP set: canonical rotation wins", nearlyEqual(child->getEuler(), Vec3(0.1f, 0.2f, 0.3f)));
         requestExit();
     }
 };
@@ -269,6 +297,7 @@ public:
 TC_CORE_TEST_MAIN() {
     testJsonRoundTrip();
     testDerivedMarker();
+    testRotation();
 
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::setToolLevel(mcp::ToolLevel::Control);

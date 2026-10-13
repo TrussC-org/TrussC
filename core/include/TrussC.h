@@ -213,8 +213,8 @@ namespace internal {
 
     // Forward declaration of setupScreenFov functions (defined later, after TAU is available)
     // `pickable` flows into the registered CameraContext (false for FBO scopes).
-    inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist = 0.0f, float farDist = 0.0f, bool pickable = true);
-    inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f);
+    inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist = 0.0f, float farDist = 0.0f, bool pickable = true);
+    inline void setupScreenFov(float fovRadians, float nearDist = 0.0f, float farDist = 0.0f);
 }
 
 } // namespace trussc (temporarily closed)
@@ -701,7 +701,7 @@ inline void enable3D() {
 
 // Enable 3D drawing mode (perspective)
 // Deprecated: use setupScreenPerspective() or setupScreenFov() instead
-[[deprecated("Use setupScreenPerspective(fovDeg) or setupScreenFov(fovDeg) instead. Note: FOV is now in degrees, not radians.")]]
+[[deprecated("Use setupScreenPerspective(fovY) or setupScreenFov(fovY) instead (radians).")]]
 inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float farZ = 1000.0f) {
     internal::loadPipeline(internal::active3D());   // format-correct 3D for the active target
     // Set perspective projection (backend-native clip-z, #134). Per-window
@@ -719,21 +719,21 @@ inline void enable3DPerspective(float fovY = 0.785f, float nearZ = 0.1f, float f
 // This is the core function that setupScreenPerspective and setupScreenOrtho call
 namespace internal {
     // Minimum FOV for calculating camera distance and clip planes (even in ortho mode)
-    constexpr float minFovForCalc = 10.0f;
+    constexpr float minFovForCalc = TAU / 36.0f;
 
     // Core implementation with explicit width/height (for FBO support)
-    inline void setupScreenFovWithSize(float fovDeg, float viewW, float viewH, float nearDist, float farDist, bool pickable) {
+    inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH, float nearDist, float farDist, bool pickable) {
         // Skip in headless mode
         if (headless::isActive()) return;
 
         // Calculate camera distance using effective FOV (min 10° for ortho)
-        float effectiveFov = (fovDeg <= 0.0f) ? minFovForCalc : fovDeg;
-        float halfFov = effectiveFov * TAU / 720.0f;  // half FOV in radians
+        float effectiveFov = (fovRadians <= 0.0f) ? minFovForCalc : fovRadians;
+        float halfFov = effectiveFov * 0.5f;  // half FOV in radians
         float theTan = std::tan(halfFov);
         float dist = viewH / (2.0f * theTan);
 
         // Save current screen state for 2D drawing
-        internal::currentWindowContext().currentScreenFov = fovDeg;
+        internal::currentWindowContext().currentScreenFov = fovRadians;
         internal::currentWindowContext().currentViewW = viewW;
         internal::currentWindowContext().currentViewH = viewH;
         internal::currentWindowContext().currentCameraDist = dist;
@@ -747,7 +747,7 @@ namespace internal {
         float eyeX = viewW / 2.0f;
         float eyeY = viewH / 2.0f;
 
-        if (fovDeg <= 0.0f) {
+        if (fovRadians <= 0.0f) {
             // Orthographic projection (2D mode)
             sgl_defaults();
             // 2D alpha pipeline for the active target (swapchain or FBO).
@@ -785,8 +785,7 @@ namespace internal {
             float aspect = viewW / viewH;
 
             // Set perspective projection with Y-flip for screen coordinates (Y down)
-            float fovRad = fovDeg * TAU / 360.0f;
-            float top = nearDist * tanf(fovRad * 0.5f);
+            float top = nearDist * tanf(fovRadians * 0.5f);
             float bottom = -top;
             float right = top * aspect;
             float left = -right;
@@ -820,28 +819,60 @@ namespace internal {
     }
 
     // Wrapper that uses main screen size
-    inline void setupScreenFov(float fovDeg, float nearDist, float farDist) {
+    inline void setupScreenFov(float fovRadians, float nearDist, float farDist) {
         // Per-window: framebuffer size and dpi come from the ACTIVE window
         // context (a secondary window on another display has its own scale).
         float dpiScale = getDpiScale();
         const bool pixelPerfect = pixelPerfectMode();
         float viewW = pixelPerfect ? (float)getFramebufferWidth() : getFramebufferWidth() / dpiScale;
         float viewH = pixelPerfect ? (float)getFramebufferHeight() : getFramebufferHeight() / dpiScale;
-        setupScreenFovWithSize(fovDeg, viewW, viewH, nearDist, farDist);
+        setupScreenFovWithSize(fovRadians, viewW, viewH, nearDist, farDist);
     }
 } // namespace internal
 
-// Setup screen with FOV (0 = ortho, >0 = perspective)
-// This is the primary function - setupScreenPerspective/Ortho are convenience wrappers
-inline void setupScreenFov(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f) {
-    internal::setupScreenFov(fovDeg, nearDist, farDist);
+// Public perspective entry points reject invalid radians, including NaN.
+// Internal callers retain zero as the orthographic sentinel.
+namespace internal {
+    inline bool validScreenFov(float fovRadians) {
+        if (fovRadians > 0.0f && fovRadians < HALF_TAU) return true;
+        static OnceGate warned;
+        if (warned.isFirstTime()) {
+            logWarning("ScreenFov") << "FOV must be radians in 0 < fov < TAU/2; "
+                "use a Deg-suffixed function for degrees. Call ignored.";
+        }
+        return false;
+    }
 }
 
-// Setup screen perspective (oF-style default 3D setup)
-// Camera positioned above viewport center, looking down at Z=0 plane
-// fovDeg: field of view in degrees (default 45 = ~28mm equivalent)
-inline void setupScreenPerspective(float fovDeg = 45.0f, float nearDist = 0.0f, float farDist = 0.0f) {
-    internal::setupScreenFov(fovDeg, nearDist, farDist);
+// Set up perspective with explicit viewport dimensions. FOV is in radians.
+inline void setupScreenFovWithSize(float fovRadians, float viewW, float viewH,
+                                   float nearDist = 0.0f, float farDist = 0.0f) {
+    if (!internal::validScreenFov(fovRadians)) return;
+    internal::setupScreenFovWithSize(fovRadians, viewW, viewH, nearDist, farDist);
+}
+
+inline void setupScreenFovWithSizeDeg(float fovDeg, float viewW, float viewH,
+                                      float nearDist = 0.0f, float farDist = 0.0f) {
+    setupScreenFovWithSize(deg2rad(fovDeg), viewW, viewH, nearDist, farDist);
+}
+
+// Set up screen perspective with FOV in radians (0 < fov < TAU/2).
+inline void setupScreenFov(float fovRadians, float nearDist = 0.0f, float farDist = 0.0f) {
+    if (!internal::validScreenFov(fovRadians)) return;
+    internal::setupScreenFov(fovRadians, nearDist, farDist);
+}
+
+inline void setupScreenFovDeg(float fovDeg, float nearDist = 0.0f, float farDist = 0.0f) {
+    setupScreenFov(deg2rad(fovDeg), nearDist, farDist);
+}
+
+// Camera above viewport center, looking at Z=0. Default TAU/8 = 45 degrees.
+inline void setupScreenPerspective(float fovRadians = (TAU / 8.0f), float nearDist = 0.0f, float farDist = 0.0f) {
+    setupScreenFov(fovRadians, nearDist, farDist);
+}
+
+inline void setupScreenPerspectiveDeg(float fovDeg = 45.0f, float nearDist = 0.0f, float farDist = 0.0f) {
+    setupScreenPerspective(deg2rad(fovDeg), nearDist, farDist);
 }
 
 // Setup orthographic projection (2D mode, origin at top-left)
@@ -849,14 +880,22 @@ inline void setupScreenOrtho() {
     internal::setupScreenFov(0.0f);
 }
 
-// Set/get default screen FOV (called automatically at frame start and FBO begin)
-// 0 = ortho (2D), 45 = default perspective (~28mm equivalent)
-inline void setDefaultScreenFov(float fovDeg) {
-    internal::defaultScreenFov() = fovDeg;
+// Default perspective FOV in radians, applied at frame start and FBO begin.
+inline void setDefaultScreenFov(float fovRadians) {
+    if (!internal::validScreenFov(fovRadians)) return;
+    internal::defaultScreenFov() = fovRadians;
 }
 
 inline float getDefaultScreenFov() {
     return internal::defaultScreenFov();
+}
+
+inline void setDefaultScreenFovDeg(float fovDeg) {
+    setDefaultScreenFov(deg2rad(fovDeg));
+}
+
+inline float getDefaultScreenFovDeg() {
+    return rad2deg(getDefaultScreenFov());
 }
 
 // Set/get near/far clip planes (0 = auto-calculate based on camera distance)
