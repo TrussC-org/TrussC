@@ -145,6 +145,11 @@ inline bool isLoadFile(const fs::path& path) {
 // Defined with the logger in tcGlobal.cpp to avoid the tcLog/FileIO include cycle.
 LoadResult reportMissingLoad(const fs::path& path, const char* module);
 
+#ifdef __EMSCRIPTEN__
+inline constexpr unsigned webLoadTimeoutMSecs = 30000;
+LoadResult reportWebLoadTimeout(const fs::path& path, const char* module);
+#endif
+
 inline std::FILE* openLoadFile(const fs::path& path, const char* module,
                               LoadResult& result) {
     std::FILE* file = isLoadFile(path) ? openFile(path, "rb") : nullptr;
@@ -161,10 +166,14 @@ inline LoadResult checkLoadFile(const fs::path& path, const char* module,
     return result;
 }
 
-inline void recordLoadName(fs::path& name, const fs::path& path = {},
-                           bool success = false) {
-    name = success ? path : fs::path{};
+inline void clearLoadName(fs::path& name) {
+    name.clear();
 }
+
+inline void setLoadName(fs::path& name, const fs::path& path) {
+    name = path;
+}
+
 
 } // namespace internal
 

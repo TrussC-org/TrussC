@@ -285,7 +285,7 @@ public:
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
-        internal::recordLoadName(path_);
+        internal::clearLoadName(path_);
         if (bitsPerSample != 16 && bitsPerSample != 32) {
             logError("SoundBuffer") << "unsupported bits per sample: " << bitsPerSample;
             return LoadResult::fail(LoadError::UnsupportedFormat,

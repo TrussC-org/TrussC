@@ -84,6 +84,9 @@ public:
 
         r = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
         if (!r) {
+            logError("Image") << r.message << " (" << pixels_.getWidth()
+                              << "x" << pixels_.getHeight() << "): "
+                              << internal::pathToDisplayUtf8(internal::resolveLoadPath(path));
             clear();
             return r;
         }
@@ -108,6 +111,8 @@ public:
 
         r = internal::checkImageSize(pixels_.getWidth(), pixels_.getHeight());
         if (!r) {
+            logError("Image") << r.message << " (" << pixels_.getWidth()
+                              << "x" << pixels_.getHeight() << ")";
             clear();
             return r;
         }

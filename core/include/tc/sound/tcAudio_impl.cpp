@@ -1271,7 +1271,7 @@ private:
 // lazily by AudioEngine::play().
 // ---------------------------------------------------------------------------
 LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     if (maxPolyphony < 1) maxPolyphony = 1;
 
     // Detect format by extension. We don't go through stb_vorbis here —
@@ -1306,7 +1306,7 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
 }
 
 LoadResult SoundStream::openStream(const fs::path& filePath, int maxPolyphony, int format, void* customBackend) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     // Internal custom decoders already receive resolved paths, or protocol
     // URLs such as FFmpeg's file: source. They own opening those sources.
     const bool backendOwnsPath = customBackend != nullptr;
@@ -1396,7 +1396,7 @@ LoadResult SoundStream::openStream(const fs::path& filePath, int maxPolyphony, i
     ma_decoder_uninit(&probe);
 
     mp3Data_ = std::move(mp3Data);
-    internal::recordLoadName(path_, path, true);
+    internal::setLoadName(path_, path);
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = format;
     customBackend_ = customBackend;

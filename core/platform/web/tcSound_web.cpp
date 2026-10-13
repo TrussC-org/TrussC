@@ -18,6 +18,9 @@ namespace trussc {
 // Start async decode and wait for completion (blocking via emscripten_sleep)
 EM_JS(int, decodeAacFile, (const char* pathPtr, float** outSamples, int* outChannels, int* outSampleRate, int* outNumSamples), {
     var path = UTF8ToString(pathPtr);
+    // A timed-out promise may settle during a later load. Only its own
+    // active decode is allowed to publish PCM or errors.
+    var decode = window._trussc_aac_decode = {};
 
     // Reset result state
     window._trussc_aac_complete = false;
@@ -50,6 +53,7 @@ EM_JS(int, decodeAacFile, (const char* pathPtr, float** outSamples, int* outChan
     }
 
     audioCtx.decodeAudioData(arrayBuffer).then(function(audioBuffer) {
+        if (window._trussc_aac_decode !== decode) return;
         window._trussc_aac_channels = audioBuffer.numberOfChannels;
         window._trussc_aac_sampleRate = audioBuffer.sampleRate;
         window._trussc_aac_length = audioBuffer.length;
@@ -76,6 +80,7 @@ EM_JS(int, decodeAacFile, (const char* pathPtr, float** outSamples, int* outChan
         console.log('[SoundBuffer] AAC decoded:', audioBuffer.numberOfChannels, 'ch,',
                     audioBuffer.sampleRate, 'Hz,', audioBuffer.length, 'samples');
     }).catch(function(err) {
+        if (window._trussc_aac_decode !== decode) return;
         console.error('[SoundBuffer] Failed to decode AAC:', err);
         window._trussc_aac_complete = true;
     });
@@ -112,6 +117,7 @@ EM_JS(void, copyAacData, (float* outPtr, int totalSamples), {
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     const auto pathStr = internal::pathToUtf8(path);
+    const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     // Start async decode
     if (!decodeAacFile(pathStr.c_str(), nullptr, nullptr, nullptr, nullptr)) {
         logWarning("SoundBuffer") << "Failed to start AAC decode: " << pathStr;
@@ -120,6 +126,13 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 
     // Wait for decode to complete (blocking via emscripten_sleep)
     while (!isAacDecodeComplete()) {
+        if (emscripten_get_now() >= deadline) {
+            EM_ASM({
+                window._trussc_aac_decode = null;
+                window._trussc_aac_data = null;
+            });
+            return internal::reportWebLoadTimeout(path, "SoundBuffer");
+        }
         emscripten_sleep(10);  // Sleep 10ms, yield to browser
     }
 
@@ -230,7 +243,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 // SoundBuffer::loadAacFromMemory - Web implementation
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     if (!data || dataSize == 0) {
         logWarning("SoundBuffer") << "loadAacFromMemory() called with empty data";
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");

@@ -185,7 +185,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 // SoundBuffer::loadAacFromMemory - macOS implementation (memory-based)
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     if (!data || dataSize == 0) {
         logError("SoundBuffer") << "AAC data is empty";
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");

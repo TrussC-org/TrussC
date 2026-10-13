@@ -174,7 +174,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     EnsureMFStartup();
 
     IStream* pStream = SHCreateMemStream((const BYTE*)data, (UINT)dataSize);

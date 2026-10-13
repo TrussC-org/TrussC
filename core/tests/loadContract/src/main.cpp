@@ -49,6 +49,45 @@ template<class F> void missing(const char* label, const fs::path& name, F load) 
     check(string(label) + " logs exactly one shared sentence", logs.messages.size() == 1 &&
           logs.messages[0].ends_with(sentence));
 }
+void missingFont(Font& font) {
+    ErrorCapture logs;
+    const fs::path name = "missing/font.ttf";
+    const auto result = font.load(name, 16);
+    const string sentence = "font not found: \"missing/font.ttf\" (resolved to \"" +
+                            internal::pathToUtf8(dataRoot / name) + "\")";
+    check("Font missing returns the Font sentence", result.error == LoadError::FileNotFound &&
+          result.message == sentence && !font.isLoaded());
+    check("Font missing does not log the shared sentence", none_of(logs.messages.begin(), logs.messages.end(),
+          [](const string& message) { return message.find("file not found:") != string::npos; }));
+}
+void imageSizeChecks() {
+    const int limit = sg_query_limits().max_image_size_2d;
+    Pixels pixels;
+    pixels.allocate(limit + 1, 1, 4);
+    check("oversize PNG fixture", pixels.save(dataRoot / "large.png"));
+    Pixels decoded;
+    check("Pixels accepts size above GPU limit", decoded.load("large.png").ok() && decoded.getWidth() == limit + 1);
+    Image image;
+    auto tooLarge = [&](const char* label, int width, int height, const fs::path& name, auto load) {
+        ErrorCapture logs;
+        const auto result = load();
+        const string message = "image exceeds GPU texture limit: " + to_string(limit);
+        string logged = "[Image] " + message + " (" + to_string(width) + "x" + to_string(height) + ")";
+        if (!name.empty()) logged += ": " + internal::pathToDisplayUtf8(dataRoot / name);
+        check(label, result.error == LoadError::TooLarge && result.message == message &&
+              !image.isAllocated() && !image.getTexture().isAllocated());
+        check(string(label) + " logs exactly one Error", logs.messages.size() == 1 && logs.messages[0] == logged);
+    };
+    tooLarge("Image rejects width above GPU limit", limit + 1, 1, "large.png", [&] { return image.load("large.png"); });
+    auto bytes = readBytes(dataRoot / "large.png");
+    tooLarge("Image memory rejects width above GPU limit", limit + 1, 1, {}, [&] { return image.loadFromMemory(bytes.data(), int(bytes.size())); });
+    pixels.allocate(1, limit + 1, 4);
+    check("tall PNG fixture", pixels.save(dataRoot / "tall.png"));
+    tooLarge("Image rejects height above GPU limit", 1, limit + 1, "tall.png", [&] { return image.load("tall.png"); });
+    pixels.allocate(limit, 1, 4);
+    check("boundary PNG fixture", pixels.save(dataRoot / "boundary.png"));
+    check("Image accepts GPU boundary", image.load("boundary.png").ok() && image.getTexture().isAllocated());
+}
 void cpuChecks() {
     const auto wav = makeWav();
     writeBytes(dataRoot / "sound.wav", wav.data(), wav.size());
@@ -148,11 +187,29 @@ void cpuChecks() {
     check("Cancelled is failure", !LoadResult::fail(LoadError::Cancelled) && string(loadErrorName(LoadError::Cancelled)) == "Cancelled");
 }
 #ifdef __EMSCRIPTEN__
+template<class F> void timeoutCheck(const char* label, const fs::path& path, F load) {
+    ErrorCapture logs;
+    const double start = emscripten_get_now();
+    const auto result = load();
+    const double elapsed = emscripten_get_now() - start;
+    const string message = "timed out after 30 s: " + internal::pathToDisplayUtf8(path);
+    check(string(label) + " returns Unknown and exact timeout message",
+          result.error == LoadError::Unknown && result.message == message);
+    check(string(label) + " logs exactly one error", logs.messages.size() == 1 &&
+          logs.messages[0].ends_with(message));
+    check(string(label) + " waits for the real 30 s deadline", elapsed >= 30000 && elapsed < 35000);
+    printf("%s elapsed: %.0f ms\n", label, elapsed);
+}
+
 class BrowserAacApp : public App {
     void setup() override {
         // No user gesture or AudioContext.resume(): setup itself must finish decoding.
         const auto path = getDataPath("setup.m4a");
         fs::create_directories(path.parent_path());
+        dataRoot = path.parent_path();
+        Font missing;
+        missingFont(missing);
+        imageSizeChecks();
         writeBytes(path, toneAac, sizeof(toneAac));
         SoundBuffer sound;
         check("setup AAC load waits for PCM", sound.loadAac("setup.m4a").ok() &&
@@ -177,6 +234,55 @@ class BrowserAacApp : public App {
             check("Video URL first frame is ready at load", video.isReady() && video.getPixels() &&
                   any_of(video.getPixels(), video.getPixels() + 16 * 16 * 4, [](unsigned char value) { return value != 0; }));
             check("Video URL fetch failure clears name", !video.load(utf8ToPath(fixtureBase + "/missing.webm")) && video.getPath().empty());
+
+            if (emscripten_run_script_int("new URLSearchParams(location.search).has('timeout-checks')")) {
+                check("seed Font before timeout", font.load(utf8ToPath(fixtureBase + "/font.ttf"), 16).ok());
+                const auto fontUrl = utf8ToPath(fixtureBase + "/stall/font.ttf");
+                timeoutCheck("Font timeout", fontUrl, [&] { return font.load(fontUrl, 16); });
+                check("Font timeout leaves no usable font", !font.isLoaded());
+                check("Font reload after timeout", font.load(utf8ToPath(fixtureBase + "/font.ttf"), 16).ok());
+
+                check("seed Video before timeout", video.load(videoUrl).ok());
+                const auto stalledVideo = utf8ToPath(fixtureBase + "/stall/clip.webm");
+                timeoutCheck("Video timeout", stalledVideo, [&] { return video.load(stalledVideo); });
+                check("Video timeout clears name", video.getPath().empty() && !video.isReady());
+                check("Video reload after timeout", video.load(videoUrl).ok() && video.getPath() == videoUrl);
+
+                check("seed AAC before timeout", sound.loadAac("setup.m4a").ok());
+                // Stall the browser API, without shortening the production deadline.
+                // Retain the first decode's resolver to complete it during a later load.
+                EM_ASM({
+                    var proto = (window.OfflineAudioContext || window.webkitOfflineAudioContext).prototype;
+                    window.loadContractDecode = proto.decodeAudioData;
+                    proto.decodeAudioData = function() {
+                        return new Promise(function(resolve) { window.loadContractLateDecode = resolve; });
+                    };
+                });
+                timeoutCheck("AAC timeout", path, [&] { return sound.loadAac("setup.m4a"); });
+                check("AAC timeout clears name", sound.getPath().empty());
+                EM_ASM({
+                    var proto = (window.OfflineAudioContext || window.webkitOfflineAudioContext).prototype;
+                    proto.decodeAudioData = function(bytes) {
+                        var context = this;
+                        var stale = context.createBuffer(1, 1, 44100);
+                        window.loadContractLateDecode(stale);
+                        return new Promise(function(resolve, reject) {
+                            setTimeout(function() {
+                                window.loadContractDecode.call(context, bytes).then(resolve, reject);
+                            }, 100);
+                        });
+                    };
+                });
+                check("AAC reload ignores late completion of timed-out decode", sound.loadAac("setup.m4a").ok() &&
+                      sound.getPath() == path && sound.numSamples > 1 &&
+                      any_of(sound.samples.begin(), sound.samples.end(), [](float value) { return abs(value) > 0.001f; }));
+                EM_ASM({
+                    var proto = (window.OfflineAudioContext || window.webkitOfflineAudioContext).prototype;
+                    proto.decodeAudioData = window.loadContractDecode;
+                    delete window.loadContractDecode;
+                    delete window.loadContractLateDecode;
+                });
+            }
         }
         EM_ASM({
             document.title = $0 ? "loadContract FAIL" : "loadContract PASS";
@@ -191,8 +297,8 @@ class LoadApp : public App {
     void setup() override {
         Font font;
         check("Font uses data file before system lookup", font.load("bad.ttf", 16).error == LoadError::DecodeFailed);
-        // A slash-containing name cannot be a system family. No fallback means one shared report.
-        missing("Font", "missing/font.ttf", [&](const auto& p) { return font.load(p, 16).ok(); });
+        // A slash-containing name cannot be a system family. Keep the Font-specific result.
+        missingFont(font);
         const auto fontNames = listSystemFonts();
         bool checkedSystemFont = false;
         for (const auto& name : fontNames) {
@@ -209,22 +315,7 @@ class LoadApp : public App {
         if (!checkedSystemFont) printf("SKIP: no resolvable system font available\n");
         IesProfile ies;
         check("IES relative data path", ies.load("light.ies") && ies.isLoaded());
-        const int limit = sg_query_limits().max_image_size_2d;
-        Pixels pixels;
-        pixels.allocate(limit + 1, 1, 4);
-        check("oversize PNG fixture", pixels.save(dataRoot / "large.png"));
-        Pixels decoded;
-        check("Pixels accepts size above GPU limit", decoded.load("large.png").ok() && decoded.getWidth() == limit + 1);
-        Image image;
-        check("Image rejects width above GPU limit", image.load("large.png").error == LoadError::TooLarge && !image.isAllocated());
-        auto bytes = readBytes(dataRoot / "large.png");
-        check("Image memory rejects width above GPU limit", image.loadFromMemory(bytes.data(), int(bytes.size())).error == LoadError::TooLarge);
-        pixels.allocate(1, limit + 1, 4);
-        check("tall PNG fixture", pixels.save(dataRoot / "tall.png"));
-        check("Image rejects height above GPU limit", image.load("tall.png").error == LoadError::TooLarge);
-        pixels.allocate(limit, 1, 4);
-        check("boundary PNG fixture", pixels.save(dataRoot / "boundary.png"));
-        check("Image accepts GPU boundary", image.load("boundary.png").ok() && image.getTexture().isAllocated());
+        imageSizeChecks();
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         const auto movie = fs::path(__FILE__).parent_path() /
             "../../../../addons/tcxHap/tests/bin/data/sine_twos.mov";
@@ -238,7 +329,7 @@ class LoadApp : public App {
 #endif
         Texture texture;
         ErrorCapture logs;
-        texture.allocate(limit + 1, 1, 4);
+        texture.allocate(sg_query_limits().max_image_size_2d + 1, 1, 4);
         check("direct Texture refuses oversized allocation", !texture.isAllocated() && logs.messages.size() == 1);
         gpuCompleted = true;
         exitApp();

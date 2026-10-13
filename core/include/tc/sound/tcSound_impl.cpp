@@ -322,7 +322,7 @@ bool decodeMemoryWithMiniaudio(const void* data, size_t dataSize,
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::loadOgg(const fs::path& filePath) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     std::string pathStr = internal::pathToDisplayUtf8(path);
     // stb_vorbis has no UTF-8 filename mode on Windows — open the FILE*
@@ -346,7 +346,7 @@ LoadResult SoundBuffer::loadOgg(const fs::path& filePath) {
     const uintmax_t fileBytes = fs::file_size(path, sizeEc);
     LoadResult r = drainVorbis(vorbis, sizeEc ? 0 : (uint64_t)fileBytes, pathStr, *this);
     if (!r) return r;
-    internal::recordLoadName(path_, path, true);
+    internal::setLoadName(path_, path);
     logVerbose("SoundBuffer") << "loaded " << path << " (" << channels << " ch, "
                               << sampleRate << " Hz, " << numSamples << " samples)";
     return LoadResult::success();
@@ -376,52 +376,52 @@ LoadResult loadFileViaMiniaudio(const fs::path& path, ma_encoding_format hint,
 } // namespace
 
 LoadResult SoundBuffer::loadWav(const fs::path& filePath) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_wav, "WAV", *this);
-    internal::recordLoadName(path_, path, r.ok());
+    if (r) internal::setLoadName(path_, path);
     return r;
 }
 
 LoadResult SoundBuffer::loadMp3(const fs::path& filePath) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_mp3, "MP3", *this);
-    internal::recordLoadName(path_, path, r.ok());
+    if (r) internal::setLoadName(path_, path);
     return r;
 }
 
 LoadResult SoundBuffer::loadFlac(const fs::path& filePath) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     LoadResult r = loadFileViaMiniaudio(path, ma_encoding_format_flac, "FLAC", *this);
-    internal::recordLoadName(path_, path, r.ok());
+    if (r) internal::setLoadName(path_, path);
     return r;
 }
 
 LoadResult SoundBuffer::loadWavFromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_wav, "WAV", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "WAV decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadMp3FromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_mp3, "MP3", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "MP3 decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadFlacFromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     return decodeMemoryWithMiniaudio(data, dataSize, ma_encoding_format_flac, "FLAC", *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed, "FLAC decode from memory failed");
 }
 
 LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     if (data == nullptr || dataSize == 0) {
         logError("SoundBuffer") << "empty memory range for OGG decode";
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");
@@ -449,12 +449,12 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
 // AAC's file entry is shared; only the decode belongs to the platform.
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAac(const fs::path& filePath) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     const auto path = internal::resolveLoadPath(filePath);
     auto entry = internal::checkLoadFile(path, "SoundBuffer");
     if (!entry) return entry;
     auto result = loadAacPlatform(path);
-    internal::recordLoadName(path_, path, result.ok());
+    if (result) internal::setLoadName(path_, path);
     return result;
 }
 
@@ -465,7 +465,7 @@ LoadResult SoundBuffer::loadAac(const fs::path& filePath) {
 // -----------------------------------------------------------------------------
 
 LoadResult SoundBuffer::load(const fs::path& path) {
-    internal::recordLoadName(path_);
+    internal::clearLoadName(path_);
     // Lowercase the extension once
     std::string ext = toLower(getFileExtension(path));
 

@@ -71,7 +71,7 @@ public:
     bool isAudioStreaming() const { return audioStreaming_; }
 
     LoadResult load(const fs::path& path) override {
-        internal::recordLoadName(sourcePath_);
+        internal::clearLoadName(sourcePath_);
         const auto previousError = errorMessage_;
         if (initialized_) {
             close();
@@ -91,6 +91,9 @@ public:
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
+#ifdef __EMSCRIPTEN__
+            if (!webLoadResult_) return webLoadResult_;
+#endif
             return LoadResult::fail(LoadError::DecodeFailed,
                                     "platform decoder failed to open: " +
                                     internal::pathToDisplayUtf8(resolvedPath));
@@ -98,7 +101,7 @@ public:
 
         // Remember the resolved path so instance-level frame extraction
         // (extractFrame / extractKeyFrame with no path arg) and getPath() work.
-        internal::recordLoadName(sourcePath_, resolvedPath, true);
+        internal::setLoadName(sourcePath_, resolvedPath);
 
         // Create texture(s) for per-frame updates
         if (width_ > 0 && height_ > 0) {
@@ -591,6 +594,9 @@ private:
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
     bool loadPlatform(const fs::path& path);
+#ifdef __EMSCRIPTEN__
+    LoadResult webLoadResult_;
+#endif
     void closePlatform();
     void playPlatform();
     void stopPlatform();

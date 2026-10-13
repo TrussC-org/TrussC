@@ -17,6 +17,8 @@ namespace trussc {
 // ---------------------------------------------------------------------------
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
+    webLoadResult_ = LoadResult::success();
+    const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     std::string pathStr = internal::pathToUtf8(path);
     // Create video element in JavaScript
     char script[8192];
@@ -70,6 +72,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             video.src = videoPath;
 
             video.onloadedmetadata = function() {
+                if (window._trussc_player_video !== video) return;
                 window._trussc_player_width = video.videoWidth;
                 window._trussc_player_height = video.videoHeight;
                 window._trussc_player_duration = video.duration;
@@ -86,6 +89,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
             };
 
             video.onended = function() {
+                if (window._trussc_player_video !== video) return;
                 window._trussc_player_finished = true;
                 if (video.loop) {
                     window._trussc_player_finished = false;
@@ -119,6 +123,11 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     while (!emscripten_run_script_int(
         "!!window._trussc_player_error || (window._trussc_player_ready && "
         "window._trussc_player_video.readyState >= 2)")) {
+        if (emscripten_get_now() >= deadline) {
+            closePlatform();
+            webLoadResult_ = internal::reportWebLoadTimeout(path, "VideoPlayer");
+            return false;
+        }
         emscripten_sleep(10);
     }
     if (emscripten_run_script_int("!!window._trussc_player_error")) {
@@ -148,9 +157,13 @@ void VideoPlayer::closePlatform() {
         window._trussc_player_playing = false;
 
         if (window._trussc_player_video) {
-            window._trussc_player_video.pause();
-            window._trussc_player_video.remove();
+            var video = window._trussc_player_video;
             window._trussc_player_video = null;
+            video.onloadedmetadata = video.onended = video.onerror = null;
+            video.pause();
+            video.removeAttribute('src');
+            video.load(); // Abort any pending network request.
+            video.remove();
         }
         window._trussc_player_canvas = null;
         window._trussc_player_ctx = null;
