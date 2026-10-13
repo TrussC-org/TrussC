@@ -199,8 +199,7 @@ void runChild(const char* executable, const char* scenario) {
     const bool eofCase = scenarioName == "lines";
     if (eofCase) {
         require(writeFd(input[1], "a b\r\nc\npartial", 14) == 14, "write mixed line endings and partial line");
-    } else if (scenarioName != "std-exit" && scenarioName != "stop-exit" &&
-               scenarioName != "stopped-lines") {
+    } else if (scenarioName != "stopped-lines") {
         writeLine(input[1], "before setup\n");
     }
     std::fflush(nullptr);
@@ -295,9 +294,19 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--child") {
         mode = argv[2];
         if (mode == "std-exit" || mode == "stop-exit") {
+            // Wait for the parent's line so the reader has consumed it and
+            // looped back into its raw read before exiting (#689).
+            EventListener listener = events().console.listen([](ConsoleEventArgs& args) {
+                check(args.raw == "before setup", "exit case receives the parent's line");
+                ++received;
+            });
             console::start();
+            while (received == 0) {
+                console::internal::processQueue();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
             if (mode == "stop-exit") console::stop();
-            std::exit(0);
+            std::exit(failures ? 1 : 0);
         }
         if (mode == "stopped-lines") {
             stoppedLines();

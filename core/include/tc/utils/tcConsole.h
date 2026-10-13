@@ -130,7 +130,7 @@ inline void readThread() {
 inline void start() {
 #ifdef __EMSCRIPTEN__
     // Console input is not available on web (no stdin/threads)
-    logWarning("Console") << "console::start() is not available on web platform";
+    logNotice("Console") << "console::start() is not available on web platform";
     return;
 #else
     if (internal::isRunning().load()) return;
