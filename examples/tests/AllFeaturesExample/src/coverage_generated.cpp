@@ -352,10 +352,18 @@ static void cover_mcp() {
     (void)mcp::isDebuggerEnabled();
     (void)mcp::deferToolResultUntilAfterFrame(af::val<std::function<json ()>>(), af::val<const void *>());
     (void)mcp::deferToolResultTwoStage(af::val<std::function<std::function<json ()> ()>>(), af::val<const void *>());
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::stopHttpServer();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::startHttpServer(af::val<int>(), af::val<const std::string>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::processHttpQueue();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::getHttpPort();
+#endif
     (void)mcp::hasTool(af::val<const std::string>());
     (void)mcp::tool(af::val<const std::string>(), af::val<const std::string>());
     (void)mcp::resource(af::val<const std::string>(), af::val<const std::string>());

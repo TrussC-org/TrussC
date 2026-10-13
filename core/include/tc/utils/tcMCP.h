@@ -27,6 +27,7 @@
 #include "../../nlohmann/json.hpp"
 using json = nlohmann::json;
 
+#include "tcAnnotations.h"
 #include "tcLog.h"
 #include "tcThreadChannel.h"
 #include "tcVersion.h"
@@ -588,12 +589,12 @@ private:
 
 #ifndef __EMSCRIPTEN__
 
-struct McpRequest {
-    std::string body;
+struct TC_PLATFORMS("macos,windows,linux,ios,android") McpRequest {
+    TC_PLATFORMS("macos,windows,linux,ios,android") std::string body;
     // Carries a thunk the HTTP worker executes to obtain the reply string —
     // see internal::ReplyThunk. Normal replies are prebuilt (thunk just returns
     // them); two-stage tool replies do their heavy encode inside the thunk.
-    std::shared_ptr<std::promise<internal::ReplyThunk>> response;
+    TC_PLATFORMS("macos,windows,linux,ios,android") std::shared_ptr<std::promise<internal::ReplyThunk>> response;
 };
 
 namespace internal {
@@ -751,7 +752,7 @@ inline void enqueueHttpRequest(McpRequest request) {
 }
 } // namespace internal
 
-inline void stopHttpServer();
+TC_PLATFORMS("macos,windows,linux,ios,android") inline void stopHttpServer();
 
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
@@ -886,11 +887,11 @@ inline void startHttpServerImpl(int port, const std::string& host,
 // parameters reuse it (0 repeats an original OS-assigned port request; the
 // actual assigned port also matches). A matching explicit opt-in still opens
 // Public app tools on an environment health-only listener.
-void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
+TC_PLATFORMS("macos,windows,linux,ios,android") void startHttpServer(int port = 0, const std::string& host = "127.0.0.1",
                      const std::string& token = "");
 
 // Stop HTTP server
-inline void stopHttpServer() {
+TC_PLATFORMS("macos,windows,linux,ios,android") inline void stopHttpServer() {
     {
         std::lock_guard<std::mutex> lock(internal::httpQueueMutex());
         auto queued = internal::getHttpChannel().receiveAll();
@@ -936,7 +937,7 @@ inline void stopHttpServer() {
 }
 
 // Process HTTP request queue (call every frame from main thread)
-inline void processHttpQueue() {
+TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
     McpRequest req;
     while (internal::getHttpChannel().tryReceive(req)) {
         auto& ds = internal::deferralState();
@@ -969,13 +970,13 @@ inline void processHttpQueue() {
 }
 
 // Get the actual HTTP port (0 if not started)
-inline int getHttpPort() {
+TC_PLATFORMS("macos,windows,linux,ios,android") inline int getHttpPort() {
     return internal::getHttpPort().load();
 }
 
 // Legacy no-op kept for source compatibility.
 [[deprecated("use setToolLevel(ToolLevel::Control); will be removed in v1.0.0")]]
-inline void enableDebugger() {}
+TC_PLATFORMS("macos,windows,linux,ios,android") inline void enableDebugger() {}
 
 #endif // __EMSCRIPTEN__
 
