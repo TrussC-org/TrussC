@@ -5,6 +5,12 @@ IPv4 multicast path that `OscReceiver::joinMulticast` / `OscSender` (and the
 underlying core `tc::UdpSocket` multicast API) provide:
 
 - unicast loopback round-trips a message intact;
+- a second `setup()` on an occupied port fails with one error event and log;
+- even a later socket with reuse enabled cannot take the exclusive port;
+- `bindFirstFree()` skips an occupied port;
+- two `setupMulticast()` receivers share one port and both receive the message
+  (a clear SKIP is printed if there is no multicast route);
+- invalid multicast group/interface setup fails with one error and no listener;
 - a receiver that **joined** a group receives multicast sent to it;
 - traffic for a group **nobody joined** is not received (multicast is join-gated).
 

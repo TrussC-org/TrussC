@@ -127,6 +127,21 @@ bool UdpSocket::bind(int port, bool startReceiving) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(static_cast<uint16_t>(port));
 
+#ifdef _WIN32
+    // POSIX already refuses a second bind unless both sockets ask for reuse.
+    // Windows lets a later SO_REUSEADDR socket take the port unless the first
+    // one sets SO_EXCLUSIVEADDRUSE.
+    if (!reuseAddress_ && !reusePort_) {
+        int exclusive = 1;
+        if (setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                       reinterpret_cast<const char*>(&exclusive), sizeof(exclusive)) != 0) {
+            notifyError("Failed to make port " + std::to_string(port) + " exclusive",
+                        SOCKET_ERROR_CODE);
+            return false;
+        }
+    }
+#endif
+
     if (::bind(socket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         notifyError("Failed to bind to port " + std::to_string(port), SOCKET_ERROR_CODE);
         return false;
@@ -194,6 +209,9 @@ void UdpSocket::close() {
         CLOSE_SOCKET(socket_);
         socket_ = INVALID_SOCKET_HANDLE;
     }
+    // Reuse options belong to the closed socket; the next one starts exclusive.
+    reuseAddress_ = false;
+    reusePort_ = false;
 
     // Wait for thread to finish. On that thread itself (an onReceive
     // listener that closes the socket) it cannot join itself: keep it for a
@@ -547,8 +565,13 @@ bool UdpSocket::setBroadcast(bool enable) {
 bool UdpSocket::setReuseAddress(bool enable) {
     if (!ensureSocket()) return false;
     int val = enable ? 1 : 0;
-    return setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
-                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+    if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
+        notifyError("Failed to set address reuse", SOCKET_ERROR_CODE);
+        return false;
+    }
+    reuseAddress_ = enable;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -631,12 +654,17 @@ bool UdpSocket::setReusePort(bool enable) {
     int val = enable ? 1 : 0;
 #ifdef _WIN32
     // Windows has no SO_REUSEPORT; SO_REUSEADDR already permits multiple binds.
-    return setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
-                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+    const int option = SO_REUSEADDR;
 #else
-    return setsockopt(socket_, SOL_SOCKET, SO_REUSEPORT,
-                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+    const int option = SO_REUSEPORT;
 #endif
+    if (setsockopt(socket_, SOL_SOCKET, option,
+                   reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
+        notifyError("Failed to set port reuse", SOCKET_ERROR_CODE);
+        return false;
+    }
+    reusePort_ = enable;
+    return true;
 }
 
 bool UdpSocket::setReceiveBufferSize(int size) {

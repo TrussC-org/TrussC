@@ -31,6 +31,7 @@ public:
     // Parse error: a packet that is not a valid OSC message or bundle (for
     // example an unknown type tag, data cut short, or a damaged message in a
     // bundle). The packet is not delivered, not even in part.
+    // Also forwards socket errors; setup failures notify on the calling thread.
     tc::Event<std::string> onParseError;
 
     OscReceiver() = default;
@@ -44,36 +45,37 @@ public:
     // Setup
     // -------------------------------------------------------------------------
 
-    // Start receiving
+    // Bind exclusively and start receiving. A port in use returns false and
+    // reports through onParseError and the socket log.
     bool setup(int port) {
-        port_ = port;
+        if (!prepareSocket(port) || !socket_.bind(port, true)) {
+            close();
+            return false;
+        }
+        return true;
+    }
 
-        // Set receive event handler
-        receiveListener_ = socket_.onReceive.listen([this](tc::UdpReceiveEventArgs& args) {
-            handleReceive(args);
-        });
-
-        errorListener_ = socket_.onError.listen([this](tc::UdpErrorEventArgs& args) {
-            std::string msg = "Socket error: " + args.message;
-            onParseError.notify(msg);
-        });
-
-        // Allow multiple receivers on the same port (SO_REUSEADDR + SO_REUSEPORT).
-        // setReusePort matters for multicast: several apps commonly share one
-        // multicast port, and macOS/BSD need SO_REUSEPORT (not just REUSEADDR).
-        socket_.create();
-        socket_.setReuseAddress(true);
-        socket_.setReusePort(true);
-
-        return socket_.bind(port, true);  // Auto-start receive thread
+    // Share a multicast port: enable reuse, bind, join, then start receiving.
+    // iface selects the NIC (""/"0.0.0.0" = default route). Any failed step
+    // reports through onParseError and the socket log, closes and returns false.
+    bool setupMulticast(int port, const std::string& group, const std::string& iface = "") {
+        if (!prepareSocket(port) || !socket_.setReuseAddress(true) ||
+            !socket_.setReusePort(true) || !socket_.bind(port, false) ||
+            !socket_.joinMulticastGroup(group, iface)) {
+            close();
+            return false;
+        }
+        socket_.startReceiving();
+        return true;
     }
 
     // -------------------------------------------------------------------------
     // Multicast (IPv4)
     // -------------------------------------------------------------------------
     // OSC is usually unicast, but some setups multicast it (one sender, many
-    // listeners on a fixed group). Call AFTER setup() so the socket is bound,
+    // listeners on a fixed group). Call AFTER setup() or setupMulticast(),
     // then the receiver also gets datagrams for `group` (e.g. "239.0.0.1").
+    // Joining after setup() keeps the port exclusive; use setupMulticast() to share.
     // `iface` selects the NIC (""/"0.0.0.0" = default route).
 
     bool joinMulticast(const std::string& group, const std::string& iface = "") {
@@ -153,6 +155,21 @@ public:
     }
 
 private:
+    bool prepareSocket(int port) {
+        // A fresh socket prevents reuse/exclusive options from a previous setup
+        // carrying over when switching between unicast and multicast.
+        close();
+        port_ = port;
+        receiveListener_ = socket_.onReceive.listen([this](tc::UdpReceiveEventArgs& args) {
+            handleReceive(args);
+        });
+        errorListener_ = socket_.onError.listen([this](tc::UdpErrorEventArgs& args) {
+            std::string msg = "Socket error: " + args.message;
+            onParseError.notify(msg);
+        });
+        return socket_.create();
+    }
+
     // Receive thread: queue a message for polling, dropping the oldest while
     // the queue is over its limit. Drops are only counted here; the polling
     // calls log them on the caller's thread (reportDrops()).

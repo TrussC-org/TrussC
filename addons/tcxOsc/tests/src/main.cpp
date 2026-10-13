@@ -9,6 +9,7 @@
 // Beyond OSC framing, this is also the cross-platform proof for the core IPv4
 // MULTICAST API (UdpSocket::joinMulticastGroup / setMulticastTTL /
 // setMulticastLoopback / setReusePort) that OscReceiver/OscSender now use:
+//   - setup owns its port; setupMulticast lets two receivers get the same message
 //   - unicast loopback still works
 //   - a receiver that JOINED a group receives multicast sent to it
 //   - traffic for a group NOBODY joined is not received (multicast is join-gated)
@@ -475,11 +476,11 @@ int main() {
     static const int TYPE_PORTS[4] = { 17116, 18116, 19116, 27116 };  // OSC 1.0 type tags
     const int LIMIT = OscBundle::MAX_NESTING_DEPTH;
 
-    // Outgoing multicast interface. macOS CI runners have no multicast route on
-    // the default NIC (send -> EHOSTUNREACH), but lo0 is multicast-capable, so
-    // route the test over loopback there. Linux/Windows route fine by default
-    // (and Linux's lo is not multicast-capable), so leave them on the default.
-#if defined(__APPLE__)
+    // Keep POSIX multicast tests on loopback: default NIC routes may be absent
+    // or filter local multicast, even when sendTo() succeeds. Linux supports
+    // multicast on loopback when the interface is selected explicitly.
+    // Windows runners use the default interface.
+#if defined(__APPLE__) || defined(__linux__)
     const std::string MIF = "127.0.0.1";
 #else
     const std::string MIF = "";  // default route
@@ -489,6 +490,100 @@ int main() {
     tx.setMulticastTTL(1);            // stay on local subnet
     tx.setMulticastLoopback(true);    // deliver to local listeners on this host
     tx.setMulticastInterface(MIF);
+
+    // Exclusive setup must reject a second listener and allow port fallback.
+    {
+        OscReceiver owner;
+        const int occupied = bindFirstFree(owner, UNI_PORTS);
+        check("exclusive: first receiver bound", occupied != 0);
+        if (occupied) {
+            OscReceiver second;
+            auto expectSetupFailure = [&](const char* name, auto setup, const std::string& detail) {
+                std::atomic<int> errors{0}, logs{0};
+                std::atomic<bool> detailSeen{false};
+                tc::EventListener errorListener = second.onParseError.listen([&](std::string& msg) {
+                    ++errors;
+                    if (msg.find(detail) != std::string::npos) detailSeen = true;
+                });
+                tc::EventListener logListener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& e) {
+                    if (e.level == tc::LogLevel::Error &&
+                        e.message.find("UdpSocket:") != std::string::npos) ++logs;
+                });
+                check(name, !setup());
+                check("setup failure: exactly one matching onParseError", errors == 1 && detailSeen);
+                check("setup failure: exactly one Error log", logs == 1);
+                check("setup failure: receiver is not listening", !second.isListening());
+            };
+            expectSetupFailure("exclusive: second setup fails",
+                [&] { return second.setup(occupied); }, std::to_string(occupied));
+            expectSetupFailure("exclusive: shared setup cannot take owned port",
+                [&] { return second.setupMulticast(occupied, GROUP_A, MIF); }, std::to_string(occupied));
+
+            // Covers Windows SO_EXCLUSIVEADDRUSE: even a later raw socket with
+            // reuse enabled must not be able to bind over the exclusive receiver.
+            tc::UdpSocket sharing;
+            check("exclusive: competing socket enables reuse", sharing.setReuseAddress(true));
+            check("exclusive: reuse socket cannot take owned port", !sharing.bind(occupied, false));
+            sharing.close();
+
+            const int candidates[4] = { occupied, MC_PORTS[0], MC_PORTS[1], MC_PORTS[2] };
+            const int freePort = bindFirstFree(second, candidates);
+            check("exclusive: bindFirstFree skips occupied port", freePort != 0 && freePort != occupied);
+            second.close();
+
+            expectSetupFailure("multicast setup: invalid group fails",
+                [&] { return second.setupMulticast(freePort, "invalid-group", MIF); }, "Invalid multicast/interface");
+            expectSetupFailure("multicast setup: invalid interface fails",
+                [&] { return second.setupMulticast(freePort, GROUP_A, "invalid-interface"); }, "Invalid multicast/interface");
+            if (freePort) {
+                tc::UdpSocket reclaimed;
+                check("multicast setup: failed join releases port", reclaimed.bind(freePort, false));
+            }
+        }
+    }
+
+    // Both receivers must receive the same multicast datagram on a shared port.
+    {
+        OscReceiver first, second;
+        const int port = bindFirstFree(first, MC_PORTS);
+        check("shared multicast: candidate port found", port != 0);
+        first.close();
+        OscMessage message("/shared");
+        message.addInt(400);
+        if (port && !tx.sendTo(GROUP_A, port, message)) {
+            std::printf("shared multicast: SKIP (no multicast route on this host)\n");
+        } else if (port) {
+            const bool firstReady = first.setupMulticast(port, GROUP_A, MIF);
+            const bool secondReady = second.setupMulticast(port, GROUP_A, MIF);
+            check("shared multicast: first setupMulticast succeeds", firstReady);
+            check("shared multicast: second setupMulticast succeeds", secondReady);
+            if (firstReady && secondReady) {
+                first.hasNewMessage();
+                second.hasNewMessage();
+                OscMessage gotFirst, gotSecond;
+                bool receivedFirst = false, receivedSecond = false;
+                // Use the existing bounded receive polling budget. Success is
+                // determined by message contents, never by elapsed time.
+                for (int i = 0; i < 40 && !(receivedFirst && receivedSecond); ++i) {
+                    tx.sendTo(GROUP_A, port, message);
+                    sleepMs(25);
+                    if (!receivedFirst) receivedFirst = first.getNextMessage(gotFirst);
+                    if (!receivedSecond) receivedSecond = second.getNextMessage(gotSecond);
+                }
+                check("shared multicast: first receives intact message",
+                      receivedFirst && sameMessage(gotFirst, message));
+                check("shared multicast: second receives intact message",
+                      receivedSecond && sameMessage(gotSecond, message));
+                check("shared multicast: leave group still works", second.leaveMulticast(GROUP_A, MIF));
+                check("shared multicast: rejoin group still works", second.joinMulticast(GROUP_A, MIF));
+            }
+            second.close();
+            // Reusing a receiver for setup() must clear its old sharing options.
+            check("exclusive: switch from multicast to unicast", first.setup(port));
+            check("exclusive: switched receiver rejects sharing socket",
+                  !second.setupMulticast(port, GROUP_A, MIF));
+        }
+    }
 
     // ----- 1. unicast loopback (baseline) ------------------------------------
     {
