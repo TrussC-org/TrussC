@@ -34,7 +34,7 @@
 //   the buffer: a channel count below 1, or a byte size that is not a whole
 //   number of frames, fails (and is logged); a valid load leaves numSamples *
 //   channels == samples.size(); 32-bit big-endian samples are byte-swapped.
-//   A failed load keeps channels, sampleRate, numSamples and the path.
+//   A failed load keeps channels, sampleRate and numSamples, but clears the path.
 //   The sample count the loaders size buffers with is checked against the
 //   limit before the product is formed: a product that would wrap 64 bits is
 //   refused, and a 32-bit limit stands in for a 32-bit size_t. (The 64-bit
@@ -1159,9 +1159,9 @@ int main() {
               internal::pathToUtf8(reused.getPath()));
         check("path: load() of the file records it again", (bool)reused.load(wav) && reused.getPath() == wav);
         const int16_t pcm[64] = {};
-        check("path: a failed PCM load keeps it",
-              !reused.loadPcmFromMemory(pcm, 3, 1, 48000) && reused.getPath() == wav &&
-              !reused.loadPcmFromMemory(pcm, sizeof(pcm), 0, 48000) && reused.getPath() == wav,
+        check("path: a failed PCM load clears it",
+              !reused.loadPcmFromMemory(pcm, 3, 1, 48000) && reused.getPath().empty() &&
+              !reused.loadPcmFromMemory(pcm, sizeof(pcm), 0, 48000) && reused.getPath().empty(),
               internal::pathToUtf8(reused.getPath()));
         check("path: PCM from memory clears it",
               (bool)reused.loadPcmFromMemory(pcm, sizeof(pcm), 1, 48000) && reused.getPath().empty());

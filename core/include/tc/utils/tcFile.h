@@ -144,10 +144,11 @@ inline int64_t getFileSize(const fs::path& path) {
 // (binary mode: the returned string is the file's exact bytes on every
 // platform; Windows text mode would silently fold \r\n into \n)
 inline std::string loadTextFile(const fs::path& path) {
-    fs::path fullPath = getDataPath(path);
+    fs::path fullPath = internal::resolveLoadPath(path);
+    if (!internal::checkLoadFile(fullPath, "File")) return "";
     std::ifstream file(fullPath, std::ios::binary);
     if (!file.is_open()) {
-        logError() << "Cannot open file: " << path;
+        internal::reportMissingLoad(fullPath, "File");
         return "";
     }
 
@@ -383,10 +384,11 @@ public:
     // Open file for reading
     bool open(const fs::path& path) {
         close();
-        fs::path fullPath = getDataPath(path);
+        fs::path fullPath = internal::resolveLoadPath(path);
+        if (!internal::checkLoadFile(fullPath, "FileReader")) return false;
         file_.open(fullPath, std::ios::in | std::ios::binary);
         if (!file_.is_open()) {
-            logError() << "FileReader: Cannot open file: " << path;
+            internal::reportMissingLoad(fullPath, "FileReader");
             return false;
         }
         return true;

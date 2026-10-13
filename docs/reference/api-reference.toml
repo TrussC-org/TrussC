@@ -2307,7 +2307,14 @@ Replaces the old `bool` returns of the load APIs (v0.7). `explicit operator bool
 keeps `if (img.load(...))` working unchanged; assigning to a plain bool needs
 `.ok()`. The error taxonomy is deliberately coarse and will grow richer without
 breaking compatibility.
+
+Core file loaders resolve relative paths via `getDataPath()` and report missing
+files with one Error sentence: `file not found: <resolved path>`. Font first tries
+a regular data file, then a system font name. Existing loading `getPath()`
+accessors are empty after failure or memory loading.
 """
+details.ja = "core のファイル読み込みは相対パスを getDataPath() で解決し、ファイルが無いときは共通の Error 文 `file not found: <解決済みパス>` を出す。Font は data の通常ファイル、システムフォント名の順に探す。既存の読み込み用 getPath() は失敗後・メモリ読み込み後に空になる。"
+details.ko = "core 파일 로드는 상대 경로를 getDataPath()로 해석하고 파일이 없으면 공통 Error 문장 `file not found: <해석된 경로>`를 기록한다. Font는 data의 일반 파일을 먼저 찾고 다음으로 시스템 폰트 이름을 찾는다. 기존 로드용 getPath()는 실패 또는 메모리 로드 후 비어 있다."
 
 ["LoadResult::error"]
 description.en = "What went wrong; LoadError::None on success"
@@ -2337,14 +2344,20 @@ description.ko = "오류 종류와 선택적 메시지로 실패 결과를 만�
 ["LoadError"]
 category = "file"
 keywords = ["error", "load", "not found", "decode"]
-description.en = "Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown."
-description.ja = "読み込み失敗の種別：None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown。"
-description.ko = "로드 실패 종류: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown."
+description.en = "Load failure kind: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled."
+description.ja = "読み込み失敗の種別：None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled。"
+description.ko = "로드 실패 종류: None, FileNotFound, UnsupportedFormat, DecodeFailed, Unknown, TooLarge, Cancelled."
 related = ["LoadResult"]
 value_desc.None.en = "Success (no error)"
 value_desc.FileNotFound.en = "The (resolved) path does not exist or could not be opened"
 value_desc.UnsupportedFormat.en = "Extension / container not supported on this platform"
 value_desc.DecodeFailed.en = "The decoder rejected the data (corrupt, truncated, wrong codec)"
+value_desc.TooLarge.en = "Image dimensions exceed the GPU texture limit (CPU Pixels are not limited)"
+value_desc.TooLarge.ja = "画像サイズが GPU テクスチャ上限を超える（CPU の Pixels には適用しない）"
+value_desc.TooLarge.ko = "이미지 크기가 GPU 텍스처 한도를 초과함 (CPU Pixels에는 적용하지 않음)"
+value_desc.Cancelled.en = "Loading was cancelled"
+value_desc.Cancelled.ja = "読み込みがキャンセルされた"
+value_desc.Cancelled.ko = "로드가 취소됨"
 value_desc.Unknown.en = "Anything the loader could not classify"
 
 ["loadErrorName"]
@@ -2669,9 +2682,9 @@ description.ko = "줄 바꿈이 활성화되었는지 확인"
 ["Font::load"]
 category = "font"
 keywords = ["open", "read", "file", "ttc", "font collection", "face index", "system font name"]
-description.en = "Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins."
-description.ja = "フォントファイルまたはシステムフォント名を読み込む。faceIndex で .ttc 内の書体を選ぶ。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う"
-description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. faceIndex로 .ttc 안의 서체를 선택. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용"
+description.en = "Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails."
+description.ja = "フォントファイルまたはシステムフォント名を読み込む。faceIndex で .ttc 内の書体を選ぶ。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。データフォルダのファイルとシステムフォントが同名なら、データフォルダのファイルを使う。Web の URL 読み込みはフォントが使える状態になるか取得・デコードが失敗するまで待つ。"
+description.ko = "폰트 파일 또는 시스템 폰트 이름을 로드. faceIndex로 .ttc 안의 서체를 선택. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. 데이터 폴더의 파일과 시스템 폰트 이름이 같으면 데이터 폴더의 파일을 사용. Web URL 로드는 폰트를 사용할 수 있거나 가져오기/디코딩에 실패할 때까지 기다린다."
 details.en = """
 `load(nameOrPath, size, faceIndex = 0)`. `nameOrPath` is a font file, a URL (web), or a system font name such as `"Noto Sans CJK SC"`.
 
@@ -3177,15 +3190,15 @@ description.ko = "할당되었는지 확인"
 ["Image::load"]
 category = "graphics_texture"
 keywords = ["open", "read", "file"]
-description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given."
-description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う"
-description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용"
+description.en = "Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels."
+description.ja = "ファイルから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築 (3D サーフェスなど縮小サンプル用途で推奨)。GPU テクスチャを作るのでメインスレッド専用。バックグラウンドで読むなら、ワーカースレッドで `Pixels::load` し、メインスレッドで `Texture::allocate(pixels)` する。相対パスはデータフォルダ基準 (getDataPath()) で解決し、絶対パスはそのまま使う。GPU 使用時、幅または高さがテクスチャ上限を超えると TooLarge。ヘッドレスでは CPU ピクセルを保持する。"
+description.ko = "파일에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성 (3D 표면 등 축소 샘플링 용도 권장). GPU 텍스처를 생성하므로 메인 스레드 전용. 백그라운드에서 로드하려면 워커 스레드에서 `Pixels::load` 후 메인 스레드에서 `Texture::allocate(pixels)`. 상대 경로는 데이터 폴더 기준 (getDataPath())으로 해석하고, 절대 경로는 그대로 사용. GPU 사용 시 너비나 높이가 텍스처 한도를 초과하면 TooLarge를 반환한다. 헤드리스에서는 CPU 픽셀을 유지한다."
 related = ["Pixels::load", "Texture::allocate"]
 
 ["Image::loadFromMemory"]
-description.en = "Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`."
-description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築。メインスレッド専用。バックグラウンドでのデコードは `Pixels::loadFromMemory` で"
-description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로"
+description.en = "Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels."
+description.ja = "メモリから画像を読み込む。`mipmaps=true` でミップマップ連鎖を構築。メインスレッド専用。バックグラウンドでのデコードは `Pixels::loadFromMemory` で GPU 使用時、幅または高さがテクスチャ上限を超えると TooLarge。ヘッドレスでは CPU ピクセルを保持する。"
+description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로 GPU 사용 시 너비나 높이가 텍스처 한도를 초과하면 TooLarge를 반환한다. 헤드리스에서는 CPU 픽셀을 유지한다."
 
 ["Image::mirror"]
 description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
@@ -7226,9 +7239,9 @@ description.ja = "再生のパン (-1 左、0 中央、1 右)"
 description.ko = "재생의 팬 (-1 왼쪽, 0 중앙, 1 오른쪽)"
 
 ["PlayingSoundInfo::path"]
-description.en = "Source file (fs::path) as given, the same value as SoundBuffer::getPath() / SoundStream::getPath() and the file name in the logs; empty for generated or in-memory buffers. tc_get_audio_state reports it as UTF-8."
-description.ja = "ソースファイル (fs::path)。渡されたままの値で、SoundBuffer::getPath() / SoundStream::getPath() やログのファイル名と同じ。生成したバッファやメモリからのバッファでは空。tc_get_audio_state は UTF-8 で返す"
-description.ko = "소스 파일 (fs::path). 전달된 그대로의 값으로, SoundBuffer::getPath() / SoundStream::getPath() 및 로그의 파일 이름과 같다. 생성한 버퍼나 메모리 버퍼에서는 비어 있음. tc_get_audio_state 는 UTF-8 로 보고한다"
+description.en = "Resolved source file (fs::path), the same value as SoundBuffer::getPath() / SoundStream::getPath() and the file name in the logs; empty for generated or in-memory buffers. tc_get_audio_state reports it as UTF-8."
+description.ja = "ソースファイル (fs::path)。解決済みの値で、SoundBuffer::getPath() / SoundStream::getPath() やログのファイル名と同じ。生成したバッファやメモリからのバッファでは空。tc_get_audio_state は UTF-8 で返す"
+description.ko = "소스 파일 (fs::path). 해석된 값으로, SoundBuffer::getPath() / SoundStream::getPath() 및 로그의 파일 이름과 같다. 생성한 버퍼나 메모리 버퍼에서는 비어 있음. tc_get_audio_state 는 UTF-8 로 보고한다"
 
 ["PlayingSoundInfo::paused"]
 description.en = "True while the playback is paused (Sound::pause())."
@@ -9119,21 +9132,21 @@ description.ja = "秒単位の長さ(numSamples / sampleRate)"
 description.ko = "초 단위 길이(numSamples / sampleRate)"
 
 ["SoundBuffer::getPath"]
-description.en = "File the samples were decoded from (for AAC, when loaded through load()); empty for memory, PCM and generated buffers."
-description.ja = "サンプルをデコードした元のファイル (AAC は load() で読んだとき)。メモリ・PCM・生成したバッファでは空"
-description.ko = "샘플을 디코딩한 원본 파일 (AAC 는 load() 로 읽었을 때). 메모리·PCM·생성한 버퍼에서는 비어 있음"
+description.en = "Resolved path of the last successful file load, including direct loadAac(). Empty after a failed load, a memory/PCM load, or generation."
+description.ja = "直近に成功したファイル読み込みの解決済みパス。loadAac() の直接呼び出しも含む。失敗・メモリ/PCM 読み込み・生成後は空。"
+description.ko = "마지막으로 성공한 파일 로드의 해석된 경로. loadAac() 직접 호출도 포함. 실패, 메모리/PCM 로드 또는 생성 후에는 비어 있음."
 
 ["SoundBuffer::load"]
-description.en = "Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure."
-description.ja = "拡張子から形式を自動判別してファイルをPCMにデコード(.wav .mp3 .ogg .flac .aac .m4a、大文字小文字を区別しない)。失敗時falseを返す"
-description.ko = "확장자로 형식을 자동 판별해 파일을 PCM으로 디코딩(.wav .mp3 .ogg .flac .aac .m4a, 대소문자 무시). 실패 시 false 반환"
+description.en = "Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure. Relative paths resolve via getDataPath(); absolute paths pass through."
+description.ja = "拡張子から形式を自動判別してファイルをPCMにデコード(.wav .mp3 .ogg .flac .aac .m4a、大文字小文字を区別しない)。失敗時falseを返す。相対パスは getDataPath() で解決し、絶対パスはそのまま使う。"
+description.ko = "확장자로 형식을 자동 판별해 파일을 PCM으로 디코딩(.wav .mp3 .ogg .flac .aac .m4a, 대소문자 무시). 실패 시 false 반환. 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다."
 
 ["SoundBuffer::loadAac"]
-description.en = "Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms)."
-description.ja = "AAC / M4AファイルをPCMにデコード(プラットフォーム依存。非対応プラットフォームではfalseを返す)"
-description.ko = "AAC / M4A 파일을 PCM으로 디코딩(플랫폼 의존. 미지원 플랫폼에서는 false 반환)"
-platform_note.en = "AAC/M4A decoding (reached via Sound::load() on .aac/.m4a, or SoundBuffer::loadAac). macOS/iOS use AVFoundation (AVAssetReader), Windows uses Media Foundation, Linux uses GStreamer, wasm uses Web Audio decodeAudioData (deferred until play(), placeholder samples until then). STUBBED on Android: logs 'AAC loading not yet implemented' and returns false (TODO MediaCodec). All other audio formats (WAV/MP3/FLAC via miniaudio, OGG via stb_vorbis) work on all 6 platforms."
-platform_note.ja = "AAC/M4A デコード (.aac/.m4a を Sound::load()、または SoundBuffer::loadAac で到達)。macOS/iOS は AVFoundation (AVAssetReader)、Windows は Media Foundation、Linux は GStreamer、wasm は Web Audio decodeAudioData (play() まで遅延、それまではプレースホルダ)。Android のみスタブで 'AAC loading not yet implemented' を出して false を返す (TODO MediaCodec)。他フォーマット (WAV/MP3/FLAC=miniaudio、OGG=stb_vorbis) は全6プラットフォームで動作。"
+description.en = "Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms). Relative paths resolve via getDataPath(); absolute paths pass through. On Web, load waits for decoded PCM using OfflineAudioContext, including in setup()."
+description.ja = "AAC / M4AファイルをPCMにデコード(プラットフォーム依存。非対応プラットフォームではfalseを返す)。相対パスは getDataPath() で解決し、絶対パスはそのまま使う。 Web では setup() 内でも OfflineAudioContext による PCM デコード完了まで待つ。"
+description.ko = "AAC / M4A 파일을 PCM으로 디코딩(플랫폼 의존. 미지원 플랫폼에서는 false 반환). 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다. Web에서는 setup() 안에서도 OfflineAudioContext를 통한 PCM 디코딩 완료까지 기다린다."
+platform_note.en = "AAC/M4A decoding (reached via Sound::load() on .aac/.m4a, or SoundBuffer::loadAac). macOS/iOS use AVFoundation (AVAssetReader), Windows uses Media Foundation, Linux uses GStreamer, wasm uses Web Audio decodeAudioData with OfflineAudioContext (load waits for decoded PCM, including in setup()). STUBBED on Android: logs 'AAC loading not yet implemented' and returns false (TODO MediaCodec). All other audio formats (WAV/MP3/FLAC via miniaudio, OGG via stb_vorbis) work on all 6 platforms."
+platform_note.ja = "AAC/M4A デコード (.aac/.m4a を Sound::load()、または SoundBuffer::loadAac で到達)。macOS/iOS は AVFoundation (AVAssetReader)、Windows は Media Foundation、Linux は GStreamer、wasm は Web Audio decodeAudioData と OfflineAudioContext (setup() 内でも load 時に PCM デコード完了まで待機)。Android のみスタブで 'AAC loading not yet implemented' を出して false を返す (TODO MediaCodec)。他フォーマット (WAV/MP3/FLAC=miniaudio、OGG=stb_vorbis) は全6プラットフォームで動作。"
 
 ["SoundBuffer::loadAacFromMemory"]
 description.en = "Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms)."
@@ -9143,9 +9156,9 @@ platform_note.en = "Memory-based AAC decode. Real impls on macOS/iOS (AVFoundati
 platform_note.ja = "メモリからの AAC デコード。macOS/iOS (AVFoundation)、Windows (Media Foundation)、Linux (GStreamer) は実装あり。Android はスタブで false、wasm も 'loadAacFromMemory() not yet implemented for Web' を出して false。api-definition.yaml には未記載。"
 
 ["SoundBuffer::loadFlac"]
-description.en = "Decode a FLAC file into PCM."
-description.ja = "FLACファイルをPCMにデコード"
-description.ko = "FLAC 파일을 PCM으로 디코딩"
+description.en = "Decode a FLAC file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through."
+description.ja = "FLACファイルをPCMにデコードする。相対パスは getDataPath() で解決し、絶対パスはそのまま使う。"
+description.ko = "FLAC 파일을 PCM으로 디코딩. 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다."
 
 ["SoundBuffer::loadFlacFromMemory"]
 description.en = "Decode FLAC data from a memory buffer."
@@ -9153,9 +9166,9 @@ description.ja = "メモリバッファからFLACデータをデコード"
 description.ko = "메모리 버퍼에서 FLAC 데이터를 디코딩"
 
 ["SoundBuffer::loadMp3"]
-description.en = "Decode an MP3 file into PCM."
-description.ja = "MP3ファイルをPCMにデコード"
-description.ko = "MP3 파일을 PCM으로 디코딩"
+description.en = "Decode an MP3 file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through."
+description.ja = "MP3ファイルをPCMにデコードする。相対パスは getDataPath() で解決し、絶対パスはそのまま使う。"
+description.ko = "MP3 파일을 PCM으로 디코딩. 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다."
 
 ["SoundBuffer::loadMp3FromMemory"]
 description.en = "Decode MP3 data from a memory buffer."
@@ -9163,9 +9176,9 @@ description.ja = "メモリバッファからMP3データをデコード"
 description.ko = "메모리 버퍼에서 MP3 데이터를 디코딩"
 
 ["SoundBuffer::loadOgg"]
-description.en = "Decode an OGG Vorbis file into PCM (via stb_vorbis)."
-description.ja = "OGG VorbisファイルをPCMにデコード(stb_vorbis経由)"
-description.ko = "OGG Vorbis 파일을 PCM으로 디코딩(stb_vorbis 사용)"
+description.en = "Decode an OGG Vorbis file into PCM (via stb_vorbis). Relative paths resolve via getDataPath(); absolute paths pass through."
+description.ja = "OGG VorbisファイルをPCMにデコード(stb_vorbis経由) 相対パスは getDataPath() で解決し、絶対パスはそのまま使う。"
+description.ko = "OGG Vorbis 파일을 PCM으로 디코딩(stb_vorbis 사용). 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다."
 
 ["SoundBuffer::loadOggFromMemory"]
 description.en = "Decode OGG Vorbis data from a memory buffer."
@@ -9178,9 +9191,9 @@ description.ja = "形式を明示してメモリから生のinterleaved PCM(16-b
 description.ko = "형식을 명시해 메모리에서 raw interleaved PCM(16-bit signed 또는 32-bit float)을 로드. 미지원 비트 심도, 1 미만의 채널 수, 프레임 단위로 나누어떨어지지 않는 데이터 크기, 버퍼에 담을 수 없는 샘플 수에서는 false 반환"
 
 ["SoundBuffer::loadWav"]
-description.en = "Decode a WAV file into PCM."
-description.ja = "WAVファイルをPCMにデコード"
-description.ko = "WAV 파일을 PCM으로 디코딩"
+description.en = "Decode a WAV file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through."
+description.ja = "WAVファイルをPCMにデコードする。相対パスは getDataPath() で解決し、絶対パスはそのまま使う。"
+description.ko = "WAV 파일을 PCM으로 디코딩. 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다."
 
 ["SoundBuffer::loadWavFromMemory"]
 description.en = "Decode WAV data from a memory buffer."
@@ -9260,14 +9273,14 @@ description.ja = "loadStream() 時に予約される同時デコーダースロ�
 description.ko = "loadStream() 시 예약되는 동시 디코더 슬롯 수"
 
 ["SoundStream::getPath"]
-description.en = "Path the stream was opened from."
-description.ja = "ストリームを開いた元のパス"
-description.ko = "스트림을 연 원본 경로"
+description.en = "Path the stream was opened from. Relative names are resolved via getDataPath(); empty after a failed load."
+description.ja = "ストリームを開いた元のパス。相対名は getDataPath() で解決し、読み込み失敗後は空。"
+description.ko = "스트림을 연 원본 경로. 상대 이름은 getDataPath()로 해석하며, 로드 실패 후에는 비어 있음."
 
 ["SoundStream::loadStream"]
-description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed)."
-description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けない、形式が非対応、またはオーディオフレームが無い (DecodeFailed) 場合falseを返す"
-description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나, 형식이 미지원이거나, 오디오 프레임이 없으면 (DecodeFailed) false 반환"
+description.en = "Open the file, validate format (.wav .mp3 .flac .ogg), and populate channels / sampleRate / duration. maxPolyphony reserves that many concurrent decoder slots. Returns false if the file can't be opened, the format is unsupported, or the file has no audio frames (DecodeFailed). Relative paths resolve via getDataPath(); absolute paths pass through."
+description.ja = "ファイルを開き、形式(.wav .mp3 .flac .ogg)を検証し、channels / sampleRate / durationを埋める。maxPolyphonyはその数だけ同時デコーダスロットを予約。ファイルが開けない、形式が非対応、またはオーディオフレームが無い (DecodeFailed) 場合falseを返す。相対パスは getDataPath() で解決し、絶対パスはそのまま使う。"
+description.ko = "파일을 열어 형식(.wav .mp3 .flac .ogg)을 검증하고 channels / sampleRate / duration을 채움. maxPolyphony는 그 수만큼 동시 디코더 슬롯을 예약. 파일을 열 수 없거나, 형식이 미지원이거나, 오디오 프레임이 없으면 (DecodeFailed) false 반환. 상대 경로는 getDataPath()로 해석하고 절대 경로는 그대로 사용한다."
 platform_note.en = "Streaming audio (Sound::loadStream / SoundStream). On wasm it is unsupported (needs std::thread + on-disk file I/O, neither available in the default browser build); Sound::loadStream() logs a warning and silently falls back to eager load(). So you always get a Sound, but it is never actually streamed on web — branch on isStreaming() / __EMSCRIPTEN__ if it matters."
 platform_note.ja = "ストリーミング再生 (Sound::loadStream / SoundStream)。wasm では非対応 (std::thread + ディスクI/O が必要、ブラウザの既定ビルドにはどちらも無い)。Sound::loadStream() は警告を出して eager load() に静かにフォールバックする。Sound 自体は得られるが web では決してストリームされない — 必要なら isStreaming() / __EMSCRIPTEN__ で分岐する。"
 
@@ -12293,9 +12306,9 @@ description.ko = "하드웨어 디코딩이 현재 활성 상태인지 확인 (l
 ["VideoPlayer::load"]
 category = "video"
 keywords = ["open", "read", "file", "movie"]
-description.en = "Load a video file"
-description.ja = "ビデオファイルを読み込む"
-description.ko = "비디오 파일을 로드"
+description.en = "Load a video file On Web, load waits for a decoded first frame instead of returning placeholder dimensions."
+description.ja = "ビデオファイルを読み込む。Web でも最初のフレームのデコードを待ち、仮の寸法で成功を返さない。"
+description.ko = "비디오 파일을 로드. Web에서도 첫 프레임 디코딩을 기다리며 임시 크기로 성공을 반환하지 않는다."
 related = ["VideoPlayer::play", "VideoPlayer::isFrameNew", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath"]
 details.en = '''
 Decoding is **asynchronous** — the decoder spins up in the background, so for a

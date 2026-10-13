@@ -28,7 +28,8 @@ public:
 
     // Load from file (relative paths resolved via getDataPath, like loadJson)
     bool load(const fs::path& path) {
-        fs::path fullPath = getDataPath(path);
+        fs::path fullPath = internal::resolveLoadPath(path);
+        if (!internal::checkLoadFile(fullPath, "Xml")) return false;
         // fullPath.c_str() is wchar_t* on Windows — pugixml has a wide
         // load_file overload there, so non-ASCII paths survive.
         XmlParseResult result = doc_.load_file(fullPath.c_str());

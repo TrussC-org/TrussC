@@ -12,6 +12,21 @@
 
 namespace trussc {
 
+namespace internal {
+inline LoadResult checkImageSize(int width, int height) {
+    // Headless Images keep their CPU pixels; there is no GPU limit to query.
+    if (sg_isvalid()) {
+        const int limit = sg_query_limits().max_image_size_2d;
+        if (width > limit || height > limit) {
+            return LoadResult::fail(LoadError::TooLarge,
+                "image exceeds GPU texture limit: " + std::to_string(limit));
+        }
+    }
+    return LoadResult::success();
+}
+} // namespace internal
+
+
 // Pixel format for Texture/FBO allocation
 enum class TextureFormat {
     RGBA8,       // 4ch, 8-bit/ch (default)
@@ -727,6 +742,12 @@ private:
         // Leave the texture unallocated so their updates and draws are no-ops.
         if (!sg_isvalid()) return;
 
+        auto sizeResult = internal::checkImageSize(width_, height_);
+        if (!sizeResult) {
+            logError("Texture") << sizeResult.message;
+            return;
+        }
+
         // Create image
         sg_image_desc img_desc = {};
         img_desc.width = width_;
@@ -803,10 +824,13 @@ private:
         }
 
         image_ = sg_make_image(&img_desc);
-        if (sg_query_image_state(image_) == SG_RESOURCESTATE_FAILED) {
+        if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
             logError("Texture") << "GPU texture allocation failed ("
                 << width_ << "x" << height_ << ", format "
                 << (int)img_desc.pixel_format << ")";
+            sg_destroy_image(image_);
+            image_ = {};
+            return;
         }
 
         // Create texture view (for sampling)

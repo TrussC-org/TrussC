@@ -215,9 +215,8 @@ public:
     // channels and sampleRate are inherited from SoundSource.
     size_t numSamples = 0;       // Samples per channel
 
-    // File the samples were decoded from (set by the path-based loaders;
-    // for AAC by load(), which Sound::load() uses). Empty for memory / PCM /
-    // generated buffers. Reported per playing sound by
+    // Resolved file of the last successful load, including direct loadAac().
+    // Empty after a failed load, memory / PCM load, or generation. Reported by
     // AudioEngine::getPlayingSounds() and tc_get_audio_state.
     fs::path getPath() const { return path_; }
 
@@ -279,17 +278,6 @@ public:
         header[6] = 0xFC; // Buffer fullness low + frames - 1
     }
 
-#ifdef __EMSCRIPTEN__
-    // Web platform: complete deferred AAC loading (blocking)
-    // Called from Sound::play() if loading was deferred during setup
-    void ensureAacLoaded();
-
-    // Check if this buffer has deferred AAC loading
-    bool hasDeferredAac() const { return !deferredAacPath_.empty(); }
-
-    std::string deferredAacPath_;  // Path for deferred AAC loading (Web only)
-#endif
-
     // Load raw interleaved PCM: 16-bit signed integer or 32-bit float,
     // little-endian unless bigEndian is set. dataSize must be a whole number
     // of frames (bitsPerSample / 8 * numChannels bytes each); anything else
@@ -297,6 +285,7 @@ public:
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
+        internal::clearLoadName(path_);
         if (bitsPerSample != 16 && bitsPerSample != 32) {
             logError("SoundBuffer") << "unsupported bits per sample: " << bitsPerSample;
             return LoadResult::fail(LoadError::UnsupportedFormat,
@@ -598,6 +587,7 @@ public:
     }
 
 private:
+    LoadResult loadAacPlatform(const fs::path& path);
     fs::path path_;  // see getPath(); cleared by the memory / generator paths
 };
 
@@ -864,7 +854,7 @@ struct AudioInBuffer {
 // ---------------------------------------------------------------------------
 struct PlayingSoundInfo {
     int         slot = 0;           // playback slot index (0 .. maxPolyphony-1)
-    fs::path    path;               // source file as given (same as getPath()); empty for generated / memory buffers
+    fs::path    path;               // resolved source file (same as getPath()); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
     bool        loop = false;
@@ -1596,7 +1586,7 @@ public:
         // getPath() and logs a failure with the file name. Relative paths
         // resolve via getDataPath, like Image::load.
         auto buf = std::make_shared<SoundBuffer>();
-        LoadResult result = buf->load(getDataPath(path));
+        LoadResult result = buf->load(path);
 
         if (!result) {
             buffer_.reset();
@@ -1636,7 +1626,7 @@ public:
 #else
         auto stream = std::make_shared<SoundStream>();
         // Relative paths resolve via getDataPath, like load().
-        LoadResult r = stream->loadStream(getDataPath(path), maxPolyphony);
+        LoadResult r = stream->loadStream(path, maxPolyphony);
         if (!r) {
             buffer_.reset();
             return r;
@@ -1685,19 +1675,6 @@ public:
     // warnings and counted in AudioEngine::getStats().
     bool play() {
         if (!buffer_) return false;
-
-#ifdef __EMSCRIPTEN__
-        // Web platform: complete deferred AAC loading if needed.
-        // Only eager SoundBuffer can have a deferred AAC payload —
-        // SoundStream is decoded incrementally at play time and doesn't
-        // use the deferred-load mechanism.
-        if (buffer_->kind() == SoundSource::Eager) {
-            auto* eager = static_cast<SoundBuffer*>(buffer_.get());
-            if (eager->hasDeferredAac()) {
-                eager->ensureAacLoaded();
-            }
-        }
-#endif
 
         // Stop if already playing
         stop();

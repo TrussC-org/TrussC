@@ -14,7 +14,9 @@
 
 namespace trussc {
 
-bool Pixels::loadPlatform(const fs::path& path) {
+bool Pixels::loadPlatform(const fs::path& filePath) {
+    const auto path = internal::resolveLoadPath(filePath);
+    if (!internal::checkLoadFile(path, "Pixels")) return false;
     @autoreleasepool {
         NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
         NSURL* url = [NSURL fileURLWithPath:nsPath];

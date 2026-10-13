@@ -533,7 +533,7 @@ TC_CORE_TEST_MAIN() {
             checkNoThrow("loadTextFile(missing unpaired-surrogate name): logged", [&] {
                 seen.clear();
                 return loadTextFile(missing).empty() &&
-                       logged("Cannot open file: ", "e" + R + ".txt");
+                       logged("[File] file not found: ", "e" + R + ".txt");
             });
             checkNoThrow("removeFile(non-empty dir, unpaired surrogate): catch logs", [&] {
                 seen.clear();
@@ -544,12 +544,12 @@ TC_CORE_TEST_MAIN() {
                 seen.clear();
                 FileReader r;
                 return !r.open(missing) &&
-                       logged("FileReader: Cannot open file: ", "e" + R + ".txt");
+                       logged("[FileReader] file not found: ", "e" + R + ".txt");
             });
             checkNoThrow("Xml::load(missing unpaired-surrogate name): logged", [&] {
                 seen.clear();
                 Xml xml;
-                return !xml.load(missing) && logged("XML load error: ", "e" + R + ".txt");
+                return !xml.load(missing) && logged("[Xml] file not found: ", "e" + R + ".txt");
             });
             checkNoThrow("Pixels::load(missing surrogate): FileNotFound, U+FFFD", [&] {
                 seen.clear();
@@ -589,7 +589,7 @@ TC_CORE_TEST_MAIN() {
                 const LoadResult r = buffer.load(bad(L"missing", L".ogg"));
                 return !r && r.error == LoadError::FileNotFound &&
                        r.message.find("missing" + R + ".ogg") != string::npos &&
-                       logged("[SoundBuffer] failed to open ", "missing" + R + ".ogg");
+                       logged("[SoundBuffer] file not found: ", "missing" + R + ".ogg");
             });
             const fs::path logPath = bad(L"g", L".log");
             Logger& logger = getLogger();

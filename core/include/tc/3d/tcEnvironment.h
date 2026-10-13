@@ -90,7 +90,6 @@ public:
     bool loadFromHDR(const fs::path& path) {
         Pixels src;
         if (!src.loadHDR(path)) {
-            logError("Environment") << "loadHDR failed: " << path;
             return false;
         }
         return loadFromHDR(src);
@@ -108,6 +107,7 @@ public:
         Texture equirect;
         equirect.setWrapU(TextureWrap::Repeat);
         equirect.allocate(src, TextureUsage::Immutable);
+        if (!equirect.isAllocated()) return false;
 
         return bakeFromEquirectTexture(equirect);
     }

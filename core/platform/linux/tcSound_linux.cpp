@@ -261,13 +261,7 @@ private:
     size_t memoryPos_ = 0;
 };
 
-LoadResult SoundBuffer::loadAac(const fs::path& path) {
-    std::error_code ec;
-    if (!fs::exists(path, ec)) {
-        logError("SoundBuffer") << "file not found: " << path;
-        return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToDisplayUtf8(path));
-    }
+LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     GstAacDecoder decoder;
     return decoder.decodeFile(internal::pathToUtf8(path), *this)
                ? LoadResult::success()
@@ -277,6 +271,7 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    internal::clearLoadName(path_);
     GstAacDecoder decoder;
     return decoder.decodeMemory(data, dataSize, *this)
                ? LoadResult::success()

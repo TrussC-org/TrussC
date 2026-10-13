@@ -1570,11 +1570,12 @@ public:
         std::string nameStr = internal::pathToUtf8(nameOrPath);
         std::string actualPath = nameStr;
         int actualFace = faceIndex;
+        bool isDataFile = false;
         if (!isUrl(nameStr)) {
-            const fs::path filePath = getDataPath(nameOrPath);   // absolute paths pass through
+            const fs::path filePath = internal::resolveLoadPath(nameOrPath);   // absolute paths pass through
             actualPath = internal::pathToUtf8(filePath);
-            std::ifstream test(filePath, std::ios::binary);
-            if (!test.good()) {
+            isDataFile = internal::isLoadFile(filePath);
+            if (!isDataFile) {
                 // Not a usable file path — try as a system font name. The OS
                 // gives the file and the face inside it.
                 internal::SystemFontFace resolved = internal::systemFontFace(nameStr);
@@ -1613,15 +1614,27 @@ public:
 
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
-            // Async load - returns immediately, font available after fetch completes
-            loadFromUrlAsync(actualPath, physicalSize, actualFace);
-            return LoadResult::success();  // Will be loaded asynchronously
+            // Yield via Asyncify until fetching and decoding have completed.
+            auto result = loadFromUrl(actualPath, physicalSize, actualFace);
+            if (!result) {
+                cacheKey_.fontPath.clear();
+                if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+                return result;
+            }
 #else
             logError() << "Font: URL loading only supported in WebAssembly";
             return LoadResult::fail(LoadError::UnsupportedFormat,
                                     "URL loading only supported in WebAssembly: " + actualPath);
 #endif
         } else {
+            if (isDataFile) {
+                auto entry = internal::checkLoadFile(internal::utf8ToPath(actualPath), "Font");
+                if (!entry) {
+                    atlasManager_.reset();
+                    if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
+                    return entry;
+                }
+            }
             atlasManager_ = internal::SharedFontCache::getInstance().getOrCreate(cacheKey_);
         }
 
@@ -1636,7 +1649,7 @@ public:
             // was never found (bad path or unresolvable system-font name);
             // otherwise the file opened but stb_truetype rejected it.
             std::error_code ec;
-            if (!fs::exists(internal::utf8ToPath(actualPath), ec)) {
+            if (!isUrl(actualPath) && !fs::exists(internal::utf8ToPath(actualPath), ec)) {
                 std::string msg = "font not found: \"" + nameStr + "\"";
                 if (actualPath != nameStr) msg += " (resolved to \"" + actualPath + "\")";
                 return LoadResult::fail(LoadError::FileNotFound, msg);
@@ -1658,6 +1671,9 @@ private:
     struct FontLoadContext {
         Font* font;
         internal::FontCacheKey key;
+        double deadline;
+        bool complete = false;
+        bool timedOut = false;
     };
 
     static void onFetchSuccess(emscripten_fetch_t* fetch) {
@@ -1667,8 +1683,7 @@ private:
         // refused. setupFromMemory() rejects an empty response with a warning.
         if (fetch->numBytes > (uint64_t)SIZE_MAX) {
             logWarning() << "Font: response too large for " << ctx->key.fontPath;
-            delete ctx;
-            emscripten_fetch_close(fetch);
+            ctx->complete = true;
             return;
         }
 
@@ -1682,40 +1697,62 @@ private:
             logNotice("Font") << "Loaded from URL: " << ctx->key.fontPath;
         }
 
-        delete ctx;
-        emscripten_fetch_close(fetch);
+        ctx->complete = true;
     }
 
     static void onFetchError(emscripten_fetch_t* fetch) {
         FontLoadContext* ctx = reinterpret_cast<FontLoadContext*>(fetch->userData);
-        logError() << "Font: failed to fetch " << ctx->key.fontPath
-                     << " (status: " << fetch->status << ")";
-        delete ctx;
-        emscripten_fetch_close(fetch);
+        // Closing an unfinished fetch can call onerror again. The waiting
+        // caller owns closing it, after the result has been recorded.
+        if (ctx->complete) return;
+        ctx->timedOut = emscripten_get_now() >= ctx->deadline;
+        if (!ctx->timedOut) {
+            logError() << "Font: failed to fetch " << ctx->key.fontPath
+                         << " (status: " << fetch->status << ")";
+        }
+        ctx->complete = true;
     }
 
-    void loadFromUrlAsync(const std::string& url, int size, int faceIndex) {
+    LoadResult loadFromUrl(const std::string& url, int size, int faceIndex) {
         // Check cache first (don't try to load from file)
         internal::FontCacheKey key{url, size};
         key.faceIndex = faceIndex;
         auto cached = internal::SharedFontCache::getInstance().get(key);
         if (cached) {
             atlasManager_ = cached;
-            return;
+            return LoadResult::success();
         }
 
         // Start async fetch
-        FontLoadContext* ctx = new FontLoadContext{this, key};
+        atlasManager_.reset();
+        FontLoadContext ctx{this, key, emscripten_get_now() + internal::webLoadTimeoutMSecs};
 
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
         std::strcpy(attr.requestMethod, "GET");
         attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+        attr.timeoutMSecs = internal::webLoadTimeoutMSecs;
         attr.onsuccess = onFetchSuccess;
         attr.onerror = onFetchError;
-        attr.userData = ctx;
+        attr.userData = &ctx;
 
-        emscripten_fetch(&attr, url.c_str());
+        auto* fetch = emscripten_fetch(&attr, url.c_str());
+        if (fetch) {
+            while (!ctx.complete) {
+                if (emscripten_get_now() >= ctx.deadline) {
+                    ctx.timedOut = true;
+                    ctx.complete = true;
+                    break;
+                }
+                emscripten_sleep(10);
+            }
+            // Close before the stack context goes away; callbacks never
+            // close recursively, including Emscripten's abort callback.
+            emscripten_fetch_close(fetch);
+        }
+        if (ctx.timedOut) return internal::reportWebLoadTimeout(internal::utf8ToPath(url), "Font");
+        // The caller classifies fetch/decode failure from atlasManager_.
+        return LoadResult::success();
     }
 #endif
 

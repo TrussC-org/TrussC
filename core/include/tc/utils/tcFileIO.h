@@ -22,6 +22,7 @@
 // path::string() and fs::path(std::string). pathToDisplayUtf8() and
 // openFile() are internal plumbing.
 
+#include "tcLoadResult.h"
 #include <filesystem>
 #include <cstdio>
 #include <string>
@@ -130,6 +131,49 @@ inline std::FILE* openFile(const fs::path& p, const char* mode) {
     return std::fopen(p.c_str(), mode);
 #endif
 }
+
+// Loading entry. URLs opt out of filesystem resolution and opening.
+inline fs::path resolveLoadPath(const fs::path& path, bool isUrl = false) {
+    return isUrl || path.is_absolute() ? path : getDataPath(path);
+}
+
+inline bool isLoadFile(const fs::path& path) {
+    std::error_code ec;
+    return fs::is_regular_file(path, ec);
+}
+
+// Defined with the logger in tcGlobal.cpp to avoid the tcLog/FileIO include cycle.
+LoadResult reportMissingLoad(const fs::path& path, const char* module);
+
+#ifdef __EMSCRIPTEN__
+inline constexpr unsigned webLoadTimeoutMSecs = 30000;
+LoadResult reportWebLoadTimeout(const fs::path& path, const char* module);
+#endif
+
+inline std::FILE* openLoadFile(const fs::path& path, const char* module,
+                              LoadResult& result) {
+    std::FILE* file = isLoadFile(path) ? openFile(path, "rb") : nullptr;
+    result = file ? LoadResult::success() : reportMissingLoad(path, module);
+    return file;
+}
+
+// Decoders that own their file handle use this before opening it themselves.
+inline LoadResult checkLoadFile(const fs::path& path, const char* module,
+                                bool isUrl = false) {
+    if (isUrl) return LoadResult::success();
+    LoadResult result;
+    if (auto* file = openLoadFile(path, module, result)) std::fclose(file);
+    return result;
+}
+
+inline void clearLoadName(fs::path& name) {
+    name.clear();
+}
+
+inline void setLoadName(fs::path& name, const fs::path& path) {
+    name = path;
+}
+
 
 } // namespace internal
 

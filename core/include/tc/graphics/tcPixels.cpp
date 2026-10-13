@@ -75,7 +75,8 @@ bool Pixels::save(const fs::path& path) const {
 
 // Platform-specific image loader fallback (non-Apple stub)
 #ifndef __APPLE__
-bool Pixels::loadPlatform(const fs::path& /*path*/) {
+bool Pixels::loadPlatform(const fs::path& path) {
+    if (!internal::checkLoadFile(internal::resolveLoadPath(path), "Pixels")) return false;
     return false;
 }
 #endif

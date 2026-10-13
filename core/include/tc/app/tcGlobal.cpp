@@ -944,6 +944,21 @@ std::filesystem::path internal::resolveScreenshotPath(const std::filesystem::pat
     return resolved;
 }
 
+LoadResult internal::reportMissingLoad(const fs::path& path, const char* module) {
+    const std::string message = "file not found: " + pathToDisplayUtf8(path);
+    logError(module) << message;
+    return LoadResult::fail(LoadError::FileNotFound, message);
+}
+
+#ifdef __EMSCRIPTEN__
+LoadResult internal::reportWebLoadTimeout(const fs::path& path, const char* module) {
+    const std::string message = "timed out after " +
+        std::to_string(webLoadTimeoutMSecs / 1000) + " s: " + pathToDisplayUtf8(path);
+    logError(module) << message;
+    return LoadResult::fail(LoadError::Unknown, message);
+}
+#endif
+
 // Declared in tcLog.h. Defined here because tcLog.h cannot include tcUtils.h
 // (getDataPath): tcUtils.h includes tcSound.h, which includes tcLog.h.
 bool Logger::setLogFile(const fs::path& path) {

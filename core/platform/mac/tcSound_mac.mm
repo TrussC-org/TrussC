@@ -47,16 +47,10 @@ static SInt64 MemoryAudioFile_GetSizeProc(void* inClientData) {
 // -----------------------------------------------------------------------------
 // SoundBuffer::loadAac - macOS implementation (file-based)
 // -----------------------------------------------------------------------------
-LoadResult SoundBuffer::loadAac(const fs::path& path) {
+LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     // Convert path to URL
     std::string pathStr = internal::pathToUtf8(path);
 
-    std::error_code ec;
-    if (!fs::exists(path, ec)) {
-        logError("SoundBuffer") << "file not found: " << pathStr;
-        return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + pathStr);
-    }
 
     NSString* nsPath = [NSString stringWithUTF8String:pathStr.c_str()];
     NSURL* fileURL = [NSURL fileURLWithPath:nsPath];
@@ -190,6 +184,7 @@ LoadResult SoundBuffer::loadAac(const fs::path& path) {
 // SoundBuffer::loadAacFromMemory - macOS implementation (memory-based)
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    internal::clearLoadName(path_);
     if (!data || dataSize == 0) {
         logError("SoundBuffer") << "AAC data is empty";
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");

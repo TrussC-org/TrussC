@@ -504,7 +504,7 @@ std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const {
         info.streaming = (src.kind() == SoundSource::Stream);
         const fs::path p = info.streaming ? static_cast<const SoundStream&>(src).getPath()
                                           : static_cast<const SoundBuffer&>(src).getPath();
-        info.path     = p;  // as given, same string as getPath() and the logs
+        info.path     = p;  // resolved, same path as getPath() and the logs
         info.paused   = v->paused;
         info.loop     = v->loop;
         // positionF counts source frames for eager voices and, for streams,
@@ -1271,6 +1271,7 @@ private:
 // lazily by AudioEngine::play().
 // ---------------------------------------------------------------------------
 LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
+    internal::clearLoadName(path_);
     if (maxPolyphony < 1) maxPolyphony = 1;
 
     // Detect format by extension. We don't go through stb_vorbis here —
@@ -1292,6 +1293,8 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
         // Roughly half a day of work; tracked separately from this refactor.
         // AAC is platform-specific (AudioToolbox / MediaFoundation / GStreamer)
         // and streaming would need per-platform plumbing — lower priority.
+        auto entry = internal::checkLoadFile(internal::resolveLoadPath(path), "SoundStream");
+        if (!entry) return entry;
         logError("SoundStream") << "unsupported extension for streaming '." << ext
                                 << "' (use load() for full decode)";
         return LoadResult::fail(LoadError::UnsupportedFormat,
@@ -1299,19 +1302,17 @@ LoadResult SoundStream::loadStream(const fs::path& path, int maxPolyphony) {
                                 "' (use load() for full decode)");
     }
 
-    // Classify missing files before handing the path to miniaudio (whose
-    // error codes don't distinguish the two cases cheaply).
-    std::error_code ec;
-    if (!fs::exists(path, ec)) {
-        logError("SoundStream") << "file not found: " << path;
-        return LoadResult::fail(LoadError::FileNotFound,
-                                "file not found: " + internal::pathToDisplayUtf8(path));
-    }
-
     return openStream(path, maxPolyphony, (int)fmt, nullptr);
 }
 
-LoadResult SoundStream::openStream(const fs::path& path, int maxPolyphony, int format, void* customBackend) {
+LoadResult SoundStream::openStream(const fs::path& filePath, int maxPolyphony, int format, void* customBackend) {
+    internal::clearLoadName(path_);
+    // Internal custom decoders already receive resolved paths, or protocol
+    // URLs such as FFmpeg's file: source. They own opening those sources.
+    const bool backendOwnsPath = customBackend != nullptr;
+    const auto path = internal::resolveLoadPath(filePath, backendOwnsPath);
+    auto entry = internal::checkLoadFile(path, "SoundStream", backendOwnsPath);
+    if (!entry) return entry;
     // Probe decode: open, query, close. Per-voice decoders re-open later.
     // The decoder is configured to output at the engine's runtime sample
     // rate so the mixer can memcpy without resampling.
@@ -1395,7 +1396,7 @@ LoadResult SoundStream::openStream(const fs::path& path, int maxPolyphony, int f
     ma_decoder_uninit(&probe);
 
     mp3Data_ = std::move(mp3Data);
-    path_ = path;
+    internal::setLoadName(path_, path);
     maxPolyphony_ = maxPolyphony;
     encodingFormatHint_ = format;
     customBackend_ = customBackend;
