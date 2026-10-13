@@ -127,6 +127,21 @@ bool UdpSocket::bind(int port, bool startReceiving) {
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(static_cast<uint16_t>(port));
 
+#ifdef _WIN32
+    // POSIX already refuses a second bind unless both sockets ask for reuse.
+    // Windows lets a later SO_REUSEADDR socket take the port unless the first
+    // one sets SO_EXCLUSIVEADDRUSE.
+    if (!reuseAddress_ && !reusePort_) {
+        int exclusive = 1;
+        if (setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                       reinterpret_cast<const char*>(&exclusive), sizeof(exclusive)) != 0) {
+            notifyError("Failed to make port " + std::to_string(port) + " exclusive",
+                        SOCKET_ERROR_CODE);
+            return false;
+        }
+    }
+#endif
+
     if (::bind(socket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         notifyError("Failed to bind to port " + std::to_string(port), SOCKET_ERROR_CODE);
         return false;
@@ -194,6 +209,9 @@ void UdpSocket::close() {
         CLOSE_SOCKET(socket_);
         socket_ = INVALID_SOCKET_HANDLE;
     }
+    // Reuse options belong to the closed socket; the next one starts exclusive.
+    reuseAddress_ = false;
+    reusePort_ = false;
 
     // Wait for thread to finish. On that thread itself (an onReceive
     // listener that closes the socket) it cannot join itself: keep it for a
@@ -552,6 +570,7 @@ bool UdpSocket::setReuseAddress(bool enable) {
         notifyError("Failed to set address reuse", SOCKET_ERROR_CODE);
         return false;
     }
+    reuseAddress_ = enable;
     return true;
 }
 
@@ -644,21 +663,7 @@ bool UdpSocket::setReusePort(bool enable) {
         notifyError("Failed to set port reuse", SOCKET_ERROR_CODE);
         return false;
     }
-    return true;
-}
-
-bool UdpSocket::setExclusiveAddressUse(bool enable) {
-#ifdef _WIN32
-    if (!ensureSocket()) return false;
-    int val = enable ? 1 : 0;
-    if (setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
-                   reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
-        notifyError("Failed to set exclusive address use", SOCKET_ERROR_CODE);
-        return false;
-    }
-#else
-    (void)enable;
-#endif
+    reusePort_ = enable;
     return true;
 }
 

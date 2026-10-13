@@ -48,8 +48,7 @@ public:
     // Bind exclusively and start receiving. A port in use returns false and
     // reports through onParseError and the socket log.
     bool setup(int port) {
-        if (!prepareSocket(port) || !socket_.setExclusiveAddressUse(true) ||
-            !socket_.bind(port, true)) {
+        if (!prepareSocket(port) || !socket_.bind(port, true)) {
             close();
             return false;
         }

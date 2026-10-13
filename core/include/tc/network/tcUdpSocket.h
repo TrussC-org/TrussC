@@ -106,6 +106,9 @@ public:
 
     // Bind port for receiving
     // startReceiving=true automatically starts receive thread
+    // Without setReuseAddress(true) / setReusePort(true) the port is exclusive
+    // on every platform: on Windows bind() sets SO_EXCLUSIVEADDRUSE, so a later
+    // socket using SO_REUSEADDR cannot bind over it either.
     bool bind(int port, bool startReceiving = true);
 
     // Set destination (after setting, can send via send(data, size))
@@ -172,12 +175,6 @@ public:
     // where another app (a console, QLC+) may also be bound. Maps to SO_REUSEPORT
     // on POSIX; on Windows SO_REUSEADDR already grants this, so it maps to that.
     bool setReusePort(bool enable);
-
-    // Reserve the address exclusively on Windows (SO_EXCLUSIVEADDRUSE), even
-    // against later sockets using SO_REUSEADDR. Set before bind, without reuse.
-    // On POSIX this is a no-op returning true; leave reuse disabled there.
-    // Windows failures return false and report through onError and the log.
-    bool setExclusiveAddressUse(bool enable);
 
     // -------------------------------------------------------------------------
     // Multicast (IPv4)
@@ -254,6 +251,10 @@ private:
 
     SocketHandle socket_ = INVALID_SOCKET_HANDLE;
     int localPort_ = 0;
+    // Reuse requested on the current socket; cleared by close(). Neither set
+    // means bind() makes the port exclusive (SO_EXCLUSIVEADDRUSE on Windows).
+    bool reuseAddress_ = false;
+    bool reusePort_ = false;
     std::string connectedHost_;
     int connectedPort_ = 0;
 
