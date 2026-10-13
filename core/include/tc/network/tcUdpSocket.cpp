@@ -547,8 +547,12 @@ bool UdpSocket::setBroadcast(bool enable) {
 bool UdpSocket::setReuseAddress(bool enable) {
     if (!ensureSocket()) return false;
     int val = enable ? 1 : 0;
-    return setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
-                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+    if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
+        notifyError("Failed to set address reuse", SOCKET_ERROR_CODE);
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -631,12 +635,31 @@ bool UdpSocket::setReusePort(bool enable) {
     int val = enable ? 1 : 0;
 #ifdef _WIN32
     // Windows has no SO_REUSEPORT; SO_REUSEADDR already permits multiple binds.
-    return setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR,
-                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+    const int option = SO_REUSEADDR;
 #else
-    return setsockopt(socket_, SOL_SOCKET, SO_REUSEPORT,
-                      reinterpret_cast<const char*>(&val), sizeof(val)) == 0;
+    const int option = SO_REUSEPORT;
 #endif
+    if (setsockopt(socket_, SOL_SOCKET, option,
+                   reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
+        notifyError("Failed to set port reuse", SOCKET_ERROR_CODE);
+        return false;
+    }
+    return true;
+}
+
+bool UdpSocket::setExclusiveAddressUse(bool enable) {
+#ifdef _WIN32
+    if (!ensureSocket()) return false;
+    int val = enable ? 1 : 0;
+    if (setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&val), sizeof(val)) != 0) {
+        notifyError("Failed to set exclusive address use", SOCKET_ERROR_CODE);
+        return false;
+    }
+#else
+    (void)enable;
+#endif
+    return true;
 }
 
 bool UdpSocket::setReceiveBufferSize(int size) {

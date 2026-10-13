@@ -3047,6 +3047,7 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
         (void)af::val<UdpSocket>().setBroadcast(af::val<bool>());
         (void)af::val<UdpSocket>().setReuseAddress(af::val<bool>());
         (void)af::val<UdpSocket>().setReusePort(af::val<bool>());
+        (void)af::val<UdpSocket>().setExclusiveAddressUse(af::val<bool>());
         (void)af::val<UdpSocket>().joinMulticastGroup(af::val<const std::string>(), af::val<const std::string>());
         (void)af::val<UdpSocket>().leaveMulticastGroup(af::val<const std::string>(), af::val<const std::string>());
         (void)af::val<UdpSocket>().setMulticastTTL(af::val<int>());

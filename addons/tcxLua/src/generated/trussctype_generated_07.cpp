@@ -28,6 +28,7 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["setBroadcast"] = &trussc::UdpSocket::setBroadcast;
         t["setReuseAddress"] = &trussc::UdpSocket::setReuseAddress;
         t["setReusePort"] = &trussc::UdpSocket::setReusePort;
+        t["setExclusiveAddressUse"] = &trussc::UdpSocket::setExclusiveAddressUse;
         t["joinMulticastGroup"] = sol::overload([](trussc::UdpSocket& self, const std::string & groupAddr) { return self.joinMulticastGroup(groupAddr); }, [](trussc::UdpSocket& self, const std::string & groupAddr, const std::string & interfaceAddr) { return self.joinMulticastGroup(groupAddr, interfaceAddr); });
         t["leaveMulticastGroup"] = sol::overload([](trussc::UdpSocket& self, const std::string & groupAddr) { return self.leaveMulticastGroup(groupAddr); }, [](trussc::UdpSocket& self, const std::string & groupAddr, const std::string & interfaceAddr) { return self.leaveMulticastGroup(groupAddr, interfaceAddr); });
         t["setMulticastTTL"] = &trussc::UdpSocket::setMulticastTTL;

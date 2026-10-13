@@ -173,6 +173,12 @@ public:
     // on POSIX; on Windows SO_REUSEADDR already grants this, so it maps to that.
     bool setReusePort(bool enable);
 
+    // Reserve the address exclusively on Windows (SO_EXCLUSIVEADDRUSE), even
+    // against later sockets using SO_REUSEADDR. Set before bind, without reuse.
+    // On POSIX this is a no-op returning true; leave reuse disabled there.
+    // Windows failures return false and report through onError and the log.
+    bool setExclusiveAddressUse(bool enable);
+
     // -------------------------------------------------------------------------
     // Multicast (IPv4)
     // -------------------------------------------------------------------------

@@ -82,6 +82,23 @@ class tcApp : public App {
 };
 ```
 
+## Port ownership and multicast
+
+`setup(port)` owns the port exclusively. If another receiver already uses it,
+setup returns `false`, logs one error and reports it through `onParseError`.
+Starting the event example twice now reaches its "Failed to bind port" branch.
+
+For several receivers on one multicast port, use
+`setupMulticast(9000, "239.0.0.1")`. It enables reuse, binds and joins the group,
+then starts receiving. The optional `iface` is an IPv4 interface address
+(`""` or `"0.0.0.0"` selects the default route). A failed step reports an error,
+closes the socket and returns `false`.
+
+`joinMulticast()` and `leaveMulticast()` still work on a receiver that is already
+set up. Joining after `setup()` keeps the port exclusive. For v0.8.0, apps that
+previously shared a multicast port with `setup()` plus `joinMulticast()` must use
+`setupMulticast()` instead.
+
 ## Threading: event vs polling
 
 Reception happens on a **background thread**, so the two consume styles differ in where
@@ -194,12 +211,15 @@ const vector<Destination>& getConnectedAddresses() const;
 ### OscReceiver
 
 ```cpp
-bool setup(port);                  // bind + start the receive thread
+bool setup(port);                  // exclusive bind + start receiving
+bool setupMulticast(port, group, iface = ""); // shared bind + join + start receiving
+bool joinMulticast(group, iface = "");       // join on an already set up receiver
+bool leaveMulticast(group, iface = "");
 void close();
 int  getPort() const;
 bool isListening() const;
 
-// Events (fire on the receive thread)
+// Message/bundle events fire on the receive thread; setup errors fire during setup.
 Event<OscMessage> onMessageReceived;
 Event<OscBundle>  onBundleReceived;   // see the note below
 Event<string>     onParseError;

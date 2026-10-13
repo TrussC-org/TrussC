@@ -11340,6 +11340,11 @@ description.en = "Allow address reuse (set before bind)"
 description.ja = "アドレス再利用を許可（bind前に設定）"
 description.ko = "주소 재사용을 허용 (bind 전에 설정)"
 
+["UdpSocket::setExclusiveAddressUse"]
+description.en = "Reserve the address exclusively on Windows (SO_EXCLUSIVEADDRUSE), including against later sockets using SO_REUSEADDR. Set before bind without enabling reuse. On POSIX this is a no-op returning true; leave reuse disabled. Windows failures return false and report through onError and the log."
+description.ja = "Windowsでアドレスを排他的に確保（SO_EXCLUSIVEADDRUSE）。後からSO_REUSEADDRを使うソケットにも共有を許可しない。再利用を有効にせずbind前に設定。POSIXでは何もせずtrueを返すため、再利用は無効のままにする。Windowsで失敗するとfalseを返し、onErrorとログで通知する。"
+description.ko = "Windows에서 주소를 독점 사용하도록 설정 (SO_EXCLUSIVEADDRUSE). 나중에 SO_REUSEADDR를 사용하는 소켓도 공유할 수 없다. 재사용을 켜지 않고 bind 전에 설정한다. POSIX에서는 아무 작업 없이 true를 반환하므로 재사용을 비활성화한 상태로 둔다. Windows에서 실패하면 false를 반환하고 onError와 로그로 알린다."
+
 ["UdpSocket::setReusePort"]
 description.en = "Allow multiple sockets on the same port (multicast receivers; set before bind)"
 description.ja = "同一ポートへの複数ソケットを許可（マルチキャスト受信。bind前に設定）"
