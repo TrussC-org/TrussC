@@ -21,8 +21,7 @@ run covers every platform's code.
 Exemptions:
   - A line that carries the marker `log-check: allow` in a comment, with the
     reason next to it. For the Logger's own sinks (tcLog.h writes the console
-    with cout / cerr) and the few raw lines kept on purpose (the MCP port
-    line on stderr, until #414). A marker on a line with nothing to exempt
+    with cout / cerr). A marker on a line with nothing to exempt
     fails too, so markers cannot go stale.
   - Vendored files: none live under the scanned folders today (miniaudio,
     lz4, nlohmann/json, sokol, ... sit directly in core/include). List one in

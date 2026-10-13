@@ -19,10 +19,11 @@
 // The main thread pumps mcp::processHttpQueue() the way the frame loop does;
 // the requests run on a worker with a deadline.
 //
-// Also guards the port line (#311): once the server has bound its port it
+// Also guards the port line (#311, #414): once the server has bound its port it
 // logs "[MCP] HTTP server listening on http://HOST:PORT/mcp" through the
 // Logger at Notice, exactly once, with the actual (here OS-assigned) port, so
-// the line reaches onLog listeners and the log file, not only stderr.
+// the line reaches onLog listeners, stdout and the log file, with no raw
+// stderr copy. A Warning console level hides it only on the console.
 //
 // Also checks that the MCP server reports a port that is already in use: on a
 // fixed port another server listens on, it fails to bind, logs exactly one
@@ -152,6 +153,53 @@ static void testDefaultHost() {
     }
 
     mcp::stopHttpServer();
+}
+
+// Port discovery uses the Logger outputs, including a file when the console
+// filters out Notice. Capture only synchronous startup, before making checks.
+static void testPortLogOutputs() {
+    const auto consoleLevel = getLogger().getConsoleLogLevel();
+    const auto fileLevel = getLogger().getFileLogLevel();
+    const fs::path logPath = fs::temp_directory_path() /
+        ("trussc_mcpPortOutputs_" +
+         to_string(chrono::steady_clock::now().time_since_epoch().count()) + ".log");
+    setFileLogLevel(LogLevel::Notice);
+    for (auto level : {LogLevel::Notice, LogLevel::Warning}) {
+        check("port discovery log file opened", setLogFile(logPath));
+        setConsoleLogLevel(level);
+        ostringstream capturedOut, capturedErr;
+        auto* savedOut = cout.rdbuf(capturedOut.rdbuf());
+        auto* savedErr = cerr.rdbuf(capturedErr.rdbuf());
+        mcp::startHttpServer();
+        cout.rdbuf(savedOut);
+        cerr.rdbuf(savedErr);
+
+        const int port = mcp::getHttpPort();
+        check("port discovery server bound", port > 0);
+        const string portLine = "[NOTICE] [MCP] HTTP server listening on http://127.0.0.1:" +
+            to_string(port) + "/mcp\n";
+        const auto output = capturedOut.str();
+        const auto position = output.find(portLine);
+        if (level == LogLevel::Notice) {
+            check("stdout contains the Logger port Notice exactly once", position != string::npos &&
+                  output.find(portLine, position + portLine.size()) == string::npos);
+        } else {
+            check("Warning console level hides the port Notice",
+                  output.find("HTTP server listening on") == string::npos);
+        }
+        check("startup has no raw stderr port copy", capturedErr.str().empty(), capturedErr.str());
+        mcp::stopHttpServer();
+        closeLogFile();
+        ifstream in(logPath);
+        stringstream text;
+        text << in.rdbuf();
+        in.close();
+        check("log file exposes the port at either console level", text.str().find(portLine) != string::npos);
+        error_code ec;
+        fs::remove(logPath, ec);
+    }
+    setConsoleLogLevel(consoleLevel);
+    setFileLogLevel(fileLevel);
 }
 
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
@@ -708,6 +756,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 
     testPortInUse();
     testDefaultHost();
+    testPortLogOutputs();
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "OK", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

@@ -874,10 +874,6 @@ inline void startHttpServerImpl(int port, const std::string& host,
     // Notice here too, so Logger listeners do not run on the HTTP thread.
     trussc::logNotice("MCP") << "HTTP server listening on http://" << host
                              << ":" << actualPort << "/mcp";
-    // The raw stderr copy stays for v0.7 so tools that read stderr keep
-    // working; it is removed in v0.8.0 (#414).
-    std::cerr << "[MCP] HTTP server listening on http://" << host << ":" // log-check: allow (#414)
-              << actualPort << "/mcp" << std::endl;
 }
 } // namespace internal
 

@@ -494,8 +494,10 @@ Configure your MCP client with the HTTP URL:
 
 - If `TRUSSC_MCP_PORT` is set, the app uses that port.
 - If not set (or set to `0`), the OS assigns an available port.
-- The actual port is printed on startup, once the port is bound: `[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp`. It is a Logger Notice (stdout, the log file, `onLog`; hidden on the console when the console level is Warning or higher), plus, in v0.7 only, a raw copy on stderr.
-- For a guaranteed port, set `TRUSSC_MCP_PORT` rather than reading the line.
+- After binding, the server logs `[MCP] HTTP server listening on http://127.0.0.1:PORT/mcp` as a Logger Notice. On desktop, read this message from stdout or the file selected by `TRUSSC_LOG_FILE`; Logger output includes a timestamp and `[NOTICE]` prefix. `onLog` listeners also receive the message.
+- **Breaking in v0.8.0:** the raw stderr copy has been removed. Tools that previously parsed stderr must read the Logger line from stdout or the log file, or set a fixed port with `TRUSSC_MCP_PORT`.
+- A console level of Warning or higher hides the Notice on stdout. The log file still receives it if its own level permits Notice (the default); if the app uses `setLogLevel(LogLevel::Warning)` or higher, it must call `setFileLogLevel(LogLevel::Notice)` before MCP startup to enable discovery through the file.
+- To avoid log parsing, set a nonzero fixed port, for example `TRUSSC_MCP_PORT=8080`, and connect to `http://127.0.0.1:8080/mcp`. The server must still bind successfully; an occupied port is an error.
 - From code: `mcp::getHttpPort()` returns the actual port number.
 
 ## Security Model
