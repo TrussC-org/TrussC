@@ -552,10 +552,12 @@ LIBGL_ALWAYS_SOFTWARE=1 \
 - `mcpHttpGuard/` — a web page in the user's browser cannot drive the
   loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
   403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
-  native clients keep working. Also the port line (#311): after bind, the
+  native clients keep working. Also the port line (#311, #414): after bind, the
   server logs `[MCP] HTTP server listening on http://HOST:PORT/mcp` through
   the Logger at Notice, exactly once and with the actual port, and the line
-  lands in the log file.
+  lands in stdout and the log file, with no raw stderr copy. At console level
+  Warning, the Notice is hidden on stdout but remains available in a log file
+  whose level permits Notice.
 - `winsockLifetime/` — creating and destroying TcpClient / TcpServer any
   number of times leaves networking working (#254): after 200 of each, a raw
   `socket()` still succeeds and a UdpSocket that was already receiving still
