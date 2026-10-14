@@ -56,6 +56,7 @@ std::atomic<int> g_audioDeviceFault{0};
 
 // Set by internal::setAudioRecorderCaptureHookForTests(); nullptr normally.
 std::atomic<void (*)(int)> g_recorderCaptureHook{nullptr};
+std::atomic<void (*)(int)> g_screenRecorderCaptureHook{nullptr};
 
 // Set by internal::setStreamFaultForTests(): an internal::StreamFaultForTests
 // value; None normally.
@@ -142,6 +143,14 @@ bool openedDeviceIsDefault(const ma_device_id* selectedID,
 
 void setAudioDeviceFaultForTests(AudioDeviceFaultForTests fault) {
     g_audioDeviceFault.store((int)fault, std::memory_order_relaxed);
+}
+
+void setScreenRecorderCaptureHookForTests(void (*hook)(int frames)) {
+    g_screenRecorderCaptureHook.store(hook, std::memory_order_release);
+}
+
+void runScreenRecorderCaptureHookForTests(int frames) {
+    if (auto hook = g_screenRecorderCaptureHook.load(std::memory_order_acquire)) hook(frames);
 }
 
 void setAudioRecorderCaptureHookForTests(void (*hook)(int frames)) {
@@ -2325,6 +2334,8 @@ bool AudioEngine::waitForAudioCallbacks() {
 }
 
 namespace internal {
+bool isInsideAudioCallback() { return t_callbackDepth > 0; }
+
 void waitForAudioCallbacksNoTimeout() {
     AudioEngine::getInstance().waitForCallbacks(false);
 }

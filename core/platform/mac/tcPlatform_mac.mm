@@ -3,6 +3,8 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include <mutex>
+#include <vector>
 
 #if defined(__APPLE__)
 
@@ -273,8 +275,19 @@ void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
     }
 }
 
+// Free staging textures, returned by each completion after its readback.
+struct internal::CaptureStagingPool {
+    std::mutex mutex;
+    std::vector<id<MTLTexture>> free;
+};
+
+std::shared_ptr<internal::CaptureStagingPool> internal::makeCaptureStagingPool() {
+    return std::make_shared<internal::CaptureStagingPool>();
+}
+
 bool internal::captureWindowAsync(
-    const std::function<void(const internal::CaptureReadback&)>& completion) {
+    const std::function<void(const internal::CaptureReadback&)>& completion,
+    const std::shared_ptr<internal::CaptureStagingPool>& pool) {
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable. Fall back only if no pass ran yet.
@@ -291,19 +304,25 @@ bool internal::captureWindowAsync(
     id<MTLDevice> device = srcTexture.device;
 
     // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
-    // asserts — blit into a shared-storage staging texture first. Use a small
-    // ring so an in-flight async readback isn't clobbered by the next frame's
-    // blit (recording keeps a couple captures in flight). Issued only from the
-    // main thread (afterFrame), so the static ring needs no locking.
-    static const int kRing = 3;
-    static id<MTLTexture> s_ring[kRing] = { nil, nil, nil };
-    static int s_ringIdx = 0;
-    int slot = s_ringIdx;
-    s_ringIdx = (s_ringIdx + 1) % kRing;
-    id<MTLTexture> staging = s_ring[slot];
-    if (!staging || staging.device != device
-        || staging.width != width || staging.height != height
-        || staging.pixelFormat != pixelFormat) {
+    // asserts: blit into a shared-storage staging texture first. Each capture
+    // owns its staging texture until its completion has finished reading; only
+    // then does it go back to the pool. A fixed ring could wrap while an older
+    // readback still used a slot (#361).
+    id<MTLTexture> staging = nil;
+    if (pool) {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        while (!staging && !pool->free.empty()) {
+            id<MTLTexture> t = pool->free.back();
+            pool->free.pop_back();
+            // A texture of another size or device (window resized or moved)
+            // is dropped here.
+            if (t.device == device && t.width == width && t.height == height
+                && t.pixelFormat == pixelFormat) {
+                staging = t;
+            }
+        }
+    }
+    if (!staging) {
         MTLTextureDescriptor* desc =
             [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
                                                                width:width
@@ -312,7 +331,6 @@ bool internal::captureWindowAsync(
         desc.usage = MTLTextureUsageShaderRead;
         desc.storageMode = MTLStorageModeShared;
         staging = [device newTextureWithDescriptor:desc];
-        s_ring[slot] = staging;
     }
     if (!staging) return false;
 
@@ -344,6 +362,7 @@ bool internal::captureWindowAsync(
     // `completion`, so both outlive this function until the handler runs. The
     // consumer reads the staging straight into its own destination buffer.
     std::function<void(const internal::CaptureReadback&)> comp = completion;
+    std::shared_ptr<internal::CaptureStagingPool> returnTo = pool;
     NSUInteger w = width, h = height;
     bool isRGB10A2 = (pixelFormat == MTLPixelFormatRGB10A2Unorm);
     [cmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {
@@ -354,6 +373,11 @@ bool internal::captureWindowAsync(
         rb.height    = (int)h;
         rb.isRGB10A2 = isRGB10A2;
         comp(rb);
+        // The readback is done with it: reusable from here on.
+        if (returnTo) {
+            std::lock_guard<std::mutex> lock(returnTo->mutex);
+            returnTo->free.push_back(staging);
+        }
     }];
     [cmdBuf commit];
     return true;

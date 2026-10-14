@@ -1348,8 +1348,8 @@ BeepManager& getManager() {
 }
 
 ScreenRecorder& globalScreenRecorder() {
-    static ScreenRecorder rec;
-    return rec;
+    static auto* rec = new ScreenRecorder;
+    return *rec;
 }
 
 PbrPipeline& getPbrPipeline() {

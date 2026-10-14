@@ -16,6 +16,8 @@
 //   rec.stop();                      // finalize (patches the WAV header)
 //
 // The engine keeps playing as usual; recording is a pure observer.
+// Destroying an active recorder inside an audio callback is a caller mistake:
+// it returns without waiting, logs one Error, and leaves the file unfinalized.
 //
 // Every file carries a 36-byte JUNK chunk right after "WAVE" (the samples
 // start at byte 80 for S16, 92 for F32; the data chunk header is at 72 / 84).
@@ -31,6 +33,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <ostream>
 #include <sstream>
 #include <thread>
@@ -176,10 +179,182 @@ struct AudioRecordSettings {
 // -----------------------------------------------------------------------------
 // AudioRecorder
 // -----------------------------------------------------------------------------
+namespace internal { struct AudioRecorderTestAccess; }
 class AudioRecorder {
+    friend struct internal::AudioRecorderTestAccess;
+    struct State {
+        ~State() { if (file_) std::fclose(file_); }
+        // --- audio thread side ---------------------------------------------------
+        void capture(const AudioOutBuffer& b) {
+            if (!running_.load(std::memory_order_acquire)) return;
+            // Guard against a device change mid-recording (rate/channel switch
+            // would corrupt the file): drop and count instead.
+            if (b.sampleRate != sampleRate_ || b.channels != srcChannels_) {
+                droppedFrames_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
+                return;
+            }
+            const size_t n = (size_t)b.frameCount * b.channels;
+            const uint64_t head = head_.load(std::memory_order_relaxed);
+            const uint64_t tail = tail_.load(std::memory_order_acquire);
+            if (ringCap_ - (size_t)(head - tail) < n) {
+                droppedFrames_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
+                return;
+            }
+            const size_t at = (size_t)(head & (ringCap_ - 1));
+            const size_t first = std::min(n, ringCap_ - at);
+            std::memcpy(ring_.data() + at, b.data, first * sizeof(float));
+            if (n > first) std::memcpy(ring_.data(), b.data + first, (n - first) * sizeof(float));
+            internal::runAudioRecorderCaptureHookForTests(b.frameCount);
+            head_.store(head + n, std::memory_order_release);
+        }
+
+        // --- writer thread side --------------------------------------------------
+        void writerLoop() {
+            std::vector<float> chunk;      // interleaved engine-format samples
+            std::vector<float> mapped;     // interleaved file-format samples
+            std::vector<int16_t> s16;
+            // writing_, not running_: stop() clears it only after the captures
+            // in flight have finished, so the final sweep sees their samples.
+            while (writing_.load(std::memory_order_acquire) || pending() > 0) {
+                drain(chunk, mapped, s16);
+                if (!result_) return;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            if (result_) drain(chunk, mapped, s16); // final sweep
+        }
+
+        size_t pending() const {
+            return (size_t)(head_.load(std::memory_order_acquire)
+                            - tail_.load(std::memory_order_relaxed));
+        }
+
+        void drain(std::vector<float>& chunk, std::vector<float>& mapped,
+                   std::vector<int16_t>& s16) {
+            size_t n = pending();
+            n -= n % (size_t)srcChannels_;   // whole frames only
+            if (n == 0) return;
+            chunk.resize(n);
+            const uint64_t tail = tail_.load(std::memory_order_relaxed);
+            const size_t at = (size_t)(tail & (ringCap_ - 1));
+            const size_t first = std::min(n, ringCap_ - at);
+            std::memcpy(chunk.data(), ring_.data() + at, first * sizeof(float));
+            if (n > first) std::memcpy(chunk.data() + first, ring_.data(), (n - first) * sizeof(float));
+            tail_.store(tail + n, std::memory_order_release);
+
+            const size_t frames = n / srcChannels_;
+            mapChannels(chunk.data(), frames, mapped);
+
+            if (settings_.format == AudioRecordSettings::SampleFormat::S16) {
+                s16.resize(mapped.size());
+                for (size_t i = 0; i < mapped.size(); i++) {
+                    float v = std::clamp(mapped[i], -1.0f, 1.0f);
+                    s16[i] = (int16_t)std::lrintf(v * 32767.0f);
+                }
+                writeFrames(s16.data(), frames, sizeof(int16_t));
+            } else {
+                writeFrames(mapped.data(), frames, sizeof(float));
+            }
+        }
+
+        // Engine-interleaved -> file-interleaved. Explicit map: out[c] = sum of
+        // sources (unnormalized, same as Sound::setChannelMap). Auto: 1:1 for
+        // mono/stereo engines, averaged downmix to mono for 3ch+.
+        void mapChannels(const float* src, size_t frames, std::vector<float>& out) {
+            out.assign(frames * outChannels_, 0.0f);
+            if (!settings_.channelMap.empty()) {
+                for (size_t f = 0; f < frames; f++) {
+                    const float* in = src + f * srcChannels_;
+                    float* o = out.data() + f * outChannels_;
+                    for (int c = 0; c < outChannels_; c++) {
+                        float acc = 0.0f;
+                        for (int s : settings_.channelMap[(size_t)c]) {
+                            if (s >= 0 && s < srcChannels_) acc += in[s];
+                        }
+                        o[c] = acc;
+                    }
+                }
+            } else if (srcChannels_ == outChannels_) {
+                std::memcpy(out.data(), src, frames * srcChannels_ * sizeof(float));
+            } else {   // auto mono downmix (average keeps levels sane by default)
+                const float inv = 1.0f / (float)srcChannels_;
+                for (size_t f = 0; f < frames; f++) {
+                    const float* in = src + f * srcChannels_;
+                    float acc = 0.0f;
+                    for (int s = 0; s < srcChannels_; s++) acc += in[s];
+                    out[f] = acc * inv;
+                }
+            }
+        }
+
+        // --- WAV plumbing --------------------------------------------------------
+        bool isFloat() const { return settings_.format == AudioRecordSettings::SampleFormat::F32; }
+
+        SaveResult fail(SaveResult result) {
+            if (result_) {
+                result_ = result;
+                internal::reportSaveFailure(result_, "AudioRecorder");
+            }
+            running_.store(false, std::memory_order_release);
+            writing_.store(false, std::memory_order_release);
+            return result_;
+        }
+
+        void writeFrames(const void* data, size_t frames, size_t sampleBytes) {
+            errno = 0;
+            const size_t written = std::fwrite(data, sampleBytes * outChannels_, frames, file_);
+            framesWritten_.fetch_add(written, std::memory_order_relaxed);
+            if (written != frames || std::fflush(file_) != 0) {
+                fail(internal::saveErrno(recordingPath_, "Cannot write audio frames"));
+                std::fclose(file_); file_ = nullptr; // first failure ends the take
+            }
+        }
+
+        bool writeHeader(bool finalize) {
+            std::ostringstream bytes(std::ios::binary | std::ios::out);
+            header_ = internal::writeWavHeader(bytes, sampleRate_, outChannels_, isFloat());
+            if (finalize) internal::patchWavHeader(bytes, header_,
+                framesWritten_.load(std::memory_order_relaxed), outChannels_, isFloat());
+            const auto data = bytes.str();
+            errno = 0;
+            if (finalize && std::fseek(file_, 0, SEEK_SET) != 0) return false;
+            return internal::checkedWrite(file_, data.data(), data.size(), recordingPath_).ok();
+        }
+
+        // --- state ---------------------------------------------------------------
+        AudioRecordSettings settings_;
+        fs::path      path_;
+        fs::path      recordingPath_; // Worker-owned take name; unchanged until stop joins it.
+        std::FILE* file_ = nullptr;
+        SaveResult result_;
+        internal::WavHeaderLayout header_;
+        int sampleRate_  = 0;
+        int srcChannels_ = 0;
+        int outChannels_ = 0;
+
+        std::vector<float> ring_;
+        size_t ringCap_ = 0;
+        std::atomic<uint64_t> head_{0}, tail_{0};      // in floats
+        std::atomic<uint64_t> droppedFrames_{0};       // in frames
+        std::atomic<uint64_t> framesWritten_{0};       // in frames
+        std::atomic<bool>     running_{false};   // capture() takes buffers
+        std::atomic<bool>     writing_{false};   // the writer keeps draining (see stop())
+
+    };
 public:
     AudioRecorder() = default;
-    ~AudioRecorder() { stop(); }
+    ~AudioRecorder() {
+        if (writer_.joinable() && internal::isInsideAudioCallback()) {
+            state_->running_.store(false, std::memory_order_release);
+            listener_ = EventListener{};
+            state_->writing_.store(false, std::memory_order_release);
+            // The writer and the current dispatch keep State alive. Its file
+            // is closed without finalization after both have returned.
+            writer_.detach();
+            logError("AudioRecorder") << "AudioRecorder destroyed inside the audio callback; the file is not finalized";
+        } else {
+            stop();
+        }
+    }
 
     AudioRecorder(const AudioRecorder&) = delete;
     AudioRecorder& operator=(const AudioRecorder&) = delete;
@@ -193,7 +368,7 @@ public:
             logWarning("AudioRecorder") << "start: already recording";
             return SaveResult::fail(SaveError::WriteFailed, "Cannot start audio recording");
         }
-        path_.clear(); // A failed start never exposes this or a previous take's name.
+        state_->path_.clear(); // A failed start never exposes this or a previous take's name.
         auto& engine = AudioEngine::getInstance();
         if (!engine.isInitialized()) {
             logWarning("AudioRecorder")
@@ -201,60 +376,61 @@ public:
             return SaveResult::fail(SaveError::WriteFailed, "Cannot start audio recording");
         }
 
-        stop(); // join an ended take before changing fields read by its writer
-        sampleRate_ = engine.getSampleRate();
-        srcChannels_ = engine.getChannels();
-        settings_ = settings;
-        outChannels_ = !settings_.channelMap.empty() ? (int)settings_.channelMap.size()
-                     : (srcChannels_ == 2 ? 2 : 1);
-        if (outChannels_ <= 0) {
+        stop(); // join the previous take before creating its replacement
+        state_ = std::make_shared<State>();
+        state_->sampleRate_ = engine.getSampleRate();
+        state_->srcChannels_ = engine.getChannels();
+        state_->settings_ = settings;
+        state_->outChannels_ = !state_->settings_.channelMap.empty() ? (int)state_->settings_.channelMap.size()
+                     : (state_->srcChannels_ == 2 ? 2 : 1);
+        if (state_->outChannels_ <= 0) {
             logWarning("AudioRecorder") << "start: empty channel map";
             return SaveResult::fail(SaveError::WriteFailed, "Cannot start audio recording");
         }
 
-        result_ = SaveResult::success();
+        state_->result_ = SaveResult::success();
         fs::path resolved;
         auto prepared = internal::prepareOutputPath(path, resolved, "AudioRecorder");
-        if (!prepared) return result_ = prepared;
-        recordingPath_ = resolved;
+        if (!prepared) return state_->result_ = prepared;
+        state_->recordingPath_ = resolved;
         errno = 0;
-        file_ = internal::openFile(resolved, "wb");
-        framesWritten_.store(0, std::memory_order_relaxed);
-        if (!file_) return fail(internal::saveErrno(resolved, "Cannot open recording"));
+        state_->file_ = internal::openFile(resolved, "wb");
+        state_->framesWritten_.store(0, std::memory_order_relaxed);
+        if (!state_->file_) return state_->fail(internal::saveErrno(resolved, "Cannot open recording"));
         // Unbuffered writes expose the number of complete frames actually written,
         // including a short write in the middle of a chunk.
-        std::setvbuf(file_, nullptr, _IONBF, 0);
-        if (!writeHeader(false)) {
+        std::setvbuf(state_->file_, nullptr, _IONBF, 0);
+        if (!state_->writeHeader(false)) {
             auto error = internal::saveErrno(resolved, "Cannot write WAV header");
-            std::fclose(file_); file_ = nullptr;
-            return fail(error);
+            std::fclose(state_->file_); state_->file_ = nullptr;
+            return state_->fail(error);
         }
 
-        path_ = resolved; // Publish the name only after the header succeeds.
+        state_->path_ = resolved; // Publish the name only after the header succeeds.
 
         // Ring sized for ~4 seconds of engine output: overflow only happens if
         // the writer thread stalls that long, in which case frames are counted
         // into droppedFrames_ instead of blocking the audio thread.
-        ringCap_ = (size_t)1 << (size_t)std::ceil(
-            std::log2((double)sampleRate_ * srcChannels_ * 4.0));
-        ring_.assign(ringCap_, 0.0f);
-        head_.store(0, std::memory_order_relaxed);
-        tail_.store(0, std::memory_order_relaxed);
-        droppedFrames_.store(0, std::memory_order_relaxed);
-        framesWritten_.store(0, std::memory_order_relaxed);
+        state_->ringCap_ = (size_t)1 << (size_t)std::ceil(
+            std::log2((double)state_->sampleRate_ * state_->srcChannels_ * 4.0));
+        state_->ring_.assign(state_->ringCap_, 0.0f);
+        state_->head_.store(0, std::memory_order_relaxed);
+        state_->tail_.store(0, std::memory_order_relaxed);
+        state_->droppedFrames_.store(0, std::memory_order_relaxed);
+        state_->framesWritten_.store(0, std::memory_order_relaxed);
 
-        running_.store(true, std::memory_order_release);
-        writing_.store(true, std::memory_order_release);
-        writer_ = std::thread([this] { writerLoop(); });
+        state_->running_.store(true, std::memory_order_release);
+        state_->writing_.store(true, std::memory_order_release);
+        writer_ = std::thread([state = state_] { state->writerLoop(); });
 
         // Monitor priority: runs after every generator/effect listener, so the
         // ring receives the final mix (identical to the device output).
         listener_ = engine.audioOut.listen(
-            [this](AudioOutBuffer& b) { capture(b); }, audio::priority::Monitor);
+            [state = state_](AudioOutBuffer& b) { state->capture(b); }, audio::priority::Monitor);
 
-        logNotice("AudioRecorder") << "recording -> " << internal::pathToDisplayUtf8(path_)
-            << " (" << sampleRate_ << " Hz, " << outChannels_ << "ch, "
-            << (settings_.format == AudioRecordSettings::SampleFormat::S16 ? "s16" : "f32")
+        logNotice("AudioRecorder") << "recording -> " << internal::pathToDisplayUtf8(state_->path_)
+            << " (" << state_->sampleRate_ << " Hz, " << state_->outChannels_ << "ch, "
+            << (state_->settings_.format == AudioRecordSettings::SampleFormat::S16 ? "s16" : "f32")
             << ")";
         return SaveResult::success();
     }
@@ -270,204 +446,53 @@ public:
     // listener would block on it, stop() would wait up to one second for it,
     // and the audio drops out meanwhile.
     SaveResult stop() {
-        running_.store(false, std::memory_order_release);
+        state_->running_.store(false, std::memory_order_release);
         listener_ = EventListener();
         if (writer_.joinable()) {
+            // Bounded: on give-up the barrier's Warning is the log line. A
+            // straggling capture writes into the State's ring, so its last
+            // buffer is just not in the file.
             AudioEngine::getInstance().waitForAudioCallbacks();
-            writing_.store(false, std::memory_order_release);
+            state_->writing_.store(false, std::memory_order_release);
             writer_.join();
         }
-        if (file_) {
-            if (result_ && !writeHeader(true))
-                fail(internal::saveErrno(recordingPath_, "Cannot finalize WAV header"));
-            auto closed = internal::checkedClose(file_, recordingPath_);
-            file_ = nullptr;
-            if (result_ && !closed) fail(closed);
-            if (result_) {
-                const auto dropped = droppedFrames_.load(std::memory_order_relaxed);
+        if (state_->file_) {
+            if (state_->result_ && !state_->writeHeader(true))
+                state_->fail(internal::saveErrno(state_->recordingPath_, "Cannot finalize WAV header"));
+            auto closed = internal::checkedClose(state_->file_, state_->recordingPath_);
+            state_->file_ = nullptr;
+            if (state_->result_ && !closed) state_->fail(closed);
+            if (state_->result_) {
+                const auto dropped = state_->droppedFrames_.load(std::memory_order_relaxed);
                 if (dropped) logWarning("AudioRecorder") << "stopped, " << dropped << " frames dropped";
-                if (internal::wavSizeFields(framesWritten_.load(), outChannels_,
-                        isFloat() ? 4 : 2, header_.dataStart).rf64)
-                    logNotice("AudioRecorder") << "take finalized as RF64: " << recordingPath_;
-                logNotice("AudioRecorder") << "stopped: " << recordingPath_ << " (" << getRecordedSeconds() << " s)";
+                if (internal::wavSizeFields(state_->framesWritten_.load(), state_->outChannels_,
+                        state_->isFloat() ? 4 : 2, state_->header_.dataStart).rf64)
+                    logNotice("AudioRecorder") << "take finalized as RF64: " << state_->recordingPath_;
+                logNotice("AudioRecorder") << "stopped: " << state_->recordingPath_ << " (" << getRecordedSeconds() << " s)";
             }
         }
-        return result_;
+        return state_->result_;
     }
 
-    bool isRecording() const { return running_.load(std::memory_order_acquire); }
+    bool isRecording() const { return state_->running_.load(std::memory_order_acquire); }
 
     // Seconds actually written to the file so far.
     double getRecordedSeconds() const {
-        return sampleRate_ > 0
-            ? (double)framesWritten_.load(std::memory_order_relaxed) / sampleRate_
+        return state_->sampleRate_ > 0
+            ? (double)state_->framesWritten_.load(std::memory_order_relaxed) / state_->sampleRate_
             : 0.0;
     }
 
     // Frames lost to ring-buffer overflow (0 in normal operation).
     uint64_t getDroppedFrames() const {
-        return droppedFrames_.load(std::memory_order_relaxed);
+        return state_->droppedFrames_.load(std::memory_order_relaxed);
     }
 
-    fs::path getPath() const { return path_; }
+    fs::path getPath() const { return state_->path_; }
 
 private:
-    // --- audio thread side ---------------------------------------------------
-    void capture(const AudioOutBuffer& b) {
-        if (!running_.load(std::memory_order_acquire)) return;
-        // Guard against a device change mid-recording (rate/channel switch
-        // would corrupt the file): drop and count instead.
-        if (b.sampleRate != sampleRate_ || b.channels != srcChannels_) {
-            droppedFrames_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
-            return;
-        }
-        const size_t n = (size_t)b.frameCount * b.channels;
-        const uint64_t head = head_.load(std::memory_order_relaxed);
-        const uint64_t tail = tail_.load(std::memory_order_acquire);
-        if (ringCap_ - (size_t)(head - tail) < n) {
-            droppedFrames_.fetch_add((uint64_t)b.frameCount, std::memory_order_relaxed);
-            return;
-        }
-        const size_t at = (size_t)(head & (ringCap_ - 1));
-        const size_t first = std::min(n, ringCap_ - at);
-        std::memcpy(ring_.data() + at, b.data, first * sizeof(float));
-        if (n > first) std::memcpy(ring_.data(), b.data + first, (n - first) * sizeof(float));
-        internal::runAudioRecorderCaptureHookForTests(b.frameCount);
-        head_.store(head + n, std::memory_order_release);
-    }
-
-    // --- writer thread side --------------------------------------------------
-    void writerLoop() {
-        std::vector<float> chunk;      // interleaved engine-format samples
-        std::vector<float> mapped;     // interleaved file-format samples
-        std::vector<int16_t> s16;
-        // writing_, not running_: stop() clears it only after the captures
-        // in flight have finished, so the final sweep sees their samples.
-        while (writing_.load(std::memory_order_acquire) || pending() > 0) {
-            drain(chunk, mapped, s16);
-            if (!result_) return;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        if (result_) drain(chunk, mapped, s16); // final sweep
-    }
-
-    size_t pending() const {
-        return (size_t)(head_.load(std::memory_order_acquire)
-                        - tail_.load(std::memory_order_relaxed));
-    }
-
-    void drain(std::vector<float>& chunk, std::vector<float>& mapped,
-               std::vector<int16_t>& s16) {
-        size_t n = pending();
-        n -= n % (size_t)srcChannels_;   // whole frames only
-        if (n == 0) return;
-        chunk.resize(n);
-        const uint64_t tail = tail_.load(std::memory_order_relaxed);
-        const size_t at = (size_t)(tail & (ringCap_ - 1));
-        const size_t first = std::min(n, ringCap_ - at);
-        std::memcpy(chunk.data(), ring_.data() + at, first * sizeof(float));
-        if (n > first) std::memcpy(chunk.data() + first, ring_.data(), (n - first) * sizeof(float));
-        tail_.store(tail + n, std::memory_order_release);
-
-        const size_t frames = n / srcChannels_;
-        mapChannels(chunk.data(), frames, mapped);
-
-        if (settings_.format == AudioRecordSettings::SampleFormat::S16) {
-            s16.resize(mapped.size());
-            for (size_t i = 0; i < mapped.size(); i++) {
-                float v = std::clamp(mapped[i], -1.0f, 1.0f);
-                s16[i] = (int16_t)std::lrintf(v * 32767.0f);
-            }
-            writeFrames(s16.data(), frames, sizeof(int16_t));
-        } else {
-            writeFrames(mapped.data(), frames, sizeof(float));
-        }
-    }
-
-    // Engine-interleaved -> file-interleaved. Explicit map: out[c] = sum of
-    // sources (unnormalized, same as Sound::setChannelMap). Auto: 1:1 for
-    // mono/stereo engines, averaged downmix to mono for 3ch+.
-    void mapChannels(const float* src, size_t frames, std::vector<float>& out) {
-        out.assign(frames * outChannels_, 0.0f);
-        if (!settings_.channelMap.empty()) {
-            for (size_t f = 0; f < frames; f++) {
-                const float* in = src + f * srcChannels_;
-                float* o = out.data() + f * outChannels_;
-                for (int c = 0; c < outChannels_; c++) {
-                    float acc = 0.0f;
-                    for (int s : settings_.channelMap[(size_t)c]) {
-                        if (s >= 0 && s < srcChannels_) acc += in[s];
-                    }
-                    o[c] = acc;
-                }
-            }
-        } else if (srcChannels_ == outChannels_) {
-            std::memcpy(out.data(), src, frames * srcChannels_ * sizeof(float));
-        } else {   // auto mono downmix (average keeps levels sane by default)
-            const float inv = 1.0f / (float)srcChannels_;
-            for (size_t f = 0; f < frames; f++) {
-                const float* in = src + f * srcChannels_;
-                float acc = 0.0f;
-                for (int s = 0; s < srcChannels_; s++) acc += in[s];
-                out[f] = acc * inv;
-            }
-        }
-    }
-
-    // --- WAV plumbing --------------------------------------------------------
-    bool isFloat() const { return settings_.format == AudioRecordSettings::SampleFormat::F32; }
-
-    SaveResult fail(SaveResult result) {
-        if (result_) {
-            result_ = result;
-            internal::reportSaveFailure(result_, "AudioRecorder");
-        }
-        running_.store(false, std::memory_order_release);
-        writing_.store(false, std::memory_order_release);
-        return result_;
-    }
-
-    void writeFrames(const void* data, size_t frames, size_t sampleBytes) {
-        errno = 0;
-        const size_t written = std::fwrite(data, sampleBytes * outChannels_, frames, file_);
-        framesWritten_.fetch_add(written, std::memory_order_relaxed);
-        if (written != frames || std::fflush(file_) != 0) {
-            fail(internal::saveErrno(recordingPath_, "Cannot write audio frames"));
-            std::fclose(file_); file_ = nullptr; // first failure ends the take
-        }
-    }
-
-    bool writeHeader(bool finalize) {
-        std::ostringstream bytes(std::ios::binary | std::ios::out);
-        header_ = internal::writeWavHeader(bytes, sampleRate_, outChannels_, isFloat());
-        if (finalize) internal::patchWavHeader(bytes, header_,
-            framesWritten_.load(std::memory_order_relaxed), outChannels_, isFloat());
-        const auto data = bytes.str();
-        errno = 0;
-        if (finalize && std::fseek(file_, 0, SEEK_SET) != 0) return false;
-        return internal::checkedWrite(file_, data.data(), data.size(), recordingPath_).ok();
-    }
-
-    // --- state ---------------------------------------------------------------
-    AudioRecordSettings settings_;
-    fs::path      path_;
-    fs::path      recordingPath_; // Worker-owned take name; unchanged until stop joins it.
-    std::FILE* file_ = nullptr;
-    SaveResult result_;
-    internal::WavHeaderLayout header_;
-    int sampleRate_  = 0;
-    int srcChannels_ = 0;
-    int outChannels_ = 0;
-
-    std::vector<float> ring_;
-    size_t ringCap_ = 0;
-    std::atomic<uint64_t> head_{0}, tail_{0};      // in floats
-    std::atomic<uint64_t> droppedFrames_{0};       // in frames
-    std::atomic<uint64_t> framesWritten_{0};       // in frames
-    std::atomic<bool>     running_{false};   // capture() takes buffers
-    std::atomic<bool>     writing_{false};   // the writer keeps draining (see stop())
-
-    std::thread   writer_;
+    std::shared_ptr<State> state_ = std::make_shared<State>();
+    std::thread writer_;
     EventListener listener_;
 };
 

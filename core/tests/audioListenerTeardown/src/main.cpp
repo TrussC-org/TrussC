@@ -51,6 +51,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -58,6 +60,35 @@
 
 using namespace std;
 using namespace tc;
+
+// Exercise the real tap/stop path without opening a video encoder or GPU.
+// These friends expose private state only to this test, with no public API.
+namespace trussc::internal {
+struct ScreenRecorderTestAccess {
+    static void startTap(ScreenRecorder& recorder, int rate, int channels) {
+        recorder.state_->startAudioTap(rate, channels);
+    }
+    static std::weak_ptr<void> lifetime(ScreenRecorder& recorder) {
+        return recorder.state_;
+    }
+    static std::unique_lock<std::mutex> lockWriter(ScreenRecorder& recorder) {
+        return std::unique_lock<std::mutex>(recorder.state_->writerMutex_);
+    }
+    static auto pendingCapture(ScreenRecorder& recorder) {
+        auto state = recorder.state_;
+        state->inFlight_.fetch_add(1);
+        return [state]() {
+            std::lock_guard<std::mutex> lock(state->writerMutex_);
+            state->finishCapture();
+        };
+    }
+};
+struct AudioRecorderTestAccess {
+    static std::weak_ptr<void> lifetime(AudioRecorder& recorder) {
+        return recorder.state_;
+    }
+};
+}
 
 namespace {
 
@@ -560,6 +591,104 @@ TC_CORE_TEST_MAIN() {
               to_string(counted) + " of " + to_string(want) + " frames");
         check("... and written to the WAV", inFile == want && fileBytes == 80u + dataBytes,
               to_string(inFile) + " of " + to_string(want) + " frames, " + to_string(fileBytes) + " bytes");
+        std::error_code ec;
+        fs::remove(wav, ec);
+    }
+
+    // --- ScreenRecorder teardown while its actual tap is in flight ----------
+    {
+        static atomic<bool> holding{false}, release{false};
+        internal::setScreenRecorderCaptureHookForTests([](int) {
+            holding = true;
+            while (!release) this_thread::yield();
+            holding = false;
+        });
+        auto rec = make_unique<ScreenRecorder>();
+        internal::ScreenRecorderTestAccess::startTap(*rec, settings.sampleRate, settings.channels);
+        auto lifetime = internal::ScreenRecorderTestAccess::lifetime(*rec);
+        const bool held = waitFor([&] { return holding.load(); }, 3000);
+        atomic<bool> returned{false}, returnedDuringCapture{false};
+        const size_t warnBefore = countWarnings("waitForAudioCallbacks");
+        thread stopper([&] {
+            rec.reset();
+            returnedDuringCapture = holding.load();
+            returned = true;
+        });
+        // The bounded barrier gives up on the held capture with its Warning and
+        // teardown returns while the capture still runs. Wait for the return,
+        // not a guessed sleep. Skipping the barrier would return with no Warning.
+        const bool observed = waitFor([&] { return returned.load(); }, 5000);
+        const bool warned = countWarnings("waitForAudioCallbacks") == warnBefore + 1;
+        const bool kept = !lifetime.expired();
+        release = true;
+        stopper.join();
+        engine.waitForAudioCallbacks();
+        const bool released = waitFor([&] { return lifetime.expired(); }, 3000);
+        internal::setScreenRecorderCaptureHookForTests(nullptr);
+        check("ScreenRecorder teardown meets an in-flight audio capture", held && observed);
+        check("ScreenRecorder teardown runs the bounded audio barrier",
+              warned && returnedDuringCapture.load());
+        check("ScreenRecorder keeps State until its audio capture returns", kept && released);
+    }
+
+    // A synthetic GPU completion exercises the shared timeout/finalization
+    // path on every OS, without a window. Holding the encoder lock proves a
+    // timed-out stop never waits on that lock. No elapsed-time assertion.
+    {
+        auto rec = make_unique<ScreenRecorder>();
+        auto lifetime = internal::ScreenRecorderTestAccess::lifetime(*rec);
+        std::function<void()> complete = internal::ScreenRecorderTestAccess::pendingCapture(*rec);
+        auto lock = internal::ScreenRecorderTestAccess::lockWriter(*rec);
+        atomic<bool> returned{false};
+        SaveResult result;
+        const size_t before = countErrors("recording still has frames in flight");
+        thread stopper([&] { result = rec->stop(); returned = true; });
+        const bool returnedWhileLocked = waitFor([&] { return returned.load(); }, 5000);
+        lock.unlock();
+        stopper.join();
+        check("ScreenRecorder timeout returns while a completion owns the writer lock",
+              returnedWhileLocked && !result && result.error == SaveError::WriteFailed &&
+              result.message == "recording still has frames in flight");
+        rec.reset();
+        check("ScreenRecorder pending completion owns State after handle destruction", !lifetime.expired());
+        complete(); // the last completion finalizes through the real shared code
+        complete = {};
+        check("ScreenRecorder late completion releases State with one timeout Error",
+              lifetime.expired() && countErrors("recording still has frames in flight") == before + 1);
+    }
+
+    // --- Destroy AudioRecorder from inside its own capture -------------------
+    {
+        static unique_ptr<AudioRecorder> rec;
+        static atomic<bool> armed{false}, destroyed{false};
+        internal::setAudioRecorderCaptureHookForTests([](int) {
+            if (!armed.exchange(false)) return;
+            rec.reset();
+            destroyed = true; // the capture still publishes its head afterwards
+        });
+        const fs::path wav = fs::temp_directory_path() / "tc_audioRecorder_self_destroy.wav";
+        const size_t before = countErrors("AudioRecorder destroyed inside the audio callback; the file is not finalized");
+        const size_t allErrorsBefore = countErrors("[AudioRecorder]");
+        rec = make_unique<AudioRecorder>();
+        const bool recording = rec->start(wav).ok();
+        auto lifetime = internal::AudioRecorderTestAccess::lifetime(*rec);
+        armed = true;
+        const bool done = waitFor([&] { return destroyed.load(); }, 3000);
+        internal::waitForAudioCallbacksNoTimeout();
+        const bool released = waitFor([&] { return lifetime.expired(); }, 3000);
+        internal::setAudioRecorderCaptureHookForTests(nullptr);
+        check("AudioRecorder destruction inside its capture returns without a crash", recording && done);
+        check("AudioRecorder abandoned State is released after its workers finish", released);
+        check("AudioRecorder callback destruction logs exactly one Error",
+              countErrors("AudioRecorder destroyed inside the audio callback; the file is not finalized") == before + 1 &&
+              countErrors("[AudioRecorder]") == allErrorsBefore + 1);
+        uint32_t dataBytes = 1;
+        ifstream f(wav, ios::binary);
+        f.seekg(76);
+        f.read(reinterpret_cast<char*>(&dataBytes), 4);
+        check("callback destruction leaves the WAV header unfinalized", f.good() && dataBytes == 0);
+        f.close();
+        rec.reset();
         std::error_code ec;
         fs::remove(wav, ec);
     }
