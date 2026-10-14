@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include "stb/stb_image_write.h"
 
 namespace trussc {
 

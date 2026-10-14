@@ -1,6 +1,8 @@
 // Deterministic log accounting (#398): once-only gates stand in for a clock
 // held within the interval; reconstructing a gate advances to the next report.
 #include "tc/network/tcUdpSocket.h"
+#include <mutex>
+#include <thread>
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>
@@ -8,6 +10,7 @@
 #include <future>
 #include <memory>
 #ifndef _WIN32
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #endif

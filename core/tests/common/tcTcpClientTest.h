@@ -1,5 +1,10 @@
 #pragma once
 #include <TrussC.h>
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#endif
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>

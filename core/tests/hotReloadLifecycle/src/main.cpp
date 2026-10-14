@@ -117,6 +117,7 @@
 // =============================================================================
 
 #include "tcApp.h"
+#include "impl/httplib.h"
 
 #ifndef TC_HOT_RELOAD_BUILD
 // The cmake source scan keys the host/guest split off TC_HOT_RELOAD appearing
@@ -398,10 +399,19 @@ static int runCycles(const std::string& guestPath, int port) {
         }
         json status = callTool(port, "tc_get_status", json::object());
         bool statusListed = false;
+        bool textListed = false;
+        bool graphListed = false;
         if (status.is_object() && status["values"].is_array()) {
-            for (auto& v : status["values"]) statusListed |= v.is_object() && v.value("name", "") == "guest_status";
+            for (auto& v : status["values"]) {
+                if (!v.is_object()) continue;
+                const auto name = v.value("name", "");
+                statusListed |= name == "guest_status" && v["value"] == probe["ticks"];
+                textListed |= name == "guest_text" && v["value"] == std::to_string(probe["ticks"].get<int>());
+                graphListed |= name == "guest_graph" && v["value"] == probe["ticks"] && v.value("mode", "") == "graph";
+            }
         }
-        if (!statusListed) return fail(11, "tc_get_status over HTTP does not report guest_status");
+        if (!statusListed || !textListed || !graphListed)
+            return fail(11, "tc_get_status over HTTP does not report the guest's numeric, string and graph getters");
         const int pressesBefore = g_hostKeyPresses.load();
         json pressed = callTool(port, "tc_key_press", json{{"key", 65}});
         json released = callTool(port, "tc_key_release", json{{"key", 65}});
@@ -686,7 +696,8 @@ static int runCycles(const std::string& guestPath, int port) {
                             (hostDeferred.is_discarded() ? std::string("no reply") : hostDeferred.dump()));
         }
         if (mcp::hasTool("guest_probe") ||
-            hasStatus("guest_status") || hasStatusImage("guest_image")) {
+            hasStatus("guest_status") || hasStatus("guest_text") ||
+            hasStatus("guest_graph") || hasStatusImage("guest_image")) {
             return fail(5, "the destroyed guest's MCP registrations are still listed");
         }
         std::string callError;
@@ -695,6 +706,8 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(13, "the destroyed guest's tool still answers over HTTP");
         }
         if (!mcp::hasTool("host_probe")) return fail(6, "the host's own tool was removed");
+        if (!hasStatus("host_status") || !hasStatusImage("host_image"))
+            return fail(6, "the host's own status registrations were removed");
         if (!mcp::hasTool("tc_key_press") || mcp::getToolLevel() != mcp::ToolLevel::Control)
             return fail(37, "core tools and the host grant must survive guest unload");
         std::printf("hotReloadLifecycle: cycle %d/%d ok\n", i, kCycles);
@@ -930,6 +943,8 @@ int main(int argc, char** argv) {
     std::printf("hotReloadLifecycle: guest = %s\n", guestPath.c_str());
 
     // Host-owned registration: must survive every reload.
+    mcp::statusGraph("host_status", []() { return 42.0; });
+    mcp::statusImage("host_image", []() { return Pixels(); });
     mcp::tool("host_probe", "hotReloadLifecycle host tool")
         .bind(std::function<json()>([]() -> json { return json{{"ok", true}}; }));
     // A host tool that defers: its reply must survive a guest's unload.

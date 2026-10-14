@@ -23,6 +23,9 @@
 #define MA_NO_GENERATION
 #define MINIAUDIO_IMPLEMENTATION
 #include "tc/sound/tcAudioDeviceInternal.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "tc/sound/tcSound.h"
 #include "tc/utils/tcFile.h"

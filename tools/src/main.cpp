@@ -17,6 +17,7 @@
 #include <iomanip>
 #ifndef _WIN32
 #include <spawn.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <TrussC.h>
+#include <mutex>
+#include <condition_variable>
 using namespace std;
 using namespace tc;
 

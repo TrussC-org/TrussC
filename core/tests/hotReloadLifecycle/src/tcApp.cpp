@@ -4,6 +4,7 @@
 //  - at compile time it emits the extern "C" create/destroy factories the
 //    host's GuestLibrary resolves via dlsym/GetProcAddress
 #include "tcApp.h"
+#include <thread>
 #include <tcxImGui.h>   // guest-side addon includes (addons.make)
 #include <tcxNodeInspector.h>
 using namespace tcx;

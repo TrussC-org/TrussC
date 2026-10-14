@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tcTlsClient.h"
+#include <mutex>
 #include "tcTlsCaInternal.h"
 #include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"

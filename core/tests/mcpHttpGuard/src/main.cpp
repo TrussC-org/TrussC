@@ -35,6 +35,9 @@
 // =============================================================================
 
 #include <TrussC.h>
+#ifndef __EMSCRIPTEN__
+#include "impl/httplib.h"
+#endif
 #include "../../common/tcCoreTest.h"
 
 #include <atomic>

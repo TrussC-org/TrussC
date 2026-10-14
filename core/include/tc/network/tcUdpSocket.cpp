@@ -3,12 +3,15 @@
 // =============================================================================
 
 #include "tc/network/tcUdpSocket.h"
+#include <mutex>
+#include <thread>
 #include "tc/network/tcSocketInternal.h"
 
 #include <chrono>
 #include <cstring>
 
 #ifdef _WIN32
+#include <windows.h>
     #pragma comment(lib, "ws2_32.lib")
     #define CLOSE_SOCKET closesocket
     #define SOCKET_ERROR_CODE WSAGetLastError()

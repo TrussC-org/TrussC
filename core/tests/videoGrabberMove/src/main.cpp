@@ -1,5 +1,6 @@
 // Headless regression for capture pointers surviving VideoGrabber moves.
 #include <TrussC.h>
+#include <mutex>
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>

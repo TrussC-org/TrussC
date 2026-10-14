@@ -1,5 +1,8 @@
 // #378 / #383: headless exit routing and bounded uncancellable catch-up.
 #include <TrussC.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include "../../common/tcCoreTest.h"
 #include <csignal>
 #include <cstdio>

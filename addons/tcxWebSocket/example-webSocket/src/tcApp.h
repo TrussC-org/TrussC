@@ -1,6 +1,7 @@
 #pragma once
 
 #include <TrussC.h>
+#include <mutex>
 #include "tcWebSocketClient.h"
 
 using namespace std;

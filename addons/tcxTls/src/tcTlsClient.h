@@ -5,6 +5,8 @@
 #pragma once
 
 #include "tc/network/tcTcpClient.h"
+#include <mutex>
+#include <thread>
 #include <atomic>
 #include <chrono>
 #include <string>

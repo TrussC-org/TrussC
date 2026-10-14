@@ -1,6 +1,8 @@
 #pragma once
 
 #include <TrussC.h>
+#include <map>
+#include <mutex>
 #include <tcxImGui.h>
 #include "ProjectGenerator.h"
 #include <atomic>
