@@ -1,9 +1,4 @@
 #include "../../common/tcTcpClientTest.h"
-#ifdef __linux__
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#endif
 #include "../../common/tcCoreTest.h"
 
 namespace {

@@ -112,3 +112,13 @@ if (!result) {
 ```
 
 An empty exporter or a failed texture save now fails the call with one Error. OBJ and MTL text use the shared atomic save helpers; a failed MTL write leaves both previous text files intact. Replacement is atomic per file, not across the entire export: a final OBJ close or rename failure can leave the updated MTL alongside the previous OBJ, and textures already saved are kept.
+
+## TrussC.h no longer brings in the HTTP library's system headers
+
+`TrussC.h` used to include the MCP server's HTTP library, and with it a number of system headers. It no longer does (#789), which makes every file that includes `TrussC.h` compile faster. If your code uses one of these without including it itself, add the include:
+
+- `<regex>` (`std::regex`, `std::regex_match`, ...)
+- sockets: `<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>` on macOS / Linux (`<winsock2.h>` / `<ws2tcpip.h>` on Windows)
+- `<sys/stat.h>` (`stat`, `chmod`, `mkdir`)
+
+The common standard headers (`<mutex>`, `<thread>`, `<map>`, `<fstream>`, `<sstream>`, `<atomic>`, `<functional>`, `<chrono>`, ...) still come in through `TrussC.h`.
