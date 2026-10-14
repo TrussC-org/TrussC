@@ -8,5 +8,6 @@ target_sources(${PROJECT_NAME} PRIVATE
     "${_TC_TRUSSCLI_SRC}/BuildSetup.cpp"
     "${_TC_TRUSSCLI_SRC}/IdeHelper.cpp"
     "${_TC_TRUSSCLI_SRC}/VsDetector.cpp"
+    "${_TC_TRUSSCLI_SRC}/GeneratedFile.cpp"
 )
 target_include_directories(${PROJECT_NAME} PRIVATE "${_TC_TRUSSCLI_SRC}")

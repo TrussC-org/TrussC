@@ -48,6 +48,7 @@ if("trusscliPresets" IN_LIST _TC_CORE_TEST_NAMES)
         "${_TC_TRUSSCLI_SRC}/BuildSetup.cpp"
         "${_TC_TRUSSCLI_SRC}/IdeHelper.cpp"
         "${_TC_TRUSSCLI_SRC}/VsDetector.cpp"
+        "${_TC_TRUSSCLI_SRC}/GeneratedFile.cpp"
     )
     set_property(SOURCE "${_TC_CORE_TESTS_DIR}/trusscliPresets/src/main.cpp"
         APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_TRUSSCLI_SRC}")

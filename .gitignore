@@ -177,3 +177,7 @@ addons/CMakeLists.txt
 .cline/
 .clinerules/
 .aider*
+
+# Python bytecode
+__pycache__/
+*.pyc
