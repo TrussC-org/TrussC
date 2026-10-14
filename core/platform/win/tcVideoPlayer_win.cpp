@@ -13,6 +13,7 @@
 #ifdef _WIN32
 
 #include "TrussC.h"
+#include <vector>
 #include "tc/video/internal/tcVideoNotifyQueue.h"
 
 #include <windows.h>
@@ -131,7 +132,7 @@ struct VideoPlayerState {
     bool isLoop_ = false;
 
     // Pixel buffer for CPU readback
-    unsigned char* pixels_ = nullptr;
+    std::vector<unsigned char> pixels_;
 
     // Audio track info
     bool hasAudio_ = false;
@@ -405,7 +406,7 @@ bool TCVideoPlayerImpl::createRenderTexture() {
     }
 
     // Allocate pixel buffer
-    state_->pixels_ = new unsigned char[state_->width_ * state_->height_ * 4];
+    state_->pixels_.assign((size_t)state_->width_ * state_->height_ * 4, 0);
 
     return true;
 }
@@ -446,7 +447,7 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     if (SUCCEEDED(hr)) {
         // Copy row by row (handle pitch/stride)
         unsigned char* src = static_cast<unsigned char*>(mapped.pData);
-        unsigned char* dst = state_->pixels_;
+        unsigned char* dst = state_->pixels_.data();
         int rowBytes = state_->width_ * 4;
 
         for (int y = 0; y < state_->height_; y++) {
@@ -674,10 +675,7 @@ void TCVideoPlayerImpl::close() {
     state_->d3dContext_.Reset();
     state_->d3dDevice_.Reset();
 
-    if (state_->pixels_) {
-        delete[] state_->pixels_;
-        state_->pixels_ = nullptr;
-    }
+    state_->pixels_.clear();
 
     state_->isLoaded_ = false;
     state_->isReady_ = false;
@@ -694,7 +692,7 @@ void TCVideoPlayerImpl::close() {
 
 
     if (state_->mfInitialized) CloseMediaFoundation();
-    state_.reset();
+    state_ = std::make_shared<VideoPlayerState>();  // never null, like VideoGrabber::close()
 }
 
 void TCVideoPlayerImpl::play() {
@@ -747,10 +745,10 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
         state_->hasNewFrame_ = true;
 
         // Copy pixels to VideoPlayer's buffer
-        if (player && state_->pixels_) {
+        if (player && !state_->pixels_.empty()) {
             unsigned char* playerPixels = player->getPixels();
             if (playerPixels) {
-                memcpy(playerPixels, state_->pixels_, state_->width_ * state_->height_ * 4);
+                memcpy(playerPixels, state_->pixels_.data(), state_->width_ * state_->height_ * 4);
             }
         }
     }

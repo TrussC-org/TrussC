@@ -115,8 +115,30 @@ async function resolve(index, captureStream) {
     assert.strictEqual(oldStream.stops, 1);
     assert.strictEqual(replacement.stops, 0, 'old promise cannot stop replacement');
     assert.strictEqual(context.Module.tcVideoGrabbers.has(4), false);
+    // The camera opens at a different size than requested: no copy into the
+    // requested-size buffer until the handle reallocates, then frames resume.
+    context.tc_video_setup(6, 1, 1);
+    const resizedStream = stream(66);
+    await resolve(5, resizedStream);
+    const opened = videos[videos.length - 1];
+    opened.videoWidth = 2;
+    opened.onloadedmetadata();
+    context.tc_video_buffer(6, 64, 1, 1);
+    assert.strictEqual(context.tc_video_size(6, 0), 1, 'needsResize set');
+    assert.strictEqual(context.tc_video_size(6, 1), 2, 'actual width reported');
+    assert.strictEqual(context.tc_video_size(6, 2), 1);
+    assert.strictEqual(context.tc_video_update(6), 0, 'no copy into the requested-size buffer');
+    assert.strictEqual(context.HEAPU8[64], 0);
+    context.tc_video_buffer(6, 80, 2, 1);
+    context.tc_video_resized(6);
+    assert.strictEqual(context.tc_video_size(6, 0), 0, 'needsResize cleared');
+    assert.strictEqual(context.tc_video_update(6), 1, 'updates resume after reallocation');
+    assert.strictEqual(context.HEAPU8[80], 66);
+    assert.strictEqual(context.tc_video_update(6), 1, 'and keep running');
+    context.tc_video_close(6);
+
     context.tc_video_close(3);
     context.tc_video_close(5);
     assert.strictEqual(context.Module.tcVideoGrabbers.size, 0);
-    console.log('PASS: late resolution, independent capture, metadata stop, resize and restart');
+    console.log('PASS: late resolution, independent capture, metadata stop, resize, open-at-other-size and restart');
 })().catch(error => { console.error(error); process.exitCode = 1; });

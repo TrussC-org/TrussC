@@ -41,11 +41,12 @@ namespace trussc {
 struct VideoGrabberPlatformData {
     IMFMediaSource* mediaSource = nullptr;
     IMFSourceReader* sourceReader = nullptr;
+    bool sourceShutDown = false;   // closePlatform() already shut it down
 
     ~VideoGrabberPlatformData() {
         if (sourceReader) sourceReader->Release();
         if (mediaSource) {
-            mediaSource->Shutdown();
+            if (!sourceShutDown) mediaSource->Shutdown();
             mediaSource->Release();
         }
         delete[] backBuffer;
@@ -410,6 +411,7 @@ void VideoGrabber::closePlatform() {
     // Shutdown media source - this will cause ReadSample to fail and return
     if (data->mediaSource) {
         data->mediaSource->Shutdown();
+        data->sourceShutDown = true;
     }
 
     // close() joins next, before the State releases these resources.

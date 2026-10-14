@@ -65,8 +65,6 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection*)connection {
     auto state = captureState.lock();
     if (!state || state->stopped.load()) return;
-    std::lock_guard<std::mutex> stateLock(state->mtx);
-    if (!state->pixels) return;
     auto* data = static_cast<trussc::VideoGrabberPlatformData*>(state->platformData.get());
     if (!data) return;
 
@@ -126,7 +124,9 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         // メインスレッド用バッファにコピー
         {
             // リサイズされてない場合のみコピー（リサイズはメインスレッドで処理）
-            if (!data->needsResize.load() && state->width == (int)width &&
+            // Convert unlocked above; lock only for the copy the main thread reads.
+            std::lock_guard<std::mutex> stateLock(state->mtx);
+            if (state->pixels && !data->needsResize.load() && state->width == (int)width &&
                 state->height == (int)height) {
                 std::memcpy(state->pixels.get(), data->backBuffer, width * height * 4);
             }
@@ -579,9 +579,7 @@ void VideoGrabber::getNewSize(int& width, int& height) {
 void VideoGrabber::clearResizeFlag() {
     if (!state_->platformData) return;
     auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
-    std::lock_guard<std::mutex> lock(state_->mtx);
-    if (state_->width == data->newWidth && state_->height == data->newHeight)
-        data->needsResize.store(false);
+    data->needsResize.store(false);
 }
 
 // ---------------------------------------------------------------------------
