@@ -33,7 +33,10 @@
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 
 namespace trussc {
@@ -52,12 +55,35 @@ struct VideoWriterPlatformData {
     bool   hasAudio = false;
     int    audioRate = 0;
     int    audioChannels = 0;
-    bool   failed = false;
+    std::atomic<bool> failed{false};
+    std::mutex syncHandlerMutex;
+    std::condition_variable syncHandlerDone;
+    bool syncHandlerRemoved = false;
 };
 }  // namespace internal
 using internal::VideoWriterPlatformData;
 
 namespace {
+
+void flushRecordingSource(GstElement* src, gpointer) {
+    gst_element_send_event(src, gst_event_new_flush_start());
+}
+
+// This runs on the posting (usually streaming) thread, including while the
+// caller is blocked in push_buffer(). Flush only once; leave error text on the
+// bus for the caller, which alone owns the SaveResult and logs the failure.
+GstBusSyncReply recordingBusSync(GstBus*, GstMessage* message, gpointer data) {
+    auto* pd = static_cast<VideoWriterPlatformData*>(data);
+    if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_ERROR && !pd->failed.exchange(true)) {
+        // Sending downstream events here can re-enter the failing sink while
+        // it holds its streaming locks. GStreamer keeps each source alive for
+        // this asynchronous call; the callback never accesses pd.
+        gst_element_call_async(pd->appsrc, flushRecordingSource, nullptr, nullptr);
+        if (pd->audiosrc)
+            gst_element_call_async(pd->audiosrc, flushRecordingSource, nullptr, nullptr);
+    }
+    return GST_BUS_PASS;
+}
 
 // One H.264 encoder option. `segment` is the pipeline fragment that sits
 // between "videoconvert ! " and " ! h264parse" and must contain the encoder
@@ -477,6 +503,16 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
     }
     platform_ = pd;
 
+    bus = gst_element_get_bus(pipeline);
+    gst_bus_set_sync_handler(bus, recordingBusSync, pd, [](gpointer data) {
+        auto* pd = static_cast<VideoWriterPlatformData*>(data);
+        // GStreamer releases the handler data after in-flight callbacks exit.
+        std::lock_guard<std::mutex> lock(pd->syncHandlerMutex);
+        pd->syncHandlerRemoved = true;
+        pd->syncHandlerDone.notify_one();
+    });
+    gst_object_unref(bus);
+
     logNotice("VideoWriter")
         << "GStreamer " << plan.label << " encoder: " << opt->encName
         << (opt->hardware ? " (hardware)" : " (software)")
@@ -488,13 +524,24 @@ bool VideoWriter::openPlatform(const std::string& fullPath, int w, int h,
 // ---------------------------------------------------------------------------
 // appendAudioPlatform - push interleaved float samples into the audio branch
 // ---------------------------------------------------------------------------
-// Poll without waiting on every append: downstream file/encoder failures can
-// arrive after appsrc accepted the preceding buffer.
+// Downstream file/encoder failures can arrive after appsrc accepted a buffer.
+// Healthy appends poll without waiting. After the sync handler wakes a blocked
+// push, its ERROR may not be queued yet: wait for that pending message, using
+// the same bound as finalization, so the caller retains the pipeline's reason.
 static bool pollRecordingError(VideoWriterPlatformData* pd, SaveResult& result) {
+    if (!result) return false;  // the first failure has already been retained
     GstBus* bus = gst_element_get_bus(pd->pipeline);
     GstMessage* msg = gst_bus_pop_filtered(bus, GST_MESSAGE_ERROR);
+    if (!msg && !pd->failed) {
+        gst_object_unref(bus);
+        return true;
+    }
+    if (!msg) msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND, GST_MESSAGE_ERROR);
     gst_object_unref(bus);
-    if (!msg) return !pd->failed;
+    if (!msg) {
+        result = SaveResult::fail(SaveError::WriteFailed, "GStreamer pipeline error");
+        return false;
+    }
     GError* error = nullptr;
     gst_message_parse_error(msg, &error, nullptr);
     result = SaveResult::fail(SaveError::WriteFailed, error ? error->message : "GStreamer pipeline error");
@@ -507,7 +554,7 @@ static bool pollRecordingError(VideoWriterPlatformData* pd, SaveResult& result) 
 bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
                                       double timeSec) {
     VideoWriterPlatformData* pd = platform_;
-    if (!pd || !pd->audiosrc || !pd->hasAudio || pd->failed) return false;
+    if (!pd || !pd->audiosrc || !pd->hasAudio) return false;
     if (!interleaved || frames <= 0) return false;
 
     if (!pollRecordingError(pd, result_)) return false;
@@ -527,8 +574,9 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
     GstFlowReturn ret =
         gst_app_src_push_buffer(GST_APP_SRC(pd->audiosrc), buf);  // takes ownership
     if (ret != GST_FLOW_OK) {
-        result_ = SaveResult::fail(SaveError::WriteFailed,
-            std::string("GStreamer appsrc: ") + gst_flow_get_name(ret));
+        if (pollRecordingError(pd, result_))
+            result_ = SaveResult::fail(SaveError::WriteFailed,
+                std::string("GStreamer appsrc: ") + gst_flow_get_name(ret));
         pd->failed = true;
         return false;
     }
@@ -537,7 +585,7 @@ bool VideoWriter::appendAudioPlatform(const float* interleaved, int frames,
 
 bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     VideoWriterPlatformData* pd = platform_;
-    if (!pd || !pd->appsrc || pd->failed) return false;
+    if (!pd || !pd->appsrc) return false;
 
     if (!pollRecordingError(pd, result_)) return false;
     const gsize size = (gsize)pd->width * pd->height * 4;
@@ -560,8 +608,9 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     GstFlowReturn ret =
         gst_app_src_push_buffer(GST_APP_SRC(pd->appsrc), buf);  // takes ownership
     if (ret != GST_FLOW_OK) {
-        result_ = SaveResult::fail(SaveError::WriteFailed,
-            std::string("GStreamer appsrc: ") + gst_flow_get_name(ret));
+        if (pollRecordingError(pd, result_))
+            result_ = SaveResult::fail(SaveError::WriteFailed,
+                std::string("GStreamer appsrc: ") + gst_flow_get_name(ret));
         pd->failed = true;
         return false;
     }
@@ -574,14 +623,19 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
 SaveResult VideoWriter::closePlatform() {
     VideoWriterPlatformData* pd = platform_;
     if (!pd) return SaveResult::success();
-    auto result = SaveResult::success();
+    auto result = result_;
     if (!pollRecordingError(pd, result) && result)
         result = internal::saveFailure(path_, "GStreamer recording failed");
     if (result && pd->pipeline && pd->appsrc) {
         bool eos = !pd->audiosrc ||
             gst_app_src_end_of_stream(GST_APP_SRC(pd->audiosrc)) == GST_FLOW_OK;
         eos = (gst_app_src_end_of_stream(GST_APP_SRC(pd->appsrc)) == GST_FLOW_OK) && eos;
-        if (!eos) result = internal::saveFailure(path_, "GStreamer rejected EOS");
+        if (!eos) {
+            // An ERROR can flush appsrc after the initial poll. Keep that
+            // failure instead of treating GST_FLOW_FLUSHING as a new one.
+            if (pollRecordingError(pd, result))
+                result = internal::saveFailure(path_, "GStreamer rejected EOS");
+        }
         else {
             GstBus* bus = gst_element_get_bus(pd->pipeline);
             GstMessage* msg = gst_bus_timed_pop_filtered(bus, 30 * GST_SECOND,
@@ -602,6 +656,16 @@ SaveResult VideoWriter::closePlatform() {
     }
 
     if (pd->pipeline) {
+        GstBus* bus = gst_element_get_bus(pd->pipeline);
+        gst_bus_set_sync_handler(bus, nullptr, nullptr, nullptr);
+        gst_object_unref(bus);
+        {
+            // Removing the handler prevents new calls but need not wait for
+            // one already in progress. Keep pd and its source refs until done.
+            std::unique_lock<std::mutex> lock(pd->syncHandlerMutex);
+            pd->syncHandlerDone.wait(lock, [pd] { return pd->syncHandlerRemoved; });
+        }
+        // Stop/join streaming before releasing the sources and callback data.
         gst_element_set_state(pd->pipeline, GST_STATE_NULL);
     }
     if (pd->appsrc)   gst_object_unref(pd->appsrc);
