@@ -161,7 +161,7 @@ jobs:
       # Reuse one dependency tree across every configure in this job.
       - name: Cache FetchContent
         id: fetchcontent
-        if: github.event_name != 'merge_group' && matrix.shard == 1
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           # Sources and populate stamps only; <dep>-build object trees are
@@ -171,9 +171,9 @@ jobs:
             ${{ github.workspace }}/.fetchcontent/*-subbuild
           key: fetchcontent-${{ runner.os }}-${{ github.job }}-${{ hashFiles('addons/*/CMakeLists.txt') }}
 
-      - name: Cache FetchContent (restore only, merge queue and shards 2-3)
+      - name: Cache FetchContent (restore only, merge queue)
         id: fetchcontent-restore
-        if: github.event_name == 'merge_group' || matrix.shard != 1
+        if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
           # Sources and populate stamps only; <dep>-build object trees are
@@ -206,10 +206,13 @@ jobs:
           # 2G per OS (#762): at 800M the Linux cache overflowed mid-job (1.0 GB,
           # hundreds of cleanups) and the hit rate fell. Three OS caches at 2G
           # stay well under the 10 GB per-repo limit. Same cap for sccache.
-          # One cache per OS, saved by shard 1 only (#806): three per-shard
-          # caches would pass the 10 GB limit. Shards 2-3 restore it and hit on
-          # the library and trusscli; their test sources miss whenever a core
-          # header changed, which a batch PR nearly always does anyway.
+          # One compiler cache per OS, saved by shard 1 only (#806): its key
+          # gets a timestamp, so every shard would add its own 0.5-1.7 GB entry
+          # and pass the 10 GB repo limit. Shards 2-3 restore it and hit on the
+          # library and trusscli; their test sources miss whenever a core header
+          # changed, which a batch PR nearly always does anyway. (The
+          # actions/cache steps above and below need no shard term: their keys
+          # are the same in every shard, so a key is stored once.)
           max-size: 2G
           save: ${{ github.event_name != 'merge_group' && matrix.shard == 1 }}
 
@@ -240,7 +243,7 @@ jobs:
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
       - name: Cache build directories
-        if: github.event_name != 'merge_group' && matrix.shard == 1
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           path: |
@@ -250,8 +253,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
 
-      - name: Cache build directories (restore only, merge queue and shards 2-3)
-        if: github.event_name == 'merge_group' || matrix.shard != 1
+      - name: Cache build directories (restore only, merge queue)
+        if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -266,14 +269,14 @@ jobs:
       # binary under a static key so runs stop re-downloading it (this also
       # pins the tool — bump the key to pick up a newer upstream build).
       - name: Cache sokol-shdc
-        if: github.event_name != 'merge_group' && matrix.shard == 1
+        if: github.event_name != 'merge_group'
         uses: actions/cache@v5
         with:
           path: core/tools/sokol-shdc
           key: sokol-shdc-v1-${{ runner.os }}
 
-      - name: Cache sokol-shdc (restore only, merge queue and shards 2-3)
-        if: github.event_name == 'merge_group' || matrix.shard != 1
+      - name: Cache sokol-shdc (restore only, merge queue)
+        if: github.event_name == 'merge_group'
         uses: actions/cache/restore@v5
         with:
           path: core/tools/sokol-shdc
