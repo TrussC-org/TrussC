@@ -377,6 +377,7 @@ struct Host {
     bool initialized = false;
     bool multiConfig = false;
     string coreLibPath = TC_HOT_RELOAD_CORE_LIB;
+    string configuredBuildDir = TC_HOT_RELOAD_BUILD_DIR; // relative to projectDir
     vector<string> buildDirsTried;
     bool rebuildBlocked = false; // preflight already logged the reason
 
@@ -393,7 +394,29 @@ struct Host {
         return false;
     }
 
-    bool findBuildDirectory(const string& configuredDir = TC_HOT_RELOAD_BUILD_DIR) {
+    // Single-config (Ninja/Make): directly under buildDir.
+    // Multi-config (Xcode/VS/Ninja Multi-Config): the host's configuration.
+    void updateGuestLibPath() {
+#ifdef __APPLE__
+        const string guestName = "libguest.dylib";
+#elif defined(_WIN32)
+        const string guestName = "guest.dll";
+#else
+        const string guestName = "libguest.so";
+#endif
+        // The generator type is a configure-time fact (no directory has to
+        // exist before the first guest build).
+        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
+        guestLibPath = buildDir + "/";
+        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
+        guestLibPath += guestName;
+    }
+
+    // The one place that decides where the build directory is: at init, and
+    // again when its CMakeCache.txt has gone by the time of a rebuild.
+    bool findBuildDirectory() { return findBuildDirectory(configuredBuildDir); }
+
+    bool findBuildDirectory(const string& configuredDir) {
 #ifdef __APPLE__
         const char* presetDirs[] = {"build-macos", "xcode", "build"};
 #elif defined(_WIN32)
@@ -405,13 +428,16 @@ struct Host {
         buildDirsTried.clear();
         rebuildBlocked = false;
         vector<string> candidates;
-        if (!configuredDir.empty()) candidates.push_back(configuredDir);
+        if (!configuredDir.empty()) {
+            candidates.push_back((fs::path(projectDir) / configuredDir).lexically_normal().string());
+        }
         for (const char* dir : presetDirs) candidates.push_back(projectDir + "/" + dir);
         for (const auto& candidate : candidates) {
             buildDirsTried.push_back(candidate);
             std::error_code ec;
             if (fs::is_regular_file(fs::path(candidate) / "CMakeCache.txt", ec)) {
                 buildDir = candidate;
+                updateGuestLibPath();
                 return true;
             }
         }
@@ -445,22 +471,6 @@ struct Host {
             logError("HotReload") << "src/ directory not found at " << srcDir;
             return false;
         }
-
-        // Single-config (Ninja/Make): directly under buildDir.
-        // Multi-config (Xcode/VS/Ninja Multi-Config): the host's configuration.
-#ifdef __APPLE__
-        const string guestName = "libguest.dylib";
-#elif defined(_WIN32)
-        const string guestName = "guest.dll";
-#else
-        const string guestName = "libguest.so";
-#endif
-        // The generator type is a configure-time fact (no directory has to
-        // exist before the first guest build).
-        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
-        guestLibPath = buildDir + "/";
-        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
-        guestLibPath += guestName;
 
         // Initial build of the Guest
         if (!rebuildGuest()) {
@@ -501,8 +511,9 @@ struct Host {
                 return false;
             }
         }
-        if (!fs::is_regular_file(fs::path(buildDir) / "CMakeCache.txt", ec)) {
-            return reportMissingBuildDirectory();
+        if (!fs::is_regular_file(fs::path(buildDir) / "CMakeCache.txt", ec) &&
+            !findBuildDirectory()) {
+            return false;
         }
         string cmake = findCMake(buildDir);
         logNotice("HotReload") << "Rebuilding guest...";

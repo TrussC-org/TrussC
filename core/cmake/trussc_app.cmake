@@ -374,11 +374,14 @@ endif()
         else()
             set(_tc_multi_config 0)
         endif()
+        # Relative to the project root, so a copied or moved tree finds its own
+        # build directory rather than the original one.
+        file(RELATIVE_PATH _tc_rel_build "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}")
         target_compile_definitions(${PROJECT_NAME} PRIVATE
             TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_CONFIG="$<CONFIG>"
             TC_HOT_RELOAD_MULTI_CONFIG=${_tc_multi_config}
             TC_HOT_RELOAD_CORE_LIB="$<TARGET_FILE:TrussC>"
-            TC_HOT_RELOAD_BUILD_DIR="${CMAKE_BINARY_DIR}")
+            TC_HOT_RELOAD_BUILD_DIR="${_tc_rel_build}")
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
         # Force-load ALL symbols from libTrussC.a into the Host (not just the ones
         # main.cpp uses) AND export them in the dynamic symbol table. This makes

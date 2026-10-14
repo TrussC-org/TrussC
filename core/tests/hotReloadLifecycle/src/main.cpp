@@ -285,7 +285,7 @@ static std::string findGuestLibrary() {
     // Same rule as the host: multi-config generators use <buildDir>/<config>/.
     const bool multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && *TC_HOT_RELOAD_CONFIG;
     std::vector<fs::path> candidates;
-    if (*TC_HOT_RELOAD_BUILD_DIR) candidates.emplace_back(TC_HOT_RELOAD_BUILD_DIR);
+    if (*TC_HOT_RELOAD_BUILD_DIR) candidates.push_back((proj / TC_HOT_RELOAD_BUILD_DIR).lexically_normal());
     for (const char* b : buildDirs) candidates.push_back(proj / b);
     for (const auto& candidate : candidates) {
         fs::path p = candidate;
@@ -831,6 +831,8 @@ static int checkRebuildPreflight() {
     Host host;
     host.projectDir = dir.string();
     host.coreLibPath = coreLib.string();
+    expect(host.findBuildDirectory("custom-tree") && host.buildDir == configured.lexically_normal().string(),
+           "did not resolve the configured directory against the project root");
     expect(host.findBuildDirectory(configured.string()) && host.buildDir == configured.string(),
            "did not prefer configured directory");
     for (int attempt = 0; attempt < 2; ++attempt) {
@@ -876,6 +878,10 @@ static int checkRebuildPreflight() {
     std::ofstream(fallback / "CMakeCache.txt") << "# fallback\n";
     expect(host.findBuildDirectory((dir / "missing-configured").string()) &&
            host.buildDir == fallback.string(), "configured path did not fall back");
+    // A configured cache that disappears is re-scanned; the guest path follows.
+    host.configuredBuildDir = (dir / "missing-configured").string();
+    expect(host.findBuildDirectory() && host.buildDir == fallback.string() &&
+           host.guestLibPath.rfind(fallback.string(), 0) == 0, "re-scan did not move the guest path");
     fs::remove(fallback / "CMakeCache.txt");
     errors.clear();
     expect(!host.findBuildDirectory((dir / "missing-configured").string()), "accepted missing caches");
@@ -886,13 +892,15 @@ static int checkRebuildPreflight() {
                "missing build directory omitted a tried directory");
     }
     // A cache removed after initialization is caught before launching cmake.
+    // The re-scan then finds no candidate and reports every directory it tried.
+    host.configuredBuildDir = configured.string();
     host.buildDir = configured.string();
-    host.buildDirsTried = {configured.string()};
     fs::remove(configured / "CMakeCache.txt");
     errors.clear();
     expect(!host.reload() && host.getApp() == runningApp, "missing cache replaced running guest");
-    expect(errors.size() == 1 && errors[0].find(configured.string()) != std::string::npos,
-           "missing cache reload did not log one Error");
+    expect(errors.size() == 1 && errors[0].find(configured.string()) != std::string::npos &&
+           errors[0].find(fallback.string()) != std::string::npos,
+           "missing cache reload did not re-scan and log one Error");
     expect(!fs::exists(configured / "build-command-reached"), "missing cache launched build command");
     listener.disconnect();
     host.guest.app.reset();
