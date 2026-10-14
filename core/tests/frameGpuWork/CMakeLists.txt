@@ -10,4 +10,8 @@ target_include_directories(frameGpuWork PRIVATE ../../include)
 if(NOT MSVC)
     target_compile_options(frameGpuWork PRIVATE -Wall -Wextra -Wno-unused-function)
     target_link_libraries(frameGpuWork PRIVATE m)
+else()
+    # Sources and core headers are UTF-8; without /utf-8 MSVC reads them in the
+    # console code page (CP932 etc.), and /WX turns the C4819 warning into an error (#793).
+    target_compile_options(frameGpuWork PRIVATE /utf-8)
 endif()
