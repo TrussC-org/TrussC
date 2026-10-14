@@ -3,7 +3,8 @@
 // =============================================================================
 #pragma once
 #include "tc/utils/tcAnnotations.h"
-
+#include "tc/network/tcNetworkState.h"
+#include "tc/utils/tcKeptThreads.h"
 #include <string>
 #include <vector>
 #include <thread>
@@ -20,7 +21,6 @@
 #include "tc/events/tcEventListener.h"
 #include "tc/network/tcSendResult.h"
 #include "tc/network/tcTcpSendChannel.h"
-
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
@@ -33,26 +33,22 @@
     #include <netdb.h>
     #include <fcntl.h>
 #endif
-
 namespace trussc {
-
 namespace internal {
-
 // Test hook, not a user setting: stop(), on the thread that has just joined
 // the accept thread, calls fn before it disconnects the clients and joins
 // their threads, so a test can hold it there. Applies to every TcpServer; an
 // empty fn (the default) removes it. State lives in tcTcpServer.cpp.
 void setTcpServerStopHookForTests(std::function<void()> fn);
-
 // Test hook, not a user setting: stop(), on a thread that has just taken the
 // accept thread out of the server, calls fn before it waits for that thread
 // to end, so a test can tell that another stop() arrives only after that.
 // Applies to every TcpServer; an empty fn (the default) removes it. State
 // lives in tcTcpServer.cpp.
 void setTcpServerAcceptTakenHookForTests(std::function<void()> fn);
-
+// Runs under the handoff mutex immediately before accept-thread publication.
+void setTcpServerStartHookForTests(std::function<void()> fn);
 } // namespace internal
-
 // =============================================================================
 // Connected client information
 // =============================================================================
@@ -61,59 +57,125 @@ public:
     int getId() const { return id_; }
     const std::string& getHost() const { return host_; }
     int getPort() const { return port_; }
-
 private:
     friend class TcpServer;
-
     int id_;                // Client ID (assigned by server)
     std::string host_;      // Client IP address
     int port_;              // Client port
-
 #ifdef _WIN32
     SOCKET socket_;
 #else
     int socket_;
 #endif
-
     // Owns the send mutex for this client (see internal::TcpSendChannel)
     std::shared_ptr<internal::TcpSendChannel> channel_;
 };
-
 // =============================================================================
 // Event arguments
 // =============================================================================
-
 // Client connect event
 struct TcpClientConnectEventArgs {
     int clientId;
     std::string host;
     int port;
 };
-
 // Data receive from client event
 struct TcpServerReceiveEventArgs {
     int clientId;
     std::vector<char> data;
 };
-
 // Client disconnect event
 struct TcpClientDisconnectEventArgs {
     int clientId;
     std::string reason;
     bool wasClean;
 };
-
 // Server error event
 struct TcpServerErrorEventArgs {
     std::string message;
     int errorCode = 0;
     int clientId = -1;  // -1 = server itself error
 };
-
 // =============================================================================
 // TcpServer class
 // =============================================================================
 class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
+    struct State : std::enable_shared_from_this<State> {
+        internal::NetworkEvent<TcpClientConnectEventArgs> onClientConnect;
+        internal::NetworkEvent<TcpServerReceiveEventArgs> onReceive;
+        internal::NetworkEvent<TcpClientDisconnectEventArgs> onClientDisconnect;
+        internal::NetworkEvent<TcpServerErrorEventArgs> onError;
+        internal::NetworkEvent<TcpSendCompleteEventArgs> onSendComplete;
+        bool start(int port, int maxClients = 0);
+        void stop();
+        bool isRunning() const;
+        void disconnectClient(int clientId);
+        void disconnectAllClients();
+        int getClientCount() const;
+        std::vector<int> getClientIds() const;
+        const TcpServerClient* getClient(int clientId) const;
+        bool send(int clientId, const void* data, size_t size);
+        bool send(int clientId, const std::vector<char>& data);
+        bool send(int clientId, const std::string& message);
+        void broadcast(const void* data, size_t size);
+        void broadcast(const std::vector<char>& data);
+        void broadcast(const std::string& message);
+        SendResult sendAsync(int clientId, const void* data, size_t size);
+        SendResult sendAsync(int clientId, std::vector<char>&& data);
+        SendResult sendAsync(int clientId, const std::string& message);
+        int broadcastAsync(const void* data, size_t size);
+        int broadcastAsync(const std::vector<char>& data);
+        int broadcastAsync(const std::string& message);
+        void setReceiveBufferSize(size_t size);
+        void setSendTimeout(float seconds);
+        void setSendAsyncBufferSize(size_t bytes);
+        size_t getSendAsyncBufferSize() const;
+        size_t getSendAsyncPendingBytes(int clientId) const;
+        int getPort() const;
+        void acceptThreadFunc();
+        void clientThreadFunc(int clientId);
+        void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
+        void notifyError(const std::string& msg, int code = 0, int clientId = -1);
+        bool removeClient(int clientId);
+        void reapClientThreads();
+        void joinClientThreads();
+        void releaseListenSocket(bool andClose);
+        void shutAllClients();
+    #ifdef _WIN32
+        SOCKET serverSocket_ = INVALID_SOCKET;
+    #else
+        int serverSocket_ = -1;
+    #endif
+        std::mutex listenSocketMutex_;
+        int port_ = 0;
+        int maxClients_ = 0;
+        std::thread acceptThread_;
+        std::mutex acceptThreadMutex_;
+        int stopsInProgress_ = 0;
+        std::condition_variable stopsDone_;
+        std::atomic<bool> running_{false};
+        std::unordered_map<int, TcpServerClient> clients_;
+        std::unordered_map<int, std::thread> clientThreads_;
+        std::unordered_map<int, std::thread> clientWriters_;
+        std::vector<int> finishedClientThreads_;
+        std::vector<int> finishedWriters_;
+        mutable std::shared_mutex clientsMutex_;
+        int nextClientId_ = 1;
+        size_t receiveBufferSize_ = 65536;
+        std::atomic<float> sendTimeout_{60.0f};
+        std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
+        std::atomic<uint64_t> nextSendId_{0};
+        std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;
+        std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> snapshotChannels() const;
+        SendResult enqueue(const std::shared_ptr<internal::TcpSendChannel>& ch, int clientId,
+                           internal::TcpSendItem&& item);
+        void completeSend(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch,
+                          const internal::TcpSendItem& item, SendError error, size_t bytesSent);
+        bool shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
+        internal::KeptThreads keptThreads_;
+        ~State();
+    };
+    std::shared_ptr<State> state_ = std::make_shared<State>();
 public:
     // -------------------------------------------------------------------------
     // Events
@@ -153,29 +215,22 @@ public:
     Event<TcpServerReceiveEventArgs> onReceive;             // On data receive
     Event<TcpClientDisconnectEventArgs> onClientDisconnect; // On client disconnect
     Event<TcpServerErrorEventArgs> onError;                 // On error
-
     // A queued send finished, successfully or not. Fires on the writer thread
     // for that client — the same threading note as above applies.
     Event<TcpSendCompleteEventArgs> onSendComplete;
-
     // -------------------------------------------------------------------------
     // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpServer();
-
-    // Stops the server and waits for all of its threads, including those a
-    // listener's stop() or disconnect left running. Must not run on one of
-    // the server's own threads (in a listener).
+    // Stops and joins from another thread. On a server worker it requests stop
+    // without self-join; workers keep the State until they return.
     ~TcpServer();
-
     // Copy prohibited
     TcpServer(const TcpServer&) = delete;
     TcpServer& operator=(const TcpServer&) = delete;
-
     // -------------------------------------------------------------------------
     // Server management
     // -------------------------------------------------------------------------
-
     // Start server (listen on specified port).
     //
     // maxClients caps how many clients can be connected at once (0 =
@@ -195,7 +250,6 @@ public:
     // onSendComplete, onClientDisconnect, onError from those threads), it logs
     // an error and returns false without stopping anything.
     bool start(int port, int maxClients = 0);
-
     // Stop server. Returns once the accept thread and every client thread have
     // ended and every client is disconnected. When two threads call it at
     // once, only one of them waits for the accept thread.
@@ -208,38 +262,29 @@ public:
     // next stop() or start() on another thread, or the destructor.
     // isRunning() is false as soon as it is called.
     void stop();
-
     // Whether server is running
     bool isRunning() const;
-
     // -------------------------------------------------------------------------
     // Client management
     // -------------------------------------------------------------------------
-
     // Disconnect specified client. Returns once that client's threads have
     // ended; from an inline listener on one of the server's own threads (see
     // Events above), for its own client or any other, it returns without
     // waiting for them.
     void disconnectClient(int clientId);
-
     // Disconnect all clients. Waits for their threads like disconnectClient(),
     // except in an inline listener on one of the server's own threads. A
     // client that connects while it runs may stay connected.
     void disconnectAllClients();
-
     // Number of connected clients
     int getClientCount() const;
-
     // Get all connected client IDs
     std::vector<int> getClientIds() const;
-
     // Get client information (nullptr if not found)
     const TcpServerClient* getClient(int clientId) const;
-
     // -------------------------------------------------------------------------
     // Data send
     // -------------------------------------------------------------------------
-
     // Send data to the specified client and wait until the payload is written
     // or an error occurs, including setSendTimeout() seconds without progress
     // (60 s by default). On the main thread (update/draw, input handlers,
@@ -247,7 +292,6 @@ public:
     bool send(int clientId, const void* data, size_t size);
     bool send(int clientId, const std::vector<char>& data);
     bool send(int clientId, const std::string& message);
-
     // Broadcast to all clients and wait for each payload to be written or an
     // error to occur, including setSendTimeout() seconds without progress
     // (60 s by default). On the main thread (update/draw, input handlers,
@@ -255,7 +299,6 @@ public:
     void broadcast(const void* data, size_t size);
     void broadcast(const std::vector<char>& data);
     void broadcast(const std::string& message);
-
     // Queue data for a client and return at once, without waiting for it to be
     // written. A falsy result means nothing was queued and `error` says why;
     // otherwise `id` identifies this send in onSendComplete, which fires
@@ -263,26 +306,21 @@ public:
     SendResult sendAsync(int clientId, const void* data, size_t size);
     SendResult sendAsync(int clientId, std::vector<char>&& data);   // takes the buffer, no copy
     SendResult sendAsync(int clientId, const std::string& message);
-
     // Queue data for every client. Returns how many accepted it; the payload is
     // buffered once and shared, not copied per client.
     int broadcastAsync(const void* data, size_t size);
     int broadcastAsync(const std::vector<char>& data);
     int broadcastAsync(const std::string& message);
-
     // -------------------------------------------------------------------------
     // Settings
     // -------------------------------------------------------------------------
-
     // Set receive buffer size
     void setReceiveBufferSize(size_t size);
-
     // Set how long a send may make NO progress before it gives up, in seconds
     // (0 = wait indefinitely). Defaults to 60 s: long enough that no healthy
     // peer trips it, short enough that a dead one cannot hang a send forever.
     // Applies to every send that starts after this call, on every client.
     void setSendTimeout(float seconds);
-
     // Set the high-water mark for one client's send queue, in bytes
     // (0 = unlimited). Defaults to 16 MB.
     //
@@ -294,118 +332,23 @@ public:
     // sendAsync() can return.
     void setSendAsyncBufferSize(size_t bytes);
     size_t getSendAsyncBufferSize() const;
-
     // How much this client has queued and not yet completed, in bytes.
     // 0 for an unknown client.
     size_t getSendAsyncPendingBytes(int clientId) const;
-
     // -------------------------------------------------------------------------
     // Information retrieval
     // -------------------------------------------------------------------------
-
     // The port the server is bound to. After start(0) this is the port the OS
     // picked; for a fixed port it is that port.
     int getPort() const;
-
 private:
-    void acceptThreadFunc();
-    void clientThreadFunc(int clientId);
-    void writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch);
-    void notifyError(const std::string& msg, int code = 0, int clientId = -1);
-    // Unregister the client and shut its channel, joining nothing (the
-    // server's own threads use it). False if the client was already gone.
-    bool removeClient(int clientId);
-
-    // Join the client threads (receive and writer) that have ended. Called
-    // from the accept loop, which wakes in short slices, so a finished thread
-    // is reclaimed promptly rather than held until stop(). The only join on
-    // one of the server's own threads: a finished thread waits for nothing.
-    void reapClientThreads();
-
-    // Join every client thread whose client is no longer registered. Never
-    // called on one of the server's own threads.
-    void joinClientThreads();
-
-    // Shut down the listening socket, or (andClose) close it for good.
-    // Guarded by listenSocketMutex_; a no-op once it is closed.
-    void releaseListenSocket(bool andClose);
-
-    // Disconnect every client without joining any of its threads; they stay
-    // registered for whoever joins them. The accept thread does this on its
-    // way out, and so do stop() and disconnectAllClients() on the server's own
-    // threads.
-    void shutAllClients();
-
-#ifdef _WIN32
-    SOCKET serverSocket_ = INVALID_SOCKET;
-#else
-    int serverSocket_ = -1;
-#endif
-    // Serializes shutting down and closing serverSocket_ between the accept
-    // thread and a stop() on another thread
-    std::mutex listenSocketMutex_;
-
-    int port_ = 0;
-    int maxClients_ = 0;   // 0 = unlimited; read only by the accept thread
-
-    std::thread acceptThread_;
-    // Guards acceptThread_ itself, so two threads calling stop() at once never
-    // both join it. Held only to move the thread in or out, never to join.
-    std::mutex acceptThreadMutex_;
-    // How many stop() calls are tearing the server down (joining an accept
-    // thread they moved out, disconnecting the clients and joining their
-    // threads, or on a client thread only disconnecting them), and the signal
-    // that one of them has finished; start() waits until none is left. Both
-    // guarded by acceptThreadMutex_.
-    int stopsInProgress_ = 0;
-    std::condition_variable stopsDone_;
-    std::atomic<bool> running_{false};
-
-    std::unordered_map<int, TcpServerClient> clients_;
-    std::unordered_map<int, std::thread> clientThreads_;
-    std::unordered_map<int, std::thread> clientWriters_;
-
-    // Ids of receive threads and writers that have returned and still need
-    // joining. Guarded by clientsMutex_; drained by reapClientThreads().
-    std::vector<int> finishedClientThreads_;
-    std::vector<int> finishedWriters_;
-
-    // Shared: every send() looks a channel up through here, and so does every
-    // getClientCount() a draw loop makes. Those are reads, and readers of a
-    // plain mutex would take turns for no reason. Only registering, removing
-    // and disconnecting a client write.
-    mutable std::shared_mutex clientsMutex_;
-
-    int nextClientId_ = 1;
-    size_t receiveBufferSize_ = 65536;
-    std::atomic<float> sendTimeout_{60.0f};   // idle, not total; read by every sending thread
-    std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};   // per client high-water mark
-    std::atomic<uint64_t> nextSendId_{0};     // 0 is reserved for "not queued"
-
-    // Look up a client's send channel without holding clientsMutex_ during the send
-    std::shared_ptr<internal::TcpSendChannel> findChannel(int clientId) const;
-
-    // Every channel, taken under one lock. broadcast() used to take the lock
-    // once for the id list and again for each id it then sent to.
-    std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> snapshotChannels() const;
-
-    // Put an item on a client's queue. `waiter` non-null means a synchronous
-    // send: it waits for room rather than being refused with QueueFull.
-    SendResult enqueue(const std::shared_ptr<internal::TcpSendChannel>& ch, int clientId,
-                       internal::TcpSendItem&& item);
-
-    // Report one finished item: release its share of the queue, wake a
-    // synchronous sender, then fire onSendComplete
-    void completeSend(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch,
-                      const internal::TcpSendItem& item, SendError error, size_t bytesSent);
-
-    // Refuse further sends, wake everything waiting on the channel and shut
-    // the socket down. The writer drains the queue and closes the descriptor
-    // itself, on its way out. False if the channel was already closed (or
-    // null).
-    bool shutChannel(const std::shared_ptr<internal::TcpSendChannel>& ch);
+    std::shared_ptr<internal::NetworkDelivery> delivery_ = std::make_shared<internal::NetworkDelivery>();
+    std::shared_ptr<internal::NetworkEvent<TcpClientConnectEventArgs>::Target> onClientConnectTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpServerReceiveEventArgs>::Target> onReceiveTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpClientDisconnectEventArgs>::Target> onClientDisconnectTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpServerErrorEventArgs>::Target> onErrorTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpSendCompleteEventArgs>::Target> onSendCompleteTarget_;
+    void attachTargets();
 };
-
 } // namespace trussc
-
 namespace tc = trussc;

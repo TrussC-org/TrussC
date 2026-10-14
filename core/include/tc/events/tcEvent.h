@@ -112,6 +112,8 @@ enum class Deliver { Inline, Main };
 // ---------------------------------------------------------------------------
 // Event<T> - Event with arguments
 // ---------------------------------------------------------------------------
+namespace internal { template<class T> struct NetworkEvent; }
+
 template<typename T>
 class Event {
 public:
@@ -243,7 +245,14 @@ public:
     //     AudioEngine::waitForAudioCallbacks()), or the listener uses
     //     Deliver::Main.
     void notify(T& arg) {
-        ConstEntryListPtr snapshot = internal::sharedLoad(entries_);
+        notifySnapshot(internal::sharedLoad(entries_), arg);
+    }
+
+private:
+    template<class> friend struct internal::NetworkEvent;
+    // Network delivery retains a snapshot while the handle can be destroyed.
+    // Dispatch accesses only the owned entries and payload, never the Event.
+    static void notifySnapshot(ConstEntryListPtr snapshot, T& arg) {
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
@@ -279,6 +288,7 @@ public:
         }
     }
 
+public:
     // Get listener count
     size_t listenerCount() const {
         ConstEntryListPtr snapshot = internal::sharedLoad(entries_);

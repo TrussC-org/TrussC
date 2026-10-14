@@ -3,7 +3,8 @@
 // =============================================================================
 #pragma once
 #include "tc/utils/tcAnnotations.h"
-
+#include "tc/network/tcNetworkState.h"
+#include "tc/utils/tcKeptThreads.h"
 #include <string>
 #include <vector>
 #include <thread>
@@ -13,10 +14,8 @@
 #include <memory>
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
-#include "tc/utils/tcKeptThreads.h"
 #include "tc/network/tcTcpSendChannel.h"
 #include <chrono>
-
 #ifdef _WIN32
     #include <winsock2.h>
     #include <ws2tcpip.h>
@@ -41,40 +40,130 @@
     #endif
     #define SOCKET_ERROR -1
 #endif
-
 namespace trussc {
-
+namespace internal { struct TcpClientTestAccess; }
 // =============================================================================
 // Event arguments
 // =============================================================================
-
 // Connection complete event
 struct TcpConnectEventArgs {
     bool success = false;
     std::string message;
 };
-
 // Data receive event
 struct TcpReceiveEventArgs {
     std::vector<char> data;
 };
-
 // Disconnect event
 struct TcpDisconnectEventArgs {
     std::string reason;
     bool wasClean = true;  // Whether it was a clean disconnect
 };
-
 // Error event
 struct TcpErrorEventArgs {
     std::string message;
     int errorCode = 0;
 };
-
 // =============================================================================
 // TcpClient class (base class - parent of TlsClient)
 // =============================================================================
 class TC_PLATFORMS("macos,windows,linux,android,ios") TcpClient {
+    friend struct internal::TcpClientTestAccess;
+    struct State : std::enable_shared_from_this<State> {
+        ~State();
+        internal::NetworkEvent<TcpConnectEventArgs> onConnect;
+        internal::NetworkEvent<TcpReceiveEventArgs> onReceive;
+        internal::NetworkEvent<TcpDisconnectEventArgs> onDisconnect;
+        internal::NetworkEvent<TcpSendCompleteEventArgs> onSendComplete;
+        internal::NetworkEvent<TcpErrorEventArgs> onError;
+        bool connect(const std::string& host, int port);
+        void connectAsync(const std::string& host, int port);
+        void disconnect();
+        bool isConnected() const;
+        bool isConnecting() const;
+        bool send(const void* data, size_t size);
+        bool send(const std::vector<char>& data);
+        bool send(const std::string& message);
+        SendResult sendAsync(const void* data, size_t size);
+        SendResult sendAsync(std::vector<char>&& data);
+        SendResult sendAsync(const std::string& message);
+        void setSendTimeout(float seconds);
+        void setConnectTimeout(float seconds);
+        void setSendAsyncBufferSize(size_t bytes);
+        size_t getSendAsyncBufferSize() const;
+        size_t getSendAsyncPendingBytes() const;
+        void setReceiveBufferSize(size_t size);
+        void setBlocking(bool blocking);
+        void setUseThread(bool useThread);
+        bool isUsingThread() const;
+        void processNetwork();
+        std::string getRemoteHost() const;
+        int getRemotePort() const;
+        using AliveToken = std::shared_ptr<std::atomic<bool>>;
+        void stopConnectThread();
+        bool prepareConnect();
+        bool connectSocket(const std::string& host, int port);
+        int checkPendingConnect(int waitMs, int& error);
+        void closeClientSocket();
+        void waitClientSocket(bool forWrite, int ms);
+        void startSendChannel();
+        bool processSendQueue(const AliveToken& alive);
+        void stopSendChannel();
+        int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
+        std::mutex socketMutex_;
+        void notifyError(const std::string& msg, int code = 0);
+        AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
+        bool processNetworkStep(const AliveToken& alive);
+    #ifdef _WIN32
+        SOCKET socket_ = INVALID_SOCKET;
+    #else
+        int socket_ = -1;
+    #endif
+        std::string remoteHost_;
+        int remotePort_ = 0;
+        std::atomic<bool> running_{false};
+        std::atomic<bool> connected_{false};
+        std::atomic<size_t> receiveBufferSize_{65536};
+    #ifdef __EMSCRIPTEN__
+        std::atomic<bool> useThread_{false};
+    #else
+        std::atomic<bool> useThread_{true};
+    #endif
+        EventListener updateListener_;
+        std::atomic<bool> connectPending_{false};
+        void receiveThreadFunc(unsigned generation, AliveToken alive);
+        void connectThreadFunc(const std::string& host, int port, unsigned attempt);
+        void resetConnection();
+        void disconnectImpl(bool notify, bool stopConnect = true);
+        std::thread receiveThread_;
+        std::thread connectThread_;
+        struct ClientSendChannel;
+        bool drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, bool wait, const AliveToken& alive);
+        std::thread writerThread_;
+        mutable std::mutex channelMutex_;
+        std::shared_ptr<ClientSendChannel> sendChannel_;
+        std::atomic<float> sendTimeout_{60.0f};
+        std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
+        std::atomic<uint64_t> nextSendId_{0};
+        std::atomic<float> connectTimeout_{0.0f};
+        std::chrono::steady_clock::time_point connectStart_;
+        std::atomic<bool> connectCancelled_{false};
+        std::atomic<bool> asyncConnecting_{false};
+        std::atomic<unsigned> connectAttempt_{0};
+        mutable std::mutex targetMutex_;
+        std::string asyncHost_;
+        int asyncPort_ = 0;
+        std::shared_ptr<ClientSendChannel> sendChannel() const;
+        SendResult enqueue(internal::TcpSendItem&& item);
+        void writerThreadFunc(std::shared_ptr<ClientSendChannel> channel, AliveToken alive);
+        internal::KeptThreads keptThreads_;
+        internal::KeptThreads keptWriters_;
+        std::atomic<unsigned> receiveGeneration_{0};
+        std::vector<char> recvBuf_;
+        std::weak_ptr<std::function<bool(const std::string&, int)>> connectOverride_;
+        std::weak_ptr<std::function<int(const void*, size_t, bool&, int&)>> writeOverride_;
+    };
+    internal::AtomicSharedPtr<State> state_{std::make_shared<State>()};
 public:
     // -------------------------------------------------------------------------
     // Events
@@ -122,35 +211,13 @@ public:
     // connect(), which is unsupported. Without threads
     // connectAsync() is connect(), and is overruled the same way.
     //
-    // RECONNECTING ON THE RECEIVE THREAD: when an event fires on the receive
-    // thread (onDisconnect for a remote close or an error, onReceive; for
-    // TlsClient also onConnect and onError around the handshake), a plain
-    // (inline) listener that calls connect() runs it on that old receive
-    // thread, which cannot join itself. A listener that calls disconnect()
-    // there is in the same position, and so is one that calls disconnect()
-    // on the connect thread of connectAsync(). The client keeps such a
-    // thread, which goes on with the rest of the listener and leaves its
-    // loop, and joins it from another thread: the next connect() or
-    // disconnect() waits for it, and so does the destructor.
-    // connect(), connectAsync(), disconnect() and the destructor can wait
-    // for a listener still running on one of the client's threads. Do not
-    // call them while holding a lock that such a listener takes: the call
-    // and the listener would wait for each other forever. Do not call disconnect() on the client from another thread until the
-    // listener's call has returned; simultaneous reentrant connection
-    // management from multiple threads is unsupported.
-    // Reconnecting from the main thread, as above, avoids all of this.
-    //
-    // DESTROYING FROM A LISTENER: an inline listener on the receive thread
-    // may destroy the client (an owner that replaces it, as
-    // WebSocketClient::connect() does). That thread cannot join itself: the
-    // destructor detaches it and returns. Once a notification on the
-    // receive thread returns, the thread checks whether the client still
-    // exists before it reads the client again, and after onDisconnect (and
-    // TlsClient's onConnect(false)) it stops without reading the client at
-    // all (#262). The connect thread of connectAsync() is not covered: do
-    // not destroy the client from a listener there (it returns into the
-    // destroyed client, undefined behavior); destroy it from another thread,
-    // or once the listener has returned (from a Deliver::Main listener, say).
+    // Inline TCP listeners may disconnect, reconnect with connectAsync(), or
+    // destroy the client. Workers retain their own State and never read the
+    // public handle after a notification. Teardown joins from another thread;
+    // on its own worker it returns without self-join. A restart gets a fresh
+    // State. TLS's derived transport ownership is handled separately.
+    // Do not hold a listener's lock while joining it from another thread.
+    // Simultaneous reentrant connection management remains unsupported.
     //
     // onConnect(false): a failed attempt reports it from connectAsync(), from
     // a pending connect without threads, and from a failed TLS handshake (a
@@ -166,50 +233,37 @@ public:
     Event<TcpDisconnectEventArgs> onDisconnect; // On disconnect
     Event<TcpSendCompleteEventArgs> onSendComplete; // Writer thread, or processNetwork() without threads
     Event<TcpErrorEventArgs> onError;           // On error
-
     // -------------------------------------------------------------------------
     // Constructor / Destructor
     // -------------------------------------------------------------------------
     TcpClient();
-
-    // Disconnects without onDisconnect and returns once every thread of the
-    // client has ended, one that a listener's connect() or disconnect() let
-    // go of included. On the receive thread itself (a listener that destroys
-    // the client) it detaches that thread instead; on the connect thread it
-    // must not run (see Events).
+    // Disconnects without onDisconnect. On a TCP worker, retains that worker's
+    // State until it returns; from another thread, waits for completion.
     virtual ~TcpClient();
-
     // Copy prohibited
     TcpClient(const TcpClient&) = delete;
     TcpClient& operator=(const TcpClient&) = delete;
-
-    // Move allowed
+    // Only stopped sockets move their State. A running socket is stopped first
+    // with one Error "moved while running; stopped". Listeners stay with the
+    // old handle; the moved-from handle is ready for a new connection.
     TcpClient(TcpClient&& other) noexcept;
     TcpClient& operator=(TcpClient&& other) noexcept;
-
     // -------------------------------------------------------------------------
     // Connection management (virtual - can be overridden in TlsClient)
     // -------------------------------------------------------------------------
-
     // Connect to server (blocking)
     virtual bool connect(const std::string& host, int port);
-
     // Connect to server asynchronously (connects in background, notifies via onConnect)
     virtual void connectAsync(const std::string& host, int port);
-
     // Disconnect
     virtual void disconnect();
-
     // Whether connected
     virtual bool isConnected() const;
-
     // True during an asynchronous TCP connect (TLS also includes its handshake).
     virtual bool isConnecting() const;
-
     // -------------------------------------------------------------------------
     // Data send/receive (virtual - can be overridden in TlsClient)
     // -------------------------------------------------------------------------
-
     // Send data and wait until the payload is written or an error occurs,
     // including setSendTimeout() seconds without progress (60 s by default).
     // On the main thread (update/draw, input handlers, Deliver::Main listeners),
@@ -217,7 +271,6 @@ public:
     virtual bool send(const void* data, size_t size);
     virtual bool send(const std::vector<char>& data);
     virtual bool send(const std::string& message);
-
     // Queue owned bytes; completion reports through onSendComplete.
     // An immediate rejection (not connected, queue full, connection closed)
     // also fires onError right away on the calling thread: sending again from
@@ -225,7 +278,6 @@ public:
     SendResult sendAsync(const void* data, size_t size);
     SendResult sendAsync(std::vector<char>&& data);
     SendResult sendAsync(const std::string& message);
-
     // Idle send deadline, default 60 seconds; 0 waits indefinitely.
     void setSendTimeout(float seconds);
     // TCP connect deadline, default 0 (the OS deadline). Does not cover DNS or TLS.
@@ -235,38 +287,43 @@ public:
     void setSendAsyncBufferSize(size_t bytes);
     size_t getSendAsyncBufferSize() const;
     size_t getSendAsyncPendingBytes() const;
-
     // -------------------------------------------------------------------------
     // Settings
     // -------------------------------------------------------------------------
-
     // Set receive buffer size
     void setReceiveBufferSize(size_t size);
-
     // Set blocking mode
     void setBlocking(bool blocking);
-
     // Set whether to use threads (Wasm must be false)
     void setUseThread(bool useThread);
-
     // Whether threading is being used
     bool isUsingThread() const;
-
     // Internal update method (called by event listener if not using threads)
     virtual void processNetwork();
-
     // -------------------------------------------------------------------------
     // Information retrieval
     // -------------------------------------------------------------------------
-
     // Remote host name
     std::string getRemoteHost() const;
-
     // Remote port
     int getRemotePort() const;
-
+private:
+    std::shared_ptr<internal::NetworkDelivery> delivery_ = std::make_shared<internal::NetworkDelivery>();
+    std::shared_ptr<internal::NetworkEvent<TcpConnectEventArgs>::Target> onConnectTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpReceiveEventArgs>::Target> onReceiveTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpDisconnectEventArgs>::Target> onDisconnectTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpSendCompleteEventArgs>::Target> onSendCompleteTarget_;
+    std::shared_ptr<internal::NetworkEvent<TcpErrorEventArgs>::Target> onErrorTarget_;
+    void attachTargets();
+    void freshState();
+    void joinRetired();
+    std::vector<std::shared_ptr<State>> retired_;
+    void attachOverrides();
+    std::shared_ptr<std::function<bool(const std::string&, int)>> connectOverride_;
+    std::shared_ptr<std::function<int(const void*, size_t, bool&, int&)>> writeOverride_;
 protected:
     using AliveToken = std::shared_ptr<std::atomic<bool>>;
+    void notifyError(const std::string& msg, int code = 0);
     // Cancel and join before derived connection state is released. Self-join
     // is kept for a later caller, as with the receive thread.
     void stopConnectThread();
@@ -278,111 +335,21 @@ protected:
     void waitClientSocket(bool forWrite, int ms);
     void startSendChannel();
     bool processSendQueue(const AliveToken& alive);
+    bool processNetworkStep(const AliveToken& alive);
     void stopSendChannel();
     // Non-blocking write step; -1 means retry, -2 fatal. TLS overrides it.
     virtual int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
-    std::mutex socketMutex_;
-
-    // Accessible from derived classes
-    void notifyError(const std::string& msg, int code = 0);
-
-    // Set to false by the destructor. A receive thread holds its own copy:
-    // after a notification it checks this copy, not the client, to find out
-    // whether a listener destroyed the client (#262).
+    internal::NetworkField<State, std::mutex> socketMutex_{state_, &State::socketMutex_};
+    internal::NetworkField<State, decltype(State::socket_)> socket_{state_, &State::socket_};
+    internal::NetworkField<State, std::atomic<bool>> running_{state_, &State::running_};
+    internal::NetworkField<State, std::atomic<bool>> connected_{state_, &State::connected_};
+    internal::NetworkField<State, std::atomic<size_t>> receiveBufferSize_{state_, &State::receiveBufferSize_};
+    internal::NetworkField<State, std::atomic<bool>> useThread_{state_, &State::useThread_};
+    internal::NetworkField<State, std::atomic<bool>> connectPending_{state_, &State::connectPending_};
     AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
-
-    // processNetwork()'s work. alive: the caller's copy of alive_. Returns
-    // false when the calling thread must stop at once without reading the
-    // client again: it reported the end of the connection (onDisconnect, or
-    // onConnect(false)), or a listener destroyed the client. The decision to
-    // stop is made before the notification, since its listeners may destroy,
-    // disconnect or reconnect the client.
-    bool processNetworkStep(const AliveToken& alive);
-
-#ifdef _WIN32
-    SOCKET socket_ = INVALID_SOCKET;
-#else
-    int socket_ = -1;
-#endif
-
     std::string remoteHost_;
     int remotePort_ = 0;
-
-    std::atomic<bool> running_{false};
-    std::atomic<bool> connected_{false};
-
-    // Atomic: setReceiveBufferSize() may run on any thread (a listener on the
-    // receive thread, say) while a receive thread reads it
-    std::atomic<size_t> receiveBufferSize_{65536};
-
-
-    // Atomic, both: a receive thread that a listener's disconnect() let go of
-    // may still read them while the app calls setUseThread() or connect()
-#ifdef __EMSCRIPTEN__
-    std::atomic<bool> useThread_{false};
-#else
-    std::atomic<bool> useThread_{true};
-#endif
     EventListener updateListener_;
-    std::atomic<bool> connectPending_{false};
-
-private:
-    void receiveThreadFunc(unsigned generation, AliveToken alive);
-    void connectThreadFunc(const std::string& host, int port, unsigned attempt);
-
-    // Close the socket and release the receive thread (connectThread_ is left alone)
-    void resetConnection();
-
-    // disconnect()'s work. notify: fire onDisconnect ("Disconnected by
-    // client") if the client was connected. The destructor passes false.
-    void disconnectImpl(bool notify, bool stopConnect = true);
-
-    std::thread receiveThread_;
-    std::thread connectThread_;
-    struct ClientSendChannel;
-    bool drainSendChannel(const std::shared_ptr<ClientSendChannel>& ch, bool wait, const AliveToken& alive);
-    std::thread writerThread_;
-    mutable std::mutex channelMutex_;
-    std::shared_ptr<ClientSendChannel> sendChannel_;
-    std::atomic<float> sendTimeout_{60.0f};
-    std::atomic<size_t> sendAsyncBufferSize_{16 * 1024 * 1024};
-    std::atomic<uint64_t> nextSendId_{0};
-    std::atomic<float> connectTimeout_{0.0f};
-    std::chrono::steady_clock::time_point connectStart_;
-    std::atomic<bool> connectCancelled_{false};
-    std::atomic<bool> asyncConnecting_{false};
-    std::atomic<unsigned> connectAttempt_{0};
-    mutable std::mutex targetMutex_;
-    std::string asyncHost_;
-    int asyncPort_ = 0;
-
-    std::shared_ptr<ClientSendChannel> sendChannel() const;
-    SendResult enqueue(internal::TcpSendItem&& item);
-    void writerThreadFunc(std::shared_ptr<ClientSendChannel> channel, AliveToken alive);
-
-    // receiveThread_ or connectThread_ when a call on that very thread (a
-    // listener's connect() or disconnect(), or the destructor) let go of it.
-    // Joined by the next connect() or disconnect() on another thread, or by
-    // the destructor (see tcKeptThreads.h).
-    internal::KeptThreads keptThreads_;
-    internal::KeptThreads keptWriters_;
-
-    // Bumped by every connect(), before it sets any flag for the new
-    // connection; its receive thread gets that value. A thread whose
-    // generation is no longer current stops: processNetwork()'s receive loop and the loop
-    // in receiveThreadFunc() both check it. So a listener on the receive
-    // thread (onReceive or onDisconnect) can reconnect without the old
-    // thread reading the new connection's socket.
-    //
-    // Cancellation of connectAsync() is checked between non-blocking TCP
-    // waits. Reentrant connection methods from listeners still require the
-    // external caller to wait for that listener's call (see Events).
-    std::atomic<unsigned> receiveGeneration_{0};
-
-    // Receive buffer, sized to receiveBufferSize_ by processNetwork()
-    std::vector<char> recvBuf_;
 };
-
 } // namespace trussc
-
 namespace tc = trussc;
