@@ -252,7 +252,7 @@ function enumerate(objs) {
         const recFile = fileOf(rec);
         // qualified owner for members + nested types (Entry -> ChipSoundBundle::Entry)
         const qn = enclosing ? enclosing + '::' + rec.name : rec.name;
-        const typeSym = { kind: 'type', ns: nsPath, owner: enclosing || null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec) };
+        const typeSym = { kind: 'type', ns: nsPath, owner: enclosing || null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec), bases: rec.bases || [] };
         syms.push(typeSym);
         let access = rec.tagUsed === 'class' ? 'private' : 'public';
         for (const m of (rec.inner || [])) {
@@ -262,7 +262,7 @@ function enumerate(objs) {
                 && !m.isImplicit && !m.explicitlyDeleted && !/&&/.test((m.type && m.type.qualType) || '')) {
                 const ca = argsOf(m);
                 const isCopy = ca.length === 1 && ca[0].type === `const ${rec.name} &`;   // skip copy ctor (noise)
-                if (!isCopy) (typeSym.ctors = typeSym.ctors || []).push({ params: paramsOf(m), args: ca });
+                if (!isCopy) (typeSym.ctors = typeSym.ctors || []).push({ params: paramsOf(m), args: ca, ...annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
                 continue;
             }
             if (m.kind === 'CXXMethodDecl') {
@@ -280,7 +280,7 @@ function enumerate(objs) {
                     flags: [...(extraFlags || []), 'template', /operator/.test(m.name) ? 'operator' : null, fn.storageClass === 'static' ? 'static' : null].filter(Boolean),
                     ann: annotationsOf(fn, fileOf(m)), deprecated: deprecatedOf(fn) });
             } else if (m.kind === 'FieldDecl') {
-                syms.push({ kind: 'field', ns: nsPath, owner: qn, name: m.name, ftype: m.type && m.type.qualType, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'field', ns: nsPath, owner: qn, name: m.name, ftype: m.type && m.type.qualType, file: fileOf(m), access, flags: [], ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'EnumDecl' && m.name) {
                 syms.push({ kind: 'enum', ns: nsPath, owner: qn, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'CXXRecordDecl' && m.name && access === 'public') {
@@ -305,7 +305,7 @@ function enumerate(objs) {
             } else if (c.kind === 'FunctionTemplateDecl' && c.name) {
                 const fn = (c.inner || []).find(x => x.kind === 'FunctionDecl');
                 // the AnnotateAttr (TC_PLATFORMS / TC_LUA_BIND) lives on the inner FunctionDecl, not the template decl
-                syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: fn && fn.type && fn.type.qualType, params: fn ? paramsOf(fn) : '', args: fn ? argsOf(fn) : [], file: fileOf(c), flags: ['template'], tparams: tparamsOf(c), ann: fn ? annotationsOf(fn, fileOf(c)) : undefined, deprecated: deprecatedOf(c) });
+                syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: fn && fn.type && fn.type.qualType, params: fn ? paramsOf(fn) : '', args: fn ? argsOf(fn) : [], file: fileOf(c), flags: ['template'], tparams: tparamsOf(c), ann: fn ? annotationsOf(fn, fileOf(c)) : undefined, deprecated: fn ? deprecatedOf(fn) : deprecatedOf(c) });
             } else if (c.kind === 'TypedefDecl' || c.kind === 'TypeAliasDecl') { syms.push({ kind: 'typedef', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], deprecated: deprecatedOf(c) });
             } else if (c.kind === 'VarDecl') { syms.push({ kind: 'var', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], ann: annotationsOf(c, fileOf(c)), deprecated: deprecatedOf(c) });
             }
@@ -361,10 +361,72 @@ let pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbolId
 // and is kept as-is.
 const enumsWithMembers = new Set(pub.filter(s => s.kind === 'enum' && s.members && s.members.length).map(symbolId));
 pub = pub.filter(s => !(s.kind === 'enum' && !(s.members && s.members.length) && enumsWithMembers.has(symbolId(s))));
+// Resolve inheritance before grouping overloads. C++ member lookup hides a base
+// name when the derived type declares that name. Constructors are not members
+// inherited by this walk; only public members of public bases are copied.
+const records = new Map(pub.filter(s => s.kind === 'type').map(s => [
+    [nsPrefix(s), s.owner, s.name].filter(Boolean).join('::'), s]));
+const ownMembers = new Map();
+for (const s of pub.filter(s => s.owner)) {
+    const key = [nsPrefix(s), s.owner].filter(Boolean).join('::');
+    if (!ownMembers.has(key)) ownMembers.set(key, []);
+    ownMembers.get(key).push(s);
+}
+const declaredNames = new Map();
+for (const s of syms.filter(s => s.owner)) {
+    const key = [nsPrefix(s), s.owner].filter(Boolean).join('::');
+    if (!declaredNames.has(key)) declaredNames.set(key, new Set());
+    declaredNames.get(key).add(s.name);
+}
+const resolvedMembers = new Map();
+function membersOf(key) {
+    if (resolvedMembers.has(key)) return resolvedMembers.get(key);
+    const rec = records.get(key);
+    const members = [...(ownMembers.get(key) || [])];
+    const names = new Set(declaredNames.get(key));
+    for (const base of (rec.bases || [])) {
+        if (base.access !== 'public') continue;
+        const baseKey = (base.type.desugaredQualType || base.type.qualType).replace(/^trussc::/, '');
+        if (!records.has(baseKey)) continue;
+        const inherited = membersOf(baseKey).filter(s => (!s.access || s.access === 'public') && !names.has(s.name));
+        for (const s of inherited) members.push({ ...s, ctors: s.ctors?.map(c => ({ ...c })), ns: rec.ns,
+            owner: [rec.owner, rec.name].filter(Boolean).join('::'),
+            declaredIn: s.declaredIn || baseKey });
+        for (const s of inherited) names.add(s.name);
+    }
+    resolvedMembers.set(key, members);
+    return members;
+}
+for (const key of records.keys()) pub.push(...membersOf(key).filter(s => s.declaredIn));
+
+// Every declaration uses its own metadata, otherwise its owner type's. Resolve
+// nested owners first, so the same rule applies at every depth.
+const resolvedTypes = new Set();
+function resolveType(key) {
+    const rec = records.get(key);
+    if (!rec || resolvedTypes.has(key)) return rec;
+    const owner = rec.owner && resolveType([nsPrefix(rec), rec.owner].filter(Boolean).join('::'));
+    resolveMetadata(rec, owner);
+    resolvedTypes.add(key);
+    return rec;
+}
+function resolveMetadata(s, owner) {
+    s.ann = { ...s.ann, platforms: s.ann?.platforms ?? owner?.ann?.platforms ?? null };
+    s.deprecated = s.deprecated ?? owner?.deprecated ?? null;
+}
+for (const key of records.keys()) resolveType(key);
+for (const s of pub) {
+    const owner = s.owner && records.get([nsPrefix(s), s.owner].filter(Boolean).join('::'));
+    resolveMetadata(s, owner);
+    for (const ctor of (s.ctors || [])) {
+        ctor.platforms = ctor.platforms ?? s.ann.platforms;
+        ctor.deprecated = ctor.deprecated ?? s.deprecated;
+    }
+}
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
-    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, lua_skip: (s.ann && s.ann.lua_skip) || undefined, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
+    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, declaredIn: s.declaredIn, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, lua_skip: (s.ann && s.ann.lua_skip) || undefined, deprecated: s.deprecated, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
     const e = structure[id];
     if ((s.flags || []).includes('static')) e.static = true;
     if (s.deprecated && !e.deprecated) e.deprecated = s.deprecated;
@@ -372,7 +434,7 @@ for (const s of pub) {
         const p = parseSig(s.sig);                             // ret + const from qualType
         if (p) { const sig = { ret: p.ret, params: s.params !== undefined ? s.params : p.params, const: p.const, args: s.args,
                 tmpl: (s.flags || []).includes('template') || undefined,     // tmpl: needs explicit instantiation (e.g. typeName<T>()) — binders skip it
-                deprecated: s.deprecated || undefined };                     // C++ carries [[deprecated]] per DECLARATION, so it belongs on the overload
+                deprecated: s.deprecated };                     // C++ carries [[deprecated]] per DECLARATION, so it belongs on the overload
             if (!e.signatures.some(x => x.params === sig.params && x.const === sig.const)) e.signatures.push(sig); }
     }
 }
@@ -381,7 +443,7 @@ for (const s of pub) {
 for (const s of require('./std-symbols.js')) {
     if (structure[s.id]) continue;                              // a real trussc:: symbol wins
     structure[s.id] = { id: s.id, kind: s.kind, owner: undefined, name: s.name, ns: undefined,
-        signatures: s.signatures || [], static: false, provider: s.provider };
+        signatures: s.signatures || [], static: false, provider: s.provider, platforms: null, deprecated: null };
 }
 
 // --- 4c. reconcile per-overload deprecation ---------------------------------
@@ -399,12 +461,12 @@ for (const id in structure) {
     const e = structure[id];
     if (!e.signatures || !e.signatures.length) continue;
     const dep = e.signatures.filter((sig) => sig.deprecated);
-    e.deprecated = dep.length === e.signatures.length ? dep[0].deprecated : undefined;
+    e.deprecated = dep.length === e.signatures.length ? dep[0].deprecated : null;
 }
 
 // --- 5. output --------------------------------------------------------------
 const jsonOut = argVal('--json');
-if (argv.includes('--ids')) { console.log(Object.keys(structure).sort().join('\n')); process.exit(0); }
+if (argv.includes('--ids')) { console.log(Object.keys(structure).filter(id => !structure[id].declaredIn || structure[id].declaredIn === structure[id].owner).sort().join('\n')); process.exit(0); }
 if (jsonOut) {
     // __meta rides along ONLY in the JSON output (--ids stays a pure id list,
     // which is all check.js needs — its gates are name-based and stay valid

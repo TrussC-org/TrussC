@@ -58,9 +58,12 @@ const prose = TOML.parse(fs.readFileSync(path.join(__dirname, 'api-reference.tom
 // --- join: structure is the spine; prose enriches ---
 const joined = {};
 for (const id in structure) {
-    const s = structure[id], p = prose[id] || {};
+    const s = structure[id];
+    // Inherited copies share their declaration's prose; the resolved metadata
+    // passes through unchanged for every downstream consumer.
+    const p = prose[id] || prose[s.declaredIn + '::' + s.name] || {};
     joined[id] = {
-        id, kind: s.kind, owner: s.owner, name: s.name, ns: s.ns,
+        id, kind: s.kind, owner: s.owner, declaredIn: s.declaredIn, name: s.name, ns: s.ns,
         signatures: s.signatures, static: s.static || undefined, tparams: s.tparams,
         type: s.type,                                      // field/property C++ type (e.g. "float")
         access: s.access,                                  // 'protected' (public omitted); web emitter hides protected

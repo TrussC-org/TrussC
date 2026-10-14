@@ -35,7 +35,8 @@ const keys = Object.keys(prose);
 let ids;
 const structFile = argVal('--structure');
 if (structFile) {
-    ids = new Set(Object.keys(JSON.parse(fs.readFileSync(structFile, 'utf8'))));
+    const structure = JSON.parse(fs.readFileSync(structFile, 'utf8'));
+    ids = new Set(Object.keys(structure).filter(id => !structure[id].declaredIn || structure[id].declaredIn === structure[id].owner));
 } else {
     const sArgs = ['--max-old-space-size=8192', path.join(__dirname, 'structure.js')];
     if (argVal('--ast')) sArgs.push('--ast', argVal('--ast'));
