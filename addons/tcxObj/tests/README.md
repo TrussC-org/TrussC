@@ -45,3 +45,8 @@ material, configure with `-DTCX_OBJ_TEST_GPU=ON`, rebuild and run the same
 executable in a graphics session (under Xvfb on Linux). This optional mode uses
 the native graphics backend and runs all cases inside one draw callback.
 The default mode remains headless and needs no display.
+
+The load-entry tests check `FileNotFound` and the exact shared missing-file
+Error, `DecodeFailed` with exactly one Error for a broken OBJ, and relative
+Japanese OBJ/MTL/texture paths through `getDataPath()`. Fixtures are generated
+at runtime.

@@ -36,7 +36,8 @@ public:
     // -------------------------------------------------------------------------
 
     // Load OBJ file. Also loads MTL and textures if present.
-    bool load(const fs::path& path);
+    // Relative paths resolve via getDataPath(); failures log one Error.
+    LoadResult load(const fs::path& path);
 
     // -------------------------------------------------------------------------
     // Access results

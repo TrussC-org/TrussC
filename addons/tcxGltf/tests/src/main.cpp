@@ -35,7 +35,7 @@
 //   - a file with no scene loads from its root nodes; with no nodes it fails
 //   - a 20000-deep node chain loads without recursion; node cycles and
 //     repeated scene nodes fail to load
-// Every failed load logs a warning and leaves the model empty.
+// Every failed load logs an Error and leaves the model empty.
 // =============================================================================
 
 #include <tcxGltf.h>
@@ -65,12 +65,14 @@ static void check(const string& name, bool ok) {
 // Counts warnings (and worse) logged while it is alive.
 struct WarningCounter {
     int count = 0;
+    int errors = 0;
     string last;  // text of the last warning
     EventListener listener;
     WarningCounter() {
         listener = getLogger().onLog.listen([this](LogEventArgs& e) {
             if (e.level >= LogLevel::Warning) {
                 count++;
+                if (e.level == LogLevel::Error) errors++;
                 last = e.message;
             }
         });
@@ -225,19 +227,22 @@ static fs::path writeGlb(const GltfBuilder& b) {
 }
 
 // Load `b` and check the result. When the load should fail, also check that
-// it logged a warning and left the model empty.
+// it logged exactly one Error and left the model empty.
 // `lastWarning` (when given) receives the text of the last warning logged.
 // With `asGlb`, `b` is written as a .glb instead of a .gltf.
 static bool loadCase(const string& name, const GltfBuilder& b, bool expectOk, GltfModel& model,
                      string* lastWarning = nullptr, bool asGlb = false) {
     fs::path p = asGlb ? writeGlb(b) : writeGltf(b);
     WarningCounter warnings;
-    bool ok = model.load(pathToUtf8(p));
+    auto result = model.load(p);
+    bool ok = result.ok();
     if (expectOk) {
         check(name + ": loads", ok && model.isLoaded());
     } else {
         check(name + ": rejected", !ok && !model.isLoaded() && model.getNodeCount() == 0);
-        check(name + ": warning logged", warnings.count > 0);
+        check(name + ": DecodeFailed, exactly one Error",
+              result.error == LoadError::DecodeFailed && warnings.errors == 1 &&
+              warnings.last == "[GltfModel] " + result.message);
     }
     if (lastWarning) *lastWarning = warnings.last;
     return ok;
@@ -268,6 +273,63 @@ int main() {
             utf8ToPath("tcxGltf-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
 
+    {
+        fs::path oldRoot = getDataPathRoot();
+        setDataPathRoot(g_dir);
+        GltfModel model;
+        WarningCounter logs;
+        auto result = model.load(string("missing.gltf"));
+        string expected = "file not found: " + pathToUtf8(g_dir / "missing.gltf");
+        check("missing glTF: FileNotFound and exactly one shared Error",
+              result.error == LoadError::FileNotFound && result.message == expected &&
+              logs.errors == 1 && logs.count == 1 && logs.last == "[GltfModel] " + expected);
+        logs.errors = logs.count = 0;
+        ofstream(g_dir / "broken.gltf", ios::binary) << "not JSON";
+        result = model.load("broken.gltf");
+        check("broken glTF: DecodeFailed and exactly one Error",
+              result.error == LoadError::DecodeFailed && !result.message.empty() &&
+              logs.errors == 1 && logs.count == 1 && logs.last == "[GltfModel] " + result.message &&
+              !model.isLoaded() && model.getNodeCount() == 0);
+        setDataPathRoot(oldRoot);
+    }
+
+    // Decode each URI once, including escaped '%' and UTF-8 bytes, while
+    // leaving the literal '%' in the model's parent directory untouched.
+    for (const string& imageUri : {string("a%20b.png"), string("a%2520b.png"),
+                                   string("%E7%94%BB%E5%83%8F.png")}) {
+        fs::path oldRoot = getDataPathRoot();
+        fs::path folder = g_dir / utf8ToPath("読み込み%20");
+        fs::create_directories(folder);
+        setDataPathRoot(g_dir);
+        Pixels pixels;
+        pixels.allocate(2, 2, 4);
+        pixels.setColor(0, 0, Color(1, 0, 0, 1));
+        string imageFile = imageUri == "a%20b.png" ? "a b.png" :
+                           imageUri == "a%2520b.png" ? "a%20b.png" : "画像.png";
+        check("URI fixture: PNG saved", pixels.save(folder / utf8ToPath(imageFile)).ok());
+        GltfBuilder b = texturedTriangle(Json{{"uri", imageUri}}.dump());
+        Json document = Json::parse(b.json());
+        document["buffers"][0]["uri"] = "%E9%A0%82%E7%82%B9%20%2520.bin";
+        ofstream(folder / utf8ToPath("頂点 %20.bin"), ios::binary)
+            .write(reinterpret_cast<const char*>(b.bin.data()), (streamsize)b.bin.size());
+        ofstream(folder / utf8ToPath("モデル.gltf"), ios::binary) << document.dump();
+        GltfModel model;
+        WarningCounter logs;
+        auto result = model.load(utf8ToPath("読み込み%20/モデル.gltf"));
+        check("encoded URI: relative model, external buffer and texture load",
+              result.ok() && logs.count == 0 && model.getNodeCount() == 1 &&
+              model.getNode(0).mesh.getNumIndices() == 3 &&
+              model.getNode(0).mesh.getVertices()[1].x == 1 &&
+              model.getNode(0).material.hasBaseColorTexture() &&
+              model.getNode(0).material.getBaseColorTexture()->getWidth() == 2);
+        fs::remove(folder / utf8ToPath("頂点 %20.bin"));
+        result = model.load(utf8ToPath("読み込み%20/モデル.gltf"));
+        check("missing external buffer: DecodeFailed, exactly one Error",
+              result.error == LoadError::DecodeFailed && logs.errors == 1 &&
+              logs.last == "[GltfModel] " + result.message && !model.isLoaded());
+        setDataPathRoot(oldRoot);
+    }
+
     // ----- UTF-8 paths, with embedded and external buffers --------------------
     {
         fs::path oldRoot = getDataPathRoot();
@@ -292,7 +354,7 @@ int main() {
             ofstream(g_dir / fileName, ios::binary) << json;
             GltfModel m;
             WarningCounter warnings;
-            bool loaded = m.load(pathToUtf8(fileName));
+            bool loaded = m.load(fileName).ok();
             string name = external ? "UTF-8 glTF external buffer" : "UTF-8 glTF data URI buffer";
             check(name + ": geometry loads without warnings",
                   loaded && warnings.count == 0 && m.getNodeCount() == 1 &&
@@ -604,7 +666,7 @@ int main() {
                       R"({"attributes":{"NORMAL":2},"indices":1})";
         GltfModel m;
         WarningCounter warnings;
-        bool ok = m.load(pathToUtf8(writeGltf(b)));
+        bool ok = m.load(writeGltf(b)).ok();
         check("two primitives without positions: loads, one node",
               ok && m.isLoaded() && m.getNodeCount() == 1);
         check("two primitives without positions: one warning with the count",
@@ -732,7 +794,7 @@ int main() {
         ofstream(modelPath, ios::binary) << b.json();
         GltfModel m;
         WarningCounter warnings;
-        bool loaded = m.load(pathToUtf8(modelPath));
+        bool loaded = m.load(modelPath).ok();
         check("absolute image uri: geometry loads",
               loaded && m.getNodeCount() == 1 && m.getNode(0).mesh.getNumVertices() == 3);
         const Texture* texture = loaded && m.getNodeCount() == 1
@@ -922,10 +984,10 @@ int main() {
     // ----- a failed load after a good one leaves the model empty ---------------
     {
         GltfModel m;
-        bool first = m.load(pathToUtf8(writeGltf(triangle())));
+        bool first = m.load(writeGltf(triangle())).ok();
         GltfBuilder bad = triangle();
         bad.accessors[0] = accessorJson(0, CT_FLOAT, "4", "VEC3");
-        bool second = m.load(pathToUtf8(writeGltf(bad)));
+        bool second = m.load(writeGltf(bad)).ok();
         check("reload: good then rejected leaves the model empty",
               first && !second && !m.isLoaded() && m.getNodeCount() == 0);
     }

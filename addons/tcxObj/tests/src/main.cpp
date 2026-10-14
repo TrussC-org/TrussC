@@ -84,7 +84,7 @@ static ObjLoadResult loadObjText(const string& text) {
     ObjLoadResult r;
     ObjLoader loader;
     WarningCounter warnings;
-    r.ok = loader.load(writeObj(text));
+    r.ok = loader.load(writeObj(text)).ok();
     r.warnings = warnings.count;
     r.skippedWarnings = warnings.skipped;
     r.invalidFaceWarnings = warnings.invalidFace;
@@ -133,6 +133,36 @@ static int runTests() {
             utf8ToPath("tcxObj-テスト-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(g_dir);
 
+    // The shared entry reports missing and broken files exactly once.
+    {
+        fs::path oldRoot = getDataPathRoot();
+        setDataPathRoot(g_dir);
+        vector<string> errors;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Error) errors.push_back(e.message);
+        });
+        ObjLoader loader;
+        auto result = loader.load("missing.obj");
+        string expected = "file not found: " + pathToUtf8(g_dir / "missing.obj");
+        check("missing OBJ: FileNotFound and exactly one shared Error",
+              result.error == LoadError::FileNotFound && result.message == expected &&
+              errors.size() == 1 && errors[0] == "[ObjLoader] " + expected);
+        errors.clear();
+        result = loader.load(writeObj(TRI_V + "f 0 1 2\n"));
+        check("broken OBJ: DecodeFailed and exactly one Error",
+              result.error == LoadError::DecodeFailed && !result.message.empty() &&
+              errors.size() == 1 && errors[0] == "[ObjLoader] " + result.message && loader.getNumGroups() == 0);
+        // A malformed .mtl is not a failed load: LoadObj returns true with the
+        // material reader's error in err. The geometry is usable, so the model
+        // loads and the material message is a Warning, not an Error.
+        errors.clear();
+        ofstream(g_dir / "broken.mtl", ios::binary) << "newmtl red\nKd x y z\n";
+        result = loader.load(writeObj("mtllib broken.mtl\n" + TRI_V + "f 1 2 3\n"));
+        check("OBJ with a malformed .mtl still loads without an Error",
+              result.ok() && errors.empty() && loader.getNumGroups() > 0);
+        setDataPathRoot(oldRoot);
+    }
+
     // ----- UTF-8 model, material and texture paths ----------------------------
     {
         fs::path oldRoot = getDataPathRoot();
@@ -149,7 +179,7 @@ static int runTests() {
             << "mtllib 材質.mtl\n" << TRI_V
             << "vt 0 0\nvt 1 0\nvt 0 1\nusemtl red\nf 1/1 2/2 3/3\n";
         ObjLoader loader;
-        bool loaded = loader.load(utf8ToPath("三角.obj"));
+        bool loaded = loader.load(utf8ToPath("三角.obj")).ok();
         check("UTF-8 OBJ: triangle and material loaded",
               loaded && loader.getNumGroups() == 1 && loader.getMesh().getNumIndices() == 3);
         bool textured = loaded && loader.getNumGroups() == 1 && loader.getGroups()[0].hasTexture;
@@ -171,7 +201,7 @@ static int runTests() {
             }
             check("UTF-8 OBJ: mtllib contains UTF-8 bytes", utf8Mtl);
             ObjLoader roundTrip;
-            bool reloaded = roundTrip.load(utf8ToPath("モデル.obj"));
+            bool reloaded = roundTrip.load(utf8ToPath("モデル.obj")).ok();
             check("UTF-8 OBJ: export loads with its texture",
                   reloaded && roundTrip.getNumGroups() == 1 &&
                   roundTrip.getGroups()[0].mesh.getNumIndices() == 3 &&

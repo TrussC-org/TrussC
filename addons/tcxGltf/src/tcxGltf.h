@@ -57,7 +57,8 @@ public:
     // -------------------------------------------------------------------------
 
     // Load a .gltf or .glb file. Path is resolved via getDataPath().
-    bool load(const std::string& path);
+    // Missing files and decode failures return a LoadResult and log one Error.
+    LoadResult load(const fs::path& path);
 
     bool isLoaded() const { return loaded_; }
 
