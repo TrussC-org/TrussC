@@ -33,6 +33,8 @@ struct VideoGrabberPlatformData {
     id<AVCaptureVideoDataOutputSampleBufferDelegate> delegate = nil;
     dispatch_queue_t captureQueue = nil;
 
+    ~VideoGrabberPlatformData() { delete[] backBuffer; }
+
     // ダブルバッファリング用
     unsigned char* backBuffer = nullptr;
     std::atomic<bool> bufferReady{false};
@@ -50,12 +52,10 @@ struct VideoGrabberPlatformData {
 // ---------------------------------------------------------------------------
 // AVCaptureVideoDataOutputSampleBufferDelegate 実装
 // ---------------------------------------------------------------------------
-@interface TrussCVideoGrabberDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
-@property (nonatomic, assign) trussc::VideoGrabberPlatformData* platformData;
-@property (nonatomic, assign) unsigned char* targetPixels;
-@property (nonatomic, assign) std::atomic<bool>* pixelsDirty;
-@property (nonatomic, assign) std::mutex* mutex;
-@property (nonatomic, assign) trussc::internal::GrabberFrameQueue* frameQueue;
+@interface TrussCVideoGrabberDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate> {
+@public
+    std::weak_ptr<trussc::internal::GrabberSharedState> captureState;
+}
 @end
 
 @implementation TrussCVideoGrabberDelegate
@@ -63,7 +63,12 @@ struct VideoGrabberPlatformData {
 - (void)captureOutput:(AVCaptureOutput*)output
 didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
        fromConnection:(AVCaptureConnection*)connection {
-    if (!_platformData || !_targetPixels || !_pixelsDirty || !_mutex) return;
+    auto state = captureState.lock();
+    if (!state || state->stopped.load()) return;
+    std::lock_guard<std::mutex> stateLock(state->mtx);
+    if (!state->pixels) return;
+    auto* data = static_cast<trussc::VideoGrabberPlatformData*>(state->platformData.get());
+    if (!data) return;
 
     // Stamp arrival time on the capture thread, BEFORE any processing.
     // This stays accurate even when the app's main loop stalls.
@@ -81,28 +86,28 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     size_t height = CVPixelBufferGetHeight(imageBuffer);
 
     // サイズが変わった場合はバッファをリサイズ（最初のフレームまたはサイズ変更時）
-    if (width != _platformData->bufferWidth || height != _platformData->bufferHeight) {
+    if (width != data->bufferWidth || height != data->bufferHeight) {
         trussc::logVerbose("VideoGrabber") << "Frame size changed: " << width << " x " << height
-            << " (was " << _platformData->bufferWidth << " x "
-            << _platformData->bufferHeight << ")";
+            << " (was " << data->bufferWidth << " x "
+            << data->bufferHeight << ")";
 
         // バックバッファをリサイズ
-        if (_platformData->backBuffer) {
-            delete[] _platformData->backBuffer;
+        if (data->backBuffer) {
+            delete[] data->backBuffer;
         }
-        _platformData->backBuffer = new unsigned char[width * height * 4];
-        _platformData->bufferWidth = (int)width;
-        _platformData->bufferHeight = (int)height;
+        data->backBuffer = new unsigned char[width * height * 4];
+        data->bufferWidth = (int)width;
+        data->bufferHeight = (int)height;
 
         // メインスレッド側にリサイズを通知（フラグで）
-        _platformData->needsResize.store(true);
-        _platformData->newWidth = (int)width;
-        _platformData->newHeight = (int)height;
+        data->needsResize.store(true);
+        data->newWidth = (int)width;
+        data->newHeight = (int)height;
     }
 
-    if (baseAddress && _platformData->backBuffer) {
+    if (baseAddress && data->backBuffer) {
         unsigned char* src = (unsigned char*)baseAddress;
-        unsigned char* dst = _platformData->backBuffer;
+        unsigned char* dst = data->backBuffer;
 
         // BGRA -> RGBA 変換してコピー
         for (size_t y = 0; y < height; y++) {
@@ -120,19 +125,17 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
 
         // メインスレッド用バッファにコピー
         {
-            std::lock_guard<std::mutex> lock(*_mutex);
             // リサイズされてない場合のみコピー（リサイズはメインスレッドで処理）
-            if (!_platformData->needsResize.load()) {
-                std::memcpy(_targetPixels, _platformData->backBuffer, width * height * 4);
+            if (!data->needsResize.load() && state->width == (int)width &&
+                state->height == (int)height) {
+                std::memcpy(state->pixels.get(), data->backBuffer, width * height * 4);
             }
         }
 
-        _pixelsDirty->store(true);
+        state->dirty.store(true);
 
         // Timestamped frame queue (no-op unless enabled via setFrameQueueSize)
-        if (_frameQueue) {
-            _frameQueue->push(_platformData->backBuffer, (int)width, (int)height, arrivalUs);
-        }
+        state->frameQueue.push(data->backBuffer, (int)width, (int)height, arrivalUs);
     }
 
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);
@@ -217,7 +220,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
 bool VideoGrabber::setupPlatform() {
     @autoreleasepool {
         auto* data = new VideoGrabberPlatformData();
-        platformHandle_ = data;
+        state_->platformData = std::shared_ptr<VideoGrabberPlatformData>(data);
 
         // デバイスを取得
         NSArray<AVCaptureDevice*>* devices = nil;
@@ -264,8 +267,7 @@ bool VideoGrabber::setupPlatform() {
         if (deviceId_ >= (int)devices.count) {
             logError("VideoGrabber") << "Invalid device ID " << deviceId_ << " (only "
                 << (unsigned long)devices.count << " devices available)";
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
 
@@ -287,7 +289,7 @@ bool VideoGrabber::setupPlatform() {
             bool bestFpsOk = false;
 
             if (verbose_) {
-                logVerbose("VideoGrabber") << "Searching for " << requestedWidth_ << "x" << requestedHeight_
+                logVerbose("VideoGrabber") << "Searching for " << state_->requestedWidth << "x" << state_->requestedHeight
                                             << " in device formats...";
             }
 
@@ -319,7 +321,7 @@ bool VideoGrabber::setupPlatform() {
                 }
 
                 // 完全一致（解像度＋fps）なら即採用
-                if (tw == requestedWidth_ && th == requestedHeight_ && fpsOk) {
+                if (tw == state_->requestedWidth && th == state_->requestedHeight && fpsOk) {
                     bestW = tw;
                     bestH = th;
                     bestFormat = format;
@@ -332,8 +334,8 @@ bool VideoGrabber::setupPlatform() {
                 // ユークリッド距離で最も近いフォーマットを探す。
                 // 解像度が主、fps対応はタイブレーク（解像度を勝手に落として
                 // まで fps を優先しない）
-                float dx = (float)(tw - requestedWidth_);
-                float dy = (float)(th - requestedHeight_);
+                float dx = (float)(tw - state_->requestedWidth);
+                float dy = (float)(th - state_->requestedHeight);
                 float dist = sqrtf(dx * dx + dy * dy);
 
                 if (dist < smallestDist ||
@@ -348,24 +350,24 @@ bool VideoGrabber::setupPlatform() {
 
             // 最適なフォーマットを設定
             if (bestFormat != nil && bestW > 0 && bestH > 0) {
-                if (bestW != requestedWidth_ || bestH != requestedHeight_) {
+                if (bestW != state_->requestedWidth || bestH != state_->requestedHeight) {
                     if (verbose_) {
-                        logVerbose("VideoGrabber") << "Requested " << requestedWidth_ << "x" << requestedHeight_
+                        logVerbose("VideoGrabber") << "Requested " << state_->requestedWidth << "x" << state_->requestedHeight
                             << " not available. Using closest: " << bestW << "x" << bestH;
                     }
                 }
                 [data->device setActiveFormat:bestFormat];
-                width_ = bestW;
-                height_ = bestH;
+                state_->width = bestW;
+                state_->height = bestH;
             } else {
                 // フォールバック: 現在のフォーマットを使用
                 CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
                     data->device.activeFormat.formatDescription);
-                width_ = dimensions.width;
-                height_ = dimensions.height;
+                state_->width = dimensions.width;
+                state_->height = dimensions.height;
                 if (verbose_) {
                     logVerbose("VideoGrabber") << "No suitable format found. Using device default: "
-                                            << width_ << "x" << height_;
+                                            << state_->width << "x" << state_->height;
                 }
             }
 
@@ -421,8 +423,8 @@ bool VideoGrabber::setupPlatform() {
             // フォールバック: 現在のフォーマットを使用
             CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(
                 data->device.activeFormat.formatDescription);
-            width_ = dimensions.width;
-            height_ = dimensions.height;
+            state_->width = dimensions.width;
+            state_->height = dimensions.height;
         }
 
         // セッションを作成
@@ -433,15 +435,13 @@ bool VideoGrabber::setupPlatform() {
         data->input = [AVCaptureDeviceInput deviceInputWithDevice:data->device error:&error];
         if (error || !data->input) {
             logError("VideoGrabber") << "Failed to create input: " << tcLogText(error.localizedDescription);
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
 
         if (![data->session canAddInput:data->input]) {
             logError("VideoGrabber") << "Cannot add input to session";
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
         [data->session addInput:data->input];
@@ -450,47 +450,43 @@ bool VideoGrabber::setupPlatform() {
         data->output = [[AVCaptureVideoDataOutput alloc] init];
         data->output.videoSettings = @{
             (NSString*)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
-            (NSString*)kCVPixelBufferWidthKey: @(width_),
-            (NSString*)kCVPixelBufferHeightKey: @(height_)
+            (NSString*)kCVPixelBufferWidthKey: @(state_->width),
+            (NSString*)kCVPixelBufferHeightKey: @(state_->height)
         };
         data->output.alwaysDiscardsLateVideoFrames = YES;
 
         // キャプチャキューを作成
         data->captureQueue = dispatch_queue_create("trussc.videograbber", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(data->captureQueue, data, data, nullptr);
 
         // デリゲートを設定
         TrussCVideoGrabberDelegate* delegate = [[TrussCVideoGrabberDelegate alloc] init];
-        delegate.platformData = data;
-        delegate.targetPixels = pixels_;
-        delegate.pixelsDirty = &sharedState_->dirty;
-        delegate.mutex = &sharedState_->mtx;
-        delegate.frameQueue = frameQueue_.get();
+        delegate->captureState = state_;
         data->delegate = delegate;
 
         [data->output setSampleBufferDelegate:delegate queue:data->captureQueue];
 
         if (![data->session canAddOutput:data->output]) {
             logError("VideoGrabber") << "Cannot add output to session";
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
         [data->session addOutput:data->output];
 
         if (verbose_) {
-            logVerbose("VideoGrabber") << "Configured format: " << width_ << "x" << height_;
+            logVerbose("VideoGrabber") << "Configured format: " << state_->width << "x" << state_->height;
         }
 
         // バックバッファを確保
-        data->bufferWidth = width_;
-        data->bufferHeight = height_;
-        data->backBuffer = new unsigned char[width_ * height_ * 4];
-        std::memset(data->backBuffer, 0, width_ * height_ * 4);
+        data->bufferWidth = state_->width;
+        data->bufferHeight = state_->height;
+        data->backBuffer = new unsigned char[state_->width * state_->height * 4];
+        std::memset(data->backBuffer, 0, state_->width * state_->height * 4);
 
         // キャプチャ開始
         [data->session startRunning];
 
-        logVerbose("VideoGrabber") << "Started capturing at " << width_ << "x" << height_
+        logVerbose("VideoGrabber") << "Started capturing at " << state_->width << "x" << state_->height
             << " from " << tcLogText(data->device.localizedName);
 
         return true;
@@ -500,12 +496,9 @@ bool VideoGrabber::setupPlatform() {
 // ---------------------------------------------------------------------------
 // closePlatform - カメラを停止
 // ---------------------------------------------------------------------------
-void VideoGrabber::closePlatform() {
-    if (!platformHandle_) return;
-
+static void stopCapture(const std::shared_ptr<internal::GrabberSharedState>& state) {
     @autoreleasepool {
-        auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-
+        auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
         if (data->session) {
             [data->session stopRunning];
         }
@@ -522,11 +515,6 @@ void VideoGrabber::closePlatform() {
             [data->session removeOutput:data->output];
         }
 
-        if (data->backBuffer) {
-            delete[] data->backBuffer;
-            data->backBuffer = nullptr;
-        }
-
         // ARC が処理するので明示的な release は不要
         data->session = nil;
         data->device = nil;
@@ -535,9 +523,22 @@ void VideoGrabber::closePlatform() {
         data->delegate = nil;
         data->captureQueue = nil;
 
-        delete data;
-        platformHandle_ = nullptr;
     }
+}
+
+void VideoGrabber::closePlatform() {
+    if (!state_->platformData) return;
+    auto state = state_;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+    if (dispatch_get_specific(data) == data) {
+        // Session stop/drain must not wait for the callback executing it.
+        // This closure owns the old State until unregister and drain finish.
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            stopCapture(state);
+        });
+        return;
+    }
+    stopCapture(state);
 }
 
 // ---------------------------------------------------------------------------
@@ -545,15 +546,15 @@ void VideoGrabber::closePlatform() {
 // ---------------------------------------------------------------------------
 void VideoGrabber::updatePlatform() {
     // AVFoundation はバックグラウンドスレッドでフレームを取得するので
-    // ここでは特に何もしない（sharedState_->dirty のチェックは呼び出し元で行う）
+    // ここでは特に何もしない（state_->dirty のチェックは呼び出し元で行う）
 }
 
 // ---------------------------------------------------------------------------
 // checkResizeNeeded - リサイズが必要かチェック
 // ---------------------------------------------------------------------------
 bool VideoGrabber::checkResizeNeeded() {
-    if (!platformHandle_) return false;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return false;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     return data->needsResize.load();
 }
 
@@ -561,12 +562,13 @@ bool VideoGrabber::checkResizeNeeded() {
 // getNewSize - 新しいサイズを取得
 // ---------------------------------------------------------------------------
 void VideoGrabber::getNewSize(int& width, int& height) {
-    if (!platformHandle_) {
+    if (!state_->platformData) {
         width = 0;
         height = 0;
         return;
     }
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
+    std::lock_guard<std::mutex> lock(state_->mtx);
     width = data->newWidth;
     height = data->newHeight;
 }
@@ -575,25 +577,18 @@ void VideoGrabber::getNewSize(int& width, int& height) {
 // clearResizeFlag - リサイズフラグをクリア
 // ---------------------------------------------------------------------------
 void VideoGrabber::clearResizeFlag() {
-    if (!platformHandle_) return;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    data->needsResize.store(false);
+    if (!state_->platformData) return;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
+    std::lock_guard<std::mutex> lock(state_->mtx);
+    if (state_->width == data->newWidth && state_->height == data->newHeight)
+        data->needsResize.store(false);
 }
 
 // ---------------------------------------------------------------------------
 // updateDelegatePixels - ピクセルバッファ確保後にデリゲートを更新
 // ---------------------------------------------------------------------------
 void VideoGrabber::updateDelegatePixels() {
-    if (!platformHandle_) return;
-
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    if (data->delegate) {
-        TrussCVideoGrabberDelegate* delegate = (TrussCVideoGrabberDelegate*)data->delegate;
-        delegate.targetPixels = pixels_;
-        if (verbose_) {
-            logVerbose("VideoGrabber") << "Updated delegate pixels pointer to " << (void*)pixels_;
-        }
-    }
+    // The delegate reads the State buffer while holding the State lock.
 }
 
 // ---------------------------------------------------------------------------

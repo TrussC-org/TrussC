@@ -1,216 +1,140 @@
 // =============================================================================
-// tcVideoGrabber Web implementation
-// Webcam input using getUserMedia + Canvas API
+// Web webcam capture: each run has its own never-reused JS identity.
 // =============================================================================
-
 #ifdef __EMSCRIPTEN__
 
 #include <emscripten.h>
 #include "TrussC.h"
-#include <cstring>
-#include <cstdio>
+
+EM_JS(void, tc_video_setup, (unsigned id, int width, int height), {
+    Module.tcVideoGrabbers = Module.tcVideoGrabbers || new Map();
+    const state = {stopped: false, ready: false, needsResize: false,
+                   width: width, height: height, actualWidth: 0, actualHeight: 0,
+                   buffer: 0, stream: null, video: null, canvas: null, ctx: null};
+    Module.tcVideoGrabbers.set(id, state);
+    navigator.mediaDevices.getUserMedia({video: {
+        width: {ideal: width}, height: {ideal: height}
+    }}).then(function(stream) {
+        if (state.stopped) {
+            stream.getTracks().forEach(function(track) { track.stop(); });
+            return;
+        }
+        state.stream = stream;
+        const video = document.createElement('video');
+        state.video = video;
+        video.setAttribute('playsinline', '');
+        video.muted = true;
+        video.style.display = 'none';
+        document.body.appendChild(video);
+        const canvas = document.createElement('canvas');
+        state.canvas = canvas;
+        state.ctx = canvas.getContext('2d', {willReadFrequently: true});
+        video.onloadedmetadata = function() {
+            if (state.stopped) return;
+            state.actualWidth = video.videoWidth;
+            state.actualHeight = video.videoHeight;
+            canvas.width = state.actualWidth;
+            canvas.height = state.actualHeight;
+            state.needsResize = state.actualWidth !== state.width ||
+                                state.actualHeight !== state.height;
+            state.ready = true;
+            video.play();
+        };
+        video.srcObject = stream;
+    }).catch(function(error) {
+        if (!state.stopped) console.error('[VideoGrabber] Web: failed to start -', error.message);
+    });
+});
+
+EM_JS(void, tc_video_close, (unsigned id), {
+    const state = Module.tcVideoGrabbers && Module.tcVideoGrabbers.get(id);
+    if (!state) return;
+    state.stopped = true;
+    state.ready = false;
+    state.buffer = 0;
+    if (state.stream) state.stream.getTracks().forEach(function(track) { track.stop(); });
+    if (state.video) {
+        state.video.onloadedmetadata = null;
+        state.video.pause();
+        state.video.srcObject = null;
+        state.video.remove();
+    }
+    state.stream = state.video = state.canvas = state.ctx = null;
+    Module.tcVideoGrabbers.delete(id);
+    // Outstanding promises retain this stopped state until they resolve.
+});
+
+EM_JS(void, tc_video_buffer, (unsigned id, unsigned char* buffer, int width, int height), {
+    const state = Module.tcVideoGrabbers && Module.tcVideoGrabbers.get(id);
+    if (!state || state.stopped) return;
+    state.buffer = buffer;
+    state.width = width;
+    state.height = height;
+});
+
+EM_JS(int, tc_video_update, (unsigned id), {
+    const state = Module.tcVideoGrabbers && Module.tcVideoGrabbers.get(id);
+    if (!state || state.stopped || !state.ready || !state.buffer ||
+        state.actualWidth !== state.width || state.actualHeight !== state.height) return 0;
+    state.ctx.drawImage(state.video, 0, 0, state.width, state.height);
+    const data = state.ctx.getImageData(0, 0, state.width, state.height).data;
+    HEAPU8.set(data, state.buffer);
+    return 1;
+});
+
+EM_JS(int, tc_video_size, (unsigned id, int field), {
+    const state = Module.tcVideoGrabbers && Module.tcVideoGrabbers.get(id);
+    if (!state || state.stopped) return 0;
+    if (field === 0) return state.needsResize ? 1 : 0;
+    if (field === 1) return state.actualWidth;
+    return state.actualHeight;
+});
+
+EM_JS(void, tc_video_resized, (unsigned id), {
+    const state = Module.tcVideoGrabbers && Module.tcVideoGrabbers.get(id);
+    if (state) state.needsResize = false;
+});
 
 namespace trussc {
 
-// ---------------------------------------------------------------------------
-// VideoGrabber Web implementation
-// ---------------------------------------------------------------------------
-
 std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
-    // Web版ではデバイスリスト取得は省略（非同期のため）
-    // デフォルトカメラを使用
-    std::vector<VideoDeviceInfo> devices;
-    VideoDeviceInfo info;
-    info.deviceId = 0;
-    info.deviceName = "Default Camera";
-    info.uniqueId = "default";
-    devices.push_back(info);
-    return devices;
+    return {{0, "Default Camera", "default"}};
 }
 
 bool VideoGrabber::setupPlatform() {
-    // JavaScript側でカメラ初期化（非同期）
-    char script[4096];
-    snprintf(script, sizeof(script), R"JS(
-        (function() {
-            var width = %d;
-            var height = %d;
-
-            // 既存のカメラがあれば停止
-            if (window._trussc_video_stream) {
-                window._trussc_video_stream.getTracks().forEach(function(t) { t.stop(); });
-            }
-
-            // 状態初期化
-            window._trussc_video_running = false;
-            window._trussc_video_ready = false;
-            window._trussc_video_width = width;
-            window._trussc_video_height = height;
-            window._trussc_video_actualWidth = 0;
-            window._trussc_video_actualHeight = 0;
-            window._trussc_video_needsResize = false;
-
-            // video要素を作成
-            var video = document.createElement('video');
-            video.setAttribute('playsinline', '');
-            video.setAttribute('autoplay', '');
-            video.muted = true;
-            video.style.display = 'none';
-            document.body.appendChild(video);
-            window._trussc_video_element = video;
-
-            // canvas要素を作成（ピクセル取得用）
-            var canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            window._trussc_video_canvas = canvas;
-            window._trussc_video_ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-            // getUserMediaでカメラアクセス
-            navigator.mediaDevices.getUserMedia({
-                video: {
-                    width: { ideal: width },
-                    height: { ideal: height }
-                }
-            }).then(function(stream) {
-                window._trussc_video_stream = stream;
-                video.srcObject = stream;
-
-                video.onloadedmetadata = function() {
-                    video.play();
-
-                    // 実際の解像度を取得
-                    var actualW = video.videoWidth;
-                    var actualH = video.videoHeight;
-                    window._trussc_video_actualWidth = actualW;
-                    window._trussc_video_actualHeight = actualH;
-
-                    // サイズが違う場合はリサイズフラグを立てる
-                    if (actualW != width || actualH != height) {
-                        canvas.width = actualW;
-                        canvas.height = actualH;
-                        window._trussc_video_needsResize = true;
-                        console.log('[VideoGrabber] Web: actual size ' + actualW + 'x' + actualH + ' (requested ' + width + 'x' + height + ')');
-                    }
-
-                    window._trussc_video_ready = true;
-                    window._trussc_video_running = true;
-                    console.log('[VideoGrabber] Web: started (' + actualW + 'x' + actualH + ')');
-                };
-
-            }).catch(function(err) {
-                console.error('[VideoGrabber] Web: failed to start -', err.message);
-                window._trussc_video_running = false;
-            });
-        })();
-    )JS", requestedWidth_, requestedHeight_);
-
-    emscripten_run_script(script);
-
-    // 初期サイズを設定（後でリサイズされる可能性あり）
-    width_ = requestedWidth_;
-    height_ = requestedHeight_;
+    static uint64_t nextId = 1;
+    if (nextId > UINT32_MAX) {
+        logError("VideoGrabber") << "Web capture identities exhausted";
+        return false;
+    }
+    state_->webId = static_cast<uint32_t>(nextId++);
+    state_->width = state_->requestedWidth;
+    state_->height = state_->requestedHeight;
     deviceName_ = "Web Camera";
-
-    logNotice("VideoGrabber") << "setup requested (" << width_ << "x" << height_ << ") [Web]";
+    tc_video_setup(state_->webId, state_->width, state_->height);
     return true;
 }
 
 void VideoGrabber::closePlatform() {
-    emscripten_run_script(R"JS(
-        window._trussc_video_running = false;
-        window._trussc_video_ready = false;
-
-        if (window._trussc_video_stream) {
-            window._trussc_video_stream.getTracks().forEach(function(t) { t.stop(); });
-            window._trussc_video_stream = null;
-        }
-        if (window._trussc_video_element) {
-            window._trussc_video_element.remove();
-            window._trussc_video_element = null;
-        }
-        window._trussc_video_canvas = null;
-        window._trussc_video_ctx = null;
-
-        console.log('[VideoGrabber] Web: stopped');
-    )JS");
-
-    logNotice("VideoGrabber") << "stopped [Web]";
+    if (state_->webId) tc_video_close(state_->webId);
 }
 
 void VideoGrabber::updatePlatform() {
-    if (!pixels_) return;
-
-    // JavaScriptからピクセルデータを取得
-    char script[1024];
-    snprintf(script, sizeof(script), R"JS(
-        (function() {
-            if (!window._trussc_video_running || !window._trussc_video_ready) {
-                return 0;
-            }
-
-            var video = window._trussc_video_element;
-            var canvas = window._trussc_video_canvas;
-            var ctx = window._trussc_video_ctx;
-
-            if (!video || !canvas || !ctx) return 0;
-
-            var w = canvas.width;
-            var h = canvas.height;
-
-            // videoをcanvasに描画
-            ctx.drawImage(video, 0, 0, w, h);
-
-            // ピクセルデータを取得
-            var imageData = ctx.getImageData(0, 0, w, h);
-            var data = imageData.data;
-
-            // WASMメモリにコピー（RGBA）
-            var outBuffer = %u;
-            for (var i = 0; i < data.length; i++) {
-                HEAPU8[outBuffer + i] = data[i];
-            }
-
-            return 1;
-        })();
-    )JS", (unsigned int)(uintptr_t)pixels_);
-
-    int result = emscripten_run_script_int(script);
-    if (result > 0) {
-        sharedState_->dirty.store(true);
-    }
+    if (tc_video_update(state_->webId)) state_->dirty.store(true);
 }
 
 void VideoGrabber::updateDelegatePixels() {
-    // Web版では特に何もしない（pixels_は直接使用）
+    tc_video_buffer(state_->webId, state_->pixels.get(), state_->width, state_->height);
 }
 
-bool VideoGrabber::checkResizeNeeded() {
-    int result = emscripten_run_script_int(R"JS(
-        (window._trussc_video_needsResize ? 1 : 0)
-    )JS");
-    return result != 0;
-}
-
+bool VideoGrabber::checkResizeNeeded() { return tc_video_size(state_->webId, 0) != 0; }
 void VideoGrabber::getNewSize(int& width, int& height) {
-    width = emscripten_run_script_int("(window._trussc_video_actualWidth || 0)");
-    height = emscripten_run_script_int("(window._trussc_video_actualHeight || 0)");
+    width = tc_video_size(state_->webId, 1);
+    height = tc_video_size(state_->webId, 2);
 }
-
-void VideoGrabber::clearResizeFlag() {
-    emscripten_run_script("window._trussc_video_needsResize = false;");
-}
-
-bool VideoGrabber::checkCameraPermission() {
-    // Web版では非同期のため、常にtrueを返す
-    // 実際の許可はgetUserMediaで処理
-    return true;
-}
-
-void VideoGrabber::requestCameraPermission() {
-    // Web版ではgetUserMediaで自動的に許可ダイアログが出る
-}
+void VideoGrabber::clearResizeFlag() { tc_video_resized(state_->webId); }
+bool VideoGrabber::checkCameraPermission() { return true; }
+void VideoGrabber::requestCameraPermission() {}
 
 } // namespace trussc
-
 #endif // __EMSCRIPTEN__

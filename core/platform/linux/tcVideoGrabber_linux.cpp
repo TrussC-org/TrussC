@@ -26,6 +26,8 @@
 
 namespace trussc {
 
+static int xioctl(int fd, unsigned long request, void* arg);
+
 // =============================================================================
 // Platform data structure
 // =============================================================================
@@ -45,26 +47,27 @@ struct VideoGrabberPlatformData {
     int bufferWidth = 0;
     int bufferHeight = 0;
 
-    // Capture thread
-    std::thread captureThread;
-    std::atomic<bool> running{false};
-    std::atomic<bool> bufferReady{false};
-
     // Resize notification
     std::atomic<bool> needsResize{false};
     int newWidth = 0;
     int newHeight = 0;
 
+    ~VideoGrabberPlatformData() {
+        if (fd != -1) {
+            auto type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            xioctl(fd, VIDIOC_STREAMOFF, &type);
+        }
+        for (unsigned int i = 0; buffers && i < bufferCount; ++i) {
+            if (buffers[i].start && buffers[i].start != MAP_FAILED)
+                munmap(buffers[i].start, buffers[i].length);
+        }
+        delete[] buffers;
+        delete[] backBuffer;
+        if (fd != -1) ::close(fd);
+    }
+
     // Format info
     uint32_t pixelFormat = 0;
-
-    // Pointer to VideoGrabber members
-    unsigned char* targetPixels = nullptr;
-    std::atomic<bool>* pixelsDirty = nullptr;
-    std::mutex* mutex = nullptr;
-
-    // Timestamped frame queue (enabled via setFrameQueueSize)
-    internal::GrabberFrameQueue* frameQueue = nullptr;
 };
 
 // =============================================================================
@@ -137,8 +140,9 @@ static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
 // =============================================================================
 // Capture thread function
 // =============================================================================
-static void captureThreadFunc(VideoGrabberPlatformData* data) {
-    while (data->running) {
+static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> state) {
+    auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+    while (!state->stopped.load()) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(data->fd, &fds);
@@ -185,22 +189,18 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
                                   data->bufferWidth, data->bufferHeight);
             }
 
-            // Copy to target buffer
-            if (data->targetPixels && data->mutex) {
-                std::lock_guard<std::mutex> lock(*data->mutex);
-                memcpy(data->targetPixels, data->backBuffer,
-                       data->bufferWidth * data->bufferHeight * 4);
+            // Publish under the State lock, including pointer/size checks.
+            {
+                std::lock_guard<std::mutex> lock(state->mtx);
+                if (state->pixels && state->width == data->bufferWidth &&
+                    state->height == data->bufferHeight) {
+                    std::memcpy(state->pixels.get(), data->backBuffer,
+                                (size_t)data->bufferWidth * data->bufferHeight * 4);
+                    state->dirty.store(true);
+                }
             }
-
-            if (data->pixelsDirty) {
-                data->pixelsDirty->store(true);
-            }
-
-            // Timestamped frame queue (no-op unless enabled)
-            if (data->frameQueue) {
-                data->frameQueue->push(data->backBuffer, data->bufferWidth,
-                                       data->bufferHeight, arrivalUs);
-            }
+            state->frameQueue.push(data->backBuffer, data->bufferWidth,
+                                   data->bufferHeight, arrivalUs);
         }
 
         // Re-queue buffer
@@ -216,7 +216,7 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
 
 bool VideoGrabber::setupPlatform() {
     auto data = new VideoGrabberPlatformData();
-    platformHandle_ = data;
+    state_->platformData = std::shared_ptr<VideoGrabberPlatformData>(data);
 
     // Open device
     std::string devicePath = "/dev/video" + std::to_string(deviceId_);
@@ -224,8 +224,7 @@ bool VideoGrabber::setupPlatform() {
 
     if (data->fd == -1) {
         logError("VideoGrabber") << "Failed to open " << devicePath;
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -233,17 +232,13 @@ bool VideoGrabber::setupPlatform() {
     struct v4l2_capability cap;
     if (xioctl(data->fd, VIDIOC_QUERYCAP, &cap) == -1) {
         logError("VideoGrabber") << "Failed to query capabilities";
-        ::close(data->fd);
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
     if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
         logError("VideoGrabber") << "Device does not support video capture";
-        ::close(data->fd);
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -253,8 +248,8 @@ bool VideoGrabber::setupPlatform() {
     // Set format
     struct v4l2_format fmt = {};
     fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = requestedWidth_;
-    fmt.fmt.pix.height = requestedHeight_;
+    fmt.fmt.pix.width = state_->requestedWidth;
+    fmt.fmt.pix.height = state_->requestedHeight;
     fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;  // Try MJPEG first
     fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
@@ -263,20 +258,18 @@ bool VideoGrabber::setupPlatform() {
         fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
         if (xioctl(data->fd, VIDIOC_S_FMT, &fmt) == -1) {
             logError("VideoGrabber") << "Failed to set format";
-            ::close(data->fd);
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
     }
 
-    width_ = fmt.fmt.pix.width;
-    height_ = fmt.fmt.pix.height;
-    data->bufferWidth = width_;
-    data->bufferHeight = height_;
+    state_->width = fmt.fmt.pix.width;
+    state_->height = fmt.fmt.pix.height;
+    data->bufferWidth = state_->width;
+    data->bufferHeight = state_->height;
     data->pixelFormat = fmt.fmt.pix.pixelformat;
 
-    logNotice("VideoGrabber") << "Format: " << width_ << "x" << height_
+    logNotice("VideoGrabber") << "Format: " << state_->width << "x" << state_->height
                                 << " (" << (char*)&data->pixelFormat << ")";
 
     // Set frame rate if specified
@@ -296,9 +289,7 @@ bool VideoGrabber::setupPlatform() {
 
     if (xioctl(data->fd, VIDIOC_REQBUFS, &req) == -1) {
         logError("VideoGrabber") << "Failed to request buffers";
-        ::close(data->fd);
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -314,14 +305,7 @@ bool VideoGrabber::setupPlatform() {
 
         if (xioctl(data->fd, VIDIOC_QUERYBUF, &buf) == -1) {
             logError("VideoGrabber") << "Failed to query buffer";
-            // Cleanup
-            for (unsigned int j = 0; j < i; j++) {
-                munmap(data->buffers[j].start, data->buffers[j].length);
-            }
-            delete[] data->buffers;
-            ::close(data->fd);
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
 
@@ -331,19 +315,13 @@ bool VideoGrabber::setupPlatform() {
 
         if (data->buffers[i].start == MAP_FAILED) {
             logError("VideoGrabber") << "Failed to mmap buffer";
-            for (unsigned int j = 0; j < i; j++) {
-                munmap(data->buffers[j].start, data->buffers[j].length);
-            }
-            delete[] data->buffers;
-            ::close(data->fd);
-            delete data;
-            platformHandle_ = nullptr;
+            state_->platformData.reset();
             return false;
         }
     }
 
     // Allocate back buffer
-    data->backBuffer = new unsigned char[width_ * height_ * 4];
+    data->backBuffer = new unsigned char[state_->width * state_->height * 4];
 
     // Queue buffers
     for (unsigned int i = 0; i < data->bufferCount; i++) {
@@ -361,65 +339,22 @@ bool VideoGrabber::setupPlatform() {
     enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (xioctl(data->fd, VIDIOC_STREAMON, &type) == -1) {
         logError("VideoGrabber") << "Failed to start streaming";
-        // Cleanup
-        for (unsigned int i = 0; i < data->bufferCount; i++) {
-            munmap(data->buffers[i].start, data->buffers[i].length);
-        }
-        delete[] data->buffers;
-        delete[] data->backBuffer;
-        ::close(data->fd);
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
     // Start capture thread
-    data->running = true;
-    data->captureThread = std::thread(captureThreadFunc, data);
+    state_->keptThreads.start(state_->captureThread, [state = state_] {
+        captureThreadFunc(state);
+    });
 
     logNotice("VideoGrabber") << "Started capturing";
     return true;
 }
 
 void VideoGrabber::closePlatform() {
-    if (!platformHandle_) return;
-
-    auto data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-
-    // Stop capture thread
-    data->running = false;
-    if (data->captureThread.joinable()) {
-        data->captureThread.join();
-    }
-
-    // Stop streaming
-    if (data->fd != -1) {
-        enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        xioctl(data->fd, VIDIOC_STREAMOFF, &type);
-    }
-
-    // Unmap buffers
-    if (data->buffers) {
-        for (unsigned int i = 0; i < data->bufferCount; i++) {
-            if (data->buffers[i].start && data->buffers[i].start != MAP_FAILED) {
-                munmap(data->buffers[i].start, data->buffers[i].length);
-            }
-        }
-        delete[] data->buffers;
-    }
-
-    // Free back buffer
-    if (data->backBuffer) {
-        delete[] data->backBuffer;
-    }
-
-    // Close device
-    if (data->fd != -1) {
-        ::close(data->fd);
-    }
-
-    delete data;
-    platformHandle_ = nullptr;
+    // close() joins without holding the pixel lock. The State then releases
+    // the stream, mappings and fd; a self-stop leaves them with the worker.
 }
 
 void VideoGrabber::updatePlatform() {
@@ -427,13 +362,7 @@ void VideoGrabber::updatePlatform() {
 }
 
 void VideoGrabber::updateDelegatePixels() {
-    if (!platformHandle_) return;
-
-    auto data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    data->targetPixels = pixels_;
-    data->pixelsDirty = &sharedState_->dirty;
-    data->mutex = &sharedState_->mtx;
-    data->frameQueue = frameQueue_.get();
+    // Callbacks read pixels directly from the State under its lock.
 }
 
 std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
@@ -462,21 +391,21 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
 }
 
 bool VideoGrabber::checkResizeNeeded() {
-    if (!platformHandle_) return false;
-    auto data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return false;
+    auto data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     return data->needsResize.load();
 }
 
 void VideoGrabber::getNewSize(int& width, int& height) {
-    if (!platformHandle_) return;
-    auto data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return;
+    auto data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     width = data->newWidth;
     height = data->newHeight;
 }
 
 void VideoGrabber::clearResizeFlag() {
-    if (!platformHandle_) return;
-    auto data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return;
+    auto data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     data->needsResize = false;
 }
 
