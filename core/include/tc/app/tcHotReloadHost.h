@@ -18,6 +18,9 @@
 #ifndef TC_HOT_RELOAD_CONFIG
 #define TC_HOT_RELOAD_CONFIG ""
 #endif
+#ifndef TC_HOT_RELOAD_MULTI_CONFIG
+#define TC_HOT_RELOAD_MULTI_CONFIG 0
+#endif
 
 // Note: this header is included BY TrussC.h (after all core types are defined).
 #ifdef _WIN32
@@ -423,20 +426,11 @@ struct Host {
 #else
         const string guestName = "libguest.so";
 #endif
-        const char* configs[] = {"Debug", "Release", "RelWithDebInfo", "MinSizeRel"};
-        // Keep the existing layout detection: a root-level guest takes
-        // precedence; otherwise any known config subdirectory identifies a
-        // multi-config tree, even before the initial guest build.
-        multiConfig = false;
-        if (!fs::exists(buildDir + "/" + guestName)) {
-            for (const char* c : configs) {
-                if (fs::exists(buildDir + "/" + c)) { multiConfig = true; break; }
-            }
-        }
+        // The generator type is a configure-time fact (no directory has to
+        // exist before the first guest build).
+        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
         guestLibPath = buildDir + "/";
-        if (multiConfig && !string(TC_HOT_RELOAD_CONFIG).empty()) {
-            guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
-        }
+        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
         guestLibPath += guestName;
 
         // Initial build of the Guest
@@ -474,9 +468,7 @@ struct Host {
         // is involved, so $(...), ``, ; etc. in buildDir cannot run.
         vector<string> command = {cmake, "--build", buildDir,
                                   "--target", "guest", "--parallel"};
-        if (multiConfig && !string(TC_HOT_RELOAD_CONFIG).empty()) {
-            command.insert(command.end(), {"--config", TC_HOT_RELOAD_CONFIG});
-        }
+        if (multiConfig) command.insert(command.end(), {"--config", TC_HOT_RELOAD_CONFIG});
         int rc = runBuildCommand(command);
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";

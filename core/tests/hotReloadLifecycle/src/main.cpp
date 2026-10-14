@@ -281,14 +281,13 @@ static std::string findGuestLibrary() {
 #endif
     const char* buildDirs[] = {"build-macos", "build-windows", "build-linux",
                                "build", "xcode", "vs"};
-    const char* configs[] = {"", TC_HOT_RELOAD_CONFIG};
+    // Same rule as the host: multi-config generators use <buildDir>/<config>/.
+    const bool multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && *TC_HOT_RELOAD_CONFIG;
     for (const char* b : buildDirs) {
-        for (const char* c : configs) {
-            fs::path p = proj / b;
-            if (*c) p /= c;
-            p /= guestName;
-            if (fs::exists(p)) return p.string();
-        }
+        fs::path p = proj / b;
+        if (multiConfig) p /= TC_HOT_RELOAD_CONFIG;
+        p /= guestName;
+        if (fs::exists(p)) return p.string();
     }
     return "";
 }

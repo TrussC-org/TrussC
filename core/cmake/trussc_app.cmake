@@ -365,8 +365,18 @@ endif()
 
         # Host: executable with main.cpp + TrussC core
         add_executable(${PROJECT_NAME} ${_TC_HOST_SOURCES})
+        # The guest is built and loaded in the host's configuration (#794).
+        # Multi-config generators (Visual Studio, Xcode, Ninja Multi-Config)
+        # put it in <buildDir>/<config>/; single-config ones in <buildDir>/.
+        get_property(_tc_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+        if(_tc_multi_config)
+            set(_tc_multi_config 1)
+        else()
+            set(_tc_multi_config 0)
+        endif()
         target_compile_definitions(${PROJECT_NAME} PRIVATE
-            TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_CONFIG="$<CONFIG>")
+            TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_CONFIG="$<CONFIG>"
+            TC_HOT_RELOAD_MULTI_CONFIG=${_tc_multi_config})
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
         # Force-load ALL symbols from libTrussC.a into the Host (not just the ones
         # main.cpp uses) AND export them in the dynamic symbol table. This makes
