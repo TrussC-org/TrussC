@@ -165,7 +165,9 @@ static void testExporterSaves() {
         errors = 0;
         result = exporter.save(obj);
         check("export: blocked " + pathToUtf8(blocked.extension()) + " fails with one Error",
-              result.error == SaveError::WriteFailed && !result.message.empty() && errors == 1);
+              // A directory at <file>.tmp is EISDIR on POSIX (WriteFailed) but
+              // EACCES on Windows (AccessDenied): check the failure, not the code.
+              !result.ok() && !result.message.empty() && errors == 1);
         check("export: failure preserves previous OBJ, MTL and texture",
               readFile(obj) == previousObj && readFile(mtl) == previousMtl &&
               readFile(png) == previousPng);
