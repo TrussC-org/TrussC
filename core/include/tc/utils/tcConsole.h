@@ -108,8 +108,9 @@ inline void readLines(std::istream& input) {
         if (!isRunning().load()) continue;
         // Raw reads bypass text-mode CRLF translation on every platform.
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.empty()) continue;
-        getChannel().send(parseLine(line));
+        auto args = parseLine(line);
+        if (args.args.empty()) continue;
+        getChannel().send(std::move(args));
     }
 }
 
