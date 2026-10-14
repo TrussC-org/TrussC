@@ -1,8 +1,10 @@
 # Per-PR / per-push CI: the FAST lane. Every platform in parallel, each job
 # kept to what catches breakage cheaply: AllFeaturesExample on every platform
-# (desktop, Android, web, iOS), plus the core library + trusscli and the
-# behavioral tests (core/tests incl. the hot reload host/guest split, addon
-# tests) on desktop. AllFeaturesExample
+# (desktop, Android, web, iOS), plus the core library + trusscli and the core
+# behavioral tests (core/tests incl. the hot reload host/guest split) on
+# desktop, split over three jobs per OS (#806). The addon test harnesses run
+# in daily.yml. Runs only for main: changes land on next/<topic> branches
+# without CI and reach main as one batch PR per topic. AllFeaturesExample
 # references every documented public core API and the repo-contained bundled
 # addons without running them (its src/coverage.h), so each platform compiles
 # every call and links it against its own implementation. A textual check
@@ -112,12 +114,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     timeout-minutes: 60
+    name: build (${{ matrix.preset }}, shard ${{ matrix.shard }}/3)
     strategy:
       fail-fast: false
       matrix:
+        preset: [macos, windows, linux]
+        # The core tests are split over three jobs per OS (#806):
+        # build_all.py --shard N/3. Shard 1 also builds AllFeaturesExample and
+        # runs the trusscli/tooling checks and the own-binary and unit tests;
+        # shards 2 and 3 build and run half of the combined tests each.
+        shard: [1, 2, 3]
         include:
-          - os: macos-latest
-            preset: macos
+          - preset: macos
+            os: macos-latest
             launcher: ccache
           # Unpinned back to windows-latest (a VS2026 runner). The previous
           # windows-2022 pin blamed projectGenerator's VS-project generation,
@@ -133,12 +142,12 @@ jobs:
           # instead of the Visual Studio generator: the compiler-launcher hook
           # sccache relies on is ignored by the VS generator, and Ninja + cl.exe
           # (from vcvars) is version-agnostic anyway. Local dev is unchanged.
-          - os: windows-latest
-            preset: windows
+          - preset: windows
+            os: windows-latest
             launcher: sccache
             cmake_gen: Ninja
-          - os: ubuntu-latest
-            preset: linux
+          - preset: linux
+            os: ubuntu-latest
             launcher: ccache
 
     runs-on: ${{ matrix.os }}
@@ -197,8 +206,15 @@ jobs:
           # 2G per OS (#762): at 800M the Linux cache overflowed mid-job (1.0 GB,
           # hundreds of cleanups) and the hit rate fell. Three OS caches at 2G
           # stay well under the 10 GB per-repo limit. Same cap for sccache.
+          # One compiler cache per OS, saved by shard 1 only (#806): its key
+          # gets a timestamp, so every shard would add its own 0.5-1.7 GB entry
+          # and pass the 10 GB repo limit. Shards 2-3 restore it and hit on the
+          # library and trusscli; their test sources miss whenever a core header
+          # changed, which a batch PR nearly always does anyway. (The
+          # actions/cache steps above and below need no shard term: their keys
+          # are the same in every shard, so a key is stored once.)
           max-size: 2G
-          save: ${{ github.event_name != 'merge_group' }}
+          save: ${{ github.event_name != 'merge_group' && matrix.shard == 1 }}
 
       - name: Enable compiler launcher
         shell: bash
@@ -299,13 +315,13 @@ jobs:
       # commit: clean refuses a folder that is not a TrussC project (#459), and
       # generated files are written atomically with LF endings (#373).
       - name: trusscli regression tests
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         shell: bash
         run: python3 -m unittest discover -s tools/tests -p "test_trusscli_*.py" -v
 
       # Configure and build must agree on localized /showIncludes bytes (#417).
       - name: Windows UTF-8 console header dependencies
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.shard == 1
         shell: cmd
         run: |
           chcp 65001 >NUL
@@ -314,7 +330,7 @@ jobs:
       # Weekly-only tests go stale unnoticed; run the offline upstream-check
       # tests on every PR too (ls_remote is patched, no network).
       - name: upstream-check regression tests
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.shard == 1
         shell: bash
         run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
 
@@ -322,27 +338,23 @@ jobs:
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every
       # other example is built daily (daily.yml).
       - name: Build AllFeaturesExample
+        if: matrix.shard == 1
         shell: bash
         run: |
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
 
-      # Behavioral test harnesses bundled with monorepo addons (addons/*/tests/):
-      # built AND run (non-zero exit fails the job). The tests are small console
-      # projects. No-op when none exist. Harnesses with a `daily-only` marker
-      # (heavy dependencies, e.g. tcxTls builds mbedTLS) run in daily.yml only.
-      - name: Build & run addon tests
-        shell: bash
-        run: |
-          chmod +x examples/build_all.py
-          ./examples/build_all.py --addon-tests-only --verbose
+      # The addon test harnesses (addons/*/tests/) run in daily.yml only
+      # (--addon-tests-only --include-daily, #806): they were about 15 of the
+      # job's 36-40 minutes.
 
       # Behavioral regression tests for the core (core/tests/*/): built AND run
       # on every build (small headless console projects, non-zero exit fails).
       # hotReloadLifecycle also covers the host/guest split build with an addon.
+      # This job runs its shard only (see the matrix); ci-ok needs every shard.
       - name: Build & run core tests
         shell: bash
-        run: ./examples/build_all.py --core-tests-only --verbose
+        run: ./examples/build_all.py --core-tests-only --shard ${{ matrix.shard }}/3 --verbose
 
       - name: Compiler cache stats
         if: always()

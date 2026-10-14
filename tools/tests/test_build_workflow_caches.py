@@ -16,21 +16,37 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
+MATRIX_TERM = re.compile(r"matrix\.\w+\s*(?:==|!=)\s*(?:\d+|'[^']*')")
+
+
 def on_merge_group(expression):
+    """Whether the expression can be true on merge_group. A matrix comparison
+    (e.g. `matrix.shard == 1`) can go either way in some job, so every
+    combination of their values is tried; any true one counts."""
     expression = expression.strip().removeprefix('${{').removesuffix('}}').strip()
+    terms = sorted(set(MATRIX_TERM.findall(expression)))
+    for i, term in enumerate(terms):
+        expression = expression.replace(term, f'_m{i}')
     expression = expression.replace('github.event_name', "'merge_group'")
     expression = re.sub(r'\btrue\b', 'True', expression)
     expression = re.sub(r'\bfalse\b', 'False', expression)
     expression = re.sub(r'!(?!=)', ' not ', expression).replace('&&', ' and ').replace('||', ' or ')
     tree = ast.parse(expression.strip(), mode='eval')
     allowed = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not,
-               ast.Compare, ast.Eq, ast.NotEq, ast.Constant)
-    if any(not isinstance(node, allowed) for node in ast.walk(tree)):
+               ast.Compare, ast.Eq, ast.NotEq, ast.Constant, ast.Name, ast.Load)
+    names = {f'_m{i}' for i in range(len(terms))}
+    if any(not isinstance(node, allowed) or (isinstance(node, ast.Name) and node.id not in names)
+           for node in ast.walk(tree)):
         raise ValueError('unsupported cache condition')
-    result = eval(compile(tree, '<cache condition>', 'eval'), {'__builtins__': {}})
-    if not isinstance(result, bool):
-        raise ValueError('cache condition must evaluate to a boolean')
-    return result
+    code = compile(tree, '<cache condition>', 'eval')
+    for bits in range(1 << len(terms)):
+        values = {f'_m{i}': bool(bits >> i & 1) for i in range(len(terms))}
+        result = eval(code, {'__builtins__': {}}, values)
+        if not isinstance(result, bool):
+            raise ValueError('cache condition must evaluate to a boolean')
+        if result:
+            return True
+    return False
 
 
 def can_save_on_merge_group(step):
@@ -87,6 +103,11 @@ class BuildWorkflowCacheTests(unittest.TestCase):
             ({'if': "github.event_name == 'merge_group'"}, True),
             ({'if': "github.event_name != 'merge_group' || true"}, True),
             ({'uses': CCACHE, 'with': {'save': "${{ github.event_name == 'merge_group' }}"}}, True),
+            # Matrix terms go either way: only the merge_group guard decides.
+            ({'uses': CCACHE, 'with': {'save': "${{ github.event_name != 'merge_group' && matrix.shard == 1 }}"}}, False),
+            ({'uses': CCACHE, 'with': {'save': "${{ matrix.shard == 1 }}"}}, True),
+            ({'if': "github.event_name == 'merge_group' || matrix.shard != 1"}, True),
+            ({'if': "github.event_name != 'merge_group' && matrix.preset == 'linux'"}, False),
             # actions/cache has no `save` input: it would still save.
             ({'uses': 'actions/cache@v5', 'with': {'save': 'false'}}, True),
             ({'uses': 'actions/cache/save@v5', 'with': {'save': 'false'}}, True),
@@ -95,6 +116,8 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                 self.assertEqual(can_save_on_merge_group(step), expected)
         with self.assertRaises(ValueError):
             on_merge_group('unknown.context')
+        with self.assertRaises(ValueError):
+            on_merge_group('matrix.shard')   # only comparisons are understood
 
     def test_fetchcontent_cache_twins_and_environment(self):
         for filename, jobs in [('build.yml', ('build', 'build-android', 'build-web', 'build-ios')),
