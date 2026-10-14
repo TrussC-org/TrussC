@@ -290,30 +290,16 @@ bool internal::captureWindowAsync(
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
     id<MTLDevice> device = srcTexture.device;
 
-    // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
-    // asserts — blit into a shared-storage staging texture first. Use a small
-    // ring so an in-flight async readback isn't clobbered by the next frame's
-    // blit (recording keeps a couple captures in flight). Issued only from the
-    // main thread (afterFrame), so the static ring needs no locking.
-    static const int kRing = 3;
-    static id<MTLTexture> s_ring[kRing] = { nil, nil, nil };
-    static int s_ringIdx = 0;
-    int slot = s_ringIdx;
-    s_ringIdx = (s_ringIdx + 1) % kRing;
-    id<MTLTexture> staging = s_ring[slot];
-    if (!staging || staging.device != device
-        || staging.width != width || staging.height != height
-        || staging.pixelFormat != pixelFormat) {
-        MTLTextureDescriptor* desc =
-            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
-                                                               width:width
-                                                              height:height
-                                                           mipmapped:NO];
-        desc.usage = MTLTextureUsageShaderRead;
-        desc.storageMode = MTLStorageModeShared;
-        staging = [device newTextureWithDescriptor:desc];
-        s_ring[slot] = staging;
-    }
+    // Each capture owns its staging texture until its completion has finished
+    // reading. A fixed ring can wrap while an older readback is still in use.
+    MTLTextureDescriptor* desc =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
+                                                           width:width
+                                                          height:height
+                                                       mipmapped:NO];
+    desc.usage = MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModeShared;
+    id<MTLTexture> staging = [device newTextureWithDescriptor:desc];
     if (!staging) return false;
 
     // Blit on sokol's own queue so it is ordered AFTER the frame's render (a

@@ -944,6 +944,8 @@ namespace internal {
     // (core/tests/audioListenerTeardown). nullptr, the default, turns it off.
     // State lives in tcAudio_impl.cpp.
     void setAudioRecorderCaptureHookForTests(void (*hook)(int frames));
+    void setScreenRecorderCaptureHookForTests(void (*hook)(int frames));
+    void runScreenRecorderCaptureHookForTests(int frames);
     void runAudioRecorderCaptureHookForTests(int frames);   // calls the hook, if set
 
     // Test hook, not a user setting: make the StreamWorker's decoder calls
@@ -1033,6 +1035,7 @@ namespace internal {
     // second it logs an error, once, and goes on waiting. Returns at once on
     // the audio thread inside a listener. tcAudio_impl.cpp.
     void waitForAudioCallbacksNoTimeout();
+    bool isInsideAudioCallback();
 }
 
 // ---------------------------------------------------------------------------
@@ -2006,6 +2009,9 @@ public:
 
 private:
     void* device_ = nullptr;  // ma_device*
+#ifdef __EMSCRIPTEN__
+    unsigned int webInstanceId_ = 0;
+#endif
     bool running_ = false;
     int sampleRate_ = DEFAULT_SAMPLE_RATE;
     std::string deviceName_;
