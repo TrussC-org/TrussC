@@ -803,11 +803,15 @@ static int checkLoadFailuresLogged() {
 // stands in for cmake and records whether the build command was reached.
 static int checkRebuildPreflight() {
     using trussc::hot_reload::Host;
+    // The host normalizes candidates, so compare paths, not spellings.
+    auto samePath = [](const std::string& a, const fs::path& b) {
+        return fs::path(a).lexically_normal() == b.lexically_normal();
+    };
     const fs::path dir = fs::temp_directory_path() / "tc_hotReloadLifecycle_preflight";
     std::error_code ec;
     fs::remove_all(dir, ec);
     fs::create_directories(dir / "custom-tree");
-    const fs::path configured = dir / "custom-tree";
+    const fs::path configured = (dir / "custom-tree").lexically_normal();
     const fs::path coreLib = dir / "core-lib";
     std::ofstream(coreLib) << "mtime probe\n";
     const auto hostTime = fs::last_write_time(getExecutablePath());
@@ -831,9 +835,9 @@ static int checkRebuildPreflight() {
     Host host;
     host.projectDir = dir.string();
     host.coreLibPath = coreLib.string();
-    expect(host.findBuildDirectory("custom-tree") && host.buildDir == configured.lexically_normal().string(),
+    expect(host.findBuildDirectory("custom-tree") && samePath(host.buildDir, configured),
            "did not resolve the configured directory against the project root");
-    expect(host.findBuildDirectory(configured.string()) && host.buildDir == configured.string(),
+    expect(host.findBuildDirectory(configured.string()) && samePath(host.buildDir, configured),
            "did not prefer configured directory");
     for (int attempt = 0; attempt < 2; ++attempt) {
         errors.clear();
@@ -877,11 +881,11 @@ static int checkRebuildPreflight() {
     fs::create_directories(fallback);
     std::ofstream(fallback / "CMakeCache.txt") << "# fallback\n";
     expect(host.findBuildDirectory((dir / "missing-configured").string()) &&
-           host.buildDir == fallback.string(), "configured path did not fall back");
+           samePath(host.buildDir, fallback), "configured path did not fall back");
     // A configured cache that disappears is re-scanned; the guest path follows.
     host.configuredBuildDir = (dir / "missing-configured").string();
-    expect(host.findBuildDirectory() && host.buildDir == fallback.string() &&
-           host.guestLibPath.rfind(fallback.string(), 0) == 0, "re-scan did not move the guest path");
+    expect(host.findBuildDirectory() && samePath(host.buildDir, fallback) &&
+           host.guestLibPath.rfind(host.buildDir, 0) == 0, "re-scan did not move the guest path");
     fs::remove(fallback / "CMakeCache.txt");
     errors.clear();
     expect(!host.findBuildDirectory((dir / "missing-configured").string()), "accepted missing caches");
@@ -899,7 +903,7 @@ static int checkRebuildPreflight() {
     errors.clear();
     expect(!host.reload() && host.getApp() == runningApp, "missing cache replaced running guest");
     expect(errors.size() == 1 && errors[0].find(configured.string()) != std::string::npos &&
-           errors[0].find(fallback.string()) != std::string::npos,
+           errors[0].find(fallback.lexically_normal().string()) != std::string::npos,
            "missing cache reload did not re-scan and log one Error");
     expect(!fs::exists(configured / "build-command-reached"), "missing cache launched build command");
     listener.disconnect();

@@ -431,7 +431,9 @@ struct Host {
         if (!configuredDir.empty()) {
             candidates.push_back((fs::path(projectDir) / configuredDir).lexically_normal().string());
         }
-        for (const char* dir : presetDirs) candidates.push_back(projectDir + "/" + dir);
+        for (const char* dir : presetDirs) {
+            candidates.push_back((fs::path(projectDir) / dir).lexically_normal().string());
+        }
         for (const auto& candidate : candidates) {
             buildDirsTried.push_back(candidate);
             std::error_code ec;
