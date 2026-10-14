@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <sstream>
 #include <thread>
 #ifdef _WIN32
 #include <fcntl.h>
@@ -157,6 +158,12 @@ void stoppedLines() {
     check(queued.size() == 1 && queued[0].raw == "再開 café" &&
           queued[0].args == std::vector<std::string>{"再開", "café"},
           "only the restarted line arrives; UTF-8 and CRLF preserved/normalized");
+    int callbacks = 0;
+    EventListener listener = events().console.listen([&](ConsoleEventArgs&) { ++callbacks; });
+    std::istringstream ignored("\n   \t\r\n# comment\n  # comment\r\n");
+    console::internal::readLines(ignored);
+    console::internal::processQueue();
+    check(callbacks == 0, "whitespace and comment-only lines deliver no console event");
     console::stop();
 }
 
