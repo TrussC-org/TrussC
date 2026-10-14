@@ -37,6 +37,7 @@
 #include <chrono>
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <fstream>
 #include <unordered_set>
 
@@ -2136,8 +2137,17 @@ namespace internal {
     // waitUntilCompleted stall. Returns false if there is no frame to capture.
     // (Implemented in platform/mac/tcPlatform_mac.mm; captureWindow() is just
     // this plus an inline wait.)
+    //
+    // `pool` (optional) keeps the staging textures for reuse: a capture takes a
+    // free one, and its completion returns it after the callback has read it,
+    // so no texture is reused while a readback still uses it (#361). The pool
+    // holds as many textures as captures in flight. Without a pool, each
+    // capture allocates its own.
+    struct CaptureStagingPool;
+    std::shared_ptr<CaptureStagingPool> makeCaptureStagingPool();
     bool captureWindowAsync(
-        const std::function<void(const CaptureReadback&)>& completion);
+        const std::function<void(const CaptureReadback&)>& completion,
+        const std::shared_ptr<CaptureStagingPool>& pool = nullptr);
 #endif
 }
 

@@ -608,27 +608,27 @@ TC_CORE_TEST_MAIN() {
         auto lifetime = internal::ScreenRecorderTestAccess::lifetime(*rec);
         const bool held = waitFor([&] { return holding.load(); }, 3000);
         atomic<bool> returned{false}, returnedDuringCapture{false};
-        const size_t before = countErrors("teardown keeps waiting");
+        const size_t warnBefore = countWarnings("waitForAudioCallbacks");
         thread stopper([&] {
             rec.reset();
             returnedDuringCapture = holding.load();
             returned = true;
         });
-        // Wait for the existing barrier diagnostic, not a guessed sleep. If
-        // teardown skips the barrier, returned becomes true while holding.
-        const bool observed = waitFor([&] {
-            return returned.load() || countErrors("teardown keeps waiting") > before;
-        }, 5000);
+        // The bounded barrier gives up on the held capture with its Warning and
+        // teardown returns while the capture still runs. Wait for the return,
+        // not a guessed sleep. Skipping the barrier would return with no Warning.
+        const bool observed = waitFor([&] { return returned.load(); }, 5000);
+        const bool warned = countWarnings("waitForAudioCallbacks") == warnBefore + 1;
         const bool kept = !lifetime.expired();
         release = true;
         stopper.join();
         engine.waitForAudioCallbacks();
+        const bool released = waitFor([&] { return lifetime.expired(); }, 3000);
         internal::setScreenRecorderCaptureHookForTests(nullptr);
         check("ScreenRecorder teardown meets an in-flight audio capture", held && observed);
-        check("ScreenRecorder keeps State until its audio capture returns",
-              kept && !returnedDuringCapture.load() && lifetime.expired());
-        check("ScreenRecorder uses the no-give-up audio teardown barrier",
-              countErrors("teardown keeps waiting") == before + 1);
+        check("ScreenRecorder teardown runs the bounded audio barrier",
+              warned && returnedDuringCapture.load());
+        check("ScreenRecorder keeps State until its audio capture returns", kept && released);
     }
 
     // A synthetic GPU completion exercises the shared timeout/finalization

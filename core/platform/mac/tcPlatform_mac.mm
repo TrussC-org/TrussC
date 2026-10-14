@@ -3,6 +3,8 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include <mutex>
+#include <vector>
 
 #if defined(__APPLE__)
 
@@ -273,8 +275,19 @@ void internal::CaptureReadback::readInto(unsigned char* dst, int dstStride,
     }
 }
 
+// Free staging textures, returned by each completion after its readback.
+struct internal::CaptureStagingPool {
+    std::mutex mutex;
+    std::vector<id<MTLTexture>> free;
+};
+
+std::shared_ptr<internal::CaptureStagingPool> internal::makeCaptureStagingPool() {
+    return std::make_shared<internal::CaptureStagingPool>();
+}
+
 bool internal::captureWindowAsync(
-    const std::function<void(const internal::CaptureReadback&)>& completion) {
+    const std::function<void(const internal::CaptureReadback&)>& completion,
+    const std::shared_ptr<internal::CaptureStagingPool>& pool) {
     // Read back the drawable this frame ACTUALLY rendered into (recorded by the
     // swapchain pass). NOT sapp_get_swapchain() — that advances to the next,
     // unrendered drawable. Fall back only if no pass ran yet.
@@ -290,16 +303,35 @@ bool internal::captureWindowAsync(
     MTLPixelFormat pixelFormat = srcTexture.pixelFormat;
     id<MTLDevice> device = srcTexture.device;
 
-    // Each capture owns its staging texture until its completion has finished
-    // reading. A fixed ring can wrap while an older readback is still in use.
-    MTLTextureDescriptor* desc =
-        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
-                                                           width:width
-                                                          height:height
-                                                       mipmapped:NO];
-    desc.usage = MTLTextureUsageShaderRead;
-    desc.storageMode = MTLStorageModeShared;
-    id<MTLTexture> staging = [device newTextureWithDescriptor:desc];
+    // sokol sets framebufferOnly=YES on the layer, so getBytes on the drawable
+    // asserts: blit into a shared-storage staging texture first. Each capture
+    // owns its staging texture until its completion has finished reading; only
+    // then does it go back to the pool. A fixed ring could wrap while an older
+    // readback still used a slot (#361).
+    id<MTLTexture> staging = nil;
+    if (pool) {
+        std::lock_guard<std::mutex> lock(pool->mutex);
+        while (!staging && !pool->free.empty()) {
+            id<MTLTexture> t = pool->free.back();
+            pool->free.pop_back();
+            // A texture of another size or device (window resized or moved)
+            // is dropped here.
+            if (t.device == device && t.width == width && t.height == height
+                && t.pixelFormat == pixelFormat) {
+                staging = t;
+            }
+        }
+    }
+    if (!staging) {
+        MTLTextureDescriptor* desc =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixelFormat
+                                                               width:width
+                                                              height:height
+                                                           mipmapped:NO];
+        desc.usage = MTLTextureUsageShaderRead;
+        desc.storageMode = MTLStorageModeShared;
+        staging = [device newTextureWithDescriptor:desc];
+    }
     if (!staging) return false;
 
     // Blit on sokol's own queue so it is ordered AFTER the frame's render (a
@@ -330,6 +362,7 @@ bool internal::captureWindowAsync(
     // `completion`, so both outlive this function until the handler runs. The
     // consumer reads the staging straight into its own destination buffer.
     std::function<void(const internal::CaptureReadback&)> comp = completion;
+    std::shared_ptr<internal::CaptureStagingPool> returnTo = pool;
     NSUInteger w = width, h = height;
     bool isRGB10A2 = (pixelFormat == MTLPixelFormatRGB10A2Unorm);
     [cmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {
@@ -340,6 +373,11 @@ bool internal::captureWindowAsync(
         rb.height    = (int)h;
         rb.isRGB10A2 = isRGB10A2;
         comp(rb);
+        // The readback is done with it: reusable from here on.
+        if (returnTo) {
+            std::lock_guard<std::mutex> lock(returnTo->mutex);
+            returnTo->free.push_back(staging);
+        }
     }];
     [cmdBuf commit];
     return true;

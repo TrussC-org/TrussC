@@ -477,7 +477,9 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             afterFrameListener_ = EventListener{};   // no new captures get queued
             exitListener_ = EventListener{};
             audioListener_ = EventListener{};
-            if (audioActive_) internal::waitForAudioCallbacksNoTimeout();
+            // Bounded, like AudioRecorder: a straggling tap writes into this
+            // State's ring, which outlives it.
+            if (audioActive_) AudioEngine::getInstance().waitForAudioCallbacks();
             source_ = Source::None;
             fbo_ = nullptr;
 #if TC_ASYNC_SCREEN_CAPTURE
@@ -615,6 +617,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
             // staging straight into the encoder's pixel buffer (BGRA, no swap) and
             // submit. PTS t is captured now so wall-clock timing is unaffected by
             // encode latency.
+            if (!stagingPool_) stagingPool_ = internal::makeCaptureStagingPool();
             inFlight_.fetch_add(1, std::memory_order_relaxed);
             bool started = internal::captureWindowAsync(
                 [state = shared_from_this(), t](const internal::CaptureReadback& rb) {
@@ -627,7 +630,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
                         }
                     }
                     state->finishCapture();
-                });
+                }, stagingPool_);
             if (!started) {
                 std::lock_guard<std::mutex> lk(writerMutex_);
                 finishCapture();
@@ -796,6 +799,10 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
         EventListener exitListener_;
         std::mutex writerMutex_;          // serializes encoder access (completion threads + stop)
         std::atomic<int> inFlight_{0};    // async captures not yet encoded (macOS)
+#if TC_ASYNC_SCREEN_CAPTURE
+        // Staging textures of this take, reused once each readback is done.
+        std::shared_ptr<internal::CaptureStagingPool> stagingPool_;
+#endif
 
         // Audio tap state (see the comment block above).
         std::atomic<bool> audioActive_{false};

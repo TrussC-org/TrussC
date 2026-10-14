@@ -439,17 +439,20 @@ public:
     // A take past 4 GiB of samples is finalized as RF64 (logged as a notice).
     // If writing the file failed on the way (disk full, a file size limit),
     // it logs an error instead: the file is incomplete.
-    // It uses the no-timeout audio teardown barrier (one Error if stuck):
+    // It waits on AudioEngine::waitForAudioCallbacks(), the engine-wide barrier:
     // for every audioOut / audioIn listener running at that moment, not only
     // this recorder's capture (usually well under one buffer). So don't call
     // it while holding a lock that an audioOut / audioIn listener takes: the
-    // listener would block on it, stop() would keep waiting for it,
+    // listener would block on it, stop() would wait up to one second for it,
     // and the audio drops out meanwhile.
     SaveResult stop() {
         state_->running_.store(false, std::memory_order_release);
         listener_ = EventListener();
         if (writer_.joinable()) {
-            internal::waitForAudioCallbacksNoTimeout();
+            // Bounded: on give-up the barrier's Warning is the log line. A
+            // straggling capture writes into the State's ring, so its last
+            // buffer is just not in the file.
+            AudioEngine::getInstance().waitForAudioCallbacks();
             state_->writing_.store(false, std::memory_order_release);
             writer_.join();
         }
