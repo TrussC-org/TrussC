@@ -27,7 +27,7 @@ const cats = JSON.parse(fs.readFileSync(path.join(__dirname, 'categories.json'),
 const catName = Object.fromEntries(cats.map(c => [c.id, c.name]));
 const catOrder = Object.fromEntries(cats.map(c => [c.id, c.order]));
 
-const E = Object.values(data).filter(e => !e.hidden);   // `hide = true` symbols are excluded from the public index
+const E = Object.values(data).filter(e => !e.hidden && (!e.declaredIn || e.declaredIn === e.owner));   // `hide = true` symbols are excluded from the public index
 const isOp = e => /::operator/.test(e.id);
 const documented = e => e.documented;
 // DISPLAY-only: drop a single trailing "_" from param names (member-shadow

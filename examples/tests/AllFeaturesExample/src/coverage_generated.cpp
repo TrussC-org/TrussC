@@ -81,16 +81,16 @@ static void cover_font() {
 }
 
 static void cover_graphics_3d_setup() {
+    (void)setupScreenFovWithSize(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setupScreenFovWithSizeDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
     (void)setupScreenFov(af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setupScreenFovDeg(af::val<float>(), af::val<float>(), af::val<float>());
     (void)setupScreenPerspective(af::val<float>(), af::val<float>(), af::val<float>());
+    (void)setupScreenPerspectiveDeg(af::val<float>(), af::val<float>(), af::val<float>());
     (void)setupScreenOrtho();
     (void)setDefaultScreenFov(af::val<float>());
     (void)setDefaultScreenOrtho();
     (void)getDefaultScreenFov();
-    (void)setupScreenFovWithSize(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-    (void)setupScreenFovWithSizeDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-    (void)setupScreenFovDeg(af::val<float>(), af::val<float>(), af::val<float>());
-    (void)setupScreenPerspectiveDeg(af::val<float>(), af::val<float>(), af::val<float>());
     (void)setDefaultScreenFovDeg(af::val<float>());
     (void)getDefaultScreenFovDeg();
     (void)setNearClip(af::val<float>());
@@ -360,10 +360,10 @@ static void cover_mcp() {
     (void)mcp::deferToolResultUntilAfterFrame(af::val<std::function<json ()>>(), af::val<const void *>());
     (void)mcp::deferToolResultTwoStage(af::val<std::function<std::function<json ()> ()>>(), af::val<const void *>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
-    (void)mcp::stopHttpServer();
+    (void)mcp::startHttpServer(af::val<int>(), af::val<const std::string>(), af::val<const std::string>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
-    (void)mcp::startHttpServer(af::val<int>(), af::val<const std::string>(), af::val<const std::string>());
+    (void)mcp::stopHttpServer();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
     (void)mcp::processHttpQueue();
@@ -780,8 +780,8 @@ struct Cover_App : af::Scope<App> {
         (void)App();
         (void)af::val<App>().setSize(af::val<float>(), af::val<float>());
         (void)af::val<App>().requestExit();
-        (void)af::val<App>().isExitRequested();
-        (void)af::val<App>().getWindow();
+        (void)af::val<const App>().isExitRequested();
+        (void)af::val<const App>().getWindow();
         (void)af::val<App>().keyPressed(af::val<const KeyEventArgs>());
         (void)af::val<App>().keyPressed(af::val<int>());
         (void)af::val<App>().keyReleased(af::val<const KeyEventArgs>());
@@ -804,6 +804,122 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().exit();
         (void)af::val<App>().audioOut(af::val<AudioOutBuffer>());
         (void)af::val<App>().audioIn(af::val<const AudioInBuffer>());
+        (void)af::val<const App>().getWidth();
+        (void)af::val<const App>().getHeight();
+        (void)af::val<const App>().getSize();
+        (void)af::val<App>().setWidth(af::val<float>());
+        (void)af::val<App>().setHeight(af::val<float>());
+        (void)af::val<App>().setRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<App>().setClipping(af::val<bool>());
+        (void)af::val<const App>().isClipping();
+        (void)af::val<const App>().getLeft();
+        (void)af::val<const App>().getRight();
+        (void)af::val<const App>().getTop();
+        (void)af::val<const App>().getBottom();
+        (void)af::val<App>().hitTest(af::val<const Ray>(), af::val<float>());
+        (void)af::val<App>().hitTest(af::val<Vec2>());
+        (void)af::val<App>().findHitNodeRecursive(af::val<internal::PickRaySource>(), af::val<const CameraContext *>(), af::val<Ray>(), af::val<const Mat4>());
+        (void)af::val<App>().draw();
+        (void)af::val<App>().setup();
+        (void)af::val<App>().update();
+        (void)af::val<App>().cleanup();
+        (void)af::val<App>().addChild(af::val<Ptr>(), af::val<bool>());
+        (void)af::val<App>().insertChild(af::val<size_t>(), af::val<Ptr>(), af::val<bool>());
+        (void)af::val<App>().removeChild(af::val<Ptr>());
+        (void)af::val<App>().removeAllChildren();
+        (void)af::val<App>().onChildAdded(af::val<Ptr>());
+        (void)af::val<App>().onChildRemoved(af::val<Ptr>());
+        (void)af::val<const App>().getParent();
+        (void)af::val<const App>().getChildren();
+        (void)af::val<const App>().getChildCount();
+        (void)af::val<const App>().indexOfChild(af::val<const Node *>());
+        (void)af::val<const App>().getChildIndex();
+        (void)af::val<App>().moveToFront();
+        (void)af::val<App>().moveToBack();
+        (void)af::val<const App>().isActive();
+        (void)af::val<App>().setActive(af::val<bool>());
+        (void)af::val<const App>().isVisible();
+        (void)af::val<App>().setVisible(af::val<bool>());
+        (void)af::val<App>().destroy();
+        (void)af::val<const App>().isDead();
+        (void)af::val<App>().enableEvents();
+        (void)af::val<App>().disableEvents();
+        (void)af::val<const App>().isEventsEnabled();
+        (void)af::val<const App>().isMouseOver();
+        (void)af::val<App>().setName(af::val<const std::string>());
+        (void)af::val<const App>().getName();
+        (void)af::val<const App>().hasName();
+        (void)af::val<const App>().getTypeName();
+        (void)af::val<const App>().getDisplayName();
+        (void)af::val<const App>().getInstanceId();
+        (void)af::val<App>().findByInstanceId(af::val<uint64_t>());
+        (void)af::val<const App>().getPos();
+        (void)af::val<const App>().getX();
+        (void)af::val<const App>().getY();
+        (void)af::val<const App>().getZ();
+        (void)af::val<App>().setPos(af::val<const Vec3>());
+        (void)af::val<App>().setPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<App>().setX(af::val<float>());
+        (void)af::val<App>().setY(af::val<float>());
+        (void)af::val<App>().setZ(af::val<float>());
+        (void)af::val<const App>().getQuaternion();
+        (void)af::val<App>().setQuaternion(af::val<const Quaternion>());
+        (void)af::val<const App>().getEuler();
+        (void)af::val<App>().setEuler(af::val<const Vec3>());
+        (void)af::val<App>().setEuler(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const App>().getEulerDeg();
+        (void)af::val<App>().setEulerDeg(af::val<const Vec3>());
+        (void)af::val<const App>().getRot();
+        (void)af::val<App>().setRot(af::val<float>());
+        (void)af::val<const App>().getRotDeg();
+        (void)af::val<App>().setRotDeg(af::val<float>());
+        (void)af::val<const App>().getScale();
+        (void)af::val<const App>().getScaleX();
+        (void)af::val<const App>().getScaleY();
+        (void)af::val<const App>().getScaleZ();
+        (void)af::val<App>().setScale(af::val<const Vec3>());
+        (void)af::val<App>().setScale(af::val<float>());
+        (void)af::val<App>().setScale(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<App>().setScaleX(af::val<float>());
+        (void)af::val<App>().setScaleY(af::val<float>());
+        (void)af::val<App>().setScaleZ(af::val<float>());
+        (void)af::val<App>().localMatrixChanged;
+        (void)af::val<const App>().getLocalMatrix();
+        (void)af::val<const App>().getGlobalMatrix();
+        (void)af::val<const App>().getGlobalMatrixInverse();
+        (void)af::val<const App>().globalToLocal(af::val<const Vec3>());
+        (void)af::val<const App>().getGlobalPos();
+        (void)af::val<App>().setGlobalPos(af::val<const Vec3>());
+        (void)af::val<App>().setGlobalPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const App>().localToGlobal(af::val<const Vec3>());
+        (void)af::val<const App>().getMouseX();
+        (void)af::val<const App>().getMouseY();
+        (void)af::val<const App>().getPMouseX();
+        (void)af::val<const App>().getPMouseY();
+        (void)af::val<App>().findHitNode(af::val<const Ray>());
+        (void)af::val<App>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
+        (void)af::val<const App>().getCameraContext();
+        (void)af::val<App>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
+        (void)af::val<const App>().getModTypeNames();
+        (void)af::val<const App>().getMods();
+        (void)af::val<const App>().getModByTypeName(af::val<const std::string>());
+        (void)af::val<App>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<App>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<App>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
+        (void)af::val<App>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<App>().cancelAllTimers();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<App>().callAfterAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<App>().callEveryAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<App>().cancelAsyncTimer(af::val<uint64_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<App>().cancelAllAsyncTimers();
+#endif
     }
 };
 
@@ -832,13 +948,13 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().init(af::val<const AudioSettings>());
         (void)af::val<AudioEngine>().shutdown();
         (void)af::val<AudioEngine>().listDevices();
-        (void)af::val<AudioEngine>().getSampleRate();
-        (void)af::val<AudioEngine>().getChannels();
-        (void)af::val<AudioEngine>().getMaxPolyphony();
-        (void)af::val<AudioEngine>().getBufferSize();
-        (void)af::val<AudioEngine>().isInitialized();
-        (void)af::val<AudioEngine>().getStats();
-        (void)af::val<AudioEngine>().getPlayingSounds();
+        (void)af::val<const AudioEngine>().getSampleRate();
+        (void)af::val<const AudioEngine>().getChannels();
+        (void)af::val<const AudioEngine>().getMaxPolyphony();
+        (void)af::val<const AudioEngine>().getBufferSize();
+        (void)af::val<const AudioEngine>().isInitialized();
+        (void)af::val<const AudioEngine>().getStats();
+        (void)af::val<const AudioEngine>().getPlayingSounds();
         (void)af::val<AudioEngine>().audioOut;
         (void)af::val<AudioEngine>().audioIn;
         (void)af::val<AudioEngine>().waitForAudioCallbacks();
@@ -882,10 +998,10 @@ struct Cover_AudioRecorder : af::Scope<AudioRecorder> {
         (void)AudioRecorder();
         (void)af::val<AudioRecorder>().start(af::val<const fs::path>(), af::val<const AudioRecordSettings>());
         (void)af::val<AudioRecorder>().stop();
-        (void)af::val<AudioRecorder>().isRecording();
-        (void)af::val<AudioRecorder>().getRecordedSeconds();
-        (void)af::val<AudioRecorder>().getDroppedFrames();
-        (void)af::val<AudioRecorder>().getPath();
+        (void)af::val<const AudioRecorder>().isRecording();
+        (void)af::val<const AudioRecorder>().getRecordedSeconds();
+        (void)af::val<const AudioRecorder>().getDroppedFrames();
+        (void)af::val<const AudioRecorder>().getPath();
     }
 };
 
@@ -943,8 +1059,8 @@ struct Cover_CameraContext : af::Scope<CameraContext> {
         (void)af::val<CameraContext>().viewW;
         (void)af::val<CameraContext>().viewH;
         (void)af::val<CameraContext>().pickable;
-        (void)af::val<CameraContext>().screenPointToRay(af::val<float>(), af::val<float>());
-        (void)af::val<CameraContext>().worldToScreen(af::val<const Vec3>());
+        (void)af::val<const CameraContext>().screenPointToRay(af::val<float>(), af::val<float>());
+        (void)af::val<const CameraContext>().worldToScreen(af::val<const Vec3>());
     }
 };
 
@@ -955,8 +1071,8 @@ struct Cover_ChipSoundBundle : af::Scope<ChipSoundBundle> {
         (void)af::val<ChipSoundBundle>().add(af::val<const ChipSoundNote>(), af::val<float>());
         (void)af::val<ChipSoundBundle>().add(af::val<ChipSoundNote::Wave>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<ChipSoundBundle>().clear();
-        (void)af::val<ChipSoundBundle>().getDuration();
-        (void)af::val<ChipSoundBundle>().build();
+        (void)af::val<const ChipSoundBundle>().getDuration();
+        (void)af::val<const ChipSoundBundle>().build();
     }
 };
 
@@ -979,9 +1095,9 @@ struct Cover_ChipSoundNote : af::Scope<ChipSoundNote> {
         (void)af::val<ChipSoundNote>().decay;
         (void)af::val<ChipSoundNote>().sustain;
         (void)af::val<ChipSoundNote>().release;
-        (void)af::val<ChipSoundNote>().build();
-        (void)af::val<ChipSoundNote>().generateBuffer(af::val<SoundBuffer>());
-        (void)af::val<ChipSoundNote>().getTotalDuration();
+        (void)af::val<const ChipSoundNote>().build();
+        (void)af::val<const ChipSoundNote>().generateBuffer(af::val<SoundBuffer>());
+        (void)af::val<const ChipSoundNote>().getTotalDuration();
     }
 };
 
@@ -1009,24 +1125,24 @@ struct Cover_Color : af::Scope<Color> {
         (void)af::val<Color>().fromOKLCH(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Color>().fromOKLab(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Color>().fromLinear(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Color>().toHex(af::val<bool>());
-        (void)af::val<Color>().toLinear();
-        (void)af::val<Color>().toHSB();
-        (void)af::val<Color>().toOKLab();
-        (void)af::val<Color>().toOKLCH();
-        (void)af::val<Color>().operator+(af::val<const Color>());
-        (void)af::val<Color>().operator-(af::val<const Color>());
-        (void)af::val<Color>().operator*(af::val<float>());
-        (void)af::val<Color>().operator/(af::val<float>());
-        (void)af::val<Color>().clamped();
-        (void)af::val<Color>().lerpRGB(af::val<const Color>(), af::val<float>());
-        (void)af::val<Color>().lerpLinear(af::val<const Color>(), af::val<float>());
-        (void)af::val<Color>().lerpHSB(af::val<const Color>(), af::val<float>());
-        (void)af::val<Color>().lerpOKLab(af::val<const Color>(), af::val<float>());
-        (void)af::val<Color>().lerpOKLCH(af::val<const Color>(), af::val<float>());
-        (void)af::val<Color>().lerp(af::val<const Color>(), af::val<float>());
-        (void)af::val<Color>().operator==(af::val<const Color>());
-        (void)af::val<Color>().operator!=(af::val<const Color>());
+        (void)af::val<const Color>().toHex(af::val<bool>());
+        (void)af::val<const Color>().toLinear();
+        (void)af::val<const Color>().toHSB();
+        (void)af::val<const Color>().toOKLab();
+        (void)af::val<const Color>().toOKLCH();
+        (void)af::val<const Color>().operator+(af::val<const Color>());
+        (void)af::val<const Color>().operator-(af::val<const Color>());
+        (void)af::val<const Color>().operator*(af::val<float>());
+        (void)af::val<const Color>().operator/(af::val<float>());
+        (void)af::val<const Color>().clamped();
+        (void)af::val<const Color>().lerpRGB(af::val<const Color>(), af::val<float>());
+        (void)af::val<const Color>().lerpLinear(af::val<const Color>(), af::val<float>());
+        (void)af::val<const Color>().lerpHSB(af::val<const Color>(), af::val<float>());
+        (void)af::val<const Color>().lerpOKLab(af::val<const Color>(), af::val<float>());
+        (void)af::val<const Color>().lerpOKLCH(af::val<const Color>(), af::val<float>());
+        (void)af::val<const Color>().lerp(af::val<const Color>(), af::val<float>());
+        (void)af::val<const Color>().operator==(af::val<const Color>());
+        (void)af::val<const Color>().operator!=(af::val<const Color>());
     }
 };
 
@@ -1038,11 +1154,11 @@ struct Cover_ColorHSB : af::Scope<ColorHSB> {
         (void)af::val<ColorHSB>().s;
         (void)af::val<ColorHSB>().b;
         (void)af::val<ColorHSB>().a;
-        (void)af::val<ColorHSB>().toRGB();
-        (void)af::val<ColorHSB>().toLinear();
-        (void)af::val<ColorHSB>().toOKLab();
-        (void)af::val<ColorHSB>().toOKLCH();
-        (void)af::val<ColorHSB>().lerp(af::val<const ColorHSB>(), af::val<float>(), af::val<bool>());
+        (void)af::val<const ColorHSB>().toRGB();
+        (void)af::val<const ColorHSB>().toLinear();
+        (void)af::val<const ColorHSB>().toOKLab();
+        (void)af::val<const ColorHSB>().toOKLCH();
+        (void)af::val<const ColorHSB>().lerp(af::val<const ColorHSB>(), af::val<float>(), af::val<bool>());
     }
 };
 
@@ -1055,20 +1171,20 @@ struct Cover_ColorLinear : af::Scope<ColorLinear> {
         (void)af::val<ColorLinear>().g;
         (void)af::val<ColorLinear>().b;
         (void)af::val<ColorLinear>().a;
-        (void)af::val<ColorLinear>().toSRGB();
-        (void)af::val<ColorLinear>().toHSB();
-        (void)af::val<ColorLinear>().toOKLab();
-        (void)af::val<ColorLinear>().toOKLCH();
-        (void)af::val<ColorLinear>().operator+(af::val<const ColorLinear>());
-        (void)af::val<ColorLinear>().operator-(af::val<const ColorLinear>());
-        (void)af::val<ColorLinear>().operator*(af::val<float>());
-        (void)af::val<ColorLinear>().operator*(af::val<const ColorLinear>());
-        (void)af::val<ColorLinear>().operator/(af::val<float>());
-        (void)af::val<ColorLinear>().clamped();
-        (void)af::val<ColorLinear>().clampedLDR();
-        (void)af::val<ColorLinear>().lerp(af::val<const ColorLinear>(), af::val<float>());
-        (void)af::val<ColorLinear>().operator==(af::val<const ColorLinear>());
-        (void)af::val<ColorLinear>().operator!=(af::val<const ColorLinear>());
+        (void)af::val<const ColorLinear>().toSRGB();
+        (void)af::val<const ColorLinear>().toHSB();
+        (void)af::val<const ColorLinear>().toOKLab();
+        (void)af::val<const ColorLinear>().toOKLCH();
+        (void)af::val<const ColorLinear>().operator+(af::val<const ColorLinear>());
+        (void)af::val<const ColorLinear>().operator-(af::val<const ColorLinear>());
+        (void)af::val<const ColorLinear>().operator*(af::val<float>());
+        (void)af::val<const ColorLinear>().operator*(af::val<const ColorLinear>());
+        (void)af::val<const ColorLinear>().operator/(af::val<float>());
+        (void)af::val<const ColorLinear>().clamped();
+        (void)af::val<const ColorLinear>().clampedLDR();
+        (void)af::val<const ColorLinear>().lerp(af::val<const ColorLinear>(), af::val<float>());
+        (void)af::val<const ColorLinear>().operator==(af::val<const ColorLinear>());
+        (void)af::val<const ColorLinear>().operator!=(af::val<const ColorLinear>());
     }
 };
 
@@ -1080,11 +1196,11 @@ struct Cover_ColorOKLCH : af::Scope<ColorOKLCH> {
         (void)af::val<ColorOKLCH>().C;
         (void)af::val<ColorOKLCH>().H;
         (void)af::val<ColorOKLCH>().alpha;
-        (void)af::val<ColorOKLCH>().toOKLab();
-        (void)af::val<ColorOKLCH>().toLinear();
-        (void)af::val<ColorOKLCH>().toRGB();
-        (void)af::val<ColorOKLCH>().toHSB();
-        (void)af::val<ColorOKLCH>().lerp(af::val<const ColorOKLCH>(), af::val<float>(), af::val<bool>());
+        (void)af::val<const ColorOKLCH>().toOKLab();
+        (void)af::val<const ColorOKLCH>().toLinear();
+        (void)af::val<const ColorOKLCH>().toRGB();
+        (void)af::val<const ColorOKLCH>().toHSB();
+        (void)af::val<const ColorOKLCH>().lerp(af::val<const ColorOKLCH>(), af::val<float>(), af::val<bool>());
     }
 };
 
@@ -1096,11 +1212,11 @@ struct Cover_ColorOKLab : af::Scope<ColorOKLab> {
         (void)af::val<ColorOKLab>().a;
         (void)af::val<ColorOKLab>().b;
         (void)af::val<ColorOKLab>().alpha;
-        (void)af::val<ColorOKLab>().toLinear();
-        (void)af::val<ColorOKLab>().toRGB();
-        (void)af::val<ColorOKLab>().toHSB();
-        (void)af::val<ColorOKLab>().toOKLCH();
-        (void)af::val<ColorOKLab>().lerp(af::val<const ColorOKLab>(), af::val<float>());
+        (void)af::val<const ColorOKLab>().toLinear();
+        (void)af::val<const ColorOKLab>().toRGB();
+        (void)af::val<const ColorOKLab>().toHSB();
+        (void)af::val<const ColorOKLab>().toOKLCH();
+        (void)af::val<const ColorOKLab>().lerp(af::val<const ColorOKLab>(), af::val<float>());
     }
 };
 
@@ -1171,22 +1287,22 @@ struct Cover_EasyCam : af::Scope<EasyCam> {
         (void)af::val<EasyCam>().reset();
         (void)af::val<EasyCam>().setTarget(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<EasyCam>().setTarget(af::val<const Vec3>());
-        (void)af::val<EasyCam>().getTarget();
+        (void)af::val<const EasyCam>().getTarget();
         (void)af::val<EasyCam>().setUpAxis(af::val<const Vec3>());
         (void)af::val<EasyCam>().setUpAxis(af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<EasyCam>().getUpAxis();
+        (void)af::val<const EasyCam>().getUpAxis();
         (void)af::val<EasyCam>().setDistance(af::val<float>());
-        (void)af::val<EasyCam>().getDistance();
+        (void)af::val<const EasyCam>().getDistance();
         (void)af::val<EasyCam>().setAzimuth(af::val<float>());
         (void)af::val<EasyCam>().setElevation(af::val<float>());
-        (void)af::val<EasyCam>().getElevation();
-        (void)af::val<EasyCam>().getAzimuth();
+        (void)af::val<const EasyCam>().getElevation();
+        (void)af::val<const EasyCam>().getAzimuth();
         (void)af::val<EasyCam>().enableOrtho();
         (void)af::val<EasyCam>().disableOrtho();
         (void)af::val<EasyCam>().setOrtho(af::val<bool>());
-        (void)af::val<EasyCam>().getOrtho();
+        (void)af::val<const EasyCam>().getOrtho();
         (void)af::val<EasyCam>().setFov(af::val<float>());
-        (void)af::val<EasyCam>().getFov();
+        (void)af::val<const EasyCam>().getFov();
         (void)af::val<EasyCam>().setFovDeg(af::val<float>());
         (void)af::val<EasyCam>().setNearClip(af::val<float>());
         (void)af::val<EasyCam>().setFarClip(af::val<float>());
@@ -1194,22 +1310,22 @@ struct Cover_EasyCam : af::Scope<EasyCam> {
         (void)af::val<EasyCam>().setZoomSensitivity(af::val<float>());
         (void)af::val<EasyCam>().setPanSensitivity(af::val<float>());
         (void)af::val<EasyCam>().setOrbitButton(af::val<int>());
-        (void)af::val<EasyCam>().getOrbitButton();
+        (void)af::val<const EasyCam>().getOrbitButton();
         (void)af::val<EasyCam>().setPanButton(af::val<int>());
-        (void)af::val<EasyCam>().getPanButton();
+        (void)af::val<const EasyCam>().getPanButton();
         (void)af::val<EasyCam>().setDragModifier(af::val<Modifier>());
-        (void)af::val<EasyCam>().getDragModifier();
+        (void)af::val<const EasyCam>().getDragModifier();
         (void)af::val<EasyCam>().setControlArea(af::val<const Rect>());
         (void)af::val<EasyCam>().clearControlArea();
         (void)af::val<EasyCam>().enableMouseInput();
         (void)af::val<EasyCam>().disableMouseInput();
-        (void)af::val<EasyCam>().isMouseInputEnabled();
+        (void)af::val<const EasyCam>().isMouseInputEnabled();
         (void)af::val<EasyCam>().mousePressed(af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<EasyCam>().mouseReleased(af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<EasyCam>().mouseDragged(af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<EasyCam>().mouseScrolled(af::val<float>(), af::val<float>());
-        (void)af::val<EasyCam>().getPosition();
-        (void)af::val<EasyCam>().getOrientation();
+        (void)af::val<const EasyCam>().getPosition();
+        (void)af::val<const EasyCam>().getOrientation();
         (void)af::val<EasyCam>().setOrientation(af::val<const Quaternion>());
     }
 };
@@ -1228,11 +1344,11 @@ struct Cover_Environment : af::Scope<Environment> {
         (void)af::val<Environment>().loadFromHDR(af::val<const Pixels>());
         (void)af::val<Environment>().loadProcedural();
         (void)af::val<Environment>().release();
-        (void)af::val<Environment>().isLoaded();
-        (void)af::val<Environment>().getIrradianceMap();
-        (void)af::val<Environment>().getPrefilterMap();
-        (void)af::val<Environment>().getBrdfLut();
-        (void)af::val<Environment>().getPrefilterMipLevels();
+        (void)af::val<const Environment>().isLoaded();
+        (void)af::val<const Environment>().getIrradianceMap();
+        (void)af::val<const Environment>().getPrefilterMap();
+        (void)af::val<const Environment>().getBrdfLut();
+        (void)af::val<const Environment>().getPrefilterMipLevels();
     }
 };
 
@@ -1240,7 +1356,7 @@ struct Cover_EventListener : af::Scope<EventListener> {
     static void run() {
         (void)EventListener();
         (void)af::val<EventListener>().disconnect();
-        (void)af::val<EventListener>().isConnected();
+        (void)af::val<const EventListener>().isConnected();
     }
 };
 
@@ -1255,8 +1371,8 @@ struct Cover_Fbo : af::Scope<Fbo> {
     static void run() {
         (void)Fbo();
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
-        (void)af::val<Fbo>().getDebugName();
-        (void)af::val<Fbo>().lifetimeToken();
+        (void)af::val<const Fbo>().getDebugName();
+        (void)af::val<const Fbo>().lifetimeToken();
         (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
         (void)af::val<Fbo>().clear();
         (void)af::val<Fbo>().begin();
@@ -1264,26 +1380,37 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<Fbo>().clearColor(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Fbo>().end();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
-        (void)af::val<Fbo>().readPixels(af::val<unsigned char *>());
+        (void)af::val<const Fbo>().readPixels(af::val<unsigned char *>());
 #endif
 #if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
-        (void)af::val<Fbo>().readPixelsFloat(af::val<float *>());
+        (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
 #endif
-        (void)af::val<Fbo>().copyTo(af::val<Image>());
-        (void)af::val<Fbo>().getWidth();
-        (void)af::val<Fbo>().getHeight();
-        (void)af::val<Fbo>().getSampleCount();
-        (void)af::val<Fbo>().getTextureFormat();
-        (void)af::val<Fbo>().isAllocated();
-        (void)af::val<Fbo>().isActive();
+        (void)af::val<const Fbo>().copyTo(af::val<Image>());
+        (void)af::val<const Fbo>().getWidth();
+        (void)af::val<const Fbo>().getHeight();
+        (void)af::val<const Fbo>().getSampleCount();
+        (void)af::val<const Fbo>().getTextureFormat();
+        (void)af::val<const Fbo>().isAllocated();
+        (void)af::val<const Fbo>().isActive();
         (void)af::val<Fbo>().getTexture();
-        (void)af::val<Fbo>().getTexture();
-        (void)af::val<Fbo>().draw(af::val<float>(), af::val<float>());
-        (void)af::val<Fbo>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Fbo>().save(af::val<const fs::path>());
-        (void)af::val<Fbo>().getColorImage();
-        (void)af::val<Fbo>().getTextureView();
-        (void)af::val<Fbo>().getSampler();
+        (void)af::val<const Fbo>().getTexture();
+        (void)af::val<const Fbo>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const Fbo>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Fbo>().save(af::val<const fs::path>());
+        (void)af::val<const Fbo>().getColorImage();
+        (void)af::val<const Fbo>().getTextureView();
+        (void)af::val<const Fbo>().getSampler();
+        (void)af::val<const Fbo>().hasTexture();
+        (void)af::val<Fbo>().setMinFilter(af::val<TextureFilter>());
+        (void)af::val<Fbo>().setMagFilter(af::val<TextureFilter>());
+        (void)af::val<Fbo>().setFilter(af::val<TextureFilter>());
+        (void)af::val<const Fbo>().getMinFilter();
+        (void)af::val<const Fbo>().getMagFilter();
+        (void)af::val<Fbo>().setWrapU(af::val<TextureWrap>());
+        (void)af::val<Fbo>().setWrapV(af::val<TextureWrap>());
+        (void)af::val<Fbo>().setWrap(af::val<TextureWrap>());
+        (void)af::val<const Fbo>().getWrapU();
+        (void)af::val<const Fbo>().getWrapV();
     }
 };
 
@@ -1300,8 +1427,8 @@ struct Cover_FileReader : af::Scope<FileReader> {
         (void)FileReader();
         (void)af::val<FileReader>().open(af::val<const fs::path>());
         (void)af::val<FileReader>().close();
-        (void)af::val<FileReader>().isOpen();
-        (void)af::val<FileReader>().eof();
+        (void)af::val<const FileReader>().isOpen();
+        (void)af::val<const FileReader>().eof();
         (void)af::val<FileReader>().readLine();
         (void)af::val<FileReader>().readLine(af::val<std::string>());
         (void)af::val<FileReader>().readChar();
@@ -1317,7 +1444,7 @@ struct Cover_FileWriter : af::Scope<FileWriter> {
         (void)FileWriter();
         (void)af::val<FileWriter>().open(af::val<const fs::path>(), af::val<bool>());
         (void)af::val<FileWriter>().close();
-        (void)af::val<FileWriter>().isOpen();
+        (void)af::val<const FileWriter>().isOpen();
         (void)af::val<FileWriter>().write(af::val<const std::string>());
         (void)af::val<FileWriter>().write(af::val<char>());
         (void)af::val<FileWriter>().write(af::val<const void *>(), af::val<size_t>());
@@ -1332,59 +1459,59 @@ struct Cover_Font : af::Scope<Font> {
         (void)af::val<Font>().setDefaultOversampling(af::val<int>());
         (void)af::val<Font>().getDefaultOversampling();
         (void)af::val<Font>().setOversampling(af::val<int>());
-        (void)af::val<Font>().getOversampling();
+        (void)af::val<const Font>().getOversampling();
         (void)af::val<Font>().setGridFit(af::val<bool>());
-        (void)af::val<Font>().getGridFit();
+        (void)af::val<const Font>().getGridFit();
         (void)af::val<Font>().setMipmaps(af::val<bool>());
-        (void)af::val<Font>().getMipmaps();
+        (void)af::val<const Font>().getMipmaps();
         (void)af::val<Font>().load(af::val<const fs::path>(), af::val<int>(), af::val<int>());
-        (void)af::val<Font>().isLoaded();
+        (void)af::val<const Font>().isLoaded();
         (void)af::val<Font>().setAlign(af::val<Direction>(), af::val<Direction>());
         (void)af::val<Font>().setAlign(af::val<Direction>());
-        (void)af::val<Font>().getAlignH();
-        (void)af::val<Font>().getAlignV();
+        (void)af::val<const Font>().getAlignH();
+        (void)af::val<const Font>().getAlignV();
         (void)af::val<Font>().setLineHeight(af::val<float>());
         (void)af::val<Font>().setLineHeightEm(af::val<float>());
         (void)af::val<Font>().resetLineHeight();
-        (void)af::val<Font>().drawString(af::val<const std::string>(), af::val<float>(), af::val<float>());
-        (void)af::val<Font>().drawString(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>());
-        (void)af::val<Font>().getGlyphPath(af::val<uint32_t>());
-        (void)af::val<Font>().getStringPath(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>());
-        (void)af::val<Font>().getStringPath(af::val<const std::string>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Font>().drawString(af::val<const std::string>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Font>().drawString(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>());
+        (void)af::val<const Font>().getGlyphPath(af::val<uint32_t>());
+        (void)af::val<const Font>().getStringPath(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>());
+        (void)af::val<const Font>().getStringPath(af::val<const std::string>(), af::val<float>(), af::val<float>());
         (void)af::val<Font>().setWritingMode(af::val<WritingMode>());
-        (void)af::val<Font>().getWritingMode();
+        (void)af::val<const Font>().getWritingMode();
         (void)af::val<Font>().setTcyDigits(af::val<int>(), af::val<TcyMode>(), af::val<TcyMode>());
         (void)af::val<Font>().setTcyLatin(af::val<TcyMode>());
-        (void)af::val<Font>().getTcyLatinMode();
-        (void)af::val<Font>().getTcyDigitMax();
+        (void)af::val<const Font>().getTcyLatinMode();
+        (void)af::val<const Font>().getTcyDigitMax();
         (void)af::val<Font>().enableWrap(af::val<bool>());
-        (void)af::val<Font>().isWrapEnabled();
+        (void)af::val<const Font>().isWrapEnabled();
         (void)af::val<Font>().setMaxLineLength(af::val<float>());
-        (void)af::val<Font>().getMaxLineLength();
+        (void)af::val<const Font>().getMaxLineLength();
         (void)af::val<Font>().setLatinHyphenation(af::val<bool>());
-        (void)af::val<Font>().getLatinHyphenation();
+        (void)af::val<const Font>().getLatinHyphenation();
         (void)af::val<Font>().setHangingPunctuation(af::val<bool>());
-        (void)af::val<Font>().getHangingPunctuation();
+        (void)af::val<const Font>().getHangingPunctuation();
         (void)af::val<Font>().setKinsoku(af::val<KinsokuLevel>());
-        (void)af::val<Font>().getKinsoku();
-        (void)af::val<Font>().forEachGlyph(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>(), af::val<const GlyphVisitor>());
-        (void)af::val<Font>().forEachGlyph(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<const GlyphVisitor>());
-        (void)af::val<Font>().getWidth(af::val<const std::string>());
-        (void)af::val<Font>().stringWidth(af::val<const std::string>());
-        (void)af::val<Font>().getHeight(af::val<const std::string>());
-        (void)af::val<Font>().getBBox(af::val<const std::string>());
-        (void)af::val<Font>().getLineHeight();
-        (void)af::val<Font>().getDefaultLineHeight();
-        (void)af::val<Font>().getAscent();
-        (void)af::val<Font>().getDescent();
-        (void)af::val<Font>().getSize();
-        (void)af::val<Font>().getMemoryUsage();
-        (void)af::val<Font>().getAtlasMemoryUsage();
+        (void)af::val<const Font>().getKinsoku();
+        (void)af::val<const Font>().forEachGlyph(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<Direction>(), af::val<Direction>(), af::val<const GlyphVisitor>());
+        (void)af::val<const Font>().forEachGlyph(af::val<const std::string>(), af::val<float>(), af::val<float>(), af::val<const GlyphVisitor>());
+        (void)af::val<const Font>().getWidth(af::val<const std::string>());
+        (void)af::val<const Font>().stringWidth(af::val<const std::string>());
+        (void)af::val<const Font>().getHeight(af::val<const std::string>());
+        (void)af::val<const Font>().getBBox(af::val<const std::string>());
+        (void)af::val<const Font>().getLineHeight();
+        (void)af::val<const Font>().getDefaultLineHeight();
+        (void)af::val<const Font>().getAscent();
+        (void)af::val<const Font>().getDescent();
+        (void)af::val<const Font>().getSize();
+        (void)af::val<const Font>().getMemoryUsage();
+        (void)af::val<const Font>().getAtlasMemoryUsage();
         (void)af::val<Font>().clearAtlas();
-        (void)af::val<Font>().getAtlasCount();
-        (void)af::val<Font>().getAtlas(af::val<size_t>());
+        (void)af::val<const Font>().getAtlasCount();
+        (void)af::val<const Font>().getAtlas(af::val<size_t>());
         (void)af::val<Font>().getSampler();
-        (void)af::val<Font>().getLoadedGlyphCount();
+        (void)af::val<const Font>().getLoadedGlyphCount();
         (void)af::val<Font>().getTotalCacheMemoryUsage();
     }
 };
@@ -1414,6 +1541,24 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
     static void run() {
         (void)FullscreenShader();
         (void)af::val<FullscreenShader>().draw();
+        (void)af::val<FullscreenShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<FullscreenShader>().clear();
+        (void)af::val<const FullscreenShader>().isLoaded();
+        (void)af::val<FullscreenShader>().begin();
+        (void)af::val<FullscreenShader>().end();
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<float>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const Vec2>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const Vec3>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const Vec4>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const Color>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const std::vector<float>>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec2>>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec3>>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec4>>());
+        (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const void *>(), af::val<size_t>());
+        (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
+        (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
+        (void)af::val<FullscreenShader>().submitVertices(af::val<const ShaderVertex *>(), af::val<int>(), af::val<PrimitiveType>());
     }
 };
 
@@ -1439,21 +1584,21 @@ struct Cover_GraphicsBackend : af::Scope<GraphicsBackend> {
 struct Cover_HasTexture : af::Scope<HasTexture> {
     static void run() {
         (void)af::val<HasTexture>().getTexture();
-        (void)af::val<HasTexture>().getTexture();
-        (void)af::val<HasTexture>().hasTexture();
-        (void)af::val<HasTexture>().draw(af::val<float>(), af::val<float>());
-        (void)af::val<HasTexture>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const HasTexture>().getTexture();
+        (void)af::val<const HasTexture>().hasTexture();
+        (void)af::val<const HasTexture>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const HasTexture>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<HasTexture>().setMinFilter(af::val<TextureFilter>());
         (void)af::val<HasTexture>().setMagFilter(af::val<TextureFilter>());
         (void)af::val<HasTexture>().setFilter(af::val<TextureFilter>());
-        (void)af::val<HasTexture>().getMinFilter();
-        (void)af::val<HasTexture>().getMagFilter();
+        (void)af::val<const HasTexture>().getMinFilter();
+        (void)af::val<const HasTexture>().getMagFilter();
         (void)af::val<HasTexture>().setWrapU(af::val<TextureWrap>());
         (void)af::val<HasTexture>().setWrapV(af::val<TextureWrap>());
         (void)af::val<HasTexture>().setWrap(af::val<TextureWrap>());
-        (void)af::val<HasTexture>().getWrapU();
-        (void)af::val<HasTexture>().getWrapV();
-        (void)af::val<HasTexture>().save(af::val<const fs::path>());
+        (void)af::val<const HasTexture>().getWrapU();
+        (void)af::val<const HasTexture>().getWrapV();
+        (void)af::val<const HasTexture>().save(af::val<const fs::path>());
     }
 };
 
@@ -1471,16 +1616,16 @@ struct Cover_IVec2 : af::Scope<IVec2> {
         (void)IVec2(af::val<int>());
         (void)af::val<IVec2>().x;
         (void)af::val<IVec2>().y;
-        (void)af::val<IVec2>().operator+(af::val<const IVec2>());
-        (void)af::val<IVec2>().operator-(af::val<const IVec2>());
-        (void)af::val<IVec2>().operator-();
-        (void)af::val<IVec2>().operator*(af::val<int>());
+        (void)af::val<const IVec2>().operator+(af::val<const IVec2>());
+        (void)af::val<const IVec2>().operator-(af::val<const IVec2>());
+        (void)af::val<const IVec2>().operator-();
+        (void)af::val<const IVec2>().operator*(af::val<int>());
         (void)af::val<IVec2>().operator+=(af::val<const IVec2>());
         (void)af::val<IVec2>().operator-=(af::val<const IVec2>());
         (void)af::val<IVec2>().operator*=(af::val<int>());
-        (void)af::val<IVec2>().operator==(af::val<const IVec2>());
-        (void)af::val<IVec2>().operator!=(af::val<const IVec2>());
-        (void)af::val<IVec2>().toVec2();
+        (void)af::val<const IVec2>().operator==(af::val<const IVec2>());
+        (void)af::val<const IVec2>().operator!=(af::val<const IVec2>());
+        (void)af::val<const IVec2>().toVec2();
     }
 };
 
@@ -1493,17 +1638,17 @@ struct Cover_IVec3 : af::Scope<IVec3> {
         (void)af::val<IVec3>().x;
         (void)af::val<IVec3>().y;
         (void)af::val<IVec3>().z;
-        (void)af::val<IVec3>().operator+(af::val<const IVec3>());
-        (void)af::val<IVec3>().operator-(af::val<const IVec3>());
-        (void)af::val<IVec3>().operator-();
-        (void)af::val<IVec3>().operator*(af::val<int>());
+        (void)af::val<const IVec3>().operator+(af::val<const IVec3>());
+        (void)af::val<const IVec3>().operator-(af::val<const IVec3>());
+        (void)af::val<const IVec3>().operator-();
+        (void)af::val<const IVec3>().operator*(af::val<int>());
         (void)af::val<IVec3>().operator+=(af::val<const IVec3>());
         (void)af::val<IVec3>().operator-=(af::val<const IVec3>());
         (void)af::val<IVec3>().operator*=(af::val<int>());
-        (void)af::val<IVec3>().operator==(af::val<const IVec3>());
-        (void)af::val<IVec3>().operator!=(af::val<const IVec3>());
-        (void)af::val<IVec3>().toVec3();
-        (void)af::val<IVec3>().xy();
+        (void)af::val<const IVec3>().operator==(af::val<const IVec3>());
+        (void)af::val<const IVec3>().operator!=(af::val<const IVec3>());
+        (void)af::val<const IVec3>().toVec3();
+        (void)af::val<const IVec3>().xy();
     }
 };
 
@@ -1512,12 +1657,12 @@ struct Cover_IesProfile : af::Scope<IesProfile> {
         (void)IesProfile();
         (void)af::val<IesProfile>().load(af::val<const fs::path>());
         (void)af::val<IesProfile>().loadFromString(af::val<const std::string>());
-        (void)af::val<IesProfile>().isLoaded();
-        (void)af::val<IesProfile>().getMaxVerticalAngle();
-        (void)af::val<IesProfile>().getMaxCandela();
-        (void)af::val<IesProfile>().getTextureWidth();
-        (void)af::val<IesProfile>().getView();
-        (void)af::val<IesProfile>().getSampler();
+        (void)af::val<const IesProfile>().isLoaded();
+        (void)af::val<const IesProfile>().getMaxVerticalAngle();
+        (void)af::val<const IesProfile>().getMaxCandela();
+        (void)af::val<const IesProfile>().getTextureWidth();
+        (void)af::val<const IesProfile>().getView();
+        (void)af::val<const IesProfile>().getSampler();
     }
 };
 
@@ -1525,21 +1670,21 @@ struct Cover_Image : af::Scope<Image> {
     static void run() {
         (void)Image();
         (void)af::val<Image>().setDebugName(af::val<const std::string>());
-        (void)af::val<Image>().getDebugName();
+        (void)af::val<const Image>().getDebugName();
         (void)af::val<Image>().load(af::val<const fs::path>(), af::val<bool>());
         (void)af::val<Image>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>(), af::val<bool>());
-        (void)af::val<Image>().save(af::val<const fs::path>());
+        (void)af::val<const Image>().save(af::val<const fs::path>());
         (void)af::val<Image>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<bool>());
         (void)af::val<Image>().clear();
-        (void)af::val<Image>().isAllocated();
-        (void)af::val<Image>().getWidth();
-        (void)af::val<Image>().getHeight();
-        (void)af::val<Image>().getChannels();
+        (void)af::val<const Image>().isAllocated();
+        (void)af::val<const Image>().getWidth();
+        (void)af::val<const Image>().getHeight();
+        (void)af::val<const Image>().getChannels();
         (void)af::val<Image>().getPixels();
-        (void)af::val<Image>().getPixels();
+        (void)af::val<const Image>().getPixels();
         (void)af::val<Image>().getPixelsData();
-        (void)af::val<Image>().getPixelsData();
-        (void)af::val<Image>().getColor(af::val<int>(), af::val<int>());
+        (void)af::val<const Image>().getPixelsData();
+        (void)af::val<const Image>().getColor(af::val<int>(), af::val<int>());
         (void)af::val<Image>().setColor(af::val<int>(), af::val<int>(), af::val<const Color>());
         (void)af::val<Image>().halve();
         (void)af::val<Image>().resize(af::val<int>(), af::val<int>());
@@ -1550,7 +1695,20 @@ struct Cover_Image : af::Scope<Image> {
         (void)af::val<Image>().update();
         (void)af::val<Image>().setDirty();
         (void)af::val<Image>().getTexture();
-        (void)af::val<Image>().getTexture();
+        (void)af::val<const Image>().getTexture();
+        (void)af::val<const Image>().hasTexture();
+        (void)af::val<const Image>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const Image>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<Image>().setMinFilter(af::val<TextureFilter>());
+        (void)af::val<Image>().setMagFilter(af::val<TextureFilter>());
+        (void)af::val<Image>().setFilter(af::val<TextureFilter>());
+        (void)af::val<const Image>().getMinFilter();
+        (void)af::val<const Image>().getMagFilter();
+        (void)af::val<Image>().setWrapU(af::val<TextureWrap>());
+        (void)af::val<Image>().setWrapV(af::val<TextureWrap>());
+        (void)af::val<Image>().setWrap(af::val<TextureWrap>());
+        (void)af::val<const Image>().getWrapU();
+        (void)af::val<const Image>().getWrapV();
     }
 };
 
@@ -1560,7 +1718,7 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
         (void)af::val<JsonReadReflector>().applied;
         (void)af::val<JsonReadReflector>().skipped;
         (void)af::val<JsonReadReflector>().readOnly;
-        (void)af::val<JsonReadReflector>().unknownKeys();
+        (void)af::val<const JsonReadReflector>().unknownKeys();
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<float>());
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<int>());
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<bool>());
@@ -1571,6 +1729,12 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<int>(), af::val<const EnumLabelSpan>());
         (void)af::val<JsonReadReflector>().beginGroup(af::val<const char *>());
         (void)af::val<JsonReadReflector>().endGroup();
+        (void)af::val<const JsonReadReflector>().isReadOnly();
+        (void)af::val<JsonReadReflector>().pushReadOnly();
+        (void)af::val<JsonReadReflector>().popReadOnly();
+        (void)af::val<const JsonReadReflector>().isDerived();
+        (void)af::val<JsonReadReflector>().pushDerived();
+        (void)af::val<JsonReadReflector>().popDerived();
     }
 };
 
@@ -1589,6 +1753,12 @@ struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<int>(), af::val<const EnumLabelSpan>());
         (void)af::val<JsonWriteReflector>().beginGroup(af::val<const char *>());
         (void)af::val<JsonWriteReflector>().endGroup();
+        (void)af::val<const JsonWriteReflector>().isReadOnly();
+        (void)af::val<JsonWriteReflector>().pushReadOnly();
+        (void)af::val<JsonWriteReflector>().popReadOnly();
+        (void)af::val<const JsonWriteReflector>().isDerived();
+        (void)af::val<JsonWriteReflector>().pushDerived();
+        (void)af::val<JsonWriteReflector>().popDerived();
     }
 };
 
@@ -1607,18 +1777,18 @@ struct Cover_KeyEventArgs : af::Scope<KeyEventArgs> {
 struct Cover_LayoutMod : af::Scope<LayoutMod> {
     static void run() {
         (void)LayoutMod(af::val<LayoutDirection>(), af::val<float>());
-        (void)af::val<LayoutMod>().getDirection();
+        (void)af::val<const LayoutMod>().getDirection();
         (void)af::val<LayoutMod>().setDirection(af::val<LayoutDirection>());
-        (void)af::val<LayoutMod>().getSpacing();
+        (void)af::val<const LayoutMod>().getSpacing();
         (void)af::val<LayoutMod>().setSpacing(af::val<float>());
-        (void)af::val<LayoutMod>().getCrossAxis();
+        (void)af::val<const LayoutMod>().getCrossAxis();
         (void)af::val<LayoutMod>().setCrossAxis(af::val<AxisMode>());
-        (void)af::val<LayoutMod>().getMainAxis();
+        (void)af::val<const LayoutMod>().getMainAxis();
         (void)af::val<LayoutMod>().setMainAxis(af::val<AxisMode>());
-        (void)af::val<LayoutMod>().getPaddingLeft();
-        (void)af::val<LayoutMod>().getPaddingTop();
-        (void)af::val<LayoutMod>().getPaddingRight();
-        (void)af::val<LayoutMod>().getPaddingBottom();
+        (void)af::val<const LayoutMod>().getPaddingLeft();
+        (void)af::val<const LayoutMod>().getPaddingTop();
+        (void)af::val<const LayoutMod>().getPaddingRight();
+        (void)af::val<const LayoutMod>().getPaddingBottom();
         (void)af::val<LayoutMod>().setPadding(af::val<float>());
         (void)af::val<LayoutMod>().setPadding(af::val<float>(), af::val<float>());
         (void)af::val<LayoutMod>().setPadding(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1627,6 +1797,8 @@ struct Cover_LayoutMod : af::Scope<LayoutMod> {
         (void)af::val<LayoutMod>().setPaddingRight(af::val<float>());
         (void)af::val<LayoutMod>().setPaddingBottom(af::val<float>());
         (void)af::val<LayoutMod>().updateLayout();
+        (void)af::val<LayoutMod>().getOwner();
+        (void)af::val<const LayoutMod>().getOwner();
     }
 };
 
@@ -1639,56 +1811,56 @@ struct Cover_Light : af::Scope<Light> {
         (void)af::val<Light>().setPoint(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Light>().setSpot(af::val<const Vec3>(), af::val<const Vec3>(), af::val<float>(), af::val<float>());
         (void)af::val<Light>().setSpot(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Light>().getSpotInnerCos();
-        (void)af::val<Light>().getSpotOuterCos();
+        (void)af::val<const Light>().getSpotInnerCos();
+        (void)af::val<const Light>().getSpotOuterCos();
         (void)af::val<Light>().setProjectionTexture(af::val<const Texture *>());
-        (void)af::val<Light>().getProjectionTexture();
-        (void)af::val<Light>().hasProjectionTexture();
+        (void)af::val<const Light>().getProjectionTexture();
+        (void)af::val<const Light>().hasProjectionTexture();
         (void)af::val<Light>().setLensShift(af::val<float>(), af::val<float>());
-        (void)af::val<Light>().getLensShiftX();
-        (void)af::val<Light>().getLensShiftY();
+        (void)af::val<const Light>().getLensShiftX();
+        (void)af::val<const Light>().getLensShiftY();
         (void)af::val<Light>().setProjectorAspect(af::val<float>());
-        (void)af::val<Light>().getProjectorAspect();
-        (void)af::val<Light>().computeProjectorViewProj(af::val<float>(), af::val<float>());
-        (void)af::val<Light>().computeShadowViewProj();
+        (void)af::val<const Light>().getProjectorAspect();
+        (void)af::val<const Light>().computeProjectorViewProj(af::val<float>(), af::val<float>());
+        (void)af::val<const Light>().computeShadowViewProj();
         (void)af::val<Light>().setIesProfile(af::val<const IesProfile *>());
-        (void)af::val<Light>().getIesProfile();
-        (void)af::val<Light>().hasIesProfile();
+        (void)af::val<const Light>().getIesProfile();
+        (void)af::val<const Light>().hasIesProfile();
         (void)af::val<Light>().enableShadow(af::val<int>());
         (void)af::val<Light>().disableShadow();
-        (void)af::val<Light>().isShadowEnabled();
-        (void)af::val<Light>().getShadowResolution();
+        (void)af::val<const Light>().isShadowEnabled();
+        (void)af::val<const Light>().getShadowResolution();
         (void)af::val<Light>().setShadowBias(af::val<float>());
-        (void)af::val<Light>().getShadowBias();
+        (void)af::val<const Light>().getShadowBias();
         (void)af::val<Light>().setShadowSoftness(af::val<float>());
-        (void)af::val<Light>().getShadowSoftness();
+        (void)af::val<const Light>().getShadowSoftness();
         (void)af::val<Light>().setShadowArea(af::val<const Vec3>(), af::val<float>());
-        (void)af::val<Light>().getShadowAreaCenter();
-        (void)af::val<Light>().getShadowAreaRadius();
+        (void)af::val<const Light>().getShadowAreaCenter();
+        (void)af::val<const Light>().getShadowAreaRadius();
         (void)af::val<Light>().setShadowSamples(af::val<int>());
-        (void)af::val<Light>().getShadowSamples();
-        (void)af::val<Light>().getType();
-        (void)af::val<Light>().getDirection();
-        (void)af::val<Light>().getPosition();
+        (void)af::val<const Light>().getShadowSamples();
+        (void)af::val<const Light>().getType();
+        (void)af::val<const Light>().getDirection();
+        (void)af::val<const Light>().getPosition();
         (void)af::val<Light>().setAmbient(af::val<const Color>());
         (void)af::val<Light>().setAmbient(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Light>().getAmbient();
+        (void)af::val<const Light>().getAmbient();
         (void)af::val<Light>().setDiffuse(af::val<const Color>());
         (void)af::val<Light>().setDiffuse(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Light>().getDiffuse();
+        (void)af::val<const Light>().getDiffuse();
         (void)af::val<Light>().setSpecular(af::val<const Color>());
         (void)af::val<Light>().setSpecular(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Light>().getSpecular();
+        (void)af::val<const Light>().getSpecular();
         (void)af::val<Light>().setIntensity(af::val<float>());
-        (void)af::val<Light>().getIntensity();
+        (void)af::val<const Light>().getIntensity();
         (void)af::val<Light>().setAttenuation(af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Light>().getConstantAttenuation();
-        (void)af::val<Light>().getLinearAttenuation();
-        (void)af::val<Light>().getQuadraticAttenuation();
+        (void)af::val<const Light>().getConstantAttenuation();
+        (void)af::val<const Light>().getLinearAttenuation();
+        (void)af::val<const Light>().getQuadraticAttenuation();
         (void)af::val<Light>().enable();
         (void)af::val<Light>().disable();
-        (void)af::val<Light>().isEnabled();
-        (void)af::val<Light>().calculate(af::val<const Vec3>(), af::val<const Vec3>(), af::val<const Material>(), af::val<const Vec3>());
+        (void)af::val<const Light>().isEnabled();
+        (void)af::val<const Light>().calculate(af::val<const Vec3>(), af::val<const Vec3>(), af::val<const Material>(), af::val<const Vec3>());
     }
 };
 
@@ -1696,7 +1868,7 @@ struct Cover_LoadResult : af::Scope<LoadResult> {
     static void run() {
         (void)af::val<LoadResult>().error;
         (void)af::val<LoadResult>().message;
-        (void)af::val<LoadResult>().ok();
+        (void)af::val<const LoadResult>().ok();
         (void)af::val<LoadResult>().success();
         (void)af::val<LoadResult>().fail(af::val<LoadError>(), af::val<std::string>());
     }
@@ -1733,15 +1905,15 @@ struct Cover_Logger : af::Scope<Logger> {
         (void)af::val<Logger>().log(af::val<LogLevel>(), af::val<const std::string>());
         (void)af::val<Logger>().setLogLevel(af::val<LogLevel>());
         (void)af::val<Logger>().setConsoleLogLevel(af::val<LogLevel>());
-        (void)af::val<Logger>().getConsoleLogLevel();
+        (void)af::val<const Logger>().getConsoleLogLevel();
         (void)af::val<Logger>().setLogFile(af::val<const fs::path>());
         (void)af::val<Logger>().closeFile();
         (void)af::val<Logger>().setFileLogLevel(af::val<LogLevel>());
-        (void)af::val<Logger>().getFileLogLevel();
+        (void)af::val<const Logger>().getFileLogLevel();
         (void)af::val<Logger>().setSystemLogLevel(af::val<LogLevel>());
-        (void)af::val<Logger>().getSystemLogLevel();
-        (void)af::val<Logger>().getLogFilePath();
-        (void)af::val<Logger>().isFileOpen();
+        (void)af::val<const Logger>().getSystemLogLevel();
+        (void)af::val<const Logger>().getLogFilePath();
+        (void)af::val<const Logger>().isFileOpen();
     }
 };
 
@@ -1751,7 +1923,7 @@ struct Cover_Mat3 : af::Scope<Mat3> {
         (void)Mat3(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mat3>().m;
         (void)af::val<Mat3>().at(af::val<int>(), af::val<int>());
-        (void)af::val<Mat3>().at(af::val<int>(), af::val<int>());
+        (void)af::val<const Mat3>().at(af::val<int>(), af::val<int>());
         (void)af::val<Mat3>().identity();
         (void)af::val<Mat3>().translate(af::val<float>(), af::val<float>());
         (void)af::val<Mat3>().translate(af::val<const Vec2>());
@@ -1759,12 +1931,12 @@ struct Cover_Mat3 : af::Scope<Mat3> {
         (void)af::val<Mat3>().scale(af::val<float>(), af::val<float>());
         (void)af::val<Mat3>().scale(af::val<float>());
         (void)af::val<Mat3>().scale(af::val<const Vec2>());
-        (void)af::val<Mat3>().operator*(af::val<const Mat3>());
-        (void)af::val<Mat3>().operator*(af::val<const Vec2>());
-        (void)af::val<Mat3>().operator*(af::val<const Vec3>());
-        (void)af::val<Mat3>().transposed();
-        (void)af::val<Mat3>().determinant();
-        (void)af::val<Mat3>().inverted();
+        (void)af::val<const Mat3>().operator*(af::val<const Mat3>());
+        (void)af::val<const Mat3>().operator*(af::val<const Vec2>());
+        (void)af::val<const Mat3>().operator*(af::val<const Vec3>());
+        (void)af::val<const Mat3>().transposed();
+        (void)af::val<const Mat3>().determinant();
+        (void)af::val<const Mat3>().inverted();
         (void)af::val<Mat3>().getHomography(af::val<const Vec2 *>(), af::val<const Vec2 *>());
     }
 };
@@ -1775,7 +1947,7 @@ struct Cover_Mat4 : af::Scope<Mat4> {
         (void)Mat4(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mat4>().m;
         (void)af::val<Mat4>().at(af::val<int>(), af::val<int>());
-        (void)af::val<Mat4>().at(af::val<int>(), af::val<int>());
+        (void)af::val<const Mat4>().at(af::val<int>(), af::val<int>());
         (void)af::val<Mat4>().identity();
         (void)af::val<Mat4>().fromHomography(af::val<const Mat3>());
         (void)af::val<Mat4>().translate(af::val<float>(), af::val<float>(), af::val<float>());
@@ -1787,12 +1959,12 @@ struct Cover_Mat4 : af::Scope<Mat4> {
         (void)af::val<Mat4>().scale(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mat4>().scale(af::val<float>());
         (void)af::val<Mat4>().scale(af::val<const Vec3>());
-        (void)af::val<Mat4>().operator*(af::val<const Mat4>());
-        (void)af::val<Mat4>().operator*(af::val<const Vec3>());
-        (void)af::val<Mat4>().operator*(af::val<const Vec4>());
-        (void)af::val<Mat4>().transposed();
-        (void)af::val<Mat4>().inverted();
-        (void)af::val<Mat4>().tryInvert(af::val<Mat4>());
+        (void)af::val<const Mat4>().operator*(af::val<const Mat4>());
+        (void)af::val<const Mat4>().operator*(af::val<const Vec3>());
+        (void)af::val<const Mat4>().operator*(af::val<const Vec4>());
+        (void)af::val<const Mat4>().transposed();
+        (void)af::val<const Mat4>().inverted();
+        (void)af::val<const Mat4>().tryInvert(af::val<Mat4>());
         (void)af::val<Mat4>().lookAt(af::val<const Vec3>(), af::val<const Vec3>(), af::val<const Vec3>());
         (void)af::val<Mat4>().ortho(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mat4>().perspective(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1805,18 +1977,18 @@ struct Cover_Material : af::Scope<Material> {
         (void)Material();
         (void)af::val<Material>().setBaseColor(af::val<const Color>());
         (void)af::val<Material>().setBaseColor(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Material>().getBaseColor();
+        (void)af::val<const Material>().getBaseColor();
         (void)af::val<Material>().setMetallic(af::val<float>());
-        (void)af::val<Material>().getMetallic();
+        (void)af::val<const Material>().getMetallic();
         (void)af::val<Material>().setRoughness(af::val<float>());
-        (void)af::val<Material>().getRoughness();
+        (void)af::val<const Material>().getRoughness();
         (void)af::val<Material>().setAo(af::val<float>());
-        (void)af::val<Material>().getAo();
+        (void)af::val<const Material>().getAo();
         (void)af::val<Material>().setEmissive(af::val<const Color>());
         (void)af::val<Material>().setEmissive(af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Material>().getEmissive();
+        (void)af::val<const Material>().getEmissive();
         (void)af::val<Material>().setEmissiveStrength(af::val<float>());
-        (void)af::val<Material>().getEmissiveStrength();
+        (void)af::val<const Material>().getEmissiveStrength();
         (void)af::val<Material>().gold();
         (void)af::val<Material>().silver();
         (void)af::val<Material>().copper();
@@ -1828,20 +2000,20 @@ struct Cover_Material : af::Scope<Material> {
         (void)af::val<Material>().rubber(af::val<const Color>());
         (void)af::val<Material>().fromPhong(af::val<const Color>(), af::val<const Color>(), af::val<float>(), af::val<const Color>());
         (void)af::val<Material>().setNormalMap(af::val<const Texture *>());
-        (void)af::val<Material>().getNormalMap();
-        (void)af::val<Material>().hasNormalMap();
+        (void)af::val<const Material>().getNormalMap();
+        (void)af::val<const Material>().hasNormalMap();
         (void)af::val<Material>().setBaseColorTexture(af::val<const Texture *>());
-        (void)af::val<Material>().getBaseColorTexture();
-        (void)af::val<Material>().hasBaseColorTexture();
+        (void)af::val<const Material>().getBaseColorTexture();
+        (void)af::val<const Material>().hasBaseColorTexture();
         (void)af::val<Material>().setMetallicRoughnessTexture(af::val<const Texture *>());
-        (void)af::val<Material>().getMetallicRoughnessTexture();
-        (void)af::val<Material>().hasMetallicRoughnessTexture();
+        (void)af::val<const Material>().getMetallicRoughnessTexture();
+        (void)af::val<const Material>().hasMetallicRoughnessTexture();
         (void)af::val<Material>().setEmissiveTexture(af::val<const Texture *>());
-        (void)af::val<Material>().getEmissiveTexture();
-        (void)af::val<Material>().hasEmissiveTexture();
+        (void)af::val<const Material>().getEmissiveTexture();
+        (void)af::val<const Material>().hasEmissiveTexture();
         (void)af::val<Material>().setOcclusionTexture(af::val<const Texture *>());
-        (void)af::val<Material>().getOcclusionTexture();
-        (void)af::val<Material>().hasOcclusionTexture();
+        (void)af::val<const Material>().getOcclusionTexture();
+        (void)af::val<const Material>().hasOcclusionTexture();
     }
 };
 
@@ -1849,51 +2021,51 @@ struct Cover_Mesh : af::Scope<Mesh> {
     static void run() {
         (void)Mesh();
         (void)af::val<Mesh>().setMode(af::val<PrimitiveMode>());
-        (void)af::val<Mesh>().getMode();
+        (void)af::val<const Mesh>().getMode();
         (void)af::val<Mesh>().addVertex(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mesh>().addVertex(af::val<const Vec2>());
         (void)af::val<Mesh>().addVertex(af::val<const Vec3>());
         (void)af::val<Mesh>().addVertices(af::val<const std::vector<Vec3>>());
         (void)af::val<Mesh>().getVertices();
-        (void)af::val<Mesh>().getVertices();
-        (void)af::val<Mesh>().getNumVertices();
+        (void)af::val<const Mesh>().getVertices();
+        (void)af::val<const Mesh>().getNumVertices();
         (void)af::val<Mesh>().addColor(af::val<const Color>());
         (void)af::val<Mesh>().addColor(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mesh>().addColors(af::val<const std::vector<Color>>());
         (void)af::val<Mesh>().getColors();
-        (void)af::val<Mesh>().getColors();
-        (void)af::val<Mesh>().getNumColors();
-        (void)af::val<Mesh>().hasColors();
+        (void)af::val<const Mesh>().getColors();
+        (void)af::val<const Mesh>().getNumColors();
+        (void)af::val<const Mesh>().hasColors();
         (void)af::val<Mesh>().addIndex(af::val<unsigned int>());
         (void)af::val<Mesh>().addIndices(af::val<const std::vector<unsigned int>>());
         (void)af::val<Mesh>().addTriangle(af::val<unsigned int>(), af::val<unsigned int>(), af::val<unsigned int>());
         (void)af::val<Mesh>().getIndices();
-        (void)af::val<Mesh>().getIndices();
-        (void)af::val<Mesh>().getNumIndices();
-        (void)af::val<Mesh>().hasIndices();
+        (void)af::val<const Mesh>().getIndices();
+        (void)af::val<const Mesh>().getNumIndices();
+        (void)af::val<const Mesh>().hasIndices();
         (void)af::val<Mesh>().addNormal(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mesh>().addNormal(af::val<const Vec3>());
         (void)af::val<Mesh>().addNormals(af::val<const std::vector<Vec3>>());
         (void)af::val<Mesh>().setNormal(af::val<size_t>(), af::val<const Vec3>());
-        (void)af::val<Mesh>().getNormal(af::val<size_t>());
+        (void)af::val<const Mesh>().getNormal(af::val<size_t>());
         (void)af::val<Mesh>().getNormals();
-        (void)af::val<Mesh>().getNormals();
-        (void)af::val<Mesh>().getNumNormals();
-        (void)af::val<Mesh>().hasNormals();
+        (void)af::val<const Mesh>().getNormals();
+        (void)af::val<const Mesh>().getNumNormals();
+        (void)af::val<const Mesh>().hasNormals();
         (void)af::val<Mesh>().addTexCoord(af::val<float>(), af::val<float>());
         (void)af::val<Mesh>().addTexCoord(af::val<const Vec2>());
         (void)af::val<Mesh>().getTexCoords();
-        (void)af::val<Mesh>().getTexCoords();
-        (void)af::val<Mesh>().getNumTexCoords();
-        (void)af::val<Mesh>().hasTexCoords();
-        (void)af::val<Mesh>().hasValidTexCoords();
+        (void)af::val<const Mesh>().getTexCoords();
+        (void)af::val<const Mesh>().getNumTexCoords();
+        (void)af::val<const Mesh>().hasTexCoords();
+        (void)af::val<const Mesh>().hasValidTexCoords();
         (void)af::val<Mesh>().addTangent(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Mesh>().addTangent(af::val<const Vec4>());
         (void)af::val<Mesh>().addTangent(af::val<const Vec3>(), af::val<float>());
         (void)af::val<Mesh>().getTangents();
-        (void)af::val<Mesh>().getTangents();
-        (void)af::val<Mesh>().getNumTangents();
-        (void)af::val<Mesh>().hasTangents();
+        (void)af::val<const Mesh>().getTangents();
+        (void)af::val<const Mesh>().getNumTangents();
+        (void)af::val<const Mesh>().hasTangents();
         (void)af::val<Mesh>().clear();
         (void)af::val<Mesh>().clearVertices();
         (void)af::val<Mesh>().clearNormals();
@@ -1911,25 +2083,25 @@ struct Cover_Mesh : af::Scope<Mesh> {
         (void)af::val<Mesh>().scale(af::val<const Vec3>());
         (void)af::val<Mesh>().transform(af::val<const Mat4>());
         (void)af::val<Mesh>().append(af::val<const Mesh>());
-        (void)af::val<Mesh>().draw();
-        (void)af::val<Mesh>().draw(af::val<const Texture>());
-        (void)af::val<Mesh>().draw(af::val<const Image>());
-        (void)af::val<Mesh>().drawNoLighting();
-        (void)af::val<Mesh>().drawWithLighting();
-        (void)af::val<Mesh>().drawNoLightingWithTexture(af::val<const Texture>());
-        (void)af::val<Mesh>().drawWireframe();
-        (void)af::val<Mesh>().markGpuDirty();
-        (void)af::val<Mesh>().getDataRevision();
-        (void)af::val<Mesh>().uploadToGpu();
-        (void)af::val<Mesh>().drawGpuPbr();
-        (void)af::val<Mesh>().drawGpuPoints();
-        (void)af::val<Mesh>().uploadPointsToGpu();
-        (void)af::val<Mesh>().getGpuVertexBuffer();
-        (void)af::val<Mesh>().getGpuIndexBuffer();
-        (void)af::val<Mesh>().getGpuVertexCount();
-        (void)af::val<Mesh>().getGpuIndexCount();
-        (void)af::val<Mesh>().getGpuPointBuffer();
-        (void)af::val<Mesh>().getGpuPointCount();
+        (void)af::val<const Mesh>().draw();
+        (void)af::val<const Mesh>().draw(af::val<const Texture>());
+        (void)af::val<const Mesh>().draw(af::val<const Image>());
+        (void)af::val<const Mesh>().drawNoLighting();
+        (void)af::val<const Mesh>().drawWithLighting();
+        (void)af::val<const Mesh>().drawNoLightingWithTexture(af::val<const Texture>());
+        (void)af::val<const Mesh>().drawWireframe();
+        (void)af::val<const Mesh>().markGpuDirty();
+        (void)af::val<const Mesh>().getDataRevision();
+        (void)af::val<const Mesh>().uploadToGpu();
+        (void)af::val<const Mesh>().drawGpuPbr();
+        (void)af::val<const Mesh>().drawGpuPoints();
+        (void)af::val<const Mesh>().uploadPointsToGpu();
+        (void)af::val<const Mesh>().getGpuVertexBuffer();
+        (void)af::val<const Mesh>().getGpuIndexBuffer();
+        (void)af::val<const Mesh>().getGpuVertexCount();
+        (void)af::val<const Mesh>().getGpuIndexCount();
+        (void)af::val<const Mesh>().getGpuPointBuffer();
+        (void)af::val<const Mesh>().getGpuPointCount();
     }
 };
 
@@ -1939,9 +2111,9 @@ struct Cover_MicInput : af::Scope<MicInput> {
         (void)af::val<MicInput>().start(af::val<int>());
         (void)af::val<MicInput>().stop();
         (void)af::val<MicInput>().getBuffer(af::val<float *>(), af::val<size_t>());
-        (void)af::val<MicInput>().isRunning();
-        (void)af::val<MicInput>().getSampleRate();
-        (void)af::val<MicInput>().getDeviceName();
+        (void)af::val<const MicInput>().isRunning();
+        (void)af::val<const MicInput>().getSampleRate();
+        (void)af::val<const MicInput>().getDeviceName();
         (void)af::val<MicInput>().onAudioData(af::val<const float *>(), af::val<size_t>());
     }
 };
@@ -1949,7 +2121,7 @@ struct Cover_MicInput : af::Scope<MicInput> {
 struct Cover_Mod : af::Scope<Mod> {
     static void run() {
         (void)af::val<Mod>().getOwner();
-        (void)af::val<Mod>().getOwner();
+        (void)af::val<const Mod>().getOwner();
     }
 };
 
@@ -2017,13 +2189,13 @@ struct Cover_NetworkInterface : af::Scope<NetworkInterface> {
         (void)af::val<NetworkInterface>().isIPv4;
         (void)af::val<NetworkInterface>().isLoopback;
         (void)af::val<NetworkInterface>().isUp;
-        (void)af::val<NetworkInterface>().getName();
-        (void)af::val<NetworkInterface>().getAddress();
-        (void)af::val<NetworkInterface>().getNetmask();
-        (void)af::val<NetworkInterface>().getMac();
-        (void)af::val<NetworkInterface>().getIsIPv4();
-        (void)af::val<NetworkInterface>().getIsLoopback();
-        (void)af::val<NetworkInterface>().getIsUp();
+        (void)af::val<const NetworkInterface>().getName();
+        (void)af::val<const NetworkInterface>().getAddress();
+        (void)af::val<const NetworkInterface>().getNetmask();
+        (void)af::val<const NetworkInterface>().getMac();
+        (void)af::val<const NetworkInterface>().getIsIPv4();
+        (void)af::val<const NetworkInterface>().getIsLoopback();
+        (void)af::val<const NetworkInterface>().getIsUp();
     }
 };
 
@@ -2040,54 +2212,54 @@ struct Cover_Node : af::Scope<Node> {
         (void)af::val<Node>().removeAllChildren();
         (void)af::val<Node>().onChildAdded(af::val<Ptr>());
         (void)af::val<Node>().onChildRemoved(af::val<Ptr>());
-        (void)af::val<Node>().getParent();
-        (void)af::val<Node>().getChildren();
-        (void)af::val<Node>().getChildCount();
-        (void)af::val<Node>().indexOfChild(af::val<const Node *>());
-        (void)af::val<Node>().getChildIndex();
+        (void)af::val<const Node>().getParent();
+        (void)af::val<const Node>().getChildren();
+        (void)af::val<const Node>().getChildCount();
+        (void)af::val<const Node>().indexOfChild(af::val<const Node *>());
+        (void)af::val<const Node>().getChildIndex();
         (void)af::val<Node>().moveToFront();
         (void)af::val<Node>().moveToBack();
-        (void)af::val<Node>().isActive();
+        (void)af::val<const Node>().isActive();
         (void)af::val<Node>().setActive(af::val<bool>());
-        (void)af::val<Node>().isVisible();
+        (void)af::val<const Node>().isVisible();
         (void)af::val<Node>().setVisible(af::val<bool>());
         (void)af::val<Node>().destroy();
-        (void)af::val<Node>().isDead();
+        (void)af::val<const Node>().isDead();
         (void)af::val<Node>().enableEvents();
         (void)af::val<Node>().disableEvents();
-        (void)af::val<Node>().isEventsEnabled();
-        (void)af::val<Node>().isMouseOver();
+        (void)af::val<const Node>().isEventsEnabled();
+        (void)af::val<const Node>().isMouseOver();
         (void)af::val<Node>().setName(af::val<const std::string>());
-        (void)af::val<Node>().getName();
-        (void)af::val<Node>().hasName();
-        (void)af::val<Node>().getTypeName();
-        (void)af::val<Node>().getDisplayName();
-        (void)af::val<Node>().getInstanceId();
+        (void)af::val<const Node>().getName();
+        (void)af::val<const Node>().hasName();
+        (void)af::val<const Node>().getTypeName();
+        (void)af::val<const Node>().getDisplayName();
+        (void)af::val<const Node>().getInstanceId();
         (void)af::val<Node>().findByInstanceId(af::val<uint64_t>());
-        (void)af::val<Node>().getPos();
-        (void)af::val<Node>().getX();
-        (void)af::val<Node>().getY();
-        (void)af::val<Node>().getZ();
+        (void)af::val<const Node>().getPos();
+        (void)af::val<const Node>().getX();
+        (void)af::val<const Node>().getY();
+        (void)af::val<const Node>().getZ();
         (void)af::val<Node>().setPos(af::val<const Vec3>());
         (void)af::val<Node>().setPos(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Node>().setX(af::val<float>());
         (void)af::val<Node>().setY(af::val<float>());
         (void)af::val<Node>().setZ(af::val<float>());
-        (void)af::val<Node>().getQuaternion();
+        (void)af::val<const Node>().getQuaternion();
         (void)af::val<Node>().setQuaternion(af::val<const Quaternion>());
-        (void)af::val<Node>().getEuler();
+        (void)af::val<const Node>().getEuler();
         (void)af::val<Node>().setEuler(af::val<const Vec3>());
         (void)af::val<Node>().setEuler(af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Node>().getEulerDeg();
+        (void)af::val<const Node>().getEulerDeg();
         (void)af::val<Node>().setEulerDeg(af::val<const Vec3>());
-        (void)af::val<Node>().getRot();
+        (void)af::val<const Node>().getRot();
         (void)af::val<Node>().setRot(af::val<float>());
-        (void)af::val<Node>().getRotDeg();
+        (void)af::val<const Node>().getRotDeg();
         (void)af::val<Node>().setRotDeg(af::val<float>());
-        (void)af::val<Node>().getScale();
-        (void)af::val<Node>().getScaleX();
-        (void)af::val<Node>().getScaleY();
-        (void)af::val<Node>().getScaleZ();
+        (void)af::val<const Node>().getScale();
+        (void)af::val<const Node>().getScaleX();
+        (void)af::val<const Node>().getScaleY();
+        (void)af::val<const Node>().getScaleZ();
         (void)af::val<Node>().setScale(af::val<const Vec3>());
         (void)af::val<Node>().setScale(af::val<float>());
         (void)af::val<Node>().setScale(af::val<float>(), af::val<float>(), af::val<float>());
@@ -2095,25 +2267,25 @@ struct Cover_Node : af::Scope<Node> {
         (void)af::val<Node>().setScaleY(af::val<float>());
         (void)af::val<Node>().setScaleZ(af::val<float>());
         (void)af::val<Node>().localMatrixChanged;
-        (void)af::val<Node>().getLocalMatrix();
-        (void)af::val<Node>().getGlobalMatrix();
-        (void)af::val<Node>().getGlobalMatrixInverse();
-        (void)af::val<Node>().globalToLocal(af::val<const Vec3>());
-        (void)af::val<Node>().getGlobalPos();
+        (void)af::val<const Node>().getLocalMatrix();
+        (void)af::val<const Node>().getGlobalMatrix();
+        (void)af::val<const Node>().getGlobalMatrixInverse();
+        (void)af::val<const Node>().globalToLocal(af::val<const Vec3>());
+        (void)af::val<const Node>().getGlobalPos();
         (void)af::val<Node>().setGlobalPos(af::val<const Vec3>());
         (void)af::val<Node>().setGlobalPos(af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Node>().localToGlobal(af::val<const Vec3>());
-        (void)af::val<Node>().getMouseX();
-        (void)af::val<Node>().getMouseY();
-        (void)af::val<Node>().getPMouseX();
-        (void)af::val<Node>().getPMouseY();
+        (void)af::val<const Node>().localToGlobal(af::val<const Vec3>());
+        (void)af::val<const Node>().getMouseX();
+        (void)af::val<const Node>().getMouseY();
+        (void)af::val<const Node>().getPMouseX();
+        (void)af::val<const Node>().getPMouseY();
         (void)af::val<Node>().findHitNode(af::val<const Ray>());
         (void)af::val<Node>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
-        (void)af::val<Node>().getCameraContext();
+        (void)af::val<const Node>().getCameraContext();
         (void)af::val<Node>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
-        (void)af::val<Node>().getModTypeNames();
-        (void)af::val<Node>().getMods();
-        (void)af::val<Node>().getModByTypeName(af::val<const std::string>());
+        (void)af::val<const Node>().getModTypeNames();
+        (void)af::val<const Node>().getMods();
+        (void)af::val<const Node>().getModByTypeName(af::val<const std::string>());
         (void)af::val<Node>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
         (void)af::val<Node>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
         (void)af::val<Node>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
@@ -2139,7 +2311,7 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
         (void)af::val<Node::HitResult>().node;
         (void)af::val<Node::HitResult>().distance;
         (void)af::val<Node::HitResult>().localPoint;
-        (void)af::val<Node::HitResult>().hit();
+        (void)af::val<const Node::HitResult>().hit();
     }
 };
 
@@ -2163,19 +2335,19 @@ struct Cover_Path : af::Scope<Path> {
         (void)af::val<Path>().addVertex(af::val<const Vec3>());
         (void)af::val<Path>().addVertices(af::val<const std::vector<Vec2>>());
         (void)af::val<Path>().addVertices(af::val<const std::vector<Vec3>>());
+        (void)af::val<const Path>().getVertices();
         (void)af::val<Path>().getVertices();
-        (void)af::val<Path>().getVertices();
-        (void)af::val<Path>().size();
-        (void)af::val<Path>().empty();
+        (void)af::val<const Path>().size();
+        (void)af::val<const Path>().empty();
         (void)af::val<Path>().operator[](af::val<int>());
-        (void)af::val<Path>().operator[](af::val<int>());
+        (void)af::val<const Path>().operator[](af::val<int>());
         (void)af::val<Path>().clear();
         (void)af::val<Path>().moveTo(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Path>().moveTo(af::val<const Vec2>());
         (void)af::val<Path>().moveTo(af::val<const Vec3>());
-        (void)af::val<Path>().getNumSubpaths();
-        (void)af::val<Path>().getSubpathRange(af::val<size_t>());
-        (void)af::val<Path>().isSubpathClosed(af::val<size_t>());
+        (void)af::val<const Path>().getNumSubpaths();
+        (void)af::val<const Path>().getSubpathRange(af::val<size_t>());
+        (void)af::val<const Path>().isSubpathClosed(af::val<size_t>());
         (void)af::val<Path>().lineTo(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Path>().lineTo(af::val<const Vec2>());
         (void)af::val<Path>().lineTo(af::val<const Vec3>());
@@ -2189,26 +2361,26 @@ struct Cover_Path : af::Scope<Path> {
         (void)af::val<Path>().curveTo(af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().curveTo(af::val<const Vec2>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>(), af::val<int>());
-        (void)af::val<Path>().arcDeg(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>(), af::val<int>());
-        (void)af::val<Path>().arcDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
-        (void)af::val<Path>().arcDeg(af::val<const Vec2>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<const Vec2>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().arc(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>());
         (void)af::val<Path>().arc(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>());
         (void)af::val<Path>().arc(af::val<const Vec2>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>());
+        (void)af::val<Path>().arcDeg(af::val<const Vec3>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<bool>(), af::val<int>());
+        (void)af::val<Path>().arcDeg(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
+        (void)af::val<Path>().arcDeg(af::val<const Vec2>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<Path>().close();
         (void)af::val<Path>().setClosed(af::val<bool>());
-        (void)af::val<Path>().isClosed();
+        (void)af::val<const Path>().isClosed();
         (void)af::val<Path>().reverseWinding(af::val<size_t>());
         (void)af::val<Path>().reverseWinding();
-        (void)af::val<Path>().draw();
-        (void)af::val<Path>().buildFillTriangles();
-        (void)af::val<Path>().drawFill();
-        (void)af::val<Path>().toFillMesh();
-        (void)af::val<Path>().drawStroke();
-        (void)af::val<Path>().getBounds();
-        (void)af::val<Path>().getPerimeter();
+        (void)af::val<const Path>().draw();
+        (void)af::val<const Path>().buildFillTriangles();
+        (void)af::val<const Path>().drawFill();
+        (void)af::val<const Path>().toFillMesh();
+        (void)af::val<const Path>().drawStroke();
+        (void)af::val<const Path>().getBounds();
+        (void)af::val<const Path>().getPerimeter();
     }
 };
 
@@ -2217,30 +2389,30 @@ struct Cover_Pixels : af::Scope<Pixels> {
         (void)Pixels();
         (void)af::val<Pixels>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<PixelFormat>());
         (void)af::val<Pixels>().clear();
-        (void)af::val<Pixels>().isAllocated();
-        (void)af::val<Pixels>().getWidth();
-        (void)af::val<Pixels>().getHeight();
-        (void)af::val<Pixels>().getChannels();
-        (void)af::val<Pixels>().getFormat();
-        (void)af::val<Pixels>().isFloat();
-        (void)af::val<Pixels>().getTotalBytes();
+        (void)af::val<const Pixels>().isAllocated();
+        (void)af::val<const Pixels>().getWidth();
+        (void)af::val<const Pixels>().getHeight();
+        (void)af::val<const Pixels>().getChannels();
+        (void)af::val<const Pixels>().getFormat();
+        (void)af::val<const Pixels>().isFloat();
+        (void)af::val<const Pixels>().getTotalBytes();
         (void)af::val<Pixels>().getData();
-        (void)af::val<Pixels>().getData();
+        (void)af::val<const Pixels>().getData();
         (void)af::val<Pixels>().getDataF32();
-        (void)af::val<Pixels>().getDataF32();
+        (void)af::val<const Pixels>().getDataF32();
         (void)af::val<Pixels>().getDataVoid();
-        (void)af::val<Pixels>().getDataVoid();
-        (void)af::val<Pixels>().getColor(af::val<int>(), af::val<int>());
+        (void)af::val<const Pixels>().getDataVoid();
+        (void)af::val<const Pixels>().getColor(af::val<int>(), af::val<int>());
         (void)af::val<Pixels>().setColor(af::val<int>(), af::val<int>(), af::val<const Color>());
         (void)af::val<Pixels>().setFromPixels(af::val<const unsigned char *>(), af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<Pixels>().setFromFloats(af::val<const float *>(), af::val<int>(), af::val<int>(), af::val<int>());
-        (void)af::val<Pixels>().copyTo(af::val<unsigned char *>());
-        (void)af::val<Pixels>().clone();
+        (void)af::val<const Pixels>().copyTo(af::val<unsigned char *>());
+        (void)af::val<const Pixels>().clone();
         (void)af::val<Pixels>().load(af::val<const fs::path>());
         (void)af::val<Pixels>().loadHDR(af::val<const fs::path>());
         (void)af::val<Pixels>().loadPlatform(af::val<const fs::path>());
         (void)af::val<Pixels>().loadFromMemory(af::val<const unsigned char *>(), af::val<int>());
-        (void)af::val<Pixels>().save(af::val<const fs::path>());
+        (void)af::val<const Pixels>().save(af::val<const fs::path>());
         (void)af::val<Pixels>().halve();
         (void)af::val<Pixels>().resize(af::val<int>(), af::val<int>());
         (void)af::val<Pixels>().crop(af::val<int>(), af::val<int>(), af::val<int>(), af::val<int>());
@@ -2308,21 +2480,21 @@ struct Cover_Quaternion : af::Scope<Quaternion> {
         (void)af::val<Quaternion>().x;
         (void)af::val<Quaternion>().y;
         (void)af::val<Quaternion>().z;
-        (void)af::val<Quaternion>().operator==(af::val<const Quaternion>());
-        (void)af::val<Quaternion>().operator!=(af::val<const Quaternion>());
+        (void)af::val<const Quaternion>().operator==(af::val<const Quaternion>());
+        (void)af::val<const Quaternion>().operator!=(af::val<const Quaternion>());
         (void)af::val<Quaternion>().identity();
         (void)af::val<Quaternion>().fromAxisAngle(af::val<const Vec3>(), af::val<float>());
         (void)af::val<Quaternion>().fromEuler(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Quaternion>().fromEuler(af::val<const Vec3>());
-        (void)af::val<Quaternion>().toEuler();
-        (void)af::val<Quaternion>().toMatrix();
-        (void)af::val<Quaternion>().length();
-        (void)af::val<Quaternion>().lengthSquared();
-        (void)af::val<Quaternion>().normalized();
+        (void)af::val<const Quaternion>().toEuler();
+        (void)af::val<const Quaternion>().toMatrix();
+        (void)af::val<const Quaternion>().length();
+        (void)af::val<const Quaternion>().lengthSquared();
+        (void)af::val<const Quaternion>().normalized();
         (void)af::val<Quaternion>().normalize();
-        (void)af::val<Quaternion>().conjugate();
-        (void)af::val<Quaternion>().operator*(af::val<const Quaternion>());
-        (void)af::val<Quaternion>().rotate(af::val<const Vec3>());
+        (void)af::val<const Quaternion>().conjugate();
+        (void)af::val<const Quaternion>().operator*(af::val<const Quaternion>());
+        (void)af::val<const Quaternion>().rotate(af::val<const Vec3>());
         (void)af::val<Quaternion>().slerp(af::val<const Quaternion>(), af::val<const Quaternion>(), af::val<float>());
     }
 };
@@ -2333,13 +2505,13 @@ struct Cover_Ray : af::Scope<Ray> {
         (void)Ray(af::val<const Vec3>(), af::val<const Vec3>());
         (void)af::val<Ray>().origin;
         (void)af::val<Ray>().direction;
-        (void)af::val<Ray>().at(af::val<float>());
-        (void)af::val<Ray>().transformed(af::val<const Mat4>());
+        (void)af::val<const Ray>().at(af::val<float>());
+        (void)af::val<const Ray>().transformed(af::val<const Mat4>());
         (void)af::val<Ray>().fromScreenPoint2D(af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Ray>().intersectZPlane();
-        (void)af::val<Ray>().intersectPlane(af::val<const Vec3>(), af::val<float>());
-        (void)af::val<Ray>().intersectSphere(af::val<float>());
-        (void)af::val<Ray>().intersectAABB(af::val<const Vec3>(), af::val<const Vec3>());
+        (void)af::val<const Ray>().intersectZPlane();
+        (void)af::val<const Ray>().intersectPlane(af::val<const Vec3>(), af::val<float>());
+        (void)af::val<const Ray>().intersectSphere(af::val<float>());
+        (void)af::val<const Ray>().intersectAABB(af::val<const Vec3>(), af::val<const Vec3>());
     }
 };
 
@@ -2364,13 +2536,13 @@ struct Cover_Rect : af::Scope<Rect> {
         (void)af::val<Rect>().height;
         (void)af::val<Rect>().set(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Rect>().set(af::val<const Vec2>(), af::val<float>(), af::val<float>());
-        (void)af::val<Rect>().getRight();
-        (void)af::val<Rect>().getBottom();
-        (void)af::val<Rect>().getCenter();
-        (void)af::val<Rect>().getCenterX();
-        (void)af::val<Rect>().getCenterY();
-        (void)af::val<Rect>().contains(af::val<float>(), af::val<float>());
-        (void)af::val<Rect>().intersects(af::val<const Rect>());
+        (void)af::val<const Rect>().getRight();
+        (void)af::val<const Rect>().getBottom();
+        (void)af::val<const Rect>().getCenter();
+        (void)af::val<const Rect>().getCenterX();
+        (void)af::val<const Rect>().getCenterY();
+        (void)af::val<const Rect>().contains(af::val<float>(), af::val<float>());
+        (void)af::val<const Rect>().intersects(af::val<const Rect>());
     }
 };
 
@@ -2380,9 +2552,9 @@ struct Cover_RectNode : af::Scope<RectNode> {
         (void)af::val<RectNode>().mouseReleased;
         (void)af::val<RectNode>().mouseDragged;
         (void)af::val<RectNode>().mouseScrolled;
-        (void)af::val<RectNode>().getWidth();
-        (void)af::val<RectNode>().getHeight();
-        (void)af::val<RectNode>().getSize();
+        (void)af::val<const RectNode>().getWidth();
+        (void)af::val<const RectNode>().getHeight();
+        (void)af::val<const RectNode>().getSize();
         (void)af::val<RectNode>().setWidth(af::val<float>());
         (void)af::val<RectNode>().setHeight(af::val<float>());
         (void)af::val<RectNode>().setSize(af::val<float>(), af::val<float>());
@@ -2390,15 +2562,115 @@ struct Cover_RectNode : af::Scope<RectNode> {
         (void)af::val<RectNode>().setSize(af::val<const Vec2>());
         (void)af::val<RectNode>().setRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<RectNode>().setClipping(af::val<bool>());
-        (void)af::val<RectNode>().isClipping();
-        (void)af::val<RectNode>().getLeft();
-        (void)af::val<RectNode>().getRight();
-        (void)af::val<RectNode>().getTop();
-        (void)af::val<RectNode>().getBottom();
+        (void)af::val<const RectNode>().isClipping();
+        (void)af::val<const RectNode>().getLeft();
+        (void)af::val<const RectNode>().getRight();
+        (void)af::val<const RectNode>().getTop();
+        (void)af::val<const RectNode>().getBottom();
         (void)af::val<RectNode>().hitTest(af::val<const Ray>(), af::val<float>());
         (void)af::val<RectNode>().hitTest(af::val<Vec2>());
         (void)af::val<RectNode>().findHitNodeRecursive(af::val<internal::PickRaySource>(), af::val<const CameraContext *>(), af::val<Ray>(), af::val<const Mat4>());
         (void)af::val<RectNode>().draw();
+        (void)af::val<RectNode>().setup();
+        (void)af::val<RectNode>().update();
+        (void)af::val<RectNode>().cleanup();
+        (void)af::val<RectNode>().addChild(af::val<Ptr>(), af::val<bool>());
+        (void)af::val<RectNode>().insertChild(af::val<size_t>(), af::val<Ptr>(), af::val<bool>());
+        (void)af::val<RectNode>().removeChild(af::val<Ptr>());
+        (void)af::val<RectNode>().removeAllChildren();
+        (void)af::val<RectNode>().onChildAdded(af::val<Ptr>());
+        (void)af::val<RectNode>().onChildRemoved(af::val<Ptr>());
+        (void)af::val<const RectNode>().getParent();
+        (void)af::val<const RectNode>().getChildren();
+        (void)af::val<const RectNode>().getChildCount();
+        (void)af::val<const RectNode>().indexOfChild(af::val<const Node *>());
+        (void)af::val<const RectNode>().getChildIndex();
+        (void)af::val<RectNode>().moveToFront();
+        (void)af::val<RectNode>().moveToBack();
+        (void)af::val<const RectNode>().isActive();
+        (void)af::val<RectNode>().setActive(af::val<bool>());
+        (void)af::val<const RectNode>().isVisible();
+        (void)af::val<RectNode>().setVisible(af::val<bool>());
+        (void)af::val<RectNode>().destroy();
+        (void)af::val<const RectNode>().isDead();
+        (void)af::val<RectNode>().enableEvents();
+        (void)af::val<RectNode>().disableEvents();
+        (void)af::val<const RectNode>().isEventsEnabled();
+        (void)af::val<const RectNode>().isMouseOver();
+        (void)af::val<RectNode>().setName(af::val<const std::string>());
+        (void)af::val<const RectNode>().getName();
+        (void)af::val<const RectNode>().hasName();
+        (void)af::val<const RectNode>().getTypeName();
+        (void)af::val<const RectNode>().getDisplayName();
+        (void)af::val<const RectNode>().getInstanceId();
+        (void)af::val<RectNode>().findByInstanceId(af::val<uint64_t>());
+        (void)af::val<const RectNode>().getPos();
+        (void)af::val<const RectNode>().getX();
+        (void)af::val<const RectNode>().getY();
+        (void)af::val<const RectNode>().getZ();
+        (void)af::val<RectNode>().setPos(af::val<const Vec3>());
+        (void)af::val<RectNode>().setPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<RectNode>().setX(af::val<float>());
+        (void)af::val<RectNode>().setY(af::val<float>());
+        (void)af::val<RectNode>().setZ(af::val<float>());
+        (void)af::val<const RectNode>().getQuaternion();
+        (void)af::val<RectNode>().setQuaternion(af::val<const Quaternion>());
+        (void)af::val<const RectNode>().getEuler();
+        (void)af::val<RectNode>().setEuler(af::val<const Vec3>());
+        (void)af::val<RectNode>().setEuler(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const RectNode>().getEulerDeg();
+        (void)af::val<RectNode>().setEulerDeg(af::val<const Vec3>());
+        (void)af::val<const RectNode>().getRot();
+        (void)af::val<RectNode>().setRot(af::val<float>());
+        (void)af::val<const RectNode>().getRotDeg();
+        (void)af::val<RectNode>().setRotDeg(af::val<float>());
+        (void)af::val<const RectNode>().getScale();
+        (void)af::val<const RectNode>().getScaleX();
+        (void)af::val<const RectNode>().getScaleY();
+        (void)af::val<const RectNode>().getScaleZ();
+        (void)af::val<RectNode>().setScale(af::val<const Vec3>());
+        (void)af::val<RectNode>().setScale(af::val<float>());
+        (void)af::val<RectNode>().setScale(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<RectNode>().setScaleX(af::val<float>());
+        (void)af::val<RectNode>().setScaleY(af::val<float>());
+        (void)af::val<RectNode>().setScaleZ(af::val<float>());
+        (void)af::val<RectNode>().localMatrixChanged;
+        (void)af::val<const RectNode>().getLocalMatrix();
+        (void)af::val<const RectNode>().getGlobalMatrix();
+        (void)af::val<const RectNode>().getGlobalMatrixInverse();
+        (void)af::val<const RectNode>().globalToLocal(af::val<const Vec3>());
+        (void)af::val<const RectNode>().getGlobalPos();
+        (void)af::val<RectNode>().setGlobalPos(af::val<const Vec3>());
+        (void)af::val<RectNode>().setGlobalPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const RectNode>().localToGlobal(af::val<const Vec3>());
+        (void)af::val<const RectNode>().getMouseX();
+        (void)af::val<const RectNode>().getMouseY();
+        (void)af::val<const RectNode>().getPMouseX();
+        (void)af::val<const RectNode>().getPMouseY();
+        (void)af::val<RectNode>().findHitNode(af::val<const Ray>());
+        (void)af::val<RectNode>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
+        (void)af::val<const RectNode>().getCameraContext();
+        (void)af::val<RectNode>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
+        (void)af::val<const RectNode>().getModTypeNames();
+        (void)af::val<const RectNode>().getMods();
+        (void)af::val<const RectNode>().getModByTypeName(af::val<const std::string>());
+        (void)af::val<RectNode>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<RectNode>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<RectNode>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
+        (void)af::val<RectNode>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<RectNode>().cancelAllTimers();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNode>().callAfterAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNode>().callEveryAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNode>().cancelAsyncTimer(af::val<uint64_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNode>().cancelAllAsyncTimers();
+#endif
     }
 };
 
@@ -2409,8 +2681,130 @@ struct Cover_RectNodeButton : af::Scope<RectNodeButton> {
         (void)af::val<RectNodeButton>().hoverColor;
         (void)af::val<RectNodeButton>().pressColor;
         (void)af::val<RectNodeButton>().label;
-        (void)af::val<RectNodeButton>().isPressed();
+        (void)af::val<const RectNodeButton>().isPressed();
         (void)af::val<RectNodeButton>().draw();
+        (void)af::val<RectNodeButton>().mousePressed;
+        (void)af::val<RectNodeButton>().mouseReleased;
+        (void)af::val<RectNodeButton>().mouseDragged;
+        (void)af::val<RectNodeButton>().mouseScrolled;
+        (void)af::val<const RectNodeButton>().getWidth();
+        (void)af::val<const RectNodeButton>().getHeight();
+        (void)af::val<const RectNodeButton>().getSize();
+        (void)af::val<RectNodeButton>().setWidth(af::val<float>());
+        (void)af::val<RectNodeButton>().setHeight(af::val<float>());
+        (void)af::val<RectNodeButton>().setSize(af::val<float>(), af::val<float>());
+        (void)af::val<RectNodeButton>().setSize(af::val<float>());
+        (void)af::val<RectNodeButton>().setSize(af::val<const Vec2>());
+        (void)af::val<RectNodeButton>().setRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<RectNodeButton>().setClipping(af::val<bool>());
+        (void)af::val<const RectNodeButton>().isClipping();
+        (void)af::val<const RectNodeButton>().getLeft();
+        (void)af::val<const RectNodeButton>().getRight();
+        (void)af::val<const RectNodeButton>().getTop();
+        (void)af::val<const RectNodeButton>().getBottom();
+        (void)af::val<RectNodeButton>().hitTest(af::val<const Ray>(), af::val<float>());
+        (void)af::val<RectNodeButton>().hitTest(af::val<Vec2>());
+        (void)af::val<RectNodeButton>().findHitNodeRecursive(af::val<internal::PickRaySource>(), af::val<const CameraContext *>(), af::val<Ray>(), af::val<const Mat4>());
+        (void)af::val<RectNodeButton>().setup();
+        (void)af::val<RectNodeButton>().update();
+        (void)af::val<RectNodeButton>().cleanup();
+        (void)af::val<RectNodeButton>().addChild(af::val<Ptr>(), af::val<bool>());
+        (void)af::val<RectNodeButton>().insertChild(af::val<size_t>(), af::val<Ptr>(), af::val<bool>());
+        (void)af::val<RectNodeButton>().removeChild(af::val<Ptr>());
+        (void)af::val<RectNodeButton>().removeAllChildren();
+        (void)af::val<RectNodeButton>().onChildAdded(af::val<Ptr>());
+        (void)af::val<RectNodeButton>().onChildRemoved(af::val<Ptr>());
+        (void)af::val<const RectNodeButton>().getParent();
+        (void)af::val<const RectNodeButton>().getChildren();
+        (void)af::val<const RectNodeButton>().getChildCount();
+        (void)af::val<const RectNodeButton>().indexOfChild(af::val<const Node *>());
+        (void)af::val<const RectNodeButton>().getChildIndex();
+        (void)af::val<RectNodeButton>().moveToFront();
+        (void)af::val<RectNodeButton>().moveToBack();
+        (void)af::val<const RectNodeButton>().isActive();
+        (void)af::val<RectNodeButton>().setActive(af::val<bool>());
+        (void)af::val<const RectNodeButton>().isVisible();
+        (void)af::val<RectNodeButton>().setVisible(af::val<bool>());
+        (void)af::val<RectNodeButton>().destroy();
+        (void)af::val<const RectNodeButton>().isDead();
+        (void)af::val<RectNodeButton>().enableEvents();
+        (void)af::val<RectNodeButton>().disableEvents();
+        (void)af::val<const RectNodeButton>().isEventsEnabled();
+        (void)af::val<const RectNodeButton>().isMouseOver();
+        (void)af::val<RectNodeButton>().setName(af::val<const std::string>());
+        (void)af::val<const RectNodeButton>().getName();
+        (void)af::val<const RectNodeButton>().hasName();
+        (void)af::val<const RectNodeButton>().getTypeName();
+        (void)af::val<const RectNodeButton>().getDisplayName();
+        (void)af::val<const RectNodeButton>().getInstanceId();
+        (void)af::val<RectNodeButton>().findByInstanceId(af::val<uint64_t>());
+        (void)af::val<const RectNodeButton>().getPos();
+        (void)af::val<const RectNodeButton>().getX();
+        (void)af::val<const RectNodeButton>().getY();
+        (void)af::val<const RectNodeButton>().getZ();
+        (void)af::val<RectNodeButton>().setPos(af::val<const Vec3>());
+        (void)af::val<RectNodeButton>().setPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<RectNodeButton>().setX(af::val<float>());
+        (void)af::val<RectNodeButton>().setY(af::val<float>());
+        (void)af::val<RectNodeButton>().setZ(af::val<float>());
+        (void)af::val<const RectNodeButton>().getQuaternion();
+        (void)af::val<RectNodeButton>().setQuaternion(af::val<const Quaternion>());
+        (void)af::val<const RectNodeButton>().getEuler();
+        (void)af::val<RectNodeButton>().setEuler(af::val<const Vec3>());
+        (void)af::val<RectNodeButton>().setEuler(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const RectNodeButton>().getEulerDeg();
+        (void)af::val<RectNodeButton>().setEulerDeg(af::val<const Vec3>());
+        (void)af::val<const RectNodeButton>().getRot();
+        (void)af::val<RectNodeButton>().setRot(af::val<float>());
+        (void)af::val<const RectNodeButton>().getRotDeg();
+        (void)af::val<RectNodeButton>().setRotDeg(af::val<float>());
+        (void)af::val<const RectNodeButton>().getScale();
+        (void)af::val<const RectNodeButton>().getScaleX();
+        (void)af::val<const RectNodeButton>().getScaleY();
+        (void)af::val<const RectNodeButton>().getScaleZ();
+        (void)af::val<RectNodeButton>().setScale(af::val<const Vec3>());
+        (void)af::val<RectNodeButton>().setScale(af::val<float>());
+        (void)af::val<RectNodeButton>().setScale(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<RectNodeButton>().setScaleX(af::val<float>());
+        (void)af::val<RectNodeButton>().setScaleY(af::val<float>());
+        (void)af::val<RectNodeButton>().setScaleZ(af::val<float>());
+        (void)af::val<RectNodeButton>().localMatrixChanged;
+        (void)af::val<const RectNodeButton>().getLocalMatrix();
+        (void)af::val<const RectNodeButton>().getGlobalMatrix();
+        (void)af::val<const RectNodeButton>().getGlobalMatrixInverse();
+        (void)af::val<const RectNodeButton>().globalToLocal(af::val<const Vec3>());
+        (void)af::val<const RectNodeButton>().getGlobalPos();
+        (void)af::val<RectNodeButton>().setGlobalPos(af::val<const Vec3>());
+        (void)af::val<RectNodeButton>().setGlobalPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const RectNodeButton>().localToGlobal(af::val<const Vec3>());
+        (void)af::val<const RectNodeButton>().getMouseX();
+        (void)af::val<const RectNodeButton>().getMouseY();
+        (void)af::val<const RectNodeButton>().getPMouseX();
+        (void)af::val<const RectNodeButton>().getPMouseY();
+        (void)af::val<RectNodeButton>().findHitNode(af::val<const Ray>());
+        (void)af::val<RectNodeButton>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
+        (void)af::val<const RectNodeButton>().getCameraContext();
+        (void)af::val<RectNodeButton>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
+        (void)af::val<const RectNodeButton>().getModTypeNames();
+        (void)af::val<const RectNodeButton>().getMods();
+        (void)af::val<const RectNodeButton>().getModByTypeName(af::val<const std::string>());
+        (void)af::val<RectNodeButton>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<RectNodeButton>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<RectNodeButton>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
+        (void)af::val<RectNodeButton>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<RectNodeButton>().cancelAllTimers();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNodeButton>().callAfterAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNodeButton>().callEveryAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNodeButton>().cancelAsyncTimer(af::val<uint64_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<RectNodeButton>().cancelAllAsyncTimers();
+#endif
     }
 };
 
@@ -2424,10 +2818,10 @@ struct Cover_Reflector : af::Scope<Reflector> {
         (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<Vec3>());
         (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<Color>());
         (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<int>(), af::val<const EnumLabelSpan>());
-        (void)af::val<Reflector>().isReadOnly();
+        (void)af::val<const Reflector>().isReadOnly();
         (void)af::val<Reflector>().pushReadOnly();
         (void)af::val<Reflector>().popReadOnly();
-        (void)af::val<Reflector>().isDerived();
+        (void)af::val<const Reflector>().isDerived();
         (void)af::val<Reflector>().pushDerived();
         (void)af::val<Reflector>().popDerived();
         (void)af::val<Reflector>().beginGroup(af::val<const char *>());
@@ -2446,7 +2840,7 @@ struct Cover_SaveResult : af::Scope<SaveResult> {
     static void run() {
         (void)af::val<SaveResult>().error;
         (void)af::val<SaveResult>().message;
-        (void)af::val<SaveResult>().ok();
+        (void)af::val<const SaveResult>().ok();
         (void)af::val<SaveResult>().success();
         (void)af::val<SaveResult>().fail(af::val<SaveError>(), af::val<std::string>());
     }
@@ -2457,29 +2851,163 @@ struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)ScreenRecorder();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<ScreenRecorder>().start(af::val<const fs::path>(), af::val<const VideoRecordSettings>());
         (void)af::val<ScreenRecorder>().start(af::val<const Fbo>(), af::val<const fs::path>(), af::val<const VideoRecordSettings>());
         (void)af::val<ScreenRecorder>().start(af::val<const fs::path>(), af::val<float>());
         (void)af::val<ScreenRecorder>().start(af::val<const Fbo>(), af::val<const fs::path>(), af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<ScreenRecorder>().stop();
-        (void)af::val<ScreenRecorder>().isRecording();
-        (void)af::val<ScreenRecorder>().getFrameCount();
-        (void)af::val<ScreenRecorder>().getPath();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const ScreenRecorder>().isRecording();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const ScreenRecorder>().getFrameCount();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const ScreenRecorder>().getPath();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<ScreenRecorder>().writer();
+#endif
     }
 };
 
 struct Cover_ScrollBar : af::Scope<ScrollBar> {
     static void run() {
         (void)ScrollBar(af::val<ScrollContainer *>(), af::val<Direction>());
-        (void)af::val<ScrollBar>().getBarColor();
+        (void)af::val<const ScrollBar>().getBarColor();
         (void)af::val<ScrollBar>().setBarColor(af::val<const Color>());
-        (void)af::val<ScrollBar>().getBarWidth();
+        (void)af::val<const ScrollBar>().getBarWidth();
         (void)af::val<ScrollBar>().setBarWidth(af::val<float>());
-        (void)af::val<ScrollBar>().getMargin();
+        (void)af::val<const ScrollBar>().getMargin();
         (void)af::val<ScrollBar>().setMargin(af::val<float>());
-        (void)af::val<ScrollBar>().getOffset();
+        (void)af::val<const ScrollBar>().getOffset();
         (void)af::val<ScrollBar>().updateFromContainer();
+        (void)af::val<ScrollBar>().mousePressed;
+        (void)af::val<ScrollBar>().mouseReleased;
+        (void)af::val<ScrollBar>().mouseDragged;
+        (void)af::val<ScrollBar>().mouseScrolled;
+        (void)af::val<const ScrollBar>().getWidth();
+        (void)af::val<const ScrollBar>().getHeight();
+        (void)af::val<const ScrollBar>().getSize();
+        (void)af::val<ScrollBar>().setWidth(af::val<float>());
+        (void)af::val<ScrollBar>().setHeight(af::val<float>());
+        (void)af::val<ScrollBar>().setSize(af::val<float>(), af::val<float>());
+        (void)af::val<ScrollBar>().setSize(af::val<float>());
+        (void)af::val<ScrollBar>().setSize(af::val<const Vec2>());
+        (void)af::val<ScrollBar>().setRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<ScrollBar>().setClipping(af::val<bool>());
+        (void)af::val<const ScrollBar>().isClipping();
+        (void)af::val<const ScrollBar>().getLeft();
+        (void)af::val<const ScrollBar>().getRight();
+        (void)af::val<const ScrollBar>().getTop();
+        (void)af::val<const ScrollBar>().getBottom();
+        (void)af::val<ScrollBar>().hitTest(af::val<const Ray>(), af::val<float>());
+        (void)af::val<ScrollBar>().hitTest(af::val<Vec2>());
+        (void)af::val<ScrollBar>().findHitNodeRecursive(af::val<internal::PickRaySource>(), af::val<const CameraContext *>(), af::val<Ray>(), af::val<const Mat4>());
+        (void)af::val<ScrollBar>().setup();
+        (void)af::val<ScrollBar>().update();
+        (void)af::val<ScrollBar>().cleanup();
+        (void)af::val<ScrollBar>().addChild(af::val<Ptr>(), af::val<bool>());
+        (void)af::val<ScrollBar>().insertChild(af::val<size_t>(), af::val<Ptr>(), af::val<bool>());
+        (void)af::val<ScrollBar>().removeChild(af::val<Ptr>());
+        (void)af::val<ScrollBar>().removeAllChildren();
+        (void)af::val<ScrollBar>().onChildAdded(af::val<Ptr>());
+        (void)af::val<ScrollBar>().onChildRemoved(af::val<Ptr>());
+        (void)af::val<const ScrollBar>().getParent();
+        (void)af::val<const ScrollBar>().getChildren();
+        (void)af::val<const ScrollBar>().getChildCount();
+        (void)af::val<const ScrollBar>().indexOfChild(af::val<const Node *>());
+        (void)af::val<const ScrollBar>().getChildIndex();
+        (void)af::val<ScrollBar>().moveToFront();
+        (void)af::val<ScrollBar>().moveToBack();
+        (void)af::val<const ScrollBar>().isActive();
+        (void)af::val<ScrollBar>().setActive(af::val<bool>());
+        (void)af::val<const ScrollBar>().isVisible();
+        (void)af::val<ScrollBar>().setVisible(af::val<bool>());
+        (void)af::val<ScrollBar>().destroy();
+        (void)af::val<const ScrollBar>().isDead();
+        (void)af::val<ScrollBar>().enableEvents();
+        (void)af::val<ScrollBar>().disableEvents();
+        (void)af::val<const ScrollBar>().isEventsEnabled();
+        (void)af::val<const ScrollBar>().isMouseOver();
+        (void)af::val<ScrollBar>().setName(af::val<const std::string>());
+        (void)af::val<const ScrollBar>().getName();
+        (void)af::val<const ScrollBar>().hasName();
+        (void)af::val<const ScrollBar>().getTypeName();
+        (void)af::val<const ScrollBar>().getDisplayName();
+        (void)af::val<const ScrollBar>().getInstanceId();
+        (void)af::val<ScrollBar>().findByInstanceId(af::val<uint64_t>());
+        (void)af::val<const ScrollBar>().getPos();
+        (void)af::val<const ScrollBar>().getX();
+        (void)af::val<const ScrollBar>().getY();
+        (void)af::val<const ScrollBar>().getZ();
+        (void)af::val<ScrollBar>().setPos(af::val<const Vec3>());
+        (void)af::val<ScrollBar>().setPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<ScrollBar>().setX(af::val<float>());
+        (void)af::val<ScrollBar>().setY(af::val<float>());
+        (void)af::val<ScrollBar>().setZ(af::val<float>());
+        (void)af::val<const ScrollBar>().getQuaternion();
+        (void)af::val<ScrollBar>().setQuaternion(af::val<const Quaternion>());
+        (void)af::val<const ScrollBar>().getEuler();
+        (void)af::val<ScrollBar>().setEuler(af::val<const Vec3>());
+        (void)af::val<ScrollBar>().setEuler(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const ScrollBar>().getEulerDeg();
+        (void)af::val<ScrollBar>().setEulerDeg(af::val<const Vec3>());
+        (void)af::val<const ScrollBar>().getRot();
+        (void)af::val<ScrollBar>().setRot(af::val<float>());
+        (void)af::val<const ScrollBar>().getRotDeg();
+        (void)af::val<ScrollBar>().setRotDeg(af::val<float>());
+        (void)af::val<const ScrollBar>().getScale();
+        (void)af::val<const ScrollBar>().getScaleX();
+        (void)af::val<const ScrollBar>().getScaleY();
+        (void)af::val<const ScrollBar>().getScaleZ();
+        (void)af::val<ScrollBar>().setScale(af::val<const Vec3>());
+        (void)af::val<ScrollBar>().setScale(af::val<float>());
+        (void)af::val<ScrollBar>().setScale(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<ScrollBar>().setScaleX(af::val<float>());
+        (void)af::val<ScrollBar>().setScaleY(af::val<float>());
+        (void)af::val<ScrollBar>().setScaleZ(af::val<float>());
+        (void)af::val<ScrollBar>().localMatrixChanged;
+        (void)af::val<const ScrollBar>().getLocalMatrix();
+        (void)af::val<const ScrollBar>().getGlobalMatrix();
+        (void)af::val<const ScrollBar>().getGlobalMatrixInverse();
+        (void)af::val<const ScrollBar>().globalToLocal(af::val<const Vec3>());
+        (void)af::val<const ScrollBar>().getGlobalPos();
+        (void)af::val<ScrollBar>().setGlobalPos(af::val<const Vec3>());
+        (void)af::val<ScrollBar>().setGlobalPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const ScrollBar>().localToGlobal(af::val<const Vec3>());
+        (void)af::val<const ScrollBar>().getMouseX();
+        (void)af::val<const ScrollBar>().getMouseY();
+        (void)af::val<const ScrollBar>().getPMouseX();
+        (void)af::val<const ScrollBar>().getPMouseY();
+        (void)af::val<ScrollBar>().findHitNode(af::val<const Ray>());
+        (void)af::val<ScrollBar>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
+        (void)af::val<const ScrollBar>().getCameraContext();
+        (void)af::val<ScrollBar>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
+        (void)af::val<const ScrollBar>().getModTypeNames();
+        (void)af::val<const ScrollBar>().getMods();
+        (void)af::val<const ScrollBar>().getModByTypeName(af::val<const std::string>());
+        (void)af::val<ScrollBar>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<ScrollBar>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<ScrollBar>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
+        (void)af::val<ScrollBar>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<ScrollBar>().cancelAllTimers();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollBar>().callAfterAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollBar>().callEveryAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollBar>().cancelAsyncTimer(af::val<uint64_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollBar>().cancelAllAsyncTimers();
+#endif
     }
 };
 
@@ -2487,24 +3015,146 @@ struct Cover_ScrollContainer : af::Scope<ScrollContainer> {
     static void run() {
         (void)ScrollContainer();
         (void)af::val<ScrollContainer>().setContent(af::val<Node::Ptr>());
-        (void)af::val<ScrollContainer>().getContent();
-        (void)af::val<ScrollContainer>().getContentRect();
-        (void)af::val<ScrollContainer>().getScrollX();
-        (void)af::val<ScrollContainer>().getScrollY();
-        (void)af::val<ScrollContainer>().getScroll();
+        (void)af::val<const ScrollContainer>().getContent();
+        (void)af::val<const ScrollContainer>().getContentRect();
+        (void)af::val<const ScrollContainer>().getScrollX();
+        (void)af::val<const ScrollContainer>().getScrollY();
+        (void)af::val<const ScrollContainer>().getScroll();
         (void)af::val<ScrollContainer>().setScrollX(af::val<float>());
         (void)af::val<ScrollContainer>().setScrollY(af::val<float>());
         (void)af::val<ScrollContainer>().setScroll(af::val<float>(), af::val<float>());
         (void)af::val<ScrollContainer>().setScroll(af::val<Vec2>());
-        (void)af::val<ScrollContainer>().getMaxScrollX();
-        (void)af::val<ScrollContainer>().getMaxScrollY();
+        (void)af::val<const ScrollContainer>().getMaxScrollX();
+        (void)af::val<const ScrollContainer>().getMaxScrollY();
         (void)af::val<ScrollContainer>().updateScrollBounds();
-        (void)af::val<ScrollContainer>().isHorizontalScrollEnabled();
-        (void)af::val<ScrollContainer>().isVerticalScrollEnabled();
+        (void)af::val<const ScrollContainer>().isHorizontalScrollEnabled();
+        (void)af::val<const ScrollContainer>().isVerticalScrollEnabled();
         (void)af::val<ScrollContainer>().setHorizontalScrollEnabled(af::val<bool>());
         (void)af::val<ScrollContainer>().setVerticalScrollEnabled(af::val<bool>());
-        (void)af::val<ScrollContainer>().getScrollSpeed();
+        (void)af::val<const ScrollContainer>().getScrollSpeed();
         (void)af::val<ScrollContainer>().setScrollSpeed(af::val<float>());
+        (void)af::val<ScrollContainer>().mousePressed;
+        (void)af::val<ScrollContainer>().mouseReleased;
+        (void)af::val<ScrollContainer>().mouseDragged;
+        (void)af::val<ScrollContainer>().mouseScrolled;
+        (void)af::val<const ScrollContainer>().getWidth();
+        (void)af::val<const ScrollContainer>().getHeight();
+        (void)af::val<const ScrollContainer>().getSize();
+        (void)af::val<ScrollContainer>().setWidth(af::val<float>());
+        (void)af::val<ScrollContainer>().setHeight(af::val<float>());
+        (void)af::val<ScrollContainer>().setSize(af::val<float>(), af::val<float>());
+        (void)af::val<ScrollContainer>().setSize(af::val<float>());
+        (void)af::val<ScrollContainer>().setSize(af::val<const Vec2>());
+        (void)af::val<ScrollContainer>().setRect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<ScrollContainer>().setClipping(af::val<bool>());
+        (void)af::val<const ScrollContainer>().isClipping();
+        (void)af::val<const ScrollContainer>().getLeft();
+        (void)af::val<const ScrollContainer>().getRight();
+        (void)af::val<const ScrollContainer>().getTop();
+        (void)af::val<const ScrollContainer>().getBottom();
+        (void)af::val<ScrollContainer>().hitTest(af::val<const Ray>(), af::val<float>());
+        (void)af::val<ScrollContainer>().hitTest(af::val<Vec2>());
+        (void)af::val<ScrollContainer>().findHitNodeRecursive(af::val<internal::PickRaySource>(), af::val<const CameraContext *>(), af::val<Ray>(), af::val<const Mat4>());
+        (void)af::val<ScrollContainer>().draw();
+        (void)af::val<ScrollContainer>().setup();
+        (void)af::val<ScrollContainer>().cleanup();
+        (void)af::val<ScrollContainer>().addChild(af::val<Ptr>(), af::val<bool>());
+        (void)af::val<ScrollContainer>().insertChild(af::val<size_t>(), af::val<Ptr>(), af::val<bool>());
+        (void)af::val<ScrollContainer>().removeChild(af::val<Ptr>());
+        (void)af::val<ScrollContainer>().removeAllChildren();
+        (void)af::val<ScrollContainer>().onChildAdded(af::val<Ptr>());
+        (void)af::val<ScrollContainer>().onChildRemoved(af::val<Ptr>());
+        (void)af::val<const ScrollContainer>().getParent();
+        (void)af::val<const ScrollContainer>().getChildren();
+        (void)af::val<const ScrollContainer>().getChildCount();
+        (void)af::val<const ScrollContainer>().indexOfChild(af::val<const Node *>());
+        (void)af::val<const ScrollContainer>().getChildIndex();
+        (void)af::val<ScrollContainer>().moveToFront();
+        (void)af::val<ScrollContainer>().moveToBack();
+        (void)af::val<const ScrollContainer>().isActive();
+        (void)af::val<ScrollContainer>().setActive(af::val<bool>());
+        (void)af::val<const ScrollContainer>().isVisible();
+        (void)af::val<ScrollContainer>().setVisible(af::val<bool>());
+        (void)af::val<ScrollContainer>().destroy();
+        (void)af::val<const ScrollContainer>().isDead();
+        (void)af::val<ScrollContainer>().enableEvents();
+        (void)af::val<ScrollContainer>().disableEvents();
+        (void)af::val<const ScrollContainer>().isEventsEnabled();
+        (void)af::val<const ScrollContainer>().isMouseOver();
+        (void)af::val<ScrollContainer>().setName(af::val<const std::string>());
+        (void)af::val<const ScrollContainer>().getName();
+        (void)af::val<const ScrollContainer>().hasName();
+        (void)af::val<const ScrollContainer>().getTypeName();
+        (void)af::val<const ScrollContainer>().getDisplayName();
+        (void)af::val<const ScrollContainer>().getInstanceId();
+        (void)af::val<ScrollContainer>().findByInstanceId(af::val<uint64_t>());
+        (void)af::val<const ScrollContainer>().getPos();
+        (void)af::val<const ScrollContainer>().getX();
+        (void)af::val<const ScrollContainer>().getY();
+        (void)af::val<const ScrollContainer>().getZ();
+        (void)af::val<ScrollContainer>().setPos(af::val<const Vec3>());
+        (void)af::val<ScrollContainer>().setPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<ScrollContainer>().setX(af::val<float>());
+        (void)af::val<ScrollContainer>().setY(af::val<float>());
+        (void)af::val<ScrollContainer>().setZ(af::val<float>());
+        (void)af::val<const ScrollContainer>().getQuaternion();
+        (void)af::val<ScrollContainer>().setQuaternion(af::val<const Quaternion>());
+        (void)af::val<const ScrollContainer>().getEuler();
+        (void)af::val<ScrollContainer>().setEuler(af::val<const Vec3>());
+        (void)af::val<ScrollContainer>().setEuler(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const ScrollContainer>().getEulerDeg();
+        (void)af::val<ScrollContainer>().setEulerDeg(af::val<const Vec3>());
+        (void)af::val<const ScrollContainer>().getRot();
+        (void)af::val<ScrollContainer>().setRot(af::val<float>());
+        (void)af::val<const ScrollContainer>().getRotDeg();
+        (void)af::val<ScrollContainer>().setRotDeg(af::val<float>());
+        (void)af::val<const ScrollContainer>().getScale();
+        (void)af::val<const ScrollContainer>().getScaleX();
+        (void)af::val<const ScrollContainer>().getScaleY();
+        (void)af::val<const ScrollContainer>().getScaleZ();
+        (void)af::val<ScrollContainer>().setScale(af::val<const Vec3>());
+        (void)af::val<ScrollContainer>().setScale(af::val<float>());
+        (void)af::val<ScrollContainer>().setScale(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<ScrollContainer>().setScaleX(af::val<float>());
+        (void)af::val<ScrollContainer>().setScaleY(af::val<float>());
+        (void)af::val<ScrollContainer>().setScaleZ(af::val<float>());
+        (void)af::val<ScrollContainer>().localMatrixChanged;
+        (void)af::val<const ScrollContainer>().getLocalMatrix();
+        (void)af::val<const ScrollContainer>().getGlobalMatrix();
+        (void)af::val<const ScrollContainer>().getGlobalMatrixInverse();
+        (void)af::val<const ScrollContainer>().globalToLocal(af::val<const Vec3>());
+        (void)af::val<const ScrollContainer>().getGlobalPos();
+        (void)af::val<ScrollContainer>().setGlobalPos(af::val<const Vec3>());
+        (void)af::val<ScrollContainer>().setGlobalPos(af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const ScrollContainer>().localToGlobal(af::val<const Vec3>());
+        (void)af::val<const ScrollContainer>().getMouseX();
+        (void)af::val<const ScrollContainer>().getMouseY();
+        (void)af::val<const ScrollContainer>().getPMouseX();
+        (void)af::val<const ScrollContainer>().getPMouseY();
+        (void)af::val<ScrollContainer>().findHitNode(af::val<const Ray>());
+        (void)af::val<ScrollContainer>().findHitNodeFromScreen(af::val<float>(), af::val<float>());
+        (void)af::val<const ScrollContainer>().getCameraContext();
+        (void)af::val<ScrollContainer>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
+        (void)af::val<const ScrollContainer>().getModTypeNames();
+        (void)af::val<const ScrollContainer>().getMods();
+        (void)af::val<const ScrollContainer>().getModByTypeName(af::val<const std::string>());
+        (void)af::val<ScrollContainer>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<ScrollContainer>().callEvery(af::val<double>(), af::val<std::function<void ()>>());
+        (void)af::val<ScrollContainer>().callEveryCatchUp(af::val<double>(), af::val<std::function<void ()>>(), af::val<int>());
+        (void)af::val<ScrollContainer>().cancelTimer(af::val<uint64_t>());
+        (void)af::val<ScrollContainer>().cancelAllTimers();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollContainer>().callAfterAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollContainer>().callEveryAsync(af::val<double>(), af::val<std::function<void ()>>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollContainer>().cancelAsyncTimer(af::val<uint64_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<ScrollContainer>().cancelAllAsyncTimers();
+#endif
     }
 };
 
@@ -2528,7 +3178,7 @@ struct Cover_SendResult : af::Scope<SendResult> {
     static void run() {
         (void)af::val<SendResult>().error;
         (void)af::val<SendResult>().id;
-        (void)af::val<SendResult>().ok();
+        (void)af::val<const SendResult>().ok();
     }
 };
 
@@ -2537,27 +3187,63 @@ struct Cover_Serial : af::Scope<Serial> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)Serial();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().onDisconnect;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().printDevices();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().listDevices();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().setup(af::val<const std::string>(), af::val<int>());
         (void)af::val<Serial>().setup(af::val<int>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().close();
-        (void)af::val<Serial>().isConnected();
-        (void)af::val<Serial>().isInitialized();
-        (void)af::val<Serial>().getDevicePath();
-        (void)af::val<Serial>().available();
-        (void)af::val<Serial>().getDroppedByteCount();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const Serial>().isConnected();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const Serial>().isInitialized();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const Serial>().getDevicePath();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const Serial>().available();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const Serial>().getDroppedByteCount();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().readBytes(af::val<void *>(), af::val<int>());
         (void)af::val<Serial>().readBytes(af::val<std::string>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().readByte();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().writeBytes(af::val<const void *>(), af::val<int>());
         (void)af::val<Serial>().writeBytes(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().writeByte(af::val<unsigned char>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().flushInput();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().flushOutput();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().flush();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().drain();
+#endif
     }
 };
 
@@ -2566,9 +3252,9 @@ struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
         (void)af::val<SerialDeviceInfo>().deviceId;
         (void)af::val<SerialDeviceInfo>().devicePath;
         (void)af::val<SerialDeviceInfo>().deviceName;
-        (void)af::val<SerialDeviceInfo>().getDeviceID();
-        (void)af::val<SerialDeviceInfo>().getDevicePath();
-        (void)af::val<SerialDeviceInfo>().getDeviceName();
+        (void)af::val<const SerialDeviceInfo>().getDeviceID();
+        (void)af::val<const SerialDeviceInfo>().getDevicePath();
+        (void)af::val<const SerialDeviceInfo>().getDeviceName();
     }
 };
 
@@ -2586,7 +3272,7 @@ struct Cover_Shader : af::Scope<Shader> {
         (void)Shader();
         (void)af::val<Shader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
         (void)af::val<Shader>().clear();
-        (void)af::val<Shader>().isLoaded();
+        (void)af::val<const Shader>().isLoaded();
         (void)af::val<Shader>().begin();
         (void)af::val<Shader>().end();
         (void)af::val<Shader>().setUniform(af::val<int>(), af::val<float>());
@@ -2629,34 +3315,34 @@ struct Cover_Sound : af::Scope<Sound> {
         (void)af::val<Sound>().loadTestTone(af::val<float>(), af::val<float>());
         (void)af::val<Sound>().loadFromBuffer(af::val<const SoundBuffer>());
         (void)af::val<Sound>().loadFromBuffer(af::val<std::shared_ptr<SoundBuffer>>());
-        (void)af::val<Sound>().isLoaded();
-        (void)af::val<Sound>().isStreaming();
+        (void)af::val<const Sound>().isLoaded();
+        (void)af::val<const Sound>().isStreaming();
         (void)af::val<Sound>().play();
         (void)af::val<Sound>().stop();
         (void)af::val<Sound>().pause();
         (void)af::val<Sound>().resume();
         (void)af::val<Sound>().setVolume(af::val<float>());
-        (void)af::val<Sound>().getVolume();
+        (void)af::val<const Sound>().getVolume();
         (void)af::val<Sound>().setLoop(af::val<bool>());
-        (void)af::val<Sound>().isLoop();
+        (void)af::val<const Sound>().isLoop();
         (void)af::val<Sound>().setPan(af::val<float>());
-        (void)af::val<Sound>().getPan();
+        (void)af::val<const Sound>().getPan();
         (void)af::val<Sound>().setSpeed(af::val<float>());
-        (void)af::val<Sound>().getSpeed();
+        (void)af::val<const Sound>().getSpeed();
         (void)af::val<Sound>().setMixMode(af::val<MixMode>());
-        (void)af::val<Sound>().getMixMode();
+        (void)af::val<const Sound>().getMixMode();
         (void)af::val<Sound>().setChannelMap(af::val<const std::vector<int>>());
         (void)af::val<Sound>().setChannelMap(af::val<std::vector<std::vector<int>>>());
-        (void)af::val<Sound>().getChannelMap();
+        (void)af::val<const Sound>().getChannelMap();
         (void)af::val<Sound>().setChannelGains(af::val<const std::vector<float>>());
-        (void)af::val<Sound>().getChannelGains();
+        (void)af::val<const Sound>().getChannelGains();
         (void)af::val<Sound>().clearChannelMap();
         (void)af::val<Sound>().clearChannelGains();
-        (void)af::val<Sound>().isPlaying();
-        (void)af::val<Sound>().isPaused();
-        (void)af::val<Sound>().getPosition();
+        (void)af::val<const Sound>().isPlaying();
+        (void)af::val<const Sound>().isPaused();
+        (void)af::val<const Sound>().getPosition();
         (void)af::val<Sound>().setPosition(af::val<float>());
-        (void)af::val<Sound>().getDuration();
+        (void)af::val<const Sound>().getDuration();
     }
 };
 
@@ -2665,7 +3351,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)SoundBuffer();
         (void)af::val<SoundBuffer>().samples;
         (void)af::val<SoundBuffer>().numSamples;
-        (void)af::val<SoundBuffer>().getPath();
+        (void)af::val<const SoundBuffer>().getPath();
         (void)af::val<SoundBuffer>().loadOgg(af::val<const fs::path>());
         (void)af::val<SoundBuffer>().loadWav(af::val<const fs::path>());
         (void)af::val<SoundBuffer>().loadMp3(af::val<const fs::path>());
@@ -2684,7 +3370,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)af::val<SoundBuffer>().getAdtsSampleRateIndex(af::val<int>());
         (void)af::val<SoundBuffer>().createAdtsHeader(af::val<uint8_t *>(), af::val<int>(), af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<SoundBuffer>().loadPcmFromMemory(af::val<const void *>(), af::val<size_t>(), af::val<int>(), af::val<int>(), af::val<int>(), af::val<bool>());
-        (void)af::val<SoundBuffer>().getDuration();
+        (void)af::val<const SoundBuffer>().getDuration();
         (void)af::val<SoundBuffer>().generateSineWave(af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<SoundBuffer>().generateSquareWave(af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
         (void)af::val<SoundBuffer>().generateTriangleWave(af::val<float>(), af::val<float>(), af::val<float>(), af::val<int>());
@@ -2695,6 +3381,9 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
         (void)af::val<SoundBuffer>().applyADSR(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<SoundBuffer>().mixFrom(af::val<const SoundBuffer>(), af::val<size_t>(), af::val<float>());
         (void)af::val<SoundBuffer>().clip();
+        (void)af::val<SoundBuffer>().channels;
+        (void)af::val<SoundBuffer>().sampleRate;
+        (void)af::val<const SoundBuffer>().kind();
     }
 };
 
@@ -2702,8 +3391,8 @@ struct Cover_SoundSource : af::Scope<SoundSource> {
     static void run() {
         (void)af::val<SoundSource>().channels;
         (void)af::val<SoundSource>().sampleRate;
-        (void)af::val<SoundSource>().kind();
-        (void)af::val<SoundSource>().getDuration();
+        (void)af::val<const SoundSource>().kind();
+        (void)af::val<const SoundSource>().getDuration();
     }
 };
 
@@ -2711,9 +3400,12 @@ struct Cover_SoundStream : af::Scope<SoundStream> {
     static void run() {
         (void)SoundStream();
         (void)af::val<SoundStream>().loadStream(af::val<const fs::path>(), af::val<int>());
-        (void)af::val<SoundStream>().getDuration();
-        (void)af::val<SoundStream>().getPath();
-        (void)af::val<SoundStream>().getMaxPolyphony();
+        (void)af::val<const SoundStream>().getDuration();
+        (void)af::val<const SoundStream>().getPath();
+        (void)af::val<const SoundStream>().getMaxPolyphony();
+        (void)af::val<SoundStream>().channels;
+        (void)af::val<SoundStream>().sampleRate;
+        (void)af::val<const SoundStream>().kind();
     }
 };
 
@@ -2747,34 +3439,82 @@ struct Cover_TcpClient : af::Scope<TcpClient> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)TcpClient();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().onConnect;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().onReceive;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().onDisconnect;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().onSendComplete;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().onError;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().connect(af::val<const std::string>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().connectAsync(af::val<const std::string>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().disconnect();
-        (void)af::val<TcpClient>().isConnected();
-        (void)af::val<TcpClient>().isConnecting();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().isConnected();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().isConnecting();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpClient>().send(af::val<const std::vector<char>>());
         (void)af::val<TcpClient>().send(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().sendAsync(af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpClient>().sendAsync(std::move(af::val<std::vector<char>>()));
         (void)af::val<TcpClient>().sendAsync(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().setSendTimeout(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().setConnectTimeout(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().setSendAsyncBufferSize(af::val<size_t>());
-        (void)af::val<TcpClient>().getSendAsyncBufferSize();
-        (void)af::val<TcpClient>().getSendAsyncPendingBytes();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().getSendAsyncBufferSize();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().getSendAsyncPendingBytes();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().setReceiveBufferSize(af::val<size_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().setBlocking(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().setUseThread(af::val<bool>());
-        (void)af::val<TcpClient>().isUsingThread();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().isUsingThread();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<TcpClient>().processNetwork();
-        (void)af::val<TcpClient>().getRemoteHost();
-        (void)af::val<TcpClient>().getRemotePort();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().getRemoteHost();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const TcpClient>().getRemotePort();
+#endif
     }
 };
 
@@ -2835,45 +3575,91 @@ struct Cover_TcpServer : af::Scope<TcpServer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)TcpServer();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().onClientConnect;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().onReceive;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().onClientDisconnect;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().onError;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().onSendComplete;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().start(af::val<int>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().stop();
-        (void)af::val<TcpServer>().isRunning();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().isRunning();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().disconnectClient(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().disconnectAllClients();
-        (void)af::val<TcpServer>().getClientCount();
-        (void)af::val<TcpServer>().getClientIds();
-        (void)af::val<TcpServer>().getClient(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().getClientCount();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().getClientIds();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().getClient(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().send(af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpServer>().send(af::val<int>(), af::val<const std::vector<char>>());
         (void)af::val<TcpServer>().send(af::val<int>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().broadcast(af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpServer>().broadcast(af::val<const std::vector<char>>());
         (void)af::val<TcpServer>().broadcast(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().sendAsync(af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpServer>().sendAsync(af::val<int>(), std::move(af::val<std::vector<char>>()));
         (void)af::val<TcpServer>().sendAsync(af::val<int>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().broadcastAsync(af::val<const void *>(), af::val<size_t>());
         (void)af::val<TcpServer>().broadcastAsync(af::val<const std::vector<char>>());
         (void)af::val<TcpServer>().broadcastAsync(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setReceiveBufferSize(af::val<size_t>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setSendTimeout(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<TcpServer>().setSendAsyncBufferSize(af::val<size_t>());
-        (void)af::val<TcpServer>().getSendAsyncBufferSize();
-        (void)af::val<TcpServer>().getSendAsyncPendingBytes(af::val<int>());
-        (void)af::val<TcpServer>().getPort();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().getSendAsyncBufferSize();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().getSendAsyncPendingBytes(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
+        (void)af::val<const TcpServer>().getPort();
+#endif
     }
 };
 
 struct Cover_TcpServerClient : af::Scope<TcpServerClient> {
     static void run() {
-        (void)af::val<TcpServerClient>().getId();
-        (void)af::val<TcpServerClient>().getHost();
-        (void)af::val<TcpServerClient>().getPort();
+        (void)af::val<const TcpServerClient>().getId();
+        (void)af::val<const TcpServerClient>().getHost();
+        (void)af::val<const TcpServerClient>().getPort();
     }
 };
 
@@ -2901,60 +3687,78 @@ struct Cover_Texture : af::Scope<Texture> {
         (void)af::val<Texture>().allocateCubemap(af::val<int>(), af::val<TextureFormat>(), af::val<TextureUsage>(), af::val<int>());
         (void)af::val<Texture>().loadCubemapData(af::val<const void *const *>(), af::val<size_t>());
         (void)af::val<Texture>().getCubemapFaceAttachmentView(af::val<int>(), af::val<int>());
-        (void)af::val<Texture>().isCubemap();
-        (void)af::val<Texture>().getNumMipLevels();
+        (void)af::val<const Texture>().isCubemap();
+        (void)af::val<const Texture>().getNumMipLevels();
         (void)af::val<Texture>().allocateCompressed(af::val<int>(), af::val<int>(), af::val<sg_pixel_format>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<Texture>().updateCompressed(af::val<const void *>(), af::val<size_t>());
-        (void)af::val<Texture>().isCompressed();
+        (void)af::val<const Texture>().isCompressed();
         (void)af::val<Texture>().clear();
-        (void)af::val<Texture>().isAllocated();
-        (void)af::val<Texture>().getWidth();
-        (void)af::val<Texture>().getHeight();
-        (void)af::val<Texture>().getChannels();
-        (void)af::val<Texture>().getUsage();
-        (void)af::val<Texture>().getSampleCount();
-        (void)af::val<Texture>().getPixelFormat();
+        (void)af::val<const Texture>().isAllocated();
+        (void)af::val<const Texture>().getWidth();
+        (void)af::val<const Texture>().getHeight();
+        (void)af::val<const Texture>().getChannels();
+        (void)af::val<const Texture>().getUsage();
+        (void)af::val<const Texture>().getSampleCount();
+        (void)af::val<const Texture>().getPixelFormat();
         (void)af::val<Texture>().loadData(af::val<const Pixels>());
         (void)af::val<Texture>().loadData(af::val<const void *>(), af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<Texture>().loadData(af::val<const unsigned char *>(), af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<Texture>().setMinFilter(af::val<TextureFilter>());
         (void)af::val<Texture>().setMagFilter(af::val<TextureFilter>());
         (void)af::val<Texture>().setFilter(af::val<TextureFilter>());
-        (void)af::val<Texture>().getMinFilter();
-        (void)af::val<Texture>().getMagFilter();
+        (void)af::val<const Texture>().getMinFilter();
+        (void)af::val<const Texture>().getMagFilter();
         (void)af::val<Texture>().setPremultipliedAlpha(af::val<bool>());
-        (void)af::val<Texture>().isPremultipliedAlpha();
+        (void)af::val<const Texture>().isPremultipliedAlpha();
         (void)af::val<Texture>().setWrapU(af::val<TextureWrap>());
         (void)af::val<Texture>().setWrapV(af::val<TextureWrap>());
         (void)af::val<Texture>().setWrap(af::val<TextureWrap>());
-        (void)af::val<Texture>().getWrapU();
-        (void)af::val<Texture>().getWrapV();
-        (void)af::val<Texture>().draw(af::val<float>(), af::val<float>());
-        (void)af::val<Texture>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Texture>().drawFlippedY(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Texture>().drawSubsection(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<Texture>().bind();
-        (void)af::val<Texture>().unbind();
-        (void)af::val<Texture>().getImage();
-        (void)af::val<Texture>().getView();
-        (void)af::val<Texture>().getSampler();
-        (void)af::val<Texture>().getAttachmentView();
-        (void)af::val<Texture>().getAttachmentViewForMip(af::val<int>());
-        (void)af::val<Texture>().getViewForMip(af::val<int>());
+        (void)af::val<const Texture>().getWrapU();
+        (void)af::val<const Texture>().getWrapV();
+        (void)af::val<const Texture>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const Texture>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Texture>().drawFlippedY(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Texture>().drawSubsection(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Texture>().bind();
+        (void)af::val<const Texture>().unbind();
+        (void)af::val<const Texture>().getImage();
+        (void)af::val<const Texture>().getView();
+        (void)af::val<const Texture>().getSampler();
+        (void)af::val<const Texture>().getAttachmentView();
+        (void)af::val<const Texture>().getAttachmentViewForMip(af::val<int>());
+        (void)af::val<const Texture>().getViewForMip(af::val<int>());
     }
 };
 
 struct Cover_Thread : af::Scope<Thread> {
     static void run() {
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().startThread();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().stopThread();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().waitForThread(af::val<bool>());
-        (void)af::val<Thread>().isThreadRunning();
-        (void)af::val<Thread>().getThreadId();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const Thread>().isThreadRunning();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const Thread>().getThreadId();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().sleep(af::val<unsigned long>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().yield();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().isCurrentThreadTheMainThread();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().getMainThreadId();
+#endif
     }
 };
 
@@ -2963,9 +3767,9 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
         (void)af::val<TouchEventArgs>().touches;
         (void)af::val<TouchEventArgs>().numTouches;
         (void)af::val<TouchEventArgs>().cancelled;
-        (void)af::val<TouchEventArgs>().x();
-        (void)af::val<TouchEventArgs>().y();
-        (void)af::val<TouchEventArgs>().id();
+        (void)af::val<const TouchEventArgs>().x();
+        (void)af::val<const TouchEventArgs>().y();
+        (void)af::val<const TouchEventArgs>().id();
     }
 };
 
@@ -3019,13 +3823,15 @@ struct Cover_TweenMod : af::Scope<TweenMod> {
         (void)af::val<TweenMod>().pause();
         (void)af::val<TweenMod>().resume();
         (void)af::val<TweenMod>().reset();
-        (void)af::val<TweenMod>().isPlaying();
-        (void)af::val<TweenMod>().isComplete();
-        (void)af::val<TweenMod>().getProgress();
-        (void)af::val<TweenMod>().getDuration();
-        (void)af::val<TweenMod>().getDelay();
-        (void)af::val<TweenMod>().getEaseType();
-        (void)af::val<TweenMod>().getEaseMode();
+        (void)af::val<const TweenMod>().isPlaying();
+        (void)af::val<const TweenMod>().isComplete();
+        (void)af::val<const TweenMod>().getProgress();
+        (void)af::val<const TweenMod>().getDuration();
+        (void)af::val<const TweenMod>().getDelay();
+        (void)af::val<const TweenMod>().getEaseType();
+        (void)af::val<const TweenMod>().getEaseMode();
+        (void)af::val<TweenMod>().getOwner();
+        (void)af::val<const TweenMod>().getOwner();
     }
 };
 
@@ -3049,39 +3855,99 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)UdpSocket();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().onReceive;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().onError;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().create();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().bind(af::val<int>(), af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().connect(af::val<const std::string>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().close();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().sendTo(af::val<const std::string>(), af::val<int>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().send(af::val<const void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().send(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().receive(af::val<void *>(), af::val<size_t>());
         (void)af::val<UdpSocket>().receive(af::val<void *>(), af::val<size_t>(), af::val<std::string>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().startReceiving();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().stopReceiving();
-        (void)af::val<UdpSocket>().isReceiving();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const UdpSocket>().isReceiving();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setNonBlocking(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setBroadcast(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setReuseAddress(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setReusePort(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().joinMulticastGroup(af::val<const std::string>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().leaveMulticastGroup(af::val<const std::string>(), af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setMulticastTTL(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setMulticastLoopback(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setMulticastInterface(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setReceiveBufferSize(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setSendBufferSize(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setReceiveTimeout(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().setUseThread(af::val<bool>());
-        (void)af::val<UdpSocket>().getLocalPort();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const UdpSocket>().getLocalPort();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<UdpSocket>().processNetwork();
-        (void)af::val<UdpSocket>().isValid();
-        (void)af::val<UdpSocket>().getConnectedHost();
-        (void)af::val<UdpSocket>().getConnectedPort();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const UdpSocket>().isValid();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const UdpSocket>().getConnectedHost();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const UdpSocket>().getConnectedPort();
+#endif
     }
 };
 
@@ -3095,38 +3961,38 @@ struct Cover_Vec2 : af::Scope<Vec2> {
         (void)af::val<Vec2>().set(af::val<float>(), af::val<float>());
         (void)af::val<Vec2>().set(af::val<const Vec2>());
         (void)af::val<Vec2>().operator[](af::val<int>());
-        (void)af::val<Vec2>().operator[](af::val<int>());
-        (void)af::val<Vec2>().operator+(af::val<const Vec2>());
-        (void)af::val<Vec2>().operator-(af::val<const Vec2>());
-        (void)af::val<Vec2>().operator-();
-        (void)af::val<Vec2>().operator*(af::val<float>());
-        (void)af::val<Vec2>().operator*(af::val<const Vec2>());
-        (void)af::val<Vec2>().operator/(af::val<float>());
-        (void)af::val<Vec2>().operator/(af::val<const Vec2>());
+        (void)af::val<const Vec2>().operator[](af::val<int>());
+        (void)af::val<const Vec2>().operator+(af::val<const Vec2>());
+        (void)af::val<const Vec2>().operator-(af::val<const Vec2>());
+        (void)af::val<const Vec2>().operator-();
+        (void)af::val<const Vec2>().operator*(af::val<float>());
+        (void)af::val<const Vec2>().operator*(af::val<const Vec2>());
+        (void)af::val<const Vec2>().operator/(af::val<float>());
+        (void)af::val<const Vec2>().operator/(af::val<const Vec2>());
         (void)af::val<Vec2>().operator+=(af::val<const Vec2>());
         (void)af::val<Vec2>().operator-=(af::val<const Vec2>());
         (void)af::val<Vec2>().operator*=(af::val<float>());
         (void)af::val<Vec2>().operator*=(af::val<const Vec2>());
         (void)af::val<Vec2>().operator/=(af::val<float>());
         (void)af::val<Vec2>().operator/=(af::val<const Vec2>());
-        (void)af::val<Vec2>().operator==(af::val<const Vec2>());
-        (void)af::val<Vec2>().operator!=(af::val<const Vec2>());
-        (void)af::val<Vec2>().length();
-        (void)af::val<Vec2>().lengthSquared();
-        (void)af::val<Vec2>().normalized();
+        (void)af::val<const Vec2>().operator==(af::val<const Vec2>());
+        (void)af::val<const Vec2>().operator!=(af::val<const Vec2>());
+        (void)af::val<const Vec2>().length();
+        (void)af::val<const Vec2>().lengthSquared();
+        (void)af::val<const Vec2>().normalized();
         (void)af::val<Vec2>().normalize();
         (void)af::val<Vec2>().limit(af::val<float>());
-        (void)af::val<Vec2>().dot(af::val<const Vec2>());
-        (void)af::val<Vec2>().cross(af::val<const Vec2>());
-        (void)af::val<Vec2>().distance(af::val<const Vec2>());
-        (void)af::val<Vec2>().distanceSquared(af::val<const Vec2>());
-        (void)af::val<Vec2>().angle();
-        (void)af::val<Vec2>().angle(af::val<const Vec2>());
-        (void)af::val<Vec2>().rotated(af::val<float>());
+        (void)af::val<const Vec2>().dot(af::val<const Vec2>());
+        (void)af::val<const Vec2>().cross(af::val<const Vec2>());
+        (void)af::val<const Vec2>().distance(af::val<const Vec2>());
+        (void)af::val<const Vec2>().distanceSquared(af::val<const Vec2>());
+        (void)af::val<const Vec2>().angle();
+        (void)af::val<const Vec2>().angle(af::val<const Vec2>());
+        (void)af::val<const Vec2>().rotated(af::val<float>());
         (void)af::val<Vec2>().rotate(af::val<float>());
-        (void)af::val<Vec2>().lerp(af::val<const Vec2>(), af::val<float>());
-        (void)af::val<Vec2>().perpendicular();
-        (void)af::val<Vec2>().reflected(af::val<const Vec2>());
+        (void)af::val<const Vec2>().lerp(af::val<const Vec2>(), af::val<float>());
+        (void)af::val<const Vec2>().perpendicular();
+        (void)af::val<const Vec2>().reflected(af::val<const Vec2>());
         (void)af::val<Vec2>().fromAngle(af::val<float>(), af::val<float>());
     }
 };
@@ -3143,34 +4009,34 @@ struct Cover_Vec3 : af::Scope<Vec3> {
         (void)af::val<Vec3>().set(af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Vec3>().set(af::val<const Vec3>());
         (void)af::val<Vec3>().operator[](af::val<int>());
-        (void)af::val<Vec3>().operator[](af::val<int>());
-        (void)af::val<Vec3>().operator+(af::val<const Vec3>());
-        (void)af::val<Vec3>().operator-(af::val<const Vec3>());
-        (void)af::val<Vec3>().operator-();
-        (void)af::val<Vec3>().operator*(af::val<float>());
-        (void)af::val<Vec3>().operator*(af::val<const Vec3>());
-        (void)af::val<Vec3>().operator/(af::val<float>());
-        (void)af::val<Vec3>().operator/(af::val<const Vec3>());
+        (void)af::val<const Vec3>().operator[](af::val<int>());
+        (void)af::val<const Vec3>().operator+(af::val<const Vec3>());
+        (void)af::val<const Vec3>().operator-(af::val<const Vec3>());
+        (void)af::val<const Vec3>().operator-();
+        (void)af::val<const Vec3>().operator*(af::val<float>());
+        (void)af::val<const Vec3>().operator*(af::val<const Vec3>());
+        (void)af::val<const Vec3>().operator/(af::val<float>());
+        (void)af::val<const Vec3>().operator/(af::val<const Vec3>());
         (void)af::val<Vec3>().operator+=(af::val<const Vec3>());
         (void)af::val<Vec3>().operator-=(af::val<const Vec3>());
         (void)af::val<Vec3>().operator*=(af::val<float>());
         (void)af::val<Vec3>().operator*=(af::val<const Vec3>());
         (void)af::val<Vec3>().operator/=(af::val<float>());
         (void)af::val<Vec3>().operator/=(af::val<const Vec3>());
-        (void)af::val<Vec3>().operator==(af::val<const Vec3>());
-        (void)af::val<Vec3>().operator!=(af::val<const Vec3>());
-        (void)af::val<Vec3>().length();
-        (void)af::val<Vec3>().lengthSquared();
-        (void)af::val<Vec3>().normalized();
+        (void)af::val<const Vec3>().operator==(af::val<const Vec3>());
+        (void)af::val<const Vec3>().operator!=(af::val<const Vec3>());
+        (void)af::val<const Vec3>().length();
+        (void)af::val<const Vec3>().lengthSquared();
+        (void)af::val<const Vec3>().normalized();
         (void)af::val<Vec3>().normalize();
         (void)af::val<Vec3>().limit(af::val<float>());
-        (void)af::val<Vec3>().dot(af::val<const Vec3>());
-        (void)af::val<Vec3>().cross(af::val<const Vec3>());
-        (void)af::val<Vec3>().distance(af::val<const Vec3>());
-        (void)af::val<Vec3>().distanceSquared(af::val<const Vec3>());
-        (void)af::val<Vec3>().lerp(af::val<const Vec3>(), af::val<float>());
-        (void)af::val<Vec3>().reflected(af::val<const Vec3>());
-        (void)af::val<Vec3>().xy();
+        (void)af::val<const Vec3>().dot(af::val<const Vec3>());
+        (void)af::val<const Vec3>().cross(af::val<const Vec3>());
+        (void)af::val<const Vec3>().distance(af::val<const Vec3>());
+        (void)af::val<const Vec3>().distanceSquared(af::val<const Vec3>());
+        (void)af::val<const Vec3>().lerp(af::val<const Vec3>(), af::val<float>());
+        (void)af::val<const Vec3>().reflected(af::val<const Vec3>());
+        (void)af::val<const Vec3>().xy();
     }
 };
 
@@ -3188,30 +4054,30 @@ struct Cover_Vec4 : af::Scope<Vec4> {
         (void)af::val<Vec4>().set(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
         (void)af::val<Vec4>().set(af::val<const Vec4>());
         (void)af::val<Vec4>().operator[](af::val<int>());
-        (void)af::val<Vec4>().operator[](af::val<int>());
-        (void)af::val<Vec4>().operator+(af::val<const Vec4>());
-        (void)af::val<Vec4>().operator-(af::val<const Vec4>());
-        (void)af::val<Vec4>().operator-();
-        (void)af::val<Vec4>().operator*(af::val<const Vec4>());
-        (void)af::val<Vec4>().operator*(af::val<float>());
-        (void)af::val<Vec4>().operator/(af::val<const Vec4>());
-        (void)af::val<Vec4>().operator/(af::val<float>());
+        (void)af::val<const Vec4>().operator[](af::val<int>());
+        (void)af::val<const Vec4>().operator+(af::val<const Vec4>());
+        (void)af::val<const Vec4>().operator-(af::val<const Vec4>());
+        (void)af::val<const Vec4>().operator-();
+        (void)af::val<const Vec4>().operator*(af::val<const Vec4>());
+        (void)af::val<const Vec4>().operator*(af::val<float>());
+        (void)af::val<const Vec4>().operator/(af::val<const Vec4>());
+        (void)af::val<const Vec4>().operator/(af::val<float>());
         (void)af::val<Vec4>().operator+=(af::val<const Vec4>());
         (void)af::val<Vec4>().operator-=(af::val<const Vec4>());
         (void)af::val<Vec4>().operator*=(af::val<const Vec4>());
         (void)af::val<Vec4>().operator*=(af::val<float>());
         (void)af::val<Vec4>().operator/=(af::val<const Vec4>());
         (void)af::val<Vec4>().operator/=(af::val<float>());
-        (void)af::val<Vec4>().operator==(af::val<const Vec4>());
-        (void)af::val<Vec4>().operator!=(af::val<const Vec4>());
-        (void)af::val<Vec4>().length();
-        (void)af::val<Vec4>().lengthSquared();
-        (void)af::val<Vec4>().normalized();
+        (void)af::val<const Vec4>().operator==(af::val<const Vec4>());
+        (void)af::val<const Vec4>().operator!=(af::val<const Vec4>());
+        (void)af::val<const Vec4>().length();
+        (void)af::val<const Vec4>().lengthSquared();
+        (void)af::val<const Vec4>().normalized();
         (void)af::val<Vec4>().normalize();
-        (void)af::val<Vec4>().dot(af::val<const Vec4>());
-        (void)af::val<Vec4>().lerp(af::val<const Vec4>(), af::val<float>());
-        (void)af::val<Vec4>().xy();
-        (void)af::val<Vec4>().xyz();
+        (void)af::val<const Vec4>().dot(af::val<const Vec4>());
+        (void)af::val<const Vec4>().lerp(af::val<const Vec4>(), af::val<float>());
+        (void)af::val<const Vec4>().xy();
+        (void)af::val<const Vec4>().xyz();
     }
 };
 
@@ -3220,9 +4086,9 @@ struct Cover_VideoDeviceInfo : af::Scope<VideoDeviceInfo> {
         (void)af::val<VideoDeviceInfo>().deviceId;
         (void)af::val<VideoDeviceInfo>().deviceName;
         (void)af::val<VideoDeviceInfo>().uniqueId;
-        (void)af::val<VideoDeviceInfo>().getDeviceID();
-        (void)af::val<VideoDeviceInfo>().getDeviceName();
-        (void)af::val<VideoDeviceInfo>().getUniqueId();
+        (void)af::val<const VideoDeviceInfo>().getDeviceID();
+        (void)af::val<const VideoDeviceInfo>().getDeviceName();
+        (void)af::val<const VideoDeviceInfo>().getUniqueId();
     }
 };
 
@@ -3238,38 +4104,120 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)VideoGrabber();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().listDevices();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setDeviceID(af::val<int>());
-        (void)af::val<VideoGrabber>().getDeviceID();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getDeviceID();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setDesiredFrameRate(af::val<int>());
-        (void)af::val<VideoGrabber>().getDesiredFrameRate();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getDesiredFrameRate();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setVerbose(af::val<bool>());
-        (void)af::val<VideoGrabber>().isVerbose();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().isVerbose();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setup(af::val<int>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().close();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().update();
-        (void)af::val<VideoGrabber>().isFrameNew();
-        (void)af::val<VideoGrabber>().isInitialized();
-        (void)af::val<VideoGrabber>().isPendingPermission();
-        (void)af::val<VideoGrabber>().getWidth();
-        (void)af::val<VideoGrabber>().getHeight();
-        (void)af::val<VideoGrabber>().getDeviceName();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().isFrameNew();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().isInitialized();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().isPendingPermission();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getWidth();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getHeight();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getDeviceName();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().getPixels();
-        (void)af::val<VideoGrabber>().getPixels();
+        (void)af::val<const VideoGrabber>().getPixels();
+#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<VideoGrabber>().setFrameQueueSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
-        (void)af::val<VideoGrabber>().getFrameQueueSize();
+        (void)af::val<const VideoGrabber>().getFrameQueueSize();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<VideoGrabber>().getQueuedFrames(af::val<std::vector<GrabberFrame>>());
 #endif
-        (void)af::val<VideoGrabber>().copyToImage(af::val<Image>());
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().copyToImage(af::val<Image>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().getTexture();
-        (void)af::val<VideoGrabber>().getTexture();
+        (void)af::val<const VideoGrabber>().getTexture();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().checkCameraPermission();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().requestCameraPermission();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().hasTexture();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const VideoGrabber>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setMinFilter(af::val<TextureFilter>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setMagFilter(af::val<TextureFilter>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setFilter(af::val<TextureFilter>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getMinFilter();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getMagFilter();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setWrapU(af::val<TextureWrap>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setWrapV(af::val<TextureWrap>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setWrap(af::val<TextureWrap>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getWrapU();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().getWrapV();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().save(af::val<const fs::path>());
+#endif
     }
 };
 
@@ -3278,51 +4226,240 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)VideoPlayer();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().setAudioStreaming(af::val<bool>());
-        (void)af::val<VideoPlayer>().isAudioStreaming();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isAudioStreaming();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().load(af::val<const fs::path>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().close();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().update();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().play();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().setAutoPoster(af::val<bool>());
-        (void)af::val<VideoPlayer>().getAutoPoster();
-        (void)af::val<VideoPlayer>().draw(af::val<float>(), af::val<float>());
-        (void)af::val<VideoPlayer>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-        (void)af::val<VideoPlayer>().getDuration();
-        (void)af::val<VideoPlayer>().getPosition();
-        (void)af::val<VideoPlayer>().getFrameRate();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getAutoPoster();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const VideoPlayer>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getDuration();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getPosition();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getFrameRate();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().setGammaCorrection(af::val<float>());
-        (void)af::val<VideoPlayer>().getGammaCorrection();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getGammaCorrection();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().setUseHwAccel(af::val<bool>());
-        (void)af::val<VideoPlayer>().getUseHwAccel();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getUseHwAccel();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().getPixels();
-        (void)af::val<VideoPlayer>().getPixels();
+        (void)af::val<const VideoPlayer>().getPixels();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().getPixelsY();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().getPixelsUV();
-        (void)af::val<VideoPlayer>().hasAudio();
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
-        (void)af::val<VideoPlayer>().getAudioCodec();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().hasAudio();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
-        (void)af::val<VideoPlayer>().getAudioData();
+        (void)af::val<const VideoPlayer>().getAudioCodec();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
-        (void)af::val<VideoPlayer>().getAudioSampleRate();
+        (void)af::val<const VideoPlayer>().getAudioData();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
-        (void)af::val<VideoPlayer>().getAudioChannels();
+        (void)af::val<const VideoPlayer>().getAudioSampleRate();
 #endif
-        (void)af::val<VideoPlayer>().isUsingHwAccel();
-        (void)af::val<VideoPlayer>().getHwAccelName();
-        (void)af::val<VideoPlayer>().getPath();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
+        (void)af::val<const VideoPlayer>().getAudioChannels();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isUsingHwAccel();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getHwAccelName();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getPath();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().extractFrame(af::val<const fs::path>(), af::val<Pixels>(), af::val<float>(), af::val<float *>());
-        (void)af::val<VideoPlayer>().extractFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
+        (void)af::val<const VideoPlayer>().extractFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractFrame(af::val<const fs::path>(), af::val<Image>(), af::val<float>(), af::val<float *>());
-        (void)af::val<VideoPlayer>().extractFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
+        (void)af::val<const VideoPlayer>().extractFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<const fs::path>(), af::val<Pixels>(), af::val<float>(), af::val<float *>());
-        (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
+        (void)af::val<const VideoPlayer>().extractKeyFrame(af::val<Pixels>(), af::val<float>(), af::val<float *>());
         (void)af::val<VideoPlayer>().extractKeyFrame(af::val<const fs::path>(), af::val<Image>(), af::val<float>(), af::val<float *>());
-        (void)af::val<VideoPlayer>().extractKeyFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
+        (void)af::val<const VideoPlayer>().extractKeyFrame(af::val<Image>(), af::val<float>(), af::val<float *>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isLoaded();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().stop();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setPaused(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().togglePause();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().onError;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().hasError();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getErrorMessage();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isPlaying();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isPaused();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isFrameNew();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isReady();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isDone();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getWidth();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getHeight();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setPosition(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getCurrentTime();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setCurrentTime(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setVolume(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getVolume();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setSpeed(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getSpeed();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setPan(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getPan();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setLoop(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isLoop();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getCurrentFrame();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getTotalFrames();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setFrame(af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().nextFrame();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().previousFrame();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().firstFrame();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setResyncThreshold(af::val<float>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getResyncThreshold();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().getTexture();
+        (void)af::val<const VideoPlayer>().getTexture();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().hasTexture();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setMinFilter(af::val<TextureFilter>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setMagFilter(af::val<TextureFilter>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setFilter(af::val<TextureFilter>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getMinFilter();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getMagFilter();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setWrapU(af::val<TextureWrap>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setWrapV(af::val<TextureWrap>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().setWrap(af::val<TextureWrap>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getWrapU();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().getWrapV();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().save(af::val<const fs::path>());
+#endif
     }
 };
 
@@ -3330,55 +4467,69 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
     static void run() {
         (void)af::val<VideoPlayerBase>().load(af::val<const fs::path>());
         (void)af::val<VideoPlayerBase>().close();
-        (void)af::val<VideoPlayerBase>().isLoaded();
+        (void)af::val<const VideoPlayerBase>().isLoaded();
         (void)af::val<VideoPlayerBase>().play();
         (void)af::val<VideoPlayerBase>().stop();
         (void)af::val<VideoPlayerBase>().setPaused(af::val<bool>());
         (void)af::val<VideoPlayerBase>().togglePause();
         (void)af::val<VideoPlayerBase>().update();
         (void)af::val<VideoPlayerBase>().onError;
-        (void)af::val<VideoPlayerBase>().hasError();
-        (void)af::val<VideoPlayerBase>().getErrorMessage();
-        (void)af::val<VideoPlayerBase>().isPlaying();
-        (void)af::val<VideoPlayerBase>().isPaused();
-        (void)af::val<VideoPlayerBase>().isFrameNew();
-        (void)af::val<VideoPlayerBase>().isReady();
-        (void)af::val<VideoPlayerBase>().isDone();
-        (void)af::val<VideoPlayerBase>().getWidth();
-        (void)af::val<VideoPlayerBase>().getHeight();
-        (void)af::val<VideoPlayerBase>().getDuration();
-        (void)af::val<VideoPlayerBase>().getPosition();
+        (void)af::val<const VideoPlayerBase>().hasError();
+        (void)af::val<const VideoPlayerBase>().getErrorMessage();
+        (void)af::val<const VideoPlayerBase>().isPlaying();
+        (void)af::val<const VideoPlayerBase>().isPaused();
+        (void)af::val<const VideoPlayerBase>().isFrameNew();
+        (void)af::val<const VideoPlayerBase>().isReady();
+        (void)af::val<const VideoPlayerBase>().isDone();
+        (void)af::val<const VideoPlayerBase>().getWidth();
+        (void)af::val<const VideoPlayerBase>().getHeight();
+        (void)af::val<const VideoPlayerBase>().getDuration();
+        (void)af::val<const VideoPlayerBase>().getPosition();
         (void)af::val<VideoPlayerBase>().setPosition(af::val<float>());
-        (void)af::val<VideoPlayerBase>().getCurrentTime();
+        (void)af::val<const VideoPlayerBase>().getCurrentTime();
         (void)af::val<VideoPlayerBase>().setCurrentTime(af::val<float>());
         (void)af::val<VideoPlayerBase>().setVolume(af::val<float>());
-        (void)af::val<VideoPlayerBase>().getVolume();
+        (void)af::val<const VideoPlayerBase>().getVolume();
         (void)af::val<VideoPlayerBase>().setSpeed(af::val<float>());
-        (void)af::val<VideoPlayerBase>().getSpeed();
+        (void)af::val<const VideoPlayerBase>().getSpeed();
         (void)af::val<VideoPlayerBase>().setPan(af::val<float>());
-        (void)af::val<VideoPlayerBase>().getPan();
+        (void)af::val<const VideoPlayerBase>().getPan();
         (void)af::val<VideoPlayerBase>().setLoop(af::val<bool>());
-        (void)af::val<VideoPlayerBase>().isLoop();
-        (void)af::val<VideoPlayerBase>().getFrameRate();
-        (void)af::val<VideoPlayerBase>().getCurrentFrame();
-        (void)af::val<VideoPlayerBase>().getTotalFrames();
+        (void)af::val<const VideoPlayerBase>().isLoop();
+        (void)af::val<const VideoPlayerBase>().getFrameRate();
+        (void)af::val<const VideoPlayerBase>().getCurrentFrame();
+        (void)af::val<const VideoPlayerBase>().getTotalFrames();
         (void)af::val<VideoPlayerBase>().setFrame(af::val<int>());
         (void)af::val<VideoPlayerBase>().nextFrame();
         (void)af::val<VideoPlayerBase>().previousFrame();
         (void)af::val<VideoPlayerBase>().firstFrame();
         (void)af::val<VideoPlayerBase>().getPixels();
-        (void)af::val<VideoPlayerBase>().getPixels();
-        (void)af::val<VideoPlayerBase>().hasAudio();
-        (void)af::val<VideoPlayerBase>().getAudioCodec();
-        (void)af::val<VideoPlayerBase>().getAudioData();
-        (void)af::val<VideoPlayerBase>().getAudioSampleRate();
-        (void)af::val<VideoPlayerBase>().getAudioChannels();
-        (void)af::val<VideoPlayerBase>().isUsingHwAccel();
-        (void)af::val<VideoPlayerBase>().getHwAccelName();
+        (void)af::val<const VideoPlayerBase>().getPixels();
+        (void)af::val<const VideoPlayerBase>().hasAudio();
+        (void)af::val<const VideoPlayerBase>().getAudioCodec();
+        (void)af::val<const VideoPlayerBase>().getAudioData();
+        (void)af::val<const VideoPlayerBase>().getAudioSampleRate();
+        (void)af::val<const VideoPlayerBase>().getAudioChannels();
+        (void)af::val<const VideoPlayerBase>().isUsingHwAccel();
+        (void)af::val<const VideoPlayerBase>().getHwAccelName();
         (void)af::val<VideoPlayerBase>().setResyncThreshold(af::val<float>());
-        (void)af::val<VideoPlayerBase>().getResyncThreshold();
+        (void)af::val<const VideoPlayerBase>().getResyncThreshold();
         (void)af::val<VideoPlayerBase>().getTexture();
-        (void)af::val<VideoPlayerBase>().getTexture();
+        (void)af::val<const VideoPlayerBase>().getTexture();
+        (void)af::val<const VideoPlayerBase>().hasTexture();
+        (void)af::val<const VideoPlayerBase>().draw(af::val<float>(), af::val<float>());
+        (void)af::val<const VideoPlayerBase>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<VideoPlayerBase>().setMinFilter(af::val<TextureFilter>());
+        (void)af::val<VideoPlayerBase>().setMagFilter(af::val<TextureFilter>());
+        (void)af::val<VideoPlayerBase>().setFilter(af::val<TextureFilter>());
+        (void)af::val<const VideoPlayerBase>().getMinFilter();
+        (void)af::val<const VideoPlayerBase>().getMagFilter();
+        (void)af::val<VideoPlayerBase>().setWrapU(af::val<TextureWrap>());
+        (void)af::val<VideoPlayerBase>().setWrapV(af::val<TextureWrap>());
+        (void)af::val<VideoPlayerBase>().setWrap(af::val<TextureWrap>());
+        (void)af::val<const VideoPlayerBase>().getWrapU();
+        (void)af::val<const VideoPlayerBase>().getWrapV();
+        (void)af::val<const VideoPlayerBase>().save(af::val<const fs::path>());
     }
 };
 
@@ -3401,27 +4552,51 @@ struct Cover_VideoWriter : af::Scope<VideoWriter> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)VideoWriter();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<VideoWriter>().open(af::val<const fs::path>(), af::val<int>(), af::val<int>(), af::val<const VideoRecordSettings>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<VideoWriter>().close();
-        (void)af::val<VideoWriter>().isOpen();
-        (void)af::val<VideoWriter>().getFrameCount();
-        (void)af::val<VideoWriter>().getWidth();
-        (void)af::val<VideoWriter>().getHeight();
-        (void)af::val<VideoWriter>().getFps();
-        (void)af::val<VideoWriter>().getPath();
-        (void)af::val<VideoWriter>().getSettings();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().isOpen();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getFrameCount();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getWidth();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getHeight();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getFps();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getPath();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
+        (void)af::val<const VideoWriter>().getSettings();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<VideoWriter>().addFrame(af::val<const Fbo>());
         (void)af::val<VideoWriter>().addFrame(af::val<const Pixels>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<VideoWriter>().addFrameAt(af::val<const Fbo>(), af::val<double>());
         (void)af::val<VideoWriter>().addFrameAt(af::val<const Pixels>(), af::val<double>());
         (void)af::val<VideoWriter>().addFrameAt(af::val<const unsigned char *>(), af::val<int>(), af::val<int>(), af::val<double>());
+#endif
 #if defined(AF_MACOS)
         (void)af::val<VideoWriter>().lockFrame(af::val<int>());
 #endif
 #if defined(AF_MACOS)
         (void)af::val<VideoWriter>().submitFrame(af::val<double>());
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<VideoWriter>().writeAudio(af::val<const float *>(), af::val<int>(), af::val<double>());
+#endif
     }
 };
 
@@ -3430,23 +4605,57 @@ struct Cover_Window : af::Scope<Window> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)Window();
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setApp(af::val<std::shared_ptr<App>>());
-        (void)af::val<Window>().getApp();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getApp();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().events();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().close();
-        (void)af::val<Window>().isOpen();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().isOpen();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setTitle(af::val<const std::string>());
-        (void)af::val<Window>().getTitle();
-        (void)af::val<Window>().getWidth();
-        (void)af::val<Window>().getHeight();
-        (void)af::val<Window>().isOccluded();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getTitle();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getWidth();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getHeight();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().isOccluded();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFullscreen(af::val<bool>());
-        (void)af::val<Window>().isFullscreen();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().isFullscreen();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().toggleFullscreen();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setClearColor(af::val<const Color>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFps(af::val<float>());
-        (void)af::val<Window>().getFps();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Window>().getFps();
+#endif
     }
 };
 
@@ -3481,15 +4690,15 @@ struct Cover_Xml : af::Scope<Xml> {
         (void)Xml();
         (void)af::val<Xml>().load(af::val<const fs::path>());
         (void)af::val<Xml>().parse(af::val<const std::string>());
-        (void)af::val<Xml>().save(af::val<const fs::path>(), af::val<const std::string>());
-        (void)af::val<Xml>().toString(af::val<const std::string>());
+        (void)af::val<const Xml>().save(af::val<const fs::path>(), af::val<const std::string>());
+        (void)af::val<const Xml>().toString(af::val<const std::string>());
         (void)af::val<Xml>().root();
-        (void)af::val<Xml>().root();
+        (void)af::val<const Xml>().root();
         (void)af::val<Xml>().addRoot(af::val<const std::string>());
         (void)af::val<Xml>().child(af::val<const std::string>());
         (void)af::val<Xml>().document();
-        (void)af::val<Xml>().document();
-        (void)af::val<Xml>().empty();
+        (void)af::val<const Xml>().document();
+        (void)af::val<const Xml>().empty();
         (void)af::val<Xml>().addDeclaration(af::val<const std::string>(), af::val<const std::string>());
     }
 };
@@ -3522,7 +4731,7 @@ struct Cover_mcp__Tool : af::Scope<mcp::Tool> {
         (void)af::val<mcp::Tool>().args;
         (void)af::val<mcp::Tool>().handler;
         (void)af::val<mcp::Tool>().owner;
-        (void)af::val<mcp::Tool>().getSchema();
+        (void)af::val<const mcp::Tool>().getSchema();
     }
 };
 

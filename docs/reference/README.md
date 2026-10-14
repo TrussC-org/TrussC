@@ -138,7 +138,7 @@ This is the whole point: one key, one prose blurb, N signatures.
 Driven by C++ namespace, not by the sidecar:
 
 - `trussc::` (direct) → **public**, included.
-- `internal::`, `mcp::`, `headless::`, `hot_reload::`, `console::` → hidden, excluded.
+- Namespaces in the `HIDDEN` set in [`structure.js`](structure.js) → hidden, excluded (the single authoritative list).
 - `private` members → excluded; `protected` → kept.
 
 The sidecar never controls visibility — it only adds prose to symbols that are
