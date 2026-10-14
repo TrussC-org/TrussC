@@ -13,6 +13,11 @@
 # A test's own local.cmake is NOT included here (it is written for its own
 # target and dir); what a combined test needs from it is repeated below.
 
+# TC_CORE_TEST_SELECT: a ;-list of the combined tests to compile. Set by
+# examples/build_all.py (--shard, CI splits the core tests over several jobs)
+# on every configure; empty compiles all of them.
+set(TC_CORE_TEST_SELECT "" CACHE STRING "Combined core tests to compile (empty: all)")
+
 get_filename_component(_TC_CORE_TESTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 file(GLOB _TC_CORE_TEST_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS
     "${_TC_CORE_TESTS_DIR}/*")
@@ -24,6 +29,9 @@ foreach(_TC_DIR IN LISTS _TC_CORE_TEST_DIRS)
     if(_TC_NAME STREQUAL "allCoreTests"
             OR NOT EXISTS "${_TC_DIR}/src/main.cpp"
             OR EXISTS "${_TC_DIR}/own-binary")
+        continue()
+    endif()
+    if(TC_CORE_TEST_SELECT AND NOT _TC_NAME IN_LIST TC_CORE_TEST_SELECT)
         continue()
     endif()
     file(GLOB_RECURSE _TC_TEST_SOURCES CONFIGURE_DEPENDS
