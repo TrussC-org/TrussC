@@ -357,7 +357,7 @@ endif()
             # symbols live in a static archive on the Host, not in a .so.
             target_link_options(guest PRIVATE -Wl,--unresolved-symbols=ignore-all)
         endif()
-        # Guest output directory
+        # Guest output directory (multi-config generators append <config>/).
         set_target_properties(guest PROPERTIES
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
@@ -365,7 +365,8 @@ endif()
 
         # Host: executable with main.cpp + TrussC core
         add_executable(${PROJECT_NAME} ${_TC_HOST_SOURCES})
-        target_compile_definitions(${PROJECT_NAME} PRIVATE TC_HOT_RELOAD_BUILD)
+        target_compile_definitions(${PROJECT_NAME} PRIVATE
+            TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_CONFIG="$<CONFIG>")
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
         # Force-load ALL symbols from libTrussC.a into the Host (not just the ones
         # main.cpp uses) AND export them in the dynamic symbol table. This makes
