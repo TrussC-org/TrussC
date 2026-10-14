@@ -118,7 +118,6 @@ An empty exporter or a failed texture save now fails the call with one Error. OB
 `TrussC.h` used to include the MCP server's HTTP library, and with it a number of system headers. It no longer does (#789), which makes every file that includes `TrussC.h` compile faster. If your code uses one of these without including it itself, add the include:
 
 - `<regex>` (`std::regex`, `std::regex_match`, ...)
-- sockets: `<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>` on macOS / Linux (`<winsock2.h>` / `<ws2tcpip.h>` on Windows)
-- `<sys/stat.h>` (`stat`, `chmod`, `mkdir`)
+- `<sys/stat.h>` (`stat`, `chmod`, `mkdir`) on macOS / Linux
 
-The common standard headers (`<mutex>`, `<thread>`, `<map>`, `<fstream>`, `<sstream>`, `<atomic>`, `<functional>`, `<chrono>`, ...) still come in through `TrussC.h`.
+Socket headers still come in through TrussC's network headers. The common standard headers (`<mutex>`, `<thread>`, `<map>`, `<fstream>`, `<sstream>`, `<atomic>`, `<functional>`, `<chrono>`, ...) also still come in through `TrussC.h`.
