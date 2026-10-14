@@ -15,7 +15,7 @@
 #include "../events/tcEventListener.h"
 #include "../utils/tcLog.h"
 #include "../utils/tcOnceGate.h"
-#include "tcKeptThreads.h"
+#include "tc/utils/tcKeptThreads.h"
 
 // Platform-specific socket type
 #ifdef _WIN32

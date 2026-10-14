@@ -7,7 +7,7 @@
 // Guards the invariants:
 //   - Destroying a Thread never calls std::terminate: not when its worker has
 //     already returned, not when only stopThread() was called, not after a
-//     restart, not when a subclass that does not wait is destroyed from its
+//     restart, not when a subclass that waits is destroyed from its
 //     own threadedFunction().
 //     ~Thread() used to join only while isThreadRunning() was true, so those
 //     cases left a joinable std::thread behind (SIGABRT), and the last one
@@ -28,10 +28,10 @@
 //     also after only stopThread(), or skipped because the subclass was
 //     destroyed right after startThread(). None otherwise.
 //
-// Not covered, because it still terminates (see "Destruction" in
-// tcThread.h): a subclass that waits and is destroyed from its own
-// threadedFunction(). Nor is a destruction at the very moment the worker calls
-// threadedFunction(): that window is too narrow to hit on purpose.
+// Also covers self-wait (with and without stop), self-destruction from a
+// waiting subclass, and main-thread delivery with live/dead/expired tokens.
+// Destruction at the very moment the worker calls threadedFunction() remains
+// outside the contract: subclasses must wait before destroying their members.
 //
 // The pre-fix build aborts on the first case, so each case prints its own line
 // as soon as it is done. A watchdog turns a hang (a join that never returns)
@@ -47,6 +47,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <future>
 #include <string>
 #include <thread>
 
@@ -88,6 +89,7 @@ static atomic<int>  g_ranAfterMembersGone{0};
 static atomic<bool> g_lingerEntered{false};
 static atomic<bool> g_lingerExited{false};
 static atomic<bool> g_selfDeleted{false};
+static promise<void> g_selfExited;
 static atomic<bool> g_tlsKept{false};
 static atomic<bool> g_tlsReleased{false};
 static atomic<bool> g_tlsDtorOnWorker{false};
@@ -146,10 +148,12 @@ protected:
 // in a static buffer that operator delete poisons instead of freeing, so any
 // write the worker makes after the delete shows up.
 struct SelfDeleting : Thread {
+    ~SelfDeleting() override { waitForThread(); }
     static void* operator new(size_t size);
     static void operator delete(void* p) noexcept;
 protected:
     void threadedFunction() override {
+        g_selfExited.set_value_at_thread_exit();
         delete this;
         g_selfDeleted.store(true);   // globals only from here: the object is gone
     }
@@ -184,10 +188,11 @@ static thread::id g_tlsWorkerId;   // written and read on that worker only
 
 // Its worker keeps it alive through t_tlsOwner, which becomes the last owner.
 // So ~Thread() runs on the worker again, at thread exit, after
-// threadedFunction() and startThread()'s lambda have returned. Does NOT wait
-// (waiting would join its own thread).
+// threadedFunction() and startThread()'s lambda have returned. Its destructor
+// also calls waitForThread(), which must return without joining itself.
 struct TlsOwned : BaseDoneMark, Thread, enable_shared_from_this<TlsOwned> {
     ~TlsOwned() override {
+        waitForThread();
         g_tlsDtorOnWorker.store(this_thread::get_id() == g_tlsWorkerId);
     }
 protected:
@@ -196,6 +201,26 @@ protected:
         t_tlsOwner = shared_from_this();
         g_tlsKept.store(true);
         waitUntil([] { return g_tlsReleased.load(); });
+    }
+};
+
+// The worker stays in its body after both self-waits, until main releases it.
+// The future synchronizes the checks without joining concurrently with self-wait.
+struct SelfWaiting : Thread {
+    promise<void> waited;
+    future<void> finish;
+    bool runningAfterNoStop = false;
+    bool stoppedAfterDefault = false;
+    explicit SelfWaiting(future<void> done) : finish(std::move(done)) {}
+    ~SelfWaiting() override { waitForThread(); }
+protected:
+    void threadedFunction() override {
+        waitForThread(false);
+        runningAfterNoStop = isThreadRunning();
+        waitForThread();
+        stoppedAfterDefault = !isThreadRunning();
+        waited.set_value();
+        finish.wait();
     }
 };
 
@@ -363,14 +388,17 @@ TC_CORE_TEST_MAIN() {
     {
         g_threadWarnings.store(0);
         g_selfDeleted.store(false);
+        auto exited = g_selfExited.get_future();
         auto* t = new SelfDeleting();
         t->startThread();   // the worker deletes the object right away
         check("self-destroy: destructor returned on its own worker",
               waitUntil([] { return g_selfDeleted.load(); }));
         check("self-destroy: no warning", g_threadWarnings.load() == 0);
-        // Let the detached worker leave its lambda, then check that neither it
-        // nor startThread() wrote to the object after the delete.
-        this_thread::sleep_for(chrono::milliseconds(50));
+        // Thread-exit notification proves the detached lambda has finished.
+        if (exited.wait_for(chrono::seconds(5)) != future_status::ready) {
+            check("self-destroy: worker exited", false);
+            _Exit(3);  // do not inspect storage a stuck worker could still touch
+        }
         check("self-destroy: nothing written to the object after delete",
               selfStorageUntouched());
     }
@@ -392,6 +420,51 @@ TC_CORE_TEST_MAIN() {
               waitUntil([] { return g_tlsBaseDone.load(); }));
         check("thread_local owner: destroyed on the worker", g_tlsDtorOnWorker.load());
         check("thread_local owner: no warning", g_threadWarnings.load() == 0);
+    }
+
+    // --- 10. Self-wait preserves stop semantics and a later external join ---
+    {
+        promise<void> finish;
+        SelfWaiting t(finish.get_future());
+        auto waited = t.waited.get_future();
+        t.startThread();
+        if (waited.wait_for(chrono::seconds(5)) != future_status::ready) {
+            check("self-wait: both calls returned", false);
+            _Exit(3);
+        }
+        check("self-wait(false): keeps running", t.runningAfterNoStop);
+        check("self-wait(): requests stop", t.stoppedAfterDefault);
+        check("self-wait: keeps thread handle for external join",
+              t.getThreadId() != thread::id{});
+        finish.set_value();
+        t.waitForThread(false);
+        check("self-wait: external wait joined", t.getThreadId() == thread::id{});
+    }
+
+    // --- 11. Tokens are checked when drained, not when enqueued ---
+    {
+        (void)getMainThreadId();
+        int calls = 0;
+        auto live = make_shared<atomic<bool>>(true);
+        auto dead = make_shared<atomic<bool>>(true);
+        auto expired = make_shared<atomic<bool>>(true);
+        thread worker([&] {
+            runOnMainThread([&] { calls += 1; }, live);
+            runOnMainThread([&] { calls += 10; }, dead);
+            runOnMainThread([&] { calls += 100; }, expired);
+            runOnMainThread(function<void()>{}, live);
+        });
+        worker.join();  // enqueue returns without the main thread draining
+        check("token delivery: worker only enqueued", calls == 0);
+        dead->store(false, memory_order_release);
+        expired.reset();
+        internal::drainMainThreadQueue();
+        check("token delivery: only live closure ran", calls == 1);
+        internal::drainMainThreadQueue();
+        check("token delivery: closure ran exactly once", calls == 1);
+        runOnMainThread([&] { ++calls; }, live);
+        runOnMainThread([&] { calls += 10; }, dead);
+        check("token delivery: main-thread dispatch also checks token", calls == 2);
     }
 
     printf("\n%s  (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",

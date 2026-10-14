@@ -54,12 +54,11 @@ namespace trussc {
 //   Only waiting in the subclass destructor (waitForThread()) rules out all
 //   three, and threadedFunction() then always runs.
 //
-//   A subclass that waits must not be destroyed on its own worker: from its
-//   threadedFunction() (delete this, or dropping the last shared_ptr there),
-//   or after it returned (a thread_local owner released at thread exit). Its
-//   waitForThread() would then join its own thread, which throws
-//   std::system_error (resource_deadlock_would_occur) and terminates. Only a
-//   subclass that does not wait survives this: the base destructor detaches.
+//   On its own worker, waitForThread() requests stop (unless passed false)
+//   and returns without joining. The handle stays joinable so another thread
+//   can wait later. If destruction runs there, the base destructor detaches
+//   and the worker touches no members after threadedFunction() returns.
+//   After destroying itself, threadedFunction() must likewise touch no members.
 //
 // Mutex usage:
 //   As documented, no custom wrappers provided.
@@ -123,7 +122,8 @@ public:
     // Moving does not move the running thread: the new object gets none. A
     // running thread can't follow a moved object in this inheritance design,
     // so e.g. vector<MyThread> growth would silently stop every worker. Hold
-    // Thread subclasses via unique_ptr / shared_ptr instead.
+    // Thread subclasses via unique_ptr / shared_ptr instead. Move-assigning on
+    // the object's own worker stops it but cannot join it; that is unsupported.
     [[deprecated("Moving a Thread does not move the running thread. Hold it via unique_ptr. Will be removed in v1.0.0")]]
     Thread(Thread&& other) noexcept : threadRunning_(false) {
         // Ensure source is not running
@@ -195,11 +195,12 @@ public:
 
     // Wait for thread to finish
     // callStopThread: if true, calls stopThread() first
+    // On the worker itself, return without joining; another thread can join later.
     void waitForThread(bool callStopThread = true) {
         if (callStopThread) {
             stopThread();
         }
-        if (thread_.joinable()) {
+        if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id()) {
             thread_.join();
         }
     }

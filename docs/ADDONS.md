@@ -308,6 +308,17 @@ private:
 
 ### Events, Threads and Teardown
 
+**Asynchronous work owns everything it touches until it ends; the public class is the handle, and the worker never knows the handle's address.**
+
+- Put asynchronously used buffers, mutexes, queues, rings, OS handles and devices in one heap `State`, held by the public handle's `shared_ptr<State>`. Workers capture only that state, never `this`; use a `weak_ptr` for a delivery target.
+- `stop()` and destruction request stop and wait for completion from another thread. On the worker's own thread they return without waiting, and the worker retains the state until it finishes (`internal::KeptThreads`, in `tc/utils/tcKeptThreads.h`, keeps self-thread handles for a later join and detaches them on self-destruction). Restart creates a new `State`; the old worker finishes with the old state.
+- Delivery uses liveness tokens: `Deliver::Main` carries one automatically; `runOnMainThread(fn, weakToken)` accepts the same `weak_ptr<atomic<bool>>` and drops delivery if it is expired or false. These tokens do not wait for callbacks already running. Workers enqueue and return; they must never wait for the main thread.
+- C callbacks receive the `State` as `user_data`; keep it alive until the API's unregister/stop has returned. On Web without pthreads, nothing waits: callbacks resolving after stop inspect the state's stopped flag and drop their work.
+- Add no teardown timeout. Where an existing bounded wait expires, log and return while the worker keeps the state; never free it underneath a callback.
+- Process-wide owners (audio engine, stream worker, MCP state, console channel, global recorder and main-thread queue) must remain usable during exit: allocate them once and retain them through a static pointer without deleting them. A hot reload guest still stops its workers before unloading.
+
+`tc::Thread` retains its ofThread-compatible subclass contract: call `waitForThread()` in the subclass destructor. It joins from another thread; on itself it requests stop by default and returns, and the base destructor detaches. A self-destroyed worker must then access no members.
+
 Addons often fire an `Event<T>` from a thread they own (a receive thread, a device callback), or listen to one that fires off the main thread (`AudioEngine::audioOut`). `Event` guarantees the first point below; the component that owns the thread takes care of the rest:
 
 1. **Same thread:** a listener removed during `notify()` on the notifying thread is not called again, also not later in the same pass. A listener added during a pass starts from the next `notify()`.
@@ -317,23 +328,28 @@ Addons often fire an `Event<T>` from a thread they own (a receive thread, a devi
 3. **Order:** the barrier runs before the state the callback touches is destroyed. Call it from the most-derived class's destructor (or from an explicit `close()` / `stop()`), not from a base-class destructor: by the time a base-class destructor runs, the derived members are already gone.
 4. **A listener must return.** The framework's own teardown (an App's `audioOut()` / `audioIn()` on exit, hot reload or window close) waits for a listener in flight without a time limit: one that never returns hangs the app, with an error in the log after one second, rather than letting the App be destroyed under it. The public `AudioEngine::waitForAudioCallbacks()` gives up after one second and returns `false` instead. Either way, a listener on the audio thread (or any thread you stop this way) must not wait on the main thread or on a lock the tearing-down thread may hold.
 
-An addon class that listens on the audio thread:
+An addon listener retains its state through any callback still in flight:
 
 ```cpp
 class Scope {
+    struct State {
+        std::vector<float> ring;
+        void push(const tc::AudioOutBuffer& b);
+    };
 public:
     Scope() {
         listener_ = tc::AudioEngine::getInstance().audioOut.listen(
-            [this](tc::AudioOutBuffer& b) { push(b); },        // audio thread
+            [state = state_](tc::AudioOutBuffer& b) { state->push(b); },
             tc::audio::priority::Monitor);
     }
     ~Scope() {
-        listener_.disconnect();                                // no new calls
-        tc::AudioEngine::getInstance().waitForAudioCallbacks();  // none still running
-    }                                                          // members go after this
+        listener_.disconnect();
+        if (!tc::AudioEngine::getInstance().waitForAudioCallbacks()) {
+            tc::logError("Scope") << "Audio callback still running; it retains its state";
+        }
+    }
 private:
-    void push(const tc::AudioOutBuffer& b);
-    std::vector<float> ring_;
+    std::shared_ptr<State> state_ = std::make_shared<State>();
     tc::EventListener listener_;
 };
 ```

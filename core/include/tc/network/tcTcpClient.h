@@ -13,7 +13,7 @@
 #include <memory>
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventListener.h"
-#include "tc/network/tcKeptThreads.h"
+#include "tc/utils/tcKeptThreads.h"
 #include "tc/network/tcTcpSendChannel.h"
 #include <chrono>
 
