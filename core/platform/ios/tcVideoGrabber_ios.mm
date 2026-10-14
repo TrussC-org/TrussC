@@ -50,8 +50,9 @@ struct VideoGrabberPlatformData {
 
     // Resize notification
     std::atomic<bool> needsResize{false};
-    int newWidth = 0;
-    int newHeight = 0;
+    // Written by the capture thread before needsResize is set; read on main.
+    std::atomic<int> newWidth{0};
+    std::atomic<int> newHeight{0};
 
     // Background observer tokens
     id<NSObject> bgObserver = nil;
@@ -106,9 +107,9 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         data->bufferHeight = (int)height;
 
         // Notify main thread
-        data->needsResize.store(true);
-        data->newWidth = (int)width;
-        data->newHeight = (int)height;
+        data->newWidth.store((int)width, std::memory_order_relaxed);
+        data->newHeight.store((int)height, std::memory_order_relaxed);
+        data->needsResize.store(true);   // publishes the size above
     }
 
     if (baseAddress && data->backBuffer) {
@@ -553,15 +554,19 @@ void VideoGrabber::getNewSize(int& width, int& height) {
         return;
     }
     auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
-    std::lock_guard<std::mutex> lock(state_->mtx);
-    width = data->newWidth;
-    height = data->newHeight;
+    width = data->newWidth.load(std::memory_order_relaxed);
+    height = data->newHeight.load(std::memory_order_relaxed);
 }
 
 void VideoGrabber::clearResizeFlag() {
     if (!state_->platformData) return;
     auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
-    data->needsResize.store(false);
+    // Only once the handle has the size last reported: a size change that
+    // arrived after getNewSize() keeps the flag for the next update().
+    // state_->width / height are written on the main thread only.
+    if (state_->width == data->newWidth.load(std::memory_order_relaxed) &&
+        state_->height == data->newHeight.load(std::memory_order_relaxed))
+        data->needsResize.store(false);
 }
 
 // ---------------------------------------------------------------------------
