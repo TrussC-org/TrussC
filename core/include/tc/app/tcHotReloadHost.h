@@ -18,6 +18,12 @@
 #ifndef TC_HOT_RELOAD_CONFIG
 #define TC_HOT_RELOAD_CONFIG ""
 #endif
+#ifndef TC_HOT_RELOAD_CORE_LIB
+#define TC_HOT_RELOAD_CORE_LIB ""
+#endif
+#ifndef TC_HOT_RELOAD_BUILD_DIR
+#define TC_HOT_RELOAD_BUILD_DIR ""
+#endif
 #ifndef TC_HOT_RELOAD_MULTI_CONFIG
 #define TC_HOT_RELOAD_MULTI_CONFIG 0
 #endif
@@ -370,6 +376,75 @@ struct Host {
     int reloadCount = 0;
     bool initialized = false;
     bool multiConfig = false;
+    string coreLibPath = TC_HOT_RELOAD_CORE_LIB;
+    string configuredBuildDir = TC_HOT_RELOAD_BUILD_DIR; // relative to projectDir
+    vector<string> buildDirsTried;
+    bool rebuildBlocked = false; // preflight already logged the reason
+
+    bool reportMissingBuildDirectory() {
+        string tried;
+        for (const auto& dir : buildDirsTried) {
+            if (!tried.empty()) tried += ", ";
+            tried += dir;
+        }
+        if (tried.empty()) tried = buildDir;
+        logError("HotReload") << "No build directory with CMakeCache.txt for project "
+                              << projectDir << "; tried: " << tried;
+        rebuildBlocked = true;
+        return false;
+    }
+
+    // Single-config (Ninja/Make): directly under buildDir.
+    // Multi-config (Xcode/VS/Ninja Multi-Config): the host's configuration.
+    void updateGuestLibPath() {
+#ifdef __APPLE__
+        const string guestName = "libguest.dylib";
+#elif defined(_WIN32)
+        const string guestName = "guest.dll";
+#else
+        const string guestName = "libguest.so";
+#endif
+        // The generator type is a configure-time fact (no directory has to
+        // exist before the first guest build).
+        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
+        guestLibPath = buildDir + "/";
+        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
+        guestLibPath += guestName;
+    }
+
+    // The one place that decides where the build directory is: at init, and
+    // again when its CMakeCache.txt has gone by the time of a rebuild.
+    bool findBuildDirectory() { return findBuildDirectory(configuredBuildDir); }
+
+    bool findBuildDirectory(const string& configuredDir) {
+#ifdef __APPLE__
+        const char* presetDirs[] = {"build-macos", "xcode", "build"};
+#elif defined(_WIN32)
+        const char* presetDirs[] = {"build-windows", "vs", "build"};
+#else
+        const char* presetDirs[] = {"build-linux", "build"};
+#endif
+        buildDir.clear();
+        buildDirsTried.clear();
+        rebuildBlocked = false;
+        vector<string> candidates;
+        if (!configuredDir.empty()) {
+            candidates.push_back((fs::path(projectDir) / configuredDir).lexically_normal().string());
+        }
+        for (const char* dir : presetDirs) {
+            candidates.push_back((fs::path(projectDir) / dir).lexically_normal().string());
+        }
+        for (const auto& candidate : candidates) {
+            buildDirsTried.push_back(candidate);
+            std::error_code ec;
+            if (fs::is_regular_file(fs::path(candidate) / "CMakeCache.txt", ec)) {
+                buildDir = candidate;
+                updateGuestLibPath();
+                return true;
+            }
+        }
+        return reportMissingBuildDirectory();
+    }
 
     bool init() {
         // Detect project directory from the executable's location
@@ -391,51 +466,17 @@ struct Host {
         projectDir = searchPath.string();
         srcDir = projectDir + "/src";
 
-        // Detect the build directory — try preset-style names first, fall back to build/
-#ifdef __APPLE__
-        const char* presetDirs[] = {"build-macos", "xcode", "build"};
-#elif defined(_WIN32)
-        const char* presetDirs[] = {"build-windows", "vs", "build"};
-#else
-        const char* presetDirs[] = {"build-linux", "build"};
-#endif
-        buildDir = "";
-        for (const char* d : presetDirs) {
-            string candidate = projectDir + "/" + d;
-            if (fs::exists(candidate + "/CMakeCache.txt")) {
-                buildDir = candidate;
-                break;
-            }
-        }
-        if (buildDir.empty()) {
-            // No configured build dir found — use the first preset name
-            buildDir = projectDir + "/" + presetDirs[0];
-        }
+        // Prefer the configured tree; retain the old names for older builds.
+        if (!findBuildDirectory()) return false;
 
         if (!fs::exists(srcDir)) {
             logError("HotReload") << "src/ directory not found at " << srcDir;
             return false;
         }
 
-        // Single-config (Ninja/Make): directly under buildDir.
-        // Multi-config (Xcode/VS/Ninja Multi-Config): the host's configuration.
-#ifdef __APPLE__
-        const string guestName = "libguest.dylib";
-#elif defined(_WIN32)
-        const string guestName = "guest.dll";
-#else
-        const string guestName = "libguest.so";
-#endif
-        // The generator type is a configure-time fact (no directory has to
-        // exist before the first guest build).
-        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
-        guestLibPath = buildDir + "/";
-        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
-        guestLibPath += guestName;
-
         // Initial build of the Guest
         if (!rebuildGuest()) {
-            logError("HotReload") << "Initial Guest build failed";
+            if (!rebuildBlocked) logError("HotReload") << "Initial Guest build failed";
             return false;
         }
 
@@ -460,6 +501,22 @@ struct Host {
     }
 
     bool rebuildGuest() {
+        rebuildBlocked = false;
+        // Missing/unreadable paths cannot establish staleness; keep rebuilding.
+        std::error_code ec;
+        const auto coreTime = fs::last_write_time(coreLibPath, ec);
+        if (!ec) {
+            const auto hostTime = fs::last_write_time(getExecutablePath(), ec);
+            if (!ec && coreTime > hostTime) {
+                logError("HotReload") << "the host executable is older than TrussC; rebuild and restart the app";
+                rebuildBlocked = true;
+                return false;
+            }
+        }
+        if (!fs::is_regular_file(fs::path(buildDir) / "CMakeCache.txt", ec) &&
+            !findBuildDirectory()) {
+            return false;
+        }
         string cmake = findCMake(buildDir);
         logNotice("HotReload") << "Rebuilding guest...";
 
@@ -578,7 +635,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     // Set up callbacks that go through the Host's dynamically loaded App
     internal::appSetupFunc = []() {
         if (!g_host.init()) {
-            logError() << "[HotReload] Host initialization failed. Exiting.";
+            if (!g_host.rebuildBlocked) logError() << "[HotReload] Host initialization failed. Exiting.";
             sapp_quit();
             return;
         }
