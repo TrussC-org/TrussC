@@ -114,6 +114,8 @@ public:
                 return json(nullptr);  // replaced by the deferred result
             }));
         mcp::status("guest_status", std::function<double()>([this]() { return (double)ticks_; }));
+        mcp::status("guest_text", std::function<std::string()>([this]() { return std::to_string(ticks_); }));
+        mcp::statusGraph("guest_graph", [this]() { return (double)ticks_; });
         mcp::statusImage("guest_image", [this]() { (void)ticks_; return Pixels(); });
         mcp::setToolLevel(mcp::ToolLevel::Control);
     }

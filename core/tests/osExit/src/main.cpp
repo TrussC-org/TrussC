@@ -1,4 +1,8 @@
 #include <TrussC.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+#include <thread>
 #ifndef __EMSCRIPTEN__
 #include "impl/httplib.h"
 #endif

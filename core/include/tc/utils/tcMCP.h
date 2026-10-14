@@ -718,8 +718,6 @@ inline void enqueueHttpRequest(McpRequest request) {
 }
 } // namespace internal
 
-TC_PLATFORMS("macos,windows,linux,ios,android") void stopHttpServer();
-
 // Start HTTP server.
 //   port  : 0 = OS auto-assign, else fixed port
 //   host  : "127.0.0.1" (default) keeps it loopback-only. The default is an

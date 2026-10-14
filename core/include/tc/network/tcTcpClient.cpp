@@ -3,6 +3,14 @@
 // =============================================================================
 
 #include "tc/network/tcTcpClient.h"
+#ifndef _WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#endif
+#include <deque>
+#include <mutex>
+#include <thread>
 #include "tc/network/tcSocketInternal.h"
 #include "tc/utils/tcLog.h"
 #include "tc/events/tcCoreEvents.h"

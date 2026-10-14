@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include <thread>
 #include "../../common/tcCoreTest.h"
 #include <type_traits>
 #ifndef _WIN32

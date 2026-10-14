@@ -1,4 +1,7 @@
 #include "../../common/tcTcpClientTest.h"
+#include <mutex>
+#include <condition_variable>
+#include <thread>
 #include "../../common/tcCoreTest.h"
 
 namespace {

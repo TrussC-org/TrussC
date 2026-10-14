@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "stb/stb_image_write.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <fstream>

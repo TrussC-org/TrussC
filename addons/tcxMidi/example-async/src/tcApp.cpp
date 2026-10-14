@@ -1,4 +1,5 @@
 #include "TrussC.h"
+#include <mutex>
 #include "tcApp.h"
 
 void tcApp::setup() {

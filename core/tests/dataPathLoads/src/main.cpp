@@ -22,6 +22,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "stb/stb_image_write.h"
 #include <tcLut.h>
 #include "../../common/tcCoreTest.h"
 

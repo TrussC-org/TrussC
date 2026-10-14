@@ -21,6 +21,7 @@
 // =============================================================================
 
 #include "tcxDepthRecordFormat.h"
+#include <fstream>
 
 #include <cstddef>
 #include <filesystem>

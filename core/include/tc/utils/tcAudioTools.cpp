@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include <fstream>
 #include "tcAudioTools.h"
 #include "tc/sound/tcAudioAnalysis.h"
 #include "tc/sound/tcAudioRecorder.h"

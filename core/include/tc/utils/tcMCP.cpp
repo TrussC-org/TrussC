@@ -16,10 +16,16 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include "tcMcpBuild.h"
 
 #ifndef __EMSCRIPTEN__
 #include "../../impl/httplib.h"
+#ifndef _WIN32
+#include <sys/socket.h>
+#endif
 #endif
 
 namespace trussc {
