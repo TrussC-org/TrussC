@@ -77,10 +77,14 @@ class WriteTests(unittest.TestCase):
         # An opaque icon must not be normalized along with template text.
         icon = b"\x00\x01\r\n\xff"
         (template / "icon/app.ico").write_bytes(icon)
+        # Batch files get CRLF on every line (.gitattributes: *.bat eol=crlf),
+        # whatever endings the template has.
+        (template / "tool.bat").write_bytes(b"@echo off\nrem a\r\necho done\n")
         destination = self.base / "new_project"
         self.cli("new", destination, "--ide", "cmake", "--tc-root", framework)
         actual = self.snapshot(destination)
         self.assertEqual(actual.pop("icon/app.ico"), icon)
+        self.assertEqual(actual.pop("tool.bat"), b"@echo off\r\nrem a\r\necho done\r\n")
         self.assert_lf(actual)
         for name, data in expected.items():
             self.assertEqual(actual[name], data, name)

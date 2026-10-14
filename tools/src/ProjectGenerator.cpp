@@ -573,7 +573,8 @@ static void copyTemplate(const fs::path& source, const fs::path& destination) {
         const auto extension = source.extension().string();
         const auto name = source.filename().string();
         if (extension != ".txt" && extension != ".make" && extension != ".cpp" &&
-            extension != ".h" && name != ".gitignore" && name != ".gitkeep") {
+            extension != ".h" && extension != ".bat" && extension != ".cmd" &&
+            name != ".gitignore" && name != ".gitkeep") {
             fs::copy_file(source, destination);
             return;
         }

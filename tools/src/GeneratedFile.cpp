@@ -1,5 +1,6 @@
 #include "GeneratedFile.h"
 #include "TrussC.h"
+#include <cctype>
 #include <stdexcept>
 
 void writeGeneratedFile(const std::filesystem::path& path, const std::string& text) {
@@ -12,6 +13,20 @@ void writeGeneratedFile(const std::filesystem::path& path, const std::string& te
         } else {
             bytes += text[i];
         }
+    }
+
+    // Batch files keep CRLF (.gitattributes: "*.bat text eol=crlf"); cmd.exe
+    // misreads labels and goto in LF-only scripts.
+    auto extension = path.extension().string();
+    for (auto& ch : extension) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (extension == ".bat" || extension == ".cmd") {
+        std::string crlf;
+        crlf.reserve(bytes.size() + bytes.size() / 16);
+        for (char ch : bytes) {
+            if (ch == '\n') crlf += '\r';
+            crlf += ch;
+        }
+        bytes.swap(crlf);
     }
 
     std::filesystem::path resolved;
