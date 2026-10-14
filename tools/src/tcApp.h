@@ -88,7 +88,7 @@ private:
 
     // Helper functions
     void loadConfig();
-    void saveConfig();
+    bool saveConfig();
     void scanAddons();
     // Select an addon (by index) and auto-select its transitive dependencies.
     void selectAddonWithDeps(size_t index);
