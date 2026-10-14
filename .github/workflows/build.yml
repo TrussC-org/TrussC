@@ -295,12 +295,13 @@ jobs:
             find . -name trusscli.exe
           fi
 
-      # trusscli clean must refuse a folder that is not a TrussC project (#459).
-      # Runs against the trusscli just built from this commit.
-      - name: trusscli clean regression tests
+      # trusscli CLI regressions, against the trusscli just built from this
+      # commit: clean refuses a folder that is not a TrussC project (#459), and
+      # generated files are written atomically with LF endings (#373).
+      - name: trusscli regression tests
         if: runner.os == 'Linux'
         shell: bash
-        run: python3 tools/tests/test_trusscli_clean.py -v
+        run: python3 -m unittest discover -s tools/tests -p "test_trusscli_*.py" -v
 
       # Configure and build must agree on localized /showIncludes bytes (#417).
       - name: Windows UTF-8 console header dependencies
