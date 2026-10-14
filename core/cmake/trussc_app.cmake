@@ -376,7 +376,9 @@ endif()
         endif()
         target_compile_definitions(${PROJECT_NAME} PRIVATE
             TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_CONFIG="$<CONFIG>"
-            TC_HOT_RELOAD_MULTI_CONFIG=${_tc_multi_config})
+            TC_HOT_RELOAD_MULTI_CONFIG=${_tc_multi_config}
+            TC_HOT_RELOAD_CORE_LIB="$<TARGET_FILE:TrussC>"
+            TC_HOT_RELOAD_BUILD_DIR="${CMAKE_BINARY_DIR}")
         set_target_properties(${PROJECT_NAME} PROPERTIES ENABLE_EXPORTS TRUE)
         # Force-load ALL symbols from libTrussC.a into the Host (not just the ones
         # main.cpp uses) AND export them in the dynamic symbol table. This makes

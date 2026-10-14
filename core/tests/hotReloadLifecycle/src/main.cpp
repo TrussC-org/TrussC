@@ -284,8 +284,11 @@ static std::string findGuestLibrary() {
                                "build", "xcode", "vs"};
     // Same rule as the host: multi-config generators use <buildDir>/<config>/.
     const bool multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && *TC_HOT_RELOAD_CONFIG;
-    for (const char* b : buildDirs) {
-        fs::path p = proj / b;
+    std::vector<fs::path> candidates;
+    if (*TC_HOT_RELOAD_BUILD_DIR) candidates.emplace_back(TC_HOT_RELOAD_BUILD_DIR);
+    for (const char* b : buildDirs) candidates.push_back(proj / b);
+    for (const auto& candidate : candidates) {
+        fs::path p = candidate;
         if (multiConfig) p /= TC_HOT_RELOAD_CONFIG;
         p /= guestName;
         if (fs::exists(p)) return p.string();
@@ -795,6 +798,109 @@ static int checkLoadFailuresLogged() {
     return rc;
 }
 
+// Preflight failures must stop before spawning cmake, emit exactly one Error
+// per attempt, and leave the current guest intact. A child mode of this test
+// stands in for cmake and records whether the build command was reached.
+static int checkRebuildPreflight() {
+    using trussc::hot_reload::Host;
+    const fs::path dir = fs::temp_directory_path() / "tc_hotReloadLifecycle_preflight";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "custom-tree");
+    const fs::path configured = dir / "custom-tree";
+    const fs::path coreLib = dir / "core-lib";
+    std::ofstream(coreLib) << "mtime probe\n";
+    const auto hostTime = fs::last_write_time(getExecutablePath());
+    fs::last_write_time(coreLib, hostTime + std::chrono::hours(1));
+    std::ofstream(configured / "CMakeCache.txt")
+        << "CMAKE_COMMAND:INTERNAL=" << getExecutablePath().string() << "\n";
+
+    std::vector<std::string> errors;
+    EventListener listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error) errors.push_back(e.message);
+    });
+    int rc = 0;
+    auto expect = [&](bool condition, const char* what) {
+        if (!condition) {
+            std::printf("hotReloadLifecycle: FAIL - preflight %s\n", what);
+            rc = 51;
+        }
+    };
+    const std::string staleMessage =
+        "[HotReload] the host executable is older than TrussC; rebuild and restart the app";
+    Host host;
+    host.projectDir = dir.string();
+    host.coreLibPath = coreLib.string();
+    expect(host.findBuildDirectory(configured.string()) && host.buildDir == configured.string(),
+           "did not prefer configured directory");
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        errors.clear();
+        expect(!host.rebuildGuest(), "accepted a stale host");
+        expect(errors.size() == 1 && errors[0] == staleMessage, "stale host did not log one Error");
+    }
+    // Initial failure must not add an 'Initial Guest build failed' Error.
+    errors.clear();
+    Host initial;
+    initial.coreLibPath = coreLib.string();
+    expect(!initial.init(), "initialized a stale host");
+    expect(errors.size() == 1 && errors[0] == staleMessage, "initial stale host logged duplicate Errors");
+
+    host.guest.app = std::make_shared<App>();
+    App* runningApp = host.getApp();
+    errors.clear();
+    expect(!host.reload() && host.getApp() == runningApp && host.reloadCount == 0,
+           "failed reload replaced the running guest");
+    expect(errors.size() == 1 && errors[0] == staleMessage, "reload logged duplicate Errors");
+    expect(!fs::exists(configured / "build-command-reached"), "stale host launched the build command");
+
+    // Missing or unreadable core paths skip the mtime check silently. The
+    // mock build command, rather than a real cmake build, proves it proceeds.
+    for (const fs::path& probe : {dir / "missing-core", coreLib / "unreadable-child", coreLib}) {
+        if (probe == coreLib) fs::last_write_time(coreLib, hostTime);
+        host.coreLibPath = probe.string();
+        errors.clear();
+        expect(host.rebuildGuest() && errors.empty(), "missing or equal-mtime core blocked rebuilding");
+        expect(fs::exists(configured / "build-command-reached"), "valid rebuild did not launch command");
+        fs::remove(configured / "build-command-reached");
+    }
+
+    // Missing configured path falls back to the existing platform name list.
+#ifdef __APPLE__
+    const fs::path fallback = dir / "build-macos";
+#elif defined(_WIN32)
+    const fs::path fallback = dir / "build-windows";
+#else
+    const fs::path fallback = dir / "build-linux";
+#endif
+    fs::create_directories(fallback);
+    std::ofstream(fallback / "CMakeCache.txt") << "# fallback\n";
+    expect(host.findBuildDirectory((dir / "missing-configured").string()) &&
+           host.buildDir == fallback.string(), "configured path did not fall back");
+    fs::remove(fallback / "CMakeCache.txt");
+    errors.clear();
+    expect(!host.findBuildDirectory((dir / "missing-configured").string()), "accepted missing caches");
+    expect(errors.size() == 1 && errors[0].find(dir.string()) != std::string::npos,
+           "missing build directory did not log one Error naming project root");
+    for (const auto& candidate : host.buildDirsTried) {
+        expect(errors.size() == 1 && errors[0].find(candidate) != std::string::npos,
+               "missing build directory omitted a tried directory");
+    }
+    // A cache removed after initialization is caught before launching cmake.
+    host.buildDir = configured.string();
+    host.buildDirsTried = {configured.string()};
+    fs::remove(configured / "CMakeCache.txt");
+    errors.clear();
+    expect(!host.reload() && host.getApp() == runningApp, "missing cache replaced running guest");
+    expect(errors.size() == 1 && errors[0].find(configured.string()) != std::string::npos,
+           "missing cache reload did not log one Error");
+    expect(!fs::exists(configured / "build-command-reached"), "missing cache launched build command");
+    listener.disconnect();
+    host.guest.app.reset();
+    fs::remove_all(dir);
+    if (rc == 0) std::printf("hotReloadLifecycle: rebuild preflight ok\n");
+    return rc;
+}
+
 // --reload-check: the real windowed host, reloading the guest by itself from
 // the host's afterFrame (#416). Input goes in the way _event_cb hands it on:
 // the raw sokol event first (ImGui follows the cursor through rawEvent), then
@@ -931,6 +1037,10 @@ static int runReloadCheck() {
 }
 
 int main(int argc, char** argv) {
+    if (argc > 2 && std::string(argv[1]) == "--build") {
+        std::ofstream(fs::path(argv[2]) / "build-command-reached") << "mock cmake build\n";
+        return 0;
+    }
     if (argc > 1 && std::string(argv[1]) == "--app") {
         WindowSettings settings;
         settings.setSize(960, 600);
@@ -944,6 +1054,7 @@ int main(int argc, char** argv) {
 
     if (int rc = checkWatcherExtensions()) return rc;
     if (int rc = checkLoadFailuresLogged()) return rc;
+    if (int rc = checkRebuildPreflight()) return rc;
 
     std::string guestPath = findGuestLibrary();
     if (guestPath.empty()) {
