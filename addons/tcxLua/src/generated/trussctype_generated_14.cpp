@@ -1,4 +1,5 @@
 // AUTO-GENERATED usertype bindings from reference-data.json by luagen-types.js
+// Shards are unity-built; no anonymous namespaces or static helpers with clashing names.
 #include "tcxLua.h"
 #include "TrussC.h"
 using namespace trussc;

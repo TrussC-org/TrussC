@@ -427,7 +427,7 @@ if (colorsData) {
 }
 
 const PRELUDE = (needsColorsTag) => `// AUTO-GENERATED usertype bindings from reference-data.json by luagen-types.js
-#include "tcxLua.h"
+${needsColorsTag ? '' : '// Shards are unity-built; no anonymous namespaces or static helpers with clashing names.\n'}#include "tcxLua.h"
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;

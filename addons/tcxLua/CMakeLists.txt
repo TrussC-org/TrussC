@@ -46,6 +46,23 @@ add_library(${ADDON_NAME} STATIC
     ${BINGEN_GENERATED_SOURCES}
 )
 
+# Pay the TrussC.h + sol.hpp header cost four times instead of sixteen.
+# GROUP mode ignores UNITY_BUILD_BATCH_SIZE, so assign four shards per group.
+# Leave the generated aggregator/free functions and all other sources separate.
+set(_BINDING_SHARD_INDEX 0)
+foreach(_BINDING_SOURCE IN LISTS BINGEN_GENERATED_SOURCES)
+    if(_BINDING_SOURCE MATCHES "/trussctype_generated_[0-9]+[.]cpp$")
+        math(EXPR _BINDING_GROUP "${_BINDING_SHARD_INDEX} / 4")
+        set_source_files_properties(${_BINDING_SOURCE} PROPERTIES
+            UNITY_GROUP "bindings_${_BINDING_GROUP}")
+        math(EXPR _BINDING_SHARD_INDEX "${_BINDING_SHARD_INDEX} + 1")
+    endif()
+endforeach()
+set_target_properties(${ADDON_NAME} PROPERTIES
+    UNITY_BUILD ON
+    UNITY_BUILD_MODE GROUP
+    UNITY_BUILD_BATCH_SIZE 4)
+
 if(USE_LUAJIT)
     target_compile_definitions(${ADDON_NAME} PRIVATE TCXLUA_USE_LUAJIT=1 SOL_LUAJIT=1)
     target_include_directories(${ADDON_NAME} PUBLIC
