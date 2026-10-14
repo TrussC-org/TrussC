@@ -16,9 +16,9 @@
 //
 // Each frame runs what was queued when its drain started, in order; work queued
 // while the drain runs waits for the next frame, so the frame always starts.
-// Nothing is dropped and there is no limit: a queued closure may edit the tree
-// or free something. The count taken at drain start is reported by the
-// tc_get_health MCP tool (mainQueuePending). Code that may queue faster than the
+// Calls without a token are never dropped and there is no limit: a queued
+// closure may edit the tree or free something. The count taken at drain start
+// is reported by the tc_get_health MCP tool (mainQueuePending). Code that may queue faster than the
 // app runs it, and can drop values, keeps its own bounded or latest-value buffer.
 //
 //   tcp.onReceive.listen([&](Msg& m){
@@ -31,12 +31,13 @@
 // ---------------------------------------------------------------------------
 
 #include "tcThread.h"        // isMainThread()
+#include <atomic>
+#include <memory>
 #include <cstddef>
 #include <functional>
 
 #if !defined(__EMSCRIPTEN__)
 #include "tcThreadChannel.h" // ThreadChannel<T>
-#include <atomic>
 #include <vector>
 #endif
 
@@ -98,5 +99,22 @@ inline void drainMainThreadQueue() {
 }
 
 #endif
+
+// Same dispatch as above, with the Deliver::Main liveness token. Check at
+// execution time: an expired or false token drops the closure. Workers only
+// enqueue and return; they never wait for the main thread. The token is not a
+// barrier for a callback already running: its owner must serialize teardown
+// with delivery (normally on the main thread). The wrapper costs one extra
+// std::function per call; fine for per-event delivery, but a hot path would
+// want the queue to hold {fn, token} directly.
+inline void runOnMainThread(std::function<void()> fn,
+                            std::weak_ptr<std::atomic<bool>> token) {
+    if (!fn) return;
+    runOnMainThread([fn = std::move(fn), token = std::move(token)]() {
+        auto alive = token.lock();
+        if (!alive || !alive->load(std::memory_order_acquire)) return;
+        fn();
+    });
+}
 
 } // namespace trussc

@@ -606,6 +606,7 @@ static void cover_utility() {
     (void)getMainThreadId();
     (void)isMainThread();
     (void)runOnMainThread(af::val<std::function<void ()>>());
+    (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());
     (void)logLevelToString(af::val<LogLevel>());
     (void)getLogger();
     (void)setLogLevel(af::val<LogLevel>());

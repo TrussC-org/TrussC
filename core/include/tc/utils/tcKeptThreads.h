@@ -1,6 +1,5 @@
 // =============================================================================
-// tcKeptThreads.h - threads a network client could not join yet (not public
-// API)
+// tcKeptThreads.h - threads an owner could not join yet (not public API)
 //
 // A client cannot join the thread it runs on. When disconnect(), connect()
 // (or, for UdpSocket, stopReceiving() / close()) runs on one of the client's

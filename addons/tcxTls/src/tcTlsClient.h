@@ -203,7 +203,7 @@ private:
     // tlsReceiveThread_ when a call on that very thread (a listener's
     // connect() or disconnect(), or the destructor) let go of it. Joined by
     // the next connect() or disconnect() on another thread, or by the
-    // destructor (see tc/network/tcKeptThreads.h).
+    // destructor (see tc/utils/tcKeptThreads.h).
     tc::internal::KeptThreads tlsKeptThreads_;
 
     // Bumped by every connect(), before it sets any flag for the new

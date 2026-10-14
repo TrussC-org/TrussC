@@ -118,8 +118,8 @@ public:
     // Callback type (argument passed by reference - can be modified)
     using Callback = std::function<void(T&)>;
 
-    Event() : alive_(std::make_shared<bool>(true)) {}
-    ~Event() { *alive_ = false; }
+    Event() : alive_(std::make_shared<std::atomic<bool>>(true)) {}
+    ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Copy/Move forbidden (events have fixed location)
     Event(const Event&) = delete;
@@ -216,10 +216,10 @@ private:
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
         // Capture weak_ptr to check if Event is still alive before removing
-        std::weak_ptr<bool> weak = alive_;
+        std::weak_ptr<std::atomic<bool>> weak = alive_;
         listener = EventListener([this, id, weak]() {
             if (auto alive = weak.lock()) {
-                if (*alive) {
+                if (alive->load(std::memory_order_relaxed)) {
                     this->removeListener(id);
                 }
             }
@@ -257,14 +257,9 @@ public:
             if (entry.deliver == Deliver::Main && !isMainThread()) {
                 if constexpr (std::is_copy_constructible_v<T>) {
                     T copy = arg;
-                    runOnMainThread([cb = entry.callback, copy,
-                                     w = std::weak_ptr<std::atomic<bool>>(entry.alive)]() mutable {
-                        // Listener died while this call sat in the queue —
-                        // drop it (keeps the EventListener RAII guarantee).
-                        auto alive = w.lock();
-                        if (!alive || !alive->load()) return;
+                    runOnMainThread([cb = entry.callback, copy]() mutable {
                         cb(copy);
-                    });
+                    }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                     continue;
                 }
                 // Non-copyable payload can't be marshalled — fall through and
@@ -319,7 +314,8 @@ private:
         internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
-    std::shared_ptr<bool> alive_;
+    // Liveness only, not a teardown barrier or publication of other state.
+    std::shared_ptr<std::atomic<bool>> alive_;
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
     internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     uint64_t nextId_ = 0;
@@ -334,8 +330,8 @@ public:
     // Callback type (no arguments)
     using Callback = std::function<void()>;
 
-    Event() : alive_(std::make_shared<bool>(true)) {}
-    ~Event() { *alive_ = false; }
+    Event() : alive_(std::make_shared<std::atomic<bool>>(true)) {}
+    ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     Event(const Event&) = delete;
     Event& operator=(const Event&) = delete;
@@ -426,10 +422,10 @@ private:
         }
         // Set EventListener outside lock (removeListener() may be called when disconnecting existing)
         // Capture weak_ptr to check if Event is still alive before removing
-        std::weak_ptr<bool> weak = alive_;
+        std::weak_ptr<std::atomic<bool>> weak = alive_;
         listener = EventListener([this, id, weak]() {
             if (auto alive = weak.lock()) {
-                if (*alive) {
+                if (alive->load(std::memory_order_relaxed)) {
                     this->removeListener(id);
                 }
             }
@@ -449,13 +445,8 @@ public:
             // Deliver::Main from a worker thread: run on the main thread next
             // frame (no payload to copy for Event<void>).
             if (entry.deliver == Deliver::Main && !isMainThread()) {
-                runOnMainThread([cb = entry.callback,
-                                 w = std::weak_ptr<std::atomic<bool>>(entry.alive)]() {
-                    // Listener died while this call sat in the queue — drop it
-                    auto alive = w.lock();
-                    if (!alive || !alive->load()) return;
-                    cb();
-                });
+                runOnMainThread(entry.callback,
+                                std::weak_ptr<std::atomic<bool>>(entry.alive));
                 continue;
             }
             {
@@ -497,7 +488,8 @@ private:
         internal::sharedStore(entries_, ConstEntryListPtr(next));
     }
 
-    std::shared_ptr<bool> alive_;
+    // Liveness only, not a teardown barrier or publication of other state.
+    std::shared_ptr<std::atomic<bool>> alive_;
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
     internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     uint64_t nextId_ = 0;

@@ -83,7 +83,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     ));
     lua->set_function("getMainThreadId", []() { return trussc::getMainThreadId(); });
     lua->set_function("isMainThread", []() { return trussc::isMainThread(); });
-    lua->set_function("runOnMainThread", [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); });
+    lua->set_function("runOnMainThread", sol::overload(
+        [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); },
+        [](std::function<void ()> fn, std::weak_ptr<std::atomic<bool>> token) { return trussc::runOnMainThread(fn, token); }
+    ));
     lua->set_function("logLevelToString", [](trussc::LogLevel level) { return trussc::logLevelToString(level); });
     lua->set_function("getLogger", []() -> decltype(auto) { return trussc::getLogger(); });
     lua->set_function("setLogLevel", [](trussc::LogLevel level) { return trussc::setLogLevel(level); });
