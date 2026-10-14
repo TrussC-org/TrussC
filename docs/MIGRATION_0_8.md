@@ -97,4 +97,18 @@ auto result = model.load("model.gltf");
 if (!result) { /* inspect result.error and result.message; already logged */ }
 ```
 
-`GltfModel::load()` now takes `const fs::path&`; a `std::string` still converts. For UTF-8 text on Windows, pass `utf8ToPath(text)` so it becomes a native filesystem path. External buffer and image URIs now decode percent escapes, such as `a%20b.png` for `a b.png`. `ObjExporter` is unchanged.
+`GltfModel::load()` now takes `const fs::path&`; a `std::string` still converts. For UTF-8 text on Windows, pass `utf8ToPath(text)` so it becomes a native filesystem path. External buffer and image URIs now decode percent escapes, such as `a%20b.png` for `a b.png`. `ObjExporter` changes too; see the next section.
+
+## OBJ export returns `SaveResult`
+
+`tcx::obj::ObjExporter::save()` now returns `SaveResult` (breaking change, #777). `if (exporter.save("model.obj"))` still works. Use `.ok()` when storing or passing the result as a `bool`, or keep the result to inspect the failure:
+
+```cpp
+bool saved = exporter.save("model.obj").ok();
+auto result = exporter.save("model.obj");
+if (!result) {
+    // Inspect result.error and result.message; save() already logged one Error.
+}
+```
+
+An empty exporter or a failed texture save now fails the call with one Error. OBJ and MTL text use the shared atomic save helpers; a failed MTL write leaves both previous text files intact. Replacement is atomic per file, not across the entire export: a final OBJ close or rename failure can leave the updated MTL alongside the previous OBJ, and textures already saved are kept.

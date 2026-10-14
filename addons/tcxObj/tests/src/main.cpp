@@ -32,6 +32,9 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 using namespace std;
 using namespace tc;
@@ -124,6 +127,103 @@ static bool onlyPentaVertices(const Mesh& mesh) {
     return true;
 }
 
+// Export failures must preserve previous text files and report exactly once.
+static void testExporterSaves() {
+    Mesh mesh;
+    mesh.addVertex(0, 0, 0).addVertex(1, 0, 0).addVertex(0, 1, 0);
+    mesh.addTexCoord(0, 0).addTexCoord(1, 0).addTexCoord(0, 1);
+    mesh.addColor(Color(1, 0, 0)).addColor(Color(1, 0, 0)).addColor(Color(1, 0, 0));
+    tcx::obj::ObjExporter exporter;
+    exporter.addMesh(mesh, "triangle");
+    exporter.setVertexColorMode(tcx::obj::VertexColorMode::BakeTexture).setBakeTextureSize(4);
+    const auto obj = g_dir / "saved.obj";
+    const auto mtl = g_dir / "saved.mtl";
+    const auto png = g_dir / "saved_triangle.png";
+    int errors = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error) ++errors;
+    });
+    auto readFile = [](const fs::path& path) {
+        ifstream file(path, ios::binary);
+        return string(istreambuf_iterator<char>(file), istreambuf_iterator<char>());
+    };
+    auto tempPath = [](fs::path path) { path += ".tmp"; return path; };
+
+    auto result = exporter.save(obj);
+    check("export: baked material succeeds without Errors", result.ok() && errors == 0);
+    const auto previousObj = readFile(obj);
+    const auto previousMtl = readFile(mtl);
+    const auto previousPng = readFile(png);
+    check("export: no temporary files after success",
+          !fs::exists(tempPath(obj)) && !fs::exists(tempPath(mtl)) && !fs::exists(tempPath(png)));
+    exporter.setScale(2); // Would change the OBJ if it were replaced too early.
+
+    for (const auto& blocked : {obj, mtl, png}) {
+        const auto blocker = tempPath(blocked);
+        fs::create_directory(blocker);
+        ofstream(blocker / "keep") << "pre-existing blocker";
+        errors = 0;
+        result = exporter.save(obj);
+        check("export: blocked " + pathToUtf8(blocked.extension()) + " fails with one Error",
+              // A directory at <file>.tmp is EISDIR on POSIX (WriteFailed) but
+              // EACCES on Windows (AccessDenied): check the failure, not the code.
+              !result.ok() && !result.message.empty() && errors == 1);
+        check("export: failure preserves previous OBJ, MTL and texture",
+              readFile(obj) == previousObj && readFile(mtl) == previousMtl &&
+              readFile(png) == previousPng);
+        check("export: preserves pre-existing temporary blocker", readFile(blocker / "keep") == "pre-existing blocker");
+        fs::remove_all(blocker); // Only the test owns this directory.
+        check("export: no generated temporary files after failure",
+              !fs::exists(tempPath(obj)) && !fs::exists(tempPath(mtl)) && !fs::exists(tempPath(png)));
+    }
+
+    errors = 0;
+    Image emptyImage;
+    tcx::obj::ObjExporter emptyTexture;
+    emptyTexture.addMesh(mesh, "triangle", emptyImage);
+    result = emptyTexture.save(obj);
+    check("export: empty texture fails with one Error", result.error == SaveError::WriteFailed && errors == 1);
+    check("export: empty texture preserves text and cleans temporaries",
+          readFile(obj) == previousObj && readFile(mtl) == previousMtl &&
+          !fs::exists(tempPath(obj)) && !fs::exists(tempPath(mtl)));
+
+    errors = 0;
+    result = tcx::obj::ObjExporter().save(obj);
+    check("export: no meshes fails with one Error", result.error == SaveError::WriteFailed && errors == 1);
+    errors = 0;
+    result = exporter.save({});
+    check("export: empty path fails with one Error", result.error == SaveError::WriteFailed && errors == 1);
+
+#ifndef _WIN32
+    if (geteuid() == 0) {
+        printf("export: unwritable folder SKIP (root bypasses permissions)\n");
+    } else {
+        const auto locked = g_dir / "unwritable";
+        fs::create_directory(locked);
+        fs::permissions(locked, fs::perms::owner_read | fs::perms::owner_exec);
+        errors = 0;
+        result = exporter.save(locked / "model.obj");
+        fs::permissions(locked, fs::perms::owner_all);
+        check("export: unwritable folder returns AccessDenied and one Error",
+              result.error == SaveError::AccessDenied && errors == 1);
+        check("export: unwritable folder leaves no files", fs::is_empty(locked));
+    }
+#else
+    printf("export: unwritable folder SKIP (requires a Windows ACL fixture)\n");
+#endif
+
+    errors = 0;
+    result = exporter.save(obj);
+    check("export: retry replaces previous OBJ successfully",
+          result.ok() && errors == 0 && readFile(obj) != previousObj);
+    tcx::obj::ObjExporter geometryOnly;
+    geometryOnly.addMesh(mesh);
+    const auto geometryPath = g_dir / "geometry.obj";
+    check("export: geometry without material succeeds", geometryOnly.save(geometryPath).ok());
+    check("export: geometry without material leaves no MTL or temporary",
+          !fs::exists(g_dir / "geometry.mtl") && !fs::exists(tempPath(geometryPath)));
+}
+
 static int runTests() {
 #ifndef TCX_OBJ_TEST_GPU
     sg_desc graphics = {};
@@ -163,6 +263,8 @@ static int runTests() {
         setDataPathRoot(oldRoot);
     }
 
+    testExporterSaves();
+
     // ----- UTF-8 model, material and texture paths ----------------------------
     {
         fs::path oldRoot = getDataPathRoot();
@@ -191,7 +293,7 @@ static int runTests() {
             tcx::obj::ObjExporter exporter;
             exporter.addMesh(group.mesh, "triangle", group.texture);
             check("UTF-8 OBJ: export relative Japanese filename",
-                  exporter.save(utf8ToPath("モデル.obj")));
+                  exporter.save(utf8ToPath("モデル.obj")).ok());
             ifstream obj(g_dir / utf8ToPath("モデル.obj"), ios::binary);
             string line;
             bool utf8Mtl = false;
