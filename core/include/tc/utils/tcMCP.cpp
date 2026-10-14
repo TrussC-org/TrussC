@@ -18,6 +18,10 @@
 #include <TrussC.h>
 #include "tcMcpBuild.h"
 
+#ifndef __EMSCRIPTEN__
+#include "../../impl/httplib.h"
+#endif
+
 namespace trussc {
 namespace mcp {
 
@@ -232,6 +236,155 @@ std::atomic<bool>& mcpLoopbackOnly() {
     return loopback;
 }
 
+void rejectRequest(httplib::Response& res, int status, const std::string& why) {
+    res.status = status;
+    res.set_content(dumpReply(json{{"error", why}}), "application/json");
+}
+
+// Browser-facing checks every request passes before anything else runs (#238,
+// MCP Streamable HTTP transport: servers must validate Origin). A web page
+// open in the user's browser can SEND requests to a loopback server even
+// without CORS; these keep it out:
+// - Host: when bound to loopback, it must name a loopback host. A DNS
+//   rebinding page reaches 127.0.0.1 under its own domain name.
+// - Origin: native MCP clients send none. When present, it must be the
+//   server's own origin (http://localhost:PORT and the like).
+// - Content-Type (POST): application/json only. Anything else is a request a
+//   browser could send without a CORS preflight.
+// Returns false (response filled: 403 / 415) when the request is refused.
+bool checkRequest(const httplib::Request& req, httplib::Response& res, bool requireJson) {
+    if (mcpLoopbackOnly().load() && req.has_header("Host") &&
+        !isLoopbackHostHeader(req.get_header_value("Host"))) {
+        rejectRequest(res, 403, "forbidden host '" + req.get_header_value("Host") +
+                                "': the MCP server only answers to localhost, 127.0.0.1 or [::1]");
+        return false;
+    }
+    if (req.has_header("Origin") &&
+        !isAllowedOrigin(req.get_header_value("Origin"), getHttpPort().load())) {
+        rejectRequest(res, 403, "forbidden origin '" + req.get_header_value("Origin") +
+                                "': the MCP server is for native MCP clients, not web pages");
+        return false;
+    }
+    if (requireJson && !isJsonContentType(req.get_header_value("Content-Type"))) {
+        rejectRequest(res, 415, "unsupported Content-Type '" + req.get_header_value("Content-Type") +
+                                "': send application/json");
+        return false;
+    }
+    return true;
+}
+
+
+void startHttpServerImpl(int port, const std::string& host,
+                         const std::string& token, bool healthEndpoint,
+                         const char* opener) {
+    if (environmentClosesMcp()) {
+        if (getHttpServer()) stopHttpServer();
+        return;
+    }
+    // An explicit start opens Public app tools even on an existing health listener.
+    if (!healthEndpoint) healthOnlyEndpoint() = false;
+    auto& svr = internal::getHttpServer();
+    if (svr) return; // Already running
+
+    const bool isLoopback = (host == "localhost" || host == "127.0.0.1" || host == "::1");
+    if (!isLoopback && token.empty()) {
+        trussc::logError("MCP")
+            << "Refusing to bind MCP server to non-local host '" << host
+            << "' without a token. Pass a token to startHttpServer to expose it (the MCP "
+               "surface can inject input and mutate the scene).";
+        return;
+    }
+    internal::mcpAuthToken() = token;
+    internal::mcpLoopbackOnly().store(isLoopback);
+
+    svr = std::make_unique<httplib::Server>();
+
+    // A fixed port that is already in use fails to bind and is reported below.
+    // POSIX: SO_REUSEADDR only, as TcpServer does. Windows: SO_EXCLUSIVEADDRUSE
+    // only, so a port another socket holds fails to bind.
+    svr->set_socket_options([](socket_t sock) {
+#ifdef _WIN32
+        BOOL opt = TRUE;
+        setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                   reinterpret_cast<const char*>(&opt), sizeof(opt));
+#else
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
+    });
+
+    // POST /mcp — JSON-RPC requests. No CORS header: MCP clients are native and
+    // ignore CORS, while a wildcard origin would let any web page in the user's
+    // browser drive the local server. (OPTIONS preflight handler dropped too.)
+    svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
+        if (!internal::checkRequest(req, res, true)) return;
+
+        // Bearer auth when a token is configured (always so for non-loopback).
+        const std::string& tok = internal::mcpAuthToken();
+        if (!tok.empty()) {
+            auto it = req.headers.find("Authorization");
+            if (it == req.headers.end() || !internal::bearerTokenMatches(it->second, tok)) {
+                res.status = 401;
+                res.set_content("{\"error\":\"unauthorized\"}", "application/json");
+                return;
+            }
+        }
+
+        auto p = std::make_shared<std::promise<internal::ReplyThunk>>();
+        auto f = p->get_future();
+
+        McpRequest mcpReq;
+        mcpReq.body = req.body;
+        mcpReq.response = p;
+
+        internal::enqueueHttpRequest(std::move(mcpReq));
+
+        // Block until main thread processes the request, then execute the
+        // reply thunk HERE — heavy two-stage work (thumbnail encode etc.) runs
+        // on this worker thread, not the frame loop.
+        internal::ReplyThunk thunk = f.get();
+        std::string result;
+        try {
+            result = thunk();
+        } catch (const std::exception& e) {
+            result = internal::dumpReply(json{{"error", std::string("reply construction failed: ") + e.what()}});
+        }
+
+        res.set_content(result, "application/json");
+    });
+
+    // GET / — Server info
+    svr->Get("/", [](const httplib::Request& req, httplib::Response& res) {
+        if (!internal::checkRequest(req, res, false)) return;
+        json info = {
+            {"name", "TrussC MCP Server"},
+            {"transport", "http"},
+            {"endpoint", "/mcp"}
+        };
+        res.set_content(internal::dumpReply(info), "application/json");
+    });
+
+    int actualPort = port > 0 ? (svr->bind_to_port(host.c_str(), port) ? port : -1)
+                              : svr->bind_to_any_port(host.c_str());
+    if (actualPort <= 0) {
+        trussc::logError("MCP") << "Failed to bind HTTP server to " << host << ":" << port;
+        svr.reset();
+        return;
+    }
+    healthOnlyEndpoint() = healthEndpoint;
+    internal::resetHttpChannel();
+    internal::getHttpPort().store(actualPort);
+    httpListenerConfig() = {port, host, opener};
+    internal::getHttpThread() = std::make_unique<std::thread>([]() {
+        internal::getHttpServer()->listen_after_bind();
+    });
+    svr->wait_until_ready();
+    // Binding and readiness complete on the caller's thread. Deliver the
+    // Notice here too, so Logger listeners do not run on the HTTP thread.
+    trussc::logNotice("MCP") << "HTTP server listening on http://" << host
+                             << ":" << actualPort << "/mcp";
+}
+
 #endif // __EMSCRIPTEN__
 
 Server& Server::instance() {
@@ -272,6 +425,52 @@ void startHttpServer(int port, const std::string& host, const std::string& token
         if (!wasFull) internal::logExposure();
     }
 }
+
+void stopHttpServer() {
+    {
+        std::lock_guard<std::mutex> lock(internal::httpQueueMutex());
+        auto queued = internal::getHttpChannel().receiveAll();
+        internal::getHttpChannel().close();
+        for (auto& request : queued) {
+            const auto reply = internal::normalExitReply(request.body);
+            request.response->set_value([reply] { return reply; });
+        }
+    }
+    // Unblock any HTTP workers still waiting on a deferred reply — no more frames
+    // will be presented, so their producers would never run (and a blocked
+    // worker would stall the server shutdown below).
+    {
+        auto& list = internal::deferredResponses();
+        for (auto& d : list) {
+            // During an app exit, say so (with the reason); otherwise the
+            // server was just stopped.
+            const std::string message = trussc::internal::exitReason().empty()
+                ? std::string("the MCP server shut down before the reply was produced")
+                : internal::normalExitMessage();
+            std::string reply = internal::toolError(d.id, message);
+            d.response->set_value([reply]() { return reply; });
+        }
+        list.clear();
+    }
+
+    auto& svr = internal::getHttpServer();
+    if (svr) {
+        svr->stop();
+    }
+
+    internal::getHttpChannel().close();
+
+    auto& t = internal::getHttpThread();
+    if (t && t->joinable()) {
+        t->join();
+    }
+    t.reset();
+    svr.reset();
+    internal::getHttpPort().store(0);
+    internal::explicitlyOpened() = false;
+    internal::healthOnlyEndpoint() = false;
+}
+
 #endif
 
 void setToolLevel(ToolLevel level) {

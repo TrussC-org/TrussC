@@ -1,6 +1,9 @@
 // MCP replies preserve their contents when strings contain malformed UTF-8 (#324).
 // Headless: drive the same queue and deferred stages without a socket or GPU.
 #include <TrussC.h>
+#ifndef __EMSCRIPTEN__
+#include "impl/httplib.h"
+#endif
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>

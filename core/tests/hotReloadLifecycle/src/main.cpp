@@ -117,6 +117,7 @@
 // =============================================================================
 
 #include "tcApp.h"
+#include "impl/httplib.h"
 
 #ifndef TC_HOT_RELOAD_BUILD
 // The cmake source scan keys the host/guest split off TC_HOT_RELOAD appearing
