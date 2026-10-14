@@ -17,4 +17,8 @@ else()
 endif()
 if(NOT MSVC)
     target_compile_options(mtlFlush PRIVATE -Wall -Wextra -Wno-unused-function)
+else()
+    # Sources and core headers are UTF-8; without /utf-8 MSVC reads them in the
+    # console code page (CP932 etc.), and /WX turns the C4819 warning into an error (#793).
+    target_compile_options(mtlFlush PRIVATE /utf-8)
 endif()

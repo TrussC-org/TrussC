@@ -10,7 +10,9 @@ foreach(test IN ITEMS atomicSharedPtr atomicSharedPtrNative)
     target_compile_features(${test} PRIVATE cxx_std_20)
     target_link_libraries(${test} PRIVATE Threads::Threads)
     if(MSVC)
-        target_compile_options(${test} PRIVATE /W4 /WX)
+        # Sources and core headers are UTF-8; without /utf-8 MSVC reads them in the
+        # console code page (CP932 etc.), and /WX turns the C4819 warning into an error (#793).
+        target_compile_options(${test} PRIVATE /W4 /WX /utf-8)
     else()
         target_compile_options(${test} PRIVATE -Wall -Wextra -Wpedantic -Werror)
     endif()

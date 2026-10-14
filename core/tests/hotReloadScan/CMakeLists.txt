@@ -98,3 +98,8 @@ int main(void) {
 }
 ")
 add_executable(hotReloadScan "${CMAKE_CURRENT_BINARY_DIR}/main.c")
+if(MSVC)
+    # Sources and core headers are UTF-8; without /utf-8 MSVC reads them in the
+    # console code page (CP932 etc.), and /WX turns the C4819 warning into an error (#793).
+    target_compile_options(hotReloadScan PRIVATE /utf-8)
+endif()

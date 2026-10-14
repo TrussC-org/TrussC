@@ -25,4 +25,8 @@ if(NOT MSVC)
     # implicitly and MSVC pulls it from the CRT, but GNU/Linux ld needs it
     # explicitly or the standalone test fails to link (undefined references).
     target_link_libraries(sglPoolLimits PRIVATE m)
+else()
+    # Sources and core headers are UTF-8; without /utf-8 MSVC reads them in the
+    # console code page (CP932 etc.), and /WX turns the C4819 warning into an error (#793).
+    target_compile_options(sglPoolLimits PRIVATE /utf-8)
 endif()
