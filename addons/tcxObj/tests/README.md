@@ -25,7 +25,13 @@ computed normals and UTF-8 paths:
 - mixed texcoords keep their vertex alignment and use `(0, 0)` for missing
   entries, in either face order and within a single face;
 - a Japanese-named folder, OBJ, MTL and PNG load together; exporting
-  `モデル.obj` writes a UTF-8 `mtllib` name and loads again with its texture.
+  `モデル.obj` writes a UTF-8 `mtllib` name and loads again with its texture;
+- exporter saves return `SaveResult`; unwritable folders return `AccessDenied`
+  with one Error (POSIX only, skipped as root);
+- blocked OBJ, MTL and PNG temporary paths leave previous files intact, log
+  one Error and clean up generated temporaries without removing the blocker;
+- empty exporters, paths and textures fail with one Error; successful retries,
+  baked textures and geometry-only exports work without leftover temporaries.
 
 Texture cases use sokol's dummy graphics backend (no window or GPU). On
 Windows, the test executable uses the UTF-8 manifest from `trussc_app()`.

@@ -5,6 +5,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include <ostream>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -89,8 +90,9 @@ public:
     // -------------------------------------------------------------------------
 
     // Save to OBJ file. Generates .obj, .mtl, and texture files.
+    // Returns the first failure and logs one Error. Text files are replaced atomically.
     // path: e.g. "output/model.obj"
-    bool save(const fs::path& path) const;
+    SaveResult save(const fs::path& path) const;
 
     // Clear all entries
     void clear() { entries_.clear(); }
@@ -111,12 +113,12 @@ private:
     bool needsMaterial(const ObjExportEntry& entry) const;
 
     // Write geometry for one mesh entry
-    void writeMeshGeometry(std::ofstream& file, const ObjExportEntry& entry,
+    void writeMeshGeometry(std::ostream& file, const ObjExportEntry& entry,
                            int& vertexOffset, int& normalOffset, int& texCoordOffset) const;
 
     // Save texture (with optional resize)
-    bool saveTexture(const Image& image, const fs::path& path) const;
-    bool savePixels(const Pixels& pixels, const fs::path& path) const;
+    SaveResult saveTexture(const Image& image, const fs::path& path) const;
+    SaveResult savePixels(const Pixels& pixels, const fs::path& path) const;
 
     // Bake vertex colors into a texture using UVs
     Pixels bakeVertexColors(const Mesh& mesh, int texSize) const;

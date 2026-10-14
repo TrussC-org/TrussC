@@ -1,5 +1,5 @@
 #include "tcxObjExporter.h"
-#include <fstream>
+#include <sstream>
 #include <cmath>
 #include <algorithm>
 
@@ -24,120 +24,95 @@ bool ObjExporter::needsMaterial(const ObjExportEntry& entry) const {
 // Save
 // =============================================================================
 
-bool ObjExporter::save(const fs::path& path) const {
+SaveResult ObjExporter::save(const fs::path& path) const {
+    constexpr const char* module = "ObjExporter";
     if (entries_.empty()) {
-        logWarning() << "ObjExporter::save: no meshes added";
-        return false;
+        return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed,
+            "No meshes added"), module);
     }
 
-    // Resolve path
-    fs::path objPath = getDataPath(path);
-
-    // Ensure parent directory exists
-    fs::path dir = objPath.parent_path();
-    if (!dir.empty() && !fs::exists(dir)) {
-        fs::create_directories(dir);
-    }
-
-    // Derive .mtl filename
-    string baseName = pathToUtf8(objPath.stem());
+    fs::path objPath;
+    auto result = internal::prepareOutputPath(path, objPath, module);
+    if (!result) return result;
+    const fs::path dir = objPath.parent_path();
+    const string baseName = pathToUtf8(objPath.stem());
     fs::path mtlPath = objPath;
     mtlPath.replace_extension(".mtl");
-    string mtlFileName = pathToUtf8(mtlPath.filename());
 
-    // Check if any entry needs materials
     bool hasMaterials = false;
-    for (auto& entry : entries_) {
+    for (const auto& entry : entries_) {
         if (needsMaterial(entry)) {
             hasMaterials = true;
             break;
         }
     }
-
-    // -------------------------------------------------------------------------
-    // Write .obj
-    // -------------------------------------------------------------------------
-    ofstream objFile(objPath);
-    if (!objFile.is_open()) {
-        logError() << "ObjExporter::save: cannot open " << objPath;
-        return false;
-    }
-
-    objFile << "# Exported by tcxObj (TrussC)" << endl;
-
     if (hasMaterials) {
-        objFile << "mtllib " << mtlFileName << endl;
+        fs::path resolvedMtl;
+        result = internal::prepareOutputPath(mtlPath, resolvedMtl, module);
+        if (!result) return result;
+        mtlPath = std::move(resolvedMtl);
     }
 
+    ostringstream objFile;
+    objFile << "# Exported by tcxObj (TrussC)" << endl;
+    if (hasMaterials) objFile << "mtllib " << pathToUtf8(mtlPath.filename()) << endl;
     objFile << endl;
-
     int vertexOffset = 0;
     int normalOffset = 0;
     int texCoordOffset = 0;
-
-    for (auto& entry : entries_) {
+    for (const auto& entry : entries_) {
         writeMeshGeometry(objFile, entry, vertexOffset, normalOffset, texCoordOffset);
     }
+    const string objText = objFile.str();
 
-    objFile.close();
-
-    // -------------------------------------------------------------------------
-    // Write .mtl + textures
-    // -------------------------------------------------------------------------
-    if (hasMaterials) {
-        ofstream mtlFile(mtlPath);
-        if (!mtlFile.is_open()) {
-            logError() << "ObjExporter::save: cannot open " << mtlPath;
-            return false;
-        }
-
-        mtlFile << "# Material file exported by tcxObj (TrussC)" << endl;
-        mtlFile << endl;
-
-        for (auto& entry : entries_) {
-            if (!needsMaterial(entry)) continue;
-
-            string matName = "mat_" + entry.name;
-            mtlFile << "newmtl " << matName << endl;
-            mtlFile << "Ka 1.0 1.0 1.0" << endl;
-            mtlFile << "Kd 1.0 1.0 1.0" << endl;
-            mtlFile << "Ks 0.0 0.0 0.0" << endl;
-            mtlFile << "d 1.0" << endl;
-
-            string texFileName = baseName + "_" + entry.name + ".png";
-            mtlFile << "map_Kd " << texFileName << endl;
-            fs::path texPath = dir / utf8ToPath(texFileName);
-
-            if (entry.texture) {
-                // Save provided texture
-                if (!saveTexture(*entry.texture, texPath)) {
-                    logWarning() << "ObjExporter: failed to save texture " << texPath;
+    // Keep OBJ staged until MTL succeeds, so a failed MTL write preserves
+    // both previous text files. Each rename is atomic, not the whole export:
+    // a final OBJ close/rename failure can leave the new MTL with the old OBJ.
+    bool failureReported = false;
+    result = internal::atomicWrite(objPath, [&](std::FILE* obj) {
+        auto written = internal::checkedWrite(obj, objText.data(), objText.size(), objPath);
+        if (!written || !hasMaterials) return written;
+        return internal::atomicWrite(mtlPath, [&](std::FILE* mtl) {
+            ostringstream mtlFile;
+            mtlFile << "# Material file exported by tcxObj (TrussC)" << endl << endl;
+            for (const auto& entry : entries_) {
+                if (!needsMaterial(entry)) continue;
+                mtlFile << "newmtl mat_" << entry.name << endl;
+                mtlFile << "Ka 1.0 1.0 1.0" << endl;
+                mtlFile << "Kd 1.0 1.0 1.0" << endl;
+                mtlFile << "Ks 0.0 0.0 0.0" << endl;
+                mtlFile << "d 1.0" << endl;
+                const string texFileName = baseName + "_" + entry.name + ".png";
+                mtlFile << "map_Kd " << texFileName << endl << endl;
+                const fs::path texPath = dir / utf8ToPath(texFileName);
+                SaveResult saved;
+                if (entry.texture) {
+                    saved = saveTexture(*entry.texture, texPath);
+                } else {
+                    int texSize = bakeTextureSize_;
+                    if (maxTextureSize_ > 0) texSize = min(texSize, maxTextureSize_);
+                    saved = savePixels(bakeVertexColors(*entry.mesh, texSize), texPath);
                 }
-            } else {
-                // Bake vertex colors to texture
-                int texSize = bakeTextureSize_;
-                if (maxTextureSize_ > 0) texSize = min(texSize, maxTextureSize_);
-                Pixels baked = bakeVertexColors(*entry.mesh, texSize);
-                if (!savePixels(baked, texPath)) {
-                    logWarning() << "ObjExporter: failed to save baked texture " << texPath;
+                if (!saved) {
+                    failureReported = true; // Pixels::save already logged this failure.
+                    return saved;
                 }
             }
-
-            mtlFile << endl;
-        }
-
-        mtlFile.close();
-    }
+            const string mtlText = mtlFile.str();
+            return internal::checkedWrite(mtl, mtlText.data(), mtlText.size(), mtlPath);
+        }, nullptr);
+    }, nullptr);
+    if (!result) return failureReported ? result : internal::reportSaveFailure(result, module);
 
     logNotice() << "ObjExporter: saved " << objPath;
-    return true;
+    return result;
 }
 
 // =============================================================================
 // Write geometry for one mesh
 // =============================================================================
 
-void ObjExporter::writeMeshGeometry(ofstream& file, const ObjExportEntry& entry,
+void ObjExporter::writeMeshGeometry(ostream& file, const ObjExportEntry& entry,
                                      int& vertexOffset, int& normalOffset,
                                      int& texCoordOffset) const {
     const Mesh& mesh = *entry.mesh;
@@ -252,23 +227,18 @@ void ObjExporter::writeMeshGeometry(ofstream& file, const ObjExportEntry& entry,
 // Save texture (with optional resize)
 // =============================================================================
 
-bool ObjExporter::saveTexture(const Image& image, const fs::path& path) const {
-    const Pixels& pixels = image.getPixels();
-    if (!pixels.isAllocated()) return false;
-
-    return savePixels(pixels, path);
+SaveResult ObjExporter::saveTexture(const Image& image, const fs::path& path) const {
+    return savePixels(image.getPixels(), path);
 }
 
-bool ObjExporter::savePixels(const Pixels& pixels, const fs::path& path) const {
-    if (!pixels.isAllocated()) return false;
-
-    if (maxTextureSize_ > 0 &&
+SaveResult ObjExporter::savePixels(const Pixels& pixels, const fs::path& path) const {
+    if (pixels.isAllocated() && maxTextureSize_ > 0 &&
         (pixels.getWidth() > maxTextureSize_ || pixels.getHeight() > maxTextureSize_)) {
         Pixels resized = resizePixels(pixels, maxTextureSize_);
-        return resized.save(path).ok();
+        return resized.save(path);
     }
 
-    return pixels.save(path).ok();
+    return pixels.save(path);
 }
 
 // =============================================================================
