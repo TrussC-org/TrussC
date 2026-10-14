@@ -282,14 +282,13 @@ static std::string findGuestLibrary() {
 #endif
     const char* buildDirs[] = {"build-macos", "build-windows", "build-linux",
                                "build", "xcode", "vs"};
-    const char* configs[] = {"", "Release", "Debug", "RelWithDebInfo"};
+    // Same rule as the host: multi-config generators use <buildDir>/<config>/.
+    const bool multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && *TC_HOT_RELOAD_CONFIG;
     for (const char* b : buildDirs) {
-        for (const char* c : configs) {
-            fs::path p = proj / b;
-            if (*c) p /= c;
-            p /= guestName;
-            if (fs::exists(p)) return p.string();
-        }
+        fs::path p = proj / b;
+        if (multiConfig) p /= TC_HOT_RELOAD_CONFIG;
+        p /= guestName;
+        if (fs::exists(p)) return p.string();
     }
     return "";
 }
@@ -873,6 +872,17 @@ static int runReloadCheck() {
             return finish(60, "timed out");
         }
         if (f == 3) {
+            // Both Debug and Release guests may exist. Every generation must
+            // load the host's configuration, including after a rebuild (#794).
+            const auto& host = trussc::hot_reload::g_host;
+            const fs::path expectedGuest = findGuestLibrary();
+            if (fs::path(host.guestLibPath) != expectedGuest ||
+                fs::path(host.guest.loadedPath).parent_path() != expectedGuest.parent_path()) {
+                done = true;
+                return finish(66, gen + ": guest configuration mismatch: " + host.guest.loadedPath);
+            }
+            std::printf("hotReloadLifecycle --reload-check: %s loaded %s (host config %s)\n",
+                        gen.c_str(), host.guest.loadedPath.c_str(), TC_HOT_RELOAD_CONFIG);
             const std::vector<size_t> counts = hostListenerCounts();
             if (generation == 1) {
                 firstCounts = counts;

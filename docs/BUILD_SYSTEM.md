@@ -511,6 +511,12 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 - **Host (EXE)**: `main.cpp` + TrussC core. Owns the window, event loop, and file watcher.
 - **Guest (shared library)**: Your app code (`tcApp.cpp` etc.). Rebuilt on every file change.
 
+The Guest is built and loaded in the Host's configuration. With multi-config
+generators (Xcode, Visual Studio, Ninja Multi-Config), rebuilds pass
+`--config <host configuration>` and load the library from
+`<buildDir>/<host configuration>/`. Single-config generators (Ninja, Makefiles)
+keep the library directly in `<buildDir>` and use the configured build type.
+
 The Host monitors `src/` for file modifications (polling every 500ms). When a change is detected:
 1. Guest is rebuilt via `cmake --build --target guest` (incremental — only your code, not TrussC core)
 2. The old Guest's App is ended and destroyed (`events().hotReloadUnload` fires first): its `exit()` runs, its `audioOut()` / `audioIn()` are detached (waiting for a call in flight), then its `cleanup()` runs. Its library stays loaded: host-owned state can still point into its code, so it is never `dlclose`d / `FreeLibrary`d

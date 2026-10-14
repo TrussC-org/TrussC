@@ -13,6 +13,15 @@
 
 #ifdef TC_HOT_RELOAD_BUILD
 
+// The host gets its configuration from CMake. Guest translation units also
+// include this header, but do not run the host runtime.
+#ifndef TC_HOT_RELOAD_CONFIG
+#define TC_HOT_RELOAD_CONFIG ""
+#endif
+#ifndef TC_HOT_RELOAD_MULTI_CONFIG
+#define TC_HOT_RELOAD_MULTI_CONFIG 0
+#endif
+
 // Note: this header is included BY TrussC.h (after all core types are defined).
 #ifdef _WIN32
 #include <windows.h>
@@ -360,6 +369,7 @@ struct Host {
     Clock::time_point lastCheck;
     int reloadCount = 0;
     bool initialized = false;
+    bool multiConfig = false;
 
     bool init() {
         // Detect project directory from the executable's location
@@ -407,10 +417,8 @@ struct Host {
             return false;
         }
 
-        // Guest library path: search known locations for the built dylib.
-        // Single-config (Ninja/Make): buildDir直下。
-        // Multi-config (Xcode/VS): <config>/ サブディレクトリ。
-        // Files are searched in priority order; whichever exists wins.
+        // Single-config (Ninja/Make): directly under buildDir.
+        // Multi-config (Xcode/VS/Ninja Multi-Config): the host's configuration.
 #ifdef __APPLE__
         const string guestName = "libguest.dylib";
 #elif defined(_WIN32)
@@ -418,27 +426,12 @@ struct Host {
 #else
         const string guestName = "libguest.so";
 #endif
-        const char* configs[] = {"Debug", "Release", "RelWithDebInfo", "MinSizeRel"};
-        guestLibPath = "";
-        if (fs::exists(buildDir + "/" + guestName)) {
-            guestLibPath = buildDir + "/" + guestName;
-        } else {
-            for (const char* c : configs) {
-                string candidate = buildDir + "/" + c + "/" + guestName;
-                if (fs::exists(candidate)) { guestLibPath = candidate; break; }
-            }
-        }
-        // Nothing yet — the initial rebuildGuest() below will create it. Pick
-        // a sensible default destination so the post-rebuild load() finds it.
-        // If any config subdir exists, we're in a multi-config tree → Debug/.
-        if (guestLibPath.empty()) {
-            bool multiConfig = false;
-            for (const char* c : configs) {
-                if (fs::exists(buildDir + "/" + c)) { multiConfig = true; break; }
-            }
-            guestLibPath = multiConfig ? (buildDir + "/Debug/" + guestName)
-                                       : (buildDir + "/" + guestName);
-        }
+        // The generator type is a configure-time fact (no directory has to
+        // exist before the first guest build).
+        multiConfig = TC_HOT_RELOAD_MULTI_CONFIG != 0 && string(TC_HOT_RELOAD_CONFIG) != "";
+        guestLibPath = buildDir + "/";
+        if (multiConfig) guestLibPath += string(TC_HOT_RELOAD_CONFIG) + "/";
+        guestLibPath += guestName;
 
         // Initial build of the Guest
         if (!rebuildGuest()) {
@@ -473,11 +466,10 @@ struct Host {
         // Only rebuild the guest target — fast incremental build.
         // argv is passed directly to posix_spawnp / _spawnvp — no shell
         // is involved, so $(...), ``, ; etc. in buildDir cannot run.
-        // For multi-config generators (Xcode, Visual Studio), cmake picks the
-        // generator's default config (Debug) when --config is omitted — which
-        // matches the layout the rest of init() expects (Debug/libguest.dylib).
-        int rc = runBuildCommand({cmake, "--build", buildDir,
-                                  "--target", "guest", "--parallel"});
+        vector<string> command = {cmake, "--build", buildDir,
+                                  "--target", "guest", "--parallel"};
+        if (multiConfig) command.insert(command.end(), {"--config", TC_HOT_RELOAD_CONFIG});
+        int rc = runBuildCommand(command);
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
             return false;
