@@ -41,10 +41,16 @@ namespace trussc {
 struct VideoGrabberPlatformData {
     IMFMediaSource* mediaSource = nullptr;
     IMFSourceReader* sourceReader = nullptr;
+    bool sourceShutDown = false;   // closePlatform() already shut it down
 
-    // キャプチャスレッド
-    std::thread captureThread;
-    std::atomic<bool> running{false};
+    ~VideoGrabberPlatformData() {
+        if (sourceReader) sourceReader->Release();
+        if (mediaSource) {
+            if (!sourceShutDown) mediaSource->Shutdown();
+            mediaSource->Release();
+        }
+        delete[] backBuffer;
+    }
 
     // ダブルバッファリング用
     unsigned char* backBuffer = nullptr;
@@ -58,16 +64,6 @@ struct VideoGrabberPlatformData {
     int newWidth = 0;
     int newHeight = 0;
 
-    // スレッド同期
-    std::mutex mutex;
-
-    // ターゲットバッファ（メインスレッドのピクセルバッファを指す）
-    unsigned char* targetPixels = nullptr;
-    std::atomic<bool>* pixelsDirty = nullptr;
-    std::mutex* mainMutex = nullptr;
-
-    // タイムスタンプ付きフレームキュー（setFrameQueueSize で有効化）
-    internal::GrabberFrameQueue* frameQueue = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -89,8 +85,9 @@ static bool ensureMFInitialized() {
 // ---------------------------------------------------------------------------
 // キャプチャスレッド関数
 // ---------------------------------------------------------------------------
-static void captureThreadFunc(VideoGrabberPlatformData* data) {
-    while (data->running) {
+static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> state) {
+    auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+    while (!state->stopped.load()) {
         IMFSample* sample = nullptr;
         DWORD streamIndex = 0;
         DWORD flags = 0;
@@ -106,7 +103,7 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
         );
 
         // Check if we should exit (running flag was cleared or source was shut down)
-        if (!data->running) {
+        if (state->stopped.load()) {
             if (sample) sample->Release();
             break;
         }
@@ -121,7 +118,7 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
                 continue;
             }
             // If not running, exit the loop
-            if (!data->running) break;
+            if (state->stopped.load()) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
@@ -140,20 +137,18 @@ static void captureThreadFunc(VideoGrabberPlatformData* data) {
                 if (internal::copyGrabberRGB32(data->backBuffer, rawData,
                         currentLength, w, h, data->bufferStride)) {
 
-                    // Copy to main thread buffer
-                    if (data->targetPixels && data->mainMutex && !data->needsResize.load()) {
-                        std::lock_guard<std::mutex> lock(*data->mainMutex);
-                        std::memcpy(data->targetPixels, data->backBuffer, w * h * 4);
+                    // Publish under the State lock, including pointer/size checks.
+                    {
+                        std::lock_guard<std::mutex> lock(state->mtx);
+                        if (state->pixels && state->width == data->bufferWidth &&
+                            state->height == data->bufferHeight) {
+                            std::memcpy(state->pixels.get(), data->backBuffer,
+                                        (size_t)data->bufferWidth * data->bufferHeight * 4);
+                            state->dirty.store(true);
+                        }
                     }
-
-                    if (data->pixelsDirty) {
-                        data->pixelsDirty->store(true);
-                    }
-
-                    // Timestamped frame queue (no-op unless enabled)
-                    if (data->frameQueue) {
-                        data->frameQueue->push(data->backBuffer, w, h, arrivalUs);
-                    }
+                    state->frameQueue.push(data->backBuffer, data->bufferWidth,
+                                           data->bufferHeight, arrivalUs);
                 }
 
                 buffer->Unlock();
@@ -237,14 +232,13 @@ bool VideoGrabber::setupPlatform() {
     }
 
     auto* data = new VideoGrabberPlatformData();
-    platformHandle_ = data;
+    state_->platformData = std::shared_ptr<VideoGrabberPlatformData>(data);
 
     // デバイスを列挙
     IMFAttributes* attributes = nullptr;
     HRESULT hr = MFCreateAttributes(&attributes, 1);
     if (FAILED(hr)) {
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -260,8 +254,7 @@ bool VideoGrabber::setupPlatform() {
 
     if (FAILED(hr) || count == 0) {
         logError() << "VideoGrabber: No video devices found";
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -269,8 +262,7 @@ bool VideoGrabber::setupPlatform() {
         logError() << "VideoGrabber: Invalid device ID " << deviceId_;
         for (UINT32 i = 0; i < count; i++) ppDevices[i]->Release();
         CoTaskMemFree(ppDevices);
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -298,8 +290,7 @@ bool VideoGrabber::setupPlatform() {
 
     if (FAILED(hr)) {
         logError() << "VideoGrabber: Failed to activate media source";
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -315,9 +306,7 @@ bool VideoGrabber::setupPlatform() {
 
     if (FAILED(hr)) {
         logError() << "VideoGrabber: Failed to create source reader";
-        data->mediaSource->Release();
-        delete data;
-        platformHandle_ = nullptr;
+        state_->platformData.reset();
         return false;
     }
 
@@ -328,7 +317,7 @@ bool VideoGrabber::setupPlatform() {
         outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
         outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
         outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-        MFSetAttributeSize(outputType, MF_MT_FRAME_SIZE, requestedWidth_, requestedHeight_);
+        MFSetAttributeSize(outputType, MF_MT_FRAME_SIZE, state_->requestedWidth, state_->requestedHeight);
 
         hr = data->sourceReader->SetCurrentMediaType(
             MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, outputType);
@@ -343,7 +332,7 @@ bool VideoGrabber::setupPlatform() {
     hr = data->sourceReader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &currentType);
     if (FAILED(hr) || !currentType) {
         logError() << "VideoGrabber: Cannot read current media type for requested "
-                   << requestedWidth_ << "x" << requestedHeight_;
+                   << state_->requestedWidth << "x" << state_->requestedHeight;
         if (currentType) currentType->Release();
         closePlatform();
         return false;
@@ -357,8 +346,8 @@ bool VideoGrabber::setupPlatform() {
         StringFromGUID2(subtype, subtypeName, 40);
         WideCharToMultiByte(CP_UTF8, 0, subtypeName, -1,
                             subtypeText, 40, nullptr, nullptr);
-        logError() << "VideoGrabber: Requested " << requestedWidth_ << "x"
-                   << requestedHeight_ << " requires RGB32; current subtype="
+        logError() << "VideoGrabber: Requested " << state_->requestedWidth << "x"
+                   << state_->requestedHeight << " requires RGB32; current subtype="
                    << (FAILED(hr) ? "unavailable" : subtypeText);
         currentType->Release();
         closePlatform();
@@ -367,8 +356,8 @@ bool VideoGrabber::setupPlatform() {
 
     UINT32 w = 0, h = 0;
     MFGetAttributeSize(currentType, MF_MT_FRAME_SIZE, &w, &h);
-    width_ = (int)w;
-    height_ = (int)h;
+    state_->width = (int)w;
+    state_->height = (int)h;
     UINT32 stride = 0;
     if (SUCCEEDED(currentType->GetUINT32(MF_MT_DEFAULT_STRIDE, &stride))) {
         data->bufferStride = static_cast<std::int32_t>(stride);
@@ -378,28 +367,24 @@ bool VideoGrabber::setupPlatform() {
         // RGB32's Data1 is D3DFMT_X8R8G8B8; preserve the fallback's sign.
         if (FAILED(MFGetStrideForBitmapInfoHeader(MFVideoFormat_RGB32.Data1,
                                                 w, &defaultStride)) || defaultStride == 0) {
-            defaultStride = width_ * 4;
+            defaultStride = state_->width * 4;
         }
         data->bufferStride = static_cast<std::int32_t>(defaultStride);
     }
     currentType->Release();
 
     // バックバッファを確保
-    data->bufferWidth = width_;
-    data->bufferHeight = height_;
-    data->backBuffer = new unsigned char[width_ * height_ * 4];
-    std::memset(data->backBuffer, 0, width_ * height_ * 4);
-
-    // ターゲット設定（updateDelegatePixels で設定される）
-    data->mainMutex = &sharedState_->mtx;
-    data->pixelsDirty = &sharedState_->dirty;
-    data->frameQueue = frameQueue_.get();
+    data->bufferWidth = state_->width;
+    data->bufferHeight = state_->height;
+    data->backBuffer = new unsigned char[state_->width * state_->height * 4];
+    std::memset(data->backBuffer, 0, state_->width * state_->height * 4);
 
     // キャプチャスレッドを開始
-    data->running = true;
-    data->captureThread = std::thread(captureThreadFunc, data);
+    state_->keptThreads.start(state_->captureThread, [state = state_] {
+        captureThreadFunc(state);
+    });
 
-    logNotice() << "VideoGrabber: Started capturing at " << width_ << "x" << height_
+    logNotice() << "VideoGrabber: Started capturing at " << state_->width << "x" << state_->height
                   << " from " << deviceName_;
     logNotice() << "VideoGrabber: RGB32 stride=" << data->bufferStride
                 << (data->bufferStride < 0 ? " (bottom-up)" : " (top-down)");
@@ -411,12 +396,12 @@ bool VideoGrabber::setupPlatform() {
 // closePlatform - カメラを停止
 // ---------------------------------------------------------------------------
 void VideoGrabber::closePlatform() {
-    if (!platformHandle_) return;
+    if (!state_->platformData) return;
 
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
 
     // Signal thread to stop
-    data->running = false;
+    state_->stopped.store(true);
 
     // Flush pending reads first
     if (data->sourceReader) {
@@ -426,31 +411,10 @@ void VideoGrabber::closePlatform() {
     // Shutdown media source - this will cause ReadSample to fail and return
     if (data->mediaSource) {
         data->mediaSource->Shutdown();
+        data->sourceShutDown = true;
     }
 
-    // Capture must finish before its buffers and shared state can be freed.
-    if (data->captureThread.joinable()) {
-        data->captureThread.join();
-    }
-
-    // Release resources
-    if (data->sourceReader) {
-        data->sourceReader->Release();
-        data->sourceReader = nullptr;
-    }
-
-    if (data->mediaSource) {
-        data->mediaSource->Release();
-        data->mediaSource = nullptr;
-    }
-
-    if (data->backBuffer) {
-        delete[] data->backBuffer;
-        data->backBuffer = nullptr;
-    }
-
-    delete data;
-    platformHandle_ = nullptr;
+    // close() joins next, before the State releases these resources.
 }
 
 // ---------------------------------------------------------------------------
@@ -465,8 +429,8 @@ void VideoGrabber::updatePlatform() {
 // checkResizeNeeded - リサイズが必要かチェック
 // ---------------------------------------------------------------------------
 bool VideoGrabber::checkResizeNeeded() {
-    if (!platformHandle_) return false;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return false;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     return data->needsResize.load();
 }
 
@@ -474,12 +438,12 @@ bool VideoGrabber::checkResizeNeeded() {
 // getNewSize - 新しいサイズを取得
 // ---------------------------------------------------------------------------
 void VideoGrabber::getNewSize(int& width, int& height) {
-    if (!platformHandle_) {
+    if (!state_->platformData) {
         width = 0;
         height = 0;
         return;
     }
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     width = data->newWidth;
     height = data->newHeight;
 }
@@ -488,8 +452,8 @@ void VideoGrabber::getNewSize(int& width, int& height) {
 // clearResizeFlag - リサイズフラグをクリア
 // ---------------------------------------------------------------------------
 void VideoGrabber::clearResizeFlag() {
-    if (!platformHandle_) return;
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
+    if (!state_->platformData) return;
+    auto* data = static_cast<VideoGrabberPlatformData*>(state_->platformData.get());
     data->needsResize.store(false);
 }
 
@@ -497,13 +461,7 @@ void VideoGrabber::clearResizeFlag() {
 // updateDelegatePixels - ピクセルバッファ確保後にターゲットを更新
 // ---------------------------------------------------------------------------
 void VideoGrabber::updateDelegatePixels() {
-    if (!platformHandle_) return;
-
-    auto* data = static_cast<VideoGrabberPlatformData*>(platformHandle_);
-    data->targetPixels = pixels_;
-    if (verbose_) {
-        logVerbose() << "VideoGrabber: Updated target pixels pointer to " << (void*)pixels_;
-    }
+    // Callbacks read pixels directly from the State under its lock.
 }
 
 // ---------------------------------------------------------------------------

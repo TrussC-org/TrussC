@@ -13,6 +13,8 @@
 #ifdef _WIN32
 
 #include "TrussC.h"
+#include <vector>
+#include "tc/video/internal/tcVideoNotifyQueue.h"
 
 #include <windows.h>
 #include <mfapi.h>
@@ -36,6 +38,7 @@ using namespace trussc;
 // Forward declaration
 // =============================================================================
 class TCVideoPlayerImpl;
+struct VideoPlayerState;
 
 // =============================================================================
 // Media Foundation initialization counter (thread-safe)
@@ -65,7 +68,7 @@ static void CloseMediaFoundation() {
 // =============================================================================
 class MediaEngineNotify : public IMFMediaEngineNotify {
 public:
-    MediaEngineNotify(TCVideoPlayerImpl* owner) : owner_(owner), refCount_(1) {}
+    MediaEngineNotify(const std::shared_ptr<VideoPlayerState>& state) : state_(state), refCount_(1) {}
 
     // IUnknown
     STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
@@ -94,64 +97,14 @@ public:
     STDMETHODIMP EventNotify(DWORD event, DWORD_PTR param1, DWORD param2) override;
 
 private:
-    TCVideoPlayerImpl* owner_;
+    std::weak_ptr<VideoPlayerState> state_;
     LONG refCount_;
 };
 
-// =============================================================================
-// TCVideoPlayerImpl - Windows implementation
-// =============================================================================
-class TCVideoPlayerImpl {
-public:
-    TCVideoPlayerImpl() = default;
-    ~TCVideoPlayerImpl() { close(); }
-
-    bool load(const std::string& path, VideoPlayer* player);
-    void close();
-    void play();
-    void stop();
-    void setPaused(bool paused);
-    void update(VideoPlayer* player);
-
-    bool hasNewFrame() const { return hasNewFrame_; }
-    bool isFinished() const { return isFinished_; }
-
-    float getPosition() const;
-    void setPosition(float pct);
-    float getDuration() const;
-
-    void setVolume(float vol);
-    void setSpeed(float speed);
-    void setLoop(bool loop);
-
-    float getFrameRate() const { return static_cast<float>(frameRate_); }
-    int getCurrentFrame() const;
-    int getTotalFrames() const;
-    void setFrame(int frame);
-    void nextFrame();
-    void previousFrame();
-
-    // Event handler (called from MediaEngineNotify)
-    void onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2);
-
-    int getWidth() const { return width_; }
-    int getHeight() const { return height_; }
-
-    // Audio track info
-    bool hasAudio() const { return hasAudio_; }
-    uint32_t getAudioCodec() const { return audioCodec_; }
-    int getAudioSampleRate() const { return audioSampleRate_; }
-    int getAudioChannels() const { return audioChannels_; }
-    std::vector<uint8_t> getAudioData() const;
-
-private:
+struct VideoPlayerState {
+    internal::VideoNotifyQueue notifications;
     internal::VideoErrorQueue playbackErrors_;
-    bool createD3D11Device();
-    bool createMediaEngine(const std::string& path);
-    bool createRenderTexture();
-    bool transferVideoFrame();
-    bool loadMediaInfo(const std::string& path);
-
+    bool mfInitialized = false;
     // D3D11 resources
     ComPtr<ID3D11Device> d3dDevice_;
     ComPtr<ID3D11DeviceContext> d3dContext_;
@@ -179,7 +132,7 @@ private:
     bool isLoop_ = false;
 
     // Pixel buffer for CPU readback
-    unsigned char* pixels_ = nullptr;
+    std::vector<unsigned char> pixels_;
 
     // Audio track info
     bool hasAudio_ = false;
@@ -188,17 +141,71 @@ private:
     int audioChannels_ = 0;
     std::string mediaPath_;
 
-    CRITICAL_SECTION criticalSection_;
-    bool csInitialized_ = false;
+};
+
+// =============================================================================
+// TCVideoPlayerImpl - Windows implementation
+// =============================================================================
+class TCVideoPlayerImpl {
+public:
+    TCVideoPlayerImpl() = default;
+    ~TCVideoPlayerImpl() { close(); }
+
+    bool load(const std::string& path, VideoPlayer* player);
+    void close();
+    void play();
+    void stop();
+    void setPaused(bool paused);
+    void update(VideoPlayer* player);
+
+    bool hasNewFrame() const { return state_->hasNewFrame_; }
+    bool isFinished() const { return state_->isFinished_; }
+
+    float getPosition() const;
+    void setPosition(float pct);
+    float getDuration() const;
+
+    void setVolume(float vol);
+    void setSpeed(float speed);
+    void setLoop(bool loop);
+
+    float getFrameRate() const { return static_cast<float>(state_->frameRate_); }
+    int getCurrentFrame() const;
+    int getTotalFrames() const;
+    void setFrame(int frame);
+    void nextFrame();
+    void previousFrame();
+
+    // Event handler (called by the main-thread queue drain)
+    void onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2);
+
+    int getWidth() const { return state_->width_; }
+    int getHeight() const { return state_->height_; }
+
+    // Audio track info
+    bool hasAudio() const { return state_->hasAudio_; }
+    uint32_t getAudioCodec() const { return state_->audioCodec_; }
+    int getAudioSampleRate() const { return state_->audioSampleRate_; }
+    int getAudioChannels() const { return state_->audioChannels_; }
+    std::vector<uint8_t> getAudioData() const;
+
+private:
+    bool createD3D11Device();
+    bool createMediaEngine(const std::string& path);
+    bool createRenderTexture();
+    bool transferVideoFrame();
+    bool loadMediaInfo(const std::string& path);
+
+    std::shared_ptr<VideoPlayerState> state_ = std::make_shared<VideoPlayerState>();
+    void drainNotifications();
+
 };
 
 // =============================================================================
 // MediaEngineNotify::EventNotify implementation
 // =============================================================================
 STDMETHODIMP MediaEngineNotify::EventNotify(DWORD event, DWORD_PTR param1, DWORD param2) {
-    if (owner_) {
-        owner_->onMediaEvent(event, param1, param2);
-    }
+    internal::enqueueVideoNotify(state_, {event, param1, param2});
     return S_OK;
 }
 
@@ -239,9 +246,9 @@ bool TCVideoPlayerImpl::createD3D11Device() {
             featureLevels,
             ARRAYSIZE(featureLevels),
             D3D11_SDK_VERSION,
-            &d3dDevice_,
+            &state_->d3dDevice_,
             &featureLevel,
-            &d3dContext_
+            &state_->d3dContext_
         );
         if (SUCCEEDED(hr)) {
             logNotice("VideoPlayer") << "D3D11 device created with: " << a.desc;
@@ -257,18 +264,18 @@ bool TCVideoPlayerImpl::createD3D11Device() {
 
     // Enable multi-threading
     ComPtr<ID3D10Multithread> multithread;
-    if (SUCCEEDED(d3dDevice_.As(&multithread))) {
+    if (SUCCEEDED(state_->d3dDevice_.As(&multithread))) {
         multithread->SetMultithreadProtected(TRUE);
     }
 
     // Create DXGI device manager
-    hr = MFCreateDXGIDeviceManager(&dxgiResetToken_, &dxgiManager_);
+    hr = MFCreateDXGIDeviceManager(&state_->dxgiResetToken_, &state_->dxgiManager_);
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to create DXGI device manager";
         return false;
     }
 
-    hr = dxgiManager_->ResetDevice(d3dDevice_.Get(), dxgiResetToken_);
+    hr = state_->dxgiManager_->ResetDevice(state_->d3dDevice_.Get(), state_->dxgiResetToken_);
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to reset DXGI device";
         return false;
@@ -303,15 +310,15 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     }
 
     // Set DXGI manager for HW acceleration
-    hr = attributes->SetUnknown(MF_MEDIA_ENGINE_DXGI_MANAGER, dxgiManager_.Get());
+    hr = attributes->SetUnknown(MF_MEDIA_ENGINE_DXGI_MANAGER, state_->dxgiManager_.Get());
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to set DXGI manager";
         return false;
     }
 
     // Set callback
-    eventNotify_ = new MediaEngineNotify(this);
-    hr = attributes->SetUnknown(MF_MEDIA_ENGINE_CALLBACK, eventNotify_);
+    state_->eventNotify_ = new MediaEngineNotify(state_);
+    hr = attributes->SetUnknown(MF_MEDIA_ENGINE_CALLBACK, state_->eventNotify_);
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to set callback";
         return false;
@@ -328,7 +335,7 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     hr = factory->CreateInstance(
         MF_MEDIA_ENGINE_REAL_TIME_MODE,
         attributes.Get(),
-        &mediaEngine_
+        &state_->mediaEngine_
     );
 
     if (FAILED(hr)) {
@@ -337,10 +344,10 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     }
 
     // Get extended interface
-    mediaEngine_.As(&mediaEngineEx_);
+    state_->mediaEngine_.As(&state_->mediaEngineEx_);
 
     // Disable autoplay
-    mediaEngine_->SetAutoPlay(FALSE);
+    state_->mediaEngine_->SetAutoPlay(FALSE);
 
     // Convert path to wide string and BSTR
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
@@ -348,7 +355,7 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &widePath[0], wideLen);
 
     BSTR bstrPath = SysAllocString(widePath.c_str());
-    hr = mediaEngine_->SetSource(bstrPath);
+    hr = state_->mediaEngine_->SetSource(bstrPath);
     SysFreeString(bstrPath);
 
     if (FAILED(hr)) {
@@ -357,7 +364,7 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
     }
 
     // Start loading
-    hr = mediaEngine_->Load();
+    hr = state_->mediaEngine_->Load();
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to load";
         return false;
@@ -367,12 +374,12 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
 }
 
 bool TCVideoPlayerImpl::createRenderTexture() {
-    if (width_ <= 0 || height_ <= 0) return false;
+    if (state_->width_ <= 0 || state_->height_ <= 0) return false;
 
     // Create render target texture
     D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = width_;
-    desc.Height = height_;
+    desc.Width = state_->width_;
+    desc.Height = state_->height_;
     desc.MipLevels = 1;
     desc.ArraySize = 1;
     desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -381,7 +388,7 @@ bool TCVideoPlayerImpl::createRenderTexture() {
     desc.Usage = D3D11_USAGE_DEFAULT;
     desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
-    HRESULT hr = d3dDevice_->CreateTexture2D(&desc, nullptr, &renderTexture_);
+    HRESULT hr = state_->d3dDevice_->CreateTexture2D(&desc, nullptr, &state_->renderTexture_);
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to create render texture";
         return false;
@@ -392,60 +399,60 @@ bool TCVideoPlayerImpl::createRenderTexture() {
     desc.BindFlags = 0;
     desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 
-    hr = d3dDevice_->CreateTexture2D(&desc, nullptr, &stagingTexture_);
+    hr = state_->d3dDevice_->CreateTexture2D(&desc, nullptr, &state_->stagingTexture_);
     if (FAILED(hr)) {
         logError("VideoPlayer") << "Failed to create staging texture";
         return false;
     }
 
     // Allocate pixel buffer
-    pixels_ = new unsigned char[width_ * height_ * 4];
+    state_->pixels_.assign((size_t)state_->width_ * state_->height_ * 4, 0);
 
     return true;
 }
 
 bool TCVideoPlayerImpl::transferVideoFrame() {
-    if (!mediaEngine_ || !renderTexture_) return false;
+    if (!state_->mediaEngine_ || !state_->renderTexture_) return false;
 
     // Check if video has new frame
     LONGLONG pts;
-    if (mediaEngine_->OnVideoStreamTick(&pts) != S_OK) {
+    if (state_->mediaEngine_->OnVideoStreamTick(&pts) != S_OK) {
         return false;
     }
 
     // Transfer frame to our texture
     MFARGB bgColor = {0, 0, 0, 0};
     MFVideoNormalizedRect srcRect = {0.0f, 0.0f, 1.0f, 1.0f};
-    RECT dstRect = {0, 0, width_, height_};
+    RECT dstRect = {0, 0, state_->width_, state_->height_};
 
-    HRESULT hr = mediaEngine_->TransferVideoFrame(
-        renderTexture_.Get(),
+    HRESULT hr = state_->mediaEngine_->TransferVideoFrame(
+        state_->renderTexture_.Get(),
         &srcRect,
         &dstRect,
         &bgColor
     );
 
     if (FAILED(hr)) {
-        HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
-        if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
+        HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
+        if (FAILED(reason)) state_->playbackErrors_.report("D3D11 video device lost", reason);
         return false;
     }
 
     // Copy to staging texture for CPU access
-    d3dContext_->CopyResource(stagingTexture_.Get(), renderTexture_.Get());
+    state_->d3dContext_->CopyResource(state_->stagingTexture_.Get(), state_->renderTexture_.Get());
 
     // Map and read pixels
     D3D11_MAPPED_SUBRESOURCE mapped;
-    hr = d3dContext_->Map(stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    hr = state_->d3dContext_->Map(state_->stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
     if (SUCCEEDED(hr)) {
         // Copy row by row (handle pitch/stride)
         unsigned char* src = static_cast<unsigned char*>(mapped.pData);
-        unsigned char* dst = pixels_;
-        int rowBytes = width_ * 4;
+        unsigned char* dst = state_->pixels_.data();
+        int rowBytes = state_->width_ * 4;
 
-        for (int y = 0; y < height_; y++) {
+        for (int y = 0; y < state_->height_; y++) {
             // BGRA to RGBA conversion
-            for (int x = 0; x < width_; x++) {
+            for (int x = 0; x < state_->width_; x++) {
                 int srcIdx = x * 4;
                 int dstIdx = x * 4;
                 dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
@@ -457,17 +464,17 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
             dst += rowBytes;
         }
 
-        d3dContext_->Unmap(stagingTexture_.Get(), 0);
+        state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
         return true;
     }
 
-    HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
-    if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
+    HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
+    if (FAILED(reason)) state_->playbackErrors_.report("D3D11 video device lost", reason);
     return false;
 }
 
 bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
-    frameRate_ = 0.0f;
+    state_->frameRate_ = 0.0f;
     // Reuse one source reader for video frame rate and audio track info.
     int wideLen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring widePath(wideLen, 0);
@@ -491,7 +498,7 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
         SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE,
                                       &numerator, &denominator)) &&
         numerator > 0 && denominator > 0) {
-        frameRate_ = static_cast<float>(numerator) / denominator;
+        state_->frameRate_ = static_cast<float>(numerator) / denominator;
     }
 
     // Get native audio media type
@@ -499,44 +506,44 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     hr = reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &nativeType);
     if (FAILED(hr)) {
         // No audio stream
-        hasAudio_ = false;
+        state_->hasAudio_ = false;
         return true;
     }
 
-    hasAudio_ = true;
+    state_->hasAudio_ = true;
 
     // Get audio format info
     GUID subtype;
     hr = nativeType->GetGUID(MF_MT_SUBTYPE, &subtype);
     if (SUCCEEDED(hr)) {
-        audioCodec_ = subtype.Data1;
+        state_->audioCodec_ = subtype.Data1;
     }
 
     UINT32 sampleRate = 0;
     hr = nativeType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
     if (SUCCEEDED(hr)) {
-        audioSampleRate_ = sampleRate;
+        state_->audioSampleRate_ = sampleRate;
     }
 
     UINT32 channels = 0;
     hr = nativeType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
     if (SUCCEEDED(hr)) {
-        audioChannels_ = channels;
+        state_->audioChannels_ = channels;
     }
 
-    logNotice("VideoPlayer") << "Audio: " << audioChannels_ << "ch, " << audioSampleRate_ << "Hz";
+    logNotice("VideoPlayer") << "Audio: " << state_->audioChannels_ << "ch, " << state_->audioSampleRate_ << "Hz";
     return true;
 }
 
 std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
-    if (!hasAudio_ || mediaPath_.empty()) {
+    if (!state_->hasAudio_ || state_->mediaPath_.empty()) {
         return {};
     }
 
     // Use IMFSourceReader to read raw audio data (passthrough, no decoding)
-    int wideLen = MultiByteToWideChar(CP_UTF8, 0, mediaPath_.c_str(), -1, nullptr, 0);
+    int wideLen = MultiByteToWideChar(CP_UTF8, 0, state_->mediaPath_.c_str(), -1, nullptr, 0);
     std::wstring widePath(wideLen, 0);
-    MultiByteToWideChar(CP_UTF8, 0, mediaPath_.c_str(), -1, &widePath[0], wideLen);
+    MultiByteToWideChar(CP_UTF8, 0, state_->mediaPath_.c_str(), -1, &widePath[0], wideLen);
 
     // Create attributes to disable format conversion (passthrough mode)
     ComPtr<IMFAttributes> attrs;
@@ -555,16 +562,16 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
 
     // Check if AAC (MFAudioFormat_AAC Data1 = 0x1610)
     // Also check for 'mp4a' FourCC which we store
-    bool isAAC = (audioCodec_ == 0x1610 ||      // WAVE_FORMAT_MPEG_HEAAC
-                  audioCodec_ == 0x6D703461 ||  // 'mp4a'
-                  audioCodec_ == 0x61616320);   // 'aac '
+    bool isAAC = (state_->audioCodec_ == 0x1610 ||      // WAVE_FORMAT_MPEG_HEAAC
+                  state_->audioCodec_ == 0x6D703461 ||  // 'mp4a'
+                  state_->audioCodec_ == 0x61616320);   // 'aac '
 
-    logNotice("VideoPlayer") << "Extracting audio: codec=0x" << std::hex << audioCodec_
+    logNotice("VideoPlayer") << "Extracting audio: codec=0x" << std::hex << state_->audioCodec_
                              << " isAAC=" << isAAC << std::dec;
 
     // Read all audio samples
     std::vector<uint8_t> audioData;
-    audioData.reserve(audioSampleRate_ * audioChannels_ * 2 * 10); // Reserve for ~10 sec
+    audioData.reserve(state_->audioSampleRate_ * state_->audioChannels_ * 2 * 10); // Reserve for ~10 sec
 
     while (true) {
         ComPtr<IMFSample> sample;
@@ -589,7 +596,7 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
                 // AAC: add ADTS header for each frame
                 uint8_t adtsHeader[7];
                 SoundBuffer::createAdtsHeader(adtsHeader, static_cast<int>(length),
-                                               audioSampleRate_, audioChannels_);
+                                               state_->audioSampleRate_, state_->audioChannels_);
                 audioData.insert(audioData.end(), adtsHeader, adtsHeader + 7);
             }
             audioData.insert(audioData.end(), data, data + length);
@@ -606,10 +613,9 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         return false;
     }
 
-    mediaPath_ = path;
+    state_->mediaPath_ = path;
 
-    InitializeCriticalSection(&criticalSection_);
-    csInitialized_ = true;
+    state_->mfInitialized = true;
 
     if (!createD3D11Device()) {
         return false;
@@ -622,9 +628,11 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // Wait for metadata to load (synchronous load for now)
     // In production, this should be async with callbacks
     int timeout = 5000; // 5 seconds
-    while (!isReady_ && timeout > 0) {
+    while (!state_->isReady_ && timeout > 0) {
         Sleep(10);
         timeout -= 10;
+
+        drainNotifications();
 
         // Process pending events
         MSG msg;
@@ -634,7 +642,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         }
     }
 
-    if (!isReady_) {
+    if (!state_->isReady_) {
         logError("VideoPlayer") << "Timeout waiting for video to load";
         return false;
     }
@@ -642,180 +650,177 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // Load video frame rate and audio track info
     loadMediaInfo(path);
 
-    isLoaded_ = true;
+    state_->isLoaded_ = true;
     return true;
 }
 
 void TCVideoPlayerImpl::close() {
-    EnterCriticalSection(&criticalSection_);
+    if (!state_) return;
+    state_->notifications.close();
 
-    if (mediaEngine_) {
-        mediaEngine_->Shutdown();
-        mediaEngine_.Reset();
+    if (state_->mediaEngine_) {
+        state_->mediaEngine_->Shutdown();
+        state_->mediaEngine_.Reset();
     }
-    mediaEngineEx_.Reset();
+    state_->mediaEngineEx_.Reset();
 
-    if (eventNotify_) {
-        eventNotify_->Release();
-        eventNotify_ = nullptr;
-    }
-
-    renderTexture_.Reset();
-    stagingTexture_.Reset();
-    dxgiManager_.Reset();
-    d3dContext_.Reset();
-    d3dDevice_.Reset();
-
-    if (pixels_) {
-        delete[] pixels_;
-        pixels_ = nullptr;
+    if (state_->eventNotify_) {
+        state_->eventNotify_->Release();
+        state_->eventNotify_ = nullptr;
     }
 
-    isLoaded_ = false;
-    isReady_ = false;
-    hasNewFrame_ = false;
-    isFinished_ = false;
-    width_ = 0;
-    height_ = 0;
-    frameRate_ = 0.0f;
-    hasAudio_ = false;
-    audioCodec_ = 0;
-    audioSampleRate_ = 0;
-    audioChannels_ = 0;
-    mediaPath_.clear();
+    state_->renderTexture_.Reset();
+    state_->stagingTexture_.Reset();
+    state_->dxgiManager_.Reset();
+    state_->d3dContext_.Reset();
+    state_->d3dDevice_.Reset();
 
-    LeaveCriticalSection(&criticalSection_);
+    state_->pixels_.clear();
 
-    if (csInitialized_) {
-        DeleteCriticalSection(&criticalSection_);
-        csInitialized_ = false;
-    }
+    state_->isLoaded_ = false;
+    state_->isReady_ = false;
+    state_->hasNewFrame_ = false;
+    state_->isFinished_ = false;
+    state_->width_ = 0;
+    state_->height_ = 0;
+    state_->frameRate_ = 0.0f;
+    state_->hasAudio_ = false;
+    state_->audioCodec_ = 0;
+    state_->audioSampleRate_ = 0;
+    state_->audioChannels_ = 0;
+    state_->mediaPath_.clear();
 
-    CloseMediaFoundation();
+
+    if (state_->mfInitialized) CloseMediaFoundation();
+    state_ = std::make_shared<VideoPlayerState>();  // never null, like VideoGrabber::close()
 }
 
 void TCVideoPlayerImpl::play() {
-    if (mediaEngine_) {
-        isFinished_ = false;
-        mediaEngine_->Play();
+    if (state_->mediaEngine_) {
+        state_->isFinished_ = false;
+        state_->mediaEngine_->Play();
     }
 }
 
 void TCVideoPlayerImpl::stop() {
-    if (mediaEngine_) {
-        mediaEngine_->Pause();
-        mediaEngine_->SetCurrentTime(0.0);
+    if (state_->mediaEngine_) {
+        state_->mediaEngine_->Pause();
+        state_->mediaEngine_->SetCurrentTime(0.0);
     }
 }
 
 void TCVideoPlayerImpl::setPaused(bool paused) {
-    if (mediaEngine_) {
+    if (state_->mediaEngine_) {
         if (paused) {
-            mediaEngine_->Pause();
+            state_->mediaEngine_->Pause();
         } else {
-            mediaEngine_->Play();
+            state_->mediaEngine_->Play();
         }
     }
 }
 
+void TCVideoPlayerImpl::drainNotifications() {
+    for (const auto& event : state_->notifications.take())
+        onMediaEvent(event.event, event.param1, event.param2);
+}
+
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
-    hasNewFrame_ = false;
+    drainNotifications();
+    state_->hasNewFrame_ = false;
 
-    if (!isLoaded_ || !mediaEngine_) return;
+    if (!state_->isLoaded_ || !state_->mediaEngine_) return;
 
-    if (d3dDevice_) {
-        HRESULT reason = d3dDevice_->GetDeviceRemovedReason();
-        if (FAILED(reason)) playbackErrors_.report("D3D11 video device lost", reason);
+    if (state_->d3dDevice_) {
+        HRESULT reason = state_->d3dDevice_->GetDeviceRemovedReason();
+        if (FAILED(reason)) state_->playbackErrors_.report("D3D11 video device lost", reason);
     }
-    auto error = playbackErrors_.take();
+    auto error = state_->playbackErrors_.take();
     if (!error.message.empty()) {
         if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
         return;
     }
 
-    EnterCriticalSection(&criticalSection_);
 
     if (transferVideoFrame()) {
-        hasNewFrame_ = true;
+        state_->hasNewFrame_ = true;
 
         // Copy pixels to VideoPlayer's buffer
-        if (player && pixels_) {
+        if (player && !state_->pixels_.empty()) {
             unsigned char* playerPixels = player->getPixels();
             if (playerPixels) {
-                memcpy(playerPixels, pixels_, width_ * height_ * 4);
+                memcpy(playerPixels, state_->pixels_.data(), state_->width_ * state_->height_ * 4);
             }
         }
     }
 
     // Check for loop
-    if (isLoop_ && isFinished_) {
-        mediaEngine_->SetCurrentTime(0.0);
-        mediaEngine_->Play();
-        isFinished_ = false;
+    if (state_->isLoop_ && state_->isFinished_) {
+        state_->mediaEngine_->SetCurrentTime(0.0);
+        state_->mediaEngine_->Play();
+        state_->isFinished_ = false;
     }
 
-    LeaveCriticalSection(&criticalSection_);
 }
 
 float TCVideoPlayerImpl::getPosition() const {
-    if (!mediaEngine_) return 0.0f;
-    double currentTime = mediaEngine_->GetCurrentTime();
-    return (duration_ > 0) ? static_cast<float>(currentTime / duration_) : 0.0f;
+    if (!state_->mediaEngine_) return 0.0f;
+    double currentTime = state_->mediaEngine_->GetCurrentTime();
+    return (state_->duration_ > 0) ? static_cast<float>(currentTime / state_->duration_) : 0.0f;
 }
 
 void TCVideoPlayerImpl::setPosition(float pct) {
-    if (mediaEngine_ && duration_ > 0) {
-        double seekTime = pct * duration_;
-        mediaEngine_->SetCurrentTime(seekTime);
+    if (state_->mediaEngine_ && state_->duration_ > 0) {
+        double seekTime = pct * state_->duration_;
+        state_->mediaEngine_->SetCurrentTime(seekTime);
     }
 }
 
 float TCVideoPlayerImpl::getDuration() const {
-    return duration_;
+    return state_->duration_;
 }
 
 void TCVideoPlayerImpl::setVolume(float vol) {
-    if (mediaEngine_) {
-        mediaEngine_->SetVolume(vol);
+    if (state_->mediaEngine_) {
+        state_->mediaEngine_->SetVolume(vol);
     }
 }
 
 void TCVideoPlayerImpl::setSpeed(float speed) {
-    if (mediaEngine_) {
-        mediaEngine_->SetPlaybackRate(speed);
+    if (state_->mediaEngine_) {
+        state_->mediaEngine_->SetPlaybackRate(speed);
     }
 }
 
 void TCVideoPlayerImpl::setLoop(bool loop) {
-    isLoop_ = loop;
-    if (mediaEngine_) {
-        mediaEngine_->SetLoop(loop ? TRUE : FALSE);
+    state_->isLoop_ = loop;
+    if (state_->mediaEngine_) {
+        state_->mediaEngine_->SetLoop(loop ? TRUE : FALSE);
     }
 }
 
 int TCVideoPlayerImpl::getCurrentFrame() const {
-    if (!mediaEngine_ || frameRate_ <= 0) return 0;
-    double currentTime = mediaEngine_->GetCurrentTime();
-    return static_cast<int>(currentTime * frameRate_);
+    if (!state_->mediaEngine_ || state_->frameRate_ <= 0) return 0;
+    double currentTime = state_->mediaEngine_->GetCurrentTime();
+    return static_cast<int>(currentTime * state_->frameRate_);
 }
 
 int TCVideoPlayerImpl::getTotalFrames() const {
-    if (frameRate_ <= 0) return 0;
-    return static_cast<int>(duration_ * frameRate_);
+    if (state_->frameRate_ <= 0) return 0;
+    return static_cast<int>(state_->duration_ * state_->frameRate_);
 }
 
 void TCVideoPlayerImpl::setFrame(int frame) {
-    if (frameRate_ > 0) {
-        double time = frame / frameRate_;
-        if (mediaEngine_) {
-            mediaEngine_->SetCurrentTime(time);
+    if (state_->frameRate_ > 0) {
+        double time = frame / state_->frameRate_;
+        if (state_->mediaEngine_) {
+            state_->mediaEngine_->SetCurrentTime(time);
         }
     }
 }
 
 void TCVideoPlayerImpl::nextFrame() {
-    if (mediaEngineEx_) {
-        mediaEngineEx_->FrameStep(TRUE);
+    if (state_->mediaEngineEx_) {
+        state_->mediaEngineEx_->FrameStep(TRUE);
     }
 }
 
@@ -832,15 +837,15 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
         case MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA: {
             // Get video dimensions
             DWORD w, h;
-            if (SUCCEEDED(mediaEngine_->GetNativeVideoSize(&w, &h))) {
-                width_ = static_cast<int>(w);
-                height_ = static_cast<int>(h);
-                logNotice("VideoPlayer") << "Video size: " << width_ << "x" << height_;
+            if (SUCCEEDED(state_->mediaEngine_->GetNativeVideoSize(&w, &h))) {
+                state_->width_ = static_cast<int>(w);
+                state_->height_ = static_cast<int>(h);
+                logNotice("VideoPlayer") << "Video size: " << state_->width_ << "x" << state_->height_;
             }
 
             // Get duration
-            duration_ = static_cast<float>(mediaEngine_->GetDuration());
-            logNotice("VideoPlayer") << "Duration: " << duration_ << " sec";
+            state_->duration_ = static_cast<float>(state_->mediaEngine_->GetDuration());
+            logNotice("VideoPlayer") << "Duration: " << state_->duration_ << " sec";
 
             // Create render texture
             createRenderTexture();
@@ -849,22 +854,22 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
 
         case MF_MEDIA_ENGINE_EVENT_CANPLAY:
         case MF_MEDIA_ENGINE_EVENT_CANPLAYTHROUGH:
-            isReady_ = true;
+            state_->isReady_ = true;
             break;
 
         case MF_MEDIA_ENGINE_EVENT_ENDED:
-            isFinished_ = true;
+            state_->isFinished_ = true;
             break;
 
         case MF_MEDIA_ENGINE_EVENT_ERROR:
-            playbackErrors_.report("Media Foundation playback error (MF_MEDIA_ENGINE_ERR " +
+            state_->playbackErrors_.report("Media Foundation playback error (MF_MEDIA_ENGINE_ERR " +
                                    std::to_string(param1) + ")",
                                    param2 ? static_cast<int64_t>(static_cast<HRESULT>(param2))
                                           : static_cast<int64_t>(param1));
             break;
 
         case MF_MEDIA_ENGINE_EVENT_RESOURCELOST:
-            playbackErrors_.report("Media Foundation video resource lost");
+            state_->playbackErrors_.report("Media Foundation video resource lost");
             break;
 
         default:
@@ -1020,7 +1025,6 @@ void VideoPlayer::previousFramePlatform() {
         static_cast<TCVideoPlayerImpl*>(platformHandle_)->previousFrame();
     }
 }
-
 
 // Audio track support
 bool VideoPlayer::hasAudioPlatform() const {
