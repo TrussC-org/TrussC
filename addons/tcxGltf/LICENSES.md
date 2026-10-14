@@ -55,7 +55,7 @@ SOFTWARE.
 
 ---
 
-## Duck.glb (example-gltf/data/)
+## Duck.glb (example-gltf/bin/data/)
 
 From [KhronosGroup/glTF-Sample-Models](https://github.com/KhronosGroup/glTF-Sample-Models).
 
