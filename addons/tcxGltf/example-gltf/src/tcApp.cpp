@@ -20,8 +20,12 @@ void tcApp::setup() {
     env.loadProcedural();
     setEnvironment(env);
 
-    // Load default model
+    // Load the bundled model (bin/data/). If it is missing, the loader logs
+    // the shared "file not found" Error.
     loadModel("Duck.glb");
+    if (!model.isLoaded()) {
+        logNotice() << "No model loaded. Drop a .glb/.gltf model to load";
+    }
 }
 
 void tcApp::draw() {
