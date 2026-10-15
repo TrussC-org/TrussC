@@ -402,7 +402,7 @@ bool Window::isOccluded() const {
     return st ? sapp_window_occluded(st->win) : false;
 }
 
-std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
+std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
     if (headless::isActive()) {
         logError("Window") << "createWindow(): not available in headless mode";
         return nullptr;

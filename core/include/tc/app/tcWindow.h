@@ -29,6 +29,9 @@ class Window;
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 
+// Native implementation, reached through createWindow's platform check.
+std::shared_ptr<Window> createSecondaryWindow(const WindowSettings& settings);
+
 // Open-window registry (creation order, secondaries only — the main window is
 // not a Window object). Non-inline storage in tcGlobal.cpp so the hot-reload
 // host and guest see ONE list. Used by the MCP window-targeting tools.
@@ -555,6 +558,11 @@ inline void App::setSize(float w, float h) {
 #include <TargetConditionals.h>
 #endif
 #if !(defined(__APPLE__) && TARGET_OS_OSX) && !defined(_WIN32) && !(defined(__linux__) && defined(SOKOL_GLCORE))
+namespace internal {
+// Keep the capability check and the single-window stubs under one platform rule.
+inline constexpr bool supportsSecondaryWindows() { return false; }
+inline std::shared_ptr<Window> createSecondaryWindow(const WindowSettings&) { return nullptr; }
+}
 // Stubs for platforms without window glue (web / iOS / Android / Raspberry
 // Pi). The real implementations live in platform/mac/tcWindowMac.mm,
 // platform/win/tcWindowWin.cpp and platform/linux/tcWindowLinux.cpp (desktop
@@ -573,12 +581,20 @@ inline bool Window::isOccluded() const {
 inline void Window::setSize(int, int) {}
 inline void Window::setFullscreen(bool) {}
 inline bool Window::isFullscreen() const { return false; }
-inline std::shared_ptr<Window> createWindow(const WindowSettings&) {
-    logError("Window") << "createWindow(): secondary windows are supported on "
-        "macOS, Windows and desktop Linux (OpenGL); this platform is "
-        "single-window";
-    return nullptr;
+#else
+namespace internal {
+inline constexpr bool supportsSecondaryWindows() { return true; }
 }
 #endif
+
+inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
+    if constexpr (!internal::supportsSecondaryWindows()) {
+        logError("Window") << "createWindow(): secondary windows are supported on "
+            "macOS, Windows and desktop Linux (OpenGL); this platform is "
+            "single-window";
+        return nullptr;
+    }
+    return internal::createSecondaryWindow(settings);
+}
 
 } // namespace trussc
