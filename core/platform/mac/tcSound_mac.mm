@@ -139,6 +139,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     // The members change only once the buffer is allocated
     try {
         samples.resize(sampleCount);
+        loadWrites_ |= 1;
     } catch (const std::bad_alloc&) {
         logError("SoundBuffer") << "not enough memory to load AAC ("
                                 << dstFormat.mChannelsPerFrame << " ch, "
@@ -146,6 +147,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
         ExtAudioFileDispose(extAudioFile);
         return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
     }
+    loadWrites_ |= 14;
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);
@@ -184,6 +186,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
 // SoundBuffer::loadAacFromMemory - macOS implementation (memory-based)
 // -----------------------------------------------------------------------------
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
+    async_.cancel();
     internal::clearLoadName(path_);
     if (!data || dataSize == 0) {
         logError("SoundBuffer") << "AAC data is empty";
@@ -319,6 +322,7 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     // The members change only once the buffer is allocated
     try {
         samples.resize(sampleCount);
+        loadWrites_ |= 1;
     } catch (const std::bad_alloc&) {
         logError("SoundBuffer") << "not enough memory to load AAC ("
                                 << dstFormat.mChannelsPerFrame << " ch, "
@@ -327,6 +331,7 @@ LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
         AudioFileClose(audioFile);
         return LoadResult::fail(LoadError::DecodeFailed, "not enough memory to load AAC");
     }
+    loadWrites_ |= 14;
     channels = static_cast<int>(dstFormat.mChannelsPerFrame);
     sampleRate = static_cast<int>(dstFormat.mSampleRate);
     numSamples = static_cast<size_t>(totalFrames);

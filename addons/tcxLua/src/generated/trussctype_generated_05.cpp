@@ -230,10 +230,15 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         "In", sol::var(trussc::EaseMode::In),
         "Out", sol::var(trussc::EaseMode::Out),
         "InOut", sol::var(trussc::EaseMode::InOut));
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
+    {
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
+    }
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

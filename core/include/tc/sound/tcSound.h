@@ -2,6 +2,7 @@
 #include "tc/utils/tcAnnotations.h"
 #include "tc/utils/tcFileIO.h"   // fs alias + path boundary helpers
 #include "tc/utils/tcLoadResult.h"
+#include "tc/utils/tcResourceLoad.h"
 
 // =============================================================================
 // TrussC Sound
@@ -80,6 +81,7 @@ protected:
 
 
 namespace internal {
+struct SoundBufferLoadAccess;
 
 // Interleaved sample count of `frames` frames of `channels` channels, for
 // sizing SoundBuffer::samples. False when channels < 1 or when the count
@@ -209,8 +211,25 @@ inline bool growSampleBuffer(std::vector<float>& buf, size_t needed, size_t pref
 // Sound Buffer (decoded data)
 // ---------------------------------------------------------------------------
 class SoundBuffer : public SoundSource {
+    struct AsyncState : internal::ResourceLoadState {
+        fs::path input, path;
+        std::shared_ptr<SoundBuffer> decoded;
+    };
 public:
     SoundBuffer() : SoundSource(SoundSource::Eager) {}
+    SoundBuffer(const SoundBuffer& other);
+    SoundBuffer& operator=(const SoundBuffer& other);
+    SoundBuffer(SoundBuffer&& other) noexcept;
+    SoundBuffer& operator=(SoundBuffer&& other) noexcept;
+
+    // Prepare private PCM on a worker; commit under the mixer lock and notify
+    // on main in a later frame. Handle operations/direct sample access must be
+    // serialized on main (direct sample access keeps its existing mixer rules).
+    // Web without pthreads defers CPU decode to a frame, which may stall it.
+    // App exit waits for loads still decoding; cancelling never waits.
+    void loadAsync(const fs::path& path);
+    Event<LoadResult> onLoad;
+    bool isLoading() const { return async_.loading(); }
     std::vector<float> samples;  // Interleaved samples
     // channels and sampleRate are inherited from SoundSource.
     size_t numSamples = 0;       // Samples per channel
@@ -285,6 +304,7 @@ public:
     LoadResult loadPcmFromMemory(const void* data, size_t dataSize,
                                  int numChannels, int rate, int bitsPerSample = 16,
                                  bool bigEndian = false) {
+        async_.cancel();
         internal::clearLoadName(path_);
         if (bitsPerSample != 16 && bitsPerSample != 32) {
             logError("SoundBuffer") << "unsupported bits per sample: " << bitsPerSample;
@@ -370,6 +390,7 @@ public:
     // -------------------------------------------------------------------------
 
     void generateSineWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -383,6 +404,7 @@ public:
     }
 
     void generateSquareWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -397,6 +419,7 @@ public:
     }
 
     void generateTriangleWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -415,6 +438,7 @@ public:
     }
 
     void generateSawtoothWave(float frequency, float duration, float volume = 0.5f, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -430,6 +454,7 @@ public:
     }
 
     void generateNoise(float duration, float volume = 0.5f, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -446,6 +471,7 @@ public:
     }
 
     void generatePinkNoise(float duration, float volume = 0.5f, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -479,6 +505,7 @@ public:
     }
 
     void generateSilence(float duration, int sr = 44100) {
+        async_.cancel();
         path_.clear();
         sampleRate = sr;
         channels = 1;
@@ -587,9 +614,24 @@ public:
     }
 
 private:
+    friend struct internal::SoundBufferLoadAccess;
+    internal::ResourceLoadSlot<AsyncState> async_;
+    unsigned loadWrites_ = 0; // branch-specific AAC changes, including failures
+    LoadResult loadResolved(const fs::path& input, const fs::path& resolved);
+#ifdef __EMSCRIPTEN__
+    static void loadAacWebAsync(std::shared_ptr<SoundBuffer> decoded,
+                                std::function<void(LoadResult)> complete, const fs::path& path);
+    LoadResult finishAacWebDecode(int slot, const fs::path& path);
+#endif
     LoadResult loadAacPlatform(const fs::path& path);
     fs::path path_;  // see getPath(); cleared by the memory / generator paths
 };
+
+namespace internal {
+struct SoundBufferLoadAccess {
+    static void wrote(SoundBuffer& buffer, unsigned fields) { buffer.loadWrites_ |= fields; }
+};
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // SoundStream — streaming source. File stays open; samples are decoded on
@@ -1232,6 +1274,7 @@ private:
     friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
     friend class MicInput;
+    friend class SoundBuffer;
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
     friend void internal::releaseVoice(PlayingSound&);

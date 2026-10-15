@@ -2992,10 +2992,12 @@ float Font::getWidth(const std::string & text) const  // Get text width
 WritingMode Font::getWritingMode() const  // Current writing mode
 bool Font::gridFitLands() const  // Report whether grid fit actually lands on the pixel grid, i.e. whether it is enabled and the current transform maps one model unit to one device pixel.
 bool Font::isLoaded() const  // Check if loaded
+bool Font::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
 bool Font::isWrapEnabled() const  // Check if line wrapping is enabled
 bool Font::kinsokuLineEnd(uint32_t cp) const  // Return whether a codepoint is forbidden at the end of a line (kinsoku rule).
 bool Font::kinsokuLineStart(uint32_t cp) const  // Return whether a codepoint is forbidden at the start of a line (kinsoku rule).
 LoadResult Font::load(const fs::path & nameOrPath, int size, int faceIndex = 0)  // Load a font file or a system font name; faceIndex picks the face in a .ttc. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. When a file in the data folder and a system font share a name, the data file wins. On Web, URL loading waits until the font is usable or fetching/decoding fails.
+void Font::loadAsync(const fs::path & nameOrPath, int size, int faceIndex = 0)  // loadAsync(nameOrPath, size, faceIndex = 0): prepare owned font bytes and CPU metrics on a native worker, then publish the shared atlas and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits.
 void Font::resetLineHeight()  // Reset line height to the font default
 void Font::setAlign(Direction h, Direction v) [+1]  // Set horizontal (and optional vertical) text alignment
 void Font::setDefaultOversampling(int n)  // Set the oversampling factor newly loaded fonts start with; does not affect fonts already loaded.
@@ -3125,7 +3127,9 @@ Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
 void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
 bool Image::isAllocated() const  // Check if allocated
-LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. To load in the background, call `Pixels::load` on the worker thread and create the texture on the main thread with `Texture::allocate(pixels)`. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+bool Image::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
+LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
+void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits.
 LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
 void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
 void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
@@ -4016,9 +4020,11 @@ void SoundBuffer::generateTriangleWave(float frequency, float duration, float vo
 int SoundBuffer::getAdtsSampleRateIndex(int sampleRate)  // ADTS sample-rate index for the given rate (AAC-in-MOV container helper).
 float SoundBuffer::getDuration() const  // Duration in seconds (numSamples / sampleRate).
 fs::path SoundBuffer::getPath() const  // Resolved path of the last successful file load, including direct loadAac(). Empty after a failed load, a memory/PCM load, or generation.
+bool SoundBuffer::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
 LoadResult SoundBuffer::load(const fs::path & path)  // Decode a file into PCM, auto-detecting format from the extension (.wav .mp3 .ogg .flac .aac .m4a, case-insensitive). Returns false on failure. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadAac(const fs::path & path) [macos,windows,linux,ios,web]  // Decode an AAC / M4A file into PCM (platform-specific; returns false on unsupported platforms). Relative paths resolve via getDataPath(); absolute paths pass through. On Web, load waits for decoded PCM using OfflineAudioContext, including in setup().
 LoadResult SoundBuffer::loadAacFromMemory(const void * data, size_t dataSize) [macos,windows,linux,ios]  // Decode AAC data from a memory buffer (platform-specific; returns false on unsupported platforms).
+void SoundBuffer::loadAsync(const fs::path & path)  // loadAsync(path): prepare PCM and metadata on a native worker, apply and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits.
 LoadResult SoundBuffer::loadFlac(const fs::path & path)  // Decode a FLAC file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadFlacFromMemory(const void * data, size_t dataSize)  // Decode FLAC data from a memory buffer.
 LoadResult SoundBuffer::loadMp3(const fs::path & path)  // Decode an MP3 file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.

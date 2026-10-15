@@ -2640,6 +2640,7 @@ namespace internal {
     // whether this frame draws. Split out of _frame_cb so the whole sequence
     // can be driven headless (core/tests/frameTiming).
     inline bool beginMainLoopFrame(std::chrono::steady_clock::time_point now) {
+        auto resourceLoads = takeResourceLoadBatch();
         sampleFrameTime(mainWindowContext());
 
         {
@@ -2649,6 +2650,7 @@ namespace internal {
             // Run work marshalled from worker threads (runOnMainThread, Event
             // Deliver::Main). Done before update/draw so queued tree edits land
             // while no traversal is in flight.
+            internal::deliverResourceLoadBatch(std::move(resourceLoads));
             internal::drainMainThreadQueue();
 
             // Log the dropped plays that could only be counted (off the main
@@ -2777,6 +2779,8 @@ namespace internal {
             EntryStackGuard guard(AppEntry::Exit);
             appCleanupFunc();
         }
+
+        waitForResourceLoadsAtAppExit();
 
         // Stop the audio device explicitly: the AudioEngine singleton is
         // intentionally leaked (see AudioEngine::getInstance()), so no
