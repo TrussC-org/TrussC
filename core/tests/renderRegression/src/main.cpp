@@ -323,7 +323,7 @@ class RegressionApp : public App {
             // [0,0,0,0], while the Fbo is exact. This scene never restarts a
             // swapchain pass: the Fbo CLEAR/LOAD precedes its first present().
             // Capture already uses that pass's drawable and ordered queue.
-            // New issue needed for Fbo sampling/presentation vs capture on Metal;
+            // Tracked in #832 (Fbo sampling/presentation vs capture on Metal);
             // no proven #821 PR 3/5 fix yet. Keep exact current RGB, not a tolerance.
             if (!offscreen) { red = green = Rgba{0,0,0,0}; allowance = 0; }
 #endif
