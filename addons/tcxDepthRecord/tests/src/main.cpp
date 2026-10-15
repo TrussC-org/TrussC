@@ -128,19 +128,23 @@ public:
     explicit PatternCamera(const Dims& d) : d_(d) {}
 
 protected:
-    bool openDevice() override { k_ = 0; return true; }
-    void closeDevice() override {}
-    StreamFreshness captureInto(DepthFrame& dst) override {
-        fillFrame(dst, d_, k_++);
-        StreamFreshness s;
-        s.depth = true;
-        s.color = d_.chn > 0;
-        return s;
-    }
+    struct PatternDevice : Device {
+        Dims dims;
+        int frame = 0;
+        explicit PatternDevice(const Dims& value) : dims(value) {}
+        StreamFreshness captureInto(DepthFrame& dst) override {
+            fillFrame(dst, dims, frame++);
+            StreamFreshness fresh;
+            fresh.depth = true;
+            fresh.color = dims.chn > 0;
+            return fresh;
+        }
+    };
+    std::shared_ptr<Device> openDevice() override { return std::make_shared<PatternDevice>(d_); }
 
 private:
     Dims d_;
-    int k_ = 0;
+
 };
 
 // Appends one custom block per frame, so every file also carries a block type
@@ -160,15 +164,25 @@ private:
 class ProbePlayback : public PlaybackDepthCamera {
 public:
     using PlaybackDepthCamera::PlaybackDepthCamera;
-    vector<vector<uint8_t>> extra;
+    // The test reads this only after inline capture; the Device owns its copy.
+    std::shared_ptr<vector<vector<uint8_t>>> blocks = std::make_shared<vector<vector<uint8_t>>>();
+    vector<vector<uint8_t>>& extra = *blocks;
 
 protected:
-    bool readExtraBlock(uint8_t type, const uint8_t* data, uint32_t len, double) override {
-        if (type != CUSTOM_TYPE) return false;
-        extra.emplace_back(data, data + len);
-        return true;
+    struct ProbeDevice : PlaybackDevice {
+        std::shared_ptr<vector<vector<uint8_t>>> blocks;
+        explicit ProbeDevice(std::shared_ptr<vector<vector<uint8_t>>> value) : blocks(std::move(value)) {}
+        bool readExtraBlock(uint8_t type, const uint8_t* data, uint32_t len, double) override {
+            if (type != CUSTOM_TYPE) return false;
+            blocks->emplace_back(data, data + len);
+            return true;
+        }
+        bool decodesBlockType(uint8_t type) const override { return type == CUSTOM_TYPE; }
+    };
+    std::shared_ptr<PlaybackDevice> makePlaybackDevice() override {
+        return std::make_shared<ProbeDevice>(blocks);
     }
-    bool decodesBlockType(uint8_t type) const override { return type == CUSTOM_TYPE; }
+
 };
 
 // -----------------------------------------------------------------------------
