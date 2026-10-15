@@ -513,6 +513,13 @@ When `TC_HOT_RELOAD` is detected in a source file, the build splits into two tar
 - **Host (EXE)**: `main.cpp` + TrussC core. Owns the window, event loop, and file watcher.
 - **Guest (shared library)**: Your app code (`tcApp.cpp` etc.). Rebuilt on every file change.
 
+A normal Host build also builds the Guest. A Guest-only reload never builds or
+relinks the Host, even when `main.cpp` includes app headers or generated shader
+headers that changed. On Windows, the Guest uses a separate import library
+generated from the core export definitions, without depending on the Host target.
+Under Windows hot reload the Guest imports only TrussC core symbols; app code
+shared between Host and Guest goes in the Guest or in an addon.
+
 The Guest is built and loaded in the Host's configuration. With multi-config
 generators (Xcode, Visual Studio, Ninja Multi-Config), rebuilds pass
 `--config <host configuration>` and load the library from

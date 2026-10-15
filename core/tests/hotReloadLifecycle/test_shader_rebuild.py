@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""After building hotReloadLifecycle, check a shader edit via guest-only build.
+"""Check shader/header edits and repeated guest-only builds leave the host alone.
 
 Run through the local build wrapper where one is required, e.g.:
   tcbuild.sh python3 core/tests/hotReloadLifecycle/test_shader_rebuild.py BUILD_DIR
@@ -41,11 +41,13 @@ def main():
         assert len(trees) == 1, f'expected one built build-* dir, found {trees}'
         args.build = trees[0]
     shader = project / 'src/shaders/reloadProbe.glsl'
+    app_header = project / 'src/reloadHeaderProbe.h'
     header = shader.with_suffix('.glsl.h')
     libraries = guests(args.build)
     assert len(libraries) == 1, libraries
     guest = libraries[0]
     original = shader.read_bytes()
+    original_app_header = app_header.read_bytes()
     before_header = header.read_bytes()
     before_guest = guest.stat().st_mtime_ns
     hosts = [p for p in (project / 'bin/hotReloadLifecycle',
@@ -57,6 +59,14 @@ def main():
     before_host = host.stat().st_mtime_ns
     command = ['cmake', '--build', str(args.build), '--target', 'guest',
                '--config', args.config]
+
+    def build_guest(capture=False):
+        result = subprocess.run(command, check=True,
+                                stdout=subprocess.PIPE if capture else None,
+                                stderr=subprocess.STDOUT, text=True)
+        assert host.stat().st_mtime_ns == before_host, 'guest build relinked the host executable'
+        return result
+
     try:
         # A content edit is needed for Ninja's intentional copy_if_different:
         # touching unchanged GLSL regenerates but correctly avoids relinking.
@@ -64,25 +74,37 @@ def main():
         assert changed != original
         shader.write_bytes(changed)
         bump(shader)
-        subprocess.run(command, check=True)
+        build_guest()
         # One build must do both: on Windows Ninja an edited header used to be
         # picked up by the guest's objects only on the next build.
         assert header.read_bytes() != before_header, 'guest did not regenerate app shader'
         assert guest.stat().st_mtime_ns != before_guest, 'guest did not relink in the same build'
         # A running host cannot be relinked (Windows locks the executable), so
         # a shader edit must reach the guest without touching the host.
-        assert host.stat().st_mtime_ns == before_host, 'guest build relinked the host executable'
         print('Shader edit: header regenerated and guest relinked', flush=True)
+        # The first shader build can leave a stale Host object: the next
+        # reload used to relink the Host on Windows (#827).
+        build_guest()
         bump(shader)
-        result = subprocess.run(command, check=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True)
+        result = build_guest(capture=True)
         print(result.stdout, end='', flush=True)
         assert 'Compiling shader: reloadProbe.glsl' in result.stdout, 'mtime bump did not run shader compiler'
         print('Shader mtime bump: generator completed', flush=True)
+        for generation in (1, 2):
+            before_guest = guest.stat().st_mtime_ns
+            app_header.write_bytes(original_app_header +
+                                   f'\n// Reload header edit {generation}.\n'.encode())
+            bump(app_header)
+            build_guest()
+            assert guest.stat().st_mtime_ns != before_guest, 'app header edit did not relink guest'
+            build_guest()
+            print(f'App header edit {generation}: guest relinked; host unchanged', flush=True)
     finally:
         shader.write_bytes(original)
         bump(shader)
-        subprocess.run(command, check=True)
+        app_header.write_bytes(original_app_header)
+        bump(app_header)
+        build_guest()
     assert header.read_bytes() == before_header, 'restored shader header differs'
 
 
