@@ -114,6 +114,12 @@ public:
             exitApp();
             return;
         }
+        // Count main draws: an occluded secondary may never receive a tick.
+        if (++frames_ >= 300) {
+            check("secondary window did not present within 300 main frames", false);
+            exitApp();
+            return;
+        }
         drawFrame(fbo_, true);
     }
 
@@ -121,10 +127,15 @@ private:
     Fbo fbo_;
     EventListener after_;
     std::shared_ptr<Window> secondary_;
+    int frames_ = 0;
 };
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (!internal::supportsSecondaryWindows()) {
+        std::printf("SKIP: fboWindowContext single-window platform\n");
+        return 0;
+    }
     if (argc <= 1 || std::strcmp(argv[1], "--gpu-check") != 0) {
         std::printf("SKIP: fboWindowContext needs --gpu-check and a display\n");
         return 0;
