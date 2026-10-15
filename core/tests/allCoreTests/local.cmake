@@ -42,6 +42,10 @@ foreach(_TC_DIR IN LISTS _TC_CORE_TEST_DIRS)
     source_group("tests/${_TC_NAME}" FILES ${_TC_TEST_SOURCES})
     list(APPEND _TC_CORE_TEST_NAMES "${_TC_NAME}")
 endforeach()
+
+if("renderRegression" IN_LIST _TC_CORE_TEST_NAMES)
+    trussc_compile_shaders(${PROJECT_NAME} "${_TC_CORE_TESTS_DIR}/renderRegression/src")
+endif()
 list(LENGTH _TC_CORE_TEST_NAMES _TC_CORE_TEST_COUNT)
 message(STATUS "[${PROJECT_NAME}] ${_TC_CORE_TEST_COUNT} core tests: ${_TC_CORE_TEST_NAMES}")
 

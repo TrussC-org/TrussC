@@ -782,6 +782,46 @@ jobs:
           path: regenerated.patch
           if-no-files-found: error
 
+  # Same-machine pixel comparison for the batch PR / merge queue (#821).
+  render-regression:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # Two uncached TrussC builds (merge-base and head) plus trusscli.
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/apt-deps
+      - name: Install software display
+        run: sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils
+      - name: Build trusscli
+        run: |
+          cmake -S tools -B tools/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools/build --config Release --parallel 4
+      - name: Compare merge-base and head; self-check head
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        run: |
+          if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="$HEAD_REF^"
+          fi
+          xvfb-run -a -s '-screen 0 1024x768x24' python3 tools/render_regression.py "$BASE_REF" "$HEAD_REF"
+      - name: Upload render comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-regression
+          path: |
+            render-regression-output/**/*.png
+            render-regression-output/**/samples.json
+          if-no-files-found: ignore
+
   # Header-inline state check (#249): core/include must not grow new mutable
   # header-inline state (a function-local static or an inline variable). A hot
   # reload guest is a DLL on Windows and compiles its own copy of each, so state
@@ -834,6 +874,10 @@ jobs:
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: render regression workflow and driver checks
+        if: always()
+        run: python3 tools/tests/test_render_regression.py -v
 
       - name: reference regeneration regression checks
         if: always()
@@ -894,7 +938,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [changes, build, build-android, build-web, build-ios, reference-check, header-state-check]
+    needs: [changes, build, build-android, build-web, build-ios, reference-check, header-state-check, render-regression]
     if: always()
     steps:
       - name: Verify job results
@@ -907,6 +951,7 @@ jobs:
           R_IOS: ${{ needs.build-ios.result }}
           R_REF: ${{ needs.reference-check.result }}
           R_HDR: ${{ needs.header-state-check.result }}
+          R_RENDER: ${{ needs.render-regression.result }}
         run: |
           ok=1
           check() { # name result skippable
@@ -928,5 +973,6 @@ jobs:
           check "build-ios"       "$R_IOS"      skippable
           check "reference-check" "$R_REF"
           check "header-state-check" "$R_HDR"
+          check "render-regression" "$R_RENDER" skippable
           [ "$ok" = "1" ] || { echo "ci-ok: FAILING"; exit 1; }
           echo "ci-ok: all good"

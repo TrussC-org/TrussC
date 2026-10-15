@@ -623,8 +623,16 @@ public:
         // Ensure render pass is active (swapchain or FBO)
         ensureSwapchainPass();
 
-        // Flush sokol_gl so it draws before the fullscreen quad
-        sgl_draw();
+        // Submit all preceding layers, including deferred user shaders, meshes
+        // and points. Advance the command base so end()/present() cannot blend
+        // that content a second time after this fullscreen draw.
+        if (internal::currentWindowContext().inFboPass) {
+            internal::flushFboDeferredPbr(sgl_get_context());
+            sgl_layer(0);
+        } else {
+            internal::flushDeferredShaderDraws();
+        }
+        sgl_tc_draw_rewind();
 
         // Match the pipeline to the current target (swapchain vs FBO format).
         sg_apply_pipeline(pipelineForCurrentTarget());
