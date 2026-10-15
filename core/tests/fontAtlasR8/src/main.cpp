@@ -26,6 +26,7 @@
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -374,8 +375,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings;
     settings.setSize(kCols * kCell, kRows * kCell);
     settings.setHighDpi(false);
-    runApp<GpuCheckApp>(settings);
-    filesystem::remove(g_fontPath);
-    printf("fontAtlasR8 --gpu-check: %s\n", g_fail == 0 ? "OK" : "FAIL");
-    return g_fail == 0 ? 0 : 1;
+    return tcCoreTest::runDisplayTest<GpuCheckApp>(settings, g_fail, [] {
+        filesystem::remove(g_fontPath);
+        printf("fontAtlasR8 --gpu-check: %s\n", g_fail == 0 ? "OK" : "FAIL");
+    });
 }

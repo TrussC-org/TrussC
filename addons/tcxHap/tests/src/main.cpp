@@ -25,6 +25,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../../../core/tests/common/tcDisplayTest.h"
 #include "tcxHapPlayer.h"
 
 #include <algorithm>
@@ -1384,15 +1385,13 @@ int main(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);
-        runApp<ShaderFailureApp>(settings);
-        return g_fail ? 1 : 0;
+        return tcCoreTest::runDisplayTest<ShaderFailureApp>(settings, g_fail);
     }
     if (argc > 1 && string(argv[1]) == "--playback-errors") {
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);
-        runApp<PlaybackErrorApp>(settings);
-        return g_fail ? 1 : 0;
+        return tcCoreTest::runDisplayTest<PlaybackErrorApp>(settings, g_fail);
     }
     g_fail += runVideoTests();
     const fs::path data = fs::path(getDataPath(""));

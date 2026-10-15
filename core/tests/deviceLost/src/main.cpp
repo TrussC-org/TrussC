@@ -3,6 +3,7 @@
 #include <TrussC.h>
 #include "sokol/util/sokol_d3d11_device_loss.h"
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <string>
 
@@ -55,14 +56,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         mode = argv[1];
         if (mode != "--window-default" && mode != "--window-cancel" &&
             mode != "--window-code" && mode != "--window-zero") return 2;
-        const int code = runApp<SmokeApp>(WindowSettings().setSize(64, 64));
-        const int expected = mode == "--window-default" ? 1 : mode == "--window-zero" ? 0 : 23;
-        check(code == expected, "runApp returns exitApp code");
-        check(cleanedUp, "normal App cleanup runs");
-        check(updates == (mode == "--window-cancel" ? 2 : 1), "cancel controls continued updates");
-        std::printf("deviceLost %s: runApp=%d, updates=%d, cleanup=%d\n",
-                    mode.c_str(), code, updates, cleanedUp);
-        return failures ? 1 : 0;
+        return tcCoreTest::runDisplayTest<SmokeApp>(WindowSettings().setSize(64, 64), failures, [] {
+            const int code = internal::appExitCode();
+            const int expected = mode == "--window-default" ? 1 : mode == "--window-zero" ? 0 : 23;
+            check(code == expected, "exitApp code reaches cleanup");
+            check(cleanedUp, "normal App cleanup runs");
+            check(updates == (mode == "--window-cancel" ? 2 : 1), "cancel controls continued updates");
+            std::printf("deviceLost %s: app code=%d, updates=%d, cleanup=%d\n",
+                        mode.c_str(), code, updates, cleanedUp);
+        });
     }
 
     for (uint32_t hr : {0u, 0x087A0001u, 0x087A0007u, 0x887A000Au, hung, 0x80004005u}) {

@@ -1,6 +1,7 @@
 // #686: run with --gpu-check under Xvfb on Linux.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <cstring>
 
@@ -126,7 +127,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings;
     settings.setSize(32, 32);
     settings.setHighDpi(false);
-    runApp<UploadGuardApp>(settings);
-    check("both frames completed", completed);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<UploadGuardApp>(settings, failures, [] {
+        check("both frames completed", completed);
+    });
 }
