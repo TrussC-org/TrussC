@@ -1,16 +1,14 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "impl/httplib.h"
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
-#include "impl/httplib.h"
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
+#include <string>
+#include <thread>
 
 using namespace tc;
 namespace {
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
 bool workerExit = false;
 struct ExitApp : App {
     void setup() override {
@@ -39,30 +37,35 @@ struct ExitApp : App {
         mcp::internal::drainDeferredResponses();
     }
 };
-bool runChild(bool fromWorker) {
-    std::fflush(nullptr);
-    const pid_t child = fork();
-    if (child == 0) {
-        alarm(30); // deadlock watchdog, not a success-time assertion
-        workerExit = fromWorker;
-        runHeadlessApp<ExitApp>();
-        std::_Exit(3); // neither exit path should return
-    }
-    int status = 0;
-    return child > 0 && waitpid(child, &status, 0) == child &&
-        WIFEXITED(status) && WEXITSTATUS(status) == 0;
-}
+// The test re-launches its own executable per case (as mcpHttpGuard does), so
+// one harness covers every desktop OS and reads the child's exit code.
+std::string quoteArgument(const std::string& value) {
+#ifdef _WIN32
+    return "\"" + value + "\"";  // Windows executable paths cannot contain a quote
+#else
+    std::string quoted = "'";
+    for (char c : value) quoted += c == '\'' ? "'\\''" : std::string(1, c);
+    return quoted + "'";
 #endif
 }
-TC_CORE_TEST_MAIN() {
-#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
-    const bool appExit = runChild(false);
+int child(bool fromWorker) {
+    // Deadlock watchdog, not a success-time assertion.
+    std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(30)); std::_Exit(3); }).detach();
+    workerExit = fromWorker;
+    runHeadlessApp<ExitApp>();
+    return 4; // neither exit path should return
+}
+}
+TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc == 3 && std::string(argv[1]) == "--child") return child(std::string(argv[2]) == "worker");
+    std::string command = quoteArgument(fs::absolute(argv[0]).string());
+#ifdef TC_CORE_TEST_NAME
+    command += " " TC_CORE_TEST_NAME;
+#endif
+    std::fflush(nullptr);
+    const bool appExit = std::system((command + " --child update").c_str()) == 0;
     std::printf("std::exit from update with in-process MCP listener: %s\n", appExit ? "PASS" : "FAIL");
-    const bool handlerExit = runChild(true);
+    const bool handlerExit = std::system((command + " --child worker").c_str()) == 0;
     std::printf("std::exit from HTTP request worker: %s\n", handlerExit ? "PASS" : "FAIL");
     return appExit && handlerExit ? 0 : 1;
-#else
-    std::puts("SKIP: process-exit harness uses Linux fork/waitpid");
-    return 0;
-#endif
 }
