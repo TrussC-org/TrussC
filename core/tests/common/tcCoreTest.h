@@ -11,6 +11,10 @@
 // instead of main(), after closing the anonymous namespace that holds the
 // rest of the file.
 //
+// Display tests also include tcDisplayTest.h and return runDisplayTest<App>(
+// settings, failures, finalChecks). Final checks and the exit code must be
+// decided inside the app: on macOS runApp() does not return after shutdown.
+//
 // - Built alone (trusscli project of the test itself), the macro is plain
 //   main() with the same parameters.
 // - Built into core/tests/allCoreTests, its local.cmake defines

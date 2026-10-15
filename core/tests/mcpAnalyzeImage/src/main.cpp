@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <cstring>
 
@@ -216,7 +217,9 @@ TC_CORE_TEST_MAIN(int argc,char** argv) {
 #ifndef __EMSCRIPTEN__
     if(argc>1 && strcmp(argv[1],"--gpu-check")==0) {
         WindowSettings settings;settings.setSize(32,32);settings.setHighDpi(false);settings.setSwapInterval(0);
-        runApp<CaptureApp>(settings);check("GPU test completed",completed);
+        return tcCoreTest::runDisplayTest<CaptureApp>(settings, failures, [] {
+            check("GPU test completed",completed);
+        });
     }
 #else
     (void)argc;(void)argv;

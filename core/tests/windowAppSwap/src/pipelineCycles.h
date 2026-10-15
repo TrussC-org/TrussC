@@ -112,8 +112,8 @@ inline int run(const char* closeMode, int count) {
     WindowSettings settings;
     settings.setSize(320, 240);
     settings.title = "windowAppSwap pipeline cycles";
-    runApp<Main>(settings);
-    printf("pipeline-cycles %s: %s (%d failures)\n", mode.c_str(), failures ? "FAIL" : "PASS", failures);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<Main>(settings, failures, [] {
+        printf("pipeline-cycles %s: %s (%d failures)\n", mode.c_str(), failures ? "FAIL" : "PASS", failures);
+    });
 }
 }} // anonymous namespace / pipelineCycles

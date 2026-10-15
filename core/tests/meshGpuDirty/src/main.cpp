@@ -16,6 +16,7 @@
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -201,9 +202,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(96, 96);
         settings.setHighDpi(false);
-        runApp<GpuCheckApp>(settings);
-        printf("meshGpuDirty --gpu-check: %s (%d failures)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail);
-        return g_fail ? 1 : 0;
+        return tcCoreTest::runDisplayTest<GpuCheckApp>(settings, g_fail, [] {
+            printf("meshGpuDirty --gpu-check: %s (%d failures)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail);
+        });
     }
     printf("=== meshGpuDirty (#267) ===\n");
 

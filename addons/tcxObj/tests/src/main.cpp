@@ -26,6 +26,9 @@
 // =============================================================================
 
 #include <tcxObj.h>
+#ifdef TCX_OBJ_TEST_GPU
+#include "../../../../core/tests/common/tcDisplayTest.h"
+#endif
 
 #include <chrono>
 #include <cmath>
@@ -639,8 +642,9 @@ int main() {
     WindowSettings settings;
     settings.setSize(64, 64);
     settings.setTitle("tcxObj lit path test");
-    const int result = runApp<ObjTestApp>(settings);
-    return result == 0 && g_completed && g_fail == 0 ? 0 : 1;
+    return tcCoreTest::runDisplayTest<ObjTestApp>(settings, g_fail, [] {
+        check("GPU tests completed", g_completed);
+    });
 }
 #else
 int main() {

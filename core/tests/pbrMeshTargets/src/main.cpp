@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -300,8 +301,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         settings.setSize(64, 64);
         settings.setHighDpi(false);
         settings.sampleCount = 4;
-        runApp<GpuApp>(settings);
-        check("secondary rendering completed", completed);
+        return tcCoreTest::runDisplayTest<GpuApp>(settings, failures, [] {
+            check("secondary rendering completed", completed);
+        });
 #else
         std::printf("GPU checks require Linux OpenGL\n");
         return 2;

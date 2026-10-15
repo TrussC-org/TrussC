@@ -2,6 +2,7 @@
 // Run with --gpu-check on a display (Xvfb works on Linux).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -173,7 +174,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     settings.setSize(64, 64);
     settings.setHighDpi(false);
     settings.setSwapInterval(0);
-    runApp<FboStackApp>(settings);
-    check("completed all GPU checks", finished);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<FboStackApp>(settings, failures, [] {
+        check("completed all GPU checks", finished);
+    });
 }

@@ -1,10 +1,12 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 
 using namespace tc;
 namespace {
 bool cleanupInvalidated = false;
+int failures = 0;
 struct TokenApp : App {
     std::weak_ptr<std::atomic<bool>> token;
     void setup() override { token = internal::appRunToken(); }
@@ -14,10 +16,11 @@ struct TokenApp : App {
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--window") {
-        const int code = runApp<TokenApp>(WindowSettings().setSize(64, 64));
-        const bool ok = code == 0 && cleanupInvalidated;
-        std::printf("runApp cleanup invalidates dialog token before app cleanup: %s\n", ok ? "PASS" : "FAIL");
-        return ok ? 0 : 1;
+        return tcCoreTest::runDisplayTest<TokenApp>(WindowSettings().setSize(64, 64), failures, [] {
+            const bool ok = internal::appExitCode() == 0 && cleanupInvalidated;
+            std::printf("runApp cleanup invalidates dialog token before app cleanup: %s\n", ok ? "PASS" : "FAIL");
+            if (!ok) ++failures;
+        });
     }
     buildAppDescriptor<TokenApp>();
     auto first = internal::appRunToken();
