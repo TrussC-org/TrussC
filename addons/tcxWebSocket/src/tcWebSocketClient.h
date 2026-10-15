@@ -117,8 +117,8 @@ public:
     // owns the connection and exposes no ping.
     bool sendPing(const std::string& payload = "keepalive");
 
-    State getState() const { return state_; }
-    bool isConnected() const { return state_ == State::Open; }
+    State getState() const { return tc::internal::sharedLoad(state_)->state_; }
+    bool isConnected() const { return getState() == State::Open; }
 
     // TLS certificate verification (wss:// only, no effect on Emscripten).
     // Default: verification is REQUIRED. Calling setTlsVerifyNone() before connect()
@@ -152,7 +152,16 @@ public:
     void setHandshakeTimeout(float seconds) { handshakeTimeout_ = seconds > 0.0f ? seconds : 0.0f; }
 
 private:
+    struct ConnectionState : std::enable_shared_from_this<ConnectionState> {
     void setupClient(bool useTls);
+    bool connect(const std::string& url);
+    void disconnect();
+    bool send(const std::string& message);
+    bool send(const std::vector<char>& data);
+    bool sendPing(const std::string& payload);
+    tc::internal::EventSnapshotDelivery<void> onOpen, onClose;
+    tc::internal::EventSnapshotDelivery<WebSocketEventArgs> onMessage;
+    tc::internal::EventSnapshotDelivery<TcpErrorEventArgs> onError;
     void handleRawReceive(TcpReceiveEventArgs& args);
     void handleTcpConnect(TcpConnectEventArgs& args);
     void handleTcpDisconnect(TcpDisconnectEventArgs& args);
@@ -219,7 +228,7 @@ private:
     // TCP connect (for wss://, TlsClient::getTcpConnectTime())
     std::atomic<int64_t> upgradeStartNs_{0};
 
-    State state_ = State::Disconnected;
+    std::atomic<State> state_{State::Disconnected};
     std::string host_;
     std::string path_ = "/";
     int port_ = 80;
@@ -234,8 +243,8 @@ private:
     // Lets failConnection() see, after notifying, whether a listener destroyed
     // the client (alive_ false) or disconnected / reconnected it (connection_
     // changed). alive_ is copied before the notification and checked first.
-    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
-    unsigned connection_ = 0;
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
+    std::atomic<unsigned> connection_{0};
     std::string handshakeNonce_;
 
     bool tlsVerifyNone_ = false;
@@ -248,6 +257,18 @@ private:
     static EM_BOOL onEmscriptenClose(int eventType, const EmscriptenWebSocketCloseEvent *websocketEvent, void *userData);
     static EM_BOOL onEmscriptenError(int eventType, const EmscriptenWebSocketErrorEvent *websocketEvent, void *userData);
 #endif
+    };
+    tc::internal::AtomicSharedPtr<ConnectionState> state_{std::make_shared<ConnectionState>()};
+    std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
+    std::shared_ptr<tc::internal::NetworkDelivery> delivery_ = std::make_shared<tc::internal::NetworkDelivery>();
+    std::shared_ptr<tc::internal::EventSnapshotDelivery<void>::Target> openTarget_, closeTarget_;
+    std::shared_ptr<tc::internal::EventSnapshotDelivery<WebSocketEventArgs>::Target> messageTarget_;
+    std::shared_ptr<tc::internal::EventSnapshotDelivery<TcpErrorEventArgs>::Target> errorTarget_;
+    bool tlsVerifyNone_ = false;
+    std::string tlsCaPem_;
+    float connectTimeout_ = 0.0f;
+    std::atomic<float> handshakeTimeout_{15.0f};
+
 };
 
 }  // namespace tcx::websocket

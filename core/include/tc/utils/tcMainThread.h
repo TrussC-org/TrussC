@@ -43,6 +43,16 @@
 
 namespace trussc {
 
+namespace internal {
+    // Runtime-owned liveness for native async dialog completions. One copy
+    // in tcGlobal.cpp, shared with hot reload guests; accessed on main thread.
+    std::shared_ptr<std::atomic<bool>>& appRunToken();
+    inline bool appRunIsAlive(const std::weak_ptr<std::atomic<bool>>& token) {
+        auto alive = token.lock();
+        return alive && alive->load();
+    }
+}
+
 #if defined(__EMSCRIPTEN__)
 
 // Web is single-threaded — everything already runs on the main thread, so

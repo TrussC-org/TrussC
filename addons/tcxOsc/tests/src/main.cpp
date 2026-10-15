@@ -52,6 +52,8 @@
 #include <tcxOsc.h>
 
 #include <chrono>
+#include <condition_variable>
+#include <memory>
 #include <cstdio>
 #include <map>
 #include <mutex>
@@ -462,6 +464,57 @@ static std::vector<uint8_t> mixedBytes() {
                         0xFF, 0xFF, 0xFF, 0xFD,    // i -3
                         0, 0, 0, 2, 1, 2, 0, 0,    // b {1, 2}
                         0, 0, 1, 0, 0, 0, 0, 0 }); // h 1 << 40
+}
+
+static void listenerTeardown() {
+    for (bool destroy : {false, true}) {
+        for (int kind = 0; kind < 3; ++kind) {
+            auto receiver = std::make_unique<OscReceiver>();
+            const int candidates[4] = {27960, 28960, 29960, 30960};
+            const int port = bindFirstFree(*receiver, candidates);
+            check("listener teardown: bind loopback port", port != 0);
+            if (!port) continue;
+            std::mutex mutex;
+            std::condition_variable changed;
+            bool completed = false;
+            bool closed = false;
+            auto teardown = [&](auto&) {
+                if (destroy) { receiver.reset(); closed = true; }
+                else { receiver->close(); closed = !receiver->isListening() && receiver->getPort() == 0; }
+            };
+            auto finish = [&](auto&) {
+                std::lock_guard lock(mutex);
+                completed = true;
+                changed.notify_all();
+            };
+            tc::EventListener first, last;
+            if (kind == 0) {
+                first = receiver->onMessageReceived.listen(teardown);
+                last = receiver->onMessageReceived.listen(finish);
+            } else if (kind == 1) {
+                first = receiver->onBundleReceived.listen(teardown);
+                last = receiver->onBundleReceived.listen(finish);
+            } else {
+                first = receiver->onParseError.listen(teardown);
+                last = receiver->onParseError.listen(finish);
+            }
+            OscMessage message("/teardown");
+            std::vector<uint8_t> bytes;
+            if (kind == 0) bytes = message.toBytes();
+            else if (kind == 1) {
+                OscBundle bundle;
+                bundle.addMessage(message).addMessage(message);
+                bytes = bundle.toBytes();
+            } else bytes = {1};
+            tc::UdpSocket sender;
+            sender.create();
+            check("listener teardown: send loopback packet", sender.sendTo("127.0.0.1", port, bytes.data(), bytes.size()));
+            std::unique_lock lock(mutex);
+            const bool finished = changed.wait_for(lock, std::chrono::seconds(10), [&] { return completed; });
+            check(destroy ? "destroy from OSC listener returns through snapshot"
+                          : "close from OSC listener returns through snapshot", finished && closed);
+        }
+    }
 }
 
 int main() {
@@ -1469,6 +1522,7 @@ int main() {
               OscMessageTestAccess::storedArgCount(built) == 0);
     }
 
+    listenerTeardown();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

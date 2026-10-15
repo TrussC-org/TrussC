@@ -21,9 +21,11 @@ struct output_configuration {};
 inline API midi_out_configuration_for(API api) { return api; }
 inline API observer_configuration_for(API api) { return api; }
 struct output_port { std::string display_name; };
+struct input_port { std::string display_name; };
 struct observer_configuration {};
 struct observer {
     observer(observer_configuration, API) {}
+    std::vector<input_port> get_input_ports() const { return {{"test input"}}; }
     std::vector<output_port> get_output_ports() const { return {{"test output"}}; }
 };
 
@@ -46,6 +48,48 @@ public:
         return {test::failSend};
     }
 private:
+    bool open_ = false;
+};
+}
+
+// Input backend double: a copied callback can represent a message already
+// acquired by the driver before close_port() unregisters it.
+#include <functional>
+#include <cstdint>
+#include <thread>
+namespace libremidi {
+enum class timestamp_mode { Relative };
+struct message { std::vector<unsigned char> bytes; std::int64_t timestamp = 0; };
+struct input_configuration {
+    std::function<void(const message&)> on_message;
+    bool ignore_sysex = false, ignore_timing = false, ignore_sensing = false;
+    timestamp_mode timestamps = timestamp_mode::Relative;
+};
+inline API midi_in_configuration_for(API api) { return api; }
+namespace test {
+inline std::function<void(const message&)> inputCallback;
+inline std::function<void()> duringClose;
+inline int inputCloses = 0, inputDestructs = 0;
+inline std::thread::id closeThread, destructThread;
+}
+class midi_in {
+public:
+    midi_in(input_configuration cfg, API) : callback_(std::move(cfg.on_message)) {
+        test::inputCallback = callback_;
+    }
+    ~midi_in() { ++test::inputDestructs; test::destructThread = std::this_thread::get_id(); }
+    stdx::error open_port(const input_port&) { open_ = true; return {}; }
+    stdx::error open_virtual_port(const std::string&) { open_ = true; return {}; }
+    stdx::error close_port() {
+        ++test::inputCloses;
+        test::closeThread = std::this_thread::get_id();
+        if (test::duringClose) test::duringClose();
+        open_ = false;
+        return {};
+    }
+    bool is_port_open() const { return open_; }
+private:
+    std::function<void(const message&)> callback_;
     bool open_ = false;
 };
 }
