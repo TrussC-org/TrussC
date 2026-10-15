@@ -602,7 +602,38 @@ static void runReconnectFromEventTests() {
     }
 }
 
+// Both payload and void event snapshots must survive destruction inline.
+static void checkInlineDestruction(bool fromMessage) {
+    const string name = fromMessage ? "destroy in onMessage" : "destroy in onOpen";
+    FakeServer fake;
+    if (!fake.start()) { check(name + ": server start", false); return; }
+    auto client = make_unique<WebSocketClient>();
+    atomic<bool> destroyed{false};
+    atomic<int> messages{0}, closes{0};
+    EventListener closed = client->onClose.listen([&] { ++closes; });
+    EventListener opened = client->onOpen.listen([&] {
+        if (!fromMessage) { client.reset(); destroyed = true; }
+    });
+    EventListener received = client->onMessage.listen([&](WebSocketEventArgs&) {
+        ++messages;
+        if (fromMessage) { client.reset(); destroyed = true; }
+    });
+    check(name + ": connect", client->connect("ws://127.0.0.1:" + to_string(fake.port) + "/"));
+    check(name + ": upgrade", fake.acceptUpgrade());
+    if (fromMessage) {
+        auto bytes = frame(0x81, "first");
+        auto trailing = frame(0x81, "stale");
+        bytes.insert(bytes.end(), trailing.begin(), trailing.end());
+        check(name + ": send buffered messages", fake.send(bytes));
+    }
+    check(name + ": destructor returns", waitFor([&] { return destroyed.load(); }));
+    fake.server.stop();
+    check(name + ": no stale message or close", messages == (fromMessage ? 1 : 0) && closes == 0);
+}
+
 static void runLoopbackTests() {
+    checkInlineDestruction(false);
+    checkInlineDestruction(true);
     // 1. Text in 3 fragments with a Ping between frames 2 and 3
     {
         FakeServer fake;

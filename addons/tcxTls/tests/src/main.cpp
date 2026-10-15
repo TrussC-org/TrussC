@@ -74,7 +74,7 @@
 //
 //   - No thread is left when main() returns (counted on Linux), although the
 //     clients whose listeners called connect() / disconnect() on the receive
-//     thread are kept for the life of the process.
+//     thread are kept until main() checks the final thread count.
 //
 // The scenario runs on a worker with a deadline, so a hang reports FAIL
 // instead of eating the CI job timeout. A crash prints what the test was
@@ -555,12 +555,12 @@ struct TlsPeer {
 // Scenario
 // -----------------------------------------------------------------------------
 
-static void scenario() {
-    // Constructed first: it also starts Winsock. Kept for the life of the
-    // process: the old receive threads that the onError and onConnect
+static void scenario(vector<unique_ptr<TlsClient>>& keptClients) {
+    // Constructed first: it also starts Winsock. Kept until the final thread
+    // count in main(): the old receive threads that the onError and onConnect
     // reconnects below let go of must be joined by the client's later
     // connect() and disconnect() calls, not only by a destructor (#543).
-    TlsClient& client = *new TlsClient();
+    TlsClient& client = *keptClients.emplace_back(make_unique<TlsClient>());
     client.setVerifyNone();
 
     TlsServer server;
@@ -1154,11 +1154,11 @@ static void scenario() {
     // the pending connect and the handshake on the same SSL context from two
     // threads, for as long as the client lived.
     {
-        // Kept for the life of the process: the old receive thread that the
+        // Kept until main() checks the final thread count: the old receive thread that the
         // listener's disconnect() lets go of must be joined by the client's
         // later connect() (#543). That connect() waits for the listener
         // first, so the listener's wait below runs out (3 s).
-        TlsClient& bn = *new TlsClient();
+        TlsClient& bn = *keptClients.emplace_back(make_unique<TlsClient>());
         bn.setVerifyNone();
 #ifdef __linux__
         const int threadsBaseline = countEntries("/proc/self/task");
@@ -1276,6 +1276,30 @@ static void scenario() {
           doneWhenDestroyed);
     if (g_fail) bail();
     // victimErr outlives its Event: disconnecting it is a no-op
+
+    // A failed TCP connect reports on its connect worker. The base must keep
+    // the TLS transport alive after the derived handle is destroyed there.
+    {
+        int refusedPort = 0;
+        rawsocket_t reserved = listenLoopback(refusedPort);
+        check("async TLS self-destroy: reserve loopback port", reserved != kNoSocket);
+        if (g_fail) bail();
+        TC_CLOSE(reserved);
+        auto pending = make_unique<TlsClient>();
+        pending->setVerifyNone();
+        atomic<bool> destroyed{false};
+        atomic<int> staleResults{0};
+        EventListener connected = pending->onConnect.listen([&](TcpConnectEventArgs&) { ++staleResults; });
+        EventListener failed = pending->onError.listen([&](TcpErrorEventArgs&) {
+            pending.reset();
+            destroyed = true;
+        });
+        pending->connectAsync("127.0.0.1", refusedPort);
+        check("async TLS self-destroy: connect worker returns after handle destruction",
+              waitFor(5000, [&] { return destroyed.load(); }));
+        check("async TLS self-destroy: no result after destruction", staleResults == 0);
+        if (g_fail) bail();
+    }
 
     // #261: cancellation must precede resetting/freeing the TLS state.
     for (int i = 0; i < 20; ++i) {
@@ -1707,7 +1731,10 @@ int main(int argc, char** argv) {
     const int threadsAtStart = countEntries("/proc/self/task");
 #endif
     g_phase = "the scenario";
-    if (!completesWithin(60000, scenario)) {
+    // Keep these fixtures through the thread-count assertion, then destroy
+    // them normally so LeakSanitizer can verify their owned resources too.
+    vector<unique_ptr<TlsClient>> keptClients;
+    if (!completesWithin(60000, [&] { scenario(keptClients); })) {
         check("scenario finished within 60 s", false);
         bail();
     }
