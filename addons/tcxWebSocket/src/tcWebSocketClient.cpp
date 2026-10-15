@@ -283,6 +283,10 @@ void WebSocketClient::ConnectionState::handleTcpDisconnect(TcpDisconnectEventArg
 
 void WebSocketClient::ConnectionState::checkHandshakeTimeout() {
 #ifndef __EMSCRIPTEN__
+    // Open: the deadline no longer applies. Stop polling here, on the main
+    // thread that owns timeoutListener_, rather than from the receive thread
+    // that saw the 101; this also releases the listener's hold on the State.
+    if (state_ == State::Open) { timeoutListener_.disconnect(); return; }
     if (!awaitingUpgrade_) return;
     const float timeout = handshakeTimeout_;
     if (timeout <= 0.0f) return;
