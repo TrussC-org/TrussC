@@ -600,6 +600,18 @@ inline void flushDeferredShaderDraws() {
     wctx.sglLayerNext = 0;
     sgl_layer(0);
 }
+
+// Submit and consume every layer of the active target before direct drawing or
+// suspending its pass. Rewind only after all layers have used the same prefix.
+inline void flushLayersMidPass() {
+    if (currentWindowContext().inFboPass) {
+        flushFboDeferredPbr(sgl_get_context());
+        sgl_layer(0);
+    } else {
+        flushDeferredShaderDraws();
+    }
+    sgl_tc_draw_rewind();
+}
 } // namespace internal
 
 // ---------------------------------------------------------------------------
@@ -623,8 +635,10 @@ public:
         // Ensure render pass is active (swapchain or FBO)
         ensureSwapchainPass();
 
-        // Flush sokol_gl so it draws before the fullscreen quad
-        sgl_draw();
+        // Submit all preceding layers, including deferred user shaders, meshes
+        // and points. Advance the command base so end()/present() cannot blend
+        // that content a second time after this fullscreen draw.
+        internal::flushLayersMidPass();
 
         // Match the pipeline to the current target (swapchain vs FBO format).
         sg_apply_pipeline(pipelineForCurrentTarget());

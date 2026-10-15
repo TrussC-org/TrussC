@@ -628,7 +628,9 @@ public:
         // swapchain pass even when none was active before).
         sh.wasInSwapchainPass = wctx.inSwapchainPass;
         if (sh.wasInSwapchainPass) {
-            sgl_draw();
+            // Submit every layer (including deferred mesh/user-shader draws)
+            // once before suspending. present() must not replay this prefix.
+            internal::flushLayersMidPass();
             sg_end_pass();
             wctx.inSwapchainPass = false;
         }

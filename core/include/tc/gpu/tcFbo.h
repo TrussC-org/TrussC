@@ -250,10 +250,8 @@ public:
     void clearColor(float r, float g, float b, float a) {
         if (!active_) return;
 
-        auto& shared = getShared(sampleCount_, format_);
-
-        // End current pass (flush deferred PBR + 2D for what was drawn so far).
-        internal::flushFboDeferredPbr(shared.context);
+        // Consume the pre-clear prefix so end() cannot replay it after CLEAR.
+        internal::flushLayersMidPass();
         sg_end_pass();
 
         // Restart pass with new clear color (targeting the current version)
