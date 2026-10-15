@@ -823,6 +823,10 @@ jobs:
         if: always()
         run: python3 tools/test_core_test_runner.py
 
+      - name: display test verdict regression checks
+        if: always()
+        run: python3 tools/tests/test_display_test_verdicts.py -v
+
       - name: release workflow offline tests
         if: always()
         run: python3 tools/tests/test_release_workflow.py -v

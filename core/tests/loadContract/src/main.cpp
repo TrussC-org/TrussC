@@ -1,6 +1,7 @@
 #include <TrussC.h>
 #include "stb/stb_image_write.h"
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <fstream>
 
@@ -344,8 +345,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     (void)argv;
     WindowSettings settings;
     settings.setSize(32, 32);
-    runApp<BrowserAacApp>(settings);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<BrowserAacApp>(settings, failures);
 #else
     const auto originalCwd = fs::current_path();
     const auto originalRoot = getDataPathRoot();
@@ -364,8 +364,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(32, 32);
         settings.setHighDpi(false);
-        runApp<LoadApp>(settings);
-        check("GPU checks completed", gpuCompleted);
+        return tcCoreTest::runDisplayTest<LoadApp>(settings, failures, [originalCwd, originalRoot, sandbox] {
+            check("GPU checks completed", gpuCompleted);
+            fs::current_path(originalCwd);
+            setDataPathRoot(originalRoot);
+            fs::remove_all(sandbox);
+        });
     } else printf("SKIP: GPU checks need --gpu-check and a display\n");
     fs::current_path(originalCwd);
     setDataPathRoot(originalRoot);

@@ -1,6 +1,7 @@
 // #653: --gpu-check needs a display (Linux/Xvfb or macOS Debug).
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -132,7 +133,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     settings.setSize(64, 64);
     settings.setHighDpi(false);
     settings.sampleCount = 1;
-    runApp<MainApp>(settings);
-    check("both window readbacks completed", secondaryCaptured && mainCaptured);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<MainApp>(settings, failures, [] {
+        check("both window readbacks completed", secondaryCaptured && mainCaptured);
+    });
 }

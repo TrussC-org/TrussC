@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -303,12 +304,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);
-        runApp<VideoCheckApp>(settings);
+        return tcCoreTest::runDisplayTest<VideoCheckApp>(settings, failures);
     } else if (argc > 1 && strcmp(argv[1], "--gpu-check") == 0) {
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);
-        runApp<FrameCheckApp>(settings);
+        return tcCoreTest::runDisplayTest<FrameCheckApp>(settings, failures);
     } else {
         checkState();
     }
