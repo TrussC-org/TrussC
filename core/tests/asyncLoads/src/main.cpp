@@ -156,27 +156,53 @@ void overrides() {
     // Gate at ready so every overriding synchronous branch is exercised
     // against a fully prepared result, not merely an early cancellation.
     auto imageOverride = [&](auto overrideLoad) {
-        Image image; int events = 0;
+        Image image; image.load(png); int events = 0;
         auto listener = image.onLoad.listen([&](LoadResult&) { ++events; });
         Gate gate;
         Probe probe([&](const char* stage, const fs::path&) { if (string(stage) == "image.ready") gate.block(); });
         image.loadAsync(png); gate.wait(); overrideLoad(image);
         check("Image synchronous override cancels ready work", !image.isLoading());
-        gate.open(); finish(); check("Image override silences event", events == 0);
+        const auto width = image.getWidth(), height = image.getHeight(), channels = image.getChannels();
+        vector<unsigned char> pixels;
+        if (image.isAllocated()) pixels.assign(image.getPixelsData(), image.getPixelsData() + width * height * channels);
+        gate.open(); finish();
+        check("Image override keeps pixels/dimensions and silences event", events == 0 && !image.isLoading() &&
+              image.getWidth() == width && image.getHeight() == height && image.getChannels() == channels &&
+              (pixels.empty() ? !image.isAllocated() : equal(pixels.begin(), pixels.end(), image.getPixelsData())));
     };
     imageOverride([&](Image& x) { x.load(png); });
-    imageOverride([&](Image& x) { Pixels data; data.load(png); auto bytes = data.getData(); x.loadFromMemory(bytes, 0); });
+    imageOverride([&](Image& x) {
+        ifstream file(png, ios::binary);
+        vector<unsigned char> bytes((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
+        check("Image memory override succeeds", bool(x.loadFromMemory(bytes.data(), (int)bytes.size())));
+    });
     imageOverride([](Image& x) { x.allocate(3, 4); });
     imageOverride([](Image& x) { x.clear(); });
+    imageOverride([](Image& x) { x.setColor(0, 0, Color(1, 0, 0)); });
+    imageOverride([](Image& x) { x.halve(); });
+    imageOverride([](Image& x) { x.resize(3, 4); });
+    imageOverride([](Image& x) { x.crop(1, 2, 3, 4); });
+    imageOverride([](Image& x) { x.mirror(true, true); });
+    imageOverride([](Image& x) { x.mirrorH(); });
+    imageOverride([](Image& x) { x.mirrorV(); });
+    imageOverride([](Image& x) { x.resize(0, 0); }); // invalid/no-op requests still cancel
     auto soundOverride = [&](auto overrideLoad) {
-        SoundBuffer sound; int events = 0;
+        SoundBuffer sound; sound.generateSineWave(220, .02f); int events = 0;
         auto listener = sound.onLoad.listen([&](LoadResult&) { ++events; });
         Gate gate;
         Probe probe([&](const char* stage, const fs::path&) { if (string(stage) == "sound.ready") gate.block(); });
         sound.loadAsync(wav); gate.wait(); overrideLoad(sound);
         check("Sound synchronous override cancels ready work", !sound.isLoading());
-        gate.open(); finish(); check("Sound override silences event", events == 0);
+        const auto samples = sound.samples;
+        const auto channels = sound.channels, rate = sound.sampleRate;
+        const auto frames = sound.numSamples;
+        const auto path = sound.getPath();
+        gate.open(); finish();
+        check("Sound override keeps PCM/metadata/path and silences event", events == 0 && !sound.isLoading() &&
+              sound.samples == samples && sound.channels == channels && sound.sampleRate == rate &&
+              sound.numSamples == frames && sound.getPath() == path);
     };
+    soundOverride([&](SoundBuffer& x) { x.load(wav); });
     soundOverride([&](SoundBuffer& x) { x.loadWav(wav); });
     soundOverride([&](SoundBuffer& x) { x.loadOgg(broken); });
     soundOverride([&](SoundBuffer& x) { x.loadMp3(broken); });
@@ -186,6 +212,7 @@ void overrides() {
     soundOverride([](SoundBuffer& x) { x.loadMp3FromMemory(nullptr, 0); });
     soundOverride([](SoundBuffer& x) { x.loadFlacFromMemory(nullptr, 0); });
     soundOverride([](SoundBuffer& x) { x.loadOggFromMemory(nullptr, 0); });
+    soundOverride([](SoundBuffer& x) { check("Sound memory override succeeds", bool(x.loadOggFromMemory(kToneOgg, sizeof(kToneOgg)))); });
     soundOverride([](SoundBuffer& x) { x.loadAacFromMemory(nullptr, 0); });
     soundOverride([](SoundBuffer& x) { x.loadPcmFromMemory(nullptr, 0, 0, 44100); });
     soundOverride([](SoundBuffer& x) { x.generateSineWave(440, .01f); });
@@ -195,6 +222,9 @@ void overrides() {
     soundOverride([](SoundBuffer& x) { x.generateNoise(.01f); });
     soundOverride([](SoundBuffer& x) { x.generatePinkNoise(.01f); });
     soundOverride([](SoundBuffer& x) { x.generateSilence(.01f); });
+    soundOverride([](SoundBuffer& x) { x.applyADSR(.001f, .001f, .5f, .001f); });
+    soundOverride([](SoundBuffer& x) { SoundBuffer other; other.generateSineWave(440, .03f); x.mixFrom(other, 0); });
+    soundOverride([](SoundBuffer& x) { x.clip(); });
     auto fontOverride = [&](auto overrideLoad) {
         Font typeface; int events = 0;
         auto listener = typeface.onLoad.listen([&](LoadResult&) { ++events; });
@@ -334,13 +364,25 @@ void parity() {
     }
     for (const fs::path& path : {font, broken, fixtureDir / "missing.ttf", fs::path("https://invalid/font.ttf")}) {
         Font sync, async; sync.load(font, 24); async.load(font, 24);
+        const auto* oldSyncAtlas = sync.getAtlas(0);
+        const auto* oldAsyncAtlas = async.getAtlas(0);
+        int events = 0;
         LoadResult expected, actual; vector<string> syncLogs, asyncLogs;
         { Logs logs; expected = sync.load(path, 27, path == font ? 2 : 0); syncLogs = logs.lines; }
-        auto listener = async.onLoad.listen([&](LoadResult& r) { actual = r; });
+        auto listener = async.onLoad.listen([&](LoadResult& r) { actual = r; ++events; });
         { Logs logs; async.loadAsync(path, 27, path == font ? 2 : 0); finish(); asyncLogs = logs.lines; }
         check("Font branch-specific result, logs, atlas and logical size parity", sameResult(expected, actual) && syncLogs == asyncLogs &&
               sync.isLoaded() == async.isLoaded() && sync.getAtlasCount() == async.getAtlasCount() &&
-              sync.getSize() == async.getSize());
+              sync.getSize() == async.getSize() && sync.getAscent() == async.getAscent() &&
+              sync.getDescent() == async.getDescent() && sync.getWidth("AWa") == async.getWidth("AWa") && events == 1);
+        if (path == fs::path("https://invalid/font.ttf")) {
+            check("native unsupported URL retains the exact previous atlas in both", !expected &&
+                  sync.getAtlas(0) == oldSyncAtlas && async.getAtlas(0) == oldAsyncAtlas && sync.isLoaded() && async.isLoaded() &&
+                  sync.getAtlas(0)->getPixels() == async.getAtlas(0)->getPixels());
+        } else {
+            check("missing/corrupt/invalid-face second load clears both old atlases", !expected &&
+                  !sync.isLoaded() && !async.isLoaded() && sync.getAtlas(0) == nullptr && async.getAtlas(0) == nullptr);
+        }
     }
     {
         Font sync, async;
@@ -371,6 +413,24 @@ void parity() {
     fs::permissions(unreadable, fs::perms::owner_all);
 #endif
 
+}
+
+void fontWorkerRetirement() {
+    internal::SharedFontCache::getInstance().clear();
+    Gate gate;
+    atomic<int> retiredOffMain{0};
+    Probe probe([&](const char* stage, const fs::path&) {
+        if (string(stage) == "font.ready") gate.block();
+        if (string(stage) == "font.cpu-atlas-retired" && !isMainThread()) ++retiredOffMain;
+    });
+    Font typeface;
+    int events = 0;
+    auto listener = typeface.onLoad.listen([&](LoadResult&) { ++events; });
+    typeface.loadAsync(font, 79); gate.wait();
+    typeface.clearAtlas();
+    check("Font cancellation returns while prepared CPU candidate is gated", !typeface.isLoading() && !gate.released);
+    gate.open(); finish();
+    check("cancelled Font candidate takes CPU-only cleanup on worker", retiredOffMain == 1 && !typeface.isLoaded() && events == 0);
 }
 
 void pathsAudioAndFontThreading() {
@@ -559,7 +619,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     } else {
         replacementAndCancel(); lifetimeAndReentrancy(); runtime(); exitTests(argv[0]);
         if (!(argc == 2 && string(argv[1]) == "--lifecycle-only")) {
-            successAndDelivery(); overrides(); parity(); pathsAudioAndFontThreading();
+            successAndDelivery(); overrides(); parity(); pathsAudioAndFontThreading(); fontWorkerRetirement();
             runHeadlessApp<HeadlessExitApp>();
             auto discarded = internal::takeResourceLoadBatch();
             check("headless teardown drops queued work before resource teardown", discarded.empty());

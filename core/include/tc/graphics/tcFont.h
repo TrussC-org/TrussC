@@ -677,6 +677,11 @@ public:
         // reference the old atlas views.
         const bool hasGpuResources = !pendingDestroys_.empty() ||
             std::any_of(atlases_.begin(), atlases_.end(), [](const AtlasState& atlas) { return atlas.textureValid_; });
+        // A cancelled worker owns CPU-only pages. Short-circuit before even
+        // sg_isvalid(): sokol queries also belong to main, not the decoder.
+        if (!hasGpuResources && !atlases_.empty() && !isMainThread()) {
+            internal::probeResourceLoad("font.cpu-atlas-retired", {});
+        }
         if (hasGpuResources && sg_isvalid()) {
             for (auto& pd : pendingDestroys_) {
                 internal::deferGpuDestroy(pd.view);

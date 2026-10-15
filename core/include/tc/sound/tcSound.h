@@ -517,6 +517,7 @@ public:
     // ADSR Envelope
     // -------------------------------------------------------------------------
     void applyADSR(float attack, float decay, float sustainLevel, float release) {
+        async_.cancel();
         if (samples.empty() || sampleRate == 0) return;
 
         float duration = (float)numSamples / sampleRate;
@@ -557,6 +558,7 @@ public:
     // must have the same channel count; a mismatch, or an end past what a
     // buffer can hold (or what memory allows), is logged and nothing is mixed.
     void mixFrom(const SoundBuffer& other, size_t offsetSamples, float volume = 1.0f) {
+        async_.cancel();
         if (other.samples.empty()) return;
         if (channels < 1 || other.channels != channels) {
             logError("SoundBuffer") << "mixFrom: channel counts differ (" << other.channels
@@ -607,6 +609,7 @@ public:
 
     // Clip samples to -1.0 ~ 1.0 range
     void clip() {
+        async_.cancel();
         for (auto& s : samples) {
             if (s > 1.0f) s = 1.0f;
             else if (s < -1.0f) s = -1.0f;

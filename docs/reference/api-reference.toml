@@ -3142,9 +3142,9 @@ description.ja = "画像リソースを解放"
 description.ko = "이미지 리소스를 해제"
 
 ["Image::crop"]
-description.en = "Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge."
-description.ja = "(x, y) から (w x h) を切り出し。 範囲外は最近房 (clamp-to-edge) で埋める"
-description.ko = "(x, y)에서 (w x h) 영역 자르기. 범위 밖은 클램프-투-엣지로 채움"
+description.en = "Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "(x, y) から (w x h) を切り出し。 範囲外は最近房 (clamp-to-edge) で埋める 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "(x, y)에서 (w x h) 영역 자르기. 범위 밖은 클램프-투-엣지로 채움 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::getChannels"]
 description.en = "Get number of channels"
@@ -3182,9 +3182,9 @@ description.ja = "幅を取得"
 description.ko = "너비를 얻음"
 
 ["Image::halve"]
-description.en = "Replace with 2x2 box-averaged half. Gamma-correct for U8."
-description.ja = "2x2 ボックス平均で半分に縮小 (U8 はガンマ補正)"
-description.ko = "2x2 박스 평균으로 절반 크기로 축소 (U8은 감마 보정)"
+description.en = "Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "2x2 ボックス平均で半分に縮小 (U8 はガンマ補正) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "2x2 박스 평균으로 절반 크기로 축소 (U8은 감마 보정) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::isAllocated"]
 description.en = "Check if allocated"
@@ -3205,24 +3205,24 @@ description.ja = "メモリから画像を読み込む。`mipmaps=true` でミ�
 description.ko = "메모리에서 이미지를 로드. `mipmaps=true` 시 밉맵 체인 생성. 메인 스레드 전용. 백그라운드 디코딩은 `Pixels::loadFromMemory`로 GPU 사용 시 너비나 높이가 텍스처 한도를 초과하면 TooLarge를 반환한다. 헤드리스에서는 CPU 픽셀을 유지한다."
 
 ["Image::mirror"]
-description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°."
-description.ja = "画像を反転。 horizontal=true で左右、 vertical=true で上下、 両方 true で 180度回転"
-description.ko = "이미지 뒤집기. horizontal=true 좌우, vertical=true 상하, 둘 다 true는 180도 회전"
+description.en = "Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "画像を反転。 horizontal=true で左右、 vertical=true で上下、 両方 true で 180度回転 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "이미지 뒤집기. horizontal=true 좌우, vertical=true 상하, 둘 다 true는 180도 회전 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::mirrorH"]
-description.en = "Mirror horizontally (alias for mirror(true, false))"
-description.ja = "水平反転 (mirror(true, false) のエイリアス)"
-description.ko = "수평 뒤집기 (mirror(true, false) 별칭)"
+description.en = "Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "水平反転 (mirror(true, false) のエイリアス) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "수평 뒤집기 (mirror(true, false) 별칭) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::mirrorV"]
-description.en = "Mirror vertically (alias for mirror(false, true))"
-description.ja = "垂直反転 (mirror(false, true) のエイリアス)"
-description.ko = "수직 뒤집기 (mirror(false, true) 별칭)"
+description.en = "Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "垂直反転 (mirror(false, true) のエイリアス) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "수직 뒤집기 (mirror(false, true) 별칭) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::resize"]
-description.en = "Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths."
-description.ja = "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bicubic、 U8はガンマ補正)。 高速版が必要なら FBO 経由で"
-description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용"
+description.en = "Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "高品質リサイズ (縮小=BoxArea / 拡大=Catmull-Rom bicubic、 U8はガンマ補正)。 高速版が必要なら FBO 経由で 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "고품질 리사이즈 (축소=BoxArea / 확대=Catmull-Rom 바이큐빅, U8 감마 보정). 빠른 경로는 FBO 활용 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::save"]
 description.en = "Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss."
@@ -3230,9 +3230,9 @@ description.ja = "SaveResult を返す。<file>.tmp に書き込み、close を�
 description.ko = "SaveResult를 반환한다. <file>.tmp에 쓰고 닫기를 확인한 뒤 기존 파일을 교체한다. 실패하면 기존 파일을 보존하고 임시 파일을 삭제한다. 상대 경로는 getDataPath()로 해석하고 상위 폴더를 만든다. 번들 내부는 AccessDenied. 전원 차단 시 영속성을 보장하지 않는다."
 
 ["Image::setColor"]
-description.en = "Set pixel color at position (marks image as dirty)"
-description.ja = "指定位置のピクセル色を設定（ダーティフラグが立つ）"
-description.ko = "지정 위치의 픽셀 색상을 설정 (이미지를 dirty로 표시)"
+description.en = "Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "指定位置のピクセル色を設定（ダーティフラグが立つ） 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "지정 위치의 픽셀 색상을 설정 (이미지를 dirty로 표시) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["Image::setDirty"]
 description.en = "Mark image as needing update"
@@ -9090,14 +9090,14 @@ description.ko = "Eager 사운드 소스: 파일 전체를 interleaved float PCM
 related = ["SoundStream", "SoundSource", "Sound", "Wave"]
 
 ["SoundBuffer::applyADSR"]
-description.en = "Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1)."
-description.ja = "バッファにADSR振幅エンベロープをin-placeで適用(attack / decay / releaseは秒、sustainLevelは0-1)"
-description.ko = "버퍼에 ADSR 진폭 엔벨로프를 in-place로 적용(attack / decay / release는 초, sustainLevel은 0-1)"
+description.en = "Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1). Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "バッファにADSR振幅エンベロープをin-placeで適用(attack / decay / releaseは秒、sustainLevelは0-1) 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "버퍼에 ADSR 진폭 엔벨로프를 in-place로 적용(attack / decay / release는 초, sustainLevel은 0-1) 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["SoundBuffer::clip"]
-description.en = "Hard-clip all samples into the -1.0 .. 1.0 range."
-description.ja = "全サンプルを-1.0 .. 1.0の範囲にhard-clipする"
-description.ko = "모든 샘플을 -1.0 .. 1.0 범위로 hard-clip"
+description.en = "Hard-clip all samples into the -1.0 .. 1.0 range. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "全サンプルを-1.0 .. 1.0の範囲にhard-clipする 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "모든 샘플을 -1.0 .. 1.0 범위로 hard-clip 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["SoundBuffer::createAdtsHeader"]
 description.en = "Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper)."
@@ -9219,9 +9219,9 @@ description.ja = "メモリバッファからWAVデータをデコード"
 description.ko = "메모리 버퍼에서 WAV 데이터를 디코딩"
 
 ["SoundBuffer::mixFrom"]
-description.en = "Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged."
-description.ja = "別のバッファをoffsetSamplesから加算ミックスし、必要ならこのバッファを拡張する。offsetSamplesはフレーム単位(numSamplesと同じチャンネルあたりのサンプル数)。両バッファのチャンネル数が同じである必要があり、異なる場合は何もミックスせずエラーをログに出す"
-description.ko = "다른 버퍼를 offsetSamples부터 가산 믹스하고, 필요하면 이 버퍼를 확장. offsetSamples는 프레임 단위(numSamples와 같은 채널당 샘플 수). 두 버퍼의 채널 수가 같아야 하며, 다르면 아무것도 믹스하지 않고 에러를 로그에 남김"
+description.en = "Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged. Cancels any pending loadAsync before editing, including invalid or no-op requests."
+description.ja = "別のバッファをoffsetSamplesから加算ミックスし、必要ならこのバッファを拡張する。offsetSamplesはフレーム単位(numSamplesと同じチャンネルあたりのサンプル数)。両バッファのチャンネル数が同じである必要があり、異なる場合は何もミックスせずエラーをログに出す 編集前に進行中の loadAsync をキャンセルする。無効な要求や変更のない要求も同様。"
+description.ko = "다른 버퍼를 offsetSamples부터 가산 믹스하고, 필요하면 이 버퍼를 확장. offsetSamples는 프레임 단위(numSamples와 같은 채널당 샘플 수). 두 버퍼의 채널 수가 같아야 하며, 다르면 아무것도 믹스하지 않고 에러를 로그에 남김 편집 전에 진행 중인 loadAsync를 취소한다. 유효하지 않거나 변경이 없는 요청도 동일하다."
 
 ["SoundBuffer::numSamples"]
 description.en = "Number of samples per channel (frame count)"

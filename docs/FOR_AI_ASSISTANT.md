@@ -3116,7 +3116,7 @@ bool IesProfile::loadFromString(const std::string & data)  // Load IES profile f
 ```cpp
 void Image::allocate(int width, int height, int channels = 4, bool mipmaps = false)  // Allocate empty image for dynamic updates. `mipmaps=true` builds a chain refreshed on every update().
 void Image::clear()  // Release image resources
-void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge.
+void Image::crop(int x, int y, int w, int h)  // Crop to (w x h) region starting at (x, y). Out-of-bounds samples use clamp-to-edge. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 int Image::getChannels() const  // Get number of channels
 Color Image::getColor(int x, int y) const  // Get pixel color at position
 const std::string & Image::getDebugName() const  // Return the MCP inspection name (empty for unnamed or moved-from objects).
@@ -3125,18 +3125,18 @@ Pixels & Image::getPixels() [+1]  // Get pixels reference for direct manipulatio
 unsigned char * Image::getPixelsData() [+1]  // Get raw pixel data pointer
 Texture & Image::getTexture() [+1]  // Get internal texture
 int Image::getWidth() const  // Get width
-void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8.
+void Image::halve()  // Replace with 2x2 box-averaged half. Gamma-correct for U8. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 bool Image::isAllocated() const  // Check if allocated
 bool Image::isLoading() const  // Whether the current asynchronous request is preparing or awaiting main-thread application; false before onLoad and after cancellation.
 LoadResult Image::load(const fs::path & path, bool mipmaps = false)  // Load image from file. `mipmaps=true` builds a mip chain — recommended when the image will be sampled at varying scales (e.g. mapped onto a 3D surface). Main thread only: it creates a GPU texture. Use `loadAsync` for background loading with deferred main-thread application. Relative paths resolve against the data folder (getDataPath()); absolute paths are used as given. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
 void Image::loadAsync(const fs::path & path, bool mipmaps = false)  // loadAsync(path, mipmaps = false): decode pixels on a native worker, then apply pixels, upload the texture and notify on main at a later frame, never inline. App exit waits for loads still decoding; cancelling never waits.
 LoadResult Image::loadFromMemory(const unsigned char * buffer, int len, bool mipmaps = false)  // Load image from memory. `mipmaps=true` builds a mip chain. Main thread only; decode in the background with `Pixels::loadFromMemory`. Returns TooLarge if either dimension exceeds the active GPU texture limit; headless loading keeps CPU pixels.
-void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°.
-void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false))
-void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true))
-void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths.
+void Image::mirror(bool horizontal, bool vertical)  // Flip the image. `horizontal=true` mirrors left-right; `vertical=true` mirrors top-bottom; both true is 180°. Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::mirrorH()  // Mirror horizontally (alias for mirror(true, false)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::mirrorV()  // Mirror vertically (alias for mirror(false, true)) Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void Image::resize(int newW, int newH)  // Quality resize: BoxArea on downscale, Catmull-Rom bicubic on upscale, gamma-correct for U8. Use FBO sampling for fast paths. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 SaveResult Image::save(const fs::path & path) const  // Save image pixels. Returns SaveResult after checked write, close and atomic replacement using <file>.tmp. Failed writes preserve the previous file and remove the temporary. Relative paths use getDataPath(); missing parents are created; bundle paths return AccessDenied. Atomic replacement does not guarantee durability after power loss.
-void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty)
+void Image::setColor(int x, int y, const Color & c)  // Set pixel color at position (marks image as dirty) Cancels any pending loadAsync before editing, including invalid or no-op requests.
 void Image::setDebugName(const std::string & name)  // Set the MCP inspection name. tc_list_images lists live Images with index, name, width, height and format; moves transfer name/index and remove moved-from entries, destruction removes entries, unnamed Images remain available by index. tc_analyze_image reads CPU pixels with source={image:name or index}; other sources are window:index, fbo:name or index, path:file. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), and results in ops order; byte colors are normalized RGBA, float values above 1 pass through. Ops: pixel(x,y):color; histogram(bins):histogram[channel][bin] over 0-1 (outliers in end bins); count(color,tolerance or min,max):count,bbox,centroid; stats():mean,min,max; grid(cols,rows):mean colors[row][col]; diff(path,threshold,optional save):count,bbox,maxDifference; line(x0,y0,x1,y1):colors along inclusive Bresenham samples. Every op accepts optional rect=[x,y,w,h], default whole image. Coordinates are top-left, bbox=[x,y,w,h], centroid=[x,y]; empty matches yield null bbox/centroid. Rects and grid cells must be nonempty; line endpoints are in the image and samples clip to rect. Count accepts RGB/RGBA bounds or color plus a nonnegative scalar tolerance. Diff compares raw RGBA values with equal image dimensions and counts maximum absolute channel differences strictly above threshold. Optional top-level save (omitted/null writes nothing) and diff.save use tc_save_screenshot paths: UTF-8, data-directory-relative, create parents, unsupported extensions append .png. Float file output is clamped to 0-1; analysis preserves float values. Texture, VideoPlayer and VideoGrabber are not sources.
 void Image::setDirty()  // Mark image as needing update
 void Image::update()  // Apply pixel changes to GPU texture
@@ -4007,8 +4007,8 @@ void Sound::stop()  // Stop audio and release the voice (a streamed voice also c
 ### SoundBuffer — Eager sound source: the full file decoded into interleaved float PCM held in RAM. Derives from SoundSource (inherits channels / sampleRate / kind() / getDuration()). Also provides waveform generators, an ADSR envelope, and mixing helpers, so it doubles as a procedural-audio scratch buffer. Best for short SFX and zero-latency play / seek / multi-instance.
 
 ```cpp
-void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1).
-void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range.
+void SoundBuffer::applyADSR(float attack, float decay, float sustainLevel, float release)  // Apply an ADSR amplitude envelope to the buffer in place (attack / decay / release in seconds, sustainLevel 0-1). Cancels any pending loadAsync before editing, including invalid or no-op requests.
+void SoundBuffer::clip()  // Hard-clip all samples into the -1.0 .. 1.0 range. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 void SoundBuffer::createAdtsHeader(uint8_t * header, int frameLength, int sampleRate, int channels, int profile = 2)  // Write a 7-byte ADTS header for one raw AAC frame into header (AAC-in-MOV container helper).
 void SoundBuffer::generateNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono white noise.
 void SoundBuffer::generatePinkNoise(float duration, float volume = 0.5, int sr = 44100)  // Fill the buffer with mono pink noise (1/f spectrum, Paul Kellet's method).
@@ -4034,7 +4034,7 @@ LoadResult SoundBuffer::loadOggFromMemory(const void * data, size_t dataSize)  /
 LoadResult SoundBuffer::loadPcmFromMemory(const void * data, size_t dataSize, int numChannels, int rate, int bitsPerSample = 16, bool bigEndian = false)  // Load raw interleaved PCM (16-bit signed or 32-bit float) from memory with explicit format. Returns false for unsupported bit depths, a channel count below 1, a data size that is not a whole number of frames, or more samples than a buffer can hold.
 LoadResult SoundBuffer::loadWav(const fs::path & path)  // Decode a WAV file into PCM. Relative paths resolve via getDataPath(); absolute paths pass through.
 LoadResult SoundBuffer::loadWavFromMemory(const void * data, size_t dataSize)  // Decode WAV data from a memory buffer.
-void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged.
+void SoundBuffer::mixFrom(const SoundBuffer & other, size_t offsetSamples, float volume = 1.0)  // Additively mix another buffer into this one starting at offsetSamples, growing this buffer if needed. offsetSamples is in frames (samples per channel, like numSamples). Both buffers must have the same channel count; otherwise nothing is mixed and an error is logged. Cancels any pending loadAsync before editing, including invalid or no-op requests.
 ```
 
 ### SoundSource — Abstract base for anything Sound::play() can consume. Two concrete subclasses: SoundBuffer (eager, full PCM in RAM) and SoundStream (decoded on demand from disk). Holds the shared channels / sampleRate fields and the kind() / getDuration() interface.

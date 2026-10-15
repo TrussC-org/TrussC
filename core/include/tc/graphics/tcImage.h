@@ -201,6 +201,7 @@ public:
     }
 
     void setColor(int x, int y, const Color& c) {
+        async_.cancel();
         pixels_.setColor(x, y, c);
         dirty_ = true;
     }
@@ -216,6 +217,7 @@ public:
     // Replace the buffer with its 2x2 box-averaged half. New dimensions are
     // max(width/2, 1) x max(height/2, 1). Useful for cheap downsampling.
     void halve() {
+        async_.cancel();
         if (!pixels_.isAllocated()) return;
         pixels_.halve();
         rebuildTexture_();
@@ -225,6 +227,7 @@ public:
     // version. Each axis is BoxArea on downscale, Catmull-Rom bicubic on
     // upscale; computations run in linear light for U8 buffers.
     void resize(int newW, int newH) {
+        async_.cancel();
         if (!pixels_.isAllocated() || newW <= 0 || newH <= 0) return;
         pixels_.resize(newW, newH);
         rebuildTexture_();
@@ -234,6 +237,7 @@ public:
     // clamp-to-edge for out-of-bounds samples so the destination is always
     // exactly (w x h).
     void crop(int x, int y, int w, int h) {
+        async_.cancel();
         if (!pixels_.isAllocated() || w <= 0 || h <= 0) return;
         pixels_.crop(x, y, w, h);
         rebuildTexture_();
@@ -244,6 +248,7 @@ public:
     // but the GPU texture is still pushed so the change is visible after
     // the next draw (no need to call update() separately).
     void mirror(bool horizontal, bool vertical) {
+        async_.cancel();
         if (!pixels_.isAllocated() || (!horizontal && !vertical)) return;
         pixels_.mirror(horizontal, vertical);
         rebuildTexture_();
