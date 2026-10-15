@@ -28,6 +28,22 @@ class ShaderTargetTests(unittest.TestCase):
             with self.subTest(filename=filename):
                 self.assertIn(statement, (ROOT / filename).read_text())
 
+    def test_msvc_ninja_objects_depend_on_generated_headers(self):
+        shaders = (ROOT / 'core/cmake/trussc_shaders.cmake').read_text()
+        self.assertIn('function(trussc_shader_object_depends _TC_CONSUMER)', shaders)
+        self.assertIn('PROPERTY TC_SHADER_HEADERS ${_TC_SHADER_OUTPUTS}', shaders)
+        self.assertIn('APPEND PROPERTY OBJECT_DEPENDS ${_TC_HEADERS}', shaders)
+        app = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
+        for consumer in ('${PROJECT_NAME}', 'guest'):
+            self.assertIn(f'trussc_shader_object_depends({consumer} ${{_TC_APP_SHADER_TARGETS}})', app)
+        for filename, statement in (
+            ('core/CMakeLists.txt', 'trussc_shader_object_depends(TrussC TrussC_shaders)'),
+            ('addons/tcxHap/CMakeLists.txt',
+             'trussc_shader_object_depends(${ADDON_NAME} ${ADDON_NAME}_shaders)'),
+        ):
+            with self.subTest(filename=filename):
+                self.assertIn(statement, (ROOT / filename).read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

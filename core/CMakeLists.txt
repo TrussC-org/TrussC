@@ -693,4 +693,5 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/trussc_shaders.cmake)
 trussc_compile_shaders(TrussC "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/tc/gpu/shaders")
 target_link_libraries(TrussC PUBLIC TrussC_shaders)
+trussc_shader_object_depends(TrussC TrussC_shaders)
 

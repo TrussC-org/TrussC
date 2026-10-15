@@ -58,8 +58,10 @@ def main():
         shader.write_bytes(changed)
         bump(shader)
         subprocess.run(command, check=True)
+        # One build must do both: on Windows Ninja an edited header used to be
+        # picked up by the guest's objects only on the next build.
         assert header.read_bytes() != before_header, 'guest did not regenerate app shader'
-        assert guest.stat().st_mtime_ns != before_guest, 'guest did not relink'
+        assert guest.stat().st_mtime_ns != before_guest, 'guest did not relink in the same build'
         print('Shader edit: header regenerated and guest relinked', flush=True)
         bump(shader)
         result = subprocess.run(command, check=True, stdout=subprocess.PIPE,

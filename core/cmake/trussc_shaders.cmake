@@ -196,5 +196,37 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
 
     add_custom_target(${_TC_TARGET}_shaders_gen DEPENDS ${_TC_SHADER_OUTPUTS})
     add_dependencies(${_TC_TARGET}_shaders ${_TC_TARGET}_shaders_gen)
+    set_property(TARGET ${_TC_TARGET}_shaders PROPERTY TC_SHADER_HEADERS ${_TC_SHADER_OUTPUTS})
     message(STATUS "[${_TC_TARGET}] Shader compilation enabled for ${_TC_SHADER_SOURCES}")
+endfunction()
+
+# trussc_shader_object_depends(<consumer> <name>_shaders ...)
+# Ninja with an MSVC-style compiler records header dependencies relative to
+# the build tree (../src/x.glsl.h), while a header generated outside the build
+# tree is an absolute node in build.ninja. Ninja sees two files, so an edited
+# shader regenerates its header but recompiles the consumer only on the next
+# build. Naming the headers as OBJECT_DEPENDS puts the generated node itself
+# in front of each of the consumer's objects. Other setups record the
+# absolute path already and are left alone.
+function(trussc_shader_object_depends _TC_CONSUMER)
+    if(NOT CMAKE_GENERATOR MATCHES "Ninja" OR NOT (MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"))
+        return()
+    endif()
+    set(_TC_HEADERS "")
+    foreach(_TC_SHADERS IN LISTS ARGN)
+        get_target_property(_TC_SHADER_HEADERS ${_TC_SHADERS} TC_SHADER_HEADERS)
+        if(_TC_SHADER_HEADERS)
+            list(APPEND _TC_HEADERS ${_TC_SHADER_HEADERS})
+        endif()
+    endforeach()
+    if(NOT _TC_HEADERS)
+        return()
+    endif()
+    get_target_property(_TC_SOURCES ${_TC_CONSUMER} SOURCES)
+    foreach(_TC_SOURCE IN LISTS _TC_SOURCES)
+        if(_TC_SOURCE MATCHES "\\.(c|cc|cpp|cxx)$" AND NOT _TC_SOURCE MATCHES "\\$<")
+            set_property(SOURCE "${_TC_SOURCE}" TARGET_DIRECTORY ${_TC_CONSUMER}
+                APPEND PROPERTY OBJECT_DEPENDS ${_TC_HEADERS})
+        endif()
+    endforeach()
 endfunction()

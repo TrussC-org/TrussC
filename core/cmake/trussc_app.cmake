@@ -698,6 +698,13 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
     # guest bypasses TrussC's transitive links, so link its requirements too.
     trussc_compile_shaders(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src")
     target_link_libraries(${PROJECT_NAME} PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
+    set(_TC_APP_SHADER_TARGETS TrussC_shaders ${PROJECT_NAME}_shaders)
+    foreach(_TC_SHADER_ADDON IN LISTS _TC_LOADED_ADDONS)
+        if(TARGET ${_TC_SHADER_ADDON}_shaders)
+            list(APPEND _TC_APP_SHADER_TARGETS ${_TC_SHADER_ADDON}_shaders)
+        endif()
+    endforeach()
+    trussc_shader_object_depends(${PROJECT_NAME} ${_TC_APP_SHADER_TARGETS})
     if(TARGET guest)
         target_link_libraries(guest PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
         # Include shaders from all loaded addons, including addon dependencies.
@@ -709,6 +716,7 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
                 target_link_libraries(guest PRIVATE ${_TC_SHADER_ADDON}_shaders)
             endif()
         endforeach()
+        trussc_shader_object_depends(guest ${_TC_APP_SHADER_TARGETS})
     endif()
 
     # Output settings
