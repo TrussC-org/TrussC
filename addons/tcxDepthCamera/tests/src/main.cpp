@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -23,7 +24,7 @@ void check(const char* name, bool ok) {
     if (!ok) ++failures;
 }
 
-struct State {
+struct TestState {
     std::mutex mutex;
     std::condition_variable changed;
     int allowed = 0;
@@ -35,7 +36,13 @@ struct State {
     std::atomic<int> active{0};
     std::atomic<bool> capturedWhileClosed{false};
     bool closedWhileActive = false;
-    bool stoppedBeforeMembers = false;
+    bool backendGoneWhileActive = false;
+    bool draining = false;
+    void drain() {
+        std::lock_guard lock(mutex);
+        draining = true;
+        changed.notify_all();
+    }
 
     // The next capture entering proves that the preceding capture's swap has
     // completed. The timeout only bounds a deadlock; elapsed time is not tested.
@@ -52,68 +59,130 @@ struct State {
 
 class CountingCamera : public DepthCamera {
 public:
-    explicit CountingCamera(State& state) : state_(state), witness_{state} {}
-    ~CountingCamera() override { close(); }
+    explicit CountingCamera(TestState& state) : state_(state), witness_{state} {}
 
 protected:
-    bool openDevice() override {
-        if (!state_.canOpen) return false;
-        state_.open = true;
-        ++state_.opens;
-        call_ = 0;
-        return true;
-    }
-    void closeDevice() override {
-        if (state_.active != 0) state_.closedWhileActive = true;
-        if (state_.open) {
-            state_.open = false;
-            ++state_.closes;
+    struct CountingDevice : Device {
+        TestState& state;
+        bool threaded;
+        int call = 0;
+        CountingDevice(TestState& value, bool useThread) : state(value), threaded(useThread) {
+            state.open = true;
+            ++state.opens;
         }
-    }
-    StreamFreshness captureInto(DepthFrame& dst) override {
-        ++state_.active;
-        if (!state_.open) state_.capturedWhileClosed = true;
-        const int call = ++call_;
-        if (isThreaded()) {
-            std::unique_lock lock(state_.mutex);
-            ++state_.entered;
-            state_.changed.notify_all();
-            // Poll the stop flag only to let close() join a gated capture.
-            // Frame advancement is controlled by allow(), never by a sleep.
-            while (state_.allowed < state_.entered && isThreadRunning())
-                state_.changed.wait_for(lock, std::chrono::milliseconds(1));
+        ~CountingDevice() override {
+            if (state.active != 0) state.closedWhileActive = true;
+            state.open = false;
+            ++state.closes;
         }
-        StreamFreshness fresh;
-        if ((call % 2) != 0) {
-            dst.w = dst.h = 1;
-            dst.depth.assign(1, static_cast<uint16_t>(call));
-            dst.timestamp = call;
-            fresh.depth = true;
+        StreamFreshness captureInto(DepthFrame& dst) override {
+            ++state.active;
+            if (!state.open) state.capturedWhileClosed = true;
+            ++call;
+            if (threaded) {
+                std::unique_lock lock(state.mutex);
+                ++state.entered;
+                state.changed.notify_all();
+                state.changed.wait(lock, [&] { return state.allowed >= state.entered || state.draining; });
+            }
+            StreamFreshness fresh;
+            if ((call % 2) != 0) {
+                dst.w = dst.h = 1;
+                dst.depth.assign(1, static_cast<uint16_t>(call));
+                dst.timestamp = call;
+                fresh.depth = true;
+            }
+            --state.active;
+            return fresh;
         }
-        --state_.active;
-        return fresh;
+    };
+    std::shared_ptr<Device> openDevice() override {
+        if (!state_.canOpen) return {};
+        state_.draining = false;
+        return std::make_shared<CountingDevice>(state_, isThreaded());
     }
 
 private:
     struct Witness {
-        State& state;
-        ~Witness() { state.stoppedBeforeMembers = state.active == 0 && !state.open; }
+        TestState& state;
+        ~Witness() {
+            state.backendGoneWhileActive = state.active != 0;
+            state.drain();
+        }
     };
-    State& state_;
+    TestState& state_;
     Witness witness_;
-    int call_ = 0;
 };
 
+// The user callback deliberately closes/deletes the handle from capture.
+// Everything used after it returns belongs to the Device and the run.
+void ownThreadTeardown() {
+    struct Probe {
+        std::mutex mutex;
+        std::condition_variable changed;
+        bool start = false;
+        bool released = false;
+        bool wroteAfterCallback = false;
+        std::function<void()> action;
+    };
+    class CallbackCamera : public DepthCamera {
+    public:
+        explicit CallbackCamera(std::shared_ptr<Probe> probe) : probe_(std::move(probe)) {}
+    protected:
+        struct CallbackDevice : Device {
+            std::shared_ptr<Probe> probe;
+            explicit CallbackDevice(std::shared_ptr<Probe> value) : probe(std::move(value)) {}
+            ~CallbackDevice() override {
+                std::lock_guard lock(probe->mutex);
+                probe->released = true;
+                probe->changed.notify_all();
+            }
+            StreamFreshness captureInto(DepthFrame& dst) override {
+                {
+                    std::unique_lock lock(probe->mutex);
+                    probe->changed.wait(lock, [&] { return probe->start; });
+                }
+                probe->action();
+                dst.w = dst.h = 1;
+                dst.depth.assign(1, 123);
+                probe->wroteAfterCallback = true;
+                StreamFreshness fresh;
+                fresh.depth = true;
+                return fresh;
+            }
+        };
+        std::shared_ptr<Device> openDevice() override { return std::make_shared<CallbackDevice>(probe_); }
+    private:
+        std::shared_ptr<Probe> probe_;
+    };
+    for (bool destroy : {false, true}) {
+        auto probe = std::make_shared<Probe>();
+        auto camera = std::make_unique<CallbackCamera>(probe);
+        camera->setThreaded(true);
+        probe->action = [&] { if (destroy) camera.reset(); else camera->close(); };
+        check("callback camera setup", camera->setup());
+        std::unique_lock lock(probe->mutex);
+        probe->start = true;
+        probe->changed.notify_all();
+        const bool ended = probe->changed.wait_for(lock, std::chrono::seconds(10), [&] { return probe->released; });
+        check(destroy ? "destroy from capture retains Device and frame until worker ends"
+                      : "close from capture retains Device and frame until worker ends",
+              ended && probe->wroteAfterCallback);
+    }
+}
+
 void lifecycle() {
-    State state;
+    TestState state;
     {
         CountingCamera camera(state);
         camera.setThreaded(true);
         check("first setup", camera.setup());
         check("first worker entered capture", state.waitEntered(1));
+        state.drain();
         check("setup while capture is active", camera.setup());
         check("setup closed the old session before reopening", state.opens == 2 && state.closes == 1);
         check("reopened worker entered capture", state.waitEntered(2));
+        state.drain();
         state.canOpen = false;
         check("failed setup closes the old session", !camera.setup() && !state.open && state.active == 0);
         state.canOpen = true;
@@ -123,14 +192,14 @@ void lifecycle() {
         check("capture never overlaps a closed device", !state.capturedWhileClosed && !state.closedWhileActive);
         check("setup after repeated close", camera.setup());
         check("worker active before implicit teardown", state.waitEntered(3));
-        // No explicit close(): the backend destructor must join first.
+        // No explicit close(): backend members die while the Device is capturing.
     }
     check("destructor closes every session", state.opens == 3 && state.closes == 3);
-    check("destructor stops capture before backend members die", state.stoppedBeforeMembers);
+    check("capture safely outlives backend members", state.backendGoneWhileActive);
 }
 
 void rollback(bool threaded) {
-    State state;
+    TestState state;
     CountingCamera camera(state);
     camera.setThreaded(threaded);
     check(threaded ? "threaded rollback setup" : "inline rollback setup", camera.setup());
@@ -152,7 +221,7 @@ void rollback(bool threaded) {
 }
 
 void pendingFrame() {
-    State state;
+    TestState state;
     CountingCamera camera(state);
     camera.setThreaded(true);
     check("pending-frame setup", camera.setup());
@@ -180,23 +249,29 @@ bool waitForFrame(Camera& camera) {
 // Gate actual playback to verify EOF and looping without racing the producer.
 class GatedPlayback : public PlaybackDepthCamera {
 public:
-    GatedPlayback(const std::string& path, State& state)
+    GatedPlayback(const std::string& path, TestState& state)
         : PlaybackDepthCamera(path), state_(state) {}
-    ~GatedPlayback() override { close(); }
+    ~GatedPlayback() override { state_.drain(); }
 protected:
-    StreamFreshness captureInto(DepthFrame& dst) override {
-        if (isThreaded()) {
-            std::unique_lock lock(state_.mutex);
-            ++state_.entered;
-            state_.changed.notify_all();
-            while (state_.allowed < state_.entered && isThreadRunning())
-                state_.changed.wait_for(lock, std::chrono::milliseconds(1));
-            if (!isThreadRunning()) return {};
+    struct GatedDevice : PlaybackDevice {
+        TestState& state;
+        bool threaded;
+        GatedDevice(TestState& value, bool useThread) : state(value), threaded(useThread) {}
+        StreamFreshness captureInto(DepthFrame& dst) override {
+            if (threaded) {
+                std::unique_lock lock(state.mutex);
+                ++state.entered;
+                state.changed.notify_all();
+                state.changed.wait(lock, [&] { return state.allowed >= state.entered || state.draining; });
+            }
+            return PlaybackDevice::captureInto(dst);
         }
-        return PlaybackDepthCamera::captureInto(dst);
+    };
+    std::shared_ptr<PlaybackDevice> makePlaybackDevice() override {
+        return std::make_shared<GatedDevice>(state_, isThreaded());
     }
 private:
-    State& state_;
+    TestState& state_;
 };
 
 void playback() {
@@ -207,7 +282,7 @@ void playback() {
         ~Cleanup() { std::error_code ec; std::filesystem::remove(path, ec); }
     } cleanup{path};
     {
-        State state;
+        TestState state;
         CountingCamera source(state);
         source.setup();
         DepthRecorder recorder;
@@ -219,7 +294,7 @@ void playback() {
         recorder.stop();
     }
     for (bool threaded : {false, true}) {
-        State state;
+        TestState state;
         GatedPlayback camera(path.string(), state);
         camera.setThreaded(threaded);
         camera.setLoop(false);
@@ -272,16 +347,11 @@ void playback() {
 } // namespace
 
 int main() {
-    std::atomic<int> fallbackErrors{0};
-    auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& args) {
-        if (args.message.find("backend must call close() in its destructor") != std::string::npos)
-            ++fallbackErrors;
-    });
+    ownThreadTeardown();
     lifecycle();
     rollback(false);
     rollback(true);
     pendingFrame();
     playback();
-    check("backend teardown never reaches the base fallback", fallbackErrors == 0);
     return failures == 0 ? 0 : 1;
 }
