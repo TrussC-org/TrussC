@@ -70,6 +70,16 @@ struct TcpErrorEventArgs {
 class TC_PLATFORMS("macos,windows,linux,android,ios") TcpClient {
     friend struct internal::TcpClientTestAccess;
 protected:
+    struct State;
+    // A transport belongs to the run, so asynchronous I/O never calls a handle.
+    struct Transport {
+        virtual ~Transport() = default;
+        virtual bool connectSocket(State&, const std::string& host, int port);
+        virtual int writeSendStep(State&, const void*, size_t, bool& forWrite, int& error);
+        virtual bool isConnecting(const State&) const;
+        virtual bool processNetworkStep(State&, const std::shared_ptr<std::atomic<bool>>& alive);
+    };
+    void setTransport(std::shared_ptr<Transport> transport);
     struct State : std::enable_shared_from_this<State> {
         ~State();
         internal::EventSnapshotDelivery<TcpConnectEventArgs> onConnect;
@@ -161,8 +171,8 @@ protected:
         internal::KeptThreads keptWriters_;
         std::atomic<unsigned> receiveGeneration_{0};
         std::vector<char> recvBuf_;
-        std::weak_ptr<std::function<bool(const std::string&, int)>> connectOverride_;
-        std::weak_ptr<std::function<int(const void*, size_t, bool&, int&)>> writeOverride_;
+        std::shared_ptr<Transport> transport_ = std::make_shared<Transport>();
+        bool processPlainNetworkStep(const AliveToken& alive);
     };
 private:
     internal::AtomicSharedPtr<State> state_{std::make_shared<State>()};
@@ -217,7 +227,7 @@ public:
     // destroy the client. Workers retain their own State and never read the
     // public handle after a notification. Teardown joins from another thread;
     // on its own worker it returns without self-join. A restart gets a fresh
-    // State. TLS's derived transport ownership is handled separately.
+    // State.
     // Do not hold a listener's lock while joining it from another thread.
     // Simultaneous reentrant connection management remains unsupported.
     //
@@ -320,9 +330,6 @@ private:
     void freshState();
     void joinRetired();
     std::vector<std::shared_ptr<State>> retired_;
-    void attachOverrides();
-    std::shared_ptr<std::function<bool(const std::string&, int)>> connectOverride_;
-    std::shared_ptr<std::function<int(const void*, size_t, bool&, int&)>> writeOverride_;
 protected:
     using AliveToken = std::shared_ptr<std::atomic<bool>>;
     void notifyError(const std::string& msg, int code = 0);
@@ -339,8 +346,8 @@ protected:
     bool processSendQueue(const AliveToken& alive);
     bool processNetworkStep(const AliveToken& alive);
     void stopSendChannel();
-    // Non-blocking write step; -1 means retry, -2 fatal. TLS overrides it.
-    virtual int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
+    // Non-blocking plain-socket write step; -1 means retry, -2 fatal.
+    int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
     std::shared_ptr<State> state() const { return internal::sharedLoad(state_); }
     AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
     std::string remoteHost_;

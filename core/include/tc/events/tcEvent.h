@@ -445,8 +445,11 @@ private:
 public:
     // Fire event. Hot path: a single atomic load, no allocation, no mutex.
     // Changes to the listener list during a pass: see Event<T>::notify().
-    void notify() {
-        ConstEntryListPtr snapshot = internal::sharedLoad(entries_);
+    void notify() { notifySnapshot(internal::sharedLoad(entries_)); }
+
+private:
+    template<class> friend struct internal::EventSnapshotDelivery;
+    static void notifySnapshot(ConstEntryListPtr snapshot) {
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
             if (!entry.callback) continue;
@@ -465,6 +468,7 @@ public:
         }
     }
 
+public:
     size_t listenerCount() const {
         ConstEntryListPtr snapshot = internal::sharedLoad(entries_);
         return snapshot ? snapshot->size() : 0;

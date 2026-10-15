@@ -36,4 +36,22 @@ template<class T> struct EventSnapshotDelivery {
     }
 };
 
+// The same gate and snapshot rule for events without a payload.
+template<> struct EventSnapshotDelivery<void> {
+    using Target = std::function<void()>;
+    std::weak_ptr<Target> target;
+    static std::shared_ptr<Target> bind(Event<void>& event, std::shared_ptr<NetworkDelivery> gate) {
+        return std::make_shared<Target>([source = &event, gate = std::move(gate)] {
+            Event<void>::ConstEntryListPtr snapshot;
+            {
+                std::lock_guard<std::mutex> lock(gate->mutex);
+                if (!gate->open) return;
+                snapshot = sharedLoad(source->entries_);
+            }
+            Event<void>::notifySnapshot(std::move(snapshot));
+        });
+    }
+    void notify() const { if (auto delivery = target.lock()) (*delivery)(); }
+};
+
 } // namespace trussc::internal

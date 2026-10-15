@@ -177,7 +177,7 @@ void scenario() {
         TestSocket peer = peerListener.acceptPeer();
         check("connect listener peer accepted", peer != INVALID_SOCKET);
         check("connect listener has a queued send", until([&] {
-            return client.wouldBlock && client.getSendAsyncPendingBytes() != 0;
+            return client.pressure->wouldBlock && client.getSendAsyncPendingBytes() != 0;
         }));
         if (cancel) client.disconnect();
         check("connect listener send is released", until([&] { return sent.load(); }) && failed);
@@ -202,7 +202,7 @@ void scenario() {
         check("async connect is visible before worker starts", client.isConnecting());
         check("TCP attempt is pending", until([&] { return client.pending(); }));
         client.connectAsync("127.0.0.1", full.port);
-        check("same target is a no-op", client.attempts == 1 && client.isConnecting());
+        check("same target is a no-op", client.probe->attempts == 1 && client.isConnecting());
         RawListener next;
         client.connectAsync("127.0.0.1", next.port);
         check("different target connects", until([&] { return client.isConnected(); }));

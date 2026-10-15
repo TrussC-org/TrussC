@@ -7,27 +7,30 @@
 namespace {
 struct PausedWriterClient : ProbeClient {
     using TcpClient::stopConnectThread;
-    mutex gateMutex;
-    condition_variable gateCv;
-    bool entered = false;
-    bool released = false;
-
-    int writeSendStep(const void* data, size_t size, bool& forWrite, int& error) override {
-        {
-            unique_lock<mutex> lock(gateMutex);
-            entered = true;
-            gateCv.notify_all();
-            gateCv.wait(lock, [&] { return released; });
+    struct PausedTransport : ProbeTransport {
+        mutex gateMutex;
+        condition_variable gateCv;
+        bool entered = false;
+        bool released = false;
+        int writeSendStep(State& st, const void* data, size_t size, bool& forWrite, int& error) override {
+            {
+                unique_lock<mutex> lock(gateMutex);
+                entered = true;
+                gateCv.notify_all();
+                gateCv.wait(lock, [&] { return released; });
+            }
+            return Transport::writeSendStep(st, data, size, forWrite, error);
         }
-        return TcpClient::writeSendStep(data, size, forWrite, error);
-    }
+    };
+    shared_ptr<PausedTransport> paused = make_shared<PausedTransport>();
+    PausedWriterClient() { probe = paused; setTransport(paused); }
     bool writerPaused() {
-        lock_guard<mutex> lock(gateMutex);
-        return entered;
+        lock_guard<mutex> lock(paused->gateMutex);
+        return paused->entered;
     }
     void releaseWriter() {
-        { lock_guard<mutex> lock(gateMutex); released = true; }
-        gateCv.notify_all();
+        { lock_guard<mutex> lock(paused->gateMutex); paused->released = true; }
+        paused->gateCv.notify_all();
     }
 };
 
@@ -126,9 +129,9 @@ void scenario() {
             if (!threads) client.processNetwork();
             return completions == 1;
         }));
-        check("idle send reached socket back-pressure", client.wouldBlock &&
-              client.acceptedBytes > 0 && client.acceptedBytes < 64 * 1024 * 1024);
-        printf("native sends accepted %zu bytes before timeout\n", client.acceptedBytes.load());
+        check("idle send reached socket back-pressure", client.pressure->wouldBlock &&
+              client.pressure->acceptedBytes > 0 && client.pressure->acceptedBytes < 64 * 1024 * 1024);
+        printf("native sends accepted %zu bytes before timeout\n", client.pressure->acceptedBytes.load());
         check("timeout reports once and disconnects", errors == 1 && timedOut && outcome == SendError::Disconnected && !client.isConnected());
         client.disconnect();
         if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
@@ -161,7 +164,7 @@ void scenario() {
         check("oversized payload queues on an empty queue", queued.ok() && queued.id != 0);
         check("timeout-disabled send reaches socket back-pressure", until([&] {
             if (!threads) client.processNetwork();
-            return client.wouldBlock.load();
+            return client.pressure->wouldBlock.load();
         }));
         check("accepted send does not report an error", errors == 0);
         const auto rejected = client.sendAsync(vector<char>{'t'});

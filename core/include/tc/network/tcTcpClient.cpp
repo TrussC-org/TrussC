@@ -162,8 +162,8 @@ bool TcpClient::State::connect(const std::string& host, int port) {
     // to the update event).
     const unsigned generation = ++receiveGeneration_;
 
-    if (!connectSocket(host, port)) return false;
-    if (!connectPending_) {
+    if (!transport_->connectSocket(*this, host, port)) return false;
+    if (!transport_->isConnecting(*this)) {
         startSendChannel();
         connected_ = true;
         logNotice() << "TCP connected to " << host << ":" << port;
@@ -176,7 +176,8 @@ bool TcpClient::State::connect(const std::string& host, int port) {
     if (running_) {
         if (useThread_) {
             // Both reader and writer use non-blocking sockets.
-            keptThreads_.start(receiveThread_, [state = shared_from_this(), generation, alive = alive_] {
+            keptThreads_.start(receiveThread_, [state = shared_from_this(), transport = transport_, generation, alive = alive_] {
+                (void)transport; // Retained with the socket throughout this worker.
                 state->receiveThreadFunc(generation, alive);
             });
         } else {
@@ -220,7 +221,7 @@ void TcpClient::State::stopConnectThread() {
     }
     {
         std::lock_guard<std::mutex> lock(socketMutex_);
-        if (socket_ != INVALID_SOCKET && (writeOverride_.expired() || !connected_)) {
+        if (socket_ != INVALID_SOCKET) {
 #ifdef _WIN32
             ::shutdown(socket_, SD_BOTH);
 #else
@@ -233,8 +234,7 @@ void TcpClient::State::stopConnectThread() {
 
     // A plain TCP worker waits for none of its peers: a peer listener may be
     // waiting for this callback to return. Their handles stay in the State.
-    // Derived transport teardown remains on its existing path until PR-F.
-    if (tcpWorkerState != this || !writeOverride_.expired()) {
+    if (tcpWorkerState != this) {
         keptThreads_.release(connectThread_);
         keptThreads_.joinOthers();
     }
@@ -395,8 +395,7 @@ void TcpClient::State::connectThreadFunc(const std::string& host, int port, unsi
     connectingState = this;
     const void* previousWorker = tcpWorkerState;
     tcpWorkerState = this;
-    auto override = connectOverride_.lock();
-    bool success = !connectCancelled_ && *alive_ && (override ? (*override)(host, port) : connect(host, port));
+    bool success = !connectCancelled_ && *alive_ && connect(host, port);
     if (connectAttempt_ == attempt) asyncConnecting_ = false;
     if (connectAttempt_ == attempt && !success && !connectCancelled_ && !connected_ && !running_ && !connectPending_) {
         TcpConnectEventArgs args;
@@ -421,7 +420,7 @@ void TcpClient::State::disconnectImpl(bool notify, bool stopConnect) {
 
     resetConnection();
 
-    if (tcpWorkerState != this || !writeOverride_.expired()) keptThreads_.joinOthers();
+    if (tcpWorkerState != this) keptThreads_.joinOthers();
 
     // The receive thread reports only a close it ran into itself (running_
     // still set). The EOF that the shutdown() above wakes it with is this
@@ -447,7 +446,7 @@ void TcpClient::State::resetConnection() {
     // destructor, joins it. Its loops (processNetwork()'s receive loop, then
     // receiveThreadFunc()'s) end on their own once running_ is cleared or a
     // newer receive thread has taken over.
-    if (tcpWorkerState != this || !writeOverride_.expired()) keptThreads_.release(receiveThread_);
+    if (tcpWorkerState != this) keptThreads_.release(receiveThread_);
 }
 
 bool TcpClient::State::isConnected() const {
@@ -500,7 +499,7 @@ bool TcpClient::State::send(const std::string& message) {
 }
 
 bool TcpClient::State::isConnecting() const {
-    return asyncConnecting_ || connectPending_;
+    return asyncConnecting_ || transport_->isConnecting(*this);
 }
 
 std::shared_ptr<TcpClient::State::ClientSendChannel> TcpClient::State::sendChannel() const {
@@ -525,7 +524,7 @@ void TcpClient::State::stopSendChannel() {
     {
         std::lock_guard<std::mutex> lock(channelMutex_);
         ch = std::move(sendChannel_);
-        if (tcpWorkerState != this || !writeOverride_.expired()) writer = std::move(writerThread_);
+        if (tcpWorkerState != this) writer = std::move(writerThread_);
     }
     if (ch) {
         {
@@ -704,9 +703,7 @@ bool TcpClient::State::drainSendChannel(const std::shared_ptr<ClientSendChannel>
     while (ch->written < item.size) {
         if (!ch->open || !*alive) { outcome = SendError::Disconnected; break; }
         bool forWrite = true;
-        auto override = writeOverride_.lock();
-        int sent = override ? (*override)(static_cast<const char*>(item.data()) + ch->written,
-                                 item.size - ch->written, forWrite, error) : writeSendStep(
+        int sent = transport_->writeSendStep(*this,
             static_cast<const char*>(item.data()) + ch->written, item.size - ch->written, forWrite, error);
         if (sent > 0) {
             ch->written += static_cast<size_t>(sent);
@@ -845,6 +842,10 @@ void TcpClient::State::processNetwork() {
 // processNetwork()'s work. Returns false when the caller must stop without
 // reading the client again (see the header).
 bool TcpClient::State::processNetworkStep(const AliveToken& alive) {
+    return transport_->processNetworkStep(*this, alive);
+}
+
+bool TcpClient::State::processPlainNetworkStep(const AliveToken& alive) {
     if (!processSendQueue(alive)) return false;
     if (!running_) return true;
 
@@ -1035,6 +1036,7 @@ void TcpClient::State::notifyError(const std::string& msg, int code) {
 void TcpClient::freshState() {
     auto previous = internal::sharedLoad(state_);
     auto next = std::make_shared<State>();
+    next->transport_ = previous->transport_;
     next->receiveBufferSize_ = previous->receiveBufferSize_.load();
     next->useThread_ = previous->useThread_.load();
     next->sendTimeout_ = previous->sendTimeout_.load();
@@ -1051,19 +1053,19 @@ void TcpClient::freshState() {
     *previous->alive_ = false;
     retired_.push_back(previous);
     internal::sharedStore(state_, std::move(next));
-    attachOverrides();
 }
-void TcpClient::attachOverrides() {
-    // TLS's virtual transport remains in PR-F. Keep its existing subclass
-    // entrypoints as weak targets; plain TCP never captures a handle.
-    if (typeid(*this) != typeid(TcpClient)) {
-        if (!connectOverride_) connectOverride_ = std::make_shared<std::function<bool(const std::string&, int)>>(
-            [this](const std::string& host, int port) { return connect(host, port); });
-        if (!writeOverride_) writeOverride_ = std::make_shared<std::function<int(const void*, size_t, bool&, int&)>>(
-            [this](const void* data, size_t size, bool& forWrite, int& error) { return writeSendStep(data, size, forWrite, error); });
-        internal::sharedLoad(state_)->connectOverride_ = connectOverride_;
-        internal::sharedLoad(state_)->writeOverride_ = writeOverride_;
-    }
+bool TcpClient::Transport::connectSocket(State& state, const std::string& host, int port) {
+    return state.connectSocket(host, port);
+}
+int TcpClient::Transport::writeSendStep(State& state, const void* data, size_t size, bool& forWrite, int& error) {
+    return state.writeSendStep(data, size, forWrite, error);
+}
+bool TcpClient::Transport::isConnecting(const State& state) const { return state.connectPending_; }
+bool TcpClient::Transport::processNetworkStep(State& state, const std::shared_ptr<std::atomic<bool>>& alive) {
+    return state.processPlainNetworkStep(alive);
+}
+void TcpClient::setTransport(std::shared_ptr<Transport> transport) {
+    internal::sharedLoad(state_)->transport_ = std::move(transport);
 }
 TcpClient::TcpClient(TcpClient&& other) noexcept : TcpClient() { *this = std::move(other); }
 TcpClient& TcpClient::operator=(TcpClient&& other) noexcept {
@@ -1151,8 +1153,6 @@ TcpClient::~TcpClient() {
     onSendCompleteTarget_.reset();
     onErrorTarget_.reset();
     *alive_ = false;
-    connectOverride_.reset();
-    writeOverride_.reset();
     auto state = internal::sharedLoad(state_);
     *state->alive_ = false;
     state->disconnectImpl(false);
@@ -1173,14 +1173,12 @@ bool TcpClient::connect(const std::string& host, int port) {
             logWarning() << "TcpClient: connect() closes the connection an onDisconnect listener opened";
         }
     }
-    attachOverrides();
     remoteHost_ = host;
     remotePort_ = port;
     auto state = internal::sharedLoad(state_);
     return state->connect(host, port);
 }
 bool TcpClient::prepareConnect() {
-    attachOverrides();
     auto state = internal::sharedLoad(state_);
     return state->prepareConnect();
 }
@@ -1210,7 +1208,6 @@ void TcpClient::connectAsync(const std::string& host, int port) {
     }
     disconnect();
     if (!*alive) return;
-    attachOverrides();
     auto state = internal::sharedLoad(state_);
     state->connectAsync(host, port);
 }
@@ -1243,7 +1240,6 @@ bool TcpClient::isConnecting() const {
     return state->isConnecting();
 }
 void TcpClient::startSendChannel() {
-    attachOverrides();
     auto state = internal::sharedLoad(state_);
     state->startSendChannel();
 }
