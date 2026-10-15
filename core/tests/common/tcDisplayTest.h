@@ -32,9 +32,11 @@ int runDisplayTest(const tc::WindowSettings& settings, int& failures,
     using TestApp = detail::DisplayTestApp<AppClass>;
     TestApp::finish = [&failures, finalChecks = std::move(finalChecks)] {
         if (finalChecks) finalChecks();
-        // Set only the code: the app is already shutting down, so no second
-        // quit request and the recorded exit reason stays as it was.
-        tc::internal::appExitCode() = failures ? 1 : 0;
+        // Only ever raise the code: a framework-set non-zero code (e.g. the
+        // device-lost default 1) must not become 0. A test that verified a
+        // non-zero code in finalChecks may clear it itself. Set the code
+        // only: the app is already shutting down (no second quit request).
+        if (failures) tc::internal::appExitCode() = 1;
         std::fflush(stdout);
         std::fflush(stderr);
     };

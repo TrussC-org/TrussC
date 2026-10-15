@@ -60,6 +60,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             const int code = internal::appExitCode();
             const int expected = mode == "--window-default" ? 1 : mode == "--window-zero" ? 0 : 23;
             check(code == expected, "exitApp code reaches cleanup");
+            // The expected non-zero code was verified above; the verdict is ours.
+            internal::appExitCode() = 0;
             check(cleanedUp, "normal App cleanup runs");
             check(updates == (mode == "--window-cancel" ? 2 : 1), "cancel controls continued updates");
             std::printf("deviceLost %s: app code=%d, updates=%d, cleanup=%d\n",
