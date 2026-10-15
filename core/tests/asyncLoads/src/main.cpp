@@ -29,14 +29,29 @@ struct Gate {
     condition_variable changed;
     int entered = 0;
     bool released = false;
+    string bypassed; // a load completed by a non-worker branch instead
     void block() {
         unique_lock<mutex> held(lock);
         ++entered; changed.notify_all();
         changed.wait(held, [&] { return released; });
     }
-    void wait(int count = 1) {
+    // Returns false when a load took a non-worker branch (it never reaches
+    // the gated stage). The deadline is a deadlock watchdog, not a timing
+    // assertion: a missed stage must fail loudly, never hang the test.
+    bool wait(int count = 1) {
         unique_lock<mutex> held(lock);
-        changed.wait(held, [&] { return entered >= count; });
+        if (!changed.wait_for(held, chrono::seconds(60),
+                              [&] { return entered >= count || !bypassed.empty(); })) {
+            std::printf("FAIL gate: no progress for 60 s; %d of %d gated stages reached\n", entered, count);
+            std::fflush(stdout);
+            std::_Exit(5);
+        }
+        return bypassed.empty() || entered >= count;
+    }
+    void bypass(const char* stage) {
+        lock_guard<mutex> held(lock);
+        if (bypassed.empty()) bypassed = stage;
+        changed.notify_all();
     }
     void open() { lock_guard<mutex> held(lock); released = true; changed.notify_all(); }
     void arrive() { lock_guard<mutex> held(lock); ++entered; changed.notify_all(); }
@@ -249,8 +264,18 @@ template<class Resource, class Start, class Populate> void valueSemantics(Start 
     auto sourceListener = source.onLoad.listen([&](LoadResult&) { ++sourceEvents; });
     auto destListener = destination.onLoad.listen([&](LoadResult&) { ++destinationEvents; });
     Gate gate;
-    Probe probe([&](const char* stage, const fs::path&) { if (string(stage).ends_with(".ready")) gate.block(); });
-    start(source); start(destination); gate.wait(2);
+    Probe probe([&](const char* stage, const fs::path&) {
+        const string name = stage;
+        if (name.ends_with(".ready")) gate.block();
+        else if (name.ends_with(".cache-hit") || name.ends_with(".preflight-failure") ||
+                 name.ends_with(".unsupported-url")) gate.bypass(stage);
+    });
+    start(source); start(destination);
+    if (!gate.wait(2)) {
+        check((string("load completed via ") + gate.bypassed + " before reaching ready").c_str(), false);
+        gate.open(); finish();
+        return;
+    }
     Resource copy(source);
     if constexpr (std::is_same_v<Resource, Font>) {
         check("Font copy shares only the committed atlas", copy.getAtlas(0) == source.getAtlas(0));

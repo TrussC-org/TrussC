@@ -1704,6 +1704,7 @@ public:
             state->result = LoadResult::fail(LoadError::UnsupportedFormat,
                 "URL loading only supported in WebAssembly: " + state->input.path);
             state->unsupportedUrl = true;
+            internal::probeResourceLoad("font.unsupported-url", internal::utf8ToPath(state->input.path));
             internal::completeResourceLoad(state);
 #endif
             return;
@@ -1713,6 +1714,7 @@ public:
             state->result = internal::checkLoadFile(internal::utf8ToPath(state->input.path), "Font");
             if (!state->result) {
                 state->preflightFailure = true;
+                internal::probeResourceLoad("font.preflight-failure", internal::utf8ToPath(state->input.path));
                 internal::completeResourceLoad(state);
                 return;
             }
@@ -1720,6 +1722,7 @@ public:
         if (auto cached = internal::SharedFontCache::getInstance().get(state->key)) {
             state->candidate = std::move(cached);
             state->result = LoadResult::success();
+            internal::probeResourceLoad("font.cache-hit", internal::utf8ToPath(state->input.path));
             internal::completeResourceLoad(state);
             return;
         }
