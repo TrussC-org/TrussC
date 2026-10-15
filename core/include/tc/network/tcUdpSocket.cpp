@@ -66,6 +66,7 @@ bool UdpSocket::State::create() {
 }
 
 bool UdpSocket::State::ensureSocket() {
+    if (socket_->closed) return false;   // close() shut it down; the handle has a fresh one
     if (socket_->handle == INVALID_SOCKET_HANDLE) {
         return create();
     }
@@ -169,7 +170,24 @@ UdpSocket::Socket::~Socket() {
     if (handle != INVALID_SOCKET_HANDLE) CLOSE_SOCKET(handle);
 }
 
-void UdpSocket::State::close() { stopReceiving(); }
+void UdpSocket::State::close() {
+    // A thread blocked in a direct receive() holds this State and so the
+    // Socket: shut it down so recvfrom returns. ~Socket closes the handle
+    // once the last owner lets go.
+    {
+        std::lock_guard<std::mutex> lock(socket_->mutex);
+        socket_->closed = true;
+        const SocketHandle handle = socket_->handle;
+        if (handle != INVALID_SOCKET_HANDLE) {
+#ifdef _WIN32
+            shutdown(handle, SD_BOTH);
+#else
+            shutdown(handle, SHUT_RDWR);
+#endif
+        }
+    }
+    stopReceiving();
+}
 
 // ---------------------------------------------------------------------------
 // Send

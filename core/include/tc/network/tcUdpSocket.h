@@ -50,6 +50,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
     struct Socket {
         ~Socket();
         std::atomic<SocketHandle> handle{INVALID_SOCKET_HANDLE};
+        std::atomic<bool> closed{false};   // shut down by close(); never reused
         std::mutex mutex;
     };
     struct State : std::enable_shared_from_this<State> {

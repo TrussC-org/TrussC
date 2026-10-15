@@ -167,11 +167,34 @@ void moveInsideListener() {
     check("send self-move datagram", sender.sendTo("127.0.0.1", source.getLocalPort(), "x"));
     check("move on receive thread returns stopped", until([&] { return done.load(); }) && destination && !destination->isReceiving());
 }
+// close() from another thread must wake a thread blocked in a direct receive()
+// on a bound, blocking socket (that thread keeps the run's State, and so the OS
+// socket, alive; only shutdown() makes recvfrom return).
+void closeWakesBlockedReceive() {
+    UdpSocket socket;
+    check("bind blocking receive fixture", socket.bind(0, false));
+    promise<int> received;
+    auto result = received.get_future();
+    atomic<bool> entering{false};
+    thread reader([&] {
+        char buffer[64];
+        entering = true;
+        received.set_value(socket.receive(buffer, sizeof(buffer)));
+    });
+    check("reader is about to receive", until([&] { return entering.load(); }));
+    socket.close();
+    const bool woke = result.wait_for(chrono::seconds(10)) == future_status::ready;
+    check("close wakes a blocked receive()", woke);
+    if (!woke) _Exit(3);   // a reader still in recvfrom would keep the test hanging
+    reader.join();
+    check("blocked receive() returns no data after close", result.get() <= 0);
+}
 } // namespace
 TC_CORE_TEST_MAIN() {
     Watchdog watchdog;
     for (bool threaded : {true, false}) { preservesSocket(threaded); lifecycle(threaded); moves(threaded); }
     restartWithCallbackInFlight();
     moveInsideListener();
+    closeWakesBlockedReceive();
     return failures ? 1 : 0;
 }
