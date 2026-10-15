@@ -847,6 +847,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_apt_dependencies.py -v
 
+      - name: shader target regression checks
+        if: always()
+        run: python3 tools/tests/test_shader_targets.py -v
+
       - name: core test symbol checker regression checks
         if: always()
         run: python3 tools/tests/test_core_test_symbols.py -v
