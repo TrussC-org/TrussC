@@ -704,7 +704,12 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
             list(APPEND _TC_APP_SHADER_TARGETS ${_TC_SHADER_ADDON}_shaders)
         endif()
     endforeach()
-    trussc_shader_object_depends(${PROJECT_NAME} ${_TC_APP_SHADER_TARGETS})
+    if(NOT TARGET guest)
+        # Under hot reload only the guest gets these: on Windows a guest
+        # build also builds the host (it links the host's import library),
+        # and dirty host objects would relink the running executable.
+        trussc_shader_object_depends(${PROJECT_NAME} ${_TC_APP_SHADER_TARGETS})
+    endif()
     if(TARGET guest)
         target_link_libraries(guest PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
         # Include shaders from all loaded addons, including addon dependencies.

@@ -36,6 +36,10 @@ class ShaderTargetTests(unittest.TestCase):
         app = (ROOT / 'core/cmake/trussc_app.cmake').read_text()
         for consumer in ('${PROJECT_NAME}', 'guest'):
             self.assertIn(f'trussc_shader_object_depends({consumer} ${{_TC_APP_SHADER_TARGETS}})', app)
+        # Hot reload: the host executable never gets them (a guest build on
+        # Windows would relink the running host).
+        host_call = app.index('trussc_shader_object_depends(${PROJECT_NAME}')
+        self.assertIn('if(NOT TARGET guest)', app[host_call - 400:host_call])
         for filename, statement in (
             ('core/CMakeLists.txt', 'trussc_shader_object_depends(TrussC TrussC_shaders)'),
             ('core/cmake/use_addon.cmake',

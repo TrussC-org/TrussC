@@ -48,6 +48,13 @@ def main():
     original = shader.read_bytes()
     before_header = header.read_bytes()
     before_guest = guest.stat().st_mtime_ns
+    hosts = [p for p in (project / 'bin/hotReloadLifecycle',
+                         project / 'bin/hotReloadLifecycle.exe',
+                         project / 'bin/hotReloadLifecycle.app/Contents/MacOS/hotReloadLifecycle')
+             if p.is_file()]
+    assert len(hosts) == 1, hosts
+    host = hosts[0]
+    before_host = host.stat().st_mtime_ns
     command = ['cmake', '--build', str(args.build), '--target', 'guest',
                '--config', args.config]
     try:
@@ -62,6 +69,9 @@ def main():
         # picked up by the guest's objects only on the next build.
         assert header.read_bytes() != before_header, 'guest did not regenerate app shader'
         assert guest.stat().st_mtime_ns != before_guest, 'guest did not relink in the same build'
+        # A running host cannot be relinked (Windows locks the executable), so
+        # a shader edit must reach the guest without touching the host.
+        assert host.stat().st_mtime_ns == before_host, 'guest build relinked the host executable'
         print('Shader edit: header regenerated and guest relinked', flush=True)
         bump(shader)
         result = subprocess.run(command, check=True, stdout=subprocess.PIPE,
