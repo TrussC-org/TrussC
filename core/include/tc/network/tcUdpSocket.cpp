@@ -171,22 +171,22 @@ UdpSocket::Socket::~Socket() {
 }
 
 void UdpSocket::State::close() {
-    // A thread blocked in a direct receive() holds this State and so the
-    // Socket: shut it down so recvfrom returns. ~Socket closes the handle
-    // once the last owner lets go.
-    {
-        std::lock_guard<std::mutex> lock(socket_->mutex);
-        socket_->closed = true;
-        const SocketHandle handle = socket_->handle;
-        if (handle != INVALID_SOCKET_HANDLE) {
-#ifdef _WIN32
-            shutdown(handle, SD_BOTH);
-#else
-            shutdown(handle, SHUT_RDWR);
-#endif
-        }
-    }
     stopReceiving();
+    // Close the descriptor now, as before the per-run State. shutdown() wakes
+    // a blocked recvfrom on Linux, but on macOS/BSD an unconnected UDP socket
+    // only wakes on close (shutdown fails with ENOTCONN). A direct receive()
+    // blocked on it returns with an error; later calls see the invalid handle.
+    std::lock_guard<std::mutex> lock(socket_->mutex);
+    socket_->closed = true;
+    const SocketHandle handle = socket_->handle.exchange(INVALID_SOCKET_HANDLE);
+    if (handle != INVALID_SOCKET_HANDLE) {
+#ifdef _WIN32
+        shutdown(handle, SD_BOTH);
+#else
+        shutdown(handle, SHUT_RDWR);
+#endif
+        CLOSE_SOCKET(handle);
+    }
 }
 
 // ---------------------------------------------------------------------------
