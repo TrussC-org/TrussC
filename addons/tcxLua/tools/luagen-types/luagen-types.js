@@ -61,26 +61,7 @@ const OP_UNARY = { '-': 'unary_minus' };
 // substitute a template param (Tween<T>: T->float) inside a type string
 function subT(type, T) { return T ? type.replace(/\bT\b/g, T) : type; }
 
-// ---- platform guards -----------------------------------------------------
-// A `platforms` annotation (TC_PLATFORMS) restricts where a symbol exists.
-// reference-data is generated on macOS, so members compiled out elsewhere
-// (e.g. VideoWriter::submitFrame under TC_ASYNC_SCREEN_CAPTURE) are recorded —
-// guard their bindings with the matching preprocessor condition.
-const ALL_PLATFORMS = ['macos', 'windows', 'linux', 'android', 'ios', 'web'];
-const PLATFORM_COND = {
-    macos: '(defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))',
-    ios: '(defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)',
-    windows: 'defined(_WIN32)',
-    linux: '(defined(__linux__) && !defined(__ANDROID__))',
-    android: 'defined(__ANDROID__)',
-    web: 'defined(__EMSCRIPTEN__)',
-};
-// -> condition string, or null when unrestricted (no annotation / covers all)
-function platformGuard(platforms) {
-    if (!platforms || !platforms.length) return null;
-    if (ALL_PLATFORMS.every(p => platforms.includes(p))) return null;
-    return platforms.map(p => PLATFORM_COND[p]).filter(Boolean).join(' || ');
-}
+const { platformGuard } = require('../platform-guards');
 
 // ---- emit one usertype --------------------------------------------------
 // `cppType` = the C++ type to bind (e.g. "Vec2" or "Tween<float>"),
@@ -105,7 +86,7 @@ function emitType(typeEntry, cppType, luaName, T) {
         return t;
     }
 
-    const ctorTypes = [...new Set((typeEntry.constructors || [])
+    const ctorTypes = (typeEntry.constructors || [])
         .filter(c => {
             const a = c.args || [];
             if (!a.map(x => ({ ...x, type: subT(x.type, T) })).every(argBindable)) return false;  // unbindable/internal arg
@@ -120,9 +101,12 @@ function emitType(typeEntry, cppType, luaName, T) {
             let fd = a.length;
             a.forEach((x, i) => { if (x.hasDefault && fd === a.length) fd = i; });
             const out = [];
-            for (let k = fd; k <= a.length; k++) out.push(`${Q}(${a.slice(0, k).map(x => qual(x.type)).join(', ')})`);
+            for (let k = fd; k <= a.length; k++) out.push({
+                signature: `${Q}(${a.slice(0, k).map(x => qual(x.type)).join(', ')})`,
+                guard: platformGuard(c.platforms),
+            });
             return out;
-        }))];
+        });
 
     // lambdas for a member fn with trailing-default arity expansion (Lua optional args)
     function memberLambdas(name, sigs, isStatic) {
@@ -143,7 +127,7 @@ function emitType(typeEntry, cppType, luaName, T) {
     }
 
     // collect members owned by this type
-    const ops = {};        // meta_function -> [lambda,...]
+    const ops = {};        // meta_function -> { lams, guard }
     const props = [], methods = {}, statics = {};
     for (const id in data) {
         const e = data[id];
@@ -153,7 +137,6 @@ function emitType(typeEntry, cppType, luaName, T) {
         if (e.tparams && e.tparams.length) { skip.template++; continue; }
         const opm = e.name.match(/^operator(.+)$/);
         if (opm) {
-            if (platformGuard(e.platforms)) { skip.platform = (skip.platform || 0) + 1; continue; }  // rare; keep the ctor/op expression unguarded
             const sym = opm[1];
             for (const sig of (e.signatures || [])) {   // an operator can have unary + binary overloads
                 if (sig.tmpl) continue;
@@ -167,7 +150,7 @@ function emitType(typeEntry, cppType, luaName, T) {
                     const expr = sym === '[]' ? `a[b]` : `a ${sym} b`;
                     lam = `[](const ${Q}& a, ${at} b){ return ${expr}; }`;
                 } else { skip.op++; continue; }   // unsupported (+=, <<, =, !=, …)
-                (ops[meta] ||= []).push(lam);
+                (ops[meta] ||= { lams: [], guard: platformGuard(e.platforms) }).lams.push(lam);
             }
             continue;
         }
@@ -191,20 +174,29 @@ function emitType(typeEntry, cppType, luaName, T) {
         }
     }
 
-    let s = `    {\n        sol::usertype<${Q}> t = lua->new_usertype<${Q}>("${luaName}"`;
-    // Positional constructors provide Type.new(...); sol::call_constructor
-    // additionally enables the Type(...) call form (without it the usertype
-    // table has no __call and e.g. `Vec3(1, 2, 3)` fails with "attempt to
-    // call a table value").
+    let s = `    {\n`;
+    // Keep each constructor's resolved guard. The fixed owner argument lets
+    // guarded signatures use leading commas even when every ctor is absent.
     if (ctorTypes.length) {
-        s += `,\n            sol::constructors<${ctorTypes.join(', ')}>()`;
-        s += `,\n            sol::call_constructor, sol::constructors<${ctorTypes.join(', ')}>()`;
+        s += `        auto constructors = tcxLuaConstructors<${Q}\n`;
+        for (const { signature, guard } of [...new Map(ctorTypes.map(c => [JSON.stringify(c), c])).values()]) {
+            const line = `            , ${signature}\n`;
+            s += guard ? `#if ${guard}\n${line}#endif\n` : line;
+        }
+        s += `        >();\n`;
     }
-    for (const meta in ops) {
-        const lams = [...new Set(ops[meta])];
-        s += `,\n            sol::meta_function::${meta}, ` + (lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`);
-    }
+    s += `        sol::usertype<${Q}> t = lua->new_usertype<${Q}>("${luaName}"`;
+    // Positional constructors provide Type.new(...); sol::call_constructor
+    // additionally enables the Type(...) call form.
+    if (ctorTypes.length) s += `, constructors, sol::call_constructor, constructors`;
     s += `);\n`;
+    for (const meta in ops) {
+        const { guard } = ops[meta];
+        const lams = [...new Set(ops[meta].lams)];
+        const line = `        t[sol::meta_function::${meta}] = ` +
+            (lams.length === 1 ? lams[0] : `sol::overload(${lams.join(', ')})`) + `;\n`;
+        s += guard ? `#if ${guard}\n${line}#endif\n` : line;
+    }
     const seenProps = new Set();
     for (const p of props) {
         if (seenProps.has(p.name)) continue;
@@ -243,11 +235,11 @@ function emitType(typeEntry, cppType, luaName, T) {
 //  - FileWriter/FileReader: non-copyable (deleted copy ctor / operator=).
 const EXCLUDE = new Set([
     'Json', 'Xml',   // custom Lua glue (get_string / table index) not in reference-data
-    // These 4 embed/inherit an incomplete internal:: type (internal::StreamInstance) in
+    // These 3 embed/inherit an incomplete internal:: type (internal::StreamInstance) in
     // their C++ definition — not visible in reference-data (no private members/bases), so
     // `new_usertype<T>` fails to instantiate sol's type traits on the incomplete type.
     // (Serial/Node were earlier mis-excluded via a clang cascade; they compile fine.)
-    'Thread', 'SoundSource', 'Environment', 'VideoPlayerBase',
+    'Thread', 'SoundSource', 'Environment',
     // --- still hand-written: these have custom members the generator can't produce
     // (raw-pointer/out-param marshalling, Lua-keyword renames like end_fbo, texture
     // setters). v2 migrated the 14 gen⊇hand types (Vec2/Color/Mesh/… now generated).
@@ -288,7 +280,9 @@ const flatName = (e) => (e.owner ? e.owner.replace(/::/g, '') : '') + e.name;
 
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'type' || e.ns) continue;
+    // Inherited TYPE entries are documentation copies of one C++ type.
+    // Inherited members remain eligible in emitType's owner loop.
+    if (e.kind !== 'type' || e.ns || e.declaredIn) continue;
     if (EXCLUDE.has(e.owner ? `${e.owner}::${e.name}` : e.name)) { report.push(`${id}: excluded (custom Lua glue, hand-written)`); continue; }
     if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; report.push(`${id}: TC_LUA_SKIP (skipped)`); continue; }
     if (e.owner) {
@@ -431,12 +425,29 @@ const PRELUDE = (needsColorsTag) => `// AUTO-GENERATED usertype bindings from re
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
-${needsColorsTag ? 'namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table\n' : ''}#ifndef _MSC_VER
+// Abstract bases (e.g. VideoPlayerBase) expose members but cannot be constructed.
+// An empty guarded constructor list must not enable sol2's automatic default ctor.
+namespace {
+template<typename Owner, typename... Signatures>
+auto tcxLuaConstructors() {
+    if constexpr (std::is_abstract_v<Owner> || sizeof...(Signatures) == 0) return sol::no_constructor;
+    else return sol::constructors<Signatures...>();
+}
+}
+${needsColorsTag ? 'namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table\n' : ''}#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
+// Lua retains deprecated compatibility names, including inherited ones.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 `;
-const POSTLUDE = `#ifndef _MSC_VER
+const POSTLUDE = `#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif

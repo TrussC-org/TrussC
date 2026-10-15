@@ -83,6 +83,11 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
     auto* data = static_cast<trussc::VideoGrabberPlatformData*>(state->platformData.get());
     if (!data) return;
 
+    // Stamp arrival time on the capture thread, BEFORE any processing.
+    // This stays accurate even when the app's main loop stalls.
+    uint64_t arrivalUs = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
     CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!imageBuffer) return;
 
@@ -141,6 +146,9 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         }
 
         state->dirty.store(true);
+
+        // Timestamped frame queue (no-op unless enabled via setFrameQueueSize)
+        state->frameQueue.push(data->backBuffer, (int)width, (int)height, arrivalUs);
     }
 
     CVPixelBufferUnlockBaseAddress(imageBuffer, kCVPixelBufferLock_ReadOnly);

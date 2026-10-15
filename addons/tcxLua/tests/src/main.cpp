@@ -140,6 +140,54 @@ int main() {
     check("Node().callEvery ~= nil", luaBool("Node().callEvery ~= nil"));
     check("Node().cancelTimer ~= nil", luaBool("Node().cancelTimer ~= nil"));
 
+#if defined(__linux__) && !defined(__ANDROID__)
+    check("window position funcs absent on Linux",
+        luaBool("getWindowPosition == nil and setWindowPosition == nil"));
+#endif
+
+    // A nested result uses its declaration's registration, including inherited returns.
+    checkNoThrow("NodeHitResult: findHitNode exposes hit and distance", true, [&] {
+        auto result = L.safe_script(R"lua(
+            assert(NodeHitResult ~= nil)
+            assert(AppHitResult == nil and RectNodeHitResult == nil)
+            assert(RectNodeButtonHitResult == nil and ScrollBarHitResult == nil)
+            assert(ScrollContainerHitResult == nil)
+            local hit = Node():findHitNode(Ray(Vec3(0, 0, 10), Vec3(0, 0, -1)))
+            assert(not hit:hit() and hit.distance == 0)
+            local inheritedHit = RectNode.new():findHitNode(Ray(Vec3(0, 0, 10), Vec3(0, 0, -1)))
+            assert(type(inheritedHit:hit()) == "boolean")
+            assert(type(inheritedHit.distance) == "number")
+            return true
+        )lua", sol::script_pass_on_error);
+        if (!result.valid()) {
+            sol::error error = result;
+            std::cerr << "NodeHitResult script: " << error.what() << std::endl;
+            return false;
+        }
+        return result.get<bool>();
+    });
+
+    // #778/#808: inherited bindings survive regeneration without video hardware.
+    checkNoThrow("VideoPlayer: inherited playback bindings", true, [&] {
+        auto result = L.safe_script(R"lua(
+            local player = VideoPlayer.new()
+            assert(not player:isLoaded() and not player:isPlaying())
+            player:stop()
+            player:setPaused(true)
+            player:setPosition(0.5)
+            player:setVolume(0.25)
+            player:setSpeed(0.5)
+            player:setLoop(true)
+            assert(player:getVolume() == 0.25)
+            assert(player:getSpeed() == 0.5 and player:isLoop())
+            assert(not player:isFrameNew() and not player:isReady())
+            assert(VideoPlayerBase ~= nil)
+            assert(not pcall(function() return VideoPlayerBase.new() end))
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
     // #236: the generated degree companions are callable from Lua.
     checkNoThrow("angles: radians and Deg Lua bindings", true, [&] {
         auto result = L.safe_script(R"lua(

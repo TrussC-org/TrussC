@@ -2247,7 +2247,7 @@ Json parseJson(const std::string & str)  // Parse a JSON string into a Json obje
 Xml parseXml(const std::string & str)  // Parse an XML string into an Xml object.
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Apply the keys of a Json object onto obj's reflected (TC_REFLECT) members. Returns the reflector so callers can inspect which members were applied, skipped, read-only, or unknown.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Return the reflected (TC_REFLECT) members of obj as a Json object. Works on any reflected type such as a Node or Mod. Derived values (TC_DERIVED, e.g. Node's globalPos) are left out unless includeDerived is true, so the default output is what a save should contain.
-void runOnMainThread(std::function<void ()> fn)  // Run a callback on the main (scene) thread; immediately if already on it, otherwise queued to the next frame. Each frame runs, in order, what was queued when its drain started; work queued during the drain runs in the next frame. Nothing is dropped and there is no limit (a callback may edit the tree or free something); the tc_get_health MCP tool reports the count as mainQueuePending. Code that may queue faster than the app runs it, and can drop values, keeps its own bounded or latest-value buffer
+void runOnMainThread(std::function<void ()> fn) [+1]  // Run a callback on the main (scene) thread; immediately if already on it, otherwise enqueue and return without waiting for execution. Each frame drains, in order, the work queued when its drain started; worker submissions during the drain wait until the next frame. There is no queue limit. runOnMainThread(fn, weakToken) accepts the same weak_ptr<atomic<bool>> liveness token as Deliver::Main: at execution time an expired or false token drops the closure. A token does not wait for a callback already running; serialize target teardown with delivery, normally on the main thread. The single-argument form never drops callbacks and the caller owns captured lifetimes. On Web without pthreads both forms run immediately, with the token check for the two-argument form. tc_get_health reports the drain-start count as mainQueuePending. Producers that can drop values use their own bounded or latest-value buffer.
 void setConsoleLogLevel(LogLevel level)  // Set the minimum log level printed to the console
 void setFileLogLevel(LogLevel level)  // Set the minimum log level written to the log file
 SaveResult setLogFile(const fs::path & path)  // Open a file to receive log output (append mode). A relative path resolves against the data folder (getDataPath), and a missing parent folder is created. On failure it logs an error and returns a failed SaveResult, and the current log file stays open (the error line lands in it). After a successful call, getLogFilePath() returns the resolved path. A path inside the app bundle (macOS / iOS) is refused: an error naming getUserDataPath() is logged and a failed SaveResult returned.
@@ -2639,7 +2639,7 @@ bool AudioEngine::waitForAudioCallbacks()  // Teardown barrier for audioOut / au
 ```cpp
 ```
 
-### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it
+### AudioRecorder — Records the engine's master output (everything the speakers get, Sounds and audioOut synthesis alike) to a WAV file. Taps audioOut at Monitor priority; file IO runs on a background thread, the audio thread never blocks. Every file has a 36-byte JUNK chunk after the RIFF header, so the samples start at byte 80 (S16) or 92 (F32). A take over 4 GiB of samples (about 3.1 h of 48 kHz stereo F32) is written as RF64 (EBU Tech 3306); older readers without RF64 support can't open it Destroying an active recorder inside an audio callback is a caller mistake: it returns without waiting, logs one Error, and leaves the WAV header unfinalized.
 
 ```cpp
 uint64_t AudioRecorder::getDroppedFrames() const  // Frames lost to ring-buffer overflow (0 in normal operation; nonzero means the writer thread fell behind)
@@ -2647,7 +2647,7 @@ fs::path AudioRecorder::getPath() const  // Resolved path of the file being writ
 double AudioRecorder::getRecordedSeconds() const  // Seconds actually written to the file so far. Counts complete frames actually written divided by sample rate, including a short write; queued or failed frames are excluded.
 bool AudioRecorder::isRecording() const  // True while recording
 SaveResult AudioRecorder::start(const fs::path & path, const AudioRecordSettings & settings = {std::vector<std::vector<int>>()})  // Start an in-place WAV recording of the master mix. Returns SaveResult after shared path preparation, opening and checked header writing; the AudioEngine must already be initialized. Relative paths use getDataPath, missing parents are created, and app bundle paths are refused. Every subsequent write is checked; the first failure ends the take and logs exactly one Error.
-SaveResult AudioRecorder::stop()  // Stop and finalize the file (patches the WAV header sizes; a take over 4 GiB of samples becomes RF64, logged as a notice; a failed file write, such as a full disk, is logged as an error instead); the buffer a capture was still copying is included. Safe to call when not recording; also runs automatically on destruction. Waits on AudioEngine::waitForAudioCallbacks(): for every audioOut / audioIn listener running at that moment, not only the recorder's (usually well under one buffer). Don't call it while holding a lock that such a listener takes: it would wait up to one second and the audio drops out meanwhile. Returns SaveResult for checked header patching and close, or the first take failure. Repeated stop calls preserve that result without another Error. Recording writes in place, without a temporary or rename.
+SaveResult AudioRecorder::stop()  // Stop, drain pending captures and finalize the WAV/RF64 header and file. Disconnects the audio listener and waits up to one second for all audio callbacks already in flight; if one is still running it logs a Warning and finalizes anyway (that callback's last buffer is not in the file). Do not hold a lock needed by an audio listener. Returns SaveResult for checked header patching and close, or the first take failure; repeated calls preserve that result without another Error. Destruction normally calls stop; destroying an active recorder inside an audio callback instead logs one Error and leaves the header unfinalized. Recording writes in place, without a temporary or rename.
 ```
 
 ### AudioSettings — Configuration passed to AudioEngine::init() to override engine defaults (sample rate, channels, buffer size, polyphony, device). Empty deviceName selects the system default playback device.
@@ -3834,12 +3834,12 @@ SaveResult SaveResult::success()  // Make a success result (static)
 ### ScreenRecorder — Captures the rendered output to a video file (start/stop recording of the on-screen frames)
 
 ```cpp
-int ScreenRecorder::getFrameCount() const  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
-fs::path ScreenRecorder::getPath() const  // Output file path of the current recording
-bool ScreenRecorder::isRecording() const  // Check if the screen recorder is currently capturing
-SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
-SaveResult ScreenRecorder::stop()  // Stop live capture and finalize the file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
-VideoWriter & ScreenRecorder::writer()  // Access the underlying VideoWriter for advanced introspection
+int ScreenRecorder::getFrameCount() const [macos,windows,linux,android,ios]  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
+fs::path ScreenRecorder::getPath() const [macos,windows,linux,android,ios]  // Output file path of the current recording
+bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // Check if the screen recorder is currently capturing
+SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture (window, or an Fbo for clean GUI-free output); size is taken automatically. Calling start while recording finalizes the current file first. If the recorded Fbo is destroyed mid-recording, the recording stops and finalizes automatically. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization. If the previous take times out waiting for GPU frames, its last completion finalizes it independently of the new take.
+SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Disconnect the audio listener and wait up to one second for audio callbacks (a Warning if one is still running), then wait up to 2 seconds for GPU readbacks before finalizing. If GPU frames remain, logs one Error and returns WriteFailed with message recording still has frames in flight. The callbacks retain their State and writer; the last completion drains audio and closes the file. Returns SaveResult for finalization or the retained failure; repeated calls do not repeat the timeout Error. Caller errors and transient readback failures do not fail the take. No temporary/rename is used.
+VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Access the underlying VideoWriter for advanced introspection
 ```
 
 ### ScrollBar — Visual scroll indicator RectNode that syncs with a ScrollContainer and supports drag scrolling
@@ -3904,24 +3904,24 @@ bool SendResult::ok() const  // true if the payload was queued (error == SendErr
 ### Serial — Cross-platform serial port (USB/COM): connect, read/write bytes
 
 ```cpp
-int Serial::available() const  // Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
-void Serial::close()  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
-void Serial::drain()  // Wait until output transmission completes
-void Serial::flush()  // Clear both input and output buffers
-void Serial::flushInput()  // Clear the input buffer
-void Serial::flushOutput()  // Clear the output buffer
-std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated  // Deprecated alias for listDevices()
-std::string Serial::getDevicePath() const  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
-size_t Serial::getDroppedByteCount() const  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count
-bool Serial::isConnected() const  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
-bool Serial::isInitialized() const  // Whether currently connected; same as isConnected()
-std::vector<SerialDeviceInfo> Serial::listDevices()  // List available serial devices
-void Serial::printDevices()  // Log all available serial devices
-int Serial::readByte()  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)
-int Serial::readBytes(void * buffer, int length) [+1]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)
-bool Serial::setup(const std::string & portName, int baudRate) [+1]  // Connect to a port by path or by index from listDevices()
-bool Serial::writeByte(unsigned char byte)  // Write a single byte; true on success
-int Serial::writeBytes(const void * buffer, int length) [+1]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)
+int Serial::available() const [macos,windows,linux,android]  // Number of bytes buffered by TrussC to read; 0 when not connected (a lost device also closes the port and fires onDisconnect)
+void Serial::close() [macos,windows,linux,android]  // Disconnect and release resources; fires onDisconnect (wasClean = true) when the port was open
+void Serial::drain() [macos,windows,linux,android]  // Wait until output transmission completes
+void Serial::flush() [macos,windows,linux,android]  // Clear both input and output buffers
+void Serial::flushInput() [macos,windows,linux,android]  // Clear the input buffer
+void Serial::flushOutput() [macos,windows,linux,android]  // Clear the output buffer
+std::vector<SerialDeviceInfo> Serial::getDeviceList() ⚠️deprecated [macos,windows,linux,android]  // Deprecated alias for listDevices()
+std::string Serial::getDevicePath() const [macos,windows,linux,android]  // Current device path; a copy, since another thread's setup() may change it. Never waits for setup(), close() or an I/O call
+size_t Serial::getDroppedByteCount() const [macos,windows,linux,android]  // Received bytes discarded by the 1 MiB TrussC buffer since the last setup(); flush and close preserve the count
+bool Serial::isConnected() const [macos,windows,linux,android]  // Whether the port is open and working; turns false after close() or when a read/write call finds the device gone
+bool Serial::isInitialized() const [macos,windows,linux,android]  // Whether currently connected; same as isConnected()
+std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android]  // List available serial devices
+void Serial::printDevices() [macos,windows,linux,android]  // Log all available serial devices
+int Serial::readByte() [macos,windows,linux,android]  // Read a single byte; 0-255 on success, -1 no data, -2 error (a lost device also closes the port and fires onDisconnect)
+int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Read bytes; returns actual count (>=0) or -1 on error (a lost device also closes the port and fires onDisconnect)
+bool Serial::setup(const std::string & portName, int baudRate) [+1] [macos,windows,linux,android]  // Connect to a port by path or by index from listDevices()
+bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Write a single byte; true on success
+int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Write bytes; returns actual count or -1 on error (a lost device also closes the port and fires onDisconnect)
 ```
 
 ### SerialDeviceInfo — Info for one serial device (from Serial::listDevices)
@@ -4070,27 +4070,27 @@ void StrokeMesh::update()  // Rebuild the internal triangle mesh (call before dr
 ### TcpClient — TCP client connection (connect, send/receive a stream)
 
 ```cpp
-bool TcpClient::connect(const std::string & host, int port)  // Connect to a server (blocking)
-void TcpClient::connectAsync(const std::string & host, int port)  // Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it
-void TcpClient::disconnect()  // Disconnect
-std::string TcpClient::getRemoteHost() const  // Remote host name
-int TcpClient::getRemotePort() const  // Remote port
-size_t TcpClient::getSendAsyncBufferSize() const  // Get the send queue high-water mark in bytes
-size_t TcpClient::getSendAsyncPendingBytes() const  // Bytes queued but not yet completed
-bool TcpClient::isConnected() const  // Whether currently connected
-bool TcpClient::isConnecting() const  // Whether a TCP connection attempt or TLS handshake is in progress
-bool TcpClient::isUsingThread() const  // Whether threading is in use
-void TcpClient::notifyError(const std::string & msg, int code = 0)  // Report an error (message + code) from a derived class.
-void TcpClient::processNetwork()  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
-bool TcpClient::processNetworkStep(const AliveToken & alive)  // processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client.
-bool TcpClient::send(const void * data, size_t size) [+2]  // Send data to the server
-SendResult TcpClient::sendAsync(const void * data, size_t size) [+2]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
-void TcpClient::setBlocking(bool blocking)  // Set blocking mode
-void TcpClient::setConnectTimeout(float seconds)  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
-void TcpClient::setReceiveBufferSize(size_t size)  // Set the receive buffer size
-void TcpClient::setSendAsyncBufferSize(size_t bytes)  // Set the send queue high-water mark; default 16 MB, 0 unlimited
-void TcpClient::setSendTimeout(float seconds)  // Set the idle send timeout in seconds; default 60, 0 waits forever
-void TcpClient::setUseThread(bool useThread)  // Whether to use threads (must be false on Wasm)
+bool TcpClient::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Connect to a server (blocking)
+void TcpClient::connectAsync(const std::string & host, int port) [macos,windows,linux,android,ios]  // Start a cancellable connection attempt; the same pending target is a silent no-op, a different target replaces it
+void TcpClient::disconnect() [macos,windows,linux,android,ios]  // Disconnect
+std::string TcpClient::getRemoteHost() const [macos,windows,linux,android,ios]  // Remote host name
+int TcpClient::getRemotePort() const [macos,windows,linux,android,ios]  // Remote port
+size_t TcpClient::getSendAsyncBufferSize() const [macos,windows,linux,android,ios]  // Get the send queue high-water mark in bytes
+size_t TcpClient::getSendAsyncPendingBytes() const [macos,windows,linux,android,ios]  // Bytes queued but not yet completed
+bool TcpClient::isConnected() const [macos,windows,linux,android,ios]  // Whether currently connected
+bool TcpClient::isConnecting() const [macos,windows,linux,android,ios]  // Whether a TCP connection attempt or TLS handshake is in progress
+bool TcpClient::isUsingThread() const [macos,windows,linux,android,ios]  // Whether threading is in use
+void TcpClient::notifyError(const std::string & msg, int code = 0) [macos,windows,linux,android,ios]  // Report an error (message + code) from a derived class.
+void TcpClient::processNetwork() [macos,windows,linux,android,ios]  // Pump pending TCP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
+bool TcpClient::processNetworkStep(const AliveToken & alive) [macos,windows,linux,android,ios]  // processNetwork()'s work for derived classes and the receive thread. Returns false when the calling thread must stop without reading the client again: it reported the end of the connection, or a listener destroyed the client.
+bool TcpClient::send(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Send data to the server
+SendResult TcpClient::sendAsync(const void * data, size_t size) [+2] [macos,windows,linux,android,ios]  // Queue owned bytes without waiting; returns SendResult and reports once through onSendComplete
+void TcpClient::setBlocking(bool blocking) [macos,windows,linux,android,ios]  // Set blocking mode
+void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the TCP connect deadline in seconds; default 0 uses the OS deadline
+void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size
+void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited
+void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the idle send timeout in seconds; default 60, 0 waits forever
+void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use threads (must be false on Wasm)
 ```
 
 ### TcpClientConnectEventArgs — Event args for TcpServer::onClientConnect
@@ -4131,24 +4131,24 @@ void TcpClient::setUseThread(bool useThread)  // Whether to use threads (must be
 ### TcpServer — TCP server (accept clients, send/broadcast)
 
 ```cpp
-void TcpServer::broadcast(const void * data, size_t size) [+2]  // Broadcast data to all clients and wait for every one of them (blocking)
-int TcpServer::broadcastAsync(const void * data, size_t size) [+2]  // Queue data for every client and return at once; returns how many accepted it
-void TcpServer::disconnectAllClients()  // Disconnect all clients
-void TcpServer::disconnectClient(int clientId)  // Disconnect a specific client
-const TcpServerClient * TcpServer::getClient(int clientId) const  // Client info (nullptr if not found)
-int TcpServer::getClientCount() const  // Number of connected clients
-std::vector<int> TcpServer::getClientIds() const  // IDs of all connected clients
-int TcpServer::getPort() const  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
-size_t TcpServer::getSendAsyncBufferSize() const  // The current high-water mark for one client's send queue, in bytes
-size_t TcpServer::getSendAsyncPendingBytes(int clientId) const  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
-bool TcpServer::isRunning() const  // Whether the server is running
-bool TcpServer::send(int clientId, const void * data, size_t size) [+2]  // Send data to a specific client (blocking)
-SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2]  // Queue data for a client and return at once, without waiting for it to be written
-void TcpServer::setReceiveBufferSize(size_t size)  // Set the receive buffer size
-void TcpServer::setSendAsyncBufferSize(size_t bytes)  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
-void TcpServer::setSendTimeout(float seconds)  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
-bool TcpServer::start(int port, int maxClients = 0)  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)
-void TcpServer::stop()  // Stop the server
+void TcpServer::broadcast(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Broadcast data to all clients and wait for every one of them (blocking)
+int TcpServer::broadcastAsync(const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for every client and return at once; returns how many accepted it
+void TcpServer::disconnectAllClients() [macos,windows,linux,android]  // Disconnect all clients
+void TcpServer::disconnectClient(int clientId) [macos,windows,linux,android]  // Disconnect a specific client
+const TcpServerClient * TcpServer::getClient(int clientId) const [macos,windows,linux,android]  // Client info (nullptr if not found)
+int TcpServer::getClientCount() const [macos,windows,linux,android]  // Number of connected clients
+std::vector<int> TcpServer::getClientIds() const [macos,windows,linux,android]  // IDs of all connected clients
+int TcpServer::getPort() const [macos,windows,linux,android]  // The port the server is bound to. After start(0) this is the port the OS picked; for a fixed port it is that port
+size_t TcpServer::getSendAsyncBufferSize() const [macos,windows,linux,android]  // The current high-water mark for one client's send queue, in bytes
+size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,linux,android]  // How much a client has queued and not yet completed, in bytes (0 for an unknown client)
+bool TcpServer::isRunning() const [macos,windows,linux,android]  // Whether the server is running
+bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Send data to a specific client (blocking)
+SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queue data for a client and return at once, without waiting for it to be written
+void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Set the receive buffer size
+void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Set the high-water mark for one client's send queue, in bytes (0 = unlimited). Defaults to 16 MB
+void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Set how long a send may stall without progress before giving up, in seconds (0 = wait indefinitely)
+bool TcpServer::start(int port, int maxClients = 0) [macos,windows,linux,android]  // Start listening on a port. maxClients caps the connected clients (0 = unlimited, the default)
+void TcpServer::stop() [macos,windows,linux,android]  // Stop the server
 ```
 
 ### TcpServerClient — A client connected to a TcpServer (read-only handle)
@@ -4215,19 +4215,19 @@ void Texture::unbind() const  // Unbind texture
 void Texture::updateCompressed(const void * data, size_t dataSize)  // Upload compressed pixel data to an already-allocated texture
 ```
 
-### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread).
+### Thread — Base class for background threads (ofThread compatible). Subclass it, override the protected pure-virtual threadedFunction() with a while (isThreadRunning()) { ... } loop, then control it with startThread()/stopThread()/waitForThread(). A protected mutex dataMutex_ is available for sharing data. A subclass must call waitForThread() in its own destructor: the base destructor also stops and joins, but only after the subclass members are destroyed, and logs a warning if threadedFunction() is still running. A subclass that does not wait may be destroyed before its worker has called threadedFunction() (e.g. right after startThread()), and then it depends on when the worker makes that call: while the subclass destructor runs, the real threadedFunction() runs and may use members that are already destroyed (undefined behaviour, usually without an abort); at about the moment ~Thread() starts, it can still end in "pure virtual method called"; after that, threadedFunction() is skipped and the base destructor warns and joins. Only waiting in the subclass destructor (waitForThread()) rules out all three. Hold subclasses via unique_ptr / shared_ptr (moving a Thread is deprecated: it does not move the running thread). When called on the worker itself, waitForThread() returns without joining (requesting stop by default); self-destruction detaches, and the worker must not access members afterward.
 
 ```cpp
-std::thread::id Thread::getMainThreadId()  // Get the main thread ID, recording the current thread's ID on the first call.
-std::thread::id Thread::getThreadId() const  // Get the underlying thread's ID.
-bool Thread::isCurrentThreadTheMainThread()  // Whether the current thread is the main thread. The main thread ID must be recorded first (call getMainThreadId() from the main thread).
-bool Thread::isThreadRunning() const  // Whether the thread is currently running.
-void Thread::sleep(unsigned long milliseconds)  // Pause the current thread for the given number of milliseconds.
-void Thread::startThread()  // Start the background thread (runs threadedFunction). No-op if already running.
-void Thread::stopThread()  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
-void Thread::threadedFunction()  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
-void Thread::waitForThread(bool callStopThread = true)  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first. A subclass must call it in its own destructor. Never call it on the thread itself (e.g. from a destructor that runs inside threadedFunction()): joining itself throws std::system_error.
-void Thread::yield()  // Yield execution to other threads.
+std::thread::id Thread::getMainThreadId() [macos,windows,linux,android,ios]  // Get the main thread ID, recording the current thread's ID on the first call.
+std::thread::id Thread::getThreadId() const [macos,windows,linux,android,ios]  // Get the underlying thread's ID.
+bool Thread::isCurrentThreadTheMainThread() [macos,windows,linux,android,ios]  // Whether the current thread is the main thread. The main thread ID must be recorded first (call getMainThreadId() from the main thread).
+bool Thread::isThreadRunning() const [macos,windows,linux,android,ios]  // Whether the thread is currently running.
+void Thread::sleep(unsigned long milliseconds) [macos,windows,linux,android,ios]  // Pause the current thread for the given number of milliseconds.
+void Thread::startThread() [macos,windows,linux,android,ios]  // Start the background thread (runs threadedFunction). No-op if already running.
+void Thread::stopThread() [macos,windows,linux,android,ios]  // Send the stop signal: isThreadRunning() returns false inside threadedFunction so a while-loop can exit. Does not block.
+void Thread::threadedFunction() [macos,windows,linux,android,ios]  // Override this with the work to run on the thread; recommended pattern is while (isThreadRunning()) { ... }. (protected, pure virtual)
+void Thread::waitForThread(bool callStopThread = true) [macos,windows,linux,android,ios]  // Wait (join) for the thread to finish. If callStopThread is true (default), calls stopThread() first. A subclass must call it in its own destructor. On the worker itself, returns without joining and leaves the handle available for a later join from another thread. Self-destruction detaches in the base destructor; after destroying itself, the worker must not access members.
+void Thread::yield() [macos,windows,linux,android,ios]  // Yield execution to other threads.
 ```
 
 ### ThreadChannel<T> — Thread-safe FIFO queue for one-way inter-thread communication (ofThreadChannel compatible), template<typename T>. Producer-Consumer pattern: a worker thread send()s values and another thread receive()s them. Use two channels for bidirectional communication.
@@ -4333,34 +4333,34 @@ TweenMod & TweenMod::start()  // Start (or restart) the tween from its configure
 ### UdpSocket — UDP socket (send/receive datagrams, broadcast, multicast)
 
 ```cpp
-bool UdpSocket::bind(int port, bool startReceiving = true)  // Bind a port for receiving (startReceiving auto-starts the receive thread)
-void UdpSocket::close()  // Close the socket
-bool UdpSocket::connect(const std::string & host, int port)  // Set the destination for send()
-bool UdpSocket::create()  // Create the socket explicitly (usually auto-created by bind/connect)
-const std::string & UdpSocket::getConnectedHost() const  // Destination host from connect()
-int UdpSocket::getConnectedPort() const  // Destination port from connect()
-int UdpSocket::getLocalPort() const  // The bound local port
-bool UdpSocket::isReceiving() const  // Whether the receive thread is active
-bool UdpSocket::isValid() const  // Whether the socket is valid
-bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string(""))  // Join a multicast group for receiving (call after bind; "" = default route) 
-bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string(""))  // Leave a previously joined multicast group
-void UdpSocket::processNetwork()  // Pump pending UDP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
-int UdpSocket::receive(void * buffer, size_t bufferSize) [+1]  // Blocking receive (for non-event use); returns byte count or -1
-bool UdpSocket::send(const void * data, size_t size) [+1]  // Send to the destination set by connect()
-bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1]  // Send data to a specific host and port
-bool UdpSocket::setBroadcast(bool enable)  // Allow broadcast sending
-bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr)  // Pick the NIC for outgoing multicast ("" = default route) 
-bool UdpSocket::setMulticastLoopback(bool enable)  // Whether outgoing multicast loops back to local listeners (default on)
-bool UdpSocket::setMulticastTTL(int ttl)  // Hop limit for outgoing multicast (default 1 = local subnet)
-bool UdpSocket::setNonBlocking(bool nonBlocking)  // Set non-blocking mode
-bool UdpSocket::setReceiveBufferSize(int size)  // Set the receive buffer size
-bool UdpSocket::setReceiveTimeout(int timeoutMs)  // Set the receive timeout (0 = infinite)
-bool UdpSocket::setReuseAddress(bool enable)  // Allow address reuse (set before bind)
-bool UdpSocket::setReusePort(bool enable)  // Allow multiple sockets on the same port (multicast receivers; set before bind)
-bool UdpSocket::setSendBufferSize(int size)  // Set the send buffer size
-void UdpSocket::setUseThread(bool useThread)  // Whether to use a receive thread (must be false on Wasm)
-void UdpSocket::startReceiving()  // Start the receive thread (auto-called after bind)
-void UdpSocket::stopReceiving()  // Stop the receive thread
+bool UdpSocket::bind(int port, bool startReceiving = true) [macos,windows,linux,android,ios]  // Bind a port for receiving (startReceiving auto-starts the receive thread)
+void UdpSocket::close() [macos,windows,linux,android,ios]  // Close the socket
+bool UdpSocket::connect(const std::string & host, int port) [macos,windows,linux,android,ios]  // Set the destination for send()
+bool UdpSocket::create() [macos,windows,linux,android,ios]  // Create the socket explicitly (usually auto-created by bind/connect)
+const std::string & UdpSocket::getConnectedHost() const [macos,windows,linux,android,ios]  // Destination host from connect()
+int UdpSocket::getConnectedPort() const [macos,windows,linux,android,ios]  // Destination port from connect()
+int UdpSocket::getLocalPort() const [macos,windows,linux,android,ios]  // The bound local port
+bool UdpSocket::isReceiving() const [macos,windows,linux,android,ios]  // Whether the receive thread is active
+bool UdpSocket::isValid() const [macos,windows,linux,android,ios]  // Whether the socket is valid
+bool UdpSocket::joinMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Join a multicast group for receiving (call after bind; "" = default route) 
+bool UdpSocket::leaveMulticastGroup(const std::string & groupAddr, const std::string & interfaceAddr = std::string("")) [macos,windows,linux,android,ios]  // Leave a previously joined multicast group
+void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Pump pending UDP I/O; normally auto-driven by the update event, but can be called manually for synchronous polling.
+int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Blocking receive (for non-event use); returns byte count or -1
+bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Send to the destination set by connect()
+bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Send data to a specific host and port
+bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Allow broadcast sending
+bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Pick the NIC for outgoing multicast ("" = default route) 
+bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Whether outgoing multicast loops back to local listeners (default on)
+bool UdpSocket::setMulticastTTL(int ttl) [macos,windows,linux,android,ios]  // Hop limit for outgoing multicast (default 1 = local subnet)
+bool UdpSocket::setNonBlocking(bool nonBlocking) [macos,windows,linux,android,ios]  // Set non-blocking mode
+bool UdpSocket::setReceiveBufferSize(int size) [macos,windows,linux,android,ios]  // Set the receive buffer size
+bool UdpSocket::setReceiveTimeout(int timeoutMs) [macos,windows,linux,android,ios]  // Set the receive timeout (0 = infinite)
+bool UdpSocket::setReuseAddress(bool enable) [macos,windows,linux,android,ios]  // Allow address reuse (set before bind)
+bool UdpSocket::setReusePort(bool enable) [macos,windows,linux,android,ios]  // Allow multiple sockets on the same port (multicast receivers; set before bind)
+bool UdpSocket::setSendBufferSize(int size) [macos,windows,linux,android,ios]  // Set the send buffer size
+void UdpSocket::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use a receive thread (must be false on Wasm)
+void UdpSocket::startReceiving() [macos,windows,linux,android,ios]  // Start the receive thread (auto-called after bind)
+void UdpSocket::stopReceiving() [macos,windows,linux,android,ios]  // Stop the receive thread
 ```
 
 ### Vec2 — 2D vector (x, y)
@@ -4433,77 +4433,77 @@ const std::string & VideoDeviceInfo::getUniqueId() const  // Get the stable uniq
 ### VideoGrabber — Webcam capture source. Call setup() once, then update() every frame; getTexture() (via HasTexture) gives the live frame. Move-only. Camera permission is requested automatically on macOS
 
 ```cpp
-bool VideoGrabber::checkCameraPermission()  // Return whether camera access has been granted (macOS 10.14+)
-void VideoGrabber::close()  // Stop the camera and release its resources
-void VideoGrabber::copyToImage(Image & image) const  // Copy the current frame into an Image (allocating/updating it as needed)
-int VideoGrabber::getDesiredFrameRate() const  // Return the requested frame rate (-1 if unspecified)
-int VideoGrabber::getDeviceID() const  // Return the selected device ID
-const std::string & VideoGrabber::getDeviceName() const  // Return the name of the active capture device
+bool VideoGrabber::checkCameraPermission() [macos,windows,linux,ios,web]  // Return whether camera access has been granted (macOS 10.14+)
+void VideoGrabber::close() [macos,windows,linux,ios,web]  // Stop the camera and release its resources
+void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web]  // Copy the current frame into an Image (allocating/updating it as needed)
+int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested frame rate (-1 if unspecified)
+int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected device ID
+const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the name of the active capture device
 size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the frame queue capacity (0 = queueing disabled)
-int VideoGrabber::getHeight() const  // Return the captured frame height in pixels
-unsigned char * VideoGrabber::getPixels() [+1]  // Return a pointer to the current RGBA pixel buffer
+int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the captured frame height in pixels
+unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current RGBA pixel buffer
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Drain all frames captured since the last call (appended to the given vector, oldest first; returns the count). Each GrabberFrame carries a monotonic timestamp stamped on the capture thread, so timestamps stay truthful even if the main loop stalls, and no frame is lost when the camera runs faster than the app loop. Requires setFrameQueueSize() > 0; getPixels()/isFrameNew() are unaffected
-Texture & VideoGrabber::getTexture() [+1]  // Return the texture holding the live camera frame (HasTexture override)
-int VideoGrabber::getWidth() const  // Return the captured frame width in pixels
-bool VideoGrabber::isFrameNew() const  // Return true if a new frame arrived during the most recent update()
-bool VideoGrabber::isInitialized() const  // Return true once the camera is set up and capturing
-bool VideoGrabber::isPendingPermission() const  // Return true while waiting for camera permission to be granted
-bool VideoGrabber::isVerbose() const  // Return whether verbose logging is enabled
-std::vector<VideoDeviceInfo> VideoGrabber::listDevices()  // Return the list of available camera devices
-void VideoGrabber::requestCameraPermission()  // Request camera access asynchronously (macOS)
-void VideoGrabber::setDesiredFrameRate(int fps)  // Request a capture frame rate; call before setup()
-void VideoGrabber::setDeviceID(int deviceId)  // Select which camera to use; call before setup()
+Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture holding the live camera frame (HasTexture override)
+int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the captured frame width in pixels
+bool VideoGrabber::isFrameNew() const [macos,windows,linux,ios,web]  // Return true if a new frame arrived during the most recent update()
+bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Return true once the camera is set up and capturing
+bool VideoGrabber::isPendingPermission() const [macos,windows,linux,ios,web]  // Return true while waiting for camera permission to be granted
+bool VideoGrabber::isVerbose() const [macos,windows,linux,ios,web]  // Return whether verbose logging is enabled
+std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,ios,web]  // Return the list of available camera devices
+void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access asynchronously (macOS)
+void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Request a capture frame rate; call before setup()
+void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select which camera to use; call before setup()
 void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Enable the timestamped frame queue and set its capacity (0 = disable, the default; zero overhead when off). When full, the oldest frame is dropped so a slow consumer never blocks capture. Sizing hint: at least ceil(cameraFps / appFps) plus headroom; 8-16 is plenty. Can be called before or after setup()
-bool VideoGrabber::setup(int width = 640, int height = 480)  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
-void VideoGrabber::setVerbose(bool verbose)  // Enable or disable verbose logging
-void VideoGrabber::update()  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
+bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Start the camera at the requested size. Returns false if permission is not yet granted (it is requested asynchronously); keep calling update() and capture begins once granted
+void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose logging
+void VideoGrabber::update() [macos,windows,linux,ios,web]  // Poll for a new frame and upload it to the texture. Call every frame; also completes a setup() that was waiting on permission
 ```
 
 ### VideoPlayer — Plays a video file: load/play/stop, per-frame update, and a texture you can draw each frame
 
 ```cpp
-void VideoPlayer::close()  // Close the video and release resources
-void VideoPlayer::draw(float x, float y) const [+1]  // Draw the current video frame at (x, y), optionally scaled to w x h
-bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
-bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
+void VideoPlayer::close() [macos,windows,linux,ios,web]  // Close the video and release resources
+void VideoPlayer::draw(float x, float y) const [+1] [macos,windows,linux,ios,web]  // Draw the current video frame at (x, y), optionally scaled to w x h
+bool VideoPlayer::extractFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extract the exact frame at a given time from a video file. Frame-accurate on every platform
+bool VideoPlayer::extractKeyFrame(const fs::path & path, Pixels & outPixels, float timeSec, float * outDuration = nullptr) [+3] [macos,windows,linux,ios,web]  // Extract the nearest keyframe at or before a given time. Faster than extractFrame but time-approximate
 int VideoPlayer::getAudioChannels() const [macos,windows,linux,ios]  // Number of audio channels (0 if no audio)
 uint32_t VideoPlayer::getAudioCodec() const [macos,windows,linux,ios]  // FourCC of the audio codec in the loaded video (0 if none)
 std::vector<uint8_t> VideoPlayer::getAudioData() const [macos,windows,linux,ios]  // Raw decoded audio data for the loaded video
 int VideoPlayer::getAudioSampleRate() const [macos,windows,linux,ios]  // Audio sample rate in Hz (0 if no audio)
-bool VideoPlayer::getAutoPoster() const  // Return whether the auto poster is enabled (default true)
-int VideoPlayer::getCurrentFrameImpl() const  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
-float VideoPlayer::getDuration() const  // Get total duration in seconds
-float VideoPlayer::getFrameRate() const  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
-float VideoPlayer::getGammaCorrection() const  // Get current gamma correction value
-std::string VideoPlayer::getHwAccelName() const  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
-fs::path VideoPlayer::getPath() const  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
-unsigned char * VideoPlayer::getPixels() [+1]  // Pointer to the current RGBA pixel buffer (mutable)
-unsigned char * VideoPlayer::getPixelsUV()  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
-unsigned char * VideoPlayer::getPixelsY()  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
-float VideoPlayer::getPosition() const  // Get current position (0.0 to 1.0)
-int VideoPlayer::getTotalFramesImpl() const  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
-bool VideoPlayer::getUseHwAccel() const  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
-bool VideoPlayer::hasAudio() const  // Check if the loaded video has an audio track
-bool VideoPlayer::isAudioStreaming() const  // Return the audio streaming preference (default true); on Linux it applies to the next load(). Native OS players ignore the preference.
-bool VideoPlayer::isUsingHwAccel() const  // Check if hardware decoding is currently active (after load)
-LoadResult VideoPlayer::load(const fs::path & path)  // Load a video file On Web, load waits for a decoded first frame instead of returning placeholder dimensions.
-void VideoPlayer::nextFrameImpl()  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayer::play()  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
-void VideoPlayer::playImpl()  // Backend implementation of playImpl for this platform's video player.
-void VideoPlayer::previousFrameImpl()  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayer::setAudioStreaming(bool streaming)  // Choose Linux audio streaming (default true). Call before load(); false preloads the whole track for sample-accurate loops and seeks. Changes apply to the next load.
-void VideoPlayer::setAutoPoster(bool on)  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
-void VideoPlayer::setFrameImpl(int frame)  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
-void VideoPlayer::setGammaCorrection(float gamma)  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
-void VideoPlayer::setLoopImpl(bool loop)  // Backend implementation of setLoopImpl for this platform's video player.
-void VideoPlayer::setPanImpl(float pan)  // Backend implementation of setPanImpl for this platform's video player.
-void VideoPlayer::setPausedImpl(bool paused)  // Backend implementation of setPausedImpl for this platform's video player.
-void VideoPlayer::setPositionImpl(float pct)  // Backend implementation of setPositionImpl for this platform's video player.
-void VideoPlayer::setSpeedImpl(float speed)  // Backend implementation of setSpeedImpl for this platform's video player.
-void VideoPlayer::setUseHwAccel(bool enable)  // Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only.
-void VideoPlayer::setVolumeImpl(float vol)  // Backend implementation of setVolumeImpl for this platform's video player.
-void VideoPlayer::stopImpl()  // Backend implementation of stopImpl for this platform's video player.
-void VideoPlayer::update()  // Update the video frame. Call once per frame in update()
+bool VideoPlayer::getAutoPoster() const [macos,windows,linux,ios,web]  // Return whether the auto poster is enabled (default true)
+int VideoPlayer::getCurrentFrameImpl() const [macos,windows,linux,ios,web]  // Protected implementation hook: return the current frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
+float VideoPlayer::getDuration() const [macos,windows,linux,ios,web]  // Get total duration in seconds
+float VideoPlayer::getFrameRate() const [macos,windows,linux,ios,web]  // Get the file frame rate in fps, or 0 when unknown or unloaded. Web returns 0.
+float VideoPlayer::getGammaCorrection() const [macos,windows,linux,ios,web]  // Get current gamma correction value
+std::string VideoPlayer::getHwAccelName() const [macos,windows,linux,ios,web]  // Get the name of the active decode backend. Returns 'vaapi', 'v4l2m2m', 'cuda', 'videotoolbox', 'mediafoundation', 'software', or 'none'
+fs::path VideoPlayer::getPath() const [macos,windows,linux,ios,web]  // Path of the currently loaded video file (resolved via getDataPath); empty string when nothing is loaded
+unsigned char * VideoPlayer::getPixels() [+1] [macos,windows,linux,ios,web]  // Pointer to the current RGBA pixel buffer (mutable)
+unsigned char * VideoPlayer::getPixelsUV() [macos,windows,linux,ios,web]  // Pointer to the interleaved UV (chroma) plane when decoding NV12; null otherwise
+unsigned char * VideoPlayer::getPixelsY() [macos,windows,linux,ios,web]  // Pointer to the Y (luma) plane when decoding NV12/YUV; null otherwise
+float VideoPlayer::getPosition() const [macos,windows,linux,ios,web]  // Get current position (0.0 to 1.0)
+int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Protected implementation hook: return the total frame count. Called after VideoPlayerBase's public frame API accepts the frame rate.
+bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Get HW accel preference (not the actual backend — use isUsingHwAccel() for that)
+bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Check if the loaded video has an audio track
+bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Return the audio streaming preference (default true); on Linux it applies to the next load(). Native OS players ignore the preference.
+bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Check if hardware decoding is currently active (after load)
+LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Load a video file On Web, load waits for a decoded first frame instead of returning placeholder dimensions.
+void VideoPlayer::nextFrameImpl() [macos,windows,linux,ios,web]  // Protected implementation hook: advance to the next frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::play() [macos,windows,linux,ios,web]  // Start or resume playback. With the auto poster (default), a seek made while stopped/paused is bridged with the exact frame at the new position before playback, so it never starts on a stale picture
+void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Backend implementation of playImpl for this platform's video player.
+void VideoPlayer::previousFrameImpl() [macos,windows,linux,ios,web]  // Protected implementation hook: step back to the previous frame. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::setAudioStreaming(bool streaming) [macos,windows,linux,ios,web]  // Choose Linux audio streaming (default true). Call before load(); false preloads the whole track for sample-accurate loops and seeks. Changes apply to the next load.
+void VideoPlayer::setAutoPoster(bool on) [macos,windows,linux,ios,web]  // Auto poster (default ON): on load/stop/play the player synchronously puts the frame at the current position on the texture, so drawing never shows black or a stale picture. Turn off to skip the one-time synchronous decode
+void VideoPlayer::setFrameImpl(int frame) [macos,windows,linux,ios,web]  // Protected implementation hook: seek to the given frame index. Called after VideoPlayerBase's public frame API accepts the frame rate.
+void VideoPlayer::setGammaCorrection(float gamma) [macos,windows,linux,ios,web]  // Set gamma correction (1.0 = none). Use ~0.45 to brighten on platforms with dark output (e.g. macOS AVFoundation)
+void VideoPlayer::setLoopImpl(bool loop) [macos,windows,linux,ios,web]  // Backend implementation of setLoopImpl for this platform's video player.
+void VideoPlayer::setPanImpl(float pan) [macos,windows,linux,ios,web]  // Backend implementation of setPanImpl for this platform's video player.
+void VideoPlayer::setPausedImpl(bool paused) [macos,windows,linux,ios,web]  // Backend implementation of setPausedImpl for this platform's video player.
+void VideoPlayer::setPositionImpl(float pct) [macos,windows,linux,ios,web]  // Backend implementation of setPositionImpl for this platform's video player.
+void VideoPlayer::setSpeedImpl(float speed) [macos,windows,linux,ios,web]  // Backend implementation of setSpeedImpl for this platform's video player.
+void VideoPlayer::setUseHwAccel(bool enable) [macos,windows,linux,ios,web]  // Enable/disable hardware decoding. Must be called before load(). Default: true. When enabled, the player probes available HW backends (VAAPI, V4L2M2M, CUDA, etc.) and falls back to software if none are available. Currently affects the Linux backend only.
+void VideoPlayer::setVolumeImpl(float vol) [macos,windows,linux,ios,web]  // Backend implementation of setVolumeImpl for this platform's video player.
+void VideoPlayer::stopImpl() [macos,windows,linux,ios,web]  // Backend implementation of stopImpl for this platform's video player.
+void VideoPlayer::update() [macos,windows,linux,ios,web]  // Update the video frame. Call once per frame in update()
 ```
 
 ### VideoPlayerBase — Abstract base class for video playback. Use VideoPlayer for the concrete implementation.
@@ -4588,42 +4588,42 @@ void VideoPlayerBase::update()  // Decode the next frame and refresh internal st
 ### VideoWriter — Encodes frames to a video file: open a path, write frames, then close to finalize the file
 
 ```cpp
-SaveResult VideoWriter::addFrame(const Fbo & fbo) [+1]  // Append one frame at the fixed-rate clock (frameIndex/fps). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
-SaveResult VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2]  // Append one frame at an explicit presentation time (seconds). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
-SaveResult VideoWriter::close()  // Finalize and flush the video file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
-float VideoWriter::getFps() const  // Fixed encoding frame rate
-int VideoWriter::getFrameCount() const  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
-int VideoWriter::getHeight() const  // Encoder output height in pixels
-fs::path VideoWriter::getPath() const  // Resolved output file path
-const VideoRecordSettings & VideoWriter::getSettings() const  // Encoder settings the writer was opened with
-int VideoWriter::getWidth() const  // Encoder output width in pixels
-bool VideoWriter::isOpen() const  // Check if the encoder is open and accepting frames
+SaveResult VideoWriter::addFrame(const Fbo & fbo) [+1] [macos,windows,linux,android,ios]  // Append one frame at the fixed-rate clock (frameIndex/fps). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::addFrameAt(const Fbo & fbo, double timeSec) [+2] [macos,windows,linux,android,ios]  // Append one frame at an explicit presentation time (seconds). Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::close() [macos,windows,linux,android,ios]  // Finalize and flush the video file. Returns SaveResult for backend finalization, retaining the first backend failure. Caller errors and transient readback failures do not fail the take. Repeated calls retain the result without another Error. No temporary/rename is used.
+float VideoWriter::getFps() const [macos,windows,linux,android,ios]  // Fixed encoding frame rate
+int VideoWriter::getFrameCount() const [macos,windows,linux,android,ios]  // Number of video frames accepted by the backend; failed submissions are excluded. Finalization may still fail.
+int VideoWriter::getHeight() const [macos,windows,linux,android,ios]  // Encoder output height in pixels
+fs::path VideoWriter::getPath() const [macos,windows,linux,android,ios]  // Resolved output file path
+const VideoRecordSettings & VideoWriter::getSettings() const [macos,windows,linux,android,ios]  // Encoder settings the writer was opened with
+int VideoWriter::getWidth() const [macos,windows,linux,android,ios]  // Encoder output width in pixels
+bool VideoWriter::isOpen() const [macos,windows,linux,android,ios]  // Check if the encoder is open and accepting frames
 unsigned char * VideoWriter::lockFrame(int & strideOut) [macos]  // Lock and return the encoder's frame buffer for zero-copy fills; strideOut receives the row stride. Pair with submitFrame
-SaveResult VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {})  // Open the native encoder. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
+SaveResult VideoWriter::open(const fs::path & path, int width, int height, const VideoRecordSettings & settings = {}) [macos,windows,linux,android,ios]  // Open the native encoder. Returns SaveResult for path preparation and encoder opening. Success starts an in-place stream; check close()/stop() for finalization.
 SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submit the previously locked frame at the given PTS. Returns SaveResult from the append BOOL and AVAssetWriter status/error. Accepted frames increase getFrameCount(); close() checks finalization.
-SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec)  // Append float32 audio at the given PTS; an absent audio track returns a failed SaveResult. Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
+SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Append float32 audio at the given PTS; an absent audio track returns a failed SaveResult. Returns SaveResult for this backend submission, not disk completion: Linux checks gst_app_src_push_buffer and polls bus errors during the take; Apple checks append and AVAssetWriter status/error; Windows checks WriteSample HRESULT. Check close()/stop() for finalization.
 ```
 
 ### Window — A secondary application window (macOS only for now). Owns its own Node tree, events, mouse state and render context; ticks at its display's refresh rate. GPU resources are shared with every other window
 
 ```cpp
-void Window::close()  // Close the native window; the main window and other windows keep running. A request, like exitApp() for the main window: it returns at once and the window closes at its backend's next safe point (after the current run-loop pass on Linux / Windows, after the next main-window tick on macOS), through the same path as its close button. Until then isOpen() is true and getApp() / App::getWindow() still return the App and the window. Safe to call from the window's own App (update() / draw() / keyPressed()). Destroying the Window (its last shared_ptr) still closes it immediately
-CoreEvents & Window::events()  // This window's own event stream (mousePressed / keyPressed / draw / ...)
-std::shared_ptr<App> Window::getApp() const  // Get the App attached to this window
-float Window::getFps() const  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
-int Window::getHeight() const  // Window height in logical points (matches its coordinate system)
-const std::string & Window::getTitle() const  // Last title set for this window (via WindowSettings or setTitle)
-int Window::getWidth() const  // Window width in logical points (matches its coordinate system)
-bool Window::isFullscreen() const  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
-bool Window::isOccluded() const  // Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window
-bool Window::isOpen() const  // Whether the native window is still open (true until a requested close() lands)
-void Window::setApp(std::shared_ptr<App> app)  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when it leaves its window (close(), setApp(other), or setApp(nullptr)), and leaving also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied
-void Window::setClearColor(const Color & c)  // Background clear color for this window
-void Window::setFps(float fps)  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
-void Window::setFullscreen(bool full)  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
-void Window::setSize(int width, int height)  // Resize this window's content area to the given logical size (points)
-void Window::setTitle(const std::string & title)  // Set the window title
-void Window::toggleFullscreen()  // Toggle this window's fullscreen state
+void Window::close() [macos,windows,linux]  // Close the native window; the main window and other windows keep running. A request, like exitApp() for the main window: it returns at once and the window closes at its backend's next safe point (after the current run-loop pass on Linux / Windows, after the next main-window tick on macOS), through the same path as its close button. Until then isOpen() is true and getApp() / App::getWindow() still return the App and the window. Safe to call from the window's own App (update() / draw() / keyPressed()). Destroying the Window (its last shared_ptr) still closes it immediately
+CoreEvents & Window::events() [macos,windows,linux]  // This window's own event stream (mousePressed / keyPressed / draw / ...)
+std::shared_ptr<App> Window::getApp() const [macos,windows,linux]  // Get the App attached to this window
+float Window::getFps() const [macos,windows,linux]  // This window's target frame rate set via setFps (0 = free-run at vsync); not a measured rate
+int Window::getHeight() const [macos,windows,linux]  // Window height in logical points (matches its coordinate system)
+const std::string & Window::getTitle() const [macos,windows,linux]  // Last title set for this window (via WindowSettings or setTitle)
+int Window::getWidth() const [macos,windows,linux]  // Window width in logical points (matches its coordinate system)
+bool Window::isFullscreen() const [macos,windows,linux]  // Whether this window is currently fullscreen (macOS reads the live window state; the transition is animated)
+bool Window::isOccluded() const [macos,windows,linux]  // Whether the OS reports this window as not visible, so it renders no frames (its update/draw pause until it is visible again): macOS minimized, fully covered or on another Space; Windows minimized or DXGI-occluded; Linux (X11) minimized or fully obscured (without a compositing manager). False for a closed window
+bool Window::isOpen() const [macos,windows,linux]  // Whether the native window is still open (true until a requested close() lands)
+void Window::setApp(std::shared_ptr<App> app) [macos,windows,linux]  // Attach an App to this window — the only way to give a window content. The App's full lifecycle (setup/update/draw/key/mouse/windowResized + RectNode size sync) runs against this window. One App per window. An App runs once: setup() when first attached, exit() / cleanup() when it leaves its window (close(), setApp(other), or setApp(nullptr)), and leaving also detaches its audioOut() / audioIn() for good. To show it again, create a new App: setApp() refuses an App whose cleanup() already ran, and any App on a window that is not open or is closing (both log an error and leave the window as it is). setApp() is a request: it returns at once and the window applies it at its next frame boundary (before or after one of its ticks or events), wherever it is called from, including the App's own update() / draw() / keyPressed(). Until then getApp() returns the current App. The last setApp() before the boundary wins, a close() requested before it wins over it, and the checks run again when the request is applied
+void Window::setClearColor(const Color & c) [macos,windows,linux]  // Background clear color for this window
+void Window::setFps(float fps) [macos,windows,linux]  // Set this window's target frame rate; <= 0 (or >= the display rate) free-runs at vsync, otherwise update/draw run at ~fps by skipping display ticks
+void Window::setFullscreen(bool full) [macos,windows,linux]  // Enter or leave fullscreen for this window (macOS native fullscreen, Windows borderless-fullscreen, Linux EWMH _NET_WM_STATE_FULLSCREEN)
+void Window::setSize(int width, int height) [macos,windows,linux]  // Resize this window's content area to the given logical size (points)
+void Window::setTitle(const std::string & title) [macos,windows,linux]  // Set the window title
+void Window::toggleFullscreen() [macos,windows,linux]  // Toggle this window's fullscreen state
 ```
 
 ### WindowSettings — Window configuration passed to the app at startup (size, title, DPI, MSAA, fullscreen, decoration, VSync). Setters chain

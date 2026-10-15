@@ -5,6 +5,7 @@ import platform
 import subprocess
 import shutil
 import argparse
+import re
 import glob
 from pathlib import Path
 import time
@@ -335,8 +336,14 @@ def build_test_project(test_dir, pg_bin, platform_info, args):
 
     build_dir_name = platform_info["build_dir"]
     cmd_config = cmake_config_cmd(build_dir_name, platform_info)
-    if platform_info["os"] == "linux" and os.path.basename(test_dir) == ALL_CORE_TESTS_NAME:
-        cmd_config.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+    if os.path.basename(test_dir) == ALL_CORE_TESTS_NAME:
+        if platform_info["os"] == "linux":
+            cmd_config.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
+        # Which combined tests to compile (--shard). Passed on every configure,
+        # empty for all of them, so a build dir never keeps an earlier shard's
+        # selection.
+        select = getattr(args, "core_test_select", None)
+        cmd_config.append("-DTC_CORE_TEST_SELECT=" + ";".join(select or []))
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
         return None, "configure"
 
@@ -379,6 +386,9 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
     # hide a missing registration or a stale CMake selection rule.
     expected_names = {os.path.basename(t) for t in find_core_tests(ROOT_DIR, include_daily=True)
                       if is_combined_core_test(t)}
+    select = getattr(args, "core_test_select", None)
+    if select is not None:   # --shard: this build holds only its share
+        expected_names &= set(select)
     Colors.print(f"Found {len(tests)} core test(s) for {ALL_CORE_TESTS_NAME}", Colors.YELLOW)
     print("")
 
@@ -565,8 +575,14 @@ def main():
     parser.add_argument('--addon-tests-only', action='store_true', help="Build AND RUN every addons/*/tests/ harness (console, non-zero exit fails). No-op if none exist. Harnesses with a daily-only marker are skipped unless --include-daily is given.")
     parser.add_argument('--include-daily', action='store_true', help="With --addon-tests-only or --core-tests-only: also run harnesses marked daily-only (the daily workflow passes this)")
     parser.add_argument('--core-tests-only', action='store_true', help="Build AND RUN every core/tests/*/ harness (console, non-zero exit fails). Daily-only harnesses are skipped unless --include-daily is given. No-op if none exist. With --web also, with --web-only instead: build the ones with a web-test marker for WebAssembly and run them under node.")
+    parser.add_argument('--shard', metavar='N/M', default='1/1', help="With --core-tests-only: run shard N of M (CI splits the core tests over M jobs). Shard 1 builds and runs the own-binary and unit tests; the combined tests, sorted by name, are dealt round-robin over shards 2..M (all in shard 1 when M is 1). Default 1/1: everything.")
     parser.add_argument('--verbose', action='store_true', help="Show detailed build output")
     args = parser.parse_args()
+
+    m = re.fullmatch(r'(\d+)/(\d+)', args.shard)
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        parser.error(f"--shard expects N/M with 1 <= N <= M, got {args.shard!r}")
+    args.shard_index, args.shard_count = int(m.group(1)), int(m.group(2))
 
     if args.web_only:
         args.web = True
@@ -625,6 +641,20 @@ def main():
         # built and run alone, as before.
         combined = [t for t in tests if is_combined_core_test(t)]
         own = [t for t in tests if not is_combined_core_test(t)]
+        args.core_test_select = None
+        if args.shard_count > 1:
+            # Deterministic: the same names always land in the same shard.
+            shard, shards = args.shard_index, args.shard_count
+            names = sorted(os.path.basename(t) for t in all_combined)
+            selected = [] if shard == 1 else \
+                [n for i, n in enumerate(names) if 2 + i % (shards - 1) == shard]
+            args.core_test_select = selected
+            all_combined = [t for t in all_combined if os.path.basename(t) in selected]
+            combined = [t for t in combined if os.path.basename(t) in selected]
+            if shard != 1:
+                own, unit_tests, web_tests = [], [], []
+            Colors.print(f"Shard {shard}/{shards}: {len(all_combined)} combined, "
+                         f"{len(own)} own-binary, {len(unit_tests)} unit test(s)", Colors.YELLOW)
         if all_combined:
             rc |= run_combined_core_tests(combined, pg_bin, platform_info, args)
         if own:
