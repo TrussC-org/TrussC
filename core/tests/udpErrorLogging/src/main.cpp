@@ -20,7 +20,7 @@ struct UdpSocketTestAccess {
     using Kind = UdpSocket::ErrorKind;
     static void openGate(UdpSocket& socket, Kind kind) {
         // Only used with no concurrent calls into this socket.
-        auto& gate = socket.errorLogs_[static_cast<size_t>(kind)].gate;
+        auto& gate = internal::sharedLoad(socket.state_)->errorLogs_[static_cast<size_t>(kind)].gate;
         std::destroy_at(&gate);
         std::construct_at(&gate); // once-only: no elapsed-time assumptions
     }
@@ -34,7 +34,7 @@ struct UdpSocketTestAccess {
     static int port(UdpSocket& socket) {
         sockaddr_in address{};
         socklen_t size = sizeof(address);
-        if (getsockname(socket.socket_, reinterpret_cast<sockaddr*>(&address), &size) != 0) return 0;
+        if (getsockname(internal::sharedLoad(socket.state_)->socket_->handle, reinterpret_cast<sockaddr*>(&address), &size) != 0) return 0;
         return ntohs(address.sin_port);
     }
 };

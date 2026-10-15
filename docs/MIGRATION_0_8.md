@@ -121,3 +121,41 @@ An empty exporter or a failed texture save now fails the call with one Error. OB
 - `<sys/stat.h>` (`stat`, `chmod`, `mkdir`) on macOS / Linux
 
 Socket headers still come in through TrussC's network headers. The common standard headers (`<mutex>`, `<thread>`, `<map>`, `<fstream>`, `<sstream>`, `<atomic>`, `<functional>`, `<chrono>`, ...) also still come in through `TrussC.h`.
+
+## Depth camera backends return an owned Device
+
+The `tcx::depthcamera::DepthCamera` backend interface changes in v0.8 (#796,
+PR-F2). Replace the handle's `bool openDevice()`, `closeDevice()` and
+`captureInto()` overrides with `std::shared_ptr<Device> openDevice()`. Put the
+source's resources and capture implementation in a `DepthCamera::Device`
+subclass:
+
+```cpp
+struct SensorDevice : DepthCamera::Device {
+    // Own the SDK session and all data capture touches here.
+    StreamFreshness captureInto(DepthFrame& dst) override;
+    ~SensorDevice() override; // release the SDK session here
+};
+
+std::shared_ptr<DepthCamera::Device> MyCamera::openDevice() {
+    return std::make_shared<SensorDevice>(); // return nullptr if opening fails
+}
+```
+
+Copy configuration from the backend into the Device at open. A Device must not
+retain the backend's address or call its members. `captureInto()` still fills a
+complete frame and returns `StreamFreshness`; only its owner changes. The capture
+run holds the Device until capture ends. `close()` waits from another thread;
+when called from capture itself it requests stop and returns, and the worker
+releases the Device on exit. Backend destructors no longer need to call
+`close()` before their members are destroyed. `setup()` closes the previous run
+before opening a new Device.
+
+Playback extensions move `readExtraBlock()` / `decodesBlockType()` overrides into
+a `PlaybackDepthCamera::PlaybackDevice` subclass and override the protected
+`makePlaybackDevice()` factory to return it. Keep custom decoding data in that
+Device or in shared storage it owns. `setLoop()` updates the active Device's
+atomic flag, so it can still change looping during threaded playback.
+
+External backends (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`) need the same
+migration in their own repositories; the old capture-on-backend hooks are removed.

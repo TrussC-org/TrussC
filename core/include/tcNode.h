@@ -852,7 +852,7 @@ private:
     // Framework hook, not an app callback (apps override cleanup()): runs
     // right before cleanupTree() runs this node's cleanup(). App detaches
     // its audioOut() / audioIn() here and waits for callbacks in flight.
-    virtual void onCleanupStart() {}
+    virtual void onCleanupStart() { cancelAllAsyncTimers(); }
 
     // Recursively update self and child nodes
     void updateTree() {
@@ -1451,9 +1451,11 @@ public:
     //
     // The callback runs ON THE SCHEDULER THREAD: guard state shared with
     // update()/draw() behind a mutex, never draw from it (AudioEngine::play is
-    // fine). Cancel them before the members the callback touches are destroyed
-    // (e.g. in cleanup() / on mode change); ~Node cancels any leftovers and
-    // waits for an in-flight callback to finish.
+    // fine). The framework's onCleanupStart() hook (not overridable by apps)
+    // cancels and waits before cleanupTree() calls cleanup().
+    // ~Node also cancels leftovers, but derived members have already died by
+    // then. A standalone node destroyed without cleanupTree() must cancel in
+    // its own destructor before the members its callbacks touch are destroyed.
     //
     // TC_LUA_SKIP: not exposed to Lua. Lua code only runs on the main thread;
     // Lua scripts use callAfter / callEvery.

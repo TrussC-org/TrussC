@@ -4090,7 +4090,9 @@ void TcpClient::setConnectTimeout(float seconds) [macos,windows,linux,android,io
 void TcpClient::setReceiveBufferSize(size_t size) [macos,windows,linux,android,ios]  // Set the receive buffer size
 void TcpClient::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android,ios]  // Set the send queue high-water mark; default 16 MB, 0 unlimited
 void TcpClient::setSendTimeout(float seconds) [macos,windows,linux,android,ios]  // Set the idle send timeout in seconds; default 60, 0 waits forever
+void TcpClient::setTransport(std::shared_ptr<Transport> transport) [macos,windows,linux,android,ios]  // Subclass hook: set the transport this client's connections use (TlsClient installs its TLS transport here). Call it before connecting; later connections keep it.
 void TcpClient::setUseThread(bool useThread) [macos,windows,linux,android,ios]  // Whether to use threads (must be false on Wasm)
+std::shared_ptr<State> TcpClient::state() const [macos,windows,linux,android,ios]  // Subclass hook: retain the current run's State. Load once at function entry and use that shared pointer throughout the function.
 ```
 
 ### TcpClientConnectEventArgs — Event args for TcpServer::onClientConnect

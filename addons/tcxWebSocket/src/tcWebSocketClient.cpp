@@ -74,14 +74,51 @@ namespace sha1 {
 // WebSocketClient Implementation
 // =============================================================================
 
-WebSocketClient::WebSocketClient() {}
+WebSocketClient::WebSocketClient() {
+    openTarget_ = tc::internal::EventSnapshotDelivery<void>::bind(onOpen, delivery_);
+    closeTarget_ = tc::internal::EventSnapshotDelivery<void>::bind(onClose, delivery_);
+    messageTarget_ = tc::internal::EventSnapshotDelivery<WebSocketEventArgs>::bind(onMessage, delivery_);
+    errorTarget_ = tc::internal::EventSnapshotDelivery<TcpErrorEventArgs>::bind(onError, delivery_);
+}
 
 WebSocketClient::~WebSocketClient() {
     *alive_ = false;
-    disconnect();
+    delivery_->close();
+    onOpen.clear(); onClose.clear(); onMessage.clear(); onError.clear();
+    auto state = tc::internal::sharedLoad(state_);
+    *state->alive_ = false;
+    state->disconnect();
+    state->receiveListener_.disconnect(); state->connectListener_.disconnect();
+    state->disconnectListener_.disconnect(); state->timeoutListener_.disconnect();
 }
 
 bool WebSocketClient::connect(const std::string& url) {
+    auto alive = alive_;
+    disconnect();
+    if (!*alive) return false;
+    auto previous = tc::internal::sharedLoad(state_);
+    // A reconnect in onClose may have opened another run; stop it before replacement.
+    if (previous->state_ != State::Disconnected) {
+        previous->disconnectListener_.disconnect();
+        previous->disconnect();
+    }
+    *previous->alive_ = false;
+    previous->receiveListener_.disconnect(); previous->connectListener_.disconnect();
+    previous->disconnectListener_.disconnect(); previous->timeoutListener_.disconnect();
+    auto state = std::make_shared<ConnectionState>();
+    state->tlsVerifyNone_ = tlsVerifyNone_; state->tlsCaPem_ = tlsCaPem_;
+    state->connectTimeout_ = connectTimeout_; state->handshakeTimeout_ = handshakeTimeout_.load();
+    state->onOpen.target = openTarget_; state->onClose.target = closeTarget_;
+    state->onMessage.target = messageTarget_; state->onError.target = errorTarget_;
+    tc::internal::sharedStore(state_, state);
+    return state->connect(url);
+}
+void WebSocketClient::disconnect() { auto state = tc::internal::sharedLoad(state_); state->disconnect(); }
+bool WebSocketClient::send(const std::string& message) { auto state = tc::internal::sharedLoad(state_); return state->send(message); }
+bool WebSocketClient::send(const std::vector<char>& data) { auto state = tc::internal::sharedLoad(state_); return state->send(data); }
+bool WebSocketClient::sendPing(const std::string& payload) { auto state = tc::internal::sharedLoad(state_); return state->sendPing(payload); }
+
+bool WebSocketClient::ConnectionState::connect(const std::string& url) {
     disconnect();
 
 #ifdef __EMSCRIPTEN__
@@ -128,12 +165,12 @@ bool WebSocketClient::connect(const std::string& url) {
         host_ = host_.substr(0, portStart);
     }
 
-    state_ = State::Connecting;
     setupClient(useTls_);
+    state_ = State::Connecting;
 
     // The 101 deadline is checked on the main thread
     if (!timeoutListener_.isConnected()) {
-        timeoutListener_ = events().update.listen(this, &WebSocketClient::checkHandshakeTimeout);
+        timeoutListener_ = events().update.listen([state = shared_from_this()] { state->checkHandshakeTimeout(); });
     }
 
     client_->connectAsync(host_, port_);
@@ -141,7 +178,7 @@ bool WebSocketClient::connect(const std::string& url) {
 #endif
 }
 
-void WebSocketClient::disconnect() {
+void WebSocketClient::ConnectionState::disconnect() {
 #ifdef __EMSCRIPTEN__
     if (wsHandle_ > 0) {
         emscripten_websocket_close(wsHandle_, 1000, "Normal closure");
@@ -151,14 +188,17 @@ void WebSocketClient::disconnect() {
 #else
     awaitingUpgrade_ = false;
     if (client_) {
-        // An onClose listener may reconnect or destroy this object from
-        // inside this call (it fires onDisconnect, which fires onClose). The
-        // state below then belongs to the new connection, or is gone.
-        std::shared_ptr<bool> alive = alive_;
+        // An onClose listener can replace the handle's current run. This
+        // State is retained by the caller until the notification returns.
+        std::shared_ptr<std::atomic<bool>> alive = alive_;
         unsigned connection = connection_;
         client_->disconnect();
         if (!*alive || connection_ != connection) return;
     }
+    receiveListener_.disconnect();
+    connectListener_.disconnect();
+    disconnectListener_.disconnect();
+    timeoutListener_.disconnect();
 #endif
     state_ = State::Disconnected;
     receiveBuffer_.clear();
@@ -168,8 +208,10 @@ void WebSocketClient::disconnect() {
     ++connection_;
 }
 
-void WebSocketClient::setupClient(bool useTls) {
+void WebSocketClient::ConnectionState::setupClient(bool useTls) {
 #ifndef __EMSCRIPTEN__
+    // connect() installs the transport before publishing Connecting.
+    if (state_ != State::Disconnected) return;
     if (useTls) {
         auto tls = std::make_unique<TlsClient>();
         // Cert verification is REQUIRED by default; user must opt in to skip it
@@ -181,9 +223,6 @@ void WebSocketClient::setupClient(bool useTls) {
             tls->setCACertificate(tlsCaPem_);
         }
         tls->setHandshakeTimeout(handshakeTimeout_);
-        // Replacing client_ may destroy the previous client on its own
-        // receive thread (connect() from an onClose or onError listener);
-        // that thread then stops without touching it again (#262).
         client_ = std::move(tls);
     } else {
         client_ = std::make_unique<TcpClient>();
@@ -192,15 +231,15 @@ void WebSocketClient::setupClient(bool useTls) {
     client_->setConnectTimeout(connectTimeout_);
 
     // Connect event
-    connectListener_ = client_->onConnect.listen(this, &WebSocketClient::handleTcpConnect);
+    connectListener_ = client_->onConnect.listen([state = shared_from_this()](auto& args) { state->handleTcpConnect(args); });
     // Receive event
-    receiveListener_ = client_->onReceive.listen(this, &WebSocketClient::handleRawReceive);
+    receiveListener_ = client_->onReceive.listen([state = shared_from_this()](auto& args) { state->handleRawReceive(args); });
     // Disconnect event
-    disconnectListener_ = client_->onDisconnect.listen(this, &WebSocketClient::handleTcpDisconnect);
+    disconnectListener_ = client_->onDisconnect.listen([state = shared_from_this()](auto& args) { state->handleTcpDisconnect(args); });
 #endif
 }
 
-void WebSocketClient::handleTcpConnect(TcpConnectEventArgs& args) {
+void WebSocketClient::ConnectionState::handleTcpConnect(TcpConnectEventArgs& args) {
 #ifndef __EMSCRIPTEN__
     if (args.success) {
         // The 101 deadline counts from the TCP connect (#262). For ws:// that
@@ -219,7 +258,7 @@ void WebSocketClient::handleTcpConnect(TcpConnectEventArgs& args) {
         // TlsClient's handshake deadline ran out: like the 101 timeout,
         // onError and then onClose. Any other failed connect reports onError.
         const bool timedOut = (args.message == "TLS handshake timeout");
-        std::shared_ptr<bool> alive = alive_;
+        std::shared_ptr<std::atomic<bool>> alive = alive_;
         unsigned connection = connection_;
         TcpErrorEventArgs err;
         err.message = "TCP Connection failed: " + args.message;
@@ -231,7 +270,7 @@ void WebSocketClient::handleTcpConnect(TcpConnectEventArgs& args) {
 #endif
 }
 
-void WebSocketClient::handleTcpDisconnect(TcpDisconnectEventArgs& args) {
+void WebSocketClient::ConnectionState::handleTcpDisconnect(TcpDisconnectEventArgs& args) {
 #ifndef __EMSCRIPTEN__
     // The server closed before the 101: the wait is over. Otherwise the
     // main thread's deadline check would still fire onError and
@@ -242,8 +281,12 @@ void WebSocketClient::handleTcpDisconnect(TcpDisconnectEventArgs& args) {
 #endif
 }
 
-void WebSocketClient::checkHandshakeTimeout() {
+void WebSocketClient::ConnectionState::checkHandshakeTimeout() {
 #ifndef __EMSCRIPTEN__
+    // Open: the deadline no longer applies. Stop polling here, on the main
+    // thread that owns timeoutListener_, rather than from the receive thread
+    // that saw the 101; this also releases the listener's hold on the State.
+    if (state_ == State::Open) { timeoutListener_.disconnect(); return; }
     if (!awaitingUpgrade_) return;
     const float timeout = handshakeTimeout_;
     if (timeout <= 0.0f) return;
@@ -258,7 +301,7 @@ void WebSocketClient::checkHandshakeTimeout() {
     // its synchronous onDisconnect so onError still precedes onClose.
     disconnectListener_.disconnect();
     disconnect();
-    std::shared_ptr<bool> alive = alive_;
+    std::shared_ptr<std::atomic<bool>> alive = alive_;
     unsigned connection = connection_;
     char seconds[32];
     snprintf(seconds, sizeof(seconds), "%g", timeout);
@@ -271,7 +314,7 @@ void WebSocketClient::checkHandshakeTimeout() {
 #endif
 }
 
-void WebSocketClient::sendHandshake() {
+void WebSocketClient::ConnectionState::sendHandshake() {
 #ifndef __EMSCRIPTEN__
     // Generate Sec-WebSocket-Key
     unsigned char randomBytes[16];
@@ -292,7 +335,7 @@ void WebSocketClient::sendHandshake() {
 #endif
 }
 
-void WebSocketClient::handleRawReceive(TcpReceiveEventArgs& args) {
+void WebSocketClient::ConnectionState::handleRawReceive(TcpReceiveEventArgs& args) {
 #ifndef __EMSCRIPTEN__
     receiveBuffer_.insert(receiveBuffer_.end(), args.data.begin(), args.data.end());
 
@@ -311,14 +354,14 @@ void WebSocketClient::handleRawReceive(TcpReceiveEventArgs& args) {
 #endif
 }
 
-void WebSocketClient::processHandshake(const std::string& header) {
+void WebSocketClient::ConnectionState::processHandshake(const std::string& header) {
 #ifndef __EMSCRIPTEN__
     // The handshake timeout on the main thread may have ended the wait
     // already; it closes the connection
     if (!awaitingUpgrade_.exchange(false)) return;
     if (header.find("101 Switching Protocols") != std::string::npos) {
         state_ = State::Open;
-        std::shared_ptr<bool> alive = alive_;
+        std::shared_ptr<std::atomic<bool>> alive = alive_;
         unsigned connection = connection_;
         onOpen.notify();
         // An onOpen listener may have disconnected, reconnected or
@@ -336,7 +379,7 @@ void WebSocketClient::processHandshake(const std::string& header) {
 #endif
 }
 
-void WebSocketClient::processFrame() {
+void WebSocketClient::ConnectionState::processFrame() {
 #ifndef __EMSCRIPTEN__
     while (receiveBuffer_.size() >= 2) {
         unsigned char b1 = (unsigned char)receiveBuffer_[0];
@@ -456,7 +499,7 @@ void WebSocketClient::processFrame() {
                 args.message.assign(payload.begin(), payload.end());
             }
             args.data = std::move(payload);
-            std::shared_ptr<bool> alive = alive_;
+            std::shared_ptr<std::atomic<bool>> alive = alive_;
             unsigned connection = connection_;
             onMessage.notify(args);
             // An onMessage listener may have disconnected, reconnected or
@@ -467,7 +510,7 @@ void WebSocketClient::processFrame() {
 #endif
 }
 
-bool WebSocketClient::send(const std::string& message) {
+bool WebSocketClient::ConnectionState::send(const std::string& message) {
 #ifdef __EMSCRIPTEN__
     if (wsHandle_ <= 0) return false;
     EMSCRIPTEN_RESULT res = emscripten_websocket_send_utf8_text(wsHandle_, message.c_str());
@@ -477,7 +520,7 @@ bool WebSocketClient::send(const std::string& message) {
 #endif
 }
 
-bool WebSocketClient::send(const std::vector<char>& data) {
+bool WebSocketClient::ConnectionState::send(const std::vector<char>& data) {
     if (state_ != State::Open) return false;
 
 #ifdef __EMSCRIPTEN__
@@ -523,12 +566,12 @@ bool WebSocketClient::send(const std::vector<char>& data) {
 // by proxies that keep connections alive via pings (e.g. Cloudflare): the app
 // kept reporting "online" over its HTTP heartbeat while its WS silently dropped,
 // so the server-side live flag went false and remote controls disappeared.
-void WebSocketClient::sendPong(const std::vector<char>& payload) {
+void WebSocketClient::ConnectionState::sendPong(const std::vector<char>& payload) {
     sendControl(0x0A, payload.data(), payload.size());
 }
 
 // Ping the peer. See the header for why a long-lived client needs this.
-bool WebSocketClient::sendPing(const std::string& payload) {
+bool WebSocketClient::ConnectionState::sendPing(const std::string& payload) {
     return sendControl(0x09, payload.data(), payload.size());
 }
 
@@ -537,7 +580,7 @@ bool WebSocketClient::sendPing(const std::string& payload) {
 //
 // The whole frame ships in one client_->send(), which TcpClient serializes under
 // its send mutex, so this stays frame-atomic against sends from other threads.
-bool WebSocketClient::sendControl(uint8_t opcode, const char* data, size_t len) {
+bool WebSocketClient::ConnectionState::sendControl(uint8_t opcode, const char* data, size_t len) {
 #ifndef __EMSCRIPTEN__
     if (state_ != State::Open || !client_) return false;
 
@@ -563,7 +606,7 @@ bool WebSocketClient::sendControl(uint8_t opcode, const char* data, size_t len) 
 #endif
 }
 
-void WebSocketClient::failConnection(uint16_t statusCode, const std::string& reason) {
+void WebSocketClient::ConnectionState::failConnection(uint16_t statusCode, const std::string& reason) {
 #ifndef __EMSCRIPTEN__
     // Close goes out first: sendControl() only sends while the state is Open.
     const char status[2] = {(char)((statusCode >> 8) & 0xFF), (char)(statusCode & 0xFF)};
@@ -571,7 +614,7 @@ void WebSocketClient::failConnection(uint16_t statusCode, const std::string& rea
 
     // onError fires before disconnect(), which fires onClose synchronously.
     // A listener may disconnect, reconnect or destroy the client (#262).
-    std::shared_ptr<bool> alive = alive_;
+    std::shared_ptr<std::atomic<bool>> alive = alive_;
     unsigned connection = connection_;
     TcpErrorEventArgs err;
     err.message = reason;
@@ -584,15 +627,19 @@ void WebSocketClient::failConnection(uint16_t statusCode, const std::string& rea
 }
 
 #ifdef __EMSCRIPTEN__
-EM_BOOL WebSocketClient::onEmscriptenOpen(int eventType, const EmscriptenWebSocketOpenEvent *websocketEvent, void *userData) {
-    WebSocketClient* self = static_cast<WebSocketClient*>(userData);
+EM_BOOL WebSocketClient::ConnectionState::onEmscriptenOpen(int eventType, const EmscriptenWebSocketOpenEvent *websocketEvent, void *userData) {
+    auto keepAlive = static_cast<ConnectionState*>(userData)->shared_from_this();
+    auto* self = keepAlive.get();
+    if (!*self->alive_) return EM_TRUE;
     self->state_ = State::Open;
     self->onOpen.notify();
     return EM_TRUE;
 }
 
-EM_BOOL WebSocketClient::onEmscriptenMessage(int eventType, const EmscriptenWebSocketMessageEvent *websocketEvent, void *userData) {
-    WebSocketClient* self = static_cast<WebSocketClient*>(userData);
+EM_BOOL WebSocketClient::ConnectionState::onEmscriptenMessage(int eventType, const EmscriptenWebSocketMessageEvent *websocketEvent, void *userData) {
+    auto keepAlive = static_cast<ConnectionState*>(userData)->shared_from_this();
+    auto* self = keepAlive.get();
+    if (!*self->alive_) return EM_TRUE;
     WebSocketEventArgs args;
     // Text messages arrive NUL-terminated with the terminator counted in
     // numBytes; fillMessageArgs drops it so web matches native.
@@ -603,15 +650,19 @@ EM_BOOL WebSocketClient::onEmscriptenMessage(int eventType, const EmscriptenWebS
     return EM_TRUE;
 }
 
-EM_BOOL WebSocketClient::onEmscriptenClose(int eventType, const EmscriptenWebSocketCloseEvent *websocketEvent, void *userData) {
-    WebSocketClient* self = static_cast<WebSocketClient*>(userData);
+EM_BOOL WebSocketClient::ConnectionState::onEmscriptenClose(int eventType, const EmscriptenWebSocketCloseEvent *websocketEvent, void *userData) {
+    auto keepAlive = static_cast<ConnectionState*>(userData)->shared_from_this();
+    auto* self = keepAlive.get();
+    if (!*self->alive_) return EM_TRUE;
     self->state_ = State::Disconnected;
     self->onClose.notify();
     return EM_TRUE;
 }
 
-EM_BOOL WebSocketClient::onEmscriptenError(int eventType, const EmscriptenWebSocketErrorEvent *websocketEvent, void *userData) {
-    WebSocketClient* self = static_cast<WebSocketClient*>(userData);
+EM_BOOL WebSocketClient::ConnectionState::onEmscriptenError(int eventType, const EmscriptenWebSocketErrorEvent *websocketEvent, void *userData) {
+    auto keepAlive = static_cast<ConnectionState*>(userData)->shared_from_this();
+    auto* self = keepAlive.get();
+    if (!*self->alive_) return EM_TRUE;
     TcpErrorEventArgs args;
     args.message = "WebSocket Error";
     self->onError.notify(args);

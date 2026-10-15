@@ -2,6 +2,7 @@
 namespace trussc {}
 namespace tc = trussc;
 #include "tcxMidiOut.h"
+#include "tcxMidiIn.h"
 
 #include <cstdio>
 #include <functional>
@@ -20,6 +21,69 @@ struct SendCase {
     std::function<bool(MidiOut&)> send;
     std::vector<unsigned char> expected;
 };
+}
+
+namespace {
+void inputLifecycle() {
+    using tcx::midi::MidiIn;
+    tc::getMainThreadId();
+    const auto mainThread = std::this_thread::get_id();
+    const libremidi::message packet{{0x90, 60, 100}, 5000000};
+    MidiIn input;
+    input.setBufferSize(1);
+    input.hasNewMessage();
+    int delivered = 0;
+    bool metadata = true;
+    auto listener = input.onMessage.listen([&](MidiMessage& msg) {
+        ++delivered;
+        metadata &= msg.portName == "test input" && msg.portNum == 0 && msg.deltatime == 0.005;
+    });
+    check(input.openPort(0), "open mock input");
+    auto oldCallback = libremidi::test::inputCallback;
+    oldCallback(packet);
+    oldCallback(packet);
+    check(delivered == 2 && metadata, "input callback uses copied port metadata and timestamp");
+    check(input.getDroppedMessageCount() == 1, "input queue counts overflow");
+    libremidi::test::duringClose = [&] { oldCallback(packet); };
+    input.closePort();
+    libremidi::test::duringClose = {};
+    oldCallback(packet);
+    check(delivered == 2 && !input.isOpen(), "messages during and after close are dropped");
+    MidiMessage queued;
+    check(input.getNextMessage(queued) && queued.bytes == packet.bytes,
+          "queued input survives closing its port");
+    check(input.openVirtualPort("replacement"), "reopen input");
+    oldCallback(packet);
+    check(delivered == 2, "retired callback cannot deliver into reopened input");
+    input.closePort();
+
+    for (bool destroy : {false, true}) {
+        auto owner = std::make_unique<MidiIn>();
+        int calls = 0;
+        auto inlineListener = owner->onMessage.listen([&](MidiMessage&) {
+            ++calls;
+            if (destroy) owner.reset();
+            else owner->closePort();
+        });
+        check(owner->openVirtualPort("callback close"), "open input for callback teardown");
+        auto callback = libremidi::test::inputCallback;
+        const int closes = libremidi::test::inputCloses;
+        const int destructs = libremidi::test::inputDestructs;
+        std::thread worker([&] { callback(packet); callback(packet); });
+        worker.join();
+        check(calls == 1 && (!owner || !owner->isOpen()), "callback closes public port immediately");
+        check(libremidi::test::inputCloses == closes && libremidi::test::inputDestructs == destructs,
+              "callback does not close or destroy its backend");
+        tc::internal::drainMainThreadQueue();
+        check(libremidi::test::inputCloses == closes + 1 &&
+              libremidi::test::inputDestructs == destructs + 1 &&
+              libremidi::test::closeThread == mainThread && libremidi::test::destructThread == mainThread,
+              "deferred backend teardown runs once on main thread");
+        callback(packet);
+        check(calls == 1, "late callback after teardown drops safely");
+    }
+    libremidi::test::inputCallback = {};
+}
 }
 
 int main() {
@@ -171,6 +235,7 @@ int main() {
     libremidi::test::failSend = false;
     check(warnings.size() == independentOpenWarnings,
           "opening second object does not reset first object's gates");
+    inputLifecycle();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

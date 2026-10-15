@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tc/utils/tcFileDialog.h"
+#include "tc/utils/tcMainThread.h"
 
 #if defined(__APPLE__)
 
@@ -27,6 +28,7 @@ void alertDialog(const std::string& title, const std::string& message) {
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSAlert* alert = [[NSAlert alloc] init];
         [alert setMessageText:[NSString stringWithUTF8String:title.c_str()]];
@@ -38,11 +40,12 @@ void alertDialogAsync(const std::string& title,
         if (window) {
             [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
                 (void)response;
+                if (!internal::appRunIsAlive(token)) return;
                 if (callback) callback();
             }];
         } else {
             [alert runModal];
-            if (callback) callback();
+            if (internal::appRunIsAlive(token) && callback) callback();
         }
     }
 }
@@ -65,6 +68,7 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSAlert* alert = [[NSAlert alloc] init];
         [alert setMessageText:[NSString stringWithUTF8String:title.c_str()]];
@@ -76,11 +80,12 @@ void confirmDialogAsync(const std::string& title,
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
             [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+                if (!internal::appRunIsAlive(token)) return;
                 if (callback) callback(response == NSAlertFirstButtonReturn);
             }];
         } else {
             NSModalResponse response = [alert runModal];
-            if (callback) callback(response == NSAlertFirstButtonReturn);
+            if (internal::appRunIsAlive(token) && callback) callback(response == NSAlertFirstButtonReturn);
         }
     }
 }
@@ -140,6 +145,7 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
 
@@ -171,6 +177,7 @@ void loadDialogAsync(const std::string& title,
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
             [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+                if (!internal::appRunIsAlive(token)) return;
                 FileDialogResult result;
                 if (response == NSModalResponseOK) {
                     NSURL* url = [[panel URLs] firstObject];
@@ -184,7 +191,7 @@ void loadDialogAsync(const std::string& title,
             }];
         } else {
             FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
-            if (callback) callback(result);
+            if (internal::appRunIsAlive(token) && callback) callback(result);
         }
     }
 }
@@ -236,6 +243,7 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
+    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSSavePanel* panel = [NSSavePanel savePanel];
 
@@ -259,6 +267,7 @@ void saveDialogAsync(const std::string& title,
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
             [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+                if (!internal::appRunIsAlive(token)) return;
                 FileDialogResult result;
                 if (response == NSModalResponseOK) {
                     NSURL* url = [panel URL];
@@ -272,7 +281,7 @@ void saveDialogAsync(const std::string& title,
             }];
         } else {
             FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
-            if (callback) callback(result);
+            if (internal::appRunIsAlive(token) && callback) callback(result);
         }
     }
 }

@@ -2760,6 +2760,7 @@ namespace internal {
 
     inline void _cleanup_cb() {
         if (!beginExitCleanup()) return;
+        if (auto token = appRunToken()) token->store(false);
         CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
@@ -3137,6 +3138,8 @@ namespace internal {
 template<typename AppClass>
 sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
     internal::appExitCode() = 0;
+    if (auto token = internal::appRunToken()) token->store(false);
+    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
 
     // Set pixel perfect mode
     internal::pixelPerfectMode() = settings.pixelPerfect;

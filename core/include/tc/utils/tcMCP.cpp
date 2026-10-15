@@ -133,8 +133,13 @@ DeferralState& deferralState() {
 }
 
 std::vector<DeferredResponse>& deferredResponses() {
-    static std::vector<DeferredResponse> v;
-    return v;
+    static auto* v = new std::vector<DeferredResponse>;
+    return *v;
+}
+
+std::mutex& deferredResponsesMutex() {
+    static auto* mutex = new std::mutex;
+    return *mutex;
 }
 
 // Host storage: never reset by guest registration cleanup or a reload.
@@ -179,14 +184,20 @@ std::deque<json>& alertQueue() {
 
 #ifndef __EMSCRIPTEN__
 
+// HTTP ownership survives static destruction: std::exit may start on any
+// thread while the listener and its request workers are still using it.
+// A request worker cannot join the listener, which joins that worker in turn.
+static thread_local bool handlingHttpRequest = false;
+
 std::mutex& httpQueueMutex() {
-    static std::mutex mutex;
-    return mutex;
+    static auto* mutex = new std::mutex;
+    return *mutex;
 }
 
 static std::unique_ptr<ThreadChannel<McpRequest>>& httpChannelStorage() {
-    static auto channel = std::make_unique<ThreadChannel<McpRequest>>();
-    return channel;
+    static auto* channel = new std::unique_ptr<ThreadChannel<McpRequest>>(
+        std::make_unique<ThreadChannel<McpRequest>>());
+    return *channel;
 }
 
 ThreadChannel<McpRequest>& getHttpChannel() {
@@ -201,12 +212,12 @@ void resetHttpChannel() {
 }
 
 std::unique_ptr<httplib::Server>& getHttpServer() {
-    static std::unique_ptr<httplib::Server> svr;
-    return svr;
+    static auto* svr = new std::unique_ptr<httplib::Server>;
+    return *svr;
 }
 
 std::unique_ptr<std::thread>& getHttpThread() {
-    static std::unique_ptr<std::thread> t;
+    static auto* t = new std::unique_ptr<std::thread>;
     // Code grants also work in console apps without runApp's cleanup callback.
     // Register after all shutdown state, so it remains alive for this hook.
     static const bool cleanup = [] {
@@ -215,11 +226,19 @@ std::unique_ptr<std::thread>& getHttpThread() {
         (void)httpQueueMutex();
         (void)getHttpChannel();
         (void)deferredResponses();
-        std::atexit([] { if (getHttpServer()) stopHttpServer(); });
+        (void)deferredResponsesMutex();
+        // An exception leaving an atexit handler terminates the process
+        // (Windows) or unwinds into the code that called std::exit (glibc).
+        std::atexit([] {
+            try {
+                if (getHttpServer()) stopHttpServer();
+            } catch (...) {
+            }
+        });
         return true;
     }();
     (void)cleanup;
-    return t;
+    return *t;
 }
 
 std::atomic<int>& getHttpPort() {
@@ -323,6 +342,10 @@ void startHttpServerImpl(int port, const std::string& host,
     // ignore CORS, while a wildcard origin would let any web page in the user's
     // browser drive the local server. (OPTIONS preflight handler dropped too.)
     svr->Post("/mcp", [](const httplib::Request& req, httplib::Response& res) {
+        struct RequestScope {
+            RequestScope() { handlingHttpRequest = true; }
+            ~RequestScope() { handlingHttpRequest = false; }
+        } requestScope;
         if (!internal::checkRequest(req, res, true)) return;
 
         // Bearer auth when a token is configured (always so for non-loopback).
@@ -446,7 +469,13 @@ void stopHttpServer() {
     // will be presented, so their producers would never run (and a blocked
     // worker would stall the server shutdown below).
     {
-        auto& list = internal::deferredResponses();
+        // Take them out under the lock: on an HTTP worker's std::exit the main
+        // thread may be draining the same list (see deferredResponsesMutex()).
+        std::vector<internal::DeferredResponse> list;
+        {
+            std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
+            list.swap(internal::deferredResponses());
+        }
         for (auto& d : list) {
             // During an app exit, say so (with the reason); otherwise the
             // server was just stopped.
@@ -467,11 +496,16 @@ void stopHttpServer() {
     internal::getHttpChannel().close();
 
     auto& t = internal::getHttpThread();
+    const bool onHttpThread = t && t->joinable() &&
+        (t->get_id() == std::this_thread::get_id() || internal::handlingHttpRequest);
     if (t && t->joinable()) {
-        t->join();
+        if (onHttpThread) t->detach();
+        else t->join();
     }
     t.reset();
-    svr.reset();
+    // A detached listener/handler still needs its server until process exit.
+    if (onHttpThread) (void)svr.release();
+    else svr.reset();
     internal::getHttpPort().store(0);
     internal::explicitlyOpened() = false;
     internal::healthOnlyEndpoint() = false;

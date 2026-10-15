@@ -169,7 +169,12 @@ DeferralState& deferralState();
 // registered under another owner (see DeferralState::owner).
 inline void setDeferralOwner(const void* owner) { deferralState().owner = owner; }
 
+// Pending replies. Guard every access with deferredResponsesMutex(): the main
+// thread drains them, but std::exit on an HTTP worker answers them from
+// stopHttpServer() on that worker. Whoever takes an entry out of the list
+// answers it, outside the lock, so each promise is set exactly once.
 std::vector<DeferredResponse>& deferredResponses();
+std::mutex& deferredResponsesMutex();
 
 } // namespace internal
 
@@ -213,33 +218,45 @@ namespace internal {
 // returned thunk executes on the HTTP worker. The main window's call also
 // answers targeted entries that ran past their deadline.
 inline void drainDeferredResponses(const void* targetWindow = nullptr) {
-    auto& list = internal::deferredResponses();
-    if (list.empty()) return;
     const auto now = std::chrono::steady_clock::now();
-    std::vector<internal::DeferredResponse> keep;
-    for (auto& d : list) {
-        if (d.target == targetWindow) {
-            internal::ReplyThunk thunk;
-            try {
-                thunk = d.makeEnvelope();
-            } catch (const std::exception& e) {
-                const std::string message = std::string("deferred response failed: ") + e.what();
-                std::string err = internal::toolError(d.id, message);
-                thunk = [err]() { return err; };
-            }
-            d.response->set_value(std::move(thunk));
-        } else if (!targetWindow && d.target && now >= d.deadline) {
-            std::string reply = internal::toolError(d.id,
-                "the window rendered no frame within 5 s (minimized, hidden or closed?)");
-            d.response->set_value([reply]() { return reply; });
-        } else {
-            keep.push_back(std::move(d));
+    std::vector<internal::DeferredResponse> ready;
+    std::vector<internal::DeferredResponse> expired;
+    {
+        std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
+        auto& list = internal::deferredResponses();
+        if (list.empty()) return;
+        std::vector<internal::DeferredResponse> keep;
+        for (auto& d : list) {
+            if (d.target == targetWindow) ready.push_back(std::move(d));
+            else if (!targetWindow && d.target && now >= d.deadline) expired.push_back(std::move(d));
+            else keep.push_back(std::move(d));
         }
+        list.swap(keep);
     }
-    list.swap(keep);
+    // Answer outside the lock: a worker woken here may call std::exit, whose
+    // stopHttpServer() takes the lock to answer what is still pending.
+    for (auto& d : ready) {
+        internal::ReplyThunk thunk;
+        try {
+            thunk = d.makeEnvelope();
+        } catch (const std::exception& e) {
+            const std::string message = std::string("deferred response failed: ") + e.what();
+            std::string err = internal::toolError(d.id, message);
+            thunk = [err]() { return err; };
+        }
+        d.response->set_value(std::move(thunk));
+    }
+    for (auto& d : expired) {
+        std::string reply = internal::toolError(d.id,
+            "the window rendered no frame within 5 s (minimized, hidden or closed?)");
+        d.response->set_value([reply]() { return reply; });
+    }
 }
 
-inline bool hasDeferredResponses() { return !internal::deferredResponses().empty(); }
+inline bool hasDeferredResponses() {
+    std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
+    return !internal::deferredResponses().empty();
+}
 
 } // namespace internal
 
@@ -766,7 +783,10 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + internal::kTargetedDeferralTimeout;
             d.owner = ds.owner;
-            internal::deferredResponses().push_back(std::move(d));
+            {
+                std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
+                internal::deferredResponses().push_back(std::move(d));
+            }
             ds.hasEnvelope = false;
             ds.target = nullptr;
             continue;
@@ -801,19 +821,23 @@ inline void removeRegistrationsOwnedBy(const void* owner) {
     // processHttpQueue() and drainDeferredResponses() in one frame). At exit
     // stopHttpServer() runs before the guest is unloaded and has already
     // answered every pending reply. Host tools' deferrals stay pending.
-    auto& pending = deferredResponses();
-    std::vector<DeferredResponse> keep;
-    for (auto& d : pending) {
-        if (d.owner != owner) {
-            keep.push_back(std::move(d));
-            continue;
+    std::vector<DeferredResponse> owned;
+    {
+        std::lock_guard<std::mutex> lock(deferredResponsesMutex());
+        auto& pending = deferredResponses();
+        std::vector<DeferredResponse> keep;
+        for (auto& d : pending) {
+            if (d.owner == owner) owned.push_back(std::move(d));
+            else keep.push_back(std::move(d));
         }
+        pending.swap(keep);
+    }
+    for (auto& d : owned) {
         const std::string message = "the app code behind this reply was unloaded by a hot reload "
                                     "before the reply was produced";
         std::string reply = internal::toolError(d.id, message);
         d.response->set_value([reply]() { return reply; });
     }
-    pending.swap(keep);
 }
 } // namespace internal
 
