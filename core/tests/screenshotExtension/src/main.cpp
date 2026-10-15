@@ -2,6 +2,7 @@
 // Default: no GPU. --screen: also exercise deferred and synchronous captures.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <cstring>
@@ -132,7 +133,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(64, 48);
         settings.setHighDpi(false);
-        runApp<ScreenshotApp>(settings);
+        return tcCoreTest::runDisplayTest<ScreenshotApp>(settings, failures, [] {
+            fs::remove_all(sandbox);
+            printf("screenshotExtension: %s\n", failures ? "FAIL" : "OK");
+        });
     }
     fs::remove_all(sandbox);
     printf("screenshotExtension: %s\n", failures ? "FAIL" : "OK");

@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <set>
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
@@ -100,9 +101,10 @@ int envStartup(const std::string& mode) {
     WindowSettings settings;
     settings.width = settings.height = 64;
     settings.title = "MCP startup test";
-    check("environment startup and shutdown succeed", runApp<EnvGrantApp>(settings) == 0);
-    check("environment test reached App::setup and update", envSetupRan && envUpdateRan);
-    return failures ? 1 : 0;
+    return tcCoreTest::runDisplayTest<EnvGrantApp>(settings, failures, [] {
+        check("environment startup and shutdown succeed", internal::appExitCode() == 0);
+        check("environment test reached App::setup and update", envSetupRan && envUpdateRan);
+    });
 }
 #endif
 

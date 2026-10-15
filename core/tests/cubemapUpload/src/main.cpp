@@ -1,6 +1,7 @@
 // #687: daily Linux / Xvfb regression for six-face CPU uploads.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -178,9 +179,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(32, 32);
         settings.setHighDpi(false);
-        runApp<CubemapUploadApp>(settings);
-        check("both frames completed", completed);
-        return failures ? 1 : 0;
+        return tcCoreTest::runDisplayTest<CubemapUploadApp>(settings, failures, [] {
+            check("both frames completed", completed);
+        });
     }
 #else
     (void)argc;

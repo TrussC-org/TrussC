@@ -2,6 +2,7 @@
 #include <TrussC.h>
 #include <mutex>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdio>
 #include <future>
@@ -109,9 +110,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(64, 64);
         settings.setHighDpi(false);
-        runApp<TextureTeardownApp>(settings);
-        check("GPU teardown check completes", TextureTeardownApp::completed);
-        return failures ? 1 : 0;
+        return tcCoreTest::runDisplayTest<TextureTeardownApp>(settings, failures, [] {
+            check("GPU teardown check completes", TextureTeardownApp::completed);
+        });
     }
 #else
     (void)argc;

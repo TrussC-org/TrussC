@@ -34,6 +34,7 @@
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <cstdint>
 #include <cstdlib>

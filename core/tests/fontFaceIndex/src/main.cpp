@@ -27,6 +27,7 @@
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 
 #include <chrono>
 #include <cmath>
@@ -625,8 +626,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(160, 160);
         settings.setHighDpi(false);
-        runApp<FaceIndexApp>(settings);
-        check("gpu: public loader and rendering checks completed", g_gpuCompleted);
+        return tcCoreTest::runDisplayTest<FaceIndexApp>(settings, g_fail, [dir] {
+            check("gpu: public loader and rendering checks completed", g_gpuCompleted);
+            std::error_code cleanupError;
+            fs::remove_all(dir, cleanupError);
+            printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail,
+                   g_fail == 1 ? "" : "s");
+        });
     }
 
     fs::remove_all(dir, ec);
