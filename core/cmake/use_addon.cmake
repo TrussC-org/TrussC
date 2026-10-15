@@ -64,6 +64,13 @@ macro(_tc_load_addon _ADDON_NAME)
             endif()
         endif()
 
+        # Windows + Ninja: recompile the addon's objects in the same build as
+        # an edited shader (see trussc_shader_object_depends). Done here so an
+        # addon's CMakeLists.txt only links its <name>_shaders target.
+        if(TARGET ${_ADDON_NAME} AND TARGET ${_ADDON_NAME}_shaders)
+            trussc_shader_object_depends(${_ADDON_NAME} ${_ADDON_NAME}_shaders)
+        endif()
+
         list(APPEND _TC_LOADED_ADDONS ${_ADDON_NAME})
         set(_TC_LOADED_ADDONS "${_TC_LOADED_ADDONS}" CACHE INTERNAL "List of loaded TrussC addons")
     endif()

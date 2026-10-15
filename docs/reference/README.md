@@ -61,7 +61,7 @@ docs/reference/regenerate.sh
 ```
 
 This is the regeneration command for all API outputs. It builds only the existing
-`TrussC_shaders` target first, then derives one sorted structure, joins the prose,
+`TrussC_shaders_gen` target first, then derives one sorted structure, joins the prose,
 and runs FOR_AI, oF, coverage, Lua free-function, Lua usertype, web, sketch API and
 sketch reference emitters in that order. Repeating it with the same inputs produces
 byte-identical files. `--shaders-only` bootstraps headers before `check.js --strict`.

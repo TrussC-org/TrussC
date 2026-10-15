@@ -6,10 +6,10 @@
 #   trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
 #
 # Compiles every *.glsl under <source dir> (recursively) with sokol-shdc into
-# <name>.glsl.h, next to the source, or in OUTPUT_DIR when given. A custom
-# target <target>_shaders builds the headers, and <target> depends on it.
-# On an INTERFACE library (header-only addon) the dependency is followed by
-# every target that links it. Does nothing when <source dir> has no *.glsl.
+# <name>.glsl.h, next to the source, or in OUTPUT_DIR when given. The INTERFACE
+# library <target>_shaders carries the output include directory and a dependency
+# on <target>_shaders_gen, which builds the headers. Consumers link the library
+# to inherit both. The library exists even when <source dir> has no *.glsl.
 #
 # Used by core (built-in shaders), trussc_app() (src/ of the app) and addons
 # (e.g. tcxHap, tcxLut).
@@ -19,6 +19,14 @@ include_guard(GLOBAL)
 
 function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     cmake_parse_arguments(_TC_SHADERS "" "OUTPUT_DIR" "" ${ARGN})
+
+    add_library(${_TC_TARGET}_shaders INTERFACE)
+    if(_TC_SHADERS_OUTPUT_DIR)
+        set(_TC_SHADER_INCLUDE_DIR "${_TC_SHADERS_OUTPUT_DIR}")
+    else()
+        set(_TC_SHADER_INCLUDE_DIR "${_TC_SOURCE_DIR}")
+    endif()
+    target_include_directories(${_TC_TARGET}_shaders INTERFACE "${_TC_SHADER_INCLUDE_DIR}")
 
     # CONFIGURE_DEPENDS: an existing build tree re-globs on each build, so a
     # newly added shader gets its sokol-shdc command (and its header) without
@@ -186,7 +194,47 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
         endif()
     endforeach()
 
-    add_custom_target(${_TC_TARGET}_shaders DEPENDS ${_TC_SHADER_OUTPUTS})
-    add_dependencies(${_TC_TARGET} ${_TC_TARGET}_shaders)
+    add_custom_target(${_TC_TARGET}_shaders_gen DEPENDS ${_TC_SHADER_OUTPUTS})
+    add_dependencies(${_TC_TARGET}_shaders ${_TC_TARGET}_shaders_gen)
+    set_property(TARGET ${_TC_TARGET}_shaders PROPERTY TC_SHADER_HEADERS ${_TC_SHADER_OUTPUTS})
     message(STATUS "[${_TC_TARGET}] Shader compilation enabled for ${_TC_SHADER_SOURCES}")
+endfunction()
+
+# trussc_shader_object_depends(<consumer> <name>_shaders ...)
+# Ninja with an MSVC-style compiler records header dependencies relative to
+# the build tree (../src/x.glsl.h), while a header generated outside the build
+# tree is an absolute node in build.ninja. Ninja sees two files, so an edited
+# shader regenerates its header but recompiles the consumer only on the next
+# build. Naming the headers as OBJECT_DEPENDS puts the generated node itself
+# in front of each of the consumer's objects. Other setups record the
+# absolute path already and are left alone. It reads the consumer's SOURCES
+# at call time, so call it after the target's sources are complete. Core,
+# apps and the addon loader call it; an addon does not call it itself.
+function(trussc_shader_object_depends _TC_CONSUMER)
+    if(NOT CMAKE_GENERATOR MATCHES "Ninja" OR NOT (MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"))
+        return()
+    endif()
+    set(_TC_HEADERS "")
+    foreach(_TC_SHADERS IN LISTS ARGN)
+        get_target_property(_TC_SHADER_HEADERS ${_TC_SHADERS} TC_SHADER_HEADERS)
+        if(_TC_SHADER_HEADERS)
+            list(APPEND _TC_HEADERS ${_TC_SHADER_HEADERS})
+        endif()
+    endforeach()
+    if(NOT _TC_HEADERS)
+        return()
+    endif()
+    get_target_property(_TC_SOURCES ${_TC_CONSUMER} SOURCES)
+    get_target_property(_TC_SOURCE_DIR ${_TC_CONSUMER} SOURCE_DIR)
+    foreach(_TC_SOURCE IN LISTS _TC_SOURCES)
+        if(_TC_SOURCE MATCHES "\\.(c|cc|cpp|cxx)$" AND NOT _TC_SOURCE MATCHES "\\$<")
+            # The loader calls this from the app's directory for an addon
+            # target, so resolve relative sources against the target's own.
+            if(NOT IS_ABSOLUTE "${_TC_SOURCE}")
+                set(_TC_SOURCE "${_TC_SOURCE_DIR}/${_TC_SOURCE}")
+            endif()
+            set_property(SOURCE "${_TC_SOURCE}" TARGET_DIRECTORY ${_TC_CONSUMER}
+                APPEND PROPERTY OBJECT_DEPENDS ${_TC_HEADERS})
+        endif()
+    endforeach()
 endfunction()

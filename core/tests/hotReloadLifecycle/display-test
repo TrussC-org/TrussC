@@ -1,2 +1,4 @@
 # --app is the interactive host; --reload-check exercises it and exits.
 {test} --reload-check
+# A .glsl edit regenerates its header and relinks on a guest-only build (#820).
+python3 test_shader_rebuild.py {test}
