@@ -27,11 +27,7 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
             , trussc::VideoGrabber()
 #endif
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::VideoGrabber>::user_metatable()];
-        sol::usertype<trussc::VideoGrabber> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::VideoGrabber>>()
-            : lua->new_usertype<trussc::VideoGrabber>("VideoGrabber", constructors, sol::call_constructor, constructors);
-        (*lua)["VideoGrabber"] = t;
+        sol::usertype<trussc::VideoGrabber> t = lua->new_usertype<trussc::VideoGrabber>("VideoGrabber", constructors, sol::call_constructor, constructors);
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
         t["listDevices"] = &trussc::VideoGrabber::listDevices;
 #endif
@@ -143,87 +139,64 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::PlayingSoundInfo>::user_metatable()];
-        sol::usertype<trussc::PlayingSoundInfo> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::PlayingSoundInfo>>()
-            : lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        (*lua)["PlayingSoundInfo"] = t;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["level"] = &trussc::PlayingSoundInfo::level;
+        auto constructors = tcxLuaConstructors<trussc::FileReader
+            , trussc::FileReader()
+        >();
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
+        t["open"] = &trussc::FileReader::open;
+        t["close"] = &trussc::FileReader::close;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["eof"] = &trussc::FileReader::eof;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
+        t["remaining"] = &trussc::FileReader::remaining;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::SaveResult>::user_metatable()];
-        sol::usertype<trussc::SaveResult> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::SaveResult>>()
-            : lua->new_usertype<trussc::SaveResult>("SaveResult");
-        (*lua)["SaveResult"] = t;
-        t["error"] = &trussc::SaveResult::error;
-        t["message"] = &trussc::SaveResult::message;
-        t["ok"] = &trussc::SaveResult::ok;
-        t["success"] = &trussc::SaveResult::success;
-        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
+        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
+        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
+        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["isDerived"] = &trussc::Reflector::isDerived;
+        t["pushDerived"] = &trussc::Reflector::pushDerived;
+        t["popDerived"] = &trussc::Reflector::popDerived;
+        t["endGroup"] = &trussc::Reflector::endGroup;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::TcpClientConnectEventArgs>::user_metatable()];
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::TcpClientConnectEventArgs>>()
-            : lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        (*lua)["TcpClientConnectEventArgs"] = t;
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
+        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
+        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
+        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::Location>::user_metatable()];
-        sol::usertype<trussc::Location> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::Location>>()
-            : lua->new_usertype<trussc::Location>("Location");
-        (*lua)["Location"] = t;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-        t["altitude"] = &trussc::Location::altitude;
-        t["accuracy"] = &trussc::Location::accuracy;
+        auto constructors = tcxLuaConstructors<trussc::LogStream
+            , trussc::LogStream(trussc::LogLevel)
+            , trussc::LogStream(trussc::LogLevel, const std::string &)
+        >();
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
     }
-    lua->new_usertype<trussc::SendError>("SendError",
-        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
-        "None", sol::var(trussc::SendError::None),
-        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
-        "Disconnected", sol::var(trussc::SendError::Disconnected),
-        "Timeout", sol::var(trussc::SendError::Timeout),
-        "QueueFull", sol::var(trussc::SendError::QueueFull),
-        "NotRunning", sol::var(trussc::SendError::NotRunning));
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::EnumLabelSpan>::user_metatable()];
-        sol::usertype<trussc::EnumLabelSpan> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::EnumLabelSpan>>()
-            : lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        (*lua)["EnumLabelSpan"] = t;
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
+        t["data"] = &trussc::UdpReceiveEventArgs::data;
+        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
+        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
     }
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    {
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+    }
+    {
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["name"] = &trussc::AudioDeviceInfo::name;
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+    }
+    {
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+    }
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

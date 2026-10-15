@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { createRequire } = require('node:module');
 
 const data = {
     Derived: { id: 'Derived', kind: 'type', name: 'Derived', platforms: ['linux'],
@@ -15,6 +16,11 @@ const data = {
     'Derived::operator-': { kind: 'method', name: 'operator-', owner: 'Derived',
         platforms: ['windows'], signatures: [{ ret: 'Derived', args: [] },
             { ret: 'Derived', args: [{ type: 'const Derived &', isRef: true, isConst: true }] }] },
+    Base: { id: 'Base', kind: 'type', name: 'Base' },
+    'Base::Result': { id: 'Base::Result', kind: 'type', name: 'Result', owner: 'Base' },
+    'Derived::Result': { id: 'Derived::Result', kind: 'type', name: 'Result', owner: 'Derived', declaredIn: 'Base' },
+    'Base::Result::hit': { kind: 'method', name: 'hit', owner: 'Base::Result', signatures: [{ ret: 'bool', args: [] }] },
+    'Base::Result::distance': { kind: 'field', name: 'distance', owner: 'Base::Result', type: 'float' },
     VideoPlayerBase: { id: 'VideoPlayerBase', kind: 'type', name: 'VideoPlayerBase' },
     guarded: { kind: 'func', name: 'guarded', platforms: ['android'], signatures: [{ ret: 'void', args: [] }] },
     unrestricted: { kind: 'func', name: 'unrestricted', signatures: [{ ret: 'void', args: [] }] },
@@ -27,7 +33,7 @@ function generate(script) {
             readFileSync: file => file === 'input' ? JSON.stringify(data) : fs.readFileSync(file, 'utf8'),
             readdirSync: () => [],
             writeFileSync: (file, content) => files.set(file, content),
-        } : require(name),
+        } : createRequire(filename)(name),
         __dirname: path.dirname(filename),
         process: { argv: ['node', filename, 'input'], stdout: { write: s => { stdout += s; } },
             exit: code => { throw new Error(`generator exited ${code}`); } },
@@ -44,13 +50,15 @@ for (const meta of ['unary_minus', 'subtraction']) {
     assert.match(types, new RegExp(`#if defined\\(_WIN32\\)\\n\\s*t\\[sol::meta_function::${meta}\\] = .*\\n#endif`));
 }
 assert.match(types, /new_usertype<trussc::VideoPlayerBase>/);
-assert.match(types, /registry\(\)\[sol::usertype_traits<trussc::Derived>::user_metatable\(\)\]/);
-assert.match(types, /registered\.as<sol::usertype<trussc::Derived>>\(\)/);
-assert.match(types, /\(\*lua\)\["Derived"\] = t;/);
+assert.match(types, /new_usertype<trussc::Base::Result>\("BaseResult"/);
+assert.match(types, /t\["hit"\] = &trussc::Base::Result::hit;/);
+assert.match(types, /t\["distance"\] = &trussc::Base::Result::distance;/);
+assert.doesNotMatch(types, /DerivedResult|new_usertype<[^>]*Derived::Result>/);
+assert.doesNotMatch(types, /registry\(\)|registered\.as|\(\*lua\)\["Derived"\] = t;/);
 const funcs = generate('luagen/luagen.js');
 assert.match(funcs, /#if defined\(__ANDROID__\)\n\s*lua->set_function\("guarded".*\n#endif/);
 assert.match(funcs, /#endif\n\s*lua->set_function\("unrestricted"/);
-console.log('Lua generators: resolved entry guards, inherited members and base inclusion PASS');
+console.log('Lua generators: resolved entry guards, inherited members, inherited TYPE omission and base inclusion PASS');
 let names = '';
 const done = new Error('names filtered');
 try {

@@ -27,11 +27,7 @@ void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua) {
             , trussc::VideoPlayer()
 #endif
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::VideoPlayer>::user_metatable()];
-        sol::usertype<trussc::VideoPlayer> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::VideoPlayer>>()
-            : lua->new_usertype<trussc::VideoPlayer>("VideoPlayer", constructors, sol::call_constructor, constructors);
-        (*lua)["VideoPlayer"] = t;
+        sol::usertype<trussc::VideoPlayer> t = lua->new_usertype<trussc::VideoPlayer>("VideoPlayer", constructors, sol::call_constructor, constructors);
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
         t["onError"] = &trussc::VideoPlayer::onError;
 #endif

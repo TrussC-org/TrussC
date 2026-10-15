@@ -26,11 +26,7 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
             , trussc::Path(const std::vector<trussc::Vec2> &)
             , trussc::Path(const std::vector<trussc::Vec3> &)
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::Path>::user_metatable()];
-        sol::usertype<trussc::Path> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::Path>>()
-            : lua->new_usertype<trussc::Path>("Path", constructors, sol::call_constructor, constructors);
-        (*lua)["Path"] = t;
+        sol::usertype<trussc::Path> t = lua->new_usertype<trussc::Path>("Path", constructors, sol::call_constructor, constructors);
         t[sol::meta_function::index] = [](const trussc::Path& a, int b){ return a[b]; };
         t["addVertex"] = sol::overload([](trussc::Path& self, float x, float y) { return self.addVertex(x, y); }, [](trussc::Path& self, float x, float y, float z) { return self.addVertex(x, y, z); }, [](trussc::Path& self, const trussc::Vec2 & v) { return self.addVertex(v); }, [](trussc::Path& self, const trussc::Vec3 & v) { return self.addVertex(v); });
         t["addVertices"] = sol::overload([](trussc::Path& self, const std::vector<trussc::Vec2> & verts) { return self.addVertices(verts); }, [](trussc::Path& self, const std::vector<trussc::Vec3> & verts) { return self.addVertices(verts); });
@@ -71,11 +67,7 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
             , trussc::Vec4(const trussc::Vec2 &, float)
             , trussc::Vec4(const trussc::Vec2 &, float, float)
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::Vec4>::user_metatable()];
-        sol::usertype<trussc::Vec4> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::Vec4>>()
-            : lua->new_usertype<trussc::Vec4>("Vec4", constructors, sol::call_constructor, constructors);
-        (*lua)["Vec4"] = t;
+        sol::usertype<trussc::Vec4> t = lua->new_usertype<trussc::Vec4>("Vec4", constructors, sol::call_constructor, constructors);
         t[sol::meta_function::index] = [](const trussc::Vec4& a, int b){ return a[b]; };
         t[sol::meta_function::addition] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a + b; };
         t[sol::meta_function::subtraction] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a - b; };
@@ -98,20 +90,22 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["xyz"] = &trussc::Vec4::xyz;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::FileWriter
-            , trussc::FileWriter()
-        >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::FileWriter>::user_metatable()];
-        sol::usertype<trussc::FileWriter> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::FileWriter>>()
-            : lua->new_usertype<trussc::FileWriter>("FileWriter", constructors, sol::call_constructor, constructors);
-        (*lua)["FileWriter"] = t;
-        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
-        t["close"] = &trussc::FileWriter::close;
-        t["isOpen"] = &trussc::FileWriter::isOpen;
-        t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
-        t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
-        t["flush"] = &trussc::FileWriter::flush;
+        sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
+        t["droppedPlays"] = &trussc::AudioStats::droppedPlays;
+        t["droppedPolyphonyLimit"] = &trussc::AudioStats::droppedPolyphonyLimit;
+        t["droppedStreamLimit"] = &trussc::AudioStats::droppedStreamLimit;
+        t["droppedDecoderError"] = &trussc::AudioStats::droppedDecoderError;
+        t["droppedNotRunning"] = &trussc::AudioStats::droppedNotRunning;
+        t["clippedSamples"] = &trussc::AudioStats::clippedSamples;
+        t["peak"] = &trussc::AudioStats::peak;
+        t["rms"] = &trussc::AudioStats::rms;
+        t["cpuUsage"] = &trussc::AudioStats::cpuUsage;
+        t["cpuUsagePeak"] = &trussc::AudioStats::cpuUsagePeak;
+        t["underrunFrames"] = &trussc::AudioStats::underrunFrames;
+        t["stalled"] = &trussc::AudioStats::stalled;
+        t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
+        t["initFailure"] = &trussc::AudioStats::initFailure;
+        t["initFailureResult"] = &trussc::AudioStats::initFailureResult;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::ColorOKLab
@@ -119,11 +113,7 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
             , trussc::ColorOKLab(float, float, float)
             , trussc::ColorOKLab(float, float, float, float)
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::ColorOKLab>::user_metatable()];
-        sol::usertype<trussc::ColorOKLab> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::ColorOKLab>>()
-            : lua->new_usertype<trussc::ColorOKLab>("ColorOKLab", constructors, sol::call_constructor, constructors);
-        (*lua)["ColorOKLab"] = t;
+        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab", constructors, sol::call_constructor, constructors);
         t["L"] = &trussc::ColorOKLab::L;
         t["a"] = &trussc::ColorOKLab::a;
         t["b"] = &trussc::ColorOKLab::b;
@@ -133,29 +123,6 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["toHSB"] = &trussc::ColorOKLab::toHSB;
         t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
         t["lerp"] = &trussc::ColorOKLab::lerp;
-    }
-    lua->new_usertype<trussc::TextureFormat>("TextureFormat",
-        sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
-        "RGBA8", sol::var(trussc::TextureFormat::RGBA8),
-        "RGBA16F", sol::var(trussc::TextureFormat::RGBA16F),
-        "RGBA32F", sol::var(trussc::TextureFormat::RGBA32F),
-        "R8", sol::var(trussc::TextureFormat::R8),
-        "R16F", sol::var(trussc::TextureFormat::R16F),
-        "R32F", sol::var(trussc::TextureFormat::R32F),
-        "RG8", sol::var(trussc::TextureFormat::RG8),
-        "RG16F", sol::var(trussc::TextureFormat::RG16F),
-        "RG32F", sol::var(trussc::TextureFormat::RG32F),
-        "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
-        "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
-    {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::TcpClientDisconnectEventArgs>::user_metatable()];
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::TcpClientDisconnectEventArgs>>()
-            : lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        (*lua)["TcpClientDisconnectEventArgs"] = t;
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
     lua->new_usertype<trussc::ChipSoundNote::Wave>("ChipSoundNoteWave",
         sol::meta_function::equal_to, [](trussc::ChipSoundNote::Wave a, trussc::ChipSoundNote::Wave b){ return a == b; },
@@ -167,34 +134,43 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
         "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::HeadlessSettings>::user_metatable()];
-        sol::usertype<trussc::HeadlessSettings> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::HeadlessSettings>>()
-            : lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        (*lua)["HeadlessSettings"] = t;
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        t["backend"] = &trussc::AudioSettings::backend;
+    }
+    lua->new_usertype<trussc::SaveError>("SaveError",
+        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
+        "None", sol::var(trussc::SaveError::None),
+        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
+        "NoSpace", sol::var(trussc::SaveError::NoSpace),
+        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
+        "Unknown", sol::var(trussc::SaveError::Unknown));
+    {
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+    }
+    {
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+        t["altitude"] = &trussc::Location::altitude;
+        t["accuracy"] = &trussc::Location::accuracy;
+    }
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
         t["targetFps"] = &trussc::HeadlessSettings::targetFps;
         t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
-    {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::AudioDeviceInfo>::user_metatable()];
-        sol::usertype<trussc::AudioDeviceInfo> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::AudioDeviceInfo>>()
-            : lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
-        (*lua)["AudioDeviceInfo"] = t;
-        t["name"] = &trussc::AudioDeviceInfo::name;
-        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
-    }
-    lua->new_usertype<trussc::MouseButton>("MouseButton",
-        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
-        "Left", sol::var(trussc::MouseButton::Left),
-        "Right", sol::var(trussc::MouseButton::Right),
-        "Middle", sol::var(trussc::MouseButton::Middle),
-        "None", sol::var(trussc::MouseButton::None));
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

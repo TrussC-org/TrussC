@@ -27,11 +27,7 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
             , trussc::UdpSocket()
 #endif
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::UdpSocket>::user_metatable()];
-        sol::usertype<trussc::UdpSocket> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::UdpSocket>>()
-            : lua->new_usertype<trussc::UdpSocket>("UdpSocket", constructors, sol::call_constructor, constructors);
-        (*lua)["UdpSocket"] = t;
+        sol::usertype<trussc::UdpSocket> t = lua->new_usertype<trussc::UdpSocket>("UdpSocket", constructors, sol::call_constructor, constructors);
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
         t["onReceive"] = &trussc::UdpSocket::onReceive;
 #endif
@@ -122,110 +118,77 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        auto constructors = tcxLuaConstructors<trussc::IVec3
-            , trussc::IVec3()
-            , trussc::IVec3(int, int, int)
-            , trussc::IVec3(int)
-            , trussc::IVec3(const trussc::IVec2 &)
-            , trussc::IVec3(const trussc::IVec2 &, int)
+        auto constructors = tcxLuaConstructors<trussc::FileWriter
+            , trussc::FileWriter()
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::IVec3>::user_metatable()];
-        sol::usertype<trussc::IVec3> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::IVec3>>()
-            : lua->new_usertype<trussc::IVec3>("IVec3", constructors, sol::call_constructor, constructors);
-        (*lua)["IVec3"] = t;
-        t[sol::meta_function::addition] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec3& a){ return -a; };
-        t[sol::meta_function::multiplication] = [](const trussc::IVec3& a, int b){ return a * b; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a == b; };
-        t["x"] = &trussc::IVec3::x;
-        t["y"] = &trussc::IVec3::y;
-        t["z"] = &trussc::IVec3::z;
-        t["toVec3"] = &trussc::IVec3::toVec3;
-        t["xy"] = &trussc::IVec3::xy;
+        sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter", constructors, sol::call_constructor, constructors);
+        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
+        t["close"] = &trussc::FileWriter::close;
+        t["isOpen"] = &trussc::FileWriter::isOpen;
+        t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
+        t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
+        t["flush"] = &trussc::FileWriter::flush;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::IVec2
-            , trussc::IVec2()
-            , trussc::IVec2(int, int)
-            , trussc::IVec2(int)
+        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
+        t["members"] = &trussc::JsonWriteReflector::members;
+        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
+        t["derived"] = &trussc::JsonWriteReflector::derived;
+        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
+        t["isReadOnly"] = &trussc::JsonWriteReflector::isReadOnly;
+        t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
+        t["popReadOnly"] = &trussc::JsonWriteReflector::popReadOnly;
+        t["isDerived"] = &trussc::JsonWriteReflector::isDerived;
+        t["pushDerived"] = &trussc::JsonWriteReflector::pushDerived;
+        t["popDerived"] = &trussc::JsonWriteReflector::popDerived;
+    }
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
+    {
+        auto constructors = tcxLuaConstructors<trussc::LogEventArgs
+            , trussc::LogEventArgs(trussc::LogLevel, const std::string &)
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::IVec2>::user_metatable()];
-        sol::usertype<trussc::IVec2> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::IVec2>>()
-            : lua->new_usertype<trussc::IVec2>("IVec2", constructors, sol::call_constructor, constructors);
-        (*lua)["IVec2"] = t;
-        t[sol::meta_function::addition] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec2& a){ return -a; };
-        t[sol::meta_function::multiplication] = [](const trussc::IVec2& a, int b){ return a * b; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; };
-        t["x"] = &trussc::IVec2::x;
-        t["y"] = &trussc::IVec2::y;
-        t["toVec2"] = &trussc::IVec2::toVec2;
+        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs", constructors, sol::call_constructor, constructors);
+        t["level"] = &trussc::LogEventArgs::level;
+        t["message"] = &trussc::LogEventArgs::message;
+        t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::CameraContext>::user_metatable()];
-        sol::usertype<trussc::CameraContext> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::CameraContext>>()
-            : lua->new_usertype<trussc::CameraContext>("CameraContext");
-        (*lua)["CameraContext"] = t;
-        t["view"] = &trussc::CameraContext::view;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
-    }
-    {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::TcpSendCompleteEventArgs>::user_metatable()];
-        sol::usertype<trussc::TcpSendCompleteEventArgs> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::TcpSendCompleteEventArgs>>()
-            : lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
-        (*lua)["TcpSendCompleteEventArgs"] = t;
-        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
-        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
-        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
-        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
-    }
-    {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::Node::HitResult>::user_metatable()];
-        sol::usertype<trussc::Node::HitResult> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::Node::HitResult>>()
-            : lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        (*lua)["NodeHitResult"] = t;
+        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
         t["node"] = &trussc::Node::HitResult::node;
         t["distance"] = &trussc::Node::HitResult::distance;
         t["localPoint"] = &trussc::Node::HitResult::localPoint;
         t["hit"] = &trussc::Node::HitResult::hit;
     }
-    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
-        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
-        "Points", sol::var(trussc::PrimitiveType::Points),
-        "Lines", sol::var(trussc::PrimitiveType::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
-        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
-        "Quads", sol::var(trussc::PrimitiveType::Quads));
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
-        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
-        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
-        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    {
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+    }
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

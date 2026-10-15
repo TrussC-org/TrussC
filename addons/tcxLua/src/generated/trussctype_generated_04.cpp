@@ -24,11 +24,7 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         auto constructors = tcxLuaConstructors<trussc::App
             , trussc::App()
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::App>::user_metatable()];
-        sol::usertype<trussc::App> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::App>>()
-            : lua->new_usertype<trussc::App>("App", constructors, sol::call_constructor, constructors);
-        (*lua)["App"] = t;
+        sol::usertype<trussc::App> t = lua->new_usertype<trussc::App>("App", constructors, sol::call_constructor, constructors);
         t["localMatrixChanged"] = &trussc::App::localMatrixChanged;
         t["setSize"] = &trussc::App::setSize;
         t["requestExit"] = &trussc::App::requestExit;
@@ -158,125 +154,101 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["cancelAllTimers"] = &trussc::App::cancelAllTimers;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::StrokeMesh
-            , trussc::StrokeMesh()
-            , trussc::StrokeMesh(const trussc::Path &)
+        auto constructors = tcxLuaConstructors<trussc::ColorLinear
+            , trussc::ColorLinear()
+            , trussc::ColorLinear(float, float, float)
+            , trussc::ColorLinear(float, float, float, float)
+            , trussc::ColorLinear(float)
+            , trussc::ColorLinear(float, float)
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::StrokeMesh>::user_metatable()];
-        sol::usertype<trussc::StrokeMesh> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::StrokeMesh>>()
-            : lua->new_usertype<trussc::StrokeMesh>("StrokeMesh", constructors, sol::call_constructor, constructors);
-        (*lua)["StrokeMesh"] = t;
-        t["setWidth"] = &trussc::StrokeMesh::setWidth;
-        t["setColor"] = &trussc::StrokeMesh::setColor;
-        t["setCapType"] = &trussc::StrokeMesh::setCapType;
-        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
-        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
-        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
-        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
-        t["setWidths"] = &trussc::StrokeMesh::setWidths;
-        t["setShape"] = &trussc::StrokeMesh::setShape;
-        t["setClosed"] = &trussc::StrokeMesh::setClosed;
-        t["clear"] = &trussc::StrokeMesh::clear;
-        t["update"] = &trussc::StrokeMesh::update;
-        t["draw"] = &trussc::StrokeMesh::draw;
-        t["getMesh"] = &trussc::StrokeMesh::getMesh;
-        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
+        sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::addition] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; };
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; });
+        t[sol::meta_function::division] = [](const trussc::ColorLinear& a, float b){ return a / b; };
+        t[sol::meta_function::equal_to] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a == b; };
+        t["r"] = &trussc::ColorLinear::r;
+        t["g"] = &trussc::ColorLinear::g;
+        t["b"] = &trussc::ColorLinear::b;
+        t["a"] = &trussc::ColorLinear::a;
+        t["toSRGB"] = &trussc::ColorLinear::toSRGB;
+        t["toHSB"] = &trussc::ColorLinear::toHSB;
+        t["toOKLab"] = &trussc::ColorLinear::toOKLab;
+        t["toOKLCH"] = &trussc::ColorLinear::toOKLCH;
+        t["clamped"] = &trussc::ColorLinear::clamped;
+        t["clampedLDR"] = &trussc::ColorLinear::clampedLDR;
+        t["lerp"] = &trussc::ColorLinear::lerp;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::ColorOKLCH
-            , trussc::ColorOKLCH()
-            , trussc::ColorOKLCH(float, float, float)
-            , trussc::ColorOKLCH(float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
+            , trussc::JsonReadReflector(trussc::Json)
         >();
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::ColorOKLCH>::user_metatable()];
-        sol::usertype<trussc::ColorOKLCH> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::ColorOKLCH>>()
-            : lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH", constructors, sol::call_constructor, constructors);
-        (*lua)["ColorOKLCH"] = t;
-        t["L"] = &trussc::ColorOKLCH::L;
-        t["C"] = &trussc::ColorOKLCH::C;
-        t["H"] = &trussc::ColorOKLCH::H;
-        t["alpha"] = &trussc::ColorOKLCH::alpha;
-        t["toOKLab"] = &trussc::ColorOKLCH::toOKLab;
-        t["toLinear"] = &trussc::ColorOKLCH::toLinear;
-        t["toRGB"] = &trussc::ColorOKLCH::toRGB;
-        t["toHSB"] = &trussc::ColorOKLCH::toHSB;
-        t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
+        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
+        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
+        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
+        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
+        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::ScrollEventArgs>::user_metatable()];
-        sol::usertype<trussc::ScrollEventArgs> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::ScrollEventArgs>>()
-            : lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
-        (*lua)["ScrollEventArgs"] = t;
-        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
-        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
-        t["shift"] = &trussc::ScrollEventArgs::shift;
-        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
-        t["alt"] = &trussc::ScrollEventArgs::alt;
-        t["super"] = &trussc::ScrollEventArgs::super;
-        t["pos"] = &trussc::ScrollEventArgs::pos;
-        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
-        t["scroll"] = &trussc::ScrollEventArgs::scroll;
-        t["consumed"] = &trussc::ScrollEventArgs::consumed;
-        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
+        auto constructors = tcxLuaConstructors<trussc::IesProfile
+            , trussc::IesProfile()
+        >();
+        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile", constructors, sol::call_constructor, constructors);
+        t["load"] = &trussc::IesProfile::load;
+        t["loadFromString"] = &trussc::IesProfile::loadFromString;
+        t["isLoaded"] = &trussc::IesProfile::isLoaded;
+        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
+        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
+        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
+        t["getView"] = &trussc::IesProfile::getView;
+        t["getSampler"] = &trussc::IesProfile::getSampler;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::LoadResult>::user_metatable()];
-        sol::usertype<trussc::LoadResult> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::LoadResult>>()
-            : lua->new_usertype<trussc::LoadResult>("LoadResult");
-        (*lua)["LoadResult"] = t;
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["success"] = &trussc::LoadResult::success;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::FpsSettings>::user_metatable()];
-        sol::usertype<trussc::FpsSettings> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::FpsSettings>>()
-            : lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        (*lua)["FpsSettings"] = t;
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["synced"] = &trussc::FpsSettings::synced;
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
+    }
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
+    {
+        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
+        t["getId"] = &trussc::TcpServerClient::getId;
+        t["getHost"] = &trussc::TcpServerClient::getHost;
+        t["getPort"] = &trussc::TcpServerClient::getPort;
     }
     {
-        sol::object registered = lua->registry()[sol::usertype_traits<trussc::VideoErrorEventArgs>::user_metatable()];
-        sol::usertype<trussc::VideoErrorEventArgs> t = registered.get_type() == sol::type::table
-            ? registered.as<sol::usertype<trussc::VideoErrorEventArgs>>()
-            : lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        (*lua)["VideoErrorEventArgs"] = t;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["t"] = &trussc::Ray::Hit::t;
+        t["point"] = &trussc::Ray::Hit::point;
     }
-    lua->new_usertype<trussc::LogLevel>("LogLevel",
-        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
-        "Verbose", sol::var(trussc::LogLevel::Verbose),
-        "Notice", sol::var(trussc::LogLevel::Notice),
-        "Warning", sol::var(trussc::LogLevel::Warning),
-        "Error", sol::var(trussc::LogLevel::Error),
-        "Fatal", sol::var(trussc::LogLevel::Fatal),
-        "Silent", sol::var(trussc::LogLevel::Silent));
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
 }
 #ifndef _MSC_VER
 #pragma GCC diagnostic pop

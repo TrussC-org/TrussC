@@ -61,26 +61,7 @@ const OP_UNARY = { '-': 'unary_minus' };
 // substitute a template param (Tween<T>: T->float) inside a type string
 function subT(type, T) { return T ? type.replace(/\bT\b/g, T) : type; }
 
-// ---- platform guards -----------------------------------------------------
-// A `platforms` annotation (TC_PLATFORMS) restricts where a symbol exists.
-// reference-data is generated on macOS, so members compiled out elsewhere
-// (e.g. VideoWriter::submitFrame under TC_ASYNC_SCREEN_CAPTURE) are recorded —
-// guard their bindings with the matching preprocessor condition.
-const ALL_PLATFORMS = ['macos', 'windows', 'linux', 'android', 'ios', 'web'];
-const PLATFORM_COND = {
-    macos: '(defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))',
-    ios: '(defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)',
-    windows: 'defined(_WIN32)',
-    linux: '(defined(__linux__) && !defined(__ANDROID__))',
-    android: 'defined(__ANDROID__)',
-    web: 'defined(__EMSCRIPTEN__)',
-};
-// -> condition string, or null when unrestricted (no annotation / covers all)
-function platformGuard(platforms) {
-    if (!platforms || !platforms.length) return null;
-    if (ALL_PLATFORMS.every(p => platforms.includes(p))) return null;
-    return platforms.map(p => PLATFORM_COND[p]).filter(Boolean).join(' || ');
-}
+const { platformGuard } = require('../platform-guards');
 
 // ---- emit one usertype --------------------------------------------------
 // `cppType` = the C++ type to bind (e.g. "Vec2" or "Tween<float>"),
@@ -204,16 +185,11 @@ function emitType(typeEntry, cppType, luaName, T) {
         }
         s += `        >();\n`;
     }
-    // Inherited nested types can name the same C++ type through several
-    // owners. Re-registering it clears sol2's existing methods; reuse its table.
-    s += `        sol::object registered = lua->registry()[sol::usertype_traits<${Q}>::user_metatable()];\n`;
-    s += `        sol::usertype<${Q}> t = registered.get_type() == sol::type::table\n`;
-    s += `            ? registered.as<sol::usertype<${Q}>>()\n`;
-    s += `            : lua->new_usertype<${Q}>("${luaName}"`;
+    s += `        sol::usertype<${Q}> t = lua->new_usertype<${Q}>("${luaName}"`;
     // Positional constructors provide Type.new(...); sol::call_constructor
     // additionally enables the Type(...) call form.
     if (ctorTypes.length) s += `, constructors, sol::call_constructor, constructors`;
-    s += `);\n        (*lua)["${luaName}"] = t;\n`;
+    s += `);\n`;
     for (const meta in ops) {
         const { guard } = ops[meta];
         const lams = [...new Set(ops[meta].lams)];
@@ -304,7 +280,9 @@ const flatName = (e) => (e.owner ? e.owner.replace(/::/g, '') : '') + e.name;
 
 for (const id in data) {
     const e = data[id];
-    if (e.kind !== 'type' || e.ns) continue;
+    // Inherited TYPE entries are documentation copies of one C++ type.
+    // Inherited members remain eligible in emitType's owner loop.
+    if (e.kind !== 'type' || e.ns || e.declaredIn) continue;
     if (EXCLUDE.has(e.owner ? `${e.owner}::${e.name}` : e.name)) { report.push(`${id}: excluded (custom Lua glue, hand-written)`); continue; }
     if (e.lua_skip) { skip.luaSkip = (skip.luaSkip || 0) + 1; report.push(`${id}: TC_LUA_SKIP (skipped)`); continue; }
     if (e.owner) {

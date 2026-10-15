@@ -145,19 +145,26 @@ int main() {
         luaBool("getWindowPosition == nil and setWindowPosition == nil"));
 #endif
 
-    // Inherited nested-type names must share the original sol2 registration.
-    checkNoThrow("NodeHitResult: inherited aliases preserve methods", true, [&] {
+    // A nested result uses its declaration's registration, including inherited returns.
+    checkNoThrow("NodeHitResult: findHitNode exposes hit and distance", true, [&] {
         auto result = L.safe_script(R"lua(
-            assert(rawequal(NodeHitResult, AppHitResult))
-            assert(rawequal(NodeHitResult, RectNodeHitResult))
-            assert(rawequal(NodeHitResult, RectNodeButtonHitResult))
-            assert(rawequal(NodeHitResult, ScrollBarHitResult))
-            assert(rawequal(NodeHitResult, ScrollContainerHitResult))
+            assert(NodeHitResult ~= nil)
+            assert(AppHitResult == nil and RectNodeHitResult == nil)
+            assert(RectNodeButtonHitResult == nil and ScrollBarHitResult == nil)
+            assert(ScrollContainerHitResult == nil)
             local hit = Node():findHitNode(Ray(Vec3(0, 0, 10), Vec3(0, 0, -1)))
             assert(not hit:hit() and hit.distance == 0)
+            local inheritedHit = RectNode.new():findHitNode(Ray(Vec3(0, 0, 10), Vec3(0, 0, -1)))
+            assert(type(inheritedHit:hit()) == "boolean")
+            assert(type(inheritedHit.distance) == "number")
             return true
         )lua", sol::script_pass_on_error);
-        return result.valid() && result.get<bool>();
+        if (!result.valid()) {
+            sol::error error = result;
+            std::cerr << "NodeHitResult script: " << error.what() << std::endl;
+            return false;
+        }
+        return result.get<bool>();
     });
 
     // #778/#808: inherited bindings survive regeneration without video hardware.
