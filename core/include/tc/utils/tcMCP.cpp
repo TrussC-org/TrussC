@@ -137,6 +137,11 @@ std::vector<DeferredResponse>& deferredResponses() {
     return *v;
 }
 
+std::mutex& deferredResponsesMutex() {
+    static auto* mutex = new std::mutex;
+    return *mutex;
+}
+
 // Host storage: never reset by guest registration cleanup or a reload.
 std::atomic<ToolLevel>& grantedToolLevel() {
     static std::atomic<ToolLevel> level{isDevBuild() ? ToolLevel::Control : ToolLevel::Public};
@@ -221,7 +226,15 @@ std::unique_ptr<std::thread>& getHttpThread() {
         (void)httpQueueMutex();
         (void)getHttpChannel();
         (void)deferredResponses();
-        std::atexit([] { if (getHttpServer()) stopHttpServer(); });
+        (void)deferredResponsesMutex();
+        // An exception leaving an atexit handler terminates the process
+        // (Windows) or unwinds into the code that called std::exit (glibc).
+        std::atexit([] {
+            try {
+                if (getHttpServer()) stopHttpServer();
+            } catch (...) {
+            }
+        });
         return true;
     }();
     (void)cleanup;
@@ -456,7 +469,13 @@ void stopHttpServer() {
     // will be presented, so their producers would never run (and a blocked
     // worker would stall the server shutdown below).
     {
-        auto& list = internal::deferredResponses();
+        // Take them out under the lock: on an HTTP worker's std::exit the main
+        // thread may be draining the same list (see deferredResponsesMutex()).
+        std::vector<internal::DeferredResponse> list;
+        {
+            std::lock_guard<std::mutex> lock(internal::deferredResponsesMutex());
+            list.swap(internal::deferredResponses());
+        }
         for (auto& d : list) {
             // During an app exit, say so (with the reason); otherwise the
             // server was just stopped.

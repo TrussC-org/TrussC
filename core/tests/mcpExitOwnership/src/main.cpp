@@ -6,6 +6,9 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 using namespace tc;
 namespace {
@@ -26,7 +29,11 @@ struct ExitApp : App {
             std::thread([port] {
                 httplib::Client client("127.0.0.1", port);
                 client.set_read_timeout(20);
-                client.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exit_worker"}})", "application/json");
+                auto res = client.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"exit_worker"}})", "application/json");
+                // The reply thunk exits before any reply is sent, so getting
+                // here means the tool did not run its exit: say why.
+                if (res) std::fprintf(stderr, "worker request answered without exit: HTTP %d %s\n", res->status, res->body.c_str());
+                else std::fprintf(stderr, "worker request failed: %s\n", httplib::to_string(res.error()).c_str());
             }).detach();
         }
     }
@@ -48,9 +55,22 @@ std::string quoteArgument(const std::string& value) {
     return quoted + "'";
 #endif
 }
+constexpr int kWatchdogExit = 5;
+// The child's exit code as the process reported it (std::system's raw status
+// is a wait status on POSIX).
+int exitCode(int status) {
+#ifdef _WIN32
+    return status;
+#else
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return status;
+#endif
+}
 int child(bool fromWorker) {
     // Deadlock watchdog, not a success-time assertion.
-    std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(30)); std::_Exit(3); }).detach();
+    // Its own exit code, so a failure tells a hang from an abort (3 on Windows).
+    std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(30)); std::_Exit(kWatchdogExit); }).detach();
     workerExit = fromWorker;
     runHeadlessApp<ExitApp>();
     return 4; // neither exit path should return
@@ -63,9 +83,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     command += " " TC_CORE_TEST_NAME;
 #endif
     std::fflush(nullptr);
-    const bool appExit = std::system((command + " --child update").c_str()) == 0;
-    std::printf("std::exit from update with in-process MCP listener: %s\n", appExit ? "PASS" : "FAIL");
-    const bool handlerExit = std::system((command + " --child worker").c_str()) == 0;
-    std::printf("std::exit from HTTP request worker: %s\n", handlerExit ? "PASS" : "FAIL");
+    const int appCode = exitCode(std::system((command + " --child update").c_str()));
+    const bool appExit = appCode == 0;
+    std::printf("std::exit from update with in-process MCP listener: %s (exit code %d)\n", appExit ? "PASS" : "FAIL", appCode);
+    const int handlerCode = exitCode(std::system((command + " --child worker").c_str()));
+    const bool handlerExit = handlerCode == 0;
+    std::printf("std::exit from HTTP request worker: %s (exit code %d%s)\n", handlerExit ? "PASS" : "FAIL",
+                handlerCode, handlerCode == kWatchdogExit ? ", watchdog: hung" : "");
     return appExit && handlerExit ? 0 : 1;
 }
