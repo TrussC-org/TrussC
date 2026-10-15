@@ -4,11 +4,13 @@
 lane runs `allCoreTests renderRegression --self-check` under Xvfb/Mesa. A standalone
 project generated with trusscli accepts the same arguments.
 
-- `--self-check`: assertions against known RGBA values in all 16 scenes.
+- `--self-check`: assertions against known pixel values in all 16 scenes.
 - `--record <dir>`: assertions, PNGs and `samples.json` into an empty directory.
 - `--compare <dir>`: assertions, PNGs, `samples.json` and red difference overlays
   into `<dir>.compare`. A missing image, different size, missing scene, or pixel
   exceeding its tolerance fails. All four channels are compared.
+
+Screen-capture self-checks assert RGB only because swapchain alpha varies across backends; alpha is asserted only for Fbo captures, while same-machine record/compare keeps full RGBA.
 
 Use the same machine, backend and DPI for a before/after pair. Linux invocation:
 
@@ -32,7 +34,7 @@ frames on every platform), then render and capture, with fixed geometry and a
 fixed seed. There is one 256x192 logical window with vsync off. The resize scene
 captures 256x192 and 320x224 with pixelPerfect both off and on, so a run produces
 38 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
-scale their logical coordinates by DPI; FBO assertions use framebuffer pixels.
+use DPI-scaled logical coordinates with pixelPerfect off and framebuffer coordinates with it on; FBO assertions use framebuffer pixels.
 The text scene uses the embedded default bitmap glyphs and an R8 coverage page.
 
 | Maximum RGBA8 channel difference | Scenes |
