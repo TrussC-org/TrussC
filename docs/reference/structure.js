@@ -25,7 +25,6 @@ const argv = process.argv.slice(2);
 const argVal = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
 // --- 1. obtain the AST dump (cached or fresh) -------------------------------
-let astPartial = false;   // set when clang failed mid-parse (e.g. missing generated *.glsl.h)
 // The dump needs CLANG specifically (-Xclang -ast-dump=json); g++ rejects those
 // flags outright. On macOS `c++` IS clang, so defaulting to it worked there and
 // died on Linux with four "unrecognized command-line option" lines from g++ --
@@ -63,29 +62,19 @@ function dumpAst() {
     try {
         return execSync(`${CXX} ${args.map(a => `'${a}'`).join(' ')}`, { maxBuffer: 1024 * 1024 * 1024 }).toString();
     } catch (e) {
-        // clang -ast-dump emits the AST to stdout even when it exits non-zero
-        // (e.g. a stray diagnostic after the trussc namespace was already
-        // dumped). If we got a real AST, use it — only the trussc filter matters.
-        const out = (e.stdout || '').toString();
+        // Even a large AST can be truncated by a fatal diagnostic. Never let
+        // check.js or an emitter consume that incomplete API surface.
         const err = (e.stderr || '').toString();
-        if (out.length > 100000) {
-            // A partial AST keeps symbol NAMES intact (fine for check.js's
-            // orphan/undocumented gates) but degrades unresolved template
-            // TYPES to int — poison for anything that renders signatures
-            // (generate.js / emit-forai). Record the fact; the --json output
-            // carries it as __meta so type-consumers can refuse.
-            astPartial = true;
-            process.stderr.write('structure: clang exited non-zero but produced a PARTIAL AST; using it (names ok, types may degrade). First diagnostics:\n'
-                + err.split('\n').slice(0, 8).join('\n') + '\n');
-            return out;
+        process.stderr.write(`structure: clang AST dump FAILED using CXX=${CXX}.\n`);
+        if (/fatal error:/.test(err)) {
+            process.stderr.write('structure: hint: core/include/tc/gpu/shaders/*.glsl.h may be missing; generate the shaders first with docs/reference/regenerate.sh --shaders-only.\n');
         }
-        process.stderr.write(`structure: clang AST dump FAILED (no usable output) using CXX=${CXX}.\n`);
         if (/unrecognized command-line option/.test(err)) {
             process.stderr.write('structure: that compiler is not clang -- this dump requires clang (-Xclang -ast-dump=json).\n'
                 + 'structure: install clang or set CXX=/path/to/clang++.\n');
         }
         process.stderr.write('structure: compiler stderr:\n' + err + '\n');
-        throw e;
+        process.exit(1);
     }
 }
 const cached = argVal('--ast');
@@ -468,12 +457,9 @@ for (const id in structure) {
 const jsonOut = argVal('--json');
 if (argv.includes('--ids')) { console.log(Object.keys(structure).filter(id => !structure[id].declaredIn || structure[id].declaredIn === structure[id].owner).sort().join('\n')); process.exit(0); }
 if (jsonOut) {
-    // __meta rides along ONLY in the JSON output (--ids stays a pure id list,
-    // which is all check.js needs — its gates are name-based and stay valid
-    // on a partial AST). Type-consumers (generate.js) look for this and refuse.
-    if (astPartial) structure.__meta = { partialAst: true };
-    fs.writeFileSync(jsonOut, JSON.stringify(structure, null, 0));
-    process.stderr.write(`structure written to ${jsonOut} (${Object.keys(structure).length - (astPartial ? 1 : 0)} symbols${astPartial ? ', PARTIAL AST' : ''})\n`);
+    const sorted = Object.fromEntries(Object.keys(structure).sort().map(id => [id, structure[id]]));
+    fs.writeFileSync(jsonOut, JSON.stringify(sorted, null, 0));
+    process.stderr.write(`structure written to ${jsonOut} (${Object.keys(structure).length} symbols)\n`);
     process.exit(0);
 }
 

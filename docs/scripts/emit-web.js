@@ -40,7 +40,8 @@ const { buildReverseIndex } = require('./scan-examples.js');
 const REF_DATA = path.join(__dirname, '../reference/reference-data.json');
 const CATEGORIES = path.join(__dirname, '../reference/categories.json');
 const API_YAML = path.join(__dirname, '../api-definition.yaml');                 // AUX
-const TRUSSC_API_JS = path.join(__dirname, '../../../trussc.org/generated/trussc-api.js');
+const outputArg = process.argv.indexOf('--out');
+const TRUSSC_API_JS = outputArg >= 0 ? process.argv[outputArg + 1] : path.join(__dirname, '../../../trussc.org/generated/trussc-api.js');
 const EXAMPLES_JSON = path.join(__dirname, '../../../trussc.org/examples/examples.json');
 
 const args = process.argv.slice(2);

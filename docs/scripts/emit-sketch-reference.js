@@ -36,7 +36,8 @@ const REF_DATA = path.join(__dirname, '../reference/reference-data.json');
 const CATEGORIES = path.join(__dirname, '../reference/categories.json');
 const COLORS = path.join(__dirname, '../reference/colors.json');
 const EXTRAS = path.join(__dirname, '../reference/extras.json');
-const OUT = path.join(__dirname, '../../../trussc.org/generated/trusssketch-ref.js');
+const outputArg = process.argv.indexOf('--out');
+const OUT = outputArg >= 0 ? process.argv[outputArg + 1] : path.join(__dirname, '../../../trussc.org/generated/trusssketch-ref.js');
 
 // Actual Lua binding surface of the HAND-WRITTEN tcxLua usertypes (see the lib
 // header). Hand types are advertised from THIS (bound member names, reserved-

@@ -135,7 +135,10 @@ using namespace std;
 // The Lua API deliberately keeps binding deprecated C++ compat names
 // (colorFromHSB, tcLog*, ...) so existing Lua scripts stay stable — this shim
 // layer is exempt from the CI deprecation gate (-Werror=deprecated-declarations).
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -145,7 +148,9 @@ using namespace std;
 void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) {
 ${body}}
 
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif

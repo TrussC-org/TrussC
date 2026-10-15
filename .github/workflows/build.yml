@@ -746,8 +746,36 @@ jobs:
       - name: Install doc tooling deps
         run: cd docs && npm ci
 
+      # check.js also parses the headers, so bootstrap shaders before its AST.
+      - name: Generate reference shader headers
+        run: docs/reference/regenerate.sh --shaders-only
+
       - name: reference check (dup / orphan / 100% documented gate)
         run: node docs/reference/check.js --strict
+
+      - name: Regenerate API outputs (macOS)
+        run: docs/reference/regenerate.sh
+
+      - name: Check committed API outputs
+        id: freshness
+        shell: bash
+        run: |
+          if ! git diff --exit-code -- \
+            docs/FOR_AI_ASSISTANT.md \
+            docs/TrussC_vs_openFrameworks.md \
+            examples/tests/AllFeaturesExample/src/coverage_generated.cpp \
+            'addons/tcxLua/src/generated/*.cpp'; then
+            git diff > regenerated.patch
+            exit 1
+          fi
+
+      - name: Upload regeneration patch
+        if: failure() && steps.freshness.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-patch
+          path: regenerated.patch
+          if-no-files-found: error
 
   # Header-inline state check (#249): core/include must not grow new mutable
   # header-inline state (a function-local static or an inline variable). A hot
@@ -801,6 +829,10 @@ jobs:
       - name: build workflow cache regression checks
         if: always()
         run: python3 tools/tests/test_build_workflow_caches.py -v
+
+      - name: reference regeneration regression checks
+        if: always()
+        run: python3 tools/tests/test_reference_workflow.py -v
 
       - name: FetchContent CMake regression checks
         if: always()

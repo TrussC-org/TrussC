@@ -1,0 +1,177 @@
+"""Offline checks for API regeneration order and CI drift patches (#808)."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+OUTPUTS = ['docs/FOR_AI_ASSISTANT.md', 'docs/TrussC_vs_openFrameworks.md',
+           'examples/tests/AllFeaturesExample/src/coverage_generated.cpp',
+           'addons/tcxLua/src/generated/*.cpp']
+
+
+class ReferenceWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory(dir=ROOT)
+        self.addCleanup(self.scratch.cleanup)
+        self.directory = Path(self.scratch.name)
+        self.bin = self.directory / 'bin'
+        self.bin.mkdir()
+        self.env = dict(os.environ, PATH=f'{self.bin}{os.pathsep}{os.environ["PATH"]}',
+                        CALLS=str(self.directory / 'calls'))
+        self.workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(),
+                                  Loader=yaml.BaseLoader)
+        self.job = self.workflow['jobs']['reference-check']
+
+    def stub(self, name, text):
+        script = self.bin / name
+        script.write_text('#!/usr/bin/env python3\n' + text)
+        script.chmod(0o755)
+
+    def test_ci_lanes_bootstrap_and_patch(self):
+        self.assertEqual(self.workflow['on']['pull_request']['branches'], ['main'])
+        self.assertIn('merge_group', self.workflow['on'])
+        self.assertEqual(self.job['runs-on'], 'macos-latest')
+        self.assertNotIn('if', self.job)
+        steps = self.job['steps']
+        runs = [step.get('run') for step in steps]
+        bootstrap = runs.index('docs/reference/regenerate.sh --shaders-only')
+        check = runs.index('node docs/reference/check.js --strict')
+        regen = runs.index('docs/reference/regenerate.sh')
+        freshness = next(s for s in steps if s.get('id') == 'freshness')
+        self.assertLess(bootstrap, check)
+        self.assertLess(check, regen)
+        self.assertLess(regen, steps.index(freshness))
+        upload = next(s for s in steps if s.get('uses', '').startswith('actions/upload-artifact@'))
+        self.assertEqual(upload['if'], "failure() && steps.freshness.outcome == 'failure'")
+        self.assertEqual(upload['with']['path'], 'regenerated.patch')
+        self.assertEqual(upload['with']['if-no-files-found'], 'error')
+
+        # Exercise the actual workflow shell with clean and stale diff responses.
+        # No git repository is written and no Actions service is needed.
+        self.stub('git', '''import json, os, sys
+with open(os.environ['CALLS'], 'a') as log:
+    log.write(json.dumps(sys.argv[1:]) + '\\n')
+if '--exit-code' in sys.argv:
+    sys.exit(int(os.environ['DRIFT']))
+print('diff --git a/generated.cpp b/generated.cpp')
+''')
+        for drift in ('0', '1'):
+            with self.subTest(drift=drift):
+                (self.directory / 'calls').write_text('')
+                result = subprocess.run(['bash', '-euo', 'pipefail', '-c', freshness['run']],
+                                        cwd=self.directory, env=dict(self.env, DRIFT=drift))
+                self.assertEqual(result.returncode, int(drift))
+                calls = [json.loads(line) for line in (self.directory / 'calls').read_text().splitlines()]
+                self.assertEqual(calls[0], ['diff', '--exit-code', '--', *OUTPUTS])
+                if drift == '1':
+                    self.assertEqual(calls[1], ['diff'])
+                    self.assertIn('diff --git', (self.directory / 'regenerated.patch').read_text())
+                else:
+                    self.assertFalse((self.directory / 'regenerated.patch').exists())
+        tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True)
+        self.assertEqual(len(tracked.splitlines()), 21)
+        self.assertNotIn('reference-data.json', tracked)
+
+    def test_regenerate_order_and_fail_fast(self):
+        reference = self.directory / 'docs/reference'
+        reference.mkdir(parents=True)
+        (self.directory / 'addons/tcxLua/src/generated').mkdir(parents=True)
+        script = reference / 'regenerate.sh'
+        script.write_text((ROOT / 'docs/reference/regenerate.sh').read_text())
+        stub = '''import json, os, sys
+with open(os.environ['CALLS'], 'a') as log:
+    log.write(json.dumps([os.path.basename(sys.argv[0]), *sys.argv[1:]]) + '\\n')
+if any(os.path.basename(a) == os.environ.get('FAIL_AT') for a in sys.argv[1:]):
+    sys.exit(1)
+'''
+        for name in ('cmake', 'node'):
+            self.stub(name, stub)
+        expected = ['structure.js', 'generate.js', 'emit-forai.js', 'emit-of.js',
+                    'emit-coverage.js', 'luagen.js', 'luagen-types.js', 'emit-web.js',
+                    'emit-sketch-api.js', 'emit-sketch-reference.js']
+        for args, fail_at in [([], ''), (['--shaders-only'], ''), ([], 'structure.js')]:
+            with self.subTest(args=args, fail_at=fail_at):
+                (self.directory / 'calls').write_text('')
+                result = subprocess.run(['bash', str(script), *args], cwd=self.directory,
+                                        env=dict(self.env, FAIL_AT=fail_at))
+                self.assertEqual(result.returncode, 1 if fail_at else 0)
+                calls = [json.loads(line) for line in (self.directory / 'calls').read_text().splitlines()]
+                self.assertEqual(calls[0][:2], ['cmake', '-S'])
+                self.assertEqual(calls[1][0], 'cmake')
+                self.assertIn('TrussC_shaders', calls[1])
+                emitters = [next(Path(a).name for a in call if a.endswith('.js')) for call in calls[2:]]
+                self.assertEqual(emitters, [] if args else expected[:1] if fail_at else expected)
+
+    def test_structure_rejects_failed_ast(self):
+        # A large clang stdout must never make a fatal parse look successful,
+        # including the --ids path used by check.js and cached AST export.
+        runner = r"""
+const assert = require('assert/strict'), fs = require('fs'), vm = require('vm');
+const file = process.argv[1], realRequire = require('module').createRequire(file);
+for (const args of [['--ids'], ['--json', 'output'], ['--save-ast', 'output']]) {
+    let status, stderr = '', writes = [];
+    const stopped = new Error('exit');
+    try {
+        vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
+            require: name => name === 'child_process' ? {
+                execSync: () => { throw { stdout: 'x'.repeat(200000), stderr: 'fatal error: missing.glsl.h' }; },
+            } : name === 'fs' ? { writeFileSync: name => writes.push(name) } : realRequire(name),
+            __dirname: require('path').dirname(file),
+            process: { argv: ['node', file, ...args], env: { CXX: 'clang++' },
+                stderr: { write: text => { stderr += text; } },
+                exit: code => { status = code; throw stopped; } },
+        }, { filename: file });
+    } catch (error) { if (error !== stopped) throw error; }
+    assert.equal(status, 1);
+    assert.match(stderr, /hint:.*core\/include\/tc\/gpu\/shaders\/\*\.glsl\.h.*generate the shaders first/);
+    assert.doesNotMatch(stderr, /using.*PARTIAL AST/);
+    assert.equal(writes.length, 1); // probe input only, no exported AST/structure
+}
+"""
+        subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/structure.js')], check=True)
+
+    def test_join_sorts_input_ids(self):
+        entries = {'zzFixture': {'kind': 'func', 'name': 'zzFixture', 'signatures': []},
+                   'aaFixture': {'kind': 'func', 'name': 'aaFixture', 'signatures': []}}
+        outputs = []
+        for data in (entries, dict(reversed(list(entries.items())))):
+            structure = self.directory / 'structure.json'
+            structure.write_text(json.dumps(data))
+            output = self.directory / 'reference.json'
+            # The join uses no authored prose for these fixture ids. Mock the
+            # TOML parser so this workflow test needs no npm installation.
+            runner = """
+const fs = require('fs'), vm = require('vm');
+const file = process.argv[1], realRequire = require('module').createRequire(file);
+process.argv = ['node', file, ...process.argv.slice(2)];
+vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
+    require: name => name.endsWith('/node_modules/smol-toml') ? { parse: () => ({}) } : realRequire(name),
+    __dirname: require('path').dirname(file), process, console,
+}, { filename: file });
+"""
+            subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/generate.js'), '--structure', str(structure),
+                            '--out-json', str(output), '--out-md', str(self.directory / 'index.md')],
+                           check=True, stdout=subprocess.PIPE)
+            outputs.append(output.read_bytes())
+        self.assertEqual(outputs[0], outputs[1])
+        self.assertEqual(list(json.loads(outputs[0])), sorted(entries))
+        # Old partial caches cannot bypass the failure via the former override.
+        structure.write_text(json.dumps({'__meta': {'partialAst': True}}))
+        output.unlink()
+        result = subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/generate.js'),
+                                 '--structure', str(structure), '--out-json', str(output),
+                                 '--out-md', str(self.directory / 'index.md')],
+                                env=dict(os.environ, TC_ALLOW_PARTIAL_AST='1'),
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('REFUSING', result.stderr)
+        self.assertFalse(output.exists())
+
+
+if __name__ == '__main__':
+    unittest.main()
