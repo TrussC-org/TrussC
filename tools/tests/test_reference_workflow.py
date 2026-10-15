@@ -58,18 +58,31 @@ with open(os.environ['CALLS'], 'a') as log:
     log.write(json.dumps(sys.argv[1:]) + '\\n')
 if '--exit-code' in sys.argv:
     sys.exit(int(os.environ['DRIFT']))
+if sys.argv[1] == 'status':
+    print(os.environ['NEW'], end='')
+    sys.exit(0)
+if sys.argv[1] == 'add':
+    sys.exit(0)
 print('diff --git a/generated.cpp b/generated.cpp')
 ''')
-        for drift in ('0', '1'):
-            with self.subTest(drift=drift):
+        DIRS = ['addons/tcxLua/src/generated', 'examples/tests/AllFeaturesExample/src']
+        status = ['status', '--porcelain', '--untracked-files=all', '--', *DIRS]
+        add = ['add', '-N', '--', *DIRS]
+        new_shard = '?? addons/tcxLua/src/generated/trussctype_generated_16.cpp\n'
+        # (tracked drift, untracked output) -> expected calls after the first diff
+        cases = [('0', '', [status]), ('1', '', [add, ['diff']]),
+                 ('0', new_shard, [status, add, ['diff']])]
+        for drift, new, after in cases:
+            with self.subTest(drift=drift, new=bool(new)):
                 (self.directory / 'calls').write_text('')
+                (self.directory / 'regenerated.patch').unlink(missing_ok=True)
                 result = subprocess.run(['bash', '-euo', 'pipefail', '-c', freshness['run']],
-                                        cwd=self.directory, env=dict(self.env, DRIFT=drift))
-                self.assertEqual(result.returncode, int(drift))
+                                        cwd=self.directory, env=dict(self.env, DRIFT=drift, NEW=new))
+                failed = drift == '1' or bool(new)
+                self.assertEqual(result.returncode, int(failed))
                 calls = [json.loads(line) for line in (self.directory / 'calls').read_text().splitlines()]
-                self.assertEqual(calls[0], ['diff', '--exit-code', '--', *OUTPUTS])
-                if drift == '1':
-                    self.assertEqual(calls[1], ['diff'])
+                self.assertEqual(calls, [['diff', '--exit-code', '--', *OUTPUTS], *after])
+                if failed:
                     self.assertIn('diff --git', (self.directory / 'regenerated.patch').read_text())
                 else:
                     self.assertFalse((self.directory / 'regenerated.patch').exists())

@@ -760,11 +760,16 @@ jobs:
         id: freshness
         shell: bash
         run: |
+          # A generator may also add a file (one more Lua shard); git diff only
+          # sees tracked files, so untracked ones in the output dirs fail too
+          # and go into the patch (git add -N).
           if ! git diff --exit-code -- \
             docs/FOR_AI_ASSISTANT.md \
             docs/TrussC_vs_openFrameworks.md \
             examples/tests/AllFeaturesExample/src/coverage_generated.cpp \
-            'addons/tcxLua/src/generated/*.cpp'; then
+            'addons/tcxLua/src/generated/*.cpp' \
+            || [ -n "$(git status --porcelain --untracked-files=all -- addons/tcxLua/src/generated examples/tests/AllFeaturesExample/src)" ]; then
+            git add -N -- addons/tcxLua/src/generated examples/tests/AllFeaturesExample/src
             git diff > regenerated.patch
             exit 1
           fi
