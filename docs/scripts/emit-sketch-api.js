@@ -23,7 +23,8 @@ const path = require('path');
 
 const RDJ = path.join(__dirname, '../reference/reference-data.json');
 const COLORS = path.join(__dirname, '../reference/colors.json');
-const OUT = path.join(__dirname, '../../../trussc.org/generated/trusssketch-api.js');
+const outputArg = process.argv.indexOf('--out');
+const OUT = outputArg >= 0 ? process.argv[outputArg + 1] : path.join(__dirname, '../../../trussc.org/generated/trusssketch-api.js');
 
 const data = JSON.parse(fs.readFileSync(RDJ, 'utf8'));
 const colorsData = JSON.parse(fs.readFileSync(COLORS, 'utf8'));

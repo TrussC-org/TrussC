@@ -29,7 +29,8 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 
 | script         | role |
 |----------------|------|
-| `structure.js` | clang AST → structure (~2570 symbols). The id ORACLE. |
+| `regenerate.sh` | macOS entry point: generate shader headers, build the structure, then run every emitter in a fixed order. |
+| `structure.js` | clang AST → structure. The id ORACLE; a failed clang parse exits non-zero. |
 | `check.js`     | CI gate: `dup` (TOML parse), `orphan` (toml key ∉ AST), `undocumented` (AST ∉ toml; soft until `--strict`). |
 | `generate.js`  | JOIN structure + prose by id → `reference-data.json` + `API_INDEX.md`. |
 
@@ -39,7 +40,7 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 |-----------------|--------|
 | `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped). |
 | `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
-| `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. Deprecating, removing or renaming a documented API, or dropping a platform's implementation along with its `TC_PLATFORMS` entry, needs the regenerated file in the **same PR**: the committed file still calls the old API, so CI fails. From a fresh checkout: build once (so the generated shader headers exist), then `node generate.js`, then `node emit-coverage.js`. |
+| `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. Deprecating, removing or renaming a documented API, or dropping a platform's implementation along with its `TC_PLATFORMS` entry, needs the regenerated file in the **same PR**: the committed file still calls the old API, so CI fails. Regenerate with `./regenerate.sh` on macOS. |
 | `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (macros / keywords / constant values / example links) + `colors.json`. |
 
 The legacy `api-definition.yaml` and its `generate-docs.js` / `mine.js` are
@@ -52,10 +53,30 @@ example links) and `colors.json` (the swatch palette, generated from
 `api-reference.toml` is the **only** file humans edit. `reference-data.json` is
 **auto-generated — never edit it by hand** (gitignored). Regenerate:
 
+From the repository root on **macOS**, with CMake, Clang and Node.js installed:
+
 ```bash
-node --max-old-space-size=8192 generate.js          # runs clang, ~slow
-node generate.js --structure /path/to/structure.json # reuse a cached structure
+cd docs && npm ci && cd ..
+docs/reference/regenerate.sh
 ```
+
+This is the regeneration command for all API outputs. It builds only the existing
+`TrussC_shaders` target first, then derives one sorted structure, joins the prose,
+and runs FOR_AI, oF, coverage, Lua free-function, Lua usertype, web, sketch API and
+sketch reference emitters in that order. Repeating it with the same inputs produces
+byte-identical files. `--shaders-only` bootstraps headers before `check.js --strict`.
+
+The oF Markdown guide is tracked at `docs/TrussC_vs_openFrameworks.md`; its JSON
+and the web/sketch outputs go to the ignored `docs/reference/build-regenerate/web/`
+directory, so no sibling website checkout is needed. The scratch structure and
+API index also stay in `build-regenerate/`. `reference-data.json` stays gitignored.
+Linux can run the command for local checks, but its host-specific declarations
+can differ; committed outputs are generated on macOS.
+
+The macOS `reference-check` CI job runs `check.js --strict`, regenerates, and fails
+if any tracked FOR_AI, oF Markdown, coverage or Lua output differs. It runs in the
+PR lane and merge queue. On drift, download the `regenerated-patch` artifact,
+apply `regenerated.patch` with `git apply`, and include those changes in the PR.
 
 ## `reference-data.json` — the canonical format
 

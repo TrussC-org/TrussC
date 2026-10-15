@@ -434,7 +434,10 @@ auto tcxLuaConstructors() {
     else return sol::constructors<Signatures...>();
 }
 }
-${needsColorsTag ? 'namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table\n' : ''}#ifndef _MSC_VER
+${needsColorsTag ? 'namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table\n' : ''}#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
 // Lua retains deprecated compatibility names, including inherited ones.
@@ -442,7 +445,9 @@ ${needsColorsTag ? 'namespace { struct TcxLuaColorsTable {}; }   // tag for the 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 `;
-const POSTLUDE = `#ifndef _MSC_VER
+const POSTLUDE = `#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif

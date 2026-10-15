@@ -56,6 +56,10 @@ assert.match(types, /t\["distance"\] = &trussc::Base::Result::distance;/);
 assert.doesNotMatch(types, /DerivedResult|new_usertype<[^>]*Derived::Result>/);
 assert.doesNotMatch(types, /registry\(\)|registered\.as|\(\*lua\)\["Derived"\] = t;/);
 const funcs = generate('luagen/luagen.js');
+for (const generated of [types, funcs]) {
+    assert.match(generated, /#ifdef _MSC_VER\n#pragma warning\(push\)\n#pragma warning\(disable: 4996\)\n#else/);
+    assert.match(generated, /#ifdef _MSC_VER\n#pragma warning\(pop\)\n#else/);
+}
 assert.match(funcs, /#if defined\(__ANDROID__\)\n\s*lua->set_function\("guarded".*\n#endif/);
 assert.match(funcs, /#endif\n\s*lua->set_function\("unrestricted"/);
 console.log('Lua generators: resolved entry guards, inherited members, inherited TYPE omission and base inclusion PASS');
