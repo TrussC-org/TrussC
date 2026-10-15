@@ -6,11 +6,14 @@ old hand bindings), and the **`colors` constant table** (from `colors.json`, 149
 colors) — all from `docs/reference/`. Pairs with `luagen/` (Phase 1 = free fns).
 Members/types with a `platforms` annotation are wrapped in preprocessor guards.
 
+Regenerate on macOS from the repository root:
+
 ```bash
-node luagen-types.js ../../../../docs/reference/reference-data.json \
-                     ../../../../docs/reference/colors.json \
-    > ../../src/generated/trussctype_generated.cpp
+docs/reference/regenerate.sh
 ```
+
+See the [reference pipeline](../../../../docs/reference/README.md) for prerequisites,
+all outputs and the CI freshness check.
 
 ## Status — 110 types compile clean (isolation syntax-only witness), 0 errors
 

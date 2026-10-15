@@ -6,11 +6,14 @@ denylist, no npm deps.** Correctness is verified by COMPILING the output against
 the real headers (witness).
 
 ## Run
+Regenerate on macOS from the repository root:
+
 ```bash
-node luagen.js ../../../../docs/reference/reference-data.json > ../../src/generated/trussc_generated.cpp
-# reference-data.json is gitignored; regenerate it first:
-#   node docs/reference/generate.js
+docs/reference/regenerate.sh
 ```
+
+See the [reference pipeline](../../../../docs/reference/README.md) for prerequisites,
+all outputs and the CI freshness check.
 
 ## What it does (Phase 1 = free functions)
 - Binds entries with `kind:"func"`, no `owner`, no `ns` (top-level `trussc::` free fns).

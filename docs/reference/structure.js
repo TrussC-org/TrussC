@@ -25,7 +25,6 @@ const argv = process.argv.slice(2);
 const argVal = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
 
 // --- 1. obtain the AST dump (cached or fresh) -------------------------------
-let astPartial = false;   // set when clang failed mid-parse (e.g. missing generated *.glsl.h)
 // The dump needs CLANG specifically (-Xclang -ast-dump=json); g++ rejects those
 // flags outright. On macOS `c++` IS clang, so defaulting to it worked there and
 // died on Linux with four "unrecognized command-line option" lines from g++ --
@@ -63,29 +62,19 @@ function dumpAst() {
     try {
         return execSync(`${CXX} ${args.map(a => `'${a}'`).join(' ')}`, { maxBuffer: 1024 * 1024 * 1024 }).toString();
     } catch (e) {
-        // clang -ast-dump emits the AST to stdout even when it exits non-zero
-        // (e.g. a stray diagnostic after the trussc namespace was already
-        // dumped). If we got a real AST, use it — only the trussc filter matters.
-        const out = (e.stdout || '').toString();
+        // Even a large AST can be truncated by a fatal diagnostic. Never let
+        // check.js or an emitter consume that incomplete API surface.
         const err = (e.stderr || '').toString();
-        if (out.length > 100000) {
-            // A partial AST keeps symbol NAMES intact (fine for check.js's
-            // orphan/undocumented gates) but degrades unresolved template
-            // TYPES to int — poison for anything that renders signatures
-            // (generate.js / emit-forai). Record the fact; the --json output
-            // carries it as __meta so type-consumers can refuse.
-            astPartial = true;
-            process.stderr.write('structure: clang exited non-zero but produced a PARTIAL AST; using it (names ok, types may degrade). First diagnostics:\n'
-                + err.split('\n').slice(0, 8).join('\n') + '\n');
-            return out;
+        process.stderr.write(`structure: clang AST dump FAILED using CXX=${CXX}.\n`);
+        if (/fatal error:/.test(err)) {
+            process.stderr.write('structure: hint: core/include/tc/gpu/shaders/*.glsl.h may be missing; generate the shaders first with docs/reference/regenerate.sh --shaders-only.\n');
         }
-        process.stderr.write(`structure: clang AST dump FAILED (no usable output) using CXX=${CXX}.\n`);
         if (/unrecognized command-line option/.test(err)) {
             process.stderr.write('structure: that compiler is not clang -- this dump requires clang (-Xclang -ast-dump=json).\n'
                 + 'structure: install clang or set CXX=/path/to/clang++.\n');
         }
         process.stderr.write('structure: compiler stderr:\n' + err + '\n');
-        throw e;
+        process.exit(1);
     }
 }
 const cached = argVal('--ast');
@@ -252,7 +241,7 @@ function enumerate(objs) {
         const recFile = fileOf(rec);
         // qualified owner for members + nested types (Entry -> ChipSoundBundle::Entry)
         const qn = enclosing ? enclosing + '::' + rec.name : rec.name;
-        const typeSym = { kind: 'type', ns: nsPath, owner: enclosing || null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec) };
+        const typeSym = { kind: 'type', ns: nsPath, owner: enclosing || null, name: rec.name, file: recFile, flags: [...(extraFlags || [])], tparams: tps, ann: annotationsOf(rec, recFile), deprecated: deprecatedOf(rec), bases: rec.bases || [] };
         syms.push(typeSym);
         let access = rec.tagUsed === 'class' ? 'private' : 'public';
         for (const m of (rec.inner || [])) {
@@ -262,7 +251,7 @@ function enumerate(objs) {
                 && !m.isImplicit && !m.explicitlyDeleted && !/&&/.test((m.type && m.type.qualType) || '')) {
                 const ca = argsOf(m);
                 const isCopy = ca.length === 1 && ca[0].type === `const ${rec.name} &`;   // skip copy ctor (noise)
-                if (!isCopy) (typeSym.ctors = typeSym.ctors || []).push({ params: paramsOf(m), args: ca });
+                if (!isCopy) (typeSym.ctors = typeSym.ctors || []).push({ params: paramsOf(m), args: ca, ...annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
                 continue;
             }
             if (m.kind === 'CXXMethodDecl') {
@@ -280,7 +269,7 @@ function enumerate(objs) {
                     flags: [...(extraFlags || []), 'template', /operator/.test(m.name) ? 'operator' : null, fn.storageClass === 'static' ? 'static' : null].filter(Boolean),
                     ann: annotationsOf(fn, fileOf(m)), deprecated: deprecatedOf(fn) });
             } else if (m.kind === 'FieldDecl') {
-                syms.push({ kind: 'field', ns: nsPath, owner: qn, name: m.name, ftype: m.type && m.type.qualType, file: fileOf(m), access, flags: [], deprecated: deprecatedOf(m) });
+                syms.push({ kind: 'field', ns: nsPath, owner: qn, name: m.name, ftype: m.type && m.type.qualType, file: fileOf(m), access, flags: [], ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'EnumDecl' && m.name) {
                 syms.push({ kind: 'enum', ns: nsPath, owner: qn, name: m.name, file: fileOf(m), access, flags: ['nested'], members: enumMembersOf(m), ann: annotationsOf(m, fileOf(m)), deprecated: deprecatedOf(m) });
             } else if (m.kind === 'CXXRecordDecl' && m.name && access === 'public') {
@@ -305,7 +294,7 @@ function enumerate(objs) {
             } else if (c.kind === 'FunctionTemplateDecl' && c.name) {
                 const fn = (c.inner || []).find(x => x.kind === 'FunctionDecl');
                 // the AnnotateAttr (TC_PLATFORMS / TC_LUA_BIND) lives on the inner FunctionDecl, not the template decl
-                syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: fn && fn.type && fn.type.qualType, params: fn ? paramsOf(fn) : '', args: fn ? argsOf(fn) : [], file: fileOf(c), flags: ['template'], tparams: tparamsOf(c), ann: fn ? annotationsOf(fn, fileOf(c)) : undefined, deprecated: deprecatedOf(c) });
+                syms.push({ kind: 'func', ns: p, owner: null, name: c.name, sig: fn && fn.type && fn.type.qualType, params: fn ? paramsOf(fn) : '', args: fn ? argsOf(fn) : [], file: fileOf(c), flags: ['template'], tparams: tparamsOf(c), ann: fn ? annotationsOf(fn, fileOf(c)) : undefined, deprecated: fn ? deprecatedOf(fn) : deprecatedOf(c) });
             } else if (c.kind === 'TypedefDecl' || c.kind === 'TypeAliasDecl') { syms.push({ kind: 'typedef', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], deprecated: deprecatedOf(c) });
             } else if (c.kind === 'VarDecl') { syms.push({ kind: 'var', ns: p, owner: null, name: c.name, file: fileOf(c), flags: [], ann: annotationsOf(c, fileOf(c)), deprecated: deprecatedOf(c) });
             }
@@ -361,10 +350,72 @@ let pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbolId
 // and is kept as-is.
 const enumsWithMembers = new Set(pub.filter(s => s.kind === 'enum' && s.members && s.members.length).map(symbolId));
 pub = pub.filter(s => !(s.kind === 'enum' && !(s.members && s.members.length) && enumsWithMembers.has(symbolId(s))));
+// Resolve inheritance before grouping overloads. C++ member lookup hides a base
+// name when the derived type declares that name. Constructors are not members
+// inherited by this walk; only public members of public bases are copied.
+const records = new Map(pub.filter(s => s.kind === 'type').map(s => [
+    [nsPrefix(s), s.owner, s.name].filter(Boolean).join('::'), s]));
+const ownMembers = new Map();
+for (const s of pub.filter(s => s.owner)) {
+    const key = [nsPrefix(s), s.owner].filter(Boolean).join('::');
+    if (!ownMembers.has(key)) ownMembers.set(key, []);
+    ownMembers.get(key).push(s);
+}
+const declaredNames = new Map();
+for (const s of syms.filter(s => s.owner)) {
+    const key = [nsPrefix(s), s.owner].filter(Boolean).join('::');
+    if (!declaredNames.has(key)) declaredNames.set(key, new Set());
+    declaredNames.get(key).add(s.name);
+}
+const resolvedMembers = new Map();
+function membersOf(key) {
+    if (resolvedMembers.has(key)) return resolvedMembers.get(key);
+    const rec = records.get(key);
+    const members = [...(ownMembers.get(key) || [])];
+    const names = new Set(declaredNames.get(key));
+    for (const base of (rec.bases || [])) {
+        if (base.access !== 'public') continue;
+        const baseKey = (base.type.desugaredQualType || base.type.qualType).replace(/^trussc::/, '');
+        if (!records.has(baseKey)) continue;
+        const inherited = membersOf(baseKey).filter(s => (!s.access || s.access === 'public') && !names.has(s.name));
+        for (const s of inherited) members.push({ ...s, ctors: s.ctors?.map(c => ({ ...c })), ns: rec.ns,
+            owner: [rec.owner, rec.name].filter(Boolean).join('::'),
+            declaredIn: s.declaredIn || baseKey });
+        for (const s of inherited) names.add(s.name);
+    }
+    resolvedMembers.set(key, members);
+    return members;
+}
+for (const key of records.keys()) pub.push(...membersOf(key).filter(s => s.declaredIn));
+
+// Every declaration uses its own metadata, otherwise its owner type's. Resolve
+// nested owners first, so the same rule applies at every depth.
+const resolvedTypes = new Set();
+function resolveType(key) {
+    const rec = records.get(key);
+    if (!rec || resolvedTypes.has(key)) return rec;
+    const owner = rec.owner && resolveType([nsPrefix(rec), rec.owner].filter(Boolean).join('::'));
+    resolveMetadata(rec, owner);
+    resolvedTypes.add(key);
+    return rec;
+}
+function resolveMetadata(s, owner) {
+    s.ann = { ...s.ann, platforms: s.ann?.platforms ?? owner?.ann?.platforms ?? null };
+    s.deprecated = s.deprecated ?? owner?.deprecated ?? null;
+}
+for (const key of records.keys()) resolveType(key);
+for (const s of pub) {
+    const owner = s.owner && records.get([nsPrefix(s), s.owner].filter(Boolean).join('::'));
+    resolveMetadata(s, owner);
+    for (const ctor of (s.ctors || [])) {
+        ctor.platforms = ctor.platforms ?? s.ann.platforms;
+        ctor.deprecated = ctor.deprecated ?? s.deprecated;
+    }
+}
 const structure = Object.create(null);                          // null proto: ids like "toString"/"constructor" are safe keys
 for (const s of pub) {
     const id = symbolId(s);
-    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, lua_skip: (s.ann && s.ann.lua_skip) || undefined, deprecated: s.deprecated || undefined, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
+    if (!structure[id]) structure[id] = { id, kind: s.kind, owner: s.owner || undefined, declaredIn: s.declaredIn, name: s.name, ns: nsPrefix(s) || undefined, signatures: [], static: false, type: s.ftype || undefined, access: s.access && s.access !== 'public' ? s.access : undefined, members: s.members && s.members.length ? s.members : undefined, constructors: s.ctors && s.ctors.length ? s.ctors : undefined, platforms: s.ann && s.ann.platforms, lua_bind: s.ann && s.ann.lua_bind, lua_skip: (s.ann && s.ann.lua_skip) || undefined, deprecated: s.deprecated, tparams: s.tparams && s.tparams.length ? s.tparams : undefined };
     const e = structure[id];
     if ((s.flags || []).includes('static')) e.static = true;
     if (s.deprecated && !e.deprecated) e.deprecated = s.deprecated;
@@ -372,7 +423,7 @@ for (const s of pub) {
         const p = parseSig(s.sig);                             // ret + const from qualType
         if (p) { const sig = { ret: p.ret, params: s.params !== undefined ? s.params : p.params, const: p.const, args: s.args,
                 tmpl: (s.flags || []).includes('template') || undefined,     // tmpl: needs explicit instantiation (e.g. typeName<T>()) — binders skip it
-                deprecated: s.deprecated || undefined };                     // C++ carries [[deprecated]] per DECLARATION, so it belongs on the overload
+                deprecated: s.deprecated };                     // C++ carries [[deprecated]] per DECLARATION, so it belongs on the overload
             if (!e.signatures.some(x => x.params === sig.params && x.const === sig.const)) e.signatures.push(sig); }
     }
 }
@@ -381,7 +432,7 @@ for (const s of pub) {
 for (const s of require('./std-symbols.js')) {
     if (structure[s.id]) continue;                              // a real trussc:: symbol wins
     structure[s.id] = { id: s.id, kind: s.kind, owner: undefined, name: s.name, ns: undefined,
-        signatures: s.signatures || [], static: false, provider: s.provider };
+        signatures: s.signatures || [], static: false, provider: s.provider, platforms: null, deprecated: null };
 }
 
 // --- 4c. reconcile per-overload deprecation ---------------------------------
@@ -399,19 +450,16 @@ for (const id in structure) {
     const e = structure[id];
     if (!e.signatures || !e.signatures.length) continue;
     const dep = e.signatures.filter((sig) => sig.deprecated);
-    e.deprecated = dep.length === e.signatures.length ? dep[0].deprecated : undefined;
+    e.deprecated = dep.length === e.signatures.length ? dep[0].deprecated : null;
 }
 
 // --- 5. output --------------------------------------------------------------
 const jsonOut = argVal('--json');
-if (argv.includes('--ids')) { console.log(Object.keys(structure).sort().join('\n')); process.exit(0); }
+if (argv.includes('--ids')) { console.log(Object.keys(structure).filter(id => !structure[id].declaredIn || structure[id].declaredIn === structure[id].owner).sort().join('\n')); process.exit(0); }
 if (jsonOut) {
-    // __meta rides along ONLY in the JSON output (--ids stays a pure id list,
-    // which is all check.js needs — its gates are name-based and stay valid
-    // on a partial AST). Type-consumers (generate.js) look for this and refuse.
-    if (astPartial) structure.__meta = { partialAst: true };
-    fs.writeFileSync(jsonOut, JSON.stringify(structure, null, 0));
-    process.stderr.write(`structure written to ${jsonOut} (${Object.keys(structure).length - (astPartial ? 1 : 0)} symbols${astPartial ? ', PARTIAL AST' : ''})\n`);
+    const sorted = Object.fromEntries(Object.keys(structure).sort().map(id => [id, structure[id]]));
+    fs.writeFileSync(jsonOut, JSON.stringify(sorted, null, 0));
+    process.stderr.write(`structure written to ${jsonOut} (${Object.keys(structure).length} symbols)\n`);
     process.exit(0);
 }
 

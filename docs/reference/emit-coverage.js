@@ -122,14 +122,15 @@ for (const [id, v] of Object.entries(data)) {
         push(free, v.category || 'other', guard, [`(void)${qualify(v)};`]);
     } else if (v.kind === 'method' && v.owner) {
         if (v.name === v.owner || v.name.startsWith('~')) continue;   // ctors via 'constructors', no dtors
-        const lines = v.signatures.filter(usableSig).map(s => `(void)af::val<${owner}>().${v.name}(${callArgs(s, v.ns)});`);
+        const lines = v.signatures.filter(usableSig).map(s => `(void)af::val<${s.const ? 'const ' : ''}${owner}>().${v.name}(${callArgs(s, v.ns)});`);
         if (lines.length) push(owners, owner, guard, lines);
     } else if (v.kind === 'field' && v.owner) {
         push(owners, owner, guard, [`(void)af::val<${owner}>().${v.name};`]);
     } else if (v.kind === 'type' && v.constructors && v.constructors.length && !v.owner &&
                !(v.tparams && v.tparams.length)) {
-        const lines = v.constructors.filter(usableSig).map(s => `(void)${qualify(v)}(${callArgs(s, v.ns)});`);
-        if (lines.length) push(owners, qualify(v), guard, lines);
+        for (const s of v.constructors.filter(usableSig)) {
+            push(owners, qualify(v), platformGuard(s.platforms), [`(void)${qualify(v)}(${callArgs(s, v.ns)});`]);
+        }
     }
 }
 

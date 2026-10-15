@@ -3,10 +3,25 @@
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
+// Abstract bases (e.g. VideoPlayerBase) expose members but cannot be constructed.
+// An empty guarded constructor list must not enable sol2's automatic default ctor.
+namespace {
+template<typename Owner, typename... Signatures>
+auto tcxLuaConstructors() {
+    if constexpr (std::is_abstract_v<Owner> || sizeof...(Signatures) == 0) return sol::no_constructor;
+    else return sol::constructors<Signatures...>();
+}
+}
 namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#else
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
+// Lua retains deprecated compatibility names, including inherited ones.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua);
 void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua);
@@ -42,37 +57,20 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     tcxLuaGenShard_14(lua);
     tcxLuaGenShard_15(lua);
     // constants
-    (*lua)["TAU"] = trussc::TAU;
-    (*lua)["HALF_TAU"] = trussc::HALF_TAU;
-    (*lua)["QUARTER_TAU"] = trussc::QUARTER_TAU;
-    (*lua)["PI"] = trussc::PI;
-    (*lua)["Left"] = trussc::Left;
-    (*lua)["Center"] = trussc::Center;
-    (*lua)["Right"] = trussc::Right;
-    (*lua)["Top"] = trussc::Top;
-    (*lua)["Bottom"] = trussc::Bottom;
     (*lua)["Baseline"] = trussc::Baseline;
-    (*lua)["VSYNC"] = trussc::VSYNC;
+    (*lua)["Bottom"] = trussc::Bottom;
+    (*lua)["Center"] = trussc::Center;
     (*lua)["EVENT_DRIVEN"] = trussc::EVENT_DRIVEN;
-    (*lua)["KEY_SPACE"] = trussc::KEY_SPACE;
-    (*lua)["KEY_ESCAPE"] = trussc::KEY_ESCAPE;
-    (*lua)["KEY_ENTER"] = trussc::KEY_ENTER;
-    (*lua)["KEY_TAB"] = trussc::KEY_TAB;
+    (*lua)["HALF_TAU"] = trussc::HALF_TAU;
     (*lua)["KEY_BACKSPACE"] = trussc::KEY_BACKSPACE;
     (*lua)["KEY_DELETE"] = trussc::KEY_DELETE;
-    (*lua)["KEY_RIGHT"] = trussc::KEY_RIGHT;
-    (*lua)["KEY_LEFT"] = trussc::KEY_LEFT;
     (*lua)["KEY_DOWN"] = trussc::KEY_DOWN;
-    (*lua)["KEY_UP"] = trussc::KEY_UP;
-    (*lua)["KEY_LEFT_SHIFT"] = trussc::KEY_LEFT_SHIFT;
-    (*lua)["KEY_RIGHT_SHIFT"] = trussc::KEY_RIGHT_SHIFT;
-    (*lua)["KEY_LEFT_CONTROL"] = trussc::KEY_LEFT_CONTROL;
-    (*lua)["KEY_RIGHT_CONTROL"] = trussc::KEY_RIGHT_CONTROL;
-    (*lua)["KEY_LEFT_ALT"] = trussc::KEY_LEFT_ALT;
-    (*lua)["KEY_RIGHT_ALT"] = trussc::KEY_RIGHT_ALT;
-    (*lua)["KEY_LEFT_SUPER"] = trussc::KEY_LEFT_SUPER;
-    (*lua)["KEY_RIGHT_SUPER"] = trussc::KEY_RIGHT_SUPER;
+    (*lua)["KEY_ENTER"] = trussc::KEY_ENTER;
+    (*lua)["KEY_ESCAPE"] = trussc::KEY_ESCAPE;
     (*lua)["KEY_F1"] = trussc::KEY_F1;
+    (*lua)["KEY_F10"] = trussc::KEY_F10;
+    (*lua)["KEY_F11"] = trussc::KEY_F11;
+    (*lua)["KEY_F12"] = trussc::KEY_F12;
     (*lua)["KEY_F2"] = trussc::KEY_F2;
     (*lua)["KEY_F3"] = trussc::KEY_F3;
     (*lua)["KEY_F4"] = trussc::KEY_F4;
@@ -81,12 +79,29 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
     (*lua)["KEY_F7"] = trussc::KEY_F7;
     (*lua)["KEY_F8"] = trussc::KEY_F8;
     (*lua)["KEY_F9"] = trussc::KEY_F9;
-    (*lua)["KEY_F10"] = trussc::KEY_F10;
-    (*lua)["KEY_F11"] = trussc::KEY_F11;
-    (*lua)["KEY_F12"] = trussc::KEY_F12;
+    (*lua)["KEY_LEFT"] = trussc::KEY_LEFT;
+    (*lua)["KEY_LEFT_ALT"] = trussc::KEY_LEFT_ALT;
+    (*lua)["KEY_LEFT_CONTROL"] = trussc::KEY_LEFT_CONTROL;
+    (*lua)["KEY_LEFT_SHIFT"] = trussc::KEY_LEFT_SHIFT;
+    (*lua)["KEY_LEFT_SUPER"] = trussc::KEY_LEFT_SUPER;
+    (*lua)["KEY_RIGHT"] = trussc::KEY_RIGHT;
+    (*lua)["KEY_RIGHT_ALT"] = trussc::KEY_RIGHT_ALT;
+    (*lua)["KEY_RIGHT_CONTROL"] = trussc::KEY_RIGHT_CONTROL;
+    (*lua)["KEY_RIGHT_SHIFT"] = trussc::KEY_RIGHT_SHIFT;
+    (*lua)["KEY_RIGHT_SUPER"] = trussc::KEY_RIGHT_SUPER;
+    (*lua)["KEY_SPACE"] = trussc::KEY_SPACE;
+    (*lua)["KEY_TAB"] = trussc::KEY_TAB;
+    (*lua)["KEY_UP"] = trussc::KEY_UP;
+    (*lua)["Left"] = trussc::Left;
     (*lua)["MOUSE_BUTTON_LEFT"] = trussc::MOUSE_BUTTON_LEFT;
-    (*lua)["MOUSE_BUTTON_RIGHT"] = trussc::MOUSE_BUTTON_RIGHT;
     (*lua)["MOUSE_BUTTON_MIDDLE"] = trussc::MOUSE_BUTTON_MIDDLE;
+    (*lua)["MOUSE_BUTTON_RIGHT"] = trussc::MOUSE_BUTTON_RIGHT;
+    (*lua)["PI"] = trussc::PI;
+    (*lua)["QUARTER_TAU"] = trussc::QUARTER_TAU;
+    (*lua)["Right"] = trussc::Right;
+    (*lua)["TAU"] = trussc::TAU;
+    (*lua)["Top"] = trussc::Top;
+    (*lua)["VSYNC"] = trussc::VSYNC;
     {
         sol::usertype<TcxLuaColorsTable> t = lua->new_usertype<TcxLuaColorsTable>("colors");
         t["white"] = sol::var(trussc::colors::white);
@@ -240,7 +255,9 @@ void tcxLua::setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua) {
         t["darkSlateGrey"] = sol::var(trussc::colors::darkSlateGrey);
     }
 }
-#ifndef _MSC_VER
+#ifdef _MSC_VER
+#pragma warning(pop)
+#else
 #pragma GCC diagnostic pop
 #pragma clang diagnostic pop
 #endif

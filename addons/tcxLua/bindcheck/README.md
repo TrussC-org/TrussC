@@ -18,6 +18,11 @@ they actually arrive in the Lua state and work when called.
    - `Node.new()` / `Serial` — types once mis-excluded from generation
 
 ## Workflow after editing / regenerating the bindings
+
+Regenerate the API outputs on macOS with
+[`docs/reference/regenerate.sh`](../../../docs/reference/regenerate.sh) from the
+repository root (see the [pipeline prerequisites](../../../docs/reference/README.md)).
+
 ```bash
 cd addons/tcxLua/bindcheck
 

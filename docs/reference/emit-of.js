@@ -29,7 +29,7 @@ const END = '<!-- AUTO-GENERATED-END -->';
 
 const { categoryMapping, typeCategoryMapping, ofOnlyEntries } = require('./of-mapping-config.js');
 const data = JSON.parse(fs.readFileSync(DATA, 'utf8'));
-const E = Object.values(data);
+const E = Object.values(data).filter(e => !e.declaredIn || e.declaredIn === e.owner);
 
 // --- param-name extraction (same logic as the legacy generator) ---
 function splitParams(s) {

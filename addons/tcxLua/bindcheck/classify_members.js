@@ -28,6 +28,17 @@ const data = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 // luagen-types.js keys its guards on.
 const HOST = process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux';
 const offHost = (e) => !!(e && e.platforms && e.platforms.length && !e.platforms.includes(HOST));
+// The existence lists also read registrations from source, including #if blocks.
+// Filter those names by the same resolved entry contract as member probes.
+if (process.argv.includes('--names')) {
+    const entries = new Map(Object.values(data)
+        .filter(e => !e.ns && ['func', 'type', 'enum'].includes(e.kind))
+        .map(e => [(e.owner ? e.owner.replace(/::/g, '') : '') + e.name, e]));
+    for (const name of fs.readFileSync(0, 'utf8').split('\n').filter(Boolean)) {
+        if (!offHost(entries.get(name))) process.stdout.write(name + '\n');
+    }
+    process.exit(0);
+}
 let skippedPlatform = 0;
 
 // (owner, member) -> kind, keyed on the C++ owner as reference-data spells it.
