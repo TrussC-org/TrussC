@@ -103,4 +103,3 @@ target_include_directories(${ADDON_NAME} PRIVATE
 trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
 
 target_link_libraries(${ADDON_NAME} PUBLIC ${ADDON_NAME}_shaders)
-trussc_shader_object_depends(${ADDON_NAME} ${ADDON_NAME}_shaders)

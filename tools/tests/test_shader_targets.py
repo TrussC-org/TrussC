@@ -38,11 +38,15 @@ class ShaderTargetTests(unittest.TestCase):
             self.assertIn(f'trussc_shader_object_depends({consumer} ${{_TC_APP_SHADER_TARGETS}})', app)
         for filename, statement in (
             ('core/CMakeLists.txt', 'trussc_shader_object_depends(TrussC TrussC_shaders)'),
-            ('addons/tcxHap/CMakeLists.txt',
-             'trussc_shader_object_depends(${ADDON_NAME} ${ADDON_NAME}_shaders)'),
+            ('core/cmake/use_addon.cmake',
+             'trussc_shader_object_depends(${_ADDON_NAME} ${_ADDON_NAME}_shaders)'),
         ):
             with self.subTest(filename=filename):
                 self.assertIn(statement, (ROOT / filename).read_text())
+        # Addon authors write only the link line; the loader adds the rest.
+        for addon in sorted((ROOT / 'addons').glob('*/CMakeLists.txt')):
+            with self.subTest(addon=addon.parent.name):
+                self.assertNotIn('trussc_shader_object_depends', addon.read_text())
 
 
 if __name__ == '__main__':

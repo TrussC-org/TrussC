@@ -207,7 +207,9 @@ endfunction()
 # shader regenerates its header but recompiles the consumer only on the next
 # build. Naming the headers as OBJECT_DEPENDS puts the generated node itself
 # in front of each of the consumer's objects. Other setups record the
-# absolute path already and are left alone.
+# absolute path already and are left alone. It reads the consumer's SOURCES
+# at call time, so call it after the target's sources are complete. Core,
+# apps and the addon loader call it; an addon does not call it itself.
 function(trussc_shader_object_depends _TC_CONSUMER)
     if(NOT CMAKE_GENERATOR MATCHES "Ninja" OR NOT (MSVC OR CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC"))
         return()
@@ -223,8 +225,14 @@ function(trussc_shader_object_depends _TC_CONSUMER)
         return()
     endif()
     get_target_property(_TC_SOURCES ${_TC_CONSUMER} SOURCES)
+    get_target_property(_TC_SOURCE_DIR ${_TC_CONSUMER} SOURCE_DIR)
     foreach(_TC_SOURCE IN LISTS _TC_SOURCES)
         if(_TC_SOURCE MATCHES "\\.(c|cc|cpp|cxx)$" AND NOT _TC_SOURCE MATCHES "\\$<")
+            # The loader calls this from the app's directory for an addon
+            # target, so resolve relative sources against the target's own.
+            if(NOT IS_ABSOLUTE "${_TC_SOURCE}")
+                set(_TC_SOURCE "${_TC_SOURCE_DIR}/${_TC_SOURCE}")
+            endif()
             set_property(SOURCE "${_TC_SOURCE}" TARGET_DIRECTORY ${_TC_CONSUMER}
                 APPEND PROPERTY OBJECT_DEPENDS ${_TC_HEADERS})
         endif()
