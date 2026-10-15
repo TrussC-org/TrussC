@@ -86,8 +86,8 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
         return false;
     }
 
-    size_t bytesPerRow = width_ * 4;  // RGBA8
-    return readPixelsInternal(curColorTex_().getImage(), width_, height_,
+    size_t bytesPerRow = target_.width * 4;  // RGBA8
+    return readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                               MTLPixelFormatRGBA8Unorm, bytesPerRow, pixels, reportError);
 }
 
@@ -119,13 +119,13 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     // For non-float formats, read as U8 then convert
     if (sgFmt == SG_PIXELFORMAT_RGBA8 || sgFmt == SG_PIXELFORMAT_R8 || sgFmt == SG_PIXELFORMAT_RG8) {
         int ch = channelCount(format_);
-        std::vector<unsigned char> tmp(width_ * height_ * ch);
-        size_t bytesPerRow = width_ * ch;
-        bool ok = readPixelsInternal(curColorTex_().getImage(), width_, height_,
+        std::vector<unsigned char> tmp(target_.width * target_.height * ch);
+        size_t bytesPerRow = target_.width * ch;
+        bool ok = readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                                      mtlFmt, bytesPerRow, tmp.data());
         if (!ok) return false;
         // Convert U8 to float
-        int total = width_ * height_ * ch;
+        int total = target_.width * target_.height * ch;
         for (int i = 0; i < total; i++) {
             pixels[i] = (float)tmp[i] / 255.0f;
         }
@@ -134,17 +134,17 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
     // Float formats: read directly
     int bpp = bytesPerPixel(format_);
-    size_t bytesPerRow = width_ * bpp;
+    size_t bytesPerRow = target_.width * bpp;
 
     // For 16F formats we need to read raw half-floats and convert to float
     if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
         int ch = channelCount(format_);
-        std::vector<uint16_t> tmp(width_ * height_ * ch);
-        bool ok = readPixelsInternal(curColorTex_().getImage(), width_, height_,
+        std::vector<uint16_t> tmp(target_.width * target_.height * ch);
+        bool ok = readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                                      mtlFmt, bytesPerRow, tmp.data());
         if (!ok) return false;
         // Convert half-float to float (IEEE 754 binary16)
-        int total = width_ * height_ * ch;
+        int total = target_.width * target_.height * ch;
         for (int i = 0; i < total; i++) {
             uint16_t h = tmp[i];
             uint32_t sign = (h & 0x8000) << 16;
@@ -172,7 +172,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     }
 
     // 32F formats: direct read
-    return readPixelsInternal(curColorTex_().getImage(), width_, height_,
+    return readPixelsInternal(curColorTex_().getImage(), target_.width, target_.height,
                               mtlFmt, bytesPerRow, pixels);
 }
 

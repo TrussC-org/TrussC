@@ -19,7 +19,7 @@
 //   - Pipelines are cached per (color format, sample count, primitive kind), so both the
 //     swapchain and Fbo passes are supported render targets.
 //   - ALL PBR draws are deferred: swapchain draws into the per-layer flush
-//     (flushDeferredShaderDraws), FBO-pass draws into fboPbrDraws (flushed at
+//     (flushDeferredShaderDraws), Fbo draws into their target queue (flushed at
 //     Fbo::end()), so they composite with sokol_gl 2D in submission order.
 //     Captured sg_buffer handles stay valid because Mesh defers buffer
 //     destruction to end of frame (internal::deferGpuDestroy,
@@ -83,21 +83,10 @@ inline PbrSpecialLightSlots selectPbrSpecialLightSlots(const std::vector<Light*>
     return r;
 }
 struct DeferredPbrDraw { int layerId; PbrDrawCommand cmd; };
-// deferredPbrDraws (swapchain) is now PER-WINDOW, held in WindowContext
-// (tc/app/tcWindowContext.h) and reached via currentWindowContext(). Replayed
-// per sokol_gl layer by flushDeferredShaderDraws() (tcShader.h).
 
-// PBR draws deferred WITHIN an FBO pass. Flushed at Fbo::end()/clearColor() via
-// flushFboDeferredPbr(), which interleaves them with the FBO context's sokol_gl
-// layers using sgl_context_draw_layer() — each layer drawn once (O(N)). This
-// replaces the old per-mesh sgl_draw() in the FBO path, which redrew the whole
-// FBO context on every mesh (O(N^2)) and overflowed the per-frame uniform buffer
-// once enough meshes were in flight.
-// fboPbrDraws (PBR draws deferred WITHIN an FBO pass) is now PER-WINDOW, held in
-// WindowContext and reached via currentWindowContext(); flushed per-layer by
-// flushFboDeferredPbr() below. The shared FBO-pass layer counter fboLayerNext is
-// likewise a WindowContext member (used by both this pipeline and the point
-// pipeline).
+// Each target owns its PBR queue and the layer counter shared with shaders,
+// points and sokol_gl. Fbo::end()/clearColor() and present() retain their
+// existing per-layer replay paths.
 
 class PbrPipeline {
 public:
@@ -157,9 +146,9 @@ public:
         // SG_PIXELFORMAT_NONE (1) は「カラーアタッチメントなし」なので使わない
         sg_pixel_format colorFmt;
         int sampleCount;
-        if (wctx.inFboPass) {
-            colorFmt = wctx.currentFboColorFormat;
-            sampleCount = wctx.currentFboSampleCount;
+        if (wctx.currentTarget->isFbo) {
+            colorFmt = wctx.currentTarget->colorFormat;
+            sampleCount = wctx.currentTarget->sampleCount;
         } else {
             const auto target = swapchainTargetFormat(wctx);
             colorFmt = target.colorFormat;
@@ -282,7 +271,7 @@ public:
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose the
         // storage before upload so shader can use the conventional `model * v`.
         Mat4 modelT = getDefaultContext().getMatrix().transposed();
-        Mat4 viewProj = wctx.currentProjectionMatrix * wctx.currentViewMatrix;
+        Mat4 viewProj = wctx.currentTarget->camera.currentProjectionMatrix * wctx.currentTarget->camera.currentViewMatrix;
         Mat4 viewProjT = viewProj.transposed();
         // For now, normal matrix is just the model matrix. This is correct for
         // rotations and uniform scale; non-uniform scale would need
@@ -435,26 +424,13 @@ public:
             fsp.shadowSlotLightDir[s][3] = sh.refDot[s];
         }
 
-        // --- Submit ---------------------------------------------------------
-        // Package the fully-resolved draw. Inside an FBO pass we submit it
-        // immediately (that pass is self-contained). For the swapchain we DEFER
-        // it: append to deferredPbrDraws and bump the sokol_gl layer so any 2D
-        // drawn after this mesh composites on top of it (same trick the deferred
-        // shaders use). flushDeferredShaderDraws() replays it per layer.
+        // Defer on the active target and advance its layer so later 2D
+        // composites on top. Both pass types keep the same submission order.
         PbrDrawCommand cmd{ pip, bind, vsp, fsp,
                             mesh.getGpuIndexCount(), mesh.getGpuVertexCount() };
-        if (wctx.inFboPass) {
-            // Defer (like the swapchain path) into the per-FBO list; flushed
-            // per-layer in Fbo::end(). Bump the FBO layer so 2D drawn after this
-            // mesh composites on top of it, matching the swapchain ordering.
-            wctx.fboPbrDraws.push_back({ wctx.fboLayerNext, cmd });
-            wctx.fboLayerNext++;
-            sgl_layer(wctx.fboLayerNext);
-        } else {
-            wctx.deferredPbrDraws.push_back({ wctx.sglLayerNext, cmd });
-            wctx.sglLayerNext++;
-            sgl_layer(wctx.sglLayerNext);
-        }
+        wctx.currentTarget->deferredPbrDraws.push_back({ wctx.currentTarget->sglLayerNext, cmd });
+        wctx.currentTarget->sglLayerNext++;
+        sgl_layer(wctx.currentTarget->sglLayerNext);
     }
 
     // Submit a packaged PBR draw to the GPU. Used immediately for FBO passes and
@@ -626,13 +602,13 @@ public:
         // endShadowPass() only resumes when there is something to resume
         // (mirrors Fbo::wasInSwapchainPass_ — issue #191: it used to start a
         // swapchain pass even when none was active before).
-        sh.wasInSwapchainPass = wctx.inSwapchainPass;
+        sh.wasInSwapchainPass = wctx.swapchainTarget.inPass;
         if (sh.wasInSwapchainPass) {
             // Submit every layer (including deferred mesh/user-shader draws)
             // once before suspending. present() must not replay this prefix.
             internal::flushLayersMidPass();
             sg_end_pass();
-            wctx.inSwapchainPass = false;
+            wctx.swapchainTarget.inPass = false;
         }
 
         // Claim the next shadow slot for this light. computeShadowViewProj()
@@ -916,29 +892,29 @@ PbrPipeline& getPbrPipeline();
 // single FBO context). Called by Fbo::end()/clearColor() while the FBO pass is
 // still active. Each sgl layer is drawn exactly once (O(N)).
 inline void flushFboDeferredPbr(sgl_context ctx) {
-    // FBO-pass deferral queues + layer counter are per-window (this window's tick).
+    // The active Fbo owns these queues and the layer counter.
     auto& wctx = currentWindowContext();
-    for (int layer = 0; layer <= wctx.fboLayerNext; layer++) {
+    for (int layer = 0; layer <= wctx.currentTarget->sglLayerNext; layer++) {
         sgl_context_draw_layer(ctx, layer);
         // Deferred shader draws share this FBO's layer space; replay them
         // first within the layer, matching the swapchain flush order
         // (sokol_gl -> shader -> PBR -> points) in flushDeferredShaderDraws.
-        for (auto& d : wctx.fboShaderDraws) {
+        for (auto& d : wctx.currentTarget->deferredShaderDraws) {
             if (d.layerId == layer) executeDeferredShaderDraw(d);
         }
-        for (auto& d : wctx.fboPbrDraws) {
+        for (auto& d : wctx.currentTarget->deferredPbrDraws) {
             if (d.layerId == layer) getPbrPipeline().executePbrDraw(d.cmd);
         }
-        // Point splats share this FBO's layer space (fboLayerNext); replay them
+        // Point splats share this target's layer space; replay them
         // in the same walk so they composite in submission order with PBR + 2D.
-        for (auto& d : wctx.fboPointDraws) {
+        for (auto& d : wctx.currentTarget->deferredPointDraws) {
             if (d.layerId == layer) executePointDraw(d.cmd);
         }
     }
-    wctx.fboShaderDraws.clear();
-    wctx.fboPbrDraws.clear();
-    wctx.fboPointDraws.clear();
-    wctx.fboLayerNext = 0;
+    wctx.currentTarget->deferredShaderDraws.clear();
+    wctx.currentTarget->deferredPbrDraws.clear();
+    wctx.currentTarget->deferredPointDraws.clear();
+    wctx.currentTarget->sglLayerNext = 0;
 }
 
 } // namespace internal

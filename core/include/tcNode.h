@@ -950,8 +950,8 @@ private:
 
         // Stamp the camera scope this node is being drawn under (pointer
         // compare first — steady state is one assignment skip per frame).
-        if (internal::currentWindowContext().currentCameraContext && cameraContext_ != internal::currentWindowContext().currentCameraContext) {
-            cameraContext_ = internal::currentWindowContext().currentCameraContext;
+        if (internal::currentWindowContext().currentTarget->camera.currentCameraContext && cameraContext_ != internal::currentWindowContext().currentTarget->camera.currentCameraContext) {
+            cameraContext_ = internal::currentWindowContext().currentTarget->camera.currentCameraContext;
         }
 
         pushMatrix();

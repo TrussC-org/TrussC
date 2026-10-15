@@ -17,16 +17,12 @@ namespace trussc {
 // Forward declaration
 class Fbo;
 
-// Static helper function for calling FBO's clearColor
-namespace internal { inline void _fboClearColorHelper(float r, float g, float b, float a); }
-
 namespace internal {
 
 // Rendering resources shared by every Fbo of the same (sampleCount, format):
 // one sokol_gl context and its role->pipeline cache (see Fbo::ensureShared).
 struct FboSharedResources {
-    sgl_context context = {};
-    RenderTarget target;  // role->pipeline cache for this FBO context
+    RenderTargetResources resources;
     bool initialized = false;
 };
 
@@ -57,7 +53,12 @@ std::unordered_map<uint64_t, FboSharedMipResources>& fboSharedMipMap();
 // ---------------------------------------------------------------------------
 class Fbo : public HasTexture {
 public:
-    Fbo() { internal::fboCount()++; }
+    Fbo() {
+        target_.isFbo = true;
+        target_.colorFormat = SG_PIXELFORMAT_RGBA8;
+        target_.sampleCount = 1;
+        internal::fboCount()++;
+    }
     ~Fbo() { clear(); internal::fboCount()--; }
 
     // Name this object for MCP inspection; empty names are listed by index.
@@ -107,10 +108,12 @@ public:
 
         clear();
 
-        width_ = w;
-        height_ = h;
-        sampleCount_ = sampleCount;
+        target_.width = w;
+        target_.height = h;
+        target_.viewport = {0, 0, (float)w, (float)h, true};
+        target_.sampleCount = sampleCount;
         format_ = format;
+        target_.colorFormat = toSokolFormat(format);
         mipmaps_ = mipmaps;
         // Compute the full mip chain length when requested. floor(log2(max)) + 1
         // matches the standard convention (e.g. 512 → 10 levels, 1×1 the last).
@@ -120,14 +123,14 @@ public:
         sg_pixel_format sgFormat = toSokolFormat(format);
 
         // MSAA case
-        if (sampleCount_ > 1) {
+        if (target_.sampleCount > 1) {
             // MSAA color texture (render target)
             sg_image_desc msaa_desc = {};
             msaa_desc.usage.color_attachment = true;
             msaa_desc.width = w;
             msaa_desc.height = h;
             msaa_desc.pixel_format = sgFormat;
-            msaa_desc.sample_count = sampleCount_;
+            msaa_desc.sample_count = target_.sampleCount;
             msaaColorImage_ = sg_make_image(&msaa_desc);
 
             // MSAA color attachment view
@@ -149,7 +152,7 @@ public:
             depth_desc.width = w;
             depth_desc.height = h;
             depth_desc.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-            depth_desc.sample_count = sampleCount_;
+            depth_desc.sample_count = target_.sampleCount;
             depthImage_ = sg_make_image(&depth_desc);
         } else {
             // Non-MSAA case
@@ -176,7 +179,8 @@ public:
         depthAttView_ = sg_make_view(&depth_att_desc);
 
         // Ensure shared rendering resources exist for this (sampleCount, format) combo
-        ensureShared(sampleCount_, format_);
+        ensureShared(target_.sampleCount, format_);
+        target_.pooledResources = &getShared(target_.sampleCount, format_).resources;
 
         // FBO color texture stores premultiplied alpha (due to alpha blending + MSAA resolve)
         colorTexture_.setPremultipliedAlpha(true);
@@ -191,7 +195,7 @@ public:
             sg_destroy_view(depthAttView_);
             sg_destroy_image(depthImage_);
 
-            if (sampleCount_ > 1) {
+            if (target_.sampleCount > 1) {
                 sg_destroy_view(resolveAttView_);
                 sg_destroy_view(msaaColorAttView_);
                 sg_destroy_image(msaaColorImage_);
@@ -211,10 +215,13 @@ public:
 
             allocated_ = false;
         }
-        width_ = 0;
-        height_ = 0;
-        sampleCount_ = 1;
+        target_.width = 0;
+        target_.height = 0;
+        target_.viewport = {0, 0, 0, 0, false};
+        target_.inPass = false;
+        target_.sampleCount = 1;
         format_ = TextureFormat::RGBA8;
+        target_.colorFormat = SG_PIXELFORMAT_RGBA8;
         active_ = false;
         mipmaps_ = false;
         numMipLevels_ = 1;
@@ -256,7 +263,7 @@ public:
 
         // Restart pass with new clear color (targeting the current version)
         sg_pass pass = {};
-        if (sampleCount_ > 1) {
+        if (target_.sampleCount > 1) {
             pass.attachments.colors[0] = msaaColorAttView_;
             pass.attachments.resolves[0] = curResolveAttView_();
         } else {
@@ -267,6 +274,7 @@ public:
         pass.action.colors[0].clear_value = { r, g, b, a };
         pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         pass.action.depth.clear_value = 1.0f;
+        target_.clearAction = pass.action;
         sg_begin_pass(&pass);
 
         // Reset sokol_gl state. We are still mid-FBO (currentTarget is this FBO),
@@ -276,7 +284,7 @@ public:
         sgl_defaults();
         internal::restoreCurrentPipeline();
         internal::sglLoadProjection(
-            internal::screen2DProjection((float)width_, (float)height_));
+            internal::screen2DProjection((float)target_.width, (float)target_.height));
         sgl_matrix_mode_modelview();
         sgl_load_identity();
     }
@@ -285,11 +293,11 @@ public:
     void end() {
         if (!active_) return;
 
-        auto& shared = getShared(sampleCount_, format_);
+        auto& shared = getShared(target_.sampleCount, format_);
 
         // Draw FBO context contents, interleaving any PBR meshes deferred during
         // this pass per-layer (so lit 3D composites with 2D in submission order).
-        internal::flushFboDeferredPbr(shared.context);
+        internal::flushFboDeferredPbr(shared.resources.context);
         sg_end_pass();
 
         // If mipmaps were requested, downsample mip 0 into the remaining
@@ -303,31 +311,16 @@ public:
         // Reset counters so the next FBO using this shared context starts clean.
         // Buffers stay allocated at their current (possibly grown) size — no
         // allocation or deallocation overhead between sequential FBO draws.
-        internal::reportSglStackErrors(sgl_context_error(shared.context), true);
-        sgl_tc_context_reset(shared.context);
+        internal::reportSglStackErrors(sgl_context_error(shared.resources.context), true);
+        sgl_tc_context_reset(shared.resources.context);
 
         // Switch back to the current window's context
-        sgl_set_context(internal::currentWindowContext().swapchainTarget.context);
+        sgl_set_context(internal::currentWindowContext().swapchainTarget.resources().context);
         active_ = false;
         auto& wctx = internal::currentWindowContext();
-        wctx.inFboPass = false;
-        wctx.currentFbo = nullptr;
-        wctx.currentFboColorFormat = SG_PIXELFORMAT_RGBA8;
-        wctx.currentFboSampleCount = 1;
-        wctx.currentTarget = &wctx.swapchainTarget;   // RenderTarget: back to swapchain
-        wctx.fboClearColorFunc = nullptr;
-
-        // Restore the screen camera state saved in beginInternal() so
-        // worldToScreen / camera-context stamping after end() see the screen
-        // camera again instead of this FBO's projection.
-        internal::currentWindowContext().currentScreenFov = savedScreenFov_;
-        internal::currentWindowContext().currentViewW = savedViewW_;
-        internal::currentWindowContext().currentViewH = savedViewH_;
-        internal::currentWindowContext().currentCameraDist = savedCameraDist_;
-        internal::currentWindowContext().currentProjectionMatrix = savedProjectionMatrix_;
-        internal::currentWindowContext().currentViewMatrix = savedViewMatrix_;
-        internal::currentWindowContext().currentCameraContext = savedCameraContext_;
-        savedCameraContext_.reset();
+        target_.inPass = false;
+        wctx.swapchainTarget.inheritDrawState(target_);
+        wctx.currentTarget = &wctx.swapchainTarget;
 
         // Resume swapchain pass (if we were in one before)
         if (wasInSwapchainPass_) {
@@ -340,7 +333,7 @@ public:
     // For MSAA, reads from resolved texture
     TC_PLATFORMS("macos,windows,linux,ios,android") bool readPixels(unsigned char* pixels) const {
         if (!allocated_ || !pixels) return false;
-        if (internal::currentWindowContext().inFboPass) {
+        if (internal::currentWindowContext().currentTarget->isFbo) {
             logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
             return false;
         }
@@ -356,7 +349,7 @@ public:
     // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     TC_PLATFORMS("macos,ios,windows,linux,android") bool readPixelsFloat(float* pixels) const {
         if (!allocated_ || !pixels) return false;
-        if (internal::currentWindowContext().inFboPass) {
+        if (internal::currentWindowContext().currentTarget->isFbo) {
             logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
             return false;
         }
@@ -367,7 +360,7 @@ public:
     bool copyTo(Image& image) const {
         if (!allocated_) return false;
 
-        image.allocate(width_, height_, 4);
+        image.allocate(target_.width, target_.height, 4);
         bool result = readPixels(image.getPixelsData());
         if (result) {
             image.setDirty();
@@ -377,9 +370,9 @@ public:
     }
 
     // Size and state getters
-    int getWidth() const { return width_; }
-    int getHeight() const { return height_; }
-    int getSampleCount() const { return sampleCount_; }
+    int getWidth() const { return target_.getWidth(); }
+    int getHeight() const { return target_.getHeight(); }
+    int getSampleCount() const { return target_.sampleCount; }
     TextureFormat getTextureFormat() const { return format_; }
     bool isAllocated() const { return allocated_; }
     bool isActive() const { return active_; }
@@ -404,7 +397,7 @@ public:
         markDrawnThisFrame_();
         const Texture& tex = curColorTex_();
         if (needsGlYFlip()) {
-            tex.drawFlippedY(x, y, (float)width_, (float)height_);
+            tex.drawFlippedY(x, y, (float)target_.width, (float)target_.height);
         } else {
             tex.draw(x, y);
         }
@@ -443,24 +436,13 @@ private:
         return be == SG_BACKEND_GLCORE || be == SG_BACKEND_GLES3;
     }
 
-    int width_ = 0;
-    int height_ = 0;
-    int sampleCount_ = 1;
+    internal::RenderTarget target_;
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
     bool active_ = false;
     bool wasInSwapchainPass_ = false;  // Was in swapchain pass when begin() called
     bool mipmaps_ = false;
     int  numMipLevels_ = 1;
-
-    // Screen camera state captured in beginInternal(), restored in end()
-    float savedScreenFov_ = 0.0f; // radians; zero is orthographic
-    float savedViewW_ = 0.0f;
-    float savedViewH_ = 0.0f;
-    float savedCameraDist_ = 0.0f;
-    Mat4  savedProjectionMatrix_ = Mat4::identity();
-    Mat4  savedViewMatrix_ = Mat4::identity();
-    std::shared_ptr<const CameraContext> savedCameraContext_;
 
     // Non-MSAA texture (always used, resolve target for MSAA)
     Texture colorTexture_;
@@ -509,7 +491,7 @@ private:
 
     struct ColorVersion {
         Texture tex;                  // matches colorTexture_ exactly
-        sg_view resolveAttView = {};  // only used when sampleCount_ > 1
+        sg_view resolveAttView = {};  // only used when target_.sampleCount > 1
     };
     std::vector<ColorVersion> versionPool_;        // versions 1..N (0 = colorTexture_)
     int currentVersion_ = 0;                       // cursor; 0 = primary colorTexture_
@@ -582,7 +564,7 @@ private:
             v.tex.setMagFilter(colorTexture_.getMagFilter());
             v.tex.setWrapU(colorTexture_.getWrapU());
             v.tex.setWrapV(colorTexture_.getWrapV());
-            v.tex.allocate(width_, height_, format_,
+            v.tex.allocate(target_.width, target_.height, format_,
                            TextureUsage::RenderTarget, 1, numMipLevels_);
             if (sg_query_image_state(v.tex.getImage()) == SG_RESOURCESTATE_FAILED) {
                 // Texture::createResources logged the error. Degrade
@@ -592,7 +574,7 @@ private:
                 return false;  // v's destructor defers the failed handles
             }
             v.tex.setPremultipliedAlpha(true);
-            if (sampleCount_ > 1) {
+            if (target_.sampleCount > 1) {
                 sg_view_desc rd = {};
                 rd.resolve_attachment.image = v.tex.getImage();
                 v.resolveAttView = sg_make_view(&rd);
@@ -673,9 +655,7 @@ private:
         // pre-warmed in tcGlobal because mid-frame creation in setupScreenFov corrupts
         // the frame). A failed context is warned once and not retried; this
         // (sampleCount, format) then draws no sokol_gl shapes.
-        s.target.makeContext(ctx_desc, "an Fbo format");
-        s.context = s.target.context;
-        s.target.isFbo = true;
+        s.resources.makeContext(ctx_desc, "an Fbo format");
 
         s.initialized = true;
     }
@@ -817,13 +797,13 @@ private:
         if (!allocated_) return;
 
         // Guard: nested FBO begin is not supported
-        if (internal::currentWindowContext().inFboPass) {
+        if (internal::currentWindowContext().currentTarget->isFbo) {
             logWarning("Fbo") << "Nested fbo.begin() is not supported. "
                               << "Call end() on the current FBO first.";
             return;
         }
 
-        auto& shared = getShared(sampleCount_, format_);
+        auto& shared = getShared(target_.sampleCount, format_);
 
         // Version pool frame sync (see version pool contract above): on a new
         // frame all versions become reusable and the cursor resets to primary.
@@ -840,7 +820,7 @@ private:
         // that existed when they were submitted.
         if (drawnThisFrame_) {
             int prevVersion = currentVersion_;
-            if (advanceVersion_() && !doClear && sampleCount_ == 1) {
+            if (advanceVersion_() && !doClear && target_.sampleCount == 1) {
                 // begin() without clear must see the previous content, but a
                 // version texture's content is stale/undefined — copy the
                 // previous version's pixels over before the pass starts.
@@ -854,7 +834,7 @@ private:
         // Begin offscreen pass (targeting the current version)
         sg_pass pass = {};
 
-        if (sampleCount_ > 1) {
+        if (target_.sampleCount > 1) {
             // MSAA: Render to MSAA texture, resolve to non-MSAA texture
             pass.attachments.colors[0] = msaaColorAttView_;
             pass.attachments.resolves[0] = curResolveAttView_();
@@ -874,58 +854,45 @@ private:
         pass.action.depth.clear_value = 1.0f;
 
         // For MSAA, resolve is automatic (store_action defaults to STORE)
+        target_.clearAction = pass.action;
         sg_begin_pass(&pass);
 
         // Switch to shared FBO context and ensure buffers are allocated
-        sgl_set_context(shared.context);
+        sgl_set_context(shared.resources.context);
         sgl_tc_reset_matrix_stacks();
-        sgl_tc_context_ensure_buffers(shared.context);
+        sgl_tc_context_ensure_buffers(shared.resources.context);
         sgl_defaults();
 
-        // Start this FBO pass's deferred-PBR layer counter fresh (mirrors the
-        // swapchain's sglLayerNext). Meshes drawn now defer into fboPbrDraws,
-        // point splats into fboPointDraws (both share fboLayerNext). These are
-        // per-window (this tick's context).
-        internal::currentWindowContext().fboPbrDraws.clear();
-        internal::currentWindowContext().fboPointDraws.clear();
-        internal::currentWindowContext().fboLayerNext = 0;
+        target_.deferredShaderDraws.clear();
+        target_.deferredPbrDraws.clear();
+        target_.deferredPointDraws.clear();
+        target_.sglLayerNext = 0;
         sgl_layer(0);
 
-        // Save the screen camera state so end() can restore it — the FBO's own
-        // projection setup below overwrites these globals, and anything drawn
-        // after end() (worldToScreen, node camera-context stamping) must see
-        // the screen camera again, not the FBO's.
-        savedScreenFov_ = internal::currentWindowContext().currentScreenFov;
-        savedViewW_ = internal::currentWindowContext().currentViewW;
-        savedViewH_ = internal::currentWindowContext().currentViewH;
-        savedCameraDist_ = internal::currentWindowContext().currentCameraDist;
-        savedProjectionMatrix_ = internal::currentWindowContext().currentProjectionMatrix;
-        savedViewMatrix_ = internal::currentWindowContext().currentViewMatrix;
-        savedCameraContext_ = internal::currentWindowContext().currentCameraContext;
+        // Preserve the original setup ordering: the old target selects the
+        // temporary setup pipeline, while the shared Fbo context receives its
+        // sgl matrices. Store the resulting camera on this Fbo, and leave the
+        // swapchain camera intact. PR 2 changes matrix switching itself.
+        auto& wctx = internal::currentWindowContext();
+        auto savedCamera = wctx.currentTarget->camera;
 
         // Setup screen projection using defaultScreenFov (like main screen).
         // pickable=false: geometry drawn into an offscreen target must not be
         // pickable from main-screen clicks (see tcCameraContext.h).
-        internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)width_, (float)height_, 0.0f, 0.0f, false);
+        internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)target_.width, (float)target_.height, 0.0f, 0.0f, false);
 
+        target_.camera = std::move(wctx.currentTarget->camera);
+        wctx.currentTarget->camera = std::move(savedCamera);
+        target_.inheritDrawState(*wctx.currentTarget);
+        target_.pooledResources = &shared.resources;
         active_ = true;
-        internal::currentWindowContext().inFboPass = true;
-        // Retarget to this FBO BEFORE loading its pipeline so active2D()
-        // resolves in the FBO's context/format (setupScreenFov above still ran on
-        // the previous target, as before).
-        internal::currentWindowContext().currentTarget = &shared.target;
-
-        // Load the pipeline for the CURRENT blend mode (usually Alpha =
-        // Porter-Duff over; the result is stored as premultiplied alpha in the
-        // FBO). A mode set before begin() persists into the pass, same as it
-        // persists across swapchain frames.
+        target_.inPass = true;
+        wctx.currentTarget = &target_;
         internal::restoreCurrentPipeline();
-
-        auto& wctx = internal::currentWindowContext();
-        wctx.currentFbo = this;
-        wctx.currentFboColorFormat = toSokolFormat(format_);
-        wctx.currentFboSampleCount = sampleCount_;
-        wctx.fboClearColorFunc = internal::_fboClearColorHelper;
+        target_.clearOwner = this;
+        target_.clearColor = [](void* owner, float cr, float cg, float cb, float ca) {
+            static_cast<Fbo*>(owner)->clearColor(cr, cg, cb, ca);
+        };
     }
 
 private:
@@ -933,22 +900,16 @@ private:
 
     void moveFrom(Fbo&& other) {
         // aliveToken_ intentionally not moved (see lifetimeToken())
-        width_ = other.width_;
-        height_ = other.height_;
-        sampleCount_ = other.sampleCount_;
+        target_ = std::move(other.target_);
+        target_.clearOwner = this;
+        auto& wctx = internal::currentWindowContext();
+        if (wctx.currentTarget == &other.target_) wctx.currentTarget = &target_;
         format_ = other.format_;
         allocated_ = other.allocated_;
         active_ = other.active_;
         wasInSwapchainPass_ = other.wasInSwapchainPass_;
         mipmaps_ = other.mipmaps_;
         numMipLevels_ = other.numMipLevels_;
-        savedScreenFov_ = other.savedScreenFov_;
-        savedViewW_ = other.savedViewW_;
-        savedViewH_ = other.savedViewH_;
-        savedCameraDist_ = other.savedCameraDist_;
-        savedProjectionMatrix_ = other.savedProjectionMatrix_;
-        savedViewMatrix_ = other.savedViewMatrix_;
-        savedCameraContext_ = std::move(other.savedCameraContext_);
         colorTexture_ = std::move(other.colorTexture_);
         mipScratchTexture_ = std::move(other.mipScratchTexture_);
         versionPool_ = std::move(other.versionPool_);
@@ -976,9 +937,10 @@ private:
         other.drawnThisFrame_ = false;
         other.poolAllocFailed_ = false;
         other.versionNoticeShown_ = false;
-        other.width_ = 0;
-        other.height_ = 0;
-        other.sampleCount_ = 1;
+        other.target_ = internal::RenderTarget{};
+        other.target_.isFbo = true;
+        other.target_.colorFormat = SG_PIXELFORMAT_RGBA8;
+        other.target_.sampleCount = 1;
         other.format_ = TextureFormat::RGBA8;
         other.msaaColorImage_ = {};
         other.msaaColorAttView_ = {};
@@ -992,17 +954,5 @@ private:
     bool readPixelsPlatform(unsigned char* pixels, bool reportError = true) const;
     bool readPixelsFloatPlatform(float* pixels) const;
 };
-
-// ---------------------------------------------------------------------------
-// Helper function called from tc::clear()
-// ---------------------------------------------------------------------------
-namespace internal {
-inline void _fboClearColorHelper(float r, float g, float b, float a) {
-    Fbo* fbo = static_cast<Fbo*>(internal::currentWindowContext().currentFbo);
-    if (fbo) {
-        fbo->clearColor(r, g, b, a);
-    }
-}
-} // namespace internal
 
 } // namespace trussc

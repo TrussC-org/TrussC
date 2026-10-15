@@ -601,7 +601,7 @@ static int runTests() {
 #ifdef TCX_OBJ_TEST_GPU
     {
         auto r = loadObjText(TRI_V + "v 1 1 0\nvn 0 0 1\nf 1 2 3\nf 2//1 4//1 3//1\n");
-        auto& draws = internal::currentWindowContext().deferredPbrDraws;
+        auto& draws = internal::currentWindowContext().currentTarget->deferredPbrDraws;
         const auto before = draws.size();
         Material material;
         setMaterial(material);

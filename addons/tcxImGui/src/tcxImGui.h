@@ -37,9 +37,9 @@ public:
         {
             auto& wctx = tc::internal::currentWindowContext();
             if (!wctx.isMain) {
-                desc.color_format = wctx.swapchainColorFormat;
+                desc.color_format = wctx.swapchainTarget.colorFormat;
                 desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-                desc.sample_count = wctx.swapchainSampleCount;
+                desc.sample_count = wctx.swapchainTarget.sampleCount;
             }
         }
         simguiCtx_ = simgui_tc_make_context(&desc);

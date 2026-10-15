@@ -246,7 +246,7 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
     // Absence-of-context handling only (not a semantic gate): with no camera
     // context yet (headless / before the first camera setup) or a degenerate
     // viewport there is nothing to project through.
-    std::shared_ptr<const CameraContext> ctx = internal::currentWindowContext().currentCameraContext;
+    std::shared_ptr<const CameraContext> ctx = internal::currentWindowContext().currentTarget->camera.currentCameraContext;
     if (!ctx || ctx->viewW <= 0.0f || ctx->viewH <= 0.0f) return false;
 
     if (text.empty()) return true;                 // handled: nothing to draw
@@ -286,7 +286,7 @@ bool internal::RenderContext::drawBitmapStringBillboard(const std::string& text,
     sgl_matrix_mode_projection();
     sgl_push_matrix();
     internal::sglLoadProjection(internal::screen2DProjection(
-        internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
+        internal::currentWindowContext().currentTarget->camera.currentViewW, internal::currentWindowContext().currentTarget->camera.currentViewH));
 
     sgl_matrix_mode_modelview();
     sgl_push_matrix();
@@ -372,7 +372,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
         sgl_matrix_mode_projection();
         sgl_push_matrix();
         internal::sglLoadProjection(internal::screen2DProjection(
-            internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
+            internal::currentWindowContext().currentTarget->camera.currentViewW, internal::currentWindowContext().currentTarget->camera.currentViewH));
 
         sgl_matrix_mode_modelview();
         sgl_push_matrix();
@@ -547,7 +547,7 @@ void internal::RenderContext::drawBitmapString(const std::string& text, float x,
         sgl_matrix_mode_projection();
         sgl_push_matrix();
         internal::sglLoadProjection(internal::screen2DProjection(
-            internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
+            internal::currentWindowContext().currentTarget->camera.currentViewW, internal::currentWindowContext().currentTarget->camera.currentViewH));
 
         sgl_matrix_mode_modelview();
         sgl_push_matrix();

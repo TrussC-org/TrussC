@@ -98,16 +98,16 @@ void windowTick(sapp_window swin, void* user) {
 
     // Own sokol_gl context, created lazily on the first tick (sgl is set up
     // by then). Same lifecycle caveats as Fbo contexts on sgl resize.
-    if (ctx.swapchainTarget.context.id == SG_INVALID_ID) {
+    if (ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
         sgl_context_desc_t cdesc = {};
         cdesc.max_vertices = 65536;
         cdesc.max_commands = 16384;
         cdesc.color_format = SG_PIXELFORMAT_RGBA8;
         cdesc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         cdesc.sample_count = sapp_window_sample_count(swin);
-        ctx.swapchainTarget.makeContext(cdesc, "a window");
+        ctx.swapchainTarget.resources().makeContext(cdesc, "a window");
     }
-    sgl_set_context(ctx.swapchainTarget.context);
+    sgl_set_context(ctx.swapchainTarget.resources().context);
     sgl_defaults();
 
     beginFrame();
@@ -321,7 +321,7 @@ void Window::teardown() {
     ctx_.acquireSwapchainUser = nullptr;
     sapp_destroy_window(st->win);
     // Frees this window's sgl pipelines and its sgl context (#317).
-    ctx_.swapchainTarget.release();
+    ctx_.swapchainTarget.resources().release();
     delete st;
     // The window's own exit event: per-window resource holders (e.g. the
     // tcxImGui per-window manager) tear down here, while this window's
@@ -409,8 +409,8 @@ std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
     }
     auto win = std::shared_ptr<Window>(new Window());
     win->title_ = settings.title;
-    win->ctx_.swapchainColorFormat = SG_PIXELFORMAT_RGBA8;
-    win->ctx_.swapchainSampleCount = settings.sampleCount > 0 ? settings.sampleCount : 1;
+    win->ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+    win->ctx_.swapchainTarget.sampleCount = settings.sampleCount > 0 ? settings.sampleCount : 1;
     auto* st = new AdapterState();
 
     sapp_window_desc d = {};

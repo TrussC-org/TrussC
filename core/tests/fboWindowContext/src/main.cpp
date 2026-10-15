@@ -28,13 +28,31 @@ void drawFrame(Fbo& fbo, bool main) {
     setColor(main ? Color(0, 1, 1) : Color(1, 0, 0));
     drawRect(8, 16, 16, 32);
 
+    auto& window = internal::currentWindowContext();
+    auto* screenTarget = window.currentTarget;
     fbo.begin(0, 0, 0);
+    auto* fboTarget = window.currentTarget;
+    check("Fbo owns its dimensions, format, samples and pass state",
+          fboTarget != screenTarget && fboTarget->isFbo && fboTarget->inPass &&
+          fboTarget->getWidth() == 16 && fboTarget->getHeight() == 16 &&
+          fboTarget->colorFormat == SG_PIXELFORMAT_RGBA8 && fboTarget->sampleCount == 1 &&
+          fboTarget->hasDepth);
     setColor(1, 1, 1);
     drawCircle(8, 8, 4);
     fbo.end();
     check(main ? "main FBO restores its window context" :
                  "secondary FBO restores its window context",
-          sgl_get_context().id == internal::currentWindowContext().swapchainTarget.context.id);
+          sgl_get_context().id == internal::currentWindowContext().swapchainTarget.resources().context.id);
+
+    Fbo other;
+    other.allocate(5, 7);
+    other.begin(0, 0, 0);
+    check("same-format Fbos own distinct state and borrow the same GPU resources",
+          window.currentTarget != fboTarget &&
+          &window.currentTarget->resources() == &fboTarget->resources() &&
+          window.currentTarget->getWidth() == 5 && fboTarget->getWidth() == 16);
+    other.end();
+    check("both Fbos return to this window's target", window.currentTarget == screenTarget);
 
     setColor(main ? Color(1, 0, 1) : Color(0, 1, 0));
     drawCircle(48, 32, 8);

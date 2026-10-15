@@ -210,7 +210,7 @@ namespace internal {
 
     // Screen setup / view-projection tracking state (currentScreenFov,
     // currentViewW/H, currentCameraDist, currentView/ProjectionMatrix) and the
-    // current 2D blend mode moved to WindowContext (tc/app/tcWindowContext.h).
+    // The current 2D blend mode lives on the active RenderTarget.
 
     // Forward declaration of setupScreenFov functions (defined later, after TAU is available)
     // `pickable` flows into the registered CameraContext (false for FBO scopes).
@@ -220,14 +220,14 @@ namespace internal {
 
 } // namespace trussc (temporarily closed)
 
-// RenderTarget: single source of truth for sgl pipeline selection (swapchain/FBO).
+// RenderTarget: per-drawable state and borrowed GPU resources (swapchain/Fbo).
 #include "tc/graphics/tcRenderTarget.h"
 
 // Fixed-step / frame-skip decisions shared by the loops (used by
 // tcWindowContext.h's throttle, _frame_cb and runHeadlessApp).
 #include "tc/app/tcFrameTiming.h"
 
-// Per-window state container (input/hover/camera/pass state) + the active*()
+// Per-window state container (input/hover/window state) + the active*()
 // pipeline helpers and restoreCurrentPipeline() (used in tcRenderContext.h).
 #include "tc/app/tcWindowContext.h"
 
@@ -339,12 +339,8 @@ namespace internal {
     // Elapsed time: one steady clock with its origin at program start, in
     // tcGlobal.cpp (see tcTime.h).
 
-    // Pass state (inSwapchainPass / swapchainClearValue / lastSwapchainDrawable /
-    // inFboPass) moved to WindowContext (tc/app/tcWindowContext.h).
-
-    // FBO-pass state (fboClearColorFunc / currentFbo / currentFboColorFormat /
-    // currentFboSampleCount) moved to WindowContext (tc/app/tcWindowContext.h),
-    // next to inFboPass — they are per-window pipeline-format selectors.
+    // Render/pass state lives on RenderTarget. WindowContext routes the active
+    // target and retains the drawable used for window capture.
 
     // Per-window routing for the context-aware global window-control functions
     // (setWindowTitle / setWindowSize). Defined in tc/app/tcWindow.h once Window
@@ -574,7 +570,7 @@ inline void intersectRect(float x1, float y1, float w1, float h1,
 
 // Set scissor rectangle (screen coordinates)
 inline void setScissor(float x, float y, float w, float h) {
-    internal::currentWindowContext().currentScissor = {x, y, w, h, true};
+    internal::currentWindowContext().currentTarget->currentScissor = {x, y, w, h, true};
     sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
 }
 
@@ -585,20 +581,20 @@ inline void setScissor(int x, int y, int w, int h) {
 
 // Reset scissor to entire window
 inline void resetScissor() {
-    internal::currentWindowContext().currentScissor.active = false;
+    internal::currentWindowContext().currentTarget->currentScissor.active = false;
     sgl_scissor_rect(0, 0, getFramebufferWidth(), getFramebufferHeight(), true);
 }
 
 // Save scissor to stack and set new range (intersection with current range)
 inline void pushScissor(float x, float y, float w, float h) {
     // Save current state to stack
-    internal::currentWindowContext().scissorStack.push_back(internal::currentWindowContext().currentScissor);
+    internal::currentWindowContext().currentTarget->scissorStack.push_back(internal::currentWindowContext().currentTarget->currentScissor);
 
     // Calculate new range (intersection with current range)
-    if (internal::currentWindowContext().currentScissor.active) {
+    if (internal::currentWindowContext().currentTarget->currentScissor.active) {
         float nx, ny, nw, nh;
-        intersectRect(internal::currentWindowContext().currentScissor.x, internal::currentWindowContext().currentScissor.y,
-                      internal::currentWindowContext().currentScissor.w, internal::currentWindowContext().currentScissor.h,
+        intersectRect(internal::currentWindowContext().currentTarget->currentScissor.x, internal::currentWindowContext().currentTarget->currentScissor.y,
+                      internal::currentWindowContext().currentTarget->currentScissor.w, internal::currentWindowContext().currentTarget->currentScissor.h,
                       x, y, w, h,
                       nx, ny, nw, nh);
         setScissor(nx, ny, nw, nh);
@@ -609,17 +605,17 @@ inline void pushScissor(float x, float y, float w, float h) {
 
 // Restore scissor from stack
 inline void popScissor() {
-    if (internal::currentWindowContext().scissorStack.empty()) {
+    if (internal::currentWindowContext().currentTarget->scissorStack.empty()) {
         resetScissor();
         return;
     }
 
-    internal::currentWindowContext().currentScissor = internal::currentWindowContext().scissorStack.back();
-    internal::currentWindowContext().scissorStack.pop_back();
+    internal::currentWindowContext().currentTarget->currentScissor = internal::currentWindowContext().currentTarget->scissorStack.back();
+    internal::currentWindowContext().currentTarget->scissorStack.pop_back();
 
-    if (internal::currentWindowContext().currentScissor.active) {
-        sgl_scissor_rectf(internal::currentWindowContext().currentScissor.x, internal::currentWindowContext().currentScissor.y,
-                          internal::currentWindowContext().currentScissor.w, internal::currentWindowContext().currentScissor.h, true);
+    if (internal::currentWindowContext().currentTarget->currentScissor.active) {
+        sgl_scissor_rectf(internal::currentWindowContext().currentTarget->currentScissor.x, internal::currentWindowContext().currentTarget->currentScissor.y,
+                          internal::currentWindowContext().currentTarget->currentScissor.w, internal::currentWindowContext().currentTarget->currentScissor.h, true);
     } else {
         sgl_scissor_rect(0, 0, getFramebufferWidth(), getFramebufferHeight(), true);
     }
@@ -638,14 +634,14 @@ inline void popScissor() {
 // pipeline against the current render target, so each target lazily gets a
 // pipeline matching its own color format / sample count.
 inline void setBlendMode(BlendMode mode) {
-    if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
-    internal::currentWindowContext().currentBlendMode = mode;
+    if (internal::currentWindowContext().swapchainTarget.resources().context.id == 0) return;  // renderer not set up yet
+    internal::currentWindowContext().currentTarget->currentBlendMode = mode;
     internal::loadPipeline(internal::active2D(mode));
 }
 
 // Get current blend mode
 inline BlendMode getBlendMode() {
-    return internal::currentWindowContext().currentBlendMode;
+    return internal::currentWindowContext().currentTarget->currentBlendMode;
 }
 
 // Reset to default blend mode (Alpha)
@@ -675,21 +671,21 @@ inline void restoreBlendPipeline() {
 
 // Enable depth test/write on the current (and future) blend pipelines
 inline void enableDepthTest() {
-    if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
-    internal::currentWindowContext().depthTestEnabled = true;
+    if (internal::currentWindowContext().swapchainTarget.resources().context.id == 0) return;  // renderer not set up yet
+    internal::currentWindowContext().currentTarget->depthTestEnabled = true;
     internal::restoreCurrentPipeline();
 }
 
 // Disable depth test/write on the current (and future) blend pipelines (default)
 inline void disableDepthTest() {
-    if (internal::currentWindowContext().swapchainTarget.context.id == 0) return;  // renderer not set up yet
-    internal::currentWindowContext().depthTestEnabled = false;
+    if (internal::currentWindowContext().swapchainTarget.resources().context.id == 0) return;  // renderer not set up yet
+    internal::currentWindowContext().currentTarget->depthTestEnabled = false;
     internal::restoreCurrentPipeline();
 }
 
 // Whether the depth-tested blend pipeline variant is active (see enableDepthTest)
 inline bool isDepthTestEnabled() {
-    return internal::currentWindowContext().depthTestEnabled;
+    return internal::currentWindowContext().currentTarget->depthTestEnabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -737,10 +733,10 @@ namespace internal {
         float dist = viewH / (2.0f * theTan);
 
         // Save current screen state for 2D drawing
-        internal::currentWindowContext().currentScreenFov = fovRadians;
-        internal::currentWindowContext().currentViewW = viewW;
-        internal::currentWindowContext().currentViewH = viewH;
-        internal::currentWindowContext().currentCameraDist = dist;
+        internal::currentWindowContext().currentTarget->camera.currentScreenFov = fovRadians;
+        internal::currentWindowContext().currentTarget->camera.currentViewW = viewW;
+        internal::currentWindowContext().currentTarget->camera.currentViewH = viewH;
+        internal::currentWindowContext().currentTarget->camera.currentCameraDist = dist;
 
         // Apply clip overrides or auto-calculate
         const float nearOverride = nearClipOverride();
@@ -776,8 +772,8 @@ namespace internal {
             );
 
             // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentProjectionMatrix = proj;
-            internal::currentWindowContext().currentViewMatrix = Mat4::lookAt(
+            internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = proj;
+            internal::currentWindowContext().currentTarget->camera.currentViewMatrix = Mat4::lookAt(
                 Vec3(eyeX, eyeY, dist),
                 Vec3(eyeX, eyeY, 0.0f),
                 Vec3(0.0f, 1.0f, 0.0f)
@@ -809,8 +805,8 @@ namespace internal {
             );
 
             // Save matrices for worldToScreen/screenToWorld
-            internal::currentWindowContext().currentProjectionMatrix = proj;
-            internal::currentWindowContext().currentViewMatrix = Mat4::lookAt(
+            internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = proj;
+            internal::currentWindowContext().currentTarget->camera.currentViewMatrix = Mat4::lookAt(
                 Vec3(eyeX, eyeY, dist),
                 Vec3(eyeX, eyeY, 0.0f),
                 Vec3(0.0f, 1.0f, 0.0f)
@@ -819,11 +815,15 @@ namespace internal {
 
         // Register this camera scope so nodes drawn from here on stamp it
         // (draw-time stamping → per-context pick rays; see tcCameraContext.h).
-        registerCameraContext(internal::currentWindowContext().currentViewMatrix, internal::currentWindowContext().currentProjectionMatrix, viewW, viewH, pickable);
+        registerCameraContext(internal::currentWindowContext().currentTarget->camera.currentViewMatrix, internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix, viewW, viewH, pickable);
     }
 
     // Wrapper that uses main screen size
     inline void setupScreenFov(float fovRadians, float nearDist, float farDist) {
+        auto& target = internal::currentWindowContext().swapchainTarget;
+        target.width = getFramebufferWidth();
+        target.height = getFramebufferHeight();
+        target.viewport = {0, 0, (float)target.width, (float)target.height, true};
         // Per-window: framebuffer size and dpi come from the ACTIVE window
         // context (a secondary window on another display has its own scale).
         float dpiScale = getDpiScale();
@@ -931,14 +931,14 @@ inline float getFarClip() {
 /// Returns Vec3: x, y = screen position (pixels from top-left), z = normalized depth [0, 1]
 inline Vec3 worldToScreen(const Vec3& worldPos) {
     // Get current viewport dimensions
-    float viewW = internal::currentWindowContext().currentViewW;
-    float viewH = internal::currentWindowContext().currentViewH;
+    float viewW = internal::currentWindowContext().currentTarget->camera.currentViewW;
+    float viewH = internal::currentWindowContext().currentTarget->camera.currentViewH;
     // Per-window fallback (secondary windows have their own framebuffer/dpi).
     if (viewW == 0) viewW = (float)getFramebufferWidth() / getDpiScale();
     if (viewH == 0) viewH = (float)getFramebufferHeight() / getDpiScale();
 
     // Transform world -> clip space
-    Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
+    Mat4 mvp = internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix;
     Vec4 clip = mvp * Vec4(worldPos.x, worldPos.y, worldPos.z, 1.0f);
 
     // Perspective division
@@ -961,8 +961,8 @@ inline Vec3 worldToScreen(const Vec3& worldPos) {
 /// worldZ: target Z plane (default = 0)
 inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     // Get current viewport dimensions
-    float viewW = internal::currentWindowContext().currentViewW;
-    float viewH = internal::currentWindowContext().currentViewH;
+    float viewW = internal::currentWindowContext().currentTarget->camera.currentViewW;
+    float viewH = internal::currentWindowContext().currentTarget->camera.currentViewH;
     // Per-window fallback (secondary windows have their own framebuffer/dpi).
     if (viewW == 0) viewW = (float)getFramebufferWidth() / getDpiScale();
     if (viewH == 0) viewH = (float)getFramebufferHeight() / getDpiScale();
@@ -972,7 +972,7 @@ inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
     float ndcY = 1.0f - (screenPos.y / viewH) * 2.0f;  // Flip Y
 
     // Create inverse MVP matrix
-    Mat4 mvp = internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix;
+    Mat4 mvp = internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix;
     Mat4 invMvp = mvp.inverted();
 
     // Unproject two points: near plane and a middle point (mid instead of far
@@ -1463,7 +1463,7 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     sgl_matrix_mode_projection();
     sgl_push_matrix();
     internal::sglLoadProjection(internal::screen2DProjection(
-        internal::currentWindowContext().currentViewW, internal::currentWindowContext().currentViewH));
+        internal::currentWindowContext().currentTarget->camera.currentViewW, internal::currentWindowContext().currentTarget->camera.currentViewH));
     sgl_matrix_mode_modelview();
     sgl_push_matrix();
     sgl_load_identity();
