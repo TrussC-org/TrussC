@@ -1,7 +1,153 @@
 #include "../../common/tcTcpClientTest.h"
 #include "../../common/tcCoreTest.h"
+#include <future>
+
+namespace trussc::internal {
+struct TcpClientTestAccess {
+    static std::weak_ptr<void> state(const TcpClient& client) {
+        return std::weak_ptr<void>(sharedLoad(client.state_));
+    }
+};
+} // namespace trussc::internal
 
 namespace {
+void destroyWithOlderDeliveryHeld() {
+    struct Fixture {
+        promise<void> firstEntered, firstRelease, secondEntered, allowDestroy, destroyed;
+        atomic<int> unexpected{0};
+    };
+    auto fixture = make_shared<Fixture>();
+    auto firstEntered = fixture->firstEntered.get_future();
+    auto firstRelease = fixture->firstRelease.get_future().share();
+    auto secondEntered = fixture->secondEntered.get_future();
+    auto allowDestroy = fixture->allowDestroy.get_future().share();
+    auto destroyed = fixture->destroyed.get_future();
+    RawListener first, second;
+    auto client = make_unique<TcpClient>();
+    auto oldState = internal::TcpClientTestAccess::state(*client);
+    auto complete = client->onSendComplete.listen([&, fixture, firstRelease, allowDestroy](TcpSendCompleteEventArgs& e) {
+        if (e.sendId == 1) {
+            client->connectAsync("127.0.0.1", second.port);
+            fixture->firstEntered.set_value();
+            firstRelease.wait();
+        } else if (e.sendId == 2) {
+            fixture->secondEntered.set_value();
+            allowDestroy.wait();
+            client.reset();
+            fixture->destroyed.set_value();
+        } else ++fixture->unexpected;
+    });
+    check("older-delivery fixture connects", client->connect("127.0.0.1", first.port));
+    // connect() replaces the initial idle State.
+    oldState = internal::TcpClientTestAccess::state(*client);
+    TestSocket peer = first.acceptPeer();
+    check("older delivery queued", bool(client->sendAsync("a")));
+    check("older delivery holds after reconnect", firstEntered.wait_for(chrono::seconds(10)) == future_status::ready);
+    TestSocket next = second.acceptPeer();
+    check("new run connects during older delivery", next != INVALID_SOCKET && until([&] { return client->isConnected(); }));
+    auto currentState = internal::TcpClientTestAccess::state(*client);
+    check("new delivery queued", bool(client->sendAsync("b")));
+    check("new delivery enters", secondEntered.wait_for(chrono::seconds(10)) == future_status::ready);
+    check("queued send awaits cancellation", bool(client->sendAsync("c")));
+    fixture->allowDestroy.set_value();
+    check("destroy from send delivery returns", destroyed.wait_for(chrono::seconds(10)) == future_status::ready);
+    // The new run must drain its cancelled completion while the older run
+    // still retains the shared delivery target. That target must not read a
+    // destroyed Event even though its weak_ptr can still lock.
+    check("new State finishes while older delivery is held", until([&] { return currentState.expired(); }));
+    check("destroyed event receives no cancelled completion", fixture->unexpected == 0);
+    fixture->firstRelease.set_value();
+    check("older State finishes after delivery returns", until([&] { return oldState.expired(); }));
+    if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
+    if (next != INVALID_SOCKET) CLOSE_SOCKET(next);
+}
+
+void receiveReconnectWithWriterHeld() {
+    RawListener first, replacement;
+    TcpClient client;
+    promise<void> writerEntered, writerRelease, receiveReturned;
+    auto entered = writerEntered.get_future();
+    auto release = writerRelease.get_future().share();
+    auto returned = receiveReturned.get_future();
+    auto complete = client.onSendComplete.listen([&](TcpSendCompleteEventArgs&) {
+        writerEntered.set_value();
+        release.wait();
+    });
+    auto receive = client.onReceive.listen([&](TcpReceiveEventArgs&) {
+        client.connectAsync("127.0.0.1", replacement.port);
+        receiveReturned.set_value();
+    });
+    check("held-writer fixture connects", client.connect("127.0.0.1", first.port));
+    TestSocket peer = first.acceptPeer();
+    check("held-writer payload queued", bool(client.sendAsync("x")));
+    check("writer listener enters", entered.wait_for(chrono::seconds(10)) == future_status::ready);
+    check("held-writer receive trigger", ::send(peer, "r", 1, 0) == 1);
+    check("receive reconnect returns while writer listener is held",
+          returned.wait_for(chrono::seconds(10)) == future_status::ready);
+    writerRelease.set_value();
+    TestSocket next = replacement.acceptPeer();
+    check("replacement connects with independent State", next != INVALID_SOCKET && until([&] { return client.isConnected(); }));
+    client.disconnect();
+    if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
+    if (next != INVALID_SOCKET) CLOSE_SOCKET(next);
+}
+
+void receiveRestartAndMove() {
+    for (bool threaded : {true, false}) {
+        RawListener first, second;
+        TcpClient client;
+        client.setUseThread(threaded);
+        atomic<bool> restarted{false};
+        auto receive = client.onReceive.listen([&](TcpReceiveEventArgs&) {
+            client.connectAsync("127.0.0.1", second.port);
+            restarted = true;
+        });
+        check("connect receive-restart fixture", client.connect("127.0.0.1", first.port));
+        TestSocket peer = first.acceptPeer();
+        check("receive-restart peer accepted", peer != INVALID_SOCKET);
+        check("send receive trigger", ::send(peer, "x", 1, 0) == 1);
+        check("connectAsync from receive returns", until([&] {
+            if (!threaded) client.processNetwork();
+            return restarted.load();
+        }));
+        TestSocket replacement = second.acceptPeer();
+        check("new attempt has independent connection", until([&] {
+            if (!threaded) client.processNetwork();
+            return client.isConnected();
+        }) && replacement != INVALID_SOCKET && client.getRemotePort() == second.port);
+        int moveErrors = 0;
+        auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Error && e.message == "[TcpClient] moved while running; stopped") ++moveErrors;
+        });
+        TcpClient moved(std::move(client));
+        check("TCP connected move stops with one Error", moveErrors == 1 && !moved.isConnected() && !client.isConnected());
+        RawListener movedPeer;
+        atomic<int> movedReceives{0};
+        auto movedListener = moved.onReceive.listen([&](TcpReceiveEventArgs&) { ++movedReceives; });
+        check("moved TCP handle can reconnect", moved.connect("127.0.0.1", movedPeer.port));
+        TestSocket movedConnection = movedPeer.acceptPeer();
+        check("send to moved TCP handle", ::send(movedConnection, "x", 1, 0) == 1);
+        check("TCP listeners stay on original handle", until([&] {
+            if (!threaded) moved.processNetwork();
+            return movedReceives == 1;
+        }) && moved.getRemotePort() == movedPeer.port);
+        moved.disconnect();
+        if (movedConnection != INVALID_SOCKET) CLOSE_SOCKET(movedConnection);
+        if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
+        if (replacement != INVALID_SOCKET) CLOSE_SOCKET(replacement);
+    }
+    RawListener peerListener;
+    auto client = make_unique<TcpClient>();
+    atomic<bool> destroyed{false};
+    auto connect = client->onConnect.listen([&](TcpConnectEventArgs& e) {
+        if (e.success) { client.reset(); destroyed = true; }
+    });
+    client->connectAsync("127.0.0.1", peerListener.port);
+    TestSocket peer = peerListener.acceptPeer();
+    check("destroy on connect thread returns safely", until([&] { return destroyed.load(); }));
+    if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
+}
+
 void scenario() {
     // Destruction can win before the connect worker has even entered connect().
     RawListener listener;
@@ -105,6 +251,9 @@ void scenario() {
 TC_CORE_TEST_MAIN() {
     TcpClient winsock; // Initialise process-wide Winsock before raw fixtures.
     Watchdog watchdog;
+    destroyWithOlderDeliveryHeld();
+    receiveReconnectWithWriterHeld();
+    receiveRestartAndMove();
     scenario();
     return failures ? 1 : 0;
 }

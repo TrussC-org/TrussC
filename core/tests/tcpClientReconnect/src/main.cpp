@@ -1134,7 +1134,42 @@ static void scenario() {
 
 } // namespace
 
+namespace {
+void asyncReceiveReconnect() {
+    TcpServer server;
+    check("daily async fixture starts", server.start(0));
+    TcpClient client;
+    atomic<int> receives{0};
+    auto echo = server.onReceive.listen([&](TcpServerReceiveEventArgs& args) {
+        server.sendAsync(args.clientId, args.data.data(), args.data.size());
+    });
+    auto receive = client.onReceive.listen([&](TcpReceiveEventArgs&) {
+        client.connectAsync("127.0.0.1", server.getPort());
+        ++receives;
+    });
+    check("daily async initial connect", client.connect("127.0.0.1", server.getPort()));
+    for (int round = 1; round <= 20; ++round) {
+        check("daily async trigger queued", bool(client.sendAsync("x")));
+        check("daily async receive callback returns", waitFor(5000, [&] { return receives.load() == round; }));
+        check("daily async replacement connected", waitFor(5000, [&] { return client.isConnected(); }));
+    }
+    int moveErrors = 0;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message == "[TcpClient] moved while running; stopped") ++moveErrors;
+    });
+    TcpClient moved(std::move(client));
+    check("daily connected move stops once", moveErrors == 1 && !client.isConnected() && !moved.isConnected());
+    moved.disconnect();
+    client.disconnect();
+    server.stop();
+}
+} // namespace
+
 TC_CORE_TEST_MAIN() {
+    if (!completesWithin(30000, asyncReceiveReconnect)) {
+        check("async receive reconnect finishes", false);
+        bail();
+    }
 #ifdef TC_TEST_CRASH_REPORT
     signal(SIGSEGV, onFatalSignal);
     signal(SIGBUS, onFatalSignal);

@@ -134,7 +134,10 @@ struct ProbeClient : TcpClient {
         ++attempts;
         return TcpClient::connect(host, port);
     }
-    bool pending() const { return connectPending_; }
+    bool pending() const {
+        auto st = state();
+        return st->connectPending_;
+    }
 };
 
 // Real socket back-pressure, with a bounded amount offered per native send.
@@ -147,8 +150,9 @@ struct BackpressureClient : ProbeClient {
     atomic<bool> wouldBlock{false};
     atomic<size_t> acceptedBytes{0};
     void smallSendBuffer() {
-        lock_guard<mutex> held(socketMutex_);
-        smallSocketBuffer(socket_, SO_SNDBUF);
+        auto st = state();
+        lock_guard<mutex> held(st->socketMutex_);
+        smallSocketBuffer(st->socket_, SO_SNDBUF);
     }
     int writeSendStep(const void* data, size_t size, bool& forWrite, int& error) override {
         int sent = TcpClient::writeSendStep(data, std::min(size, size_t(4096)), forWrite, error);
