@@ -269,7 +269,6 @@ endif()
         add_library(guest SHARED ${_TC_GUEST_SOURCES})
         target_include_directories(guest PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
-            "${TRUSSC_DIR}/include"
         )
         target_compile_features(guest PRIVATE cxx_std_20)
         target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TRUSSC_SHOW_CONSOLE)
@@ -321,13 +320,6 @@ endif()
         # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
         # per build dramatically shortens reload turnaround.
         target_precompile_headers(guest PRIVATE <TrussC.h>)
-        # TrussC.h includes the generated shader headers (tc/gpu/shaders/
-        # *.glsl.h). The guest does not link TrussC, so without this it would
-        # not wait for them, and a first build on a fresh tree could compile
-        # the PCH before they exist.
-        if(TARGET TrussC_shaders)
-            add_dependencies(guest TrussC_shaders)
-        endif()
         # Linux/GCC: disable STB_GNU_UNIQUE bindings for the Guest. GCC's
         # default -fgnu-unique-symbols marks Meyer's singletons (inline
         # function static locals like `static Foo& instance(){ static Foo f; }`)
@@ -702,8 +694,22 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
         set(_TC_BUNDLE_ID "com.trussc.${PROJECT_NAME}")
     endif()
 
-    # Compile shaders with sokol-shdc (if any .glsl files exist)
+    # The shader interface exists even for shader-less apps. Hot reload's
+    # guest bypasses TrussC's transitive links, so link its requirements too.
     trussc_compile_shaders(${PROJECT_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
+    if(TARGET guest)
+        target_link_libraries(guest PRIVATE TrussC_shaders ${PROJECT_NAME}_shaders)
+        # Include shaders from all loaded addons, including addon dependencies.
+        # Linking archives by file and copying INTERFACE properties above do
+        # not carry these transitive generation requirements.
+        foreach(_TC_SHADER_ADDON IN LISTS _TC_LOADED_ADDONS)
+            if(TARGET ${_TC_SHADER_ADDON}_shaders)
+                target_link_libraries(${PROJECT_NAME} PRIVATE ${_TC_SHADER_ADDON}_shaders)
+                target_link_libraries(guest PRIVATE ${_TC_SHADER_ADDON}_shaders)
+            endif()
+        endforeach()
+    endif()
 
     # Output settings
     if(ANDROID)

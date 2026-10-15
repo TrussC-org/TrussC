@@ -256,17 +256,19 @@ same function apps and TrussC core use:
 ```cmake
 # trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
 trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
+target_link_libraries(${ADDON_NAME} PUBLIC ${ADDON_NAME}_shaders) # INTERFACE for header-only addons
 ```
 
 Every `*.glsl` under the source dir becomes `<name>.glsl.h` next to it (or in
 `OUTPUT_DIR`), compiled with sokol-shdc for every backend TrussC targets
 (Metal for macOS / iOS / the iOS simulator, HLSL, GLSL 4.30, GLSL ES 3, WGSL).
-The addon target depends on the headers, so they exist before anything that
-includes them compiles; on an `INTERFACE` (header-only) addon, every target
-that links it waits for them too. Include the header from your code
-(`#include "shaders/myShader.glsl.h"`, relative to the including file, or add
-the folder to the include path). The headers are build output: don't commit
-them (the repository ignores `*.glsl.h`) and don't ship a pre-generated copy.
+The shader target carries the include directory and generation dependency,
+so the addon and every target that links it wait for the headers. Use
+`INTERFACE` instead of `PUBLIC` for a header-only addon. Include the header
+from your code (`#include "shaders/myShader.glsl.h"`, relative to the
+including file, or `#include "myShader.glsl.h"` via the shader target). The
+headers are build output: don't commit them (the repository ignores `*.glsl.h`)
+and don't ship a pre-generated copy.
 An addon with shaders therefore needs a `CMakeLists.txt`.
 
 ### Main Header (tcxMyAddon.h)

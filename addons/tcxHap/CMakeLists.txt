@@ -102,5 +102,4 @@ target_include_directories(${ADDON_NAME} PRIVATE
 # -----------------------------------------------------------------------------
 trussc_compile_shaders(${ADDON_NAME} "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders")
 
-# tcxHapPlayer.h includes "ycocg.glsl.h" from src/shaders
-target_include_directories(${ADDON_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders)
+target_link_libraries(${ADDON_NAME} PUBLIC ${ADDON_NAME}_shaders)

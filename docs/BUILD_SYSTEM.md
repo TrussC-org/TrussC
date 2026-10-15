@@ -409,6 +409,8 @@ The `trussc_app()` CMake macro (in `core/cmake/trussc_app.cmake`) handles:
 
 The **Project Generator** ensures that `CMakePresets.json` is correctly configured with the absolute path to your TrussC installation (`TRUSSC_DIR`), so you can move your project folder anywhere without breaking the build.
 
+Generated shader headers reach consumers through the `<name>_shaders` INTERFACE target, which carries both their include directory and generation dependency, including for shader-less apps. `TrussC` links `TrussC_shaders` PUBLIC; hot reload host and guest explicitly link the core, app and loaded addon shader targets. After calling `trussc_compile_shaders(...)`, a new addon links its shader target with `target_link_libraries(${ADDON_NAME} PUBLIC ${ADDON_NAME}_shaders)` (use `INTERFACE` for a header-only addon). Headers remain in their source-tree locations; the separate docs bootstrap builds `TrussC_shaders_gen`.
+
 ### macOS Deployment Target
 
 TrussC requires **macOS 14.0 (Sonoma)** or later. This is because sokol's display backend uses `CADisplayLink` and `CAFrameRateRange` (introduced in macOS 14.0) for proper frame rate control, including ProMotion 120Hz support.
