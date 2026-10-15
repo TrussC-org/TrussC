@@ -2535,6 +2535,7 @@ static void testWorldReleaseFromStay(bool replace) {
         box2d::World world;
         world.setup(0, 0);
         world.setAutoUpdate(false);
+        auto* originalWorld = world.getWorld();
         box2d::CircleBody a, b;
         a.setup(world, 100, 100, 10);
         b.setup(world, 110, 100, 10);
@@ -2566,9 +2567,8 @@ static void testWorldReleaseFromStay(bool replace) {
         string label = string(replace ? "setup-stay" : "clear-stay") + " layer " + to_string(layer);
         check(label + ": one release, no stale Stay/Exit", calls == 1 && staleStays == 0 && exits == 0);
         check(label + ": handles and contacts retired", !a.getBody() && !b.getBody() && world.getBodyCount() == 0);
-        check(label + ": expected World state", (world.getWorld() != nullptr) == replace);
-        // A replacement must still support fresh contacts through the same manager.
-        if (!replace) world.setup(0, 0);
+        check(label + ": World remains usable", world.getWorld() && (replace || world.getWorld() == originalWorld));
+        // Both clear and setup support fresh contacts through the same manager.
         releaseListener = EventListener();
         a.setup(world, 200, 200, 10);
         b.setup(world, 210, 200, 10);
@@ -2597,7 +2597,11 @@ static void testWorldReleaseDuringUpdate(bool replace) {
             world.setup(0, 0);
             replacement.setup(world, 500, 500, 10);
             replacement.setVelocity(30, 0);
-        } else world.clear();
+        } else {
+            world.clear();
+            replacement.setup(world, 500, 500, 10);
+            replacement.setVelocity(30, 0);
+        }
     });
     b.setPhysicsPosition(400, 400);
     frames.update(world, 0.04);  // two sub-steps; release on the first one's Exit
@@ -2612,8 +2616,14 @@ static void testWorldReleaseDuringUpdate(bool replace) {
         frames.update(world, 0.01);
         check(label + ": replacement steps on its own accumulated time", replacement.getPhysicsPosition().x > 500);
     } else {
-        frames.update(world, 0.04);
-        check(label + ": released World remains safely empty", !world.getWorld() && world.getBodyCount() == 0);
+        check(label + ": same update steps fresh body once", world.getBodyCount() == 1 &&
+              abs(replacement.getPhysicsPosition().x - 500.5f) < 1e-3f);
+        frames.update(world, 0.005);
+        check(label + ": surviving accumulator retains only unspent time",
+              abs(replacement.getPhysicsPosition().x - 500.5f) < 1e-3f);
+        frames.update(world, 0.01);
+        check(label + ": later frame steps fresh body once",
+              abs(replacement.getPhysicsPosition().x - 501.0f) < 1e-3f && ended == 1);
     }
 }
 
@@ -2767,6 +2777,162 @@ static void testSilentOwnerTeardown() {
     }
 }
 
+// A deferred destructor Exit belongs to the bodies cleared, even if Box2D
+// reuses their storage for a fresh pair before the next delivery point.
+static void testDeferredExitAcrossClear() {
+    for (const string mode : {"remove-mod", "delete-node", "delete-classic"}) {
+        WorldTestFrames frames;
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+        box2d::CircleBody survivor;
+        survivor.setup(world, 110, 100, 10);
+        survivor.setSensor(true);
+        auto node = make_shared<Node>();
+        node->setPos(100, 100);
+        auto classic = make_unique<box2d::CircleBody>();
+        if (mode == "delete-classic") classic->setup(world, 100, 100, 10);
+        else node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+        frames.update(world);
+        int ended = 0, exits = 0, enters = 0;
+        auto worldExit = world.getCollisionManager()->contactEnded.listen([&](box2d::WorldContact&) { ++ended; });
+        auto oldExit = survivor.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exits; });
+        if (mode == "remove-mod") node->removeMod<box2d::RigidBody2D>();
+        else if (mode == "delete-node") node.reset();
+        else classic.reset();
+        string label = "deferred-clear " + mode;
+        check(label + ": teardown queues Exit without delivery", ended == 0 && exits == 0 && world.getBodyCount() == 1);
+        world.clear();
+        survivor.setup(world, 110, 100, 10);
+        survivor.setSensor(true);
+        int freshExits = 0;
+        auto freshExit = survivor.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++freshExits; });
+        box2d::CircleBody fresh;
+        fresh.setup(world, 100, 100, 10);
+        auto enter = world.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact&) { ++enters; });
+        frames.update(world, 0);
+        check(label + ": old pending Exit discarded", ended == 0 && exits == 0 && world.getBodyCount() == 2);
+        frames.update(world);
+        check(label + ": restored listener tracks fresh contact", enters == 1 && ended == 0 && exits == 0);
+        fresh.setPhysicsPosition(400, 400);
+        frames.update(world);
+        frames.update(world, 0);
+        check(label + ": fresh Exit delivered exactly once", ended == 1 && exits == 0 && freshExits == 1);
+    }
+}
+
+// clear() keeps the b2World's registered contact listener, a user proxy
+// that forwards to the CollisionManager included (adversarial review round 4).
+struct ForwardingContactProxy : b2ContactListener {
+    b2ContactListener* forward = nullptr;
+    int began = 0;
+    void BeginContact(b2Contact* c) override { ++began; forward->BeginContact(c); }
+    void EndContact(b2Contact* c) override { forward->EndContact(c); }
+    void PreSolve(b2Contact* c, const b2Manifold* m) override { forward->PreSolve(c, m); }
+    void PostSolve(b2Contact* c, const b2ContactImpulse* i) override { forward->PostSolve(c, i); }
+};
+static void createRawSensorPair(b2World* raw) {
+    b2BodyDef def; def.type = b2_dynamicBody;
+    b2CircleShape shape; shape.m_radius = 1;
+    b2FixtureDef fixture; fixture.shape = &shape; fixture.isSensor = true;
+    raw->CreateBody(&def)->CreateFixture(&fixture);
+    raw->CreateBody(&def)->CreateFixture(&fixture);
+    raw->Step(1.0f / 60, 8, 3);
+}
+static void testClearKeepsContactListener() {
+    ForwardingContactProxy proxy;
+    tcx::box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
+    b2World* raw = world.getWorld();
+    proxy.forward = world.getCollisionManager();
+    raw->SetContactListener(&proxy);
+    createRawSensorPair(raw);
+    const int before = proxy.began;
+    world.clear();
+    check("clear keeps a user contact listener registered",
+          raw->GetContactManager().m_contactListener == &proxy);
+    createRawSensorPair(raw);
+    check("user contact listener sees contacts after clear", before == 1 && proxy.began - before == 1);
+}
+
+static void testClearReuse() {
+    for (bool automatic : {false, true}) {
+        WorldTestFrames frames;
+        box2d::World world;
+        world.setup(0, 300);
+        world.setGravity(60, 240);
+        world.setSimulationRate(120);
+        world.setVelocityIterations(11);
+        world.setPositionIterations(7);
+        world.setAutoUpdate(automatic);
+        auto* raw = world.getWorld();
+        raw->SetAllowSleeping(false);
+        raw->SetWarmStarting(false);
+        raw->SetContinuousPhysics(false);
+        raw->SetSubStepping(true);
+        world.createGround(600, 800);
+        box2d::CircleBody old;
+        old.setup(world, 100, 100, 10);
+        auto oldNode = make_shared<Node>();
+        auto* oldMod = oldNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+        // Also cover unowned raw-access bodies in the owner walk.
+        b2BodyDef unowned;
+        raw->CreateBody(&unowned);
+        world.startDrag(&old, 100, 100);
+        string label = automatic ? "clear-reuse auto" : "clear-reuse manual";
+        check(label + ": ground, owners, raw body and drag anchor exist",
+              world.getBodyCount() == 5 && raw->GetJointCount() == 1);
+        world.clear();
+        check(label + ": same world, no bodies or joints, drag ended", world.getWorld() == raw &&
+              world.getBodyCount() == 0 && raw->GetJointCount() == 0 && !world.isDragging());
+        check(label + ": gravity and stepping configuration preserved", world.getGravity() == Vec2(60, 240) &&
+              abs(world.getSimulationRate() - 120) < 1e-3f && world.getAutoUpdate() == automatic);
+        check(label + ": raw Box2D settings preserved", !raw->GetAllowSleeping() && !raw->GetWarmStarting() &&
+              !raw->GetContinuousPhysics() && raw->GetSubStepping());
+        check(label + ": old handles and fixture invalid", !old.getBody() && !oldMod->getBody() &&
+              !old.getCollider()->getFixture());
+        world.updateDrag(200, 200);
+        world.endDrag();
+        world.createBounds(0, 0, 800, 600);
+        box2d::CircleBody fresh;
+        fresh.setup(world, 100, 100, 10);
+        auto node = make_shared<Node>();
+        node->setPos(300, 100);
+        auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+        old.update();
+        old.setVelocity(1000, 1000);
+        old.setPhysicsPosition(500, 500);
+        old.addImpulse(1000, 1000);
+        old.getCollider()->setMaskBits(0);
+        old.destroy();
+        oldMod->setDensity(99).setTrigger().setBodyType(box2d::BodyType::Static);
+        oldNode.reset();
+        check(label + ": stale owner calls leave fresh bodies intact", world.getBodyCount() == 3 &&
+              !old.getBody() && fresh.getVelocity() == Vec2(0, 0) &&
+              mod->getBody()->GetType() == b2_dynamicBody && !mod->getBody()->GetFixtureList()->IsSensor());
+        for (int i = 0; i < 4; ++i) {
+            if (automatic) {
+                ++internal::updateFrameCount;
+                ++frames.ctx.updateCount;
+                frames.ctx.updateDeltaTime = 1.0 / 60.0;
+                tc::events().update.notify();
+            } else frames.update(world);
+        }
+        Vec2 modPosition = box2d::World::toPixels(mod->getBody()->GetPosition());
+        check(label + ": classic and Mod simulate under preserved gravity", fresh.getPhysicsPosition().x > 100 &&
+              fresh.getPhysicsPosition().y > 100 && modPosition.x > 300 && modPosition.y > 100);
+        world.createBounds(0, 0, 800, 600);
+        check(label + ": replacing bounds keeps exact count", world.getBodyCount() == 3);
+        world.startDrag(&fresh, fresh.getPhysicsPosition());
+        check(label + ": fresh drag creates exactly one anchor", world.isDragging() &&
+              world.getBodyCount() == 4 && raw->GetJointCount() == 1);
+        world.clear();
+        world.clear();
+        check(label + ": repeated clear removes bounds and fresh drag anchor", world.getWorld() == raw &&
+              world.getBodyCount() == 0 && raw->GetJointCount() == 0 && !world.isDragging() && !mod->getBody());
+    }
+    testDeferredExitAcrossClear();
+}
+
 static void testAdversarialReviewRound2(const string& mode = "all") {
     if (mode == "all" || mode == "replace-remove") testReplacementListenerMutation(false);
     if (mode == "all" || mode == "replace-replace") testReplacementListenerMutation(true);
@@ -2863,7 +3029,6 @@ static void testOwnerLifetimes() {
             world->endDrag();
             world->getCollisionManager()->update();
             world->clear();
-            world->setup(0, 0);
             circle.setup(*world, 400, 400, 10);
             auto freshNode = make_shared<Node>();
             freshNode->setPos(400, 400);
@@ -2913,6 +3078,11 @@ static void testOwnerLifetimes() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && string(argv[1]) == "--clear-reuse") {
+        testClearReuse();
+        testClearKeepsContactListener();
+        return g_fail ? 1 : 0;
+    }
     if (argc >= 2 && string(argv[1]) == "--review-round-2") {
         testAdversarialReviewRound2(argc >= 3 ? argv[2] : "all");
         return g_fail ? 1 : 0;
@@ -2922,6 +3092,8 @@ int main(int argc, char** argv) {
         return g_fail ? 1 : 0;
     }
     if (argc == 2 && string(argv[1]) == "--owner-lifetimes") {
+        testClearReuse();
+        testClearKeepsContactListener();
         testOwnerLifetimes();
         testAdversarialReview();
         testAdversarialReviewRound2();
@@ -2953,6 +3125,8 @@ int main(int argc, char** argv) {
     testReducedConvexHull();
     testDeprecatedEventAliases(world);
     testOwnerLifetimes();
+    testClearReuse();
+    testClearKeepsContactListener();
     testAdversarialReview();
     testAdversarialReviewRound2();
 

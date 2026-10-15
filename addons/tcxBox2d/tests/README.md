@@ -132,10 +132,20 @@ headless lifetime regressions (also included in the full suite):
 - destroying the World first, `clear()`, and a second `setup()` silently
   invalidate live classic bodies, Mod bodies, and collider fixture handles;
 - calls on released owners, repeated `destroy()`, and later owner destruction
-  are safe; a cleared World can be set up and used again;
+  are safe; a cleared World remains usable without another setup;
 - destroying a dragged body ends the mouse joint, and another drag can start;
 - point queries return classic owners and skip Mod owners; drag anchors have
   null owner data.
+
+`--clear-reuse` selects the clear-contract regressions (also in the full suite
+and `--owner-lifetimes`): clear preserves the same b2World, gravity, simulation
+rate, auto-update subscription and raw Box2D settings. Ground, raw unowned bodies
+and drag anchors are all destroyed. Bounds plus fresh classic/Mod bodies work
+immediately and move under gravity in both manual and automatic updates; stale
+owner calls cannot affect them. Fresh bounds and drags can be replaced/cleared
+with exact body/joint counts. Deferred destructor Exits are discarded by clear
+for Mod removal, Node destruction and classic destruction; fresh contacts then
+Enter and Exit exactly once through the preserved listeners.
 
 Review round 1 (adversarial). `--review-round-1` selects the callback and
 replacement regressions; they also run in the full suite and with
@@ -143,9 +153,12 @@ replacement regressions; they also run in the full suite and with
 frame IDs and delta time, without raw Box2D stepping:
 
 - `clear-stay` / `setup-stay`: release from world-level Stay and either classic
-  side; suppress stale notifications and dispatch fresh contacts after setup;
-- `clear-update` / `setup-update`: release or replace the World on the first
-  sub-step's Ended; stop the old update and preserve replacement stepping time;
+  side; retire old pairs as tombstones and dispatch fresh contacts immediately;
+- `clear-update` / `setup-update`: clear or replace the World on the first
+  sub-step's Ended. As on base, clear keeps the accumulator and continues the
+  current update's remaining sub-steps (including bodies created by that
+  listener); only setup changes the release generation and stops the old update,
+  preserving the replacement's fresh accumulator;
 - `replace-mod`: replace an exclusive Mod with active contacts, then clear the
   World; explicit Mod removal must also release exactly once;
 - `reentrant-circle`, `reentrant-rect`, `reentrant-poly`,

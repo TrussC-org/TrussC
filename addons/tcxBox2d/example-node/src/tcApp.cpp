@@ -164,7 +164,6 @@ public:
             rects.clear();
             polygons.clear();
             world.clear();
-            world.setup(Vec2(0, 300));
             world.createBounds();
         }
     }

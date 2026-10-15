@@ -102,8 +102,8 @@ public:
     // Body Management
     // -------------------------------------------------------------------------
 
-    // Invalidate all borrowed body handles and release the Box2D world.
-    // Call setup() before creating bodies again.
+    // Invalidate all borrowed body handles, end any drag and destroy all bodies.
+    // Keep the Box2D world, gravity and settings; new bodies can be created now.
     void clear();
 
     // Body count
@@ -191,7 +191,7 @@ private:
     bool autoUpdate_ = true;
     float accumulator_ = 0.0f;
     uint64_t lastStepFrame_ = UINT64_MAX;
-    uint64_t releaseGeneration_ = 0;  // changes even if setup reuses b2World's address
+    uint64_t releaseGeneration_ = 0;  // setup changes this even if b2World's address is reused
     tc::EventListener updateListener_;
 
     // Lifetime token: expires when this World is destroyed.

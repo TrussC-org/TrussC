@@ -18,6 +18,7 @@ World::World() = default;
 
 World::~World() {
     clear();
+    world_.reset();
 }
 
 World::World(World&& other) noexcept
@@ -69,6 +70,8 @@ void World::setup(float gravityX, float gravityY) {
     // Clean up existing state if setup() is called multiple times
     if (world_) {
         clear();
+        ++releaseGeneration_;
+        world_.reset();
     }
 
     // Reset groundBody_ to ensure clean state
@@ -111,8 +114,9 @@ void World::update() {
         world_->Step(timeStep_, velocityIterations_, positionIterations_);
         // Contacts that ended inside the step and did not begin again
         if (collisionManager_) collisionManager_->flushPendingExits();
-        // An Exit listener may clear or replace the world. Leave a replacement's
-        // accumulator untouched and never step it as part of this update.
+        // setup() replaces the world: leave its fresh accumulator untouched.
+        // clear() keeps this world and its stepping state, so remaining sub-steps
+        // continue normally, including bodies created by the Exit listener.
         if (releaseGeneration_ != generation) return;
         accumulator_ -= timeStep_;
         ++n;
@@ -295,8 +299,6 @@ void World::releaseBody(b2Body* body, ExitDelivery delivery) {
 }
 
 void World::clear() {
-    ++releaseGeneration_;
-    updateListener_ = tc::EventListener();
     endDrag();
     if (world_) {
         // Invalidate every borrowed handle before Box2D releases any objects.
@@ -305,8 +307,13 @@ void World::clear() {
             body->GetUserData().pointer = 0;
             if (owner) owner->onWorldReleased();
         }
+        // Clear is silent, including any Exits queued by earlier owner teardown.
+        // Keep the world, its settings and its auto-update subscription intact.
+        // Restore whatever listener was registered (a user proxy included).
+        b2ContactListener* listener = world_->GetContactManager().m_contactListener;
         world_->SetContactListener(nullptr);
-        world_.reset();
+        while (b2Body* body = world_->GetBodyList()) world_->DestroyBody(body);
+        world_->SetContactListener(listener);
     }
     // Keep the event sources/listeners across clear/setup, but no stale contacts.
     if (collisionManager_) {
