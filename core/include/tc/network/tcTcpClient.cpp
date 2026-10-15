@@ -1125,15 +1125,15 @@ void TcpClient::joinRetired() {
 }
 
 void TcpClient::attachTargets() {
-    onConnectTarget_ = internal::NetworkEvent<TcpConnectEventArgs>::bind(onConnect, delivery_);
+    onConnectTarget_ = internal::EventSnapshotDelivery<TcpConnectEventArgs>::bind(onConnect, delivery_);
     internal::sharedLoad(state_)->onConnect.target = onConnectTarget_;
-    onReceiveTarget_ = internal::NetworkEvent<TcpReceiveEventArgs>::bind(onReceive, delivery_);
+    onReceiveTarget_ = internal::EventSnapshotDelivery<TcpReceiveEventArgs>::bind(onReceive, delivery_);
     internal::sharedLoad(state_)->onReceive.target = onReceiveTarget_;
-    onDisconnectTarget_ = internal::NetworkEvent<TcpDisconnectEventArgs>::bind(onDisconnect, delivery_);
+    onDisconnectTarget_ = internal::EventSnapshotDelivery<TcpDisconnectEventArgs>::bind(onDisconnect, delivery_);
     internal::sharedLoad(state_)->onDisconnect.target = onDisconnectTarget_;
-    onSendCompleteTarget_ = internal::NetworkEvent<TcpSendCompleteEventArgs>::bind(onSendComplete, delivery_);
+    onSendCompleteTarget_ = internal::EventSnapshotDelivery<TcpSendCompleteEventArgs>::bind(onSendComplete, delivery_);
     internal::sharedLoad(state_)->onSendComplete.target = onSendCompleteTarget_;
-    onErrorTarget_ = internal::NetworkEvent<TcpErrorEventArgs>::bind(onError, delivery_);
+    onErrorTarget_ = internal::EventSnapshotDelivery<TcpErrorEventArgs>::bind(onError, delivery_);
     internal::sharedLoad(state_)->onError.target = onErrorTarget_;
 }
 TcpClient::TcpClient() { internal::ensureWinsock(); attachTargets(); }

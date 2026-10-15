@@ -112,7 +112,7 @@ enum class Deliver { Inline, Main };
 // ---------------------------------------------------------------------------
 // Event<T> - Event with arguments
 // ---------------------------------------------------------------------------
-namespace internal { template<class T> struct NetworkEvent; }
+namespace internal { template<class T> struct EventSnapshotDelivery; }
 
 template<typename T>
 class Event {
@@ -249,8 +249,8 @@ public:
     }
 
 private:
-    template<class> friend struct internal::NetworkEvent;
-    // Network delivery retains a snapshot while the handle can be destroyed.
+    template<class> friend struct internal::EventSnapshotDelivery;
+    // Internal delivery can notify from a snapshot after the Event's owner is gone.
     // Dispatch accesses only the owned entries and payload, never the Event.
     static void notifySnapshot(ConstEntryListPtr snapshot, T& arg) {
         if (!snapshot) return;

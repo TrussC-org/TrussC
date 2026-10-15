@@ -26,7 +26,7 @@
     #define INVALID_SOCKET_HANDLE (-1)
 #endif
 namespace trussc {
-namespace internal { struct UdpSocketTestAccess; }
+namespace internal { struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; }
 // ---------------------------------------------------------------------------
 // UDP receive event arguments
 // ---------------------------------------------------------------------------
@@ -46,9 +46,17 @@ struct UdpErrorEventArgs {
 // UdpSocket - UDP socket class
 // ---------------------------------------------------------------------------
 class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
+    // The handle and every receive run share the same OS socket until close().
+    struct Socket {
+        ~Socket();
+        std::atomic<SocketHandle> handle{INVALID_SOCKET_HANDLE};
+        std::mutex mutex;
+    };
     struct State : std::enable_shared_from_this<State> {
-        internal::NetworkEvent<UdpReceiveEventArgs> onReceive;
-        internal::NetworkEvent<UdpErrorEventArgs> onError;
+        explicit State(std::shared_ptr<Socket> socket = std::make_shared<Socket>())
+            : socket_(std::move(socket)) {}
+        internal::EventSnapshotDelivery<UdpReceiveEventArgs> onReceive;
+        internal::EventSnapshotDelivery<UdpErrorEventArgs> onError;
         bool create();
         bool bind(int port, bool startReceiving = true);
         bool connect(const std::string& host, int port);
@@ -77,7 +85,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         void setUseThread(bool useThread);
         int getLocalPort() const { return localPort_; }
         void processNetwork();
-        bool isValid() const { return socket_ != INVALID_SOCKET_HANDLE; }
+        bool isValid() const { return socket_->handle != INVALID_SOCKET_HANDLE; }
         const std::string& getConnectedHost() const { return connectedHost_; }
         int getConnectedPort() const { return connectedPort_; }
         enum class ErrorKind { Resolve, Send, Receive };
@@ -93,7 +101,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         void notifyRecovery(ErrorKind kind);
         ErrorLogState errorLogs_[3];
         std::mutex errorLogMutex_;
-        std::atomic<SocketHandle> socket_ = INVALID_SOCKET_HANDLE;
+        std::shared_ptr<Socket> socket_;
         int localPort_ = 0;
         bool bound_ = false;
         bool reuseAddress_ = false;
@@ -111,10 +119,10 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
     #endif
         EventListener updateListener_;
         static constexpr size_t RECEIVE_BUFFER_SIZE = 65536;
-        std::mutex socketMutex_;
         std::vector<char> receiveBuffer_ = std::vector<char>(RECEIVE_BUFFER_SIZE);
     };
-    internal::AtomicSharedPtr<State> state_{std::make_shared<State>()};
+    std::shared_ptr<Socket> socketOwner_ = std::make_shared<Socket>();
+    internal::AtomicSharedPtr<State> state_{std::make_shared<State>(socketOwner_)};
 public:
     // Events
     //
@@ -188,8 +196,8 @@ public:
     // -------------------------------------------------------------------------
     // Start receive thread (called automatically after bind)
     void startReceiving();
-    // Stop receiving and close the run's socket. Restart rebinds the saved port
-    // with a fresh State (multicast memberships/socket options need reapplying).
+    // Stop receiving only. The socket, bound port, options, multicast
+    // memberships and send() remain available across stop/start.
     // Returns once it has ended (see onReceive for a
     // call on that thread itself).
     // startReceiving() (bind() calls it), stopReceiving(), close() and the
@@ -249,16 +257,17 @@ public:
     // Internal update method (called by event listener if not using threads)
     void processNetwork();
     // Whether socket is valid
-    bool isValid() const { return internal::sharedLoad(state_)->socket_ != INVALID_SOCKET_HANDLE; }
+    bool isValid() const { return internal::sharedLoad(state_)->socket_->handle != INVALID_SOCKET_HANDLE; }
     // Destination information
     const std::string& getConnectedHost() const { return internal::sharedLoad(state_)->connectedHost_; }
     int getConnectedPort() const { return internal::sharedLoad(state_)->connectedPort_; }
 private:
     std::shared_ptr<internal::NetworkDelivery> delivery_ = std::make_shared<internal::NetworkDelivery>();
-    std::shared_ptr<internal::NetworkEvent<UdpReceiveEventArgs>::Target> onReceiveTarget_;
-    std::shared_ptr<internal::NetworkEvent<UdpErrorEventArgs>::Target> onErrorTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<UdpReceiveEventArgs>::Target> onReceiveTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<UdpErrorEventArgs>::Target> onErrorTarget_;
     void attachTargets();
     friend struct internal::UdpSocketTestAccess;
+    friend struct internal::UdpSocketLifecycleTestAccess;
     using ErrorKind = State::ErrorKind;
     void notifyError(const std::string& message, int code = 0);
     void notifyError(ErrorKind kind, const std::string& message, int code = 0);

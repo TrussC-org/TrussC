@@ -13,12 +13,15 @@ void startStopHandoff() {
         entered.set_value();
         proceed.wait();
     });
-    atomic<bool> started{false}, stopping{false};
+    atomic<bool> started{false};
+    promise<void> stopped;
+    auto stopDone = stopped.get_future();
     thread starter([&] { started = server.start(0); });
     check("start reaches accept handoff hook", ready.wait_for(chrono::seconds(10)) == future_status::ready);
-    thread stopper([&] { stopping = true; server.stop(); });
-    check("stop enters during start handoff", until([&] { return stopping.load(); }));
+    thread stopper([&] { server.stop(); stopped.set_value(); });
+    check("stop cannot finish while start handoff is held", stopDone.wait_for(chrono::milliseconds(0)) != future_status::ready);
     release.set_value();
+    check("stop finishes after start handoff is released", stopDone.wait_for(chrono::seconds(10)) == future_status::ready);
     starter.join();
     stopper.join();
     internal::setTcpServerStartHookForTests({});

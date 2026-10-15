@@ -11365,13 +11365,13 @@ description.en = "Stop the receive thread"
 description.ja = "受信スレッドを停止"
 description.ko = "수신 스레드를 정지"
 details.en = '''
-Requests stop, shuts down and closes the run's socket. From another thread it waits for the receive worker; from an inline receive listener it returns without self-join. startReceiving() creates a fresh socket and rebinds the saved port, including the actual port chosen by bind(0). Reuse settings and the destination are retained. Reapply other socket options and multicast memberships for the restarted socket. Do not hold a listener's lock while waiting for it.
+Stops receiving only. From another thread it waits for the receive worker; from an inline receive listener it returns without self-join. The handle and each run share the same OS socket: the bound port (including bind(0)), all socket options, multicast memberships and connected send() survive stopReceiving()/startReceiving(). Thread mode restores blocking IO when stopped, as for direct receive(); polling mode stays non-blocking. Only close() or destruction releases the socket. Do not hold a listener's lock while waiting for it.
 '''
 details.ja = '''
-停止を要求し、その実行のソケットを shutdown して閉じる。別スレッドからなら受信ワーカーの終了を待ち、inline の受信リスナーからは自己 join せず戻る。startReceiving() は新しいソケットを作り、保存したポートへ bind し直す。bind(0) で実際に選ばれたポートも保存する。reuse の設定と宛先は保持する。それ以外のソケットオプションとマルチキャスト参加は、再開したソケットに設定し直すこと。リスナーが取るロックを持ったまま、その終了を待たないこと。
+受信のみを停止する。別スレッドからなら受信ワーカーの終了を待ち、inline の受信リスナーからは自己 join せず戻る。ハンドルと各実行は同じ OS ソケットを共有するため、stopReceiving()/startReceiving() をまたいで bind(0) を含むポート、すべてのソケットオプション、マルチキャスト参加、接続先への send() を保持する。停止時、スレッドモードは直接 receive() するためのブロッキング IO に戻し、ポーリングモードは非ブロッキングのままとする。close() またはデストラクタのみがソケットを解放する。リスナーが取るロックを持ったまま、その終了を待たないこと。
 '''
 details.ko = '''
-중지를 요청하고 해당 실행의 소켓을 shutdown한 뒤 닫는다. 다른 스레드에서는 수신 워커의 종료를 기다리며 inline 수신 리스너에서는 자기 자신을 join하지 않고 반환한다. startReceiving()는 새 소켓을 만들고 저장된 포트에 다시 바인드한다. bind(0)이 선택한 실제 포트도 저장한다. reuse 설정과 대상은 유지한다. 다른 소켓 옵션과 멀티캐스트 가입은 다시 시작한 소켓에 다시 적용해야 한다. 리스너가 잡는 락을 쥔 채로 종료를 기다리지 말 것.
+수신만 중지한다. 다른 스레드에서는 수신 워커의 종료를 기다리며 inline 수신 리스너에서는 자기 자신을 join하지 않고 반환한다. 핸들과 각 실행이 같은 OS 소켓을 공유하므로 stopReceiving()/startReceiving() 후에도 bind(0)을 포함한 포트, 모든 소켓 옵션, 멀티캐스트 가입과 연결 대상에 대한 send()가 유지된다. 중지 시 스레드 모드는 직접 receive()를 위한 블로킹 IO로 돌아가고 폴링 모드는 비블로킹을 유지한다. close() 또는 소멸자만 소켓을 해제한다. 리스너가 잡는 락을 쥔 채로 종료를 기다리지 말 것.
 '''
 
 ["VSYNC"]
@@ -19670,6 +19670,11 @@ description.ko = "큐에 있고 아직 완료되지 않은 바이트 수"
 
 ["TcpClient::stopConnectThread"]
 hide = true
+
+["TcpClient::state"]
+description.en = "Subclass hook: retain the current run's State. Load once at function entry and use that shared pointer throughout the function."
+description.ja = "サブクラス用フック。現在の実行の State を保持する。関数の入口で一度取得し、その関数内では同じ共有ポインタを使う。"
+description.ko = "서브클래스 훅: 현재 실행의 State를 유지한다. 함수 진입 시 한 번 가져와 함수 전체에서 같은 공유 포인터를 사용한다."
 
 ["TcpClient::prepareConnect"]
 hide = true

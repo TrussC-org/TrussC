@@ -69,13 +69,14 @@ struct TcpErrorEventArgs {
 // =============================================================================
 class TC_PLATFORMS("macos,windows,linux,android,ios") TcpClient {
     friend struct internal::TcpClientTestAccess;
+protected:
     struct State : std::enable_shared_from_this<State> {
         ~State();
-        internal::NetworkEvent<TcpConnectEventArgs> onConnect;
-        internal::NetworkEvent<TcpReceiveEventArgs> onReceive;
-        internal::NetworkEvent<TcpDisconnectEventArgs> onDisconnect;
-        internal::NetworkEvent<TcpSendCompleteEventArgs> onSendComplete;
-        internal::NetworkEvent<TcpErrorEventArgs> onError;
+        internal::EventSnapshotDelivery<TcpConnectEventArgs> onConnect;
+        internal::EventSnapshotDelivery<TcpReceiveEventArgs> onReceive;
+        internal::EventSnapshotDelivery<TcpDisconnectEventArgs> onDisconnect;
+        internal::EventSnapshotDelivery<TcpSendCompleteEventArgs> onSendComplete;
+        internal::EventSnapshotDelivery<TcpErrorEventArgs> onError;
         bool connect(const std::string& host, int port);
         void connectAsync(const std::string& host, int port);
         void disconnect();
@@ -163,6 +164,7 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") TcpClient {
         std::weak_ptr<std::function<bool(const std::string&, int)>> connectOverride_;
         std::weak_ptr<std::function<int(const void*, size_t, bool&, int&)>> writeOverride_;
     };
+private:
     internal::AtomicSharedPtr<State> state_{std::make_shared<State>()};
 public:
     // -------------------------------------------------------------------------
@@ -309,11 +311,11 @@ public:
     int getRemotePort() const;
 private:
     std::shared_ptr<internal::NetworkDelivery> delivery_ = std::make_shared<internal::NetworkDelivery>();
-    std::shared_ptr<internal::NetworkEvent<TcpConnectEventArgs>::Target> onConnectTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpReceiveEventArgs>::Target> onReceiveTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpDisconnectEventArgs>::Target> onDisconnectTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpSendCompleteEventArgs>::Target> onSendCompleteTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpErrorEventArgs>::Target> onErrorTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpConnectEventArgs>::Target> onConnectTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpReceiveEventArgs>::Target> onReceiveTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpDisconnectEventArgs>::Target> onDisconnectTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpSendCompleteEventArgs>::Target> onSendCompleteTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpErrorEventArgs>::Target> onErrorTarget_;
     void attachTargets();
     void freshState();
     void joinRetired();
@@ -339,13 +341,7 @@ protected:
     void stopSendChannel();
     // Non-blocking write step; -1 means retry, -2 fatal. TLS overrides it.
     virtual int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
-    internal::NetworkField<State, std::mutex> socketMutex_{state_, &State::socketMutex_};
-    internal::NetworkField<State, decltype(State::socket_)> socket_{state_, &State::socket_};
-    internal::NetworkField<State, std::atomic<bool>> running_{state_, &State::running_};
-    internal::NetworkField<State, std::atomic<bool>> connected_{state_, &State::connected_};
-    internal::NetworkField<State, std::atomic<size_t>> receiveBufferSize_{state_, &State::receiveBufferSize_};
-    internal::NetworkField<State, std::atomic<bool>> useThread_{state_, &State::useThread_};
-    internal::NetworkField<State, std::atomic<bool>> connectPending_{state_, &State::connectPending_};
+    std::shared_ptr<State> state() const { return internal::sharedLoad(state_); }
     AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
     std::string remoteHost_;
     int remotePort_ = 0;

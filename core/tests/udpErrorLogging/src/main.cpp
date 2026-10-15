@@ -34,7 +34,7 @@ struct UdpSocketTestAccess {
     static int port(UdpSocket& socket) {
         sockaddr_in address{};
         socklen_t size = sizeof(address);
-        if (getsockname(internal::sharedLoad(socket.state_)->socket_, reinterpret_cast<sockaddr*>(&address), &size) != 0) return 0;
+        if (getsockname(internal::sharedLoad(socket.state_)->socket_->handle, reinterpret_cast<sockaddr*>(&address), &size) != 0) return 0;
         return ntohs(address.sin_port);
     }
 };

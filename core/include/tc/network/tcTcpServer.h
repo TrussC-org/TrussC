@@ -101,11 +101,11 @@ struct TcpServerErrorEventArgs {
 // =============================================================================
 class TC_PLATFORMS("macos,windows,linux,android") TcpServer {
     struct State : std::enable_shared_from_this<State> {
-        internal::NetworkEvent<TcpClientConnectEventArgs> onClientConnect;
-        internal::NetworkEvent<TcpServerReceiveEventArgs> onReceive;
-        internal::NetworkEvent<TcpClientDisconnectEventArgs> onClientDisconnect;
-        internal::NetworkEvent<TcpServerErrorEventArgs> onError;
-        internal::NetworkEvent<TcpSendCompleteEventArgs> onSendComplete;
+        internal::EventSnapshotDelivery<TcpClientConnectEventArgs> onClientConnect;
+        internal::EventSnapshotDelivery<TcpServerReceiveEventArgs> onReceive;
+        internal::EventSnapshotDelivery<TcpClientDisconnectEventArgs> onClientDisconnect;
+        internal::EventSnapshotDelivery<TcpServerErrorEventArgs> onError;
+        internal::EventSnapshotDelivery<TcpSendCompleteEventArgs> onSendComplete;
         bool start(int port, int maxClients = 0);
         void stop();
         bool isRunning() const;
@@ -343,11 +343,11 @@ public:
     int getPort() const;
 private:
     std::shared_ptr<internal::NetworkDelivery> delivery_ = std::make_shared<internal::NetworkDelivery>();
-    std::shared_ptr<internal::NetworkEvent<TcpClientConnectEventArgs>::Target> onClientConnectTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpServerReceiveEventArgs>::Target> onReceiveTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpClientDisconnectEventArgs>::Target> onClientDisconnectTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpServerErrorEventArgs>::Target> onErrorTarget_;
-    std::shared_ptr<internal::NetworkEvent<TcpSendCompleteEventArgs>::Target> onSendCompleteTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpClientConnectEventArgs>::Target> onClientConnectTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpServerReceiveEventArgs>::Target> onReceiveTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpClientDisconnectEventArgs>::Target> onClientDisconnectTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpServerErrorEventArgs>::Target> onErrorTarget_;
+    std::shared_ptr<internal::EventSnapshotDelivery<TcpSendCompleteEventArgs>::Target> onSendCompleteTarget_;
     void attachTargets();
 };
 } // namespace trussc

@@ -1535,15 +1535,15 @@ TcpServer::State::~State() {
 }
 
 void TcpServer::attachTargets() {
-    onClientConnectTarget_ = internal::NetworkEvent<TcpClientConnectEventArgs>::bind(onClientConnect, delivery_);
+    onClientConnectTarget_ = internal::EventSnapshotDelivery<TcpClientConnectEventArgs>::bind(onClientConnect, delivery_);
     state_->onClientConnect.target = onClientConnectTarget_;
-    onReceiveTarget_ = internal::NetworkEvent<TcpServerReceiveEventArgs>::bind(onReceive, delivery_);
+    onReceiveTarget_ = internal::EventSnapshotDelivery<TcpServerReceiveEventArgs>::bind(onReceive, delivery_);
     state_->onReceive.target = onReceiveTarget_;
-    onClientDisconnectTarget_ = internal::NetworkEvent<TcpClientDisconnectEventArgs>::bind(onClientDisconnect, delivery_);
+    onClientDisconnectTarget_ = internal::EventSnapshotDelivery<TcpClientDisconnectEventArgs>::bind(onClientDisconnect, delivery_);
     state_->onClientDisconnect.target = onClientDisconnectTarget_;
-    onErrorTarget_ = internal::NetworkEvent<TcpServerErrorEventArgs>::bind(onError, delivery_);
+    onErrorTarget_ = internal::EventSnapshotDelivery<TcpServerErrorEventArgs>::bind(onError, delivery_);
     state_->onError.target = onErrorTarget_;
-    onSendCompleteTarget_ = internal::NetworkEvent<TcpSendCompleteEventArgs>::bind(onSendComplete, delivery_);
+    onSendCompleteTarget_ = internal::EventSnapshotDelivery<TcpSendCompleteEventArgs>::bind(onSendComplete, delivery_);
     state_->onSendComplete.target = onSendCompleteTarget_;
 }
 TcpServer::TcpServer() { internal::ensureWinsock(); attachTargets(); }

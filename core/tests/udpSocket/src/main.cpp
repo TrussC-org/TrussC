@@ -3,8 +3,63 @@
 #include "tc/network/tcUdpSocket.h"
 #include "tc/events/tcCoreEvents.h"
 #include "tc/utils/tcLog.h"
+#ifndef _WIN32
+#include <fcntl.h>
+#endif
+
+namespace trussc::internal {
+struct UdpSocketLifecycleTestAccess {
+    static SocketHandle descriptor(const UdpSocket& socket) {
+        return internal::sharedLoad(socket.state_)->socket_->handle.load();
+    }
+};
+}
 
 namespace {
+void preservesSocket(bool threaded) {
+    UdpSocket socket, sink;
+    socket.setUseThread(threaded);
+    check("bind option preservation fixture", socket.bind(0, false) && sink.bind(0, false));
+    const int port = socket.getLocalPort();
+    check("set broadcast before receive run", socket.setBroadcast(true));
+    const bool multicast = socket.joinMulticastGroup("239.255.79.6", "127.0.0.1");
+    if (!multicast) printf("SKIP: loopback multicast unavailable; broadcast still checked\n");
+    check("connect UDP send destination", socket.connect("127.0.0.1", sink.getLocalPort()));
+    check("set sink receive deadline", sink.setReceiveTimeout(2000));
+    auto sentAndReceived = [&] {
+        if (!socket.send("retained")) return false;
+        char data[16]{};
+        string host;
+        int sourcePort = 0;
+        return sink.receive(data, sizeof(data), host, sourcePort) == 8 &&
+               string(data, 8) == "retained" && sourcePort == port;
+    };
+    socket.startReceiving();
+    socket.stopReceiving();
+    check("stop keeps socket and bind(0) port", socket.isValid() && socket.getLocalPort() == port);
+    check("connected send works while stopped", sentAndReceived());
+#ifndef _WIN32
+    const int flags = fcntl(internal::UdpSocketLifecycleTestAccess::descriptor(socket), F_GETFL, 0);
+    check("stop restores direct receive mode", flags >= 0 && bool(flags & O_NONBLOCK) == !threaded);
+#endif
+    socket.startReceiving();
+    int broadcast = 0;
+#ifdef _WIN32
+    int size = sizeof(broadcast);
+#else
+    socklen_t size = sizeof(broadcast);
+#endif
+    check("broadcast option survives stop/start", getsockopt(
+        internal::UdpSocketLifecycleTestAccess::descriptor(socket), SOL_SOCKET, SO_BROADCAST,
+        reinterpret_cast<char*>(&broadcast), &size) == 0 && broadcast != 0);
+    check("bound port survives stop/start", socket.getLocalPort() == port);
+    check("connected send works after restart", sentAndReceived());
+    if (multicast) check("multicast membership survives stop/start",
+        socket.leaveMulticastGroup("239.255.79.6", "127.0.0.1"));
+    socket.stopReceiving();
+    socket.close();
+    check("close drops the socket", !socket.isValid() && socket.getLocalPort() == 0);
+}
 void lifecycle(bool threaded) {
     UdpSocket sender;
     auto socket = make_unique<UdpSocket>();
@@ -17,7 +72,7 @@ void lifecycle(bool threaded) {
         const int packet = ++packets;
         if (packet == 1) {
             socket->stopReceiving();
-            check("stop inside receive closes the run", !socket->isReceiving() && !socket->isValid());
+            check("stop inside receive preserves the socket", !socket->isReceiving() && socket->isValid());
             socket->startReceiving();
             restarted = true;
         } else {
@@ -115,7 +170,7 @@ void moveInsideListener() {
 } // namespace
 TC_CORE_TEST_MAIN() {
     Watchdog watchdog;
-    for (bool threaded : {true, false}) { lifecycle(threaded); moves(threaded); }
+    for (bool threaded : {true, false}) { preservesSocket(threaded); lifecycle(threaded); moves(threaded); }
     restartWithCallbackInFlight();
     moveInsideListener();
     return failures ? 1 : 0;
