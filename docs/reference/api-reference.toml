@@ -19676,6 +19676,11 @@ description.en = "Subclass hook: retain the current run's State. Load once at fu
 description.ja = "サブクラス用フック。現在の実行の State を保持する。関数の入口で一度取得し、その関数内では同じ共有ポインタを使う。"
 description.ko = "서브클래스 훅: 현재 실행의 State를 유지한다. 함수 진입 시 한 번 가져와 함수 전체에서 같은 공유 포인터를 사용한다."
 
+["TcpClient::setTransport"]
+description.en = "Subclass hook: set the transport this client's connections use (TlsClient installs its TLS transport here). Call it before connecting; later connections keep it."
+description.ja = "サブクラス用フック。このクライアントの接続が使うトランスポートを設定する（TlsClient はここで TLS トランスポートを設定する）。接続前に呼ぶこと。以降の接続もこのトランスポートを使う。"
+description.ko = "서브클래스 훅: 이 클라이언트의 연결이 사용할 트랜스포트를 설정한다(TlsClient는 여기서 TLS 트랜스포트를 설정한다). 연결 전에 호출한다. 이후의 연결도 이 트랜스포트를 사용한다."
+
 ["TcpClient::prepareConnect"]
 hide = true
 
