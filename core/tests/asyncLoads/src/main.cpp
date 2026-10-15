@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDisplayTest.h"
 #include <condition_variable>
 #include <cstdio>
 #include <fstream>
@@ -614,8 +615,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     newRun(); fixtures();
     if (argc == 2 && string(argv[1]) == "--replace-every-frame") {
         WindowSettings settings; settings.setSize(64, 64); settings.setHighDpi(false);
-        runApp<ReplaceEveryFrameApp>(settings);
-        check("replacement sketch completed", replacementFrames == 300);
+        return tcCoreTest::runDisplayTest<ReplaceEveryFrameApp>(settings, failures, [] {
+            check("replacement sketch completed", replacementFrames == 300);
+            finish();
+            fs::remove_all(fixtureDir);
+        });
     } else {
         replacementAndCancel(); lifetimeAndReentrancy(); runtime(); exitTests(argv[0]);
         if (!(argc == 2 && string(argv[1]) == "--lifecycle-only")) {
