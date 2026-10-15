@@ -253,7 +253,10 @@ private:
 
     // Node's pre-cleanup hook: an App added as a child ends with its
     // subtree's cleanupTree(), so its audio hooks are detached there too.
-    void onCleanupStart() final { internal::detachAppAudio(*this); }
+    void onCleanupStart() final {
+        Node::onCleanupStart();
+        internal::detachAppAudio(*this);
+    }
 
     // Node's pre-setup hook: resolve the data path root before setup() runs,
     // not in _setup_cb (on iOS the executable path may not be available that

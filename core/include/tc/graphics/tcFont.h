@@ -1615,7 +1615,7 @@ public:
         if (isUrl(actualPath)) {
 #ifdef __EMSCRIPTEN__
             // Yield via Asyncify until fetching and decoding have completed.
-            auto result = loadFromUrl(actualPath, physicalSize, actualFace);
+            auto result = loadFromUrl();
             if (!result) {
                 cacheKey_.fontPath.clear();
                 if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
@@ -1669,7 +1669,6 @@ private:
 #ifdef __EMSCRIPTEN__
     // Context for async font loading
     struct FontLoadContext {
-        Font* font;
         internal::FontCacheKey key;
         double deadline;
         bool complete = false;
@@ -1687,13 +1686,13 @@ private:
             return;
         }
 
-        ctx->font->atlasManager_ = internal::SharedFontCache::getInstance().getOrCreateFromMemory(
+        auto atlas = internal::SharedFontCache::getInstance().getOrCreateFromMemory(
             ctx->key,
             reinterpret_cast<const uint8_t*>(fetch->data),
             (size_t)fetch->numBytes
         );
 
-        if (ctx->font->atlasManager_) {
+        if (atlas) {
             logNotice("Font") << "Loaded from URL: " << ctx->key.fontPath;
         }
 
@@ -1713,10 +1712,10 @@ private:
         ctx->complete = true;
     }
 
-    LoadResult loadFromUrl(const std::string& url, int size, int faceIndex) {
+    LoadResult loadFromUrl() {
         // Check cache first (don't try to load from file)
-        internal::FontCacheKey key{url, size};
-        key.faceIndex = faceIndex;
+        const auto key = cacheKey_;
+        const auto& url = key.fontPath;
         auto cached = internal::SharedFontCache::getInstance().get(key);
         if (cached) {
             atlasManager_ = cached;
@@ -1725,7 +1724,7 @@ private:
 
         // Start async fetch
         atlasManager_.reset();
-        FontLoadContext ctx{this, key, emscripten_get_now() + internal::webLoadTimeoutMSecs};
+        FontLoadContext ctx{key, emscripten_get_now() + internal::webLoadTimeoutMSecs};
 
         emscripten_fetch_attr_t attr;
         emscripten_fetch_attr_init(&attr);
@@ -1751,6 +1750,7 @@ private:
             emscripten_fetch_close(fetch);
         }
         if (ctx.timedOut) return internal::reportWebLoadTimeout(internal::utf8ToPath(url), "Font");
+        atlasManager_ = internal::SharedFontCache::getInstance().get(key);
         // The caller classifies fetch/decode failure from atlasManager_.
         return LoadResult::success();
     }
