@@ -12,11 +12,11 @@ void captureReviewBlend() {
     if (captured) {
         const auto alpha = pixels.getColor(16, 32);
         const auto add = pixels.getColor(64, 32);
-        auto near = [](float a, float b) { return std::abs(a - b) < 0.015f; };
+        auto nearlyEqual = [](float a, float b) { return std::abs(a - b) < 0.015f; };
         check("Fbo end retains the old screen Alpha pipeline despite logical Add (base behavior)",
-              near(alpha.r, 0.625f) && near(alpha.g, 0.125f) && near(alpha.b, 0.125f));
+              nearlyEqual(alpha.r, 0.625f) && nearlyEqual(alpha.g, 0.125f) && nearlyEqual(alpha.b, 0.125f));
         check("repeated setBlendMode(Add) loads the Add pipeline after end (never a no-op)",
-              near(add.r, 0.75f) && near(add.g, 0.25f) && near(add.b, 0.25f));
+              nearlyEqual(add.r, 0.75f) && nearlyEqual(add.g, 0.25f) && nearlyEqual(add.b, 0.25f));
         std::printf("REVIEW blend alpha=%a,%a,%a add=%a,%a,%a\n",
                     double(alpha.r), double(alpha.g), double(alpha.b),
                     double(add.r), double(add.g), double(add.b));
