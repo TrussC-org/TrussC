@@ -2,7 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <cstdlib>
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
 #include "impl/httplib.h"
 #include <sys/wait.h>
 #include <unistd.h>
@@ -10,7 +10,7 @@
 
 using namespace tc;
 namespace {
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
 bool workerExit = false;
 struct ExitApp : App {
     void setup() override {
@@ -55,7 +55,7 @@ bool runChild(bool fromWorker) {
 #endif
 }
 TC_CORE_TEST_MAIN() {
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
     const bool appExit = runChild(false);
     std::printf("std::exit from update with in-process MCP listener: %s\n", appExit ? "PASS" : "FAIL");
     const bool handlerExit = runChild(true);
