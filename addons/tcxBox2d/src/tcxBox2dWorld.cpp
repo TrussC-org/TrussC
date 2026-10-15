@@ -79,7 +79,7 @@ void World::setup(float gravityX, float gravityY) {
     world_ = std::make_unique<b2World>(g);
 
     // Create and register collision manager
-    collisionManager_ = std::make_unique<CollisionManager>();
+    if (!collisionManager_) collisionManager_ = std::make_unique<CollisionManager>();
     world_->SetContactListener(collisionManager_.get());
 
     // Fresh stepping state, and (re)arm the auto-update listener.
@@ -106,10 +106,14 @@ void World::update() {
     accumulator_ += static_cast<float>(tc::getDeltaTime());
     const int MAX_SUBSTEPS = 8;  // spiral-of-death guard (e.g. after a stall)
     int n = 0;
+    const uint64_t generation = releaseGeneration_;
     while (accumulator_ >= timeStep_ && n < MAX_SUBSTEPS) {
         world_->Step(timeStep_, velocityIterations_, positionIterations_);
         // Contacts that ended inside the step and did not begin again
         if (collisionManager_) collisionManager_->flushPendingExits();
+        // An Exit listener may clear or replace the world. Leave a replacement's
+        // accumulator untouched and never step it as part of this update.
+        if (releaseGeneration_ != generation) return;
         accumulator_ -= timeStep_;
         ++n;
     }
@@ -250,23 +254,66 @@ void World::createGround() {
 // =============================================================================
 // Body Management
 // =============================================================================
-void World::clear() {
-    if (world_) {
-        // Destroy mouse joint
-        endDrag();
+void World::attachOwner(b2Body* body, detail::BodyOwner& owner) {
+    static uint64_t nextGeneration = 0;  // physics objects live on the main thread
+    owner.generation = ++nextGeneration;
+    body->GetUserData().pointer = reinterpret_cast<uintptr_t>(&owner);
+}
 
-        // Remove all bodies
-        b2Body* body = world_->GetBodyList();
-        while (body) {
-            b2Body* next = body->GetNext();
-            if (collisionManager_) collisionManager_->forget(body);
-            world_->DestroyBody(body);
-            if (collisionManager_) collisionManager_->forgetBody(body);
-            body = next;
+detail::BodyOwner* World::findOwner(b2Body* body) const {
+    // A listener can destroy a body, then create another at the same address.
+    // Compare against live bodies before reading any user data.
+    if (world_ && body) {
+        for (b2Body* live = world_->GetBodyList(); live; live = live->GetNext()) {
+            if (live == body) {
+                return reinterpret_cast<detail::BodyOwner*>(live->GetUserData().pointer);
+            }
         }
-        groundBody_ = nullptr;
-        dragAnchorBody_ = nullptr;
     }
+    return nullptr;
+}
+
+void World::releaseBody(b2Body* body, ExitDelivery delivery) {
+    if (!world_ || !body) return;
+    if (mouseJoint_ && mouseJoint_->GetBodyB() == body) endDrag();
+    auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
+    body->GetUserData().pointer = 0;
+    if (owner) owner->onWorldReleased();
+    if (collisionManager_) collisionManager_->forget(body);
+    world_->DestroyBody(body);
+    if (collisionManager_) {
+        collisionManager_->forgetBody(body);
+        if (delivery == ExitDelivery::Deferred) {
+            // DestroyBody has now queued the collider Exits too. Their dying
+            // side must not survive the destructor as a dangling event source.
+            if (auto* classic = dynamic_cast<Body*>(owner)) {
+                collisionManager_->forgetCollider(classic->getCollider());
+            }
+        }
+        if (delivery == ExitDelivery::Immediate) collisionManager_->flushPendingExits();
+    }
+}
+
+void World::clear() {
+    ++releaseGeneration_;
+    updateListener_ = tc::EventListener();
+    endDrag();
+    if (world_) {
+        // Invalidate every borrowed handle before Box2D releases any objects.
+        for (b2Body* body = world_->GetBodyList(); body; body = body->GetNext()) {
+            auto* owner = reinterpret_cast<detail::BodyOwner*>(body->GetUserData().pointer);
+            body->GetUserData().pointer = 0;
+            if (owner) owner->onWorldReleased();
+        }
+        world_->SetContactListener(nullptr);
+        world_.reset();
+    }
+    // Keep the event sources/listeners across clear/setup, but no stale contacts.
+    if (collisionManager_) {
+        collisionManager_->clearContacts();
+    }
+    groundBody_ = nullptr;
+    dragAnchorBody_ = nullptr;
 }
 
 int World::getBodyCount() const {
@@ -291,11 +338,8 @@ Body* World::getBodyAtPoint(float px, float py) {
 
         for (b2Fixture* f = b->GetFixtureList(); f; f = f->GetNext()) {
             if (f->TestPoint(point)) {
-                // Get Body* from UserData
-                uintptr_t ptr = b->GetUserData().pointer;
-                if (ptr != 0) {
-                    return reinterpret_cast<Body*>(ptr);
-                }
+                auto* owner = reinterpret_cast<detail::BodyOwner*>(b->GetUserData().pointer);
+                if (auto* classic = dynamic_cast<Body*>(owner)) return classic;
             }
         }
     }
@@ -310,7 +354,7 @@ void World::startDrag(Body* body, const tc::Vec2& target) {
 }
 
 void World::startDrag(Body* body, float tx, float ty) {
-    if (!world_ || !body || !body->getBody()) return;
+    if (!world_ || !body || !body->getBody() || body->getBody()->GetWorld() != world_.get()) return;
 
     // Destroy existing joint if any
     endDrag();

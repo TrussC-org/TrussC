@@ -62,7 +62,9 @@ public:
     // Contact2D::other). Listeners of the deferred events and of Stay may
     // destroy bodies. Exits from TrussC body destruction, disabling or type
     // changes are also queued, then flushed after Box2D returns and before
-    // the wrapper returns. Exits from raw Box2D calls wait for update().
+    // the wrapper returns. Owner destructors and Mod teardown defer Exits to
+    // the next World delivery point; they never invoke user listeners.
+    // Exits from raw Box2D calls wait for update().
     // -------------------------------------------------------------------------
     tc::Event<WorldContact> contactBegan;   // started touching
     tc::Event<WorldContact> contactStay;    // still touching, once per World::update()
@@ -141,11 +143,17 @@ private:
     // Fire the Ended / Exit events after a Box2D operation returns.
     void flushPendingExits();
 
+    // Retire records without invalidating indices held by an active dispatch.
+    void clearContacts();
+
     // `body` is about to be destroyed (b2World::DestroyBody()). Null it and
     // its Collider2D out of every pair with no contacts left: a pending Exit
     // then reaches only the other side, with this body null in its payload.
     // Pairs that still have contacts are ended by DestroyBody() itself.
     void forget(b2Body* body);
+
+    // The owner/collider is going away after DestroyBody queued its Exits.
+    void forgetCollider(Collider2D* collider);
 
     // Null world-level references without reading a destroyed body.
     void forgetBody(b2Body* body);

@@ -19,12 +19,12 @@ namespace tcx::box2d {
 // Base class for all physics objects (circles, rectangles, polygons, etc.)
 // Inherits from tc::Node for scene graph integration
 // =============================================================================
-class Body : public tc::Node {
+class Body : public tc::Node, public detail::BodyOwner {
 public:
     Body() = default;
 
     virtual ~Body() {
-        destroy();
+        if (body_ && world_) world_->releaseBody(body_, World::ExitDelivery::Deferred);
     }
 
     // Non-copyable
@@ -37,6 +37,7 @@ public:
         , world_(other.world_)
         , body_(other.body_)
     {
+        if (body_) world_->attachOwner(body_, *this);
         other.world_ = nullptr;
         other.body_ = nullptr;
     }
@@ -46,6 +47,7 @@ public:
             destroy();
             world_ = other.world_;
             body_ = other.body_;
+            if (body_) world_->attachOwner(body_, *this);
             other.world_ = nullptr;
             other.body_ = nullptr;
         }
@@ -340,19 +342,7 @@ public:
     // Destruction
     // -------------------------------------------------------------------------
     void destroy() {
-        if (body_ && world_ && world_->getWorld()) {
-            // A deferred Exit must not reach this body's collider once it is
-            // freed (see CollisionManager)
-            auto* cm = world_->getCollisionManager();
-            b2Body* gone = body_;
-            if (cm) cm->forget(gone);
-            world_->getWorld()->DestroyBody(gone);
-            body_ = nullptr;   // listeners may call destroy() again
-            if (cm) {
-                cm->forgetBody(gone);
-                cm->flushPendingExits();
-            }
-        }
+        if (body_ && world_) world_->releaseBody(body_);
     }
 
     // -------------------------------------------------------------------------
@@ -368,7 +358,10 @@ public:
     const Collider2D* getCollider() const { return collider_.get(); }
 
 protected:
-    void setBody(b2Body* body) { body_ = body; }
+    void setBody(b2Body* body) {
+        body_ = body;
+        if (body_) world_->attachOwner(body_, *this);
+    }
 
     b2Fixture* getFixture() {
         return body_ ? body_->GetFixtureList() : nullptr;
@@ -398,6 +391,14 @@ protected:
         return ptr;
     }
 
+private:
+    void onWorldReleased() override {
+        body_ = nullptr;
+        world_ = nullptr;
+        if (collider_) collider_->fixture_ = nullptr;
+    }
+
+protected:
     World* world_ = nullptr;
     b2Body* body_ = nullptr;
     std::unique_ptr<Collider2D> collider_;
