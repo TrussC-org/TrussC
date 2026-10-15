@@ -81,6 +81,22 @@ function variantsOf(args) {
     return out;
 }
 
+const ALL_PLATFORMS = ['macos', 'windows', 'linux', 'android', 'ios', 'web'];
+const PLATFORM_COND = {
+    macos: '(defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE))',
+    ios: '(defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)',
+    windows: 'defined(_WIN32)',
+    linux: '(defined(__linux__) && !defined(__ANDROID__))',
+    android: 'defined(__ANDROID__)',
+    web: 'defined(__EMSCRIPTEN__)',
+};
+// -> condition string, or null when unrestricted (no annotation / covers all)
+function platformGuard(platforms) {
+    if (!platforms || !platforms.length) return null;
+    if (ALL_PLATFORMS.every(p => platforms.includes(p))) return null;
+    return platforms.map(p => PLATFORM_COND[p]).filter(Boolean).join(' || ');
+}
+
 function emit(e) {
     if (e.tparams && e.tparams.length) { skip.template++; return ''; }
     // `provider:"std"` symbols (sin/cos/min…) are std's, not trussc:: members —
@@ -116,7 +132,11 @@ for (const id of Object.keys(data)) {
     if (e.owner) { skip.member++; continue; }    // type member -> Phase 2
     if (e.ns) { skip.ns++; continue; }           // sub-namespaced -> Phase 2 (Lua tables)
     const s = emit(e);
-    if (s) { body += s; count++; }
+    if (s) {
+        const guard = platformGuard(e.platforms);
+        body += guard ? `#if ${guard}\n${s}#endif\n` : s;
+        count++;
+    }
 }
 
 process.stdout.write(`// AUTO-GENERATED from reference-data.json by luagen.js — DO NOT EDIT.

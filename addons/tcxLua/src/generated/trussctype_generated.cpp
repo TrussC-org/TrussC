@@ -3,10 +3,22 @@
 #include "TrussC.h"
 using namespace trussc;
 using namespace std;
+// Abstract bases (e.g. VideoPlayerBase) expose members but cannot be constructed.
+// An empty guarded constructor list must not enable sol2's automatic default ctor.
+namespace {
+template<typename Owner, typename... Signatures>
+auto tcxLuaConstructors() {
+    if constexpr (std::is_abstract_v<Owner> || sizeof...(Signatures) == 0) return sol::no_constructor;
+    else return sol::constructors<Signatures...>();
+}
+}
 namespace { struct TcxLuaColorsTable {}; }   // tag for the `colors` constant table
 #ifndef _MSC_VER
 #pragma GCC diagnostic push
 #pragma clang diagnostic push
+// Lua retains deprecated compatibility names, including inherited ones.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua);
 void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua);

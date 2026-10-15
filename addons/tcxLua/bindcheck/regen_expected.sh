@@ -22,6 +22,7 @@ trap 'rm -f "$TMP_M" "$TMP_H"' EXIT
   { grep -vE '^[[:space:]]*//' "$G"; grep -vE '^[[:space:]]*//' "$H"; } \
     | grep -oE 'set_function\("[^"]+"' \
     | sed -E 's/set_function\("(.*)"/\1/' | sort -u \
+    | node "$HERE/classify_members.js" "$ADDON/../../docs/reference/reference-data.json" --names \
     | awk '{printf "    \"%s\",\n", $0}'
   echo "  },"
   echo "  usertypes = {"
@@ -38,7 +39,8 @@ trap 'rm -f "$TMP_M" "$TMP_H"' EXIT
     grep -vE '^[[:space:]]*//' "$H" \
       | grep -oE 'define[A-Z][A-Za-z]*<.*>\([^;]*"[^"]+"' \
       | sed -E 's/.*"([^"]+)"/\1/'
-  } | sort -u | awk '{printf "    \"%s\",\n", $0}'
+  } | sort -u | node "$HERE/classify_members.js" "$ADDON/../../docs/reference/reference-data.json" --names \
+    | awk '{printf "    \"%s\",\n", $0}'
   echo "  },"
 
   # Per-usertype MEMBER names. The two lists above only prove a NAME exists,

@@ -87,6 +87,10 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); },
         [](std::function<void ()> fn, std::weak_ptr<std::atomic<bool>> token) { return trussc::runOnMainThread(fn, token); }
     ));
+    lua->set_function("loadErrorName", [](trussc::LoadError e) { return trussc::loadErrorName(e); });
+    lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
+    lua->set_function("pathToUtf8", [](const fs::path & p) { return trussc::pathToUtf8(p); });
+    lua->set_function("utf8ToPath", [](std::string_view utf8) { return trussc::utf8ToPath(utf8); });
     lua->set_function("logLevelToString", [](trussc::LogLevel level) { return trussc::logLevelToString(level); });
     lua->set_function("getLogger", []() -> decltype(auto) { return trussc::getLogger(); });
     lua->set_function("setLogLevel", [](trussc::LogLevel level) { return trussc::setLogLevel(level); });
@@ -182,40 +186,76 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     ));
     lua->set_function("bringWindowToFront", []() { return trussc::bringWindowToFront(); });
     lua->set_function("getDisplayScaleFactor", []() { return trussc::getDisplayScaleFactor(); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32)
     lua->set_function("getWindowPosition", []() { return trussc::getWindowPosition(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32)
     lua->set_function("setWindowPosition", [](int x, int y) { return trussc::setWindowPosition(x, y); });
+#endif
     lua->set_function("setWindowDecorated", [](bool decorated) { return trussc::setWindowDecorated(decorated); });
     lua->set_function("setWindowSizeLogical", [](int width, int height) { return trussc::setWindowSizeLogical(width, height); });
     lua->set_function("getExecutablePath", []() { return trussc::getExecutablePath(); });
     lua->set_function("getExecutableDir", []() { return trussc::getExecutableDir(); });
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setImmersiveMode", [](bool enabled) { return trussc::setImmersiveMode(enabled); });
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getImmersiveMode", []() { return trussc::getImmersiveMode(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setKeepScreenOn", [](bool enabled) { return trussc::setKeepScreenOn(enabled); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getKeepScreenOn", []() { return trussc::getKeepScreenOn(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__ANDROID__)
     lua->set_function("captureWindow", [](trussc::Pixels & outPixels) { return trussc::captureWindow(outPixels); });
+#endif
     lua->set_function("getSystemVolume", []() { return trussc::getSystemVolume(); });
     lua->set_function("setSystemVolume", [](float volume) { return trussc::setSystemVolume(volume); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getSystemBrightness", []() { return trussc::getSystemBrightness(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setSystemBrightness", [](float brightness) { return trussc::setSystemBrightness(brightness); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__ANDROID__)
     lua->set_function("getThermalState", []() { return trussc::getThermalState(); });
+#endif
     lua->set_function("getThermalTemperature", []() { return trussc::getThermalTemperature(); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getBatteryLevel", []() { return trussc::getBatteryLevel(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("isBatteryCharging", []() { return trussc::isBatteryCharging(); });
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getAccelerometer", []() { return trussc::getAccelerometer(); });
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getGyroscope", []() { return trussc::getGyroscope(); });
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getDeviceOrientation", []() { return trussc::getDeviceOrientation(); });
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getCompassHeading", []() { return trussc::getCompassHeading(); });
+#endif
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("isProximityClose", []() { return trussc::isProximityClose(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getLocation", []() { return trussc::getLocation(); });
+#endif
     lua->set_function("events", []() -> decltype(auto) { return trussc::events(); });
-    lua->set_function("loadErrorName", [](trussc::LoadError e) { return trussc::loadErrorName(e); });
     lua->set_function("initAudio", []() { return trussc::initAudio(); });
     lua->set_function("shutdownAudio", []() { return trussc::shutdownAudio(); });
     lua->set_function("getMicInput", []() -> decltype(auto) { return trussc::getMicInput(); });
     lua->set_function("setDataPathRoot", [](const fs::path & path) { return trussc::setDataPathRoot(path); });
     lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
-    lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });
+#endif
     lua->set_function("getUserDataPath", sol::overload(
         []() { return trussc::getUserDataPath(); },
         [](const fs::path & path) { return trussc::getUserDataPath(path); }
@@ -286,13 +326,18 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getDay", []() { return trussc::getDay(); });
     lua->set_function("getWeekday", []() { return trussc::getWeekday(); });
     lua->set_function("compressBound", [](std::size_t nbytes, trussc::Codec codec) { return trussc::compressBound(nbytes, codec); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     lua->set_function("alertDialog", [](const std::string & title, const std::string & message) { return trussc::alertDialog(title, message); });
+#endif
     lua->set_function("alertDialogAsync", sol::overload(
         [](const std::string & title, const std::string & message) { return trussc::alertDialogAsync(title, message); },
         [](const std::string & title, const std::string & message, std::function<void ()> callback) { return trussc::alertDialogAsync(title, message, callback); }
     ));
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     lua->set_function("confirmDialog", [](const std::string & title, const std::string & message) { return trussc::confirmDialog(title, message); });
+#endif
     lua->set_function("confirmDialogAsync", [](const std::string & title, const std::string & message, std::function<void (bool)> callback) { return trussc::confirmDialogAsync(title, message, callback); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     lua->set_function("loadDialog", sol::overload(
         []() { return trussc::loadDialog(); },
         [](const std::string & title) { return trussc::loadDialog(title); },
@@ -300,7 +345,9 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::string & title, const std::string & message, const fs::path & defaultPath) { return trussc::loadDialog(title, message, defaultPath); },
         [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection) { return trussc::loadDialog(title, message, defaultPath, folderSelection); }
     ));
+#endif
     lua->set_function("loadDialogAsync", [](const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback) { return trussc::loadDialogAsync(title, message, defaultPath, folderSelection, callback); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     lua->set_function("saveDialog", sol::overload(
         []() { return trussc::saveDialog(); },
         [](const std::string & title) { return trussc::saveDialog(title); },
@@ -308,6 +355,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const std::string & title, const std::string & message, const fs::path & defaultPath) { return trussc::saveDialog(title, message, defaultPath); },
         [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName) { return trussc::saveDialog(title, message, defaultPath, defaultName); }
     ));
+#endif
     lua->set_function("saveDialogAsync", [](const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback) { return trussc::saveDialogAsync(title, message, defaultPath, defaultName, callback); });
     lua->set_function("loadJson", [](const fs::path & path) { return trussc::loadJson(path); });
     lua->set_function("saveJson", sol::overload(
@@ -337,6 +385,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("saveTextFile", [](const fs::path & path, const std::string & content) { return trussc::saveTextFile(path, content); });
     lua->set_function("appendToFile", [](const fs::path & path, const std::string & content) { return trussc::appendToFile(path, content); });
     lua->set_function("getVersion", []() { return trussc::getVersion(); });
+    lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
+    lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("getGlobalMouseX", []() { return trussc::getGlobalMouseX(); });
     lua->set_function("getGlobalMouseY", []() { return trussc::getGlobalMouseY(); });
     lua->set_function("getGlobalPMouseX", []() { return trussc::getGlobalPMouseX(); });
@@ -606,12 +656,15 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("toggleFullscreen", []() { return trussc::toggleFullscreen(); });
     lua->set_function("operator|", [](trussc::Orientation a, trussc::Orientation b) { return trussc::operator|(a, b); });
     lua->set_function("operator&", [](trussc::Orientation a, trussc::Orientation b) { return trussc::operator&(a, b); });
+#if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setOrientation", [](trussc::Orientation mask) { return trussc::setOrientation(mask); });
+#endif
     lua->set_function("getWindowWidth", []() { return trussc::getWindowWidth(); });
     lua->set_function("getWindowHeight", []() { return trussc::getWindowHeight(); });
     lua->set_function("getWindowSize", []() { return trussc::getWindowSize(); });
     lua->set_function("getAspectRatio", []() { return trussc::getAspectRatio(); });
     lua->set_function("getElapsedTime", []() { return trussc::getElapsedTime(); });
+    lua->set_function("getFrameElapsedTime", []() { return trussc::getFrameElapsedTime(); });
     lua->set_function("getUpdateCount", []() { return trussc::getUpdateCount(); });
     lua->set_function("getDrawCount", []() { return trussc::getDrawCount(); });
     lua->set_function("getDeltaTime", []() { return trussc::getDeltaTime(); });
@@ -635,6 +688,8 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getFboCount", []() { return trussc::getFboCount(); });
     lua->set_function("setFps", [](float fps) { return trussc::setFps(fps); });
     lua->set_function("setIndependentFps", [](float updateFps, float drawFps) { return trussc::setIndependentFps(updateFps, drawFps); });
+    lua->set_function("setMaxUpdateSteps", [](int steps) { return trussc::setMaxUpdateSteps(steps); });
+    lua->set_function("getMaxUpdateSteps", []() { return trussc::getMaxUpdateSteps(); });
     lua->set_function("getFpsSettings", []() { return trussc::getFpsSettings(); });
     lua->set_function("getFps", []() { return trussc::getFps(); });
     lua->set_function("redraw", sol::overload(
@@ -646,7 +701,9 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         []() { return trussc::exitApp(); },
         [](int code) { return trussc::exitApp(code); }
     ));
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__ANDROID__)
     lua->set_function("grabScreen", [](trussc::Pixels & outPixels) { return trussc::grabScreen(outPixels); });
+#endif
     lua->set_function("saveScreenshot", [](const std::filesystem::path & path) { return trussc::saveScreenshot(path); });
     lua->set_function("beginShape", []() { return trussc::beginShape(); });
     lua->set_function("endShape", sol::overload(
@@ -691,11 +748,16 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float x1, float y1, float x2, float y2) { return trussc::drawStroke(x1, y1, x2, y2); },
         [](const trussc::Vec2 & p1, const trussc::Vec2 & p2) { return trussc::drawStroke(p1, p2); }
     ));
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("systemFontPath", [](const std::string & name) { return trussc::systemFontPath(name); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("listSystemFonts", []() { return trussc::listSystemFonts(); });
+#endif
     lua->set_function("pushShader", [](trussc::Shader & shader) { return trussc::pushShader(shader); });
     lua->set_function("popShader", []() { return trussc::popShader(); });
     lua->set_function("videoCodecName", [](trussc::VideoCodec c) { return trussc::videoCodecName(c); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("startRecording", sol::overload(
         [](const fs::path & path) { return trussc::startRecording(path); },
         [](const fs::path & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(path, settings); },
@@ -704,6 +766,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](const trussc::Fbo & fbo, const fs::path & path, const trussc::VideoRecordSettings & settings) { return trussc::startRecording(fbo, path, settings); },
         [](const trussc::Fbo & fbo, const fs::path & path, float durationSec) { return trussc::startRecording(fbo, path, durationSec); }
     ));
+#endif
     lua->set_function("stopRecording", []() { return trussc::stopRecording(); });
     lua->set_function("isRecording", []() { return trussc::isRecording(); });
     lua->set_function("recordingFrameCount", []() { return trussc::recordingFrameCount(); });
@@ -781,10 +844,18 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     ));
     lua->set_function("getCameraPosition", []() -> decltype(auto) { return trussc::getCameraPosition(); });
     lua->set_function("sendErrorName", [](trussc::SendError e) { return trussc::sendErrorName(e); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("listNetworkInterfaces", []() { return trussc::listNetworkInterfaces(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("printNetworkInterfaces", []() { return trussc::printNetworkInterfaces(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getLocalIp", []() { return trussc::getLocalIp(); });
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getLocalIps", []() { return trussc::getLocalIps(); });
+#endif
     lua->set_function("isLoopback", [](const std::string & addr) { return trussc::isLoopback(addr); });
     lua->set_function("isPrivate", [](const std::string & addr) { return trussc::isPrivate(addr); });
     lua->set_function("isLinkLocal", [](const std::string & addr) { return trussc::isLinkLocal(addr); });
@@ -808,16 +879,16 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](float t, trussc::EaseType type, trussc::EaseMode mode) { return trussc::ease(t, type, mode); },
         [](float t, const trussc::EaseFunction & fn, trussc::EaseMode mode) { return trussc::ease(t, fn, mode); }
     ));
-    lua->set_function("typeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::typeName(ti); });
-    lua->set_function("shortTypeName", [](const std::type_info & ti) -> decltype(auto) { return trussc::shortTypeName(ti); });
     lua->set_function("isOverlayHovered", []() { return trussc::isOverlayHovered(); });
     lua->set_function("isOverlayFocused", []() { return trussc::isOverlayFocused(); });
     lua->set_function("getSelectedNode", []() { return trussc::getSelectedNode(); });
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     lua->set_function("createWindow", sol::overload(
         []() { return trussc::createWindow(); },
         [](const trussc::WindowSettings & settings) { return trussc::createWindow(settings); }
     ));
+#endif
     lua->set_function("nodeToJson", sol::overload(
         [](trussc::Node & node, int maxDepth) { return trussc::nodeToJson(node, maxDepth); },
         [](trussc::Node & node, int maxDepth, bool includeDerived) { return trussc::nodeToJson(node, maxDepth, includeDerived); }
