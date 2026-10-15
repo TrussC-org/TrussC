@@ -44,13 +44,15 @@ public:
                 const Color red = screen.getPixels().getColor(32, 32);
                 const Color secondRed = screen.getPixels().getColor(96, 32);
                 const Color green = screen.getPixels().getColor(160, 32);
-                check("2D before no-pass readback remains visible", red.r > 0.9f && red.g < 0.1f && red.b < 0.1f);
+                // The previous frame's blit covers this probe (see blitFrame()).
+                if (!blitFrame(frames_ - 1))
+                    check("2D before no-pass readback remains visible", red.r > 0.9f && red.g < 0.1f && red.b < 0.1f);
                 check("2D before open-pass readback remains visible",
                       secondRed.r > 0.9f && secondRed.g < 0.1f && secondRed.b < 0.1f);
                 check("2D after readback remains visible", green.r < 0.1f && green.g > 0.9f && green.b < 0.1f);
             }
         }
-        if (frames_ == 3) {
+        if (frames_ == 4) {
             completed = true;
             exitApp();
             return;
@@ -62,9 +64,13 @@ public:
         renderFbo(false);
         readAll(false);
 
-        fullscreen_.setTexture(0, fbo_.getTextureView(), fbo_.getSampler());
-        fullscreen_.draw();
-        check("FullscreenShader opens swapchain pass", isInSwapchainPass());
+        if (blitFrame(frames_)) {
+            fullscreen_.setTexture(0, fbo_.getTextureView(), fbo_.getSampler());
+            fullscreen_.draw();
+            check("FullscreenShader opens swapchain pass", isInSwapchainPass());
+        } else {
+            ensureSwapchainPass();
+        }
         const uint32_t firstVersion = fbo_.getColorImage().id;
         setColor(1, 1, 1);
         fbo_.draw(184, 56, 8, 8); // marks this version as used by a recorded draw
@@ -103,6 +109,11 @@ public:
     }
 
 private:
+    // The fullscreen blit covers the whole screen opaquely, so 2D drawn before
+    // it is never visible. Only frames without it can show that deferred 2D
+    // from before a no-pass readback reaches the screen (#833).
+    static bool blitFrame(int frame) { return frame % 2 == 1; }
+
     void checkReadbackDuringFboPass() {
         // Read a different Fbo: checking only the source's active_ misses this.
         int errors = 0;
@@ -179,6 +190,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     settings.setSize(192, 64);
     settings.setHighDpi(false);
     runApp<ReadbackApp>(settings);
-    check("all three frames completed", completed);
+    check("all four frames completed", completed);
     return failures ? 1 : 0;
 }
