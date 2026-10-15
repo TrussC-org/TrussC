@@ -705,8 +705,8 @@ public:
         // Ensure render pass is active
         ensureSwapchainPass();
 
-        // Flush sokol_gl before custom drawing
-        sgl_draw();
+        // Consume all preceding layers before direct drawing.
+        internal::flushLayersMidPass();
 
         // Apply pipeline
         sg_apply_pipeline(pipeline);

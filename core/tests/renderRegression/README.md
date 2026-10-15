@@ -4,7 +4,7 @@
 lane runs `allCoreTests renderRegression --self-check` under Xvfb/Mesa. A standalone
 project generated with trusscli accepts the same arguments.
 
-- `--self-check`: assertions against known RGBA values in all 15 scenes.
+- `--self-check`: assertions against known RGBA values in all 16 scenes.
 - `--record <dir>`: assertions, PNGs and `samples.json` into an empty directory.
 - `--compare <dir>`: assertions, PNGs, `samples.json` and red difference overlays
   into `<dir>.compare`. A missing image, different size, missing scene, or pixel
@@ -23,17 +23,21 @@ compares on head, and self-checks head. Build `tools/bin/trusscli` first. Set
 `TC_BUILD_WRAPPER` when local builds require a build guard. Outputs remain in
 `render-regression-output`; the worktrees are removed even if a comparison fails.
 The initial batch, whose base lacks the harness, self-checks head only.
+Set `CMAKE_C_COMPILER_LAUNCHER=ccache` and
+`CMAKE_CXX_COMPILER_LAUNCHER=ccache` to cache both builds; the driver normalizes
+source paths per worktree so base and head share entries.
 
-Scenes use three rendered frames (draw, settle, capture), fixed geometry and a
+Scenes wait until the framebuffer matches the requested size (at most 60
+frames on every platform), then render and capture, with fixed geometry and a
 fixed seed. There is one 256x192 logical window with vsync off. The resize scene
 captures 256x192 and 320x224 with pixelPerfect both off and on, so a run produces
-36 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
+38 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
 scale their logical coordinates by DPI; FBO assertions use framebuffer pixels.
 The text scene uses the embedded default bitmap glyphs and an R8 coverage page.
 
 | Maximum RGBA8 channel difference | Scenes |
 | --- | --- |
-| 0 | blendModes, text, premultImage, fboClearLoad, scissorFbo, fullscreenShader, resizePixelPerfect, userShaderOtherFormat, readbackRoundTrip, midFrameFlush |
+| 0 | blendModes, text, premultImage, fboClearLoad, scissorFbo, fullscreenShader, resizePixelPerfect, userShaderOtherFormat, readbackRoundTrip, midFrameFlush, midPassClear |
 | 2 | msaaResolve, transformPbr, easyCamFbo, pbrShadowFbo, pointMeshTransform |
 
 Tolerances live in the source table. A change to a tolerance needs an explanation

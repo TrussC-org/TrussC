@@ -34,7 +34,7 @@ constexpr Scene scenes[] = {
     {"easyCamFbo", 2}, {"scissorFbo", 0}, {"fullscreenShader", 0},
     {"pbrShadowFbo", 2}, {"pointMeshTransform", 2},
     {"resizePixelPerfect", 0}, {"userShaderOtherFormat", 0},
-    {"readbackRoundTrip", 0}, {"midFrameFlush", 0}
+    {"readbackRoundTrip", 0}, {"midFrameFlush", 0}, {"midPassClear", 0}
 };
 int failures = 0;
 bool completed = false;
@@ -99,7 +99,7 @@ class RegressionApp : public App {
     EventListener after_;
     Json samples_ = Json::object();
     size_t scene_ = 0;
-    int phase_ = 0, variant_ = 0;
+    int phase_ = 0, variant_ = 0, settleFrames_ = 0;
     int logicalW_ = 256, logicalH_ = 192;
     std::set<std::string> captured_;
     std::string gpu_;
@@ -122,6 +122,7 @@ class RegressionApp : public App {
         triangle_.draw(); popMatrix(); clearMaterial();
     }
     void prepare() {
+        phase_ = 0; settleFrames_ = 0;
         const bool resize = is("resizePixelPerfect");
         // Four captures in this scene: both sizes with both coordinate modes.
         logicalW_ = resize && variant_ >= 2 ? 320 : 256;
@@ -168,8 +169,8 @@ class RegressionApp : public App {
         // public shadow API currently suspends only swapchains. No production
         // target-stack behavior is changed in PR 0.
         if (offscreen) {
-            internal::flushFboDeferredPbr(sgl_get_context());
-            sgl_tc_draw_rewind(); sgl_layer(0); sg_end_pass();
+            internal::flushLayersMidPass();
+            sg_end_pass();
         }
         beginShadowPass(light_);
         pushMatrix(); translate(128,96,24); shadowDraw(triangle_); popMatrix();
@@ -253,6 +254,14 @@ class RegressionApp : public App {
             const ShaderVertex quad[] = {{-0.75f,-0.75f,0,0,0,0,1,0,1}, {0.75f,-0.75f,0,0,0,0,1,0,1},
                 {0.75f,0.75f,0,0,0,0,1,0,1}, {-0.75f,0.75f,0,0,0,0,1,0,1}};
             user_.begin(); user_.submitVertices(quad, 4, PrimitiveType::Quads); user_.end();
+        } else if (is("midPassClear")) {
+            // Exercise clear() in an active pass on both targets, including
+            // commands queued since the last flush. They must never replay.
+            discard_.draw();
+            rect(16, 16, 32, 32, Color(1, 0, 0, 0.5f));
+            rect(64, 16, 32, 32, Color(1, 0, 0));
+            clear(0, 0, 1, 1);
+            rect(112, 16, 32, 32, Color(0, 1, 0));
         } else if (is("midFrameFlush")) {
             rect(16, 16, 32, 32, Color(1, 0, 0, 0.5f));
             pbr(140,156); // deferred layer 0, followed by nonzero sgl layers
@@ -303,18 +312,22 @@ class RegressionApp : public App {
             expect(px, label+" glyph", 18, 20, {255,255,255,255}, s);
             expect(px, label+" R8 coverage glyph", 21, 73, {255,255,255,255}, s);
         } else if (is("premultImage")) {
+            // Known wrong: Fbo uses Fill2D instead of Premult; #821 PR 4 pipelines fixes it.
             expect(px, label+" premult", 32, 32, offscreen ? Rgba{64,0,127,255} : Rgba{128,0,127,255}, s);
         } else if (is("fboClearLoad")) {
             expect(px, label+" loaded red", 32, 32, {128,0,0,128}, s);
             expect(px, label+" second pass", 96, 32, {0,255,0,255}, s);
         } else if (is("msaaResolve") || is("scissorFbo")) {
+            // Known wrong in scissorFbo: popScissor clips the larger Fbo to window size; #821 PR 2 matrices fixes the captured lower-right patch.
             expect(px, label+" red interior", 32, 32, {255,0,0,255}, s);
             expect(px, label+" exterior", 8, 8, {0,0,0,255}, s);
         } else if (is("transformPbr")) {
             expect(px, label+" transformed primitive", 40, 32, {0,255,0,255}, s);
+            // Known wrong: outer model leaks into Fbo; #821 PR 2 matrices fixes 149,99 vs 132,90.
             expect(px, label+" transformed PBR", offscreen ? 149.0f : 132.0f,
                 offscreen ? 99.0f : 90.0f, {232,0,0,255}, s, 2);
         } else if (is("easyCamFbo")) {
+            // Known wrong: Fbo camera uses window aspect/size; #821 PR 2 matrices fixes the captured extent.
             expect(px, label+" PBR emissive", w/2, h/2, {232,0,0,255}, s, 2);
         } else if (is("fullscreenShader")) {
             expect(px, label+" upper left", w/4, h/4, {255,255,0,255}, s);
@@ -324,8 +337,7 @@ class RegressionApp : public App {
             expect(px,label+" lit receiver",80,80,{128,128,128,255},s,2);
             expect(px,label+" shadow receiver",140,104,{42,42,42,255},s,2);
         } else if (is("pointMeshTransform")) {
-            // #655 ignores model transforms today. Keep an independent fixed
-            // origin point and capture the displaced points for PR 4's diff.
+            // Known wrong: #655 ignores model transforms; #821 PR 4 pipelines fixes this origin probe.
             expect(px, label+" GPU point", 24, 24, {0,255,0,255}, s);
         } else if (is("resizePixelPerfect") || is("readbackRoundTrip")) {
             expect(px, label+" top left", w/4, h/4, {255,0,0,255}, s);
@@ -334,6 +346,10 @@ class RegressionApp : public App {
             expect(px, label+" bottom right", w*3/4, h*3/4, {255,255,0,255}, s);
         } else if (is("userShaderOtherFormat")) {
             expect(px, label+" user shader", w/2, h/2, {0,255,0,255}, s);
+        } else if (is("midPassClear")) {
+            expect(px,label+" erased alpha",32,32,{0,0,255,255},s,0);
+            expect(px,label+" erased opaque",80,32,{0,0,255,255},s,0);
+            expect(px,label+" post-clear",128,32,{0,255,0,255},s,0);
         } else if (is("midFrameFlush")) {
             for (int x : {32,80,128}) expect(px, label+" ONE blend", float(x), 32, {128,0,0,255}, s);
             expect(px,label+" pre-flush PBR layer",140,156,{231,0,0,255},s,2);
@@ -384,7 +400,21 @@ class RegressionApp : public App {
     }
     void afterFrame() {
         if (completed) return;
-        if (++phase_ != 3) return; // draw, settle, capture
+        if (phase_ == 0) {
+            const int requestedW = int(logicalW_*getDpiScale());
+            const int requestedH = int(logicalH_*getDpiScale());
+            if (getFramebufferWidth() != requestedW || getFramebufferHeight() != requestedH) {
+                if (++settleFrames_ >= 60) {
+                    std::printf("FAIL %s resize did not settle after 60 frames: requested %dx%d, got %dx%d\n",
+                        name().c_str(), requestedW, requestedH, getFramebufferWidth(), getFramebufferHeight());
+                    ++failures; completed = true; exitApp();
+                }
+                return;
+            }
+            phase_ = 1;
+            return; // Render the settled size before capturing it.
+        }
+        if (++phase_ != 3) return;
         Pixels screen;
         if (grabScreen(screen) && screen.isAllocated()) capture(screen, "screen", false);
         else check(name()+" grabScreen", false);
@@ -399,6 +429,10 @@ class RegressionApp : public App {
         if (read) capture(pixels, "fbo", true);
         else check(name()+" readPixels", false);
         if (is("readbackRoundTrip") && screen.isAllocated() && read) {
+            // At DPI 2, screen uses logical w/h with a w*2/h*2 viewport;
+            // Fbo uses framebuffer w/h with a matching projection/viewport.
+            // pattern() divides each target into the same exact half rectangles,
+            // so all pixels must match even before #821 PR 2 matrices (no model/camera).
             check("grabScreen/readPixels identical pattern", screen.getWidth() == pixels.getWidth() &&
                 screen.getHeight() == pixels.getHeight() &&
                 std::memcmp(screen.getData(),pixels.getData(),size_t(pixels.getWidth())*pixels.getHeight()*4) == 0);
@@ -470,6 +504,7 @@ public:
     }
     void draw() override {
         if (completed) return;
+        if (phase_ == 0) return; // All platforms wait for the requested framebuffer size.
         allocateTarget();
         setBlendMode(BlendMode::Alpha); fill(); resetScissor();
         clear(0,0,0,1);
@@ -528,7 +563,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(256,192); settings.setSwapInterval(0); settings.sampleCount = 1;
         runApp<RegressionApp>(settings);
-        check("all 15 scenes completed",completed);
+        check("all "+std::to_string(std::size(scenes))+" scenes completed",completed);
     } catch (const std::exception& e) { check(e.what(),false); }
     return failures ? 1 : 0;
 #endif

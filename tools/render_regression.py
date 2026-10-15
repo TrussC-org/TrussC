@@ -18,9 +18,9 @@ ROOT = Path(__file__).resolve().parents[1]
 HARNESS = 'core/tests/renderRegression'
 
 
-def run(command, cwd=ROOT, capture=False):
+def run(command, cwd=ROOT, capture=False, env=None):
     print('+ ' + shlex.join(map(str, command)), flush=True)
-    result = subprocess.run(list(map(str, command)), cwd=cwd, check=True,
+    result = subprocess.run(list(map(str, command)), cwd=cwd, check=True, env=env,
                             text=True, stdout=subprocess.PIPE if capture else None)
     return result.stdout.strip() if capture else None
 
@@ -37,11 +37,15 @@ def has_harness(ref):
 def build(tree, trusscli):
     project = tree / HARNESS
     wrapper = shlex.split(os.environ.get('TC_BUILD_WRAPPER', ''))
+    # Normalize absolute source/include paths separately for each checkout so
+    # merge-base and head hit the same cache. CMake inherits the standard
+    # CMAKE_{C,CXX}_COMPILER_LAUNCHER env vars on both fresh configurations.
+    build_env = dict(os.environ, CCACHE_BASEDIR=str(tree))
     run(wrapper + [trusscli, 'update', '-p', project, '--tc-root', tree, '--ide', 'cmake',
-                   '--no-web', '--no-android', '--no-ios'])
+                   '--no-web', '--no-android', '--no-ios'], env=build_env)
     run(wrapper + ['cmake', '-S', project, '-B', project / 'build-regression',
-                   '-DCMAKE_BUILD_TYPE=Release', '-DTC_HOT_RELOAD=OFF'])
-    run(wrapper + ['cmake', '--build', project / 'build-regression', '--config', 'Release', '--parallel', '4'])
+                   '-DCMAKE_BUILD_TYPE=Release', '-DTC_HOT_RELOAD=OFF'], env=build_env)
+    run(wrapper + ['cmake', '--build', project / 'build-regression', '--config', 'Release', '--parallel', '4'], env=build_env)
     suffix = '.exe' if sys.platform == 'win32' else ''
     binary = project / 'bin' / ('renderRegression' + suffix)
     if sys.platform == 'darwin':

@@ -72,6 +72,18 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                     with self.subTest(job=job_name, step=step.get('name', step['uses'])):
                         self.assertFalse(can_save_on_merge_group(step))
 
+    def test_render_cache_matches_linux_setup_and_shares_refs(self):
+        job = self.workflow['jobs']['render-regression']
+        cache = next(s for s in job['steps'] if s.get('name') == 'Setup compiler cache')
+        self.assertEqual(cache['uses'],'hendrikmuhs/ccache-action@v1.2')
+        self.assertEqual(cache['with']['variant'],'ccache')
+        self.assertEqual(cache['with']['save'],"${{ github.event_name != 'merge_group' }}")
+        self.assertNotIn('sha',cache['with']['key'])
+        setup = next(s for s in job['steps'] if s.get('name') == 'Enable compiler launcher')['run']
+        self.assertIn('CMAKE_C_COMPILER_LAUNCHER=ccache',setup)
+        self.assertIn('CMAKE_CXX_COMPILER_LAUNCHER=ccache',setup)
+        self.assertIn('CCACHE_COMPILERCHECK=content',setup)
+
     def test_sokol_cache_twins(self):
         for job_name in ('build', 'build-android', 'build-web', 'build-ios'):
             with self.subTest(job=job_name):

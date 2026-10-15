@@ -630,8 +630,7 @@ public:
         if (sh.wasInSwapchainPass) {
             // Submit every layer (including deferred mesh/user-shader draws)
             // once before suspending. present() must not replay this prefix.
-            internal::flushDeferredShaderDraws();
-            sgl_tc_draw_rewind();
+            internal::flushLayersMidPass();
             sg_end_pass();
             wctx.inSwapchainPass = false;
         }

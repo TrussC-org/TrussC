@@ -1292,7 +1292,7 @@ public:
         if (!loaded) return;
 
         ensureSwapchainPass();
-        sgl_draw();
+        internal::flushLayersMidPass();
 
         sg_apply_pipeline(pipeline);
 

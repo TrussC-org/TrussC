@@ -64,6 +64,20 @@ class DriverTests(unittest.TestCase):
         calls = self.exercise(fail_compare=True)
         self.assertEqual(sum(c[:3] == ['git','worktree','remove'] for c in calls),2)
 
+    def test_builds_share_cache_with_checkout_relative_paths(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+            tree = Path(temp); binary = tree/driver.HARNESS/'bin/renderRegression'
+            binary.parent.mkdir(parents=True); binary.touch()
+            with patch.dict(driver.os.environ, CMAKE_C_COMPILER_LAUNCHER='ccache',
+                            CMAKE_CXX_COMPILER_LAUNCHER='ccache'), patch.object(driver, 'run') as run:
+                driver.build(tree, Path('/trusscli'))
+            self.assertEqual(run.call_count, 3)
+            for call in run.call_args_list:
+                env = call.kwargs['env']
+                self.assertEqual(env['CCACHE_BASEDIR'],str(tree))
+                self.assertEqual(env['CMAKE_C_COMPILER_LAUNCHER'],'ccache')
+                self.assertEqual(env['CMAKE_CXX_COMPILER_LAUNCHER'],'ccache')
+
     def test_nonempty_output_is_preserved(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
             keep = Path(temp)/'keep'; keep.write_text('existing')
@@ -82,7 +96,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('merge_group',workflow['on'])
         jobs = workflow['jobs']; job = jobs['render-regression']
         self.assertEqual(job['needs'],'changes')
-        self.assertEqual(job['if'],"needs.changes.outputs.docs_only != 'true'")
+        self.assertEqual(job['if'],"needs.changes.outputs.docs_only != 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group')")
         self.assertEqual(job['env']['LIBGL_ALWAYS_SOFTWARE'],'1')
         self.assertTrue(job['env']['__EGL_VENDOR_LIBRARY_FILENAMES'].endswith('50_mesa.json'))
         checkout = job['steps'][0]
@@ -106,12 +120,27 @@ class WorkflowTests(unittest.TestCase):
                        'run':'python3 tools/tests/test_render_regression.py -v'},
                       jobs['header-state-check']['steps'])
 
+    def test_aggregate_gate_for_each_event_and_result(self):
+        workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(),Loader=yaml.BaseLoader)
+        script = workflow['jobs']['ci-ok']['steps'][0]['run']
+        for event in ('push','workflow_dispatch','pull_request','merge_group'):
+            for result in ('success','skipped','failure','cancelled'):
+                for docs in ('true','false'):
+                    env = dict(driver.os.environ, EVENT_NAME=event, DOCS_ONLY=docs,
+                               **{key:'success' for key in ('R_CHANGES','R_BUILD','R_ANDROID','R_WEB','R_IOS','R_REF','R_HDR')},
+                               R_RENDER=result)
+                    proc = subprocess.run(['bash','-eu','-c',script],env=env,capture_output=True,text=True)
+                    ok = result == 'success' or (result == 'skipped' and
+                         (docs == 'true' or event not in ('pull_request','merge_group')))
+                    with self.subTest(event=event,result=result,docs=docs):
+                        self.assertEqual(proc.returncode == 0,ok,proc.stdout)
+
     def test_display_marker_and_tolerance_inventory(self):
         self.assertEqual((ROOT/'core/tests/renderRegression/display-test').read_text().strip(),'{test} --self-check')
         source = (ROOT/'core/tests/renderRegression/src/main.cpp').read_text()
         for name in ('blendModes','text','premultImage','fboClearLoad','msaaResolve','transformPbr',
                      'easyCamFbo','scissorFbo','fullscreenShader','pbrShadowFbo','pointMeshTransform',
-                     'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush'):
+                     'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush','midPassClear'):
             self.assertRegex(source,r'\{"'+name+r'", [02]\}')
 
 
