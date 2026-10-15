@@ -320,6 +320,10 @@ public:
         auto& wctx = internal::currentWindowContext();
         target_.inPass = false;
         wctx.swapchainTarget.inheritDrawState(target_);
+        // Match the window-wide camera save/restore on 56467c6b, including
+        // the original CameraContext identity. Per-target scopes are PR 2.
+        wctx.swapchainTarget.camera = std::move(savedCamera_);
+        savedCamera_ = {};
         wctx.currentTarget = &wctx.swapchainTarget;
 
         // Resume swapchain pass (if we were in one before)
@@ -440,6 +444,7 @@ private:
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
     bool active_ = false;
+    internal::TargetCameraState savedCamera_;
     bool wasInSwapchainPass_ = false;  // Was in swapchain pass when begin() called
     bool mipmaps_ = false;
     int  numMipLevels_ = 1;
@@ -871,18 +876,17 @@ private:
 
         // Preserve the original setup ordering: the old target selects the
         // temporary setup pipeline, while the shared Fbo context receives its
-        // sgl matrices. Store the resulting camera on this Fbo, and leave the
-        // swapchain camera intact. PR 2 changes matrix switching itself.
+        // sgl matrices. As on 56467c6b, save the incoming camera before setup
+        // overwrites it, then carry the entire window-wide state into the Fbo.
+        // Independent per-target camera scopes belong to PR 2.
         auto& wctx = internal::currentWindowContext();
-        auto savedCamera = wctx.currentTarget->camera;
+        savedCamera_ = wctx.currentTarget->camera;
 
         // Setup screen projection using defaultScreenFov (like main screen).
         // pickable=false: geometry drawn into an offscreen target must not be
         // pickable from main-screen clicks (see tcCameraContext.h).
         internal::setupScreenFovWithSize(internal::defaultScreenFov(), (float)target_.width, (float)target_.height, 0.0f, 0.0f, false);
 
-        target_.camera = std::move(wctx.currentTarget->camera);
-        wctx.currentTarget->camera = std::move(savedCamera);
         target_.inheritDrawState(*wctx.currentTarget);
         target_.pooledResources = &shared.resources;
         active_ = true;
@@ -907,6 +911,8 @@ private:
         format_ = other.format_;
         allocated_ = other.allocated_;
         active_ = other.active_;
+        savedCamera_ = std::move(other.savedCamera_);
+        other.savedCamera_ = {};
         wasInSwapchainPass_ = other.wasInSwapchainPass_;
         mipmaps_ = other.mipmaps_;
         numMipLevels_ = other.numMipLevels_;

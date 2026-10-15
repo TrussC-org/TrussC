@@ -30,6 +30,11 @@ void drawFrame(Fbo& fbo, bool main) {
 
     auto& window = internal::currentWindowContext();
     auto* screenTarget = window.currentTarget;
+    check(main ? "main target size matches its framebuffer inside draw" :
+                 "secondary target size matches its framebuffer inside draw",
+          screenTarget->getWidth() == getFramebufferWidth() &&
+          screenTarget->getHeight() == getFramebufferHeight() &&
+          screenTarget->getWidth() > 0 && screenTarget->getHeight() > 0);
     fbo.begin(0, 0, 0);
     auto* fboTarget = window.currentTarget;
     check("Fbo owns its dimensions, format, samples and pass state",

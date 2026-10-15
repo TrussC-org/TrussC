@@ -67,6 +67,10 @@ void windowTick(sapp_window swin, void* user) {
     if (fbw <= 0 || fbh <= 0) return;
     ctx.fbWidth = fbw;
     ctx.fbHeight = fbh;
+    // Keep target metadata current before update/draw, including resize ticks.
+    ctx.swapchainTarget.width = fbw;
+    ctx.swapchainTarget.height = fbh;
+    ctx.swapchainTarget.viewport = {0, 0, (float)fbw, (float)fbh, true};
     ctx.dpiScale = sapp_window_dpi_scale(swin);
 
     // Per-window frame-rate throttle (Window::setFps): the DXGI waitable keeps

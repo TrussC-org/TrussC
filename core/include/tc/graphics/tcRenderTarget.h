@@ -286,10 +286,13 @@ struct RenderTarget {
         return resources().pipeline(key, desc);
     }
 
-    // Preserve the old window-wide model/blend/scissor continuity across Fbo
-    // begin/end. Moving the CPU stacks does not reload sgl's matrix stacks:
+    // Preserve the old window-wide camera/model/blend/scissor continuity across
+    // Fbo begin/end. Fbo saves/restores the incoming camera as on 56467c6b;
+    // making camera scopes truly independent per target belongs to PR 2.
+    // Moving the CPU stacks does not reload sgl's matrix stacks:
     // the legacy Fbo/PBR model mismatch is deliberately left for PR 2.
     void inheritDrawState(RenderTarget& previous) {
+        camera = previous.camera;
         currentMatrix = previous.currentMatrix;
         matrixStack = std::move(previous.matrixStack);
         currentBlendMode = previous.currentBlendMode;
