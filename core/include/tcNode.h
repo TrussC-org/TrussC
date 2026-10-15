@@ -1451,8 +1451,8 @@ public:
     //
     // The callback runs ON THE SCHEDULER THREAD: guard state shared with
     // update()/draw() behind a mutex, never draw from it (AudioEngine::play is
-    // fine). The framework's onCleanupStart() hook cancels and waits before
-    // cleanupTree() calls cleanup(); overrides must call the base hook.
+    // fine). The framework's onCleanupStart() hook (not overridable by apps)
+    // cancels and waits before cleanupTree() calls cleanup().
     // ~Node also cancels leftovers, but derived members have already died by
     // then. A standalone node destroyed without cleanupTree() must cancel in
     // its own destructor before the members its callbacks touch are destroyed.
