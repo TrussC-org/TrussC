@@ -4,8 +4,8 @@
 Run through the local build wrapper where one is required, e.g.:
   tcbuild.sh python3 core/tests/hotReloadLifecycle/test_shader_rebuild.py BUILD_DIR
 Use --config for a multi-config generator. No graphics runtime is needed. The
-daily display lane passes the test binary instead (display-test); its build
-directory is then this test's build-linux.
+daily display lane passes the test binary instead (display-test); the build
+directory is then this test's one configured build-* dir that holds a guest.
 """
 import argparse
 import os
@@ -27,16 +27,22 @@ def main():
     parser.add_argument('--config', default='RelWithDebInfo')
     args = parser.parse_args()
     project = Path(__file__).resolve().parent
-    if args.build.is_file():   # the display lane's {test}: the built binary
-        args.build = project / 'build-linux'
+    names = ('libguest.so', 'libguest.dylib', 'guest.dll')
+
+    def guests(build):
+        found = [build / args.config / n for n in names if (build / args.config / n).is_file()]
+        return found or [build / n for n in names if (build / n).is_file()]
+
+    if args.build.is_file():
+        # The display lane passes the built binary, which lives in bin/, not in
+        # the build tree: use this test's configured build-* dir that holds a guest.
+        trees = [cache.parent for cache in sorted(project.glob('build-*/CMakeCache.txt'))
+                 if guests(cache.parent)]
+        assert len(trees) == 1, f'expected one built build-* dir, found {trees}'
+        args.build = trees[0]
     shader = project / 'src/shaders/reloadProbe.glsl'
     header = shader.with_suffix('.glsl.h')
-    names = ('libguest.so', 'libguest.dylib', 'guest.dll')
-    libraries = [args.build / args.config / name for name in names
-                 if (args.build / args.config / name).is_file()]
-    if not libraries:
-        libraries = [args.build / name for name in names
-                     if (args.build / name).is_file()]
+    libraries = guests(args.build)
     assert len(libraries) == 1, libraries
     guest = libraries[0]
     original = shader.read_bytes()
