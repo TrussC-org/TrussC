@@ -98,6 +98,13 @@ struct WarningCapture {
     bool lastContains(const string& s) const { return last.find(s) != string::npos; }
 };
 
+// Check borrowed handles directly: Box2D's pooled storage can hide stale reads
+// from ASan even after the underlying body and fixtures have been destroyed.
+static bool hasInvalidHandles(const box2d::Body& body) {
+    return body.getBody() == nullptr && body.getCollider() &&
+           body.getCollider()->getFixture() == nullptr;
+}
+
 static int fixtureCount(const b2Body* body) {
     int n = 0;
     if (!body) return 0;
@@ -1283,6 +1290,8 @@ static void testStayListenerDestroys() {
         EventListener l5 = box2.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit2; });
 
         world.getCollisionManager()->update();
+        check("Stay destruction invalidates body and collider handles",
+              destroyed && hasInvalidHandles(*destroyed) && world.getBodyCount() == 2);
         const bool gone1 = destroyed == &box1;
         check("Stay destroys the next pair's body: both boxes touched the bar", setupOk && destroyed);
         check("Stay destroys the next pair's body: one bar Stay, for the survivor", barStay == 1);
@@ -1333,6 +1342,8 @@ static void testStayListenerDestroys() {
         EventListener l5 = box2.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) { ++exit2; });
 
         world.getCollisionManager()->update();
+        check("Stay destruction invalidates body and collider handles",
+              destroyed && hasInvalidHandles(*destroyed) && world.getBodyCount() == 2);
         const bool gone1 = destroyed == &box1;
         check("Stay destroys its own pair's body: no Stay after it, one Exit",
               destroyed && staysAfter == 0 && (gone1 ? exit1 : exit2) == 1);
@@ -1376,7 +1387,7 @@ static void testStayListenerDestroys() {
 
         world.getCollisionManager()->update();
         check("RigidBody2D Stay drops the next pair's node: one Stay, teardown Exit deferred",
-              dropped && barStay == 1 && barEnded == 0);
+              dropped && barStay == 1 && barEnded == 0 && world.getBodyCount() == 2);
         world.getCollisionManager()->update();
         check("RigidBody2D Stay drops the next pair's node: next update delivers Exit and Stay", barStay == 2 && barEnded == 1);
     }
@@ -1384,8 +1395,8 @@ static void testStayListenerDestroys() {
 
 // ---------------------------------------------------------------------------
 // Event lifetimes: listeners that free bodies, and bodies destroyed before a
-// deferred Exit / Ended fires (#427). Run under ASan too: without the guards
-// these are use-after-frees, which a plain build may not notice.
+// deferred Exit / Ended fires (#427). Check handles/counts explicitly; ASan
+// covers wrapper lifetimes, but cannot see reuse of Box2D block-allocator slots.
 // ---------------------------------------------------------------------------
 
 // One step that ends the contacts, with the Exits left pending (no update()).
@@ -1427,7 +1438,7 @@ static void testClassicEventLifetimes() {
         ball->setPhysicsPosition(400, -1000);
         step(world, 1);
         check("Exit listener frees the other body: the first side gets its Exit, the freed one none",
-              touching && platformExit + ballExit == 1 && (!platform || !ball));
+              touching && platformExit + ballExit == 1 && (!platform || !ball) && world.getBodyCount() == 1);
     }
 
     // Two balls leave in the same step; the first ball's Exit listener
@@ -1467,7 +1478,7 @@ static void testClassicEventLifetimes() {
         ball2.setPhysicsPosition(460, -1000);
         step(world, 1);
         check("two balls leave, the first frees the platform: one Exit each, the second with no other",
-              touching && !platform && exit1 == 1 && exit2 == 1 && secondOtherNull == 1);
+              touching && !platform && exit1 == 1 && exit2 == 1 && secondOtherNull == 1 && world.getBodyCount() == 2);
         check("two balls leave, the first frees the platform: at most one platform Exit",
               platformExit <= 1);
     }
@@ -1501,6 +1512,7 @@ static void testClassicEventLifetimes() {
         stepOnly(world);
         const b2Body* oldBody = ball->getBody();
         ball.reset();
+        check("classic manual Step: destruction removes the old body", world.getBodyCount() == 1);
         box2d::CircleBody newBall;
         newBall.setup(world, 100, -1000, 10);
         EventListener l3 = newBall.getCollider()->onCollisionExit.listen([&](box2d::CollisionEvent&) {
@@ -1588,7 +1600,7 @@ static void testModEventLifetimes() {
         ballBody->SetTransform(box2d::World::toBox2d(400, -1000), 0);
         step(world, 1);
         check("RigidBody2D Ended listener drops the other node: one Ended, the dropped side none",
-              touching && p.ended + b.ended == 1 && (!platformNode || !ballNode));
+              touching && p.ended + b.ended == 1 && (!platformNode || !ballNode) && world.getBodyCount() == 1);
     }
 
     // Two balls leave in the same step; the first ball's Ended listener
@@ -1619,7 +1631,7 @@ static void testModEventLifetimes() {
         step(world, 1);
         check("RigidBody2D two balls leave, the first drops the platform: one Ended each, the second with no other",
               touching && !platformNode && b1.ended == 1 && b2.ended == 1 &&
-              b1.otherNull + b2.otherNull == 1);
+              b1.otherNull + b2.otherNull == 1 && world.getBodyCount() == 2);
         check("RigidBody2D two balls leave, the first drops the platform: at most one platform Ended",
               p.ended <= 1);
     }
@@ -1643,6 +1655,7 @@ static void testModEventLifetimes() {
         stepOnly(world);
         const b2Body* oldBody = ball->getBody();
         ballNode.reset();
+        check("Mod manual Step: destruction removes the old body", world.getBodyCount() == 1);
         auto* newBall = addModBody(world, newNode, 100, -1000, box2d::Shape2D::circle(10));
         auto l2 = countEvents(newBall, fresh);
         const bool reused = newBall->getBody() == oldBody;
@@ -1675,6 +1688,7 @@ static void testModEventLifetimes() {
                 if (phase != 1 || !platformNode || !ballNode) return;
                 const b2Body* gone = (other == &ballNode) ? ball->getBody() : platform->getBody();
                 other->reset();
+                check("Mod Stay: dropped node releases body before reuse", world.getBodyCount() == 1);
                 if (!replace) return;
                 auto* rb = addModBody(world, newNode, 400, kBallY, box2d::Shape2D::circle(10));
                 rb->setTrigger(true);
@@ -1737,7 +1751,8 @@ static void testExitListenerDestroysThirdBody() {
             else if (op == "dynamic") b.setDynamic();
             else b.setKinematic();
             const string label = "outside-step " + op + (reverse ? " reverse" : "");
-            check(label + ": listener sees completed Box2D operation, destroys C", touching && completed && !c.isCreated());
+            check(label + ": listener sees completed Box2D operation, destroys C", touching && completed && hasInvalidHandles(c) &&
+                  (op != "destroy" || hasInvalidHandles(b)) && world.getBodyCount() == (op == "destroy" ? 1 : 2));
             check(label + ": each Exit once before wrapper returns", ab == 1 && ac == 1 && bx == 1 && cx == 1 && ended == 2);
             world.getCollisionManager()->update();
             check(label + ": update does not repeat Exits", ab == 1 && ac == 1 && bx == 1 && cx == 1 && ended == 2);
@@ -1779,7 +1794,8 @@ static void testExitListenerDestroysThirdBody() {
             else b.setKinematic();
             const string label = "shared-contact " + op + (reverse ? " reverse" : "");
             check(label + ": three pairs, each surviving side Exit once",
-                  touching && !c.isCreated() && ab == 1 && ac == 1 && ba == 1 && bc == 1 && ca == 1 && cb <= 1 && ended == 3);
+                  touching && hasInvalidHandles(c) && (op != "destroy" || hasInvalidHandles(b)) &&
+                  world.getBodyCount() == (op == "destroy" ? 1 : 2) && ab == 1 && ac == 1 && ba == 1 && bc == 1 && ca == 1 && cb <= 1 && ended == 3);
             // C's B Exit can already have fired before the listener drops C;
             // otherwise forget() suppresses that pending notification.
             const int before = ab + ac + ba + bc + ca + cb;
@@ -1828,7 +1844,7 @@ static void testExitListenerDestroysThirdBody() {
                       na.ended == 0 && nb.ended == 0 && nc.ended == 0 && ended == 0 && cn);
                 world.getCollisionManager()->update();
             }
-            check(label + ": completed operation, listener drops C", completed && !cn);
+            check(label + ": completed operation, listener drops C", completed && !cn && world.getBodyCount() == (op == "teardown" ? 1 : 2));
             // C's destructor queues its Exit without invoking listeners. If
             // that pair was already visited, the next delivery flushes it.
             world.getCollisionManager()->update();
@@ -1858,9 +1874,9 @@ static void testExitListenerDestroysThirdBody() {
         else if (op == "type") b.getBody()->SetType(b2_staticBody);
         check("raw " + op + ": no Exit inside Box2D call", ax == 0 && bx == 0 && cx == 0);
         world.getCollisionManager()->update();
-        check("raw " + op + ": next update flushes exactly once", ax == 2 && bx == 1 && cx == 1);
+        check("raw " + op + ": next update flushes exactly once", ax == 2 && bx == 1 && cx == 1 && hasInvalidHandles(c) && world.getBodyCount() == 2);
         world.getCollisionManager()->update();
-        check("raw " + op + ": no repeated Exit", ax == 2 && bx == 1 && cx == 1);
+        check("raw " + op + ": no repeated Exit", ax == 2 && bx == 1 && cx == 1 && hasInvalidHandles(c) && world.getBodyCount() == 2);
     }
     {
         box2d::World world;
@@ -1893,7 +1909,7 @@ static void testExitListenerDestroysThirdBody() {
         world.getWorld()->DestroyBody(raw);
         check("raw DestroyBody: no Exit inside Box2D call", ended == 0 && ax == 0 && cx == 0);
         world.getCollisionManager()->update();
-        check("raw DestroyBody: next update can destroy C, each Exit once", ended == 2 && ax == 1 && cx == 1 && !c.isCreated());
+        check("raw DestroyBody: next update can destroy C, each Exit once", ended == 2 && ax == 1 && cx == 1 && hasInvalidHandles(c) && world.getBodyCount() == 1);
         world.getCollisionManager()->update();
         check("raw DestroyBody: no repeated Exit", ended == 2 && ax == 1 && cx == 1);
     }
@@ -1935,7 +1951,7 @@ static void testWorldEventLifetimes() {
         world.getCollisionManager()->update();
         const bool ballAndNull = (last.a == ball.getBody() && !last.b) || (last.b == ball.getBody() && !last.a);
         check("createBounds() between Step() and update(): one Ended, naming the ball and no walls",
-              reused && ended == 1 && ballAndNull);
+              reused && ended == 1 && ballAndNull && world.getBodyCount() == 2);
     }
     {
         box2d::World world;
@@ -1965,7 +1981,7 @@ static void testWorldEventLifetimes() {
         stepOnly(world);
         world.clear();
         world.getCollisionManager()->update();
-        check("clear() between Step() and update(): no Ended for the freed bodies", ended == 0);
+        check("clear() between Step() and update(): no Ended for the freed bodies", ended == 0 && world.getBodyCount() == 0);
     }
 }
 
@@ -2185,6 +2201,16 @@ struct MassProps {
     b2Vec2 center = b2Vec2_zero;
 };
 
+// GetInertia() adds the center-of-mass shift back with an inline dot product.
+// GCC may contract x*x + y*y in opposite orders at different inline sites,
+// giving different reported inertias even when the stored mass data is equal.
+// Use one readout path for both sides of the exact comparison, including with
+// FMA enabled. Keep this out of line on all three supported compiler families.
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
 static MassProps massProps(const b2Body* body) {
     MassProps m;
     if (!body) return m;
@@ -2196,7 +2222,14 @@ static MassProps massProps(const b2Body* body) {
 
 // The same fixtures at the same density go through the same float sums in
 // the same order, so the mass data must match exactly.
-static bool sameMass(const MassProps& got, const MassProps& want) {
+static bool g_massDiagnostics = false;
+static bool sameMass(const MassProps& got, const MassProps& want, const char* path) {
+    if (g_massDiagnostics) {
+        printf("  %s\n    got:  mass=%a center=(%a, %a) inertia=%a\n"
+               "    want: mass=%a center=(%a, %a) inertia=%a\n",
+               path, got.mass, got.center.x, got.center.y, got.inertia,
+               want.mass, want.center.x, want.center.y, want.inertia);
+    }
     return want.mass > 0.0f && got.mass == want.mass && got.inertia == want.inertia && got.center == want.center;
 }
 
@@ -2287,6 +2320,7 @@ static void testDensityAndType(box2d::World& world) {
         bool staticThenDynamic = true, densityLater = true, bothLater = true;
         bool classicDensity = true, classicStaticDensityDynamic = true;
         for (float d : densities) {
+            if (g_massDiagnostics) printf("%s density=%a\n", k.name.c_str(), d);
             shared_ptr<Node> directNode;
             const MassProps direct = massProps(modBody(k, directNode, box2d::BodyType::Dynamic, d)->getBody());
             {
@@ -2295,14 +2329,14 @@ static void testDensityAndType(box2d::World& world) {
                 auto* rb = modBody(k, node, box2d::BodyType::Static, d);
                 const bool wasStatic = rb->getBody() && rb->getBody()->GetMass() == 0.0f;
                 rb->setBodyType(box2d::BodyType::Dynamic);
-                if (!wasStatic || !sameMass(massProps(rb->getBody()), direct)) staticThenDynamic = false;
+                if (!wasStatic || !sameMass(massProps(rb->getBody()), direct, "static -> dynamic")) staticThenDynamic = false;
             }
             {
                 // Created dynamic at density 1, then given d.
                 shared_ptr<Node> node;
                 auto* rb = modBody(k, node, box2d::BodyType::Dynamic, 1.0f);
                 rb->setDensity(d);
-                if (!everyFixtureDensity(rb->getBody(), d) || !sameMass(massProps(rb->getBody()), direct)) {
+                if (!everyFixtureDensity(rb->getBody(), d) || !sameMass(massProps(rb->getBody()), direct, "dynamic -> density")) {
                     densityLater = false;
                 }
             }
@@ -2312,13 +2346,13 @@ static void testDensityAndType(box2d::World& world) {
                 auto* rb = modBody(k, node, box2d::BodyType::Static, 1.0f);
                 rb->setDensity(d);
                 rb->setBodyType(box2d::BodyType::Dynamic);
-                if (!sameMass(massProps(rb->getBody()), direct)) bothLater = false;
+                if (!sameMass(massProps(rb->getBody()), direct, "static -> density -> dynamic")) bothLater = false;
             }
             {
                 box2d::PolyShape poly;
                 classicBody(k, poly);
                 poly.setDensity(d);
-                if (!everyFixtureDensity(poly.getBody(), d) || !sameMass(massProps(poly.getBody()), direct)) {
+                if (!everyFixtureDensity(poly.getBody(), d) || !sameMass(massProps(poly.getBody()), direct, "classic -> density")) {
                     classicDensity = false;
                 }
             }
@@ -2328,7 +2362,7 @@ static void testDensityAndType(box2d::World& world) {
                 poly.setStatic();
                 poly.setDensity(d);
                 poly.setDynamic();
-                if (!sameMass(massProps(poly.getBody()), direct)) classicStaticDensityDynamic = false;
+                if (!sameMass(massProps(poly.getBody()), direct, "classic -> static -> density -> dynamic")) classicStaticDensityDynamic = false;
             }
         }
         check("RigidBody2D " + k.name + ": static, then setBodyType(Dynamic) = created dynamic",
@@ -2566,7 +2600,7 @@ static void testWorldReleaseFromStay(bool replace) {
         frames.update(world);
         string label = string(replace ? "setup-stay" : "clear-stay") + " layer " + to_string(layer);
         check(label + ": one release, no stale Stay/Exit", calls == 1 && staleStays == 0 && exits == 0);
-        check(label + ": handles and contacts retired", !a.getBody() && !b.getBody() && world.getBodyCount() == 0);
+        check(label + ": handles and contacts retired", hasInvalidHandles(a) && hasInvalidHandles(b) && world.getBodyCount() == 0);
         check(label + ": World remains usable", world.getWorld() && (replace || world.getWorld() == originalWorld));
         // Both clear and setup support fresh contacts through the same manager.
         releaseListener = EventListener();
@@ -2606,7 +2640,7 @@ static void testWorldReleaseDuringUpdate(bool replace) {
     b.setPhysicsPosition(400, 400);
     frames.update(world, 0.04);  // two sub-steps; release on the first one's Exit
     string label = replace ? "setup-update" : "clear-update";
-    check(label + ": Exit ran once and invalidated original owners", ended == 1 && !a.getBody() && !b.getBody());
+    check(label + ": Exit ran once and invalidated original owners", ended == 1 && hasInvalidHandles(a) && hasInvalidHandles(b) && world.getBodyCount() == 1);
     if (replace) {
         check(label + ": replacement not stepped by old update", abs(replacement.getPhysicsPosition().x - 500) < 1e-3f &&
               abs(replacement.getPhysicsPosition().y - 500) < 1e-3f);
@@ -2642,7 +2676,7 @@ static void testReplacedModOwner() {
     auto* rb = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
     check("replace-mod: only replacement and partner bodies remain", world.getBodyCount() == 2);
     world.clear();  // previously called a virtual method on the freed Mod
-    check("replace-mod: clear invalidates replacement", !rb->getBody() && !partner.getBody());
+    check("replace-mod: clear invalidates replacement", !rb->getBody() && hasInvalidHandles(partner) && world.getBodyCount() == 0);
     node.reset();
     world.setup(0, 0);
     node = make_shared<Node>();
@@ -2676,7 +2710,7 @@ static void testReentrantShapeSetup(const string& label, Setup setup) {
         frames.update(world);
         a.destroy();
         b.destroy();
-        check(label + ": explicit destruction leaves no orphan", world.getBodyCount() == 0);
+        check(label + ": explicit destruction leaves no orphan", hasInvalidHandles(a) && hasInvalidHandles(b) && world.getBodyCount() == 0);
     }
     world.clear();  // after the shape's lifetime: any orphan back-link is invalid
     check(label + ": World teardown after owner destruction is safe", world.getBodyCount() == 0);
@@ -2732,6 +2766,9 @@ static void testReplacementListenerMutation(bool replaceAgain) {
         frames.update(world, 0);
         check(label + ": no repeated Exit", calls == 1);
         world.clear();
+        check(label + ": clear invalidates surviving handles", world.getBodyCount() == 0 &&
+              (layer == 1 ? !partnerMod->getBody() : hasInvalidHandles(classic)) &&
+              (!current || !current->getBody()));
     }
 }
 
@@ -2803,6 +2840,7 @@ static void testDeferredExitAcrossClear() {
         string label = "deferred-clear " + mode;
         check(label + ": teardown queues Exit without delivery", ended == 0 && exits == 0 && world.getBodyCount() == 1);
         world.clear();
+        check(label + ": clear invalidates survivor before reuse", hasInvalidHandles(survivor) && world.getBodyCount() == 0);
         survivor.setup(world, 110, 100, 10);
         survivor.setSensor(true);
         int freshExits = 0;
@@ -2849,7 +2887,7 @@ static void testClearKeepsContactListener() {
     const int before = proxy.began;
     world.clear();
     check("clear keeps a user contact listener registered",
-          raw->GetContactManager().m_contactListener == &proxy);
+          raw->GetContactManager().m_contactListener == &proxy && world.getBodyCount() == 0);
     createRawSensorPair(raw);
     check("user contact listener sees contacts after clear", before == 1 && proxy.began - before == 1);
 }
@@ -2888,8 +2926,7 @@ static void testClearReuse() {
               abs(world.getSimulationRate() - 120) < 1e-3f && world.getAutoUpdate() == automatic);
         check(label + ": raw Box2D settings preserved", !raw->GetAllowSleeping() && !raw->GetWarmStarting() &&
               !raw->GetContinuousPhysics() && raw->GetSubStepping());
-        check(label + ": old handles and fixture invalid", !old.getBody() && !oldMod->getBody() &&
-              !old.getCollider()->getFixture());
+        check(label + ": old handles and fixture invalid", hasInvalidHandles(old) && !oldMod->getBody());
         world.updateDrag(200, 200);
         world.endDrag();
         world.createBounds(0, 0, 800, 600);
@@ -2928,7 +2965,7 @@ static void testClearReuse() {
         world.clear();
         world.clear();
         check(label + ": repeated clear removes bounds and fresh drag anchor", world.getWorld() == raw &&
-              world.getBodyCount() == 0 && raw->GetJointCount() == 0 && !world.isDragging() && !mod->getBody());
+              world.getBodyCount() == 0 && raw->GetJointCount() == 0 && !world.isDragging() && !mod->getBody() && hasInvalidHandles(fresh) && hasInvalidHandles(old));
     }
     testDeferredExitAcrossClear();
 }
@@ -2991,7 +3028,7 @@ static void testOwnerLifetimes() {
         else if (mode == 1) world->clear();
         else world->setup(0, 0);
 
-        check(label + ": all classic handles invalid", !circle.isCreated() && !rect.getBody() && !poly.getBody());
+        check(label + ": all classic handles invalid", hasInvalidHandles(circle) && hasInvalidHandles(rect) && hasInvalidHandles(poly));
         check(label + ": Mod handle invalid", rb->getBody() == nullptr);
         check(label + ": collider fixture invalid", circle.getCollider()->getFixture() == nullptr);
         check(label + ": invalidation is silent", exits == 0);
@@ -3060,7 +3097,7 @@ static void testOwnerLifetimes() {
     check("drag anchors have no owner", anchorsUnowned);
     circle.destroy();
     circle.destroy();
-    check("destroy during drag: handle and joint invalid", !circle.isCreated() && !world.isDragging() &&
+    check("destroy during drag: handle and joint invalid", hasInvalidHandles(circle) && !world.isDragging() &&
           world.getWorld()->GetJointCount() == 0);
     world.updateDrag(200, 200);
     world.endDrag();
@@ -3069,7 +3106,7 @@ static void testOwnerLifetimes() {
     world.startDrag(&circle, 300, 300);
     check("destroy during drag: a new body can be dragged", world.isDragging());
     circle.destroy();
-    check("destroy twice: only the unowned anchor remains", world.getBodyCount() == 1);
+    check("destroy twice: only the unowned anchor remains", hasInvalidHandles(circle) && world.getBodyCount() == 1);
 
     auto node = make_shared<Node>();
     node->setPos(500, 500);
@@ -3078,6 +3115,7 @@ static void testOwnerLifetimes() {
 }
 
 int main(int argc, char** argv) {
+    g_massDiagnostics = argc == 2 && string(argv[1]) == "--density-and-type";
     if (argc == 2 && string(argv[1]) == "--clear-reuse") {
         testClearReuse();
         testClearKeepsContactListener();
@@ -3103,6 +3141,11 @@ int main(int argc, char** argv) {
     box2d::World world;
     world.setup(0, 0);
     world.setAutoUpdate(false);
+
+    if (g_massDiagnostics) {
+        testDensityAndType(world);
+        return g_fail ? 1 : 0;
+    }
 
     testPolyShapeRefuses(world);
     testHullDropWarning(world);

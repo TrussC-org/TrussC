@@ -67,6 +67,17 @@ outline exactly, one fixture per triangle:
   `setDynamic()`) afterwards give exactly the mass, inertia and center of a
   body created that way, at densities 0.001 to 1000 (Debug: no Box2D assert).
 
+`--density-and-type` runs those 20 checks alone and prints both sides' mass,
+local center and inertia as hex floats for every density and transition.
+The comparison remains exact. Its `massProps()` reader is deliberately not
+inlined: with FMA enabled, GCC can contract `GetInertia()`'s `x*x + y*y` in
+opposite orders at different inline sites, even for identical stored body
+data. Both sides must use the same readout instructions. The x86 contraction
+check builds **both the tests/addon and Box2D** with
+`-O2 -mfma -ffp-contract=fast`, then with `-ffp-contract=off`; also run Release
+(`-O3`) to exercise GCC's different inlining choices. See `REPORT.md` for the
+base/head matrix, instruction-level diagnosis and exact values.
+
 Event lifetimes (#427). Listeners of a deferred Exit / Ended or of Stay may
 free the other body of their pair, and bodies may be destroyed between
 `Step()` and `update()`:
@@ -99,8 +110,10 @@ Outside-step Exits (#473) are queued until Box2D returns:
   surviving sides receive their pending Exits at the next World delivery
   point. Destruction/removal never calls user listeners synchronously.
 
-Without the guards these are use-after-frees that a plain build may not
-report; run them under AddressSanitizer after touching the event code.
+ASan/UBSan cover wrapper-side lifetimes (`Body`, `RigidBody2D`,
+`CollisionManager`, World members). Pooled `b2Body` / `b2Fixture` / `b2Joint`
+reuse is invisible to ASan because Box2D returns them to its block allocator;
+the defence is the owner back-link plus explicit handle-invalid assertions.
 
 CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the
 default build type, or Release). Adding the fixtures at density 0 (and
