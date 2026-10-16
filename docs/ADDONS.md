@@ -90,10 +90,10 @@ tcxBox2d
 using namespace tcx::box2d;
 
 World world;
-Circle circle;
+CircleBody circle;
 
 void setup() {
-    world.setup(Vec2(0, 300));
+    world.setup(tc::Vec2(0, 300));
     circle.setup(world, 400, 100, 30);
 }
 ```
@@ -427,7 +427,7 @@ No prefix within namespace:
 ```cpp
 namespace tcx::box2d {
     class World { ... };    // OK: tcx::box2d::World
-    class Circle { ... };   // OK: tcx::box2d::Circle
+    class CircleBody { ... }; // OK: tcx::box2d::CircleBody
 }
 ```
 
@@ -658,17 +658,12 @@ To make your addon discoverable:
 
 ### tcxBox2d
 
-2D physics engine (Box2D).
-
-**Features:**
-- World (physics world)
-- Body (physics body base class, inherits tc::Node)
-- Circle, Rect, Polygon (shapes)
-- Mouse drag (b2MouseJoint)
-
-**Usage Example:**
+2D physics built on Box2D, with physics and rendering as separate Mods.
+`World` steps automatically each frame. Set up your own World or use
+`defaultWorld().setup()`; add nodes to the scene for automatic transform sync.
 
 ```cpp
+#include <TrussC.h>
 #include <tcxBox2d.h>
 
 using namespace tc;
@@ -676,26 +671,38 @@ using namespace tcx::box2d;
 
 class tcApp : public App {
     World world;
-    Circle circle;
 
     void setup() override {
-        world.setup(Vec2(0, 300));  // Gravity
-        world.createBounds();        // Screen edge walls
-        circle.setup(world, 400, 100, 30);
-    }
-
-    void update() override {
-        world.update();
-        circle.updateTree();  // Sync Box2D → Node coordinates
+        world.setup(Vec2(0, 300));
+        world.createBounds();
+        auto node = std::make_shared<Node>();
+        node->setPos(400, 100);
+        addChild(node);
+        node->addMod<RigidBody2D>(world, Shape2D::circle(30));
+        node->addMod<ColliderRenderer2D>();
     }
 
     void draw() override {
         clear(0.12);
-        setColor(1.0, 0.78, 0.39);
-        circle.drawTree();    // Draw with position/rotation applied
     }
 };
 ```
+
+Mods expose `onCollisionEnter/Stay/Exit` for solid contacts and
+`onTriggerEnter/Stay/Exit` for sensors (`setTrigger()`). Begin/End are delivered
+after each managed sub-step; Stay runs once per update. Raw `b2World::Step()`
+events wait for the next fresh-frame `World::update()`. Listeners may release
+bodies or the World; recheck borrowed payload pointers after release.
+The classic alternative uses `CircleBody`, `RectBody` and `PolyShape` body nodes.
+See the [addon README](../addons/tcxBox2d/README.md) for shapes and the
+[collision event contract](../addons/tcxBox2d/README.md#collision-events).
+
+b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+
+Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+
+Use `World::setDestructionListener()` for a borrowed user destruction listener,
+preserving the World's internal observer.
 
 ### tcxCurl
 

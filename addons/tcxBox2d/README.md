@@ -148,6 +148,8 @@ Migration: move destroyed-side Exit cleanup before release, accept callback-retu
 
 Use `World::getWorld()` for direct `b2World` access.
 
+b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+
 Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
 
 ## Tests

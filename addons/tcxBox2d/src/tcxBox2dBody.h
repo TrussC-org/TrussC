@@ -31,28 +31,9 @@ public:
     Body(const Body&) = delete;
     Body& operator=(const Body&) = delete;
 
-    // Movable
-    Body(Body&& other) noexcept
-        : tc::Node()
-        , world_(other.world_)
-        , body_(other.body_)
-    {
-        if (body_) world_->attachOwner(body_, *this);
-        other.world_ = nullptr;
-        other.body_ = nullptr;
-    }
-
-    Body& operator=(Body&& other) noexcept {
-        if (this != &other) {
-            destroy();
-            world_ = other.world_;
-            body_ = other.body_;
-            if (body_) world_->attachOwner(body_, *this);
-            other.world_ = nullptr;
-            other.body_ = nullptr;
-        }
-        return *this;
-    }
+    // Stable address: the World holds this owner's back-link.
+    Body(Body&&) = delete;
+    Body& operator=(Body&&) = delete;
 
     // -------------------------------------------------------------------------
     // Node Integration: sync Box2D position to Node each frame

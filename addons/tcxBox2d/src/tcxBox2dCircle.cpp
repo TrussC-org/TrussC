@@ -6,22 +6,6 @@
 
 namespace tcx::box2d {
 
-CircleBody::CircleBody(CircleBody&& other) noexcept
-    : Body(std::move(other))
-    , radius_(other.radius_)
-{
-    other.radius_ = 0;
-}
-
-CircleBody& CircleBody::operator=(CircleBody&& other) noexcept {
-    if (this != &other) {
-        Body::operator=(std::move(other));
-        radius_ = other.radius_;
-        other.radius_ = 0;
-    }
-    return *this;
-}
-
 void CircleBody::setup(World& world, float cx, float cy, float radius) {
     std::weak_ptr<int> ownerLife = objectLife;
     auto worldLife = world.aliveToken();

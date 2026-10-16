@@ -4,6 +4,15 @@
 
 #include "tcxBox2dWorld.h"
 #include "tcxBox2dBody.h"
+// The Mod constructors initialize deprecated event aliases internally.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+#include "tcxBox2dMod.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include "tcxCollisionManager.h"
 
 namespace tcx::box2d {
@@ -42,54 +51,31 @@ World::~World() {
     dispatch_->alive = false;
     dispatch_->token.reset();
     updateListener_.disconnect();
+    contactRouter_.beganL.disconnect();
+    contactRouter_.stayL.disconnect();
+    contactRouter_.endedL.disconnect();
     clear();
     dispatch_->physics = nullptr;
     dispatch_->world = nullptr;
     world_.reset();
 }
 
-World::World(World&& other) noexcept
-    : world_(std::move(other.world_))
-    , dispatch_(std::move(other.dispatch_))
-    , timeStep_(other.timeStep_)
-    , velocityIterations_(other.velocityIterations_)
-    , positionIterations_(other.positionIterations_)
-    , autoUpdate_(other.autoUpdate_)
-    , accumulator_(other.accumulator_)
-    , lastStepFrame_(other.lastStepFrame_)
-    , groundBody_(other.groundBody_)
-{
-    dispatch_->world = this;
-    other.dispatch_ = std::make_shared<detail::DispatchState>();
-    other.dispatch_->world = &other;
-    other.dispatch_->manager->state_ = other.dispatch_;
-    other.groundBody_ = nullptr;
-    // The moved-from listener captured &other; drop it and bind a fresh one here.
-    other.updateListener_ = tc::EventListener();
-    refreshAutoUpdate();
-}
-
-World& World::operator=(World&& other) noexcept {
-    if (this != &other) {
-        clear();
-        world_ = std::move(other.world_);
-        dispatch_ = std::move(other.dispatch_);
-        timeStep_ = other.timeStep_;
-        velocityIterations_ = other.velocityIterations_;
-        positionIterations_ = other.positionIterations_;
-        autoUpdate_ = other.autoUpdate_;
-        accumulator_ = other.accumulator_;
-        lastStepFrame_ = other.lastStepFrame_;
-        groundBody_ = other.groundBody_;
-        dispatch_->world = this;
-        other.dispatch_ = std::make_shared<detail::DispatchState>();
-        other.dispatch_->world = &other;
-        other.dispatch_->manager->state_ = other.dispatch_;
-        other.groundBody_ = nullptr;
-        other.updateListener_ = tc::EventListener();
-        refreshAutoUpdate();
-    }
-    return *this;
+void World::ensureContactRouter() {
+    if (contactRouter_.beganL) return;
+    auto* cm = getCollisionManager();
+    if (!cm) return;
+    std::weak_ptr<detail::DispatchState> weak = dispatch_;
+    // Capture only the World identity and independently retained dispatch state.
+    // A routed listener may delete this World (including its router handles).
+    contactRouter_.beganL = cm->contactBegan.listen([wp = this, weak](WorldContact& c) {
+        if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 0);
+    });
+    contactRouter_.stayL = cm->contactStay.listen([wp = this, weak](WorldContact& c) {
+        if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 1);
+    });
+    contactRouter_.endedL = cm->contactEnded.listen([wp = this, weak](WorldContact& c) {
+        if (auto s = weak.lock(); s && s->alive) detail::routeContact(wp, c, 2);
+    });
 }
 
 // =============================================================================
