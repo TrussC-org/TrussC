@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "tcxBox2dBodyOwner.h"
 #include <TrussC.h>
 #include <box2d/box2d.h>
 #include <memory>
@@ -12,8 +13,12 @@
 namespace tcx::box2d {
 
 // Forward declarations
+class World;
 class Body;
+class RigidBody2D;
 class CollisionManager;
+struct WorldContact;
+namespace detail { void routeContact(World*, const WorldContact&, int); }
 
 // =============================================================================
 // Box2D World
@@ -97,7 +102,8 @@ public:
     // Body Management
     // -------------------------------------------------------------------------
 
-    // Remove all registered bodies
+    // Invalidate all borrowed body handles, end any drag and destroy all bodies.
+    // Keep the Box2D world, gravity and settings; new bodies can be created now.
     void clear();
 
     // Body count
@@ -160,6 +166,16 @@ public:
     std::weak_ptr<int> aliveToken() const { return alive_; }
 
 private:
+    friend class Body;
+    friend class RigidBody2D;
+    friend void detail::routeContact(World*, const WorldContact&, int);
+
+    void attachOwner(b2Body* body, detail::BodyOwner& owner);
+    // Teardown must not run user listeners inside a Node/Mod destructor.
+    enum class ExitDelivery { Immediate, Deferred };
+    void releaseBody(b2Body* body, ExitDelivery delivery = ExitDelivery::Immediate);
+    detail::BodyOwner* findOwner(b2Body* body) const;
+
     // (Re)register or drop the per-frame auto-step listener based on autoUpdate_.
     void refreshAutoUpdate();
 
@@ -175,6 +191,7 @@ private:
     bool autoUpdate_ = true;
     float accumulator_ = 0.0f;
     uint64_t lastStepFrame_ = UINT64_MAX;
+    uint64_t releaseGeneration_ = 0;  // setup changes this even if b2World's address is reused
     tc::EventListener updateListener_;
 
     // Lifetime token: expires when this World is destroyed.

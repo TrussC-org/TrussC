@@ -67,6 +67,17 @@ outline exactly, one fixture per triangle:
   `setDynamic()`) afterwards give exactly the mass, inertia and center of a
   body created that way, at densities 0.001 to 1000 (Debug: no Box2D assert).
 
+`--density-and-type` runs those 20 checks alone and prints both sides' mass,
+local center and inertia as hex floats for every density and transition.
+The comparison remains exact. Its `massProps()` reader is deliberately not
+inlined: with FMA enabled, GCC can contract `GetInertia()`'s `x*x + y*y` in
+opposite orders at different inline sites, even for identical stored body
+data. Both sides must use the same readout instructions. The x86 contraction
+check builds **both the tests/addon and Box2D** with
+`-O2 -mfma -ffp-contract=fast`, then with `-ffp-contract=off`; also run Release
+(`-O3`) to exercise GCC's different inlining choices. See `REPORT.md` for the
+base/head matrix, instruction-level diagnosis and exact values.
+
 Event lifetimes (#427). Listeners of a deferred Exit / Ended or of Stay may
 free the other body of their pair, and bodies may be destroyed between
 `Step()` and `update()`:
@@ -86,7 +97,7 @@ free the other body of their pair, and bodies may be destroyed between
 
 Outside-step Exits (#473) are queued until Box2D returns:
 
-- `Body::destroy()`, disabling, each body type setter, `RigidBody2D` teardown
+- `Body::destroy()`, disabling, each body type setter,
   and each `setBodyType()` transition deliver Exits before the wrapper
   returns; an Exit listener destroys a third touching body, with each live
   side notified exactly once, in both body creation orders;
@@ -95,9 +106,14 @@ Outside-step Exits (#473) are queued until Box2D returns:
 - raw disabling, type changes and destruction deliver no Exit during the
   Box2D call; the next update flushes them and its listener can destroy a
   third body safely.
+- owner destructors and `RigidBody2D::onDestroy()` release bodies silently;
+  surviving sides receive their pending Exits at the next World delivery
+  point. Destruction/removal never calls user listeners synchronously.
 
-Without the guards these are use-after-frees that a plain build may not
-report; run them under AddressSanitizer after touching the event code.
+ASan/UBSan cover wrapper-side lifetimes (`Body`, `RigidBody2D`,
+`CollisionManager`, World members). Pooled `b2Body` / `b2Fixture` / `b2Joint`
+reuse is invisible to ASan because Box2D returns them to its block allocator;
+the defence is the owner back-link plus explicit handle-invalid assertions.
 
 CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the
 default build type, or Release). Adding the fixtures at density 0 (and
@@ -122,3 +138,66 @@ trusscli run -p .          # from this directory
 # or from the repo root, run every addon test harness:
 ./examples/build_all.py --addon-tests-only --verbose
 ```
+
+Owner lifetimes (#842, #471, #456). `--owner-lifetimes` runs only the
+headless lifetime regressions (also included in the full suite):
+
+- destroying the World first, `clear()`, and a second `setup()` silently
+  invalidate live classic bodies, Mod bodies, and collider fixture handles;
+- calls on released owners, repeated `destroy()`, and later owner destruction
+  are safe; a cleared World remains usable without another setup;
+- destroying a dragged body ends the mouse joint, and another drag can start;
+- point queries return classic owners and skip Mod owners; drag anchors have
+  null owner data.
+
+`--clear-reuse` selects the clear-contract regressions (also in the full suite
+and `--owner-lifetimes`): clear preserves the same b2World, gravity, simulation
+rate, auto-update subscription and raw Box2D settings. Ground, raw unowned bodies
+and drag anchors are all destroyed. Bounds plus fresh classic/Mod bodies work
+immediately and move under gravity in both manual and automatic updates; stale
+owner calls cannot affect them. Fresh bounds and drags can be replaced/cleared
+with exact body/joint counts. Deferred destructor Exits are discarded by clear
+for Mod removal, Node destruction and classic destruction; fresh contacts then
+Enter and Exit exactly once through the preserved listeners.
+
+Review round 1 (adversarial). `--review-round-1` selects the callback and
+replacement regressions; they also run in the full suite and with
+`--owner-lifetimes`. Both groups now exercise `World::update()` using controlled
+frame IDs and delta time, without raw Box2D stepping:
+
+- `clear-stay` / `setup-stay`: release from world-level Stay and either classic
+  side; retire old pairs as tombstones and dispatch fresh contacts immediately;
+- `clear-update` / `setup-update`: clear or replace the World on the first
+  sub-step's Ended. As on base, clear keeps the accumulator and continues the
+  current update's remaining sub-steps (including bodies created by that
+  listener); only setup changes the release generation and stops the old update,
+  preserving the replacement's fresh accumulator;
+- `replace-mod`: replace an exclusive Mod with active contacts, then clear the
+  World; explicit Mod removal must also release exactly once;
+- `reentrant-circle`, `reentrant-rect`, `reentrant-poly`,
+  `reentrant-simplified`, `reentrant-compound`: an Exit listener sets up the
+  same owner during its outer setup; retain the inner body, leave no orphan,
+  then tear down the World after the owner is gone.
+
+Pass a case name after `--review-round-1` to run it alone. For example:
+
+```bash
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 ./bin/tests --review-round-1 clear-update
+```
+
+Review round 2 (adversarial). `--review-round-2` selects the new regressions;
+they also run in the full suite and with `--owner-lifetimes`:
+
+- `replace-remove` / `replace-replace`: an Ended or surviving Mod Exit
+  listener removes or replaces the newly installed Mod. The outer `addMod()`
+  must return with setup complete before the listener runs; the next delivery
+  mutates it safely and delivers exactly once (both listener layers per mode).
+- `owner-teardown`: explicit Mod removal, Node destruction, and classic Body
+  destruction release the body with no synchronous events. The next delivery
+  names only surviving owners, never dispatches to the destroyed side, and
+  does not repeat the Exit.
+
+Pass a case name after `--review-round-2` to run it alone. The same-notification
+release and World-destruction-during-dispatch scenarios remain assigned to
+PR 2's event delivery work; exact reproductions are recorded under “Left for
+PR 2” in `REPORT.md` and `PR_DRAFT.md`, without adding failing suite tests.

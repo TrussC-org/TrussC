@@ -106,6 +106,15 @@ void CollisionManager::dropEmptied() {
                           activeContacts_.end());
 }
 
+void CollisionManager::clearContacts() {
+    // clear/setup can run inside either side's listener. Keep tombstones until
+    // the outer dispatch returns, so its next index lookup remains valid and
+    // cannot notify the other side using a released contact or owner.
+    for (auto& pair : worldPairs_) pair = {};
+    for (auto& pair : activeContacts_) pair = {};
+    if (!dispatching_) dropEmptied();
+}
+
 void CollisionManager::forget(b2Body* body) {
     if (!body) return;
 
@@ -119,17 +128,20 @@ void CollisionManager::forget(b2Body* body) {
     }
 
     forgetBody(body);
+    for (Collider2D* c : colliders) forgetCollider(c);
+}
+
+void CollisionManager::forgetCollider(Collider2D* c) {
+    if (!c) return;
     for (auto& pair : activeContacts_) {
         if (!pair.contacts.empty()) continue;
-        for (Collider2D* c : colliders) {
-            if (pair.a == c) {
-                pair.a = nullptr;
-                pair.exit.b.other = nullptr;   // B's event about A
-            }
-            if (pair.b == c) {
-                pair.b = nullptr;
-                pair.exit.a.other = nullptr;
-            }
+        if (pair.a == c) {
+            pair.a = nullptr;
+            pair.exit.b.other = nullptr;   // B's event about A
+        }
+        if (pair.b == c) {
+            pair.b = nullptr;
+            pair.exit.a.other = nullptr;
         }
     }
 }

@@ -126,6 +126,10 @@ void PolyShape::setupCompound(World& world, const std::vector<tc::Vec2>& points,
 
 void PolyShape::createBody(World& world, const b2PolygonShape* shapes, size_t count,
                            float cx, float cy) {
+    destroy();
+    // Exit callbacks may have already set this owner up again. Keep that body
+    // and the shape/drawing data installed by the reentrant setup.
+    if (body_ || !world.getWorld()) return;
     world_ = &world;
 
     // Body definition
@@ -133,7 +137,7 @@ void PolyShape::createBody(World& world, const b2PolygonShape* shapes, size_t co
     bodyDef.type = b2_dynamicBody;
     bodyDef.position = World::toBox2d(cx, cy);
 
-    body_ = world.getWorld()->CreateBody(&bodyDef);
+    setBody(world.getWorld()->CreateBody(&bodyDef));
 
     // Fixture definition, one fixture per shape. They are added at density 0
     // and get their density once all are in: CreateFixture() resets the mass
@@ -151,9 +155,6 @@ void PolyShape::createBody(World& world, const b2PolygonShape* shapes, size_t co
     }
     for (b2Fixture* f = body_->GetFixtureList(); f; f = f->GetNext()) f->SetDensity(1.0f);
     body_->ResetMassData();
-
-    // Store Body* in UserData (used by World::getBodyAtPoint())
-    body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
     // Create collider component
     auto* collider = setupCollider<PolygonCollider2D>();

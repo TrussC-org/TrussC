@@ -23,6 +23,9 @@ CircleBody& CircleBody::operator=(CircleBody&& other) noexcept {
 }
 
 void CircleBody::setup(World& world, float cx, float cy, float radius) {
+    destroy();
+    // Exit callbacks may have already set this owner up again. Keep that body.
+    if (body_ || !world.getWorld()) return;
     world_ = &world;
     radius_ = radius;
 
@@ -32,7 +35,7 @@ void CircleBody::setup(World& world, float cx, float cy, float radius) {
     bodyDef.position = World::toBox2d(cx, cy);
 
     // Create body
-    body_ = world.getWorld()->CreateBody(&bodyDef);
+    setBody(world.getWorld()->CreateBody(&bodyDef));
 
     // Circle shape
     b2CircleShape circle;
@@ -46,9 +49,6 @@ void CircleBody::setup(World& world, float cx, float cy, float radius) {
     fixtureDef.restitution = 0.5f;
 
     body_->CreateFixture(&fixtureDef);
-
-    // Store Body* in UserData (used by World::getBodyAtPoint())
-    body_->GetUserData().pointer = reinterpret_cast<uintptr_t>(this);
 
     // Create collider component
     auto* collider = setupCollider<CircleCollider2D>();
