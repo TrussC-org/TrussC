@@ -20,6 +20,7 @@ class ShaderTargetTests(unittest.TestCase):
         command = source[source.index('set(_TC_HOST_IMPORT_LIB '):
                          source.index('add_custom_target(_tc_host_import ')]
         for setting in ('/trussc_host_import_$<CONFIG>.lib', '/DEF:${_TC_HOST_IMPORT_DEF}',
+                        '/IGNORE:4102',
                         '/MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}',
                         'DEPENDS _tc_gen_exports "${_TC_DEF_FILE}"'):
             self.assertIn(setting, command)
@@ -65,7 +66,7 @@ set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
                 for arch in ('x64', 'ARM64'):
                     with self.subTest(config=config, arch=arch):
                         library = build / f'imports_{arch}.lib'
-                        run(librarian, '/NOLOGO', f'/DEF:{definition}',
+                        run(librarian, '/NOLOGO', '/IGNORE:4102', f'/DEF:{definition}',
                             f'/OUT:{library}', f'/MACHINE:{arch}')
                         records = run(readobj, '--coff-imports', str(library))
                         # For short COFF import objects, readobj displays the

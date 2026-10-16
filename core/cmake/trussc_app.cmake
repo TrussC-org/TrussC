@@ -498,7 +498,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                 OUTPUT "${_TC_HOST_IMPORT_LIB}"
                 BYPRODUCTS "${_TC_HOST_IMPORT_DEF}"
                 COMMAND ${CMAKE_COMMAND} -P "${_TC_HOST_IMPORT_SCRIPT}"
-                COMMAND ${CMAKE_AR} /NOLOGO
+                COMMAND ${CMAKE_AR} /NOLOGO /IGNORE:4102
                     /DEF:${_TC_HOST_IMPORT_DEF}
                     /OUT:${_TC_HOST_IMPORT_LIB}
                     /MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}

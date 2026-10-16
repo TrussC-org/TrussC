@@ -519,6 +519,7 @@ headers that changed. On Windows, the Guest uses a separate import library
 generated from the core export definitions, without depending on the Host target.
 Under Windows hot reload the Guest imports only TrussC core symbols; app code
 shared between Host and Guest goes in the Guest or in an addon.
+The live reload Host and `trusscli build` print a hint after Windows Guest unresolved-symbol linker failures (MSVC or lld-link).
 
 The Guest is built and loaded in the Host's configuration. With multi-config
 generators (Xcode, Visual Studio, Ninja Multi-Config), rebuilds pass
