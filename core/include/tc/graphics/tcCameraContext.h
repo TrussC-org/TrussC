@@ -77,7 +77,7 @@ namespace internal {
 
 // The context the current drawing happens under (most recent registration)
 // lives in WindowContext (tc/app/tcWindowContext.h): reach it via
-// internal::currentWindowContext().currentCameraContext. Null until the first
+// internal::currentWindowContext().currentTarget->camera.currentCameraContext. Null until the first
 // camera setup of the process (e.g. headless mode), in which case picking
 // falls back to the plain vertical screen ray.
 

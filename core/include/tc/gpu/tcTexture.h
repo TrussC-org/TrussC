@@ -959,10 +959,10 @@ private:
         // Under the default Alpha mode, behavior is preserved: premultiplied
         // sources use the premult pipeline on the swapchain, FBO passes use
         // Fill2D even for premultiplied sources, as before.
-        BlendMode blend = internal::currentWindowContext().currentBlendMode;
+        BlendMode blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         if (blend != BlendMode::Alpha) {
             internal::loadPipeline(internal::active2D(blend));
-        } else if (internal::currentWindowContext().inFboPass) {
+        } else if (internal::currentWindowContext().currentTarget->isFbo) {
             internal::loadPipeline(internal::activeFill2D());
         } else if (premultipliedAlpha_) {
             internal::loadPipeline(internal::activePremult());

@@ -69,8 +69,8 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     // so the data is already in RGBA order — no channel swizzle needed.
     unsigned char* src = (unsigned char*)mapped.pData;
     unsigned char* dst = pixels;
-    size_t rowBytes = (size_t)width_ * 4;
-    for (int y = 0; y < height_; y++) {
+    size_t rowBytes = (size_t)target_.width * 4;
+    for (int y = 0; y < target_.height; y++) {
         memcpy(dst + y * rowBytes, src + y * mapped.RowPitch, rowBytes);
     }
 
@@ -132,17 +132,17 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
     // 32F: direct memcpy per row
     if (sgFmt == SG_PIXELFORMAT_R32F || sgFmt == SG_PIXELFORMAT_RG32F || sgFmt == SG_PIXELFORMAT_RGBA32F) {
-        size_t rowBytes = width_ * bpp;
-        for (int y = 0; y < height_; y++) {
+        size_t rowBytes = target_.width * bpp;
+        for (int y = 0; y < target_.height; y++) {
             memcpy((char*)pixels + y * rowBytes, (char*)mapped.pData + y * mapped.RowPitch, rowBytes);
         }
     }
     // 16F: read half-floats, convert to float
     else if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
-        for (int y = 0; y < height_; y++) {
+        for (int y = 0; y < target_.height; y++) {
             uint16_t* srcRow = (uint16_t*)((char*)mapped.pData + y * mapped.RowPitch);
-            float* dstRow = pixels + y * width_ * ch;
-            for (int i = 0; i < width_ * ch; i++) {
+            float* dstRow = pixels + y * target_.width * ch;
+            for (int i = 0; i < target_.width * ch; i++) {
                 uint16_t h = srcRow[i];
                 uint32_t sign = (h & 0x8000) << 16;
                 uint32_t exp = (h >> 10) & 0x1F;
@@ -161,10 +161,10 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     }
     // U8: convert to float
     else {
-        for (int y = 0; y < height_; y++) {
+        for (int y = 0; y < target_.height; y++) {
             unsigned char* srcRow = (unsigned char*)mapped.pData + y * mapped.RowPitch;
-            float* dstRow = pixels + y * width_ * ch;
-            for (int i = 0; i < width_ * ch; i++) {
+            float* dstRow = pixels + y * target_.width * ch;
+            for (int i = 0; i < target_.width * ch; i++) {
                 dstRow[i] = (float)srcRow[i] / 255.0f;
             }
         }

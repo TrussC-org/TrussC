@@ -208,7 +208,7 @@ public:
             return sizeMismatch("fbo", fbo.getWidth(), fbo.getHeight());
         }
         if (!fbo.isAllocated()) return callFailed("fbo is not allocated");
-        if (internal::currentWindowContext().inFboPass)
+        if (internal::currentWindowContext().currentTarget->isFbo)
             return callFailed("fbo readPixels requires fbo.end() first");
         if (!fbo.readPixelsPlatform(scratch_.data(), false))
             return callFailed("fbo readPixels failed");

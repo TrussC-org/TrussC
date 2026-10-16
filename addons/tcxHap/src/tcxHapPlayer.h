@@ -1108,7 +1108,7 @@ private:
 
         const auto& context = tc::internal::currentWindowContext();
         const auto data = detail::makeYCoCgDrawData(x, y, w, h,
-            context.currentProjectionMatrix, context.currentViewMatrix, tc::getMatrix(), tc::getColor());
+            context.currentTarget->camera.currentProjectionMatrix, context.currentTarget->camera.currentViewMatrix, tc::getMatrix(), tc::getColor());
 
         tc::pushShader(ycocgShader_);
         ycocgShader_.setTexture(0, texture_.getView(), texture_.getSampler());

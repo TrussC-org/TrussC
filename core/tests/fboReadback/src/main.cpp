@@ -137,7 +137,7 @@ private:
         check("save during another Fbo pass is rejected", !fbo_.save(path_));
         check("rejected save logs the Fbo error", errors == 4);
         check("rejected reads leave the Fbo pass open",
-              internal::currentWindowContext().inFboPass && half_.isActive());
+              internal::currentWindowContext().currentTarget->isFbo && half_.isActive());
     }
 
     void renderFbo(bool secondPass) {

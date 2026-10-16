@@ -59,8 +59,8 @@ static bool readFromGLTexture(sg_image image, int width, int height,
 bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
     if (!allocated_ || !pixels) return false;
 
-    size_t rowBytes = width_ * 4;
-    return readFromGLTexture(colorTexture_.getImage(), width_, height_,
+    size_t rowBytes = target_.width * 4;
+    return readFromGLTexture(colorTexture_.getImage(), target_.width, target_.height,
                              GL_RGBA, GL_UNSIGNED_BYTE, pixels, rowBytes, true, reportError);
 }
 
@@ -71,7 +71,7 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
     if (sgFmt == SG_PIXELFORMAT_NONE) sgFmt = SG_PIXELFORMAT_RGBA8;
 
     int ch = channelCount(format_);
-    size_t rowBytes = width_ * bytesPerPixel(format_);
+    size_t rowBytes = target_.width * bytesPerPixel(format_);
 
     GLenum glFormat;
     switch (ch) {
@@ -82,23 +82,23 @@ bool Fbo::readPixelsFloatPlatform(float* pixels) const {
 
     // For 32F: read directly as float
     if (sgFmt == SG_PIXELFORMAT_R32F || sgFmt == SG_PIXELFORMAT_RG32F || sgFmt == SG_PIXELFORMAT_RGBA32F) {
-        return readFromGLTexture(colorTexture_.getImage(), width_, height_,
+        return readFromGLTexture(colorTexture_.getImage(), target_.width, target_.height,
                                  glFormat, GL_FLOAT, pixels, rowBytes, true);
     }
 
     // For 16F: read as half-float then convert to float
     if (sgFmt == SG_PIXELFORMAT_R16F || sgFmt == SG_PIXELFORMAT_RG16F || sgFmt == SG_PIXELFORMAT_RGBA16F) {
-        return readFromGLTexture(colorTexture_.getImage(), width_, height_,
-                                 glFormat, GL_FLOAT, pixels, width_ * ch * sizeof(float), true);
+        return readFromGLTexture(colorTexture_.getImage(), target_.width, target_.height,
+                                 glFormat, GL_FLOAT, pixels, target_.width * ch * sizeof(float), true);
     }
 
     // U8: read as unsigned byte then convert
-    std::vector<unsigned char> tmp(width_ * height_ * ch);
-    if (!readFromGLTexture(colorTexture_.getImage(), width_, height_,
-                           glFormat, GL_UNSIGNED_BYTE, tmp.data(), width_ * ch, true)) {
+    std::vector<unsigned char> tmp(target_.width * target_.height * ch);
+    if (!readFromGLTexture(colorTexture_.getImage(), target_.width, target_.height,
+                           glFormat, GL_UNSIGNED_BYTE, tmp.data(), target_.width * ch, true)) {
         return false;
     }
-    int total = width_ * height_ * ch;
+    int total = target_.width * target_.height * ch;
     for (int i = 0; i < total; i++) {
         pixels[i] = (float)tmp[i] / 255.0f;
     }

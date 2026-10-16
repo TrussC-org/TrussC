@@ -119,10 +119,10 @@ TC_CORE_TEST_MAIN() {
     for (int conv = 0; conv <= 1; ++conv) {
         internal::clipZOverrideForTests() = conv;
         auto& wc = internal::currentWindowContext();
-        wc.currentProjectionMatrix = internal::toBackendClip(glOrtho);
-        wc.currentViewMatrix = view;
-        wc.currentViewW = W;
-        wc.currentViewH = H;
+        wc.currentTarget->camera.currentProjectionMatrix = internal::toBackendClip(glOrtho);
+        wc.currentTarget->camera.currentViewMatrix = view;
+        wc.currentTarget->camera.currentViewW = W;
+        wc.currentTarget->camera.currentViewH = H;
 
         Vec3 s = worldToScreen(probe);
         Vec3 back = screenToWorld(Vec2(s.x, s.y), probe.z);
@@ -134,10 +134,10 @@ TC_CORE_TEST_MAIN() {
     // Convergence of the free function across conventions
     {
         internal::clipZOverrideForTests() = 0;
-        internal::currentWindowContext().currentProjectionMatrix = internal::toBackendClip(glOrtho);
+        internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = internal::toBackendClip(glOrtho);
         Vec3 glS = worldToScreen(probe);
         internal::clipZOverrideForTests() = 1;
-        internal::currentWindowContext().currentProjectionMatrix = internal::toBackendClip(glOrtho);
+        internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix = internal::toBackendClip(glOrtho);
         Vec3 nS = worldToScreen(probe);
         check("free worldToScreen equal across conventions", nearv(glS, nS));
     }

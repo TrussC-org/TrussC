@@ -1,20 +1,11 @@
 #pragma once
 // =============================================================================
-// RenderTarget — single source of truth for "which sgl pipeline for the current
-// target". Replaces the scattered `inFboPass ? fboPipeline : swapchainPipeline`
-// branches (every recent FBO rendering bug was a missing branch).
-//
-// Two orthogonal axes:
-//   - target : swapchain / FBO-A / FBO-B  -> sgl context (carries pixel format,
-//              sample count, depth format)
-//   - role   : depth + rgb-blend + alpha-blend  (intrinsic to the draw)
-// A pipeline is f(target, role): each RenderTarget lazily builds+caches the
-// pipeline for a requested role in ITS context, so one desc serves any target
-// (sgl fills format/sample/depth from the context).
-//
-// Migration is incremental: this is added in parallel with the old globals; call
-// sites switch to active2D()/activePremult()/activeClear()/active3D() per slice.
-// Included from TrussC.h after BlendMode + the sokol headers.
+// RenderTarget owns the lightweight state of one drawable (swapchain or Fbo).
+// Fbo targets borrow GPU resources from the existing (format, sampleCount) pool;
+// window targets keep a dedicated context because their recorded commands coexist.
+// PR 1 preserves the legacy state handoff and pipeline/matrix choices. Target
+// stacks and independent matrix scopes are introduced in later #821 changes.
+// Included from TrussC.h after BlendMode, CameraContext and the sokol headers.
 // =============================================================================
 #include <unordered_map>
 #include <cstdint>
@@ -156,10 +147,9 @@ inline sg_pipeline_desc pipeDesc3D() {
     return d;
 }
 
-// A render target: an sgl context + a lazy pipeline cache (one entry per role key).
-struct RenderTarget {
+// Heavy resources: one context and its role-to-pipeline cache.
+struct RenderTargetResources {
     sgl_context context = {};
-    bool        isFbo   = false;
     std::unordered_map<uint32_t, sgl_pipeline> cache;
     // A creation failed (out of memory, or a GPU pool full): warned once and
     // not retried. The target stays degraded for the rest of the run (#317).
@@ -224,6 +214,91 @@ struct RenderTarget {
         }
         contextFailed = false;
         pipelineWarned = false;
+    }
+};
+
+// C++17 vectors support incomplete elements; these draw snapshots are defined
+// later in TrussC.h. Targets are constructed where those definitions are complete.
+struct DeferredPbrDraw;
+struct DeferredPointDraw;
+struct DeferredShaderDraw;
+
+struct ScissorRect {
+    float x, y, w, h;
+    bool active;
+};
+
+struct TargetCameraState {
+    std::shared_ptr<const CameraContext> currentCameraContext;
+    Mat4 currentViewMatrix = Mat4::identity();
+    Mat4 currentProjectionMatrix = Mat4::identity();
+    float currentScreenFov = TAU / 8.0f;
+    float currentViewW = 0.0f;
+    float currentViewH = 0.0f;
+    float currentCameraDist = 0.0f;
+};
+
+struct RenderTarget {
+    int width = 0;
+    int height = 0;
+    sg_pixel_format colorFormat = _SG_PIXELFORMAT_DEFAULT;
+    int sampleCount = 0;
+    bool hasDepth = true;
+    bool isFbo = false;
+    sg_pass_action clearAction = [] {
+        sg_pass_action action = {};
+        action.colors[0].clear_value = {0, 0, 0, 1};
+        return action;
+    }();
+    bool inPass = false;
+    bool passStartedThisFrame = false;
+
+    TargetCameraState camera;
+    Mat4 currentMatrix = Mat4::identity();
+    std::vector<Mat4> matrixStack;
+    ScissorRect viewport = {0, 0, 0, 0, false};
+    ScissorRect currentScissor = {0, 0, 0, 0, false};
+    std::vector<ScissorRect> scissorStack;
+    BlendMode currentBlendMode = BlendMode::Alpha;
+    bool depthTestEnabled = false;
+
+    std::vector<DeferredPbrDraw> deferredPbrDraws;
+    std::vector<DeferredPointDraw> deferredPointDraws;
+    std::vector<DeferredShaderDraw> deferredShaderDraws;
+    int sglLayerNext = 0;
+
+    // Only Fbo clear needs an owner callback until passes move to the target
+    // in PR 3. No window-side Fbo pointer or format/sample mirror is needed.
+    void* clearOwner = nullptr;
+    void (*clearColor)(void*, float, float, float, float) = nullptr;
+
+    RenderTargetResources windowResources;
+    RenderTargetResources* pooledResources = nullptr;
+    RenderTargetResources& resources() {
+        return pooledResources ? *pooledResources : windowResources;
+    }
+    const RenderTargetResources& resources() const {
+        return pooledResources ? *pooledResources : windowResources;
+    }
+    int getWidth() const { return width; }
+    int getHeight() const { return height; }
+    sgl_pipeline pipeline(uint32_t key, const sg_pipeline_desc& desc) {
+        return resources().pipeline(key, desc);
+    }
+
+    // Preserve the old window-wide camera/model/blend/scissor continuity across
+    // Fbo begin/end. Fbo saves/restores the incoming camera as on 56467c6b;
+    // making camera scopes truly independent per target belongs to PR 2.
+    // Moving the CPU stacks does not reload sgl's matrix stacks:
+    // the legacy Fbo/PBR model mismatch is deliberately left for PR 2.
+    void inheritDrawState(RenderTarget& previous) {
+        camera = previous.camera;
+        currentMatrix = previous.currentMatrix;
+        matrixStack = std::move(previous.matrixStack);
+        currentBlendMode = previous.currentBlendMode;
+        depthTestEnabled = previous.depthTestEnabled;
+        currentScissor = previous.currentScissor;
+        scissorStack = std::move(previous.scissorStack);
     }
 };
 

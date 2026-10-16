@@ -47,8 +47,8 @@ void topologyChecks() {
           meshListIndices(P::TriangleFan, 2, {}).empty());
     internal::WindowContext secondary;
     secondary.isMain = false;
-    secondary.swapchainColorFormat = SG_PIXELFORMAT_BGRA8;
-    secondary.swapchainSampleCount = 1;
+    secondary.swapchainTarget.colorFormat = SG_PIXELFORMAT_BGRA8;
+    secondary.swapchainTarget.sampleCount = 1;
     auto target = internal::swapchainTargetFormat(secondary);
     check("secondary target preserves BGRA8 and 1x", target.colorFormat == SG_PIXELFORMAT_BGRA8 && target.sampleCount == 1);
 }
@@ -87,26 +87,26 @@ public:
     void draw() override {
         if (completed) return;
         auto& ctx = internal::currentWindowContext();
-        check("real secondary window context", !ctx.isMain && ctx.swapchainSampleCount > 0);
+        check("real secondary window context", !ctx.isMain && ctx.swapchainTarget.sampleCount > 0);
         Material mat;
         mat.setEmissive(1, 0, 0);
         setMaterial(mat);
         mesh = makeMesh(PrimitiveMode::TriangleStrip);
         mesh.draw();
-        auto pbr = sg_query_pipeline_desc(ctx.deferredPbrDraws.back().cmd.pip);
-        check("secondary PBR pipeline target", pbr.sample_count == ctx.swapchainSampleCount && pbr.colors[0].pixel_format == ctx.swapchainColorFormat);
+        auto pbr = sg_query_pipeline_desc(ctx.currentTarget->deferredPbrDraws.back().cmd.pip);
+        check("secondary PBR pipeline target", pbr.sample_count == ctx.swapchainTarget.sampleCount && pbr.colors[0].pixel_format == ctx.swapchainTarget.colorFormat);
         points = makeMesh(PrimitiveMode::Points);
         for (auto style : {PointStyle::Square, PointStyle::Pixel}) {
             setPointStyle(style);
             points.draw();
-            auto point = sg_query_pipeline_desc(ctx.deferredPointDraws.back().cmd.pip);
-            check("secondary point pipeline target", point.sample_count == ctx.swapchainSampleCount && point.colors[0].pixel_format == ctx.swapchainColorFormat);
+            auto point = sg_query_pipeline_desc(ctx.currentTarget->deferredPointDraws.back().cmd.pip);
+            check("secondary point pipeline target", point.sample_count == ctx.swapchainTarget.sampleCount && point.colors[0].pixel_format == ctx.swapchainTarget.colorFormat);
         }
         clearMaterial();
         ShaderVertex v[] = {{-1,-1,0,0,0,0,1,0,1}, {1,-1,0,0,0,0,1,0,1}, {0,1,0,0,0,0,1,0,1}};
         shader->submitVertices(v, 3, PrimitiveType::Triangles);
-        auto custom = sg_query_pipeline_desc(ctx.deferredShaderDraws.back().pipeline);
-        check("secondary custom Shader pipeline target", custom.sample_count == ctx.swapchainSampleCount && custom.colors[0].pixel_format == ctx.swapchainColorFormat);
+        auto custom = sg_query_pipeline_desc(ctx.currentTarget->deferredShaderDraws.back().pipeline);
+        check("secondary custom Shader pipeline target", custom.sample_count == ctx.swapchainTarget.sampleCount && custom.colors[0].pixel_format == ctx.swapchainTarget.colorFormat);
         completed = true; // Main exits on its next tick, after this window presents.
     }
 private:
@@ -144,8 +144,8 @@ public:
         check("main target retains defaults", mainTarget.colorFormat == _SG_PIXELFORMAT_DEFAULT && mainTarget.sampleCount == sapp_sample_count());
         std::printf("Actual GLX MSAA: %d (secondary windows share the GLX config)\n", sapp_sample_count());
         const auto mainPipeline = shader.targetPipeline();
-        const auto savedFormat = ctx.swapchainColorFormat;
-        const auto savedSamples = ctx.swapchainSampleCount;
+        const auto savedFormat = ctx.swapchainTarget.colorFormat;
+        const auto savedSamples = ctx.swapchainTarget.sampleCount;
         // GLX shares one framebuffer configuration across native windows.
         // Capture (without replaying) distinct targets to cover format/MSAA
         // selection even when the local driver gives both windows 1x RGBA8.
@@ -156,29 +156,29 @@ public:
         ctx.isMain = false;
         for (auto format : {SG_PIXELFORMAT_RGBA8, SG_PIXELFORMAT_BGRA8}) {
             for (int samples : {1, 4}) {
-                ctx.swapchainColorFormat = format;
-                ctx.swapchainSampleCount = samples;
+                ctx.swapchainTarget.colorFormat = format;
+                ctx.swapchainTarget.sampleCount = samples;
                 auto pip = shader.targetPipeline();
                 auto desc = sg_query_pipeline_desc(pip);
                 check("custom Shader resolves and caches synthetic target", pip.id == shader.targetPipeline().id &&
                       pip.id != mainPipeline.id && desc.colors[0].pixel_format == format && desc.sample_count == samples);
                 targetMesh.draw();
-                desc = sg_query_pipeline_desc(ctx.deferredPbrDraws.back().cmd.pip);
+                desc = sg_query_pipeline_desc(ctx.currentTarget->deferredPbrDraws.back().cmd.pip);
                 check("PBR resolves synthetic target", desc.colors[0].pixel_format == format && desc.sample_count == samples);
-                ctx.deferredPbrDraws.pop_back();
+                ctx.currentTarget->deferredPbrDraws.pop_back();
                 for (auto style : {PointStyle::Square, PointStyle::Pixel}) {
                     setPointStyle(style);
                     targetPoints.draw();
-                    desc = sg_query_pipeline_desc(ctx.deferredPointDraws.back().cmd.pip);
+                    desc = sg_query_pipeline_desc(ctx.currentTarget->deferredPointDraws.back().cmd.pip);
                     check("points resolve synthetic target", desc.colors[0].pixel_format == format && desc.sample_count == samples);
-                    ctx.deferredPointDraws.pop_back();
+                    ctx.currentTarget->deferredPointDraws.pop_back();
                 }
             }
         }
         clearMaterial();
         ctx.isMain = true;
-        ctx.swapchainColorFormat = savedFormat;
-        ctx.swapchainSampleCount = savedSamples;
+        ctx.swapchainTarget.colorFormat = savedFormat;
+        ctx.swapchainTarget.sampleCount = savedSamples;
         check("main Shader still reuses load-time pipeline", shader.targetPipeline().id == mainPipeline.id);
 
         {
@@ -187,8 +187,8 @@ public:
             fbo.begin();
             auto cached = disposable.targetPipeline();
             auto desc = sg_query_pipeline_desc(cached);
-            check("custom Shader FBO target", desc.colors[0].pixel_format == ctx.currentFboColorFormat &&
-                  desc.sample_count == ctx.currentFboSampleCount);
+            check("custom Shader FBO target", desc.colors[0].pixel_format == ctx.currentTarget->colorFormat &&
+                  desc.sample_count == ctx.currentTarget->sampleCount);
             fbo.end();
             disposable.clear();
             retiredPipeline = cached; // GPU destruction is deferred until frame end.
@@ -259,7 +259,7 @@ public:
         setMaterial(mat);
         fbo.begin(0, 0, 0, 0);
         line.draw();
-        check("lit lines retain shadow lookup", ctx.fboPbrDraws.back().cmd.fsp.shadowMapParams[1] == 1);
+        check("lit lines retain shadow lookup", ctx.currentTarget->deferredPbrDraws.back().cmd.fsp.shadowMapParams[1] == 1);
         fbo.end();
         clearMaterial();
     }
@@ -267,7 +267,7 @@ private:
     std::vector<unsigned char> render(const Mesh& m) {
         fbo.begin(0, 0, 0, 0);
         m.draw();
-        auto& commands = internal::currentWindowContext().fboPbrDraws;
+        auto& commands = internal::currentWindowContext().currentTarget->deferredPbrDraws;
         if (!commands.empty()) {
             auto desc = sg_query_pipeline_desc(commands.back().cmd.pip);
             check("PBR primitive kind matches mesh", desc.primitive_type ==

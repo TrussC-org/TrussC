@@ -11,12 +11,12 @@
 // streaming every vertex through sokol_gl each frame. Not part of the public API.
 //
 // Modeled on tcMeshPbrPipeline.h. Draws are deferred into the same per-layer
-// flush as the PBR meshes (deferredPointDraws for the swapchain, fboPointDraws
-// inside an FBO pass), so points composite in submission order, share the target
+// flush as the PBR meshes, using the active target's deferredPointDraws,
+// so points composite in submission order, share the target
 // depth buffer, and 2D drawn afterwards lands on top.
 //
 // Included BEFORE tcMeshPbrPipeline.h so that header's flushFboDeferredPbr() can
-// replay fboPointDraws within the shared FBO layer walk.
+// replay point draws within the Fbo layer walk.
 //
 // =============================================================================
 
@@ -41,14 +41,8 @@ struct PointDrawCommand {
 };
 struct DeferredPointDraw { int layerId; PointDrawCommand cmd; };
 
-// Point-cloud draw queues (swapchain deferredPointDraws / FBO-pass fboPointDraws)
-// and the FBO-pass layer counter (fboLayerNext) are now PER-WINDOW, held in
-// WindowContext (tc/app/tcWindowContext.h) and reached via
-// currentWindowContext(). They used to be process globals here; the swapchain
-// queue shares the window's sglLayerNext with sokol_gl 2D + deferred PBR, and
-// fboLayerNext is shared by this pipeline and the PBR pipeline (mirror of the
-// swapchain's sglLayerNext). Replayed by flushDeferredShaderDraws() (tcShader.h)
-// and flushFboDeferredPbr() (tcMeshPbrPipeline.h).
+// The active target owns the point queue and the layer counter shared with
+// PBR, user shaders and sokol_gl. Both existing flush paths replay this queue.
 
 // Submit a packaged point draw to the GPU. Used from both flush sites.
 inline void executePointDraw(const PointDrawCommand& c) {
@@ -151,9 +145,9 @@ public:
         sg_pixel_format colorFmt;
         int sampleCount;
         auto& wctx = internal::currentWindowContext();
-        if (wctx.inFboPass) {
-            colorFmt = wctx.currentFboColorFormat;
-            sampleCount = wctx.currentFboSampleCount;
+        if (wctx.currentTarget->isFbo) {
+            colorFmt = wctx.currentTarget->colorFormat;
+            sampleCount = wctx.currentTarget->sampleCount;
         } else {
             const auto target = swapchainTargetFormat(wctx);
             colorFmt = target.colorFormat;
@@ -179,20 +173,10 @@ public:
             cmd.numInstances = n;
         }
 
-        // Defer like the PBR meshes: append and bump the sgl layer so 2D drawn
-        // after this mesh composites on top. Inside an FBO pass we defer into the
-        // per-FBO list (flushed in flushFboDeferredPbr); otherwise into the
-        // swapchain list (flushed in flushDeferredShaderDraws).
-        // (wctx resolved above at the format-selection step.)
-        if (wctx.inFboPass) {
-            wctx.fboPointDraws.push_back({ wctx.fboLayerNext, cmd });
-            wctx.fboLayerNext++;
-            sgl_layer(wctx.fboLayerNext);
-        } else {
-            wctx.deferredPointDraws.push_back({ wctx.sglLayerNext, cmd });
-            wctx.sglLayerNext++;
-            sgl_layer(wctx.sglLayerNext);
-        }
+        // Defer on the active target, sharing the PBR/shader layer space.
+        wctx.currentTarget->deferredPointDraws.push_back({ wctx.currentTarget->sglLayerNext, cmd });
+        wctx.currentTarget->sglLayerNext++;
+        sgl_layer(wctx.currentTarget->sglLayerNext);
     }
 
 private:
@@ -204,7 +188,7 @@ private:
 
         // TrussC Mat4 is row-major; GLSL mat4 is column-major. Transpose before
         // upload so the shader can use the conventional `viewProj * v`.
-        Mat4 viewProj = (internal::currentWindowContext().currentProjectionMatrix * internal::currentWindowContext().currentViewMatrix).transposed();
+        Mat4 viewProj = (internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix).transposed();
         std::memcpy(vsp.viewProj, viewProj.m, sizeof(vsp.viewProj));
 
         const int   w  = getWindowWidth();

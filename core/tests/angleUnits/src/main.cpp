@@ -73,15 +73,15 @@ void testDefaults() {
 
 void testInvalid() {
     auto& ctx = internal::currentWindowContext();
-    const Mat4 projection = ctx.currentProjectionMatrix;
-    const Mat4 view = ctx.currentViewMatrix;
-    const float fov = ctx.currentScreenFov;
+    const Mat4 projection = ctx.currentTarget->camera.currentProjectionMatrix;
+    const Mat4 view = ctx.currentTarget->camera.currentViewMatrix;
+    const float fov = ctx.currentTarget->camera.currentScreenFov;
     const float defaultFov = getDefaultScreenFov();
-    const float width = ctx.currentViewW, height = ctx.currentViewH;
+    const float width = ctx.currentTarget->camera.currentViewW, height = ctx.currentTarget->camera.currentViewH;
     const auto unchanged = [&] {
-        return sameMatrix(projection, ctx.currentProjectionMatrix) &&
-               sameMatrix(view, ctx.currentViewMatrix) && fov == ctx.currentScreenFov &&
-               defaultFov == getDefaultScreenFov() && width == ctx.currentViewW && height == ctx.currentViewH;
+        return sameMatrix(projection, ctx.currentTarget->camera.currentProjectionMatrix) &&
+               sameMatrix(view, ctx.currentTarget->camera.currentViewMatrix) && fov == ctx.currentTarget->camera.currentScreenFov &&
+               defaultFov == getDefaultScreenFov() && width == ctx.currentTarget->camera.currentViewW && height == ctx.currentTarget->camera.currentViewH;
     };
     setupScreenPerspective(60);
     setupScreenPerspective(60);
@@ -110,14 +110,14 @@ void testZeroFov(Fbo& fbo) {
     auto& ctx = internal::currentWindowContext();
     const int warningsBefore = fovWarnings;
     setupScreenOrtho();
-    const Mat4 ortho = ctx.currentProjectionMatrix;
-    const Mat4 view = ctx.currentViewMatrix;
-    const float width = ctx.currentViewW, height = ctx.currentViewH;
+    const Mat4 ortho = ctx.currentTarget->camera.currentProjectionMatrix;
+    const Mat4 view = ctx.currentTarget->camera.currentViewMatrix;
+    const float width = ctx.currentTarget->camera.currentViewW, height = ctx.currentTarget->camera.currentViewH;
     const auto checkSetup = [&](const char* name, auto setup) {
         setupScreenPerspective(TAU / 6);
         setup();
-        check(name, ctx.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentProjectionMatrix) &&
-              sameMatrix(view, ctx.currentViewMatrix) && ctx.currentViewW == width && ctx.currentViewH == height);
+        check(name, ctx.currentTarget->camera.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentTarget->camera.currentProjectionMatrix) &&
+              sameMatrix(view, ctx.currentTarget->camera.currentViewMatrix) && ctx.currentTarget->camera.currentViewW == width && ctx.currentTarget->camera.currentViewH == height);
     };
     checkSetup("setupScreenFov(0) matches setupScreenOrtho", [] { setupScreenFov(0); });
     checkSetup("setupScreenFovDeg(0) matches setupScreenOrtho", [] { setupScreenFovDeg(0); });
@@ -131,22 +131,22 @@ void testZeroFov(Fbo& fbo) {
     // FBO begin consumes the public default, using the same setup as frame start.
     fbo.begin();
     setupScreenFovWithSize(0, fbo.getWidth(), fbo.getHeight());
-    const Mat4 fboOrtho = ctx.currentProjectionMatrix;
-    const Mat4 fboView = ctx.currentViewMatrix;
+    const Mat4 fboOrtho = ctx.currentTarget->camera.currentProjectionMatrix;
+    const Mat4 fboView = ctx.currentTarget->camera.currentViewMatrix;
     fbo.end();
     const auto checkDefault = [&](const char* name, auto setDefault) {
         setDefaultScreenFov(TAU / 6);
         setupScreenPerspective(TAU / 6);
-        const Mat4 before = ctx.currentProjectionMatrix;
+        const Mat4 before = ctx.currentTarget->camera.currentProjectionMatrix;
         setDefault();
         const bool defaultState = getDefaultScreenFov() == 0 && getDefaultScreenFovDeg() == 0 &&
-                                  approxEq(ctx.currentScreenFov, TAU / 6) && sameMatrix(before, ctx.currentProjectionMatrix);
+                                  approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 6) && sameMatrix(before, ctx.currentTarget->camera.currentProjectionMatrix);
         internal::setupScreenFov(getDefaultScreenFov());
-        const bool frameOrtho = ctx.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentProjectionMatrix) &&
-                                sameMatrix(view, ctx.currentViewMatrix);
+        const bool frameOrtho = ctx.currentTarget->camera.currentScreenFov == 0 && sameMatrix(ortho, ctx.currentTarget->camera.currentProjectionMatrix) &&
+                                sameMatrix(view, ctx.currentTarget->camera.currentViewMatrix);
         fbo.begin();
-        check(name, defaultState && frameOrtho && ctx.currentScreenFov == 0 &&
-              sameMatrix(fboOrtho, ctx.currentProjectionMatrix) && sameMatrix(fboView, ctx.currentViewMatrix));
+        check(name, defaultState && frameOrtho && ctx.currentTarget->camera.currentScreenFov == 0 &&
+              sameMatrix(fboOrtho, ctx.currentTarget->camera.currentProjectionMatrix) && sameMatrix(fboView, ctx.currentTarget->camera.currentViewMatrix));
         fbo.end();
     };
     checkDefault("setDefaultScreenFov(0) selects orthographic projection", [] { setDefaultScreenFov(0); });
@@ -161,26 +161,26 @@ public:
     void setup() override { fbo_.allocate(32, 32); }
     void draw() override {
         auto& ctx = internal::currentWindowContext();
-        check("window starts with radians", approxEq(ctx.currentScreenFov, TAU / 8));
+        check("window starts with radians", approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 8));
         setupScreenPerspective();
-        const Mat4 defaultProjection = ctx.currentProjectionMatrix;
+        const Mat4 defaultProjection = ctx.currentTarget->camera.currentProjectionMatrix;
         setupScreenPerspectiveDeg();
-        check("no-argument perspective defaults match", sameMatrix(defaultProjection, ctx.currentProjectionMatrix) &&
-              approxEq(ctx.currentScreenFov, TAU / 8));
+        check("no-argument perspective defaults match", sameMatrix(defaultProjection, ctx.currentTarget->camera.currentProjectionMatrix) &&
+              approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 8));
         setupScreenPerspective(TAU / 6);
-        const Mat4 projection = ctx.currentProjectionMatrix;
-        const Mat4 view = ctx.currentViewMatrix;
+        const Mat4 projection = ctx.currentTarget->camera.currentProjectionMatrix;
+        const Mat4 view = ctx.currentTarget->camera.currentViewMatrix;
         setupScreenPerspectiveDeg(60);
         check("perspective radian/Deg projection and camera match",
-              sameMatrix(projection, ctx.currentProjectionMatrix) && sameMatrix(view, ctx.currentViewMatrix));
+              sameMatrix(projection, ctx.currentTarget->camera.currentProjectionMatrix) && sameMatrix(view, ctx.currentTarget->camera.currentViewMatrix));
         setupScreenFov(TAU / 6);
         setupScreenFovDeg(60);
         check("screen FOV radian/Deg projection matches perspective",
-              sameMatrix(projection, ctx.currentProjectionMatrix));
+              sameMatrix(projection, ctx.currentTarget->camera.currentProjectionMatrix));
         setupScreenFovWithSize(TAU / 6, 80, 40, 0.25f, 750);
-        const Mat4 sized = ctx.currentProjectionMatrix;
+        const Mat4 sized = ctx.currentTarget->camera.currentProjectionMatrix;
         setupScreenFovWithSizeDeg(60, 80, 40, 0.25f, 750);
-        check("explicit-size radian/Deg projection matches", sameMatrix(sized, ctx.currentProjectionMatrix));
+        check("explicit-size radian/Deg projection matches", sameMatrix(sized, ctx.currentTarget->camera.currentProjectionMatrix));
         testZeroFov(fbo_);
         testInvalid();
 
@@ -189,17 +189,17 @@ public:
         setupScreenPerspective(TAU / 6);
         setDefaultScreenFovDeg(30);
         fbo_.begin();
-        check("FBO takes its default FOV in radians", approxEq(ctx.currentScreenFov, TAU / 12));
+        check("FBO takes its default FOV in radians", approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 12));
         fbo_.end();
-        check("FBO restores radians and screen projection", approxEq(ctx.currentScreenFov, TAU / 6) &&
-              sameMatrix(projection, ctx.currentProjectionMatrix));
-        internal::setupScreenFovWithSize(ctx.currentScreenFov, ctx.currentViewW, ctx.currentViewH);
-        check("shader-style restore retains the projection", sameMatrix(projection, ctx.currentProjectionMatrix));
+        check("FBO restores radians and screen projection", approxEq(ctx.currentTarget->camera.currentScreenFov, TAU / 6) &&
+              sameMatrix(projection, ctx.currentTarget->camera.currentProjectionMatrix));
+        internal::setupScreenFovWithSize(ctx.currentTarget->camera.currentScreenFov, ctx.currentTarget->camera.currentViewW, ctx.currentTarget->camera.currentViewH);
+        check("shader-style restore retains the projection", sameMatrix(projection, ctx.currentTarget->camera.currentProjectionMatrix));
         setupScreenOrtho();
-        check("public ortho selects zero FOV", ctx.currentScreenFov == 0.0f);
-        const Mat4 ortho = ctx.currentProjectionMatrix;
+        check("public ortho selects zero FOV", ctx.currentTarget->camera.currentScreenFov == 0.0f);
+        const Mat4 ortho = ctx.currentTarget->camera.currentProjectionMatrix;
         internal::setupScreenFov(0);
-        check("internal zero still restores orthographic projection", sameMatrix(ortho, ctx.currentProjectionMatrix));
+        check("internal zero still restores orthographic projection", sameMatrix(ortho, ctx.currentTarget->camera.currentProjectionMatrix));
         setDefaultScreenFov(TAU / 8);
         gpuFinished = true;
         exitApp();
