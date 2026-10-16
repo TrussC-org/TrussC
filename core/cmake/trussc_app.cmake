@@ -339,7 +339,7 @@ endif()
         if(APPLE)
             target_link_options(guest PRIVATE -undefined dynamic_lookup)
         elseif(WIN32)
-            # Windows: Guest links Host's import library (set below)
+            # Windows: Guest imports Host symbols via a separate library (below).
         else()
             # Linux: analogue of macOS `-undefined dynamic_lookup`. The guest
             # deliberately leaves TrussC/sokol symbols unresolved at link time;
@@ -479,21 +479,45 @@ message(\"  [HotReload] Generated \${DEF_FILE} with \${SYM_COUNT} symbols\")
                 /DEF:${_TC_DEF_FILE}
                 /WHOLEARCHIVE:$<TARGET_FILE:TrussC>
             )
-            target_link_libraries(guest PRIVATE ${PROJECT_NAME})
+            # Build the Guest's import library from the same exports, without
+            # linking the Host target. That target-level dependency would
+            # recompile main.cpp after an app-header/shader edit and try to
+            # relink the running EXE (which Windows locks).
+            # Both lib.exe and llvm-lib can create imports before the EXE exists.
+            set(_TC_HOST_IMPORT_LIB "${CMAKE_BINARY_DIR}/trussc_host_import_$<CONFIG>.lib")
+            set(_TC_HOST_IMPORT_DEF "${CMAKE_BINARY_DIR}/trussc_host_import_$<CONFIG>.def")
+            set(_TC_HOST_IMPORT_SCRIPT "${CMAKE_BINARY_DIR}/_tc_host_import_$<CONFIG>.cmake")
+            # llvm-lib ignores /NAME. Put the actual EXE name in the .def
+            # instead, including any configuration-specific name/postfix.
+            # Read the core exports at build time, after their producer ran.
+            file(GENERATE OUTPUT "${_TC_HOST_IMPORT_SCRIPT}" CONTENT
+"file(READ \"${_TC_DEF_FILE}\" _tc_exports)
+file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NAME}>\\\"\\n\${_tc_exports}\")
+")
+            add_custom_command(
+                OUTPUT "${_TC_HOST_IMPORT_LIB}"
+                BYPRODUCTS "${_TC_HOST_IMPORT_DEF}"
+                COMMAND ${CMAKE_COMMAND} -P "${_TC_HOST_IMPORT_SCRIPT}"
+                COMMAND ${CMAKE_AR} /NOLOGO /IGNORE:4102
+                    /DEF:${_TC_HOST_IMPORT_DEF}
+                    /OUT:${_TC_HOST_IMPORT_LIB}
+                    /MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}
+                DEPENDS _tc_gen_exports "${_TC_DEF_FILE}" "${_TC_HOST_IMPORT_SCRIPT}"
+                COMMENT "[HotReload] Generating Guest import library"
+                VERBATIM
+            )
+            add_custom_target(_tc_host_import DEPENDS "${_TC_HOST_IMPORT_LIB}")
+            add_dependencies(guest _tc_host_import)
+            target_link_libraries(guest PRIVATE "${_TC_HOST_IMPORT_LIB}")
         else()
             target_link_options(${PROJECT_NAME} PRIVATE
                 -Wl,--whole-archive $<TARGET_FILE:TrussC> -Wl,--no-whole-archive
                 -rdynamic)
         endif()
 
-        # Mac/Linux: guest doesn't link to host (symbols resolved at runtime via
-        # dlopen), so without an explicit dependency the IDE-driven host build
-        # leaves libguest.dylib stale or missing. Force the IDE/build system
-        # (Xcode, Ninja, Make) to build guest whenever host is built.
-        # Windows already has guest -> host link dependency above.
-        if(NOT WIN32)
-            add_dependencies(${PROJECT_NAME} guest)
-        endif()
+        # A normal Host build also builds the Guest on every platform, while
+        # a reload's --target guest never builds the Host.
+        add_dependencies(${PROJECT_NAME} guest)
 
     elseif(ANDROID)
         add_library(${PROJECT_NAME} SHARED ${_TC_SOURCES})
